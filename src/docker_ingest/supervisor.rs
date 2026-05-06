@@ -125,7 +125,7 @@ async fn follow_container_events(
     log_tasks: &mut HashMap<String, JoinHandle<()>>,
     event_since_unix: i64,
 ) -> Result<()> {
-    let docker = client.streaming_docker();
+    let docker = client.docker();
     let mut events = docker.events(Some(DockerHostClient::container_events_options(
         event_since_unix,
     )));
@@ -194,7 +194,7 @@ fn spawn_log_task_if_absent(
     if tasks.contains_key(&container.id) {
         return;
     }
-    let docker = client.streaming_docker();
+    let docker = client.docker();
     let host_name = host.name.clone();
     let reconnect_initial_ms = config.reconnect_initial_ms;
     let reconnect_max_ms = config.reconnect_max_ms;
