@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-05-06
+
+### Changed
+
+- **Local dev MCP config**: Switched `.mcp.json` from HTTP transport to stdio (`./bin/syslog mcp`) for local development, removing the need for a running HTTP server.
+- **Gitignore**: Added `config/docker-hosts.toml` to prevent committing local Docker host config.
+
 ## [0.10.0] - 2026-05-05
 
 ### Changed
