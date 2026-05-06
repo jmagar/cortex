@@ -6,9 +6,9 @@ Scripts used for maintenance, hooks, and testing.
 
 | Script | Purpose | Usage |
 | --- | --- | --- |
-| `smoke-test.sh` | Live smoke test with 25 assertions across all 7 MCP tools | `bash bin/smoke-test.sh` |
-| `backup.sh` | WAL-safe SQLite backup using PRAGMA wal_checkpoint + .backup | `bash bin/backup.sh` |
-| `reset-db.sh` | Backup first, then destructive DB reset (stop server first) | `bash bin/reset-db.sh` |
+| `smoke-test.sh` | Live smoke test with 25 assertions across all 7 MCP tools | `bash scripts/smoke-test.sh` |
+| `backup.sh` | WAL-safe SQLite backup using PRAGMA wal_checkpoint + .backup | `bash scripts/backup.sh` |
+| `reset-db.sh` | Backup first, then destructive DB reset (stop server first) | `bash scripts/reset-db.sh` |
 
 
 

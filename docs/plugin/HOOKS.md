@@ -30,8 +30,8 @@ Sets `.env` to `chmod 600` (owner read/write only) if the file exists. Prevents 
 Run hooks outside of Claude Code:
 
 ```bash
-bash bin/sync-env.sh
-bash bin/fix-env-perms.sh
+bash hooks/scripts/sync-env.sh
+bash hooks/scripts/fix-env-perms.sh
 
 ```
 

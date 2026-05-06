@@ -2,10 +2,10 @@
 # bump-version.sh — update version in all version-bearing files atomically.
 #
 # Usage:
-#   ./bin/bump-version.sh 1.3.5
-#   ./bin/bump-version.sh patch   # auto-increment patch
-#   ./bin/bump-version.sh minor   # auto-increment minor
-#   ./bin/bump-version.sh major   # auto-increment major
+#   ./scripts/bump-version.sh 1.3.5
+#   ./scripts/bump-version.sh patch   # auto-increment patch
+#   ./scripts/bump-version.sh minor   # auto-increment minor
+#   ./scripts/bump-version.sh major   # auto-increment major
 
 set -euo pipefail
 

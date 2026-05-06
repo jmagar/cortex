@@ -39,7 +39,7 @@ just test-live
 # or: bash tests/test_live.sh
 ```
 
-The smoke test (`bin/smoke-test.sh`) exercises all `syslog` actions via mcporter.
+The smoke test (`scripts/smoke-test.sh`) exercises all `syslog` actions via mcporter.
 
 ### mcporter-based testing
 

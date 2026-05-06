@@ -68,6 +68,7 @@ dist/
 
 # ── Repo-specific ────────────────────────────────────────────────────────────
 config.local.toml
+config/docker-hosts.toml
 data/
 *.key
 *.pem

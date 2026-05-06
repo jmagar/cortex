@@ -8,8 +8,8 @@ Hooks are defined in `hooks/hooks.json` and enforced by Claude Code during sessi
 
 | Hook | Script | Purpose |
 | --- | --- | --- |
-| `sync-env` | `bin/sync-env.sh` | Ensures `.env.example` documents all variables read by the server |
-| `fix-env-perms` | `bin/fix-env-perms.sh` | Sets `.env` to `chmod 600` if present |
+| `sync-env` | `hooks/scripts/sync-env.sh` | Ensures `.env.example` documents all variables read by the server |
+| `fix-env-perms` | `hooks/scripts/fix-env-perms.sh` | Sets `.env` to `chmod 600` if present |
 
 
 ## Manual checks
