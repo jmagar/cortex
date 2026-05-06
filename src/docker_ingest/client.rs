@@ -1,11 +1,16 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use bollard::query_parameters::{
     EventsOptions, EventsOptionsBuilder, ListContainersOptionsBuilder, LogsOptions,
     LogsOptionsBuilder,
 };
-use bollard::Docker;
+use bollard::{BollardRequest, Docker};
+use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 
 use super::models::ContainerMeta;
 
@@ -16,7 +21,36 @@ pub(super) struct DockerHostClient {
 
 impl DockerHostClient {
     pub(super) fn connect(base_url: &str) -> Result<Self> {
-        let docker = Docker::connect_with_http(base_url, 120, bollard::API_DEFAULT_VERSION)?;
+        // Build an HttpConnector with TCP keepalive enabled. Bollard's stock
+        // `connect_with_http` uses `HttpConnector::new()` which leaves SO_KEEPALIVE
+        // off, so idle streaming connections (quiet container log streams, the
+        // events stream when no events fire) get silently dropped by NATs,
+        // conntrack, gateways, or peer-side idle timers, surfacing later as
+        // "error reading a body from connection". Matches docker/cli PR #415.
+        let mut http_connector = HttpConnector::new();
+        http_connector.set_keepalive(Some(Duration::from_secs(30)));
+        http_connector.set_keepalive_interval(Some(Duration::from_secs(30)));
+        http_connector.set_keepalive_retries(Some(3));
+
+        let mut client_builder = Client::builder(TokioExecutor::new());
+        client_builder.pool_max_idle_per_host(0);
+        let client = Arc::new(client_builder.build(http_connector));
+
+        let docker = Docker::connect_with_custom_transport(
+            move |req: BollardRequest| {
+                let client = Arc::clone(&client);
+                Box::pin(async move {
+                    client
+                        .request(req)
+                        .await
+                        .map_err(bollard::errors::Error::from)
+                })
+            },
+            Some(base_url.to_string()),
+            120,
+            bollard::API_DEFAULT_VERSION,
+        )?;
+
         Ok(Self { docker })
     }
 
