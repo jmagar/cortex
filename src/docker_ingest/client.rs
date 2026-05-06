@@ -12,12 +12,20 @@ use super::models::ContainerMeta;
 #[derive(Clone)]
 pub(super) struct DockerHostClient {
     docker: Docker,
+    // Separate client with no read timeout for follow=true log streams.
+    // The api client (120s) would time out quiet containers after 2 minutes.
+    streaming_docker: Docker,
 }
 
 impl DockerHostClient {
     pub(super) fn connect(base_url: &str) -> Result<Self> {
         let docker = Docker::connect_with_http(base_url, 120, bollard::API_DEFAULT_VERSION)?;
-        Ok(Self { docker })
+        let streaming_docker =
+            Docker::connect_with_http(base_url, 0, bollard::API_DEFAULT_VERSION)?;
+        Ok(Self {
+            docker,
+            streaming_docker,
+        })
     }
 
     pub(super) async fn list_containers(&self) -> Result<Vec<ContainerMeta>> {
@@ -51,5 +59,9 @@ impl DockerHostClient {
 
     pub(super) fn docker(&self) -> Docker {
         self.docker.clone()
+    }
+
+    pub(super) fn streaming_docker(&self) -> Docker {
+        self.streaming_docker.clone()
     }
 }
