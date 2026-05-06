@@ -125,7 +125,7 @@ async fn follow_container_events(
     log_tasks: &mut HashMap<String, JoinHandle<()>>,
     event_since_unix: i64,
 ) -> Result<()> {
-    let docker = client.docker();
+    let docker = client.streaming_docker();
     let mut events = docker.events(Some(DockerHostClient::container_events_options(
         event_since_unix,
     )));
@@ -175,6 +175,13 @@ fn prune_finished_tasks(tasks: &mut HashMap<String, JoinHandle<()>>) {
     tasks.retain(|_, handle| !handle.is_finished());
 }
 
+fn is_expected_disconnect(e: &anyhow::Error) -> bool {
+    let msg = e.to_string();
+    msg.contains("error reading a body from connection")
+        || msg.contains("connection reset by peer")
+        || msg.contains("broken pipe")
+}
+
 fn spawn_log_task_if_absent(
     config: &DockerIngestConfig,
     host: &DockerHostConfig,
@@ -207,11 +214,18 @@ fn spawn_log_task_if_absent(
             .await
             {
                 Ok(()) => {
-                    tracing::warn!(
+                    tracing::debug!(
                         host = %host_name,
                         container_id = %task_container_id,
-                        delay_ms,
                         "Docker log stream ended; reconnecting"
+                    );
+                    true
+                }
+                Err(ref e) if is_expected_disconnect(e) => {
+                    tracing::debug!(
+                        host = %host_name,
+                        container_id = %task_container_id,
+                        "Docker log stream closed by daemon; reconnecting"
                     );
                     true
                 }

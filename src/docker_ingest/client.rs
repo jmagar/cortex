@@ -57,10 +57,6 @@ impl DockerHostClient {
             .build()
     }
 
-    pub(super) fn docker(&self) -> Docker {
-        self.docker.clone()
-    }
-
     pub(super) fn streaming_docker(&self) -> Docker {
         self.streaming_docker.clone()
     }
