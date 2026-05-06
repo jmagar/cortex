@@ -2,7 +2,7 @@
   "name": "syslog-mcp",
   "version": "0.10.0",
   "description": "Syslog management via MCP",
-  "author": "jmagar",
+  "author": { "name": "jmagar" },
   "repository": "https://github.com/jmagar/syslog-mcp",
   "license": "MIT",
   "keywords": [
