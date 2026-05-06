@@ -16,7 +16,12 @@ tokio = { version = "1", features = ["full"] }
 
 # HTTP / MCP transport
 axum = "0.8"
-rmcp = { version = "1.6.0", default-features = false, features = ["server", "macros", "transport-streamable-http-server", "transport-io"] }
+rmcp = { version = "1.6.0", default-features = false, features = [
+  "server",
+  "macros",
+  "transport-streamable-http-server",
+  "transport-io",
+] }
 tower-http = { version = "0.6", features = ["cors", "limit", "trace"] }
 
 # SQLite
@@ -29,7 +34,12 @@ scheduled-thread-pool = "0.2"
 syslog_loose = "0.21"
 
 # Docker Engine API client for optional docker-socket-proxy ingestion
-bollard = { version = "0.19", default-features = false, features = ["http", "chrono"] }
+bollard = { version = "0.19", default-features = false, features = [
+  "http",
+  "chrono",
+] }
+hyper = { version = "1", features = ["client"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 bytes = "1"
 
 # Serialization
@@ -56,4 +66,7 @@ futures-util = "0.3"
 tempfile = "3"
 serial_test = "3"
 tower = { version = "0.5", features = ["util"] }
-rmcp = { version = "1.6.0", default-features = false, features = ["client", "transport-child-process"] }
+rmcp = { version = "1.6.0", default-features = false, features = [
+  "client",
+  "transport-child-process",
+] }
