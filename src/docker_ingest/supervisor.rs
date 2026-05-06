@@ -187,7 +187,7 @@ fn spawn_log_task_if_absent(
     if tasks.contains_key(&container.id) {
         return;
     }
-    let docker = client.docker();
+    let docker = client.streaming_docker();
     let host_name = host.name.clone();
     let reconnect_initial_ms = config.reconnect_initial_ms;
     let reconnect_max_ms = config.reconnect_max_ms;
@@ -196,7 +196,7 @@ fn spawn_log_task_if_absent(
     let handle = tokio::spawn(async move {
         let mut delay_ms = reconnect_initial_ms;
         loop {
-            match follow_container_logs_once(
+            let reset_backoff = match follow_container_logs_once(
                 &docker,
                 &pool,
                 &ingest,
@@ -206,22 +206,32 @@ fn spawn_log_task_if_absent(
             )
             .await
             {
-                Ok(()) => tracing::warn!(
-                    host = %host_name,
-                    container_id = %task_container_id,
-                    delay_ms,
-                    "Docker log stream ended; reconnecting"
-                ),
-                Err(e) => tracing::warn!(
-                    host = %host_name,
-                    container_id = %task_container_id,
-                    error = %e,
-                    delay_ms,
-                    "Docker log stream failed; retrying"
-                ),
-            }
+                Ok(()) => {
+                    tracing::warn!(
+                        host = %host_name,
+                        container_id = %task_container_id,
+                        delay_ms,
+                        "Docker log stream ended; reconnecting"
+                    );
+                    true
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        host = %host_name,
+                        container_id = %task_container_id,
+                        error = %e,
+                        delay_ms,
+                        "Docker log stream failed; retrying"
+                    );
+                    false
+                }
+            };
             tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-            delay_ms = (delay_ms * 2).min(reconnect_max_ms);
+            delay_ms = if reset_backoff {
+                reconnect_initial_ms
+            } else {
+                (delay_ms * 2).min(reconnect_max_ms)
+            };
         }
     });
     tasks.insert(container_id, handle);
