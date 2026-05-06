@@ -33,10 +33,7 @@ fn stdout_frame_maps_to_info_log_entry() {
     assert_eq!(entry.app_name.as_deref(), Some("edge/nginx/nginx-1"));
     assert_eq!(entry.process_id.as_deref(), Some("abcdef123456"));
     assert_eq!(entry.message, "started nginx");
-    assert_eq!(
-        entry.source_ip,
-        "docker://edge-host-a/abcdef1234567890/stdout"
-    );
+    assert_eq!(entry.source_ip, "docker://edge-host-a/nginx-1/stdout");
 }
 
 #[test]
@@ -53,10 +50,7 @@ fn stderr_frame_maps_to_warning_log_entry() {
 
     assert_eq!(entry.severity, "warning");
     assert_eq!(entry.message, "failed health check");
-    assert_eq!(
-        entry.source_ip,
-        "docker://app-host-b/abcdef1234567890/stderr"
-    );
+    assert_eq!(entry.source_ip, "docker://app-host-b/nginx-1/stderr");
 }
 
 #[test]

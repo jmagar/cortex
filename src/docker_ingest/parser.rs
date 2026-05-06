@@ -34,7 +34,7 @@ pub(super) fn log_output_to_entry(
         process_id: Some(container.short_id()),
         message,
         raw: raw_line,
-        source_ip: format!("docker://{}/{}/{}", host_name, container.id, stream),
+        source_ip: format!("docker://{}/{}/{}", host_name, container.name, stream),
         docker_checkpoint: Some(db::DockerCheckpoint {
             host_name: host_name.to_string(),
             container_id: container.id.clone(),
