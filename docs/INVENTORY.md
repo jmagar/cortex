@@ -110,9 +110,9 @@ All tools are read-only. syslog-mcp exposes no destructive operations via MCP.
 
 | Script | Purpose |
 | --- | --- |
-| `bin/smoke-test.sh` | Live smoke test -- all 7 MCP tools via mcporter (25 assertions) |
-| `bin/backup.sh` | WAL-safe SQLite backup (checkpoint + `.backup` method) |
-| `bin/reset-db.sh` | WAL-safe backup + destructive DB reset for dev recovery |
+| `scripts/smoke-test.sh` | Live smoke test -- all 7 MCP tools via mcporter (25 assertions) |
+| `scripts/backup.sh` | WAL-safe SQLite backup (checkpoint + `.backup` method) |
+| `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset for dev recovery |
 
 
 

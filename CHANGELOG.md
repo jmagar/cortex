@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-05-06
+
+### Changed
+
+- **CLAUDE.md**: Updated architecture overview for current module layout (`app/`, `db/`, `syslog/`, `mcp/`, `docker_ingest/`, `api.rs`, `runtime.rs`); updated MCP tool description to single `syslog` action-dispatch tool.
+- **Scripts**: Updated `scripts/` path references in `backup.sh`, `bump-version.sh`, `reset-db.sh`, `smoke-test.sh`.
+- **Docs**: Updated inventory, mcporter, pre-commit, tests, hooks, scripts, and deploy runbook to reflect current module/binary layout.
+- **Gitignore**: Added `config/docker-hosts.toml` (local-only Docker host config).
+
 ## [0.10.0] - 2026-05-05
 
 ### Changed
