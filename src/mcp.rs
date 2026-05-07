@@ -21,18 +21,30 @@ pub use routes::router;
 /// between "no auth wired (loopback dev)" and "auth wired". There is no
 /// `Default` impl — code that builds an `AppState` must name the variant.
 ///
-/// Locked by the OAuth epic post-spike: the `Mounted` variant carries
-/// **only** `Arc<lab_auth::state::AuthState>`. AuthContext flows per-request via
-/// axum extension propagation (see `docs/internal/rmcp-auth-spike.md`); no
-/// session-keyed map lives on `AppState`.
+/// Locked by the OAuth epic post-spike: when `auth_state` is `Some`, the
+/// shared [`lab_auth::state::AuthState`] backs both the dual-mode middleware
+/// and the OAuth router. When `None`, only static-bearer auth is active —
+/// middleware still validates the token but no OAuth flow is wired.
+/// AuthContext flows per-request via axum extension propagation
+/// (see `docs/internal/rmcp-auth-spike.md`); no session-keyed map on
+/// `AppState`.
 #[derive(Clone)]
 pub enum AuthPolicy {
     /// No authentication is wired. Only legal when the MCP listener is
     /// bound to a loopback address (validated by [`crate::config::Config::load`]).
+    /// Scope checks are bypassed in this variant — the bind itself is the
+    /// trust boundary.
     LoopbackDev,
-    /// Authentication is wired. The shared [`lab_auth::state::AuthState`] backs both
-    /// the dual-mode middleware and the OAuth router.
-    Mounted(Arc<lab_auth::state::AuthState>),
+    /// Authentication middleware is mounted. Scope checks MUST run.
+    /// `auth_state` is:
+    /// - `Some` when OAuth mode is active (Google flow + JWKS issuance
+    ///   available; the OAuth router is mounted on these paths);
+    /// - `None` when only static-bearer mode is active (no OAuth router
+    ///   mounted; middleware validates `SYSLOG_MCP_TOKEN` via lab-auth's
+    ///   `AuthLayer::with_static_token`).
+    Mounted {
+        auth_state: Option<Arc<lab_auth::state::AuthState>>,
+    },
 }
 
 // Manual Debug impl: `lab_auth::state::AuthState` does not implement Debug
@@ -43,7 +55,12 @@ impl std::fmt::Debug for AuthPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AuthPolicy::LoopbackDev => f.write_str("AuthPolicy::LoopbackDev"),
-            AuthPolicy::Mounted(_) => f.write_str("AuthPolicy::Mounted(<lab_auth::AuthState>)"),
+            AuthPolicy::Mounted {
+                auth_state: Some(_),
+            } => f.write_str("AuthPolicy::Mounted { auth_state: Some(<lab_auth::AuthState>) }"),
+            AuthPolicy::Mounted { auth_state: None } => {
+                f.write_str("AuthPolicy::Mounted { auth_state: None /* bearer-only */ }")
+            }
         }
     }
 }

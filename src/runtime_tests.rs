@@ -72,16 +72,16 @@ async fn build_auth_policy_returns_loopback_dev_when_no_auth_and_loopback_bind()
 }
 
 #[tokio::test]
-async fn build_auth_policy_returns_loopback_dev_when_static_token_only() {
+async fn build_auth_policy_returns_mounted_bearer_only_when_static_token_only() {
     let tmp = tempfile::tempdir().unwrap();
     let mut mcp = loopback_mcp();
     mcp.api_token = Some("supersecret".into());
     mcp.host = "0.0.0.0".into();
     let config = test_config(tmp.path(), mcp);
-    // Bearer + static token: lab-auth is NOT initialized in S2; legacy
-    // bearer middleware in routes.rs keeps owning auth until S6.
+    // Bearer-only: AuthLayer is mounted (auth is enforced), but no OAuth state.
+    // Scope checks in S5 must still run — Mounted { auth_state: None } is correct.
     let policy = build_auth_policy(&config).await.expect("build policy");
-    assert!(matches!(policy, AuthPolicy::LoopbackDev));
+    assert!(matches!(policy, AuthPolicy::Mounted { auth_state: None }));
 }
 
 #[tokio::test]
@@ -91,7 +91,12 @@ async fn build_auth_policy_returns_mounted_when_oauth_configured() {
     let policy = build_auth_policy(&config)
         .await
         .expect("oauth init should succeed");
-    assert!(matches!(policy, AuthPolicy::Mounted(_)));
+    assert!(matches!(
+        policy,
+        AuthPolicy::Mounted {
+            auth_state: Some(_)
+        }
+    ));
 
     // The lab-auth files must exist after init.
     assert!(tmp.path().join("auth.db").exists(), "auth.db missing");

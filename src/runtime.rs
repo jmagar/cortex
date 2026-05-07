@@ -339,17 +339,17 @@ impl RuntimeCore {
 ///
 /// Decision table (locked by the OAuth epic, post eng-review):
 ///
-/// | `auth.mode` | `api_token` | bind     | result                                |
-/// |-------------|-------------|----------|---------------------------------------|
-/// | `OAuth`     | any         | any      | `Mounted(AuthState)` (init lab-auth)  |
-/// | `Bearer`    | set         | any      | `LoopbackDev` (legacy bearer mw owns it) |
-/// | `Bearer`    | unset       | loopback | `LoopbackDev`                         |
-/// | `Bearer`    | unset       | non-loopback | `validate_auth_config` rejects earlier |
+/// | `auth.mode` | `api_token` | bind         | result                                         |
+/// |-------------|-------------|--------------|------------------------------------------------|
+/// | `OAuth`     | any         | any          | `Mounted { auth_state: Some(_) }` (full OAuth) |
+/// | `Bearer`    | set         | any          | `Mounted { auth_state: None }` (bearer-only)   |
+/// | `Bearer`    | unset       | loopback     | `LoopbackDev` (dev mode; no auth enforced)     |
+/// | `Bearer`    | unset       | non-loopback | rejected by `validate_auth_config` at startup  |
 ///
-/// `lab_auth::AuthState::new` requires `mode == OAuth`, so the bearer-only
-/// rows above intentionally do NOT initialize lab-auth — the existing
-/// bearer middleware in `mcp::routes::require_auth` keeps owning that path
-/// until the dual-mode middleware lands in S6 (`syslog-mcp-brt0.6`).
+/// Bearer-only (`static_token` set, no OAuth) produces `Mounted { auth_state: None }` so
+/// that scope checks in tool dispatch (S5) know middleware is enforcing auth.
+/// `lab_auth::AuthState::new` is only called for the OAuth row — it requires
+/// mode == OAuth and initialises Google OIDC + SQLite session storage.
 async fn build_auth_policy(config: &Config) -> Result<AuthPolicy> {
     let auth = &config.mcp.auth;
     let oauth_active = auth.mode == AuthMode::OAuth;
@@ -360,24 +360,31 @@ async fn build_auth_policy(config: &Config) -> Result<AuthPolicy> {
         .is_some_and(|t| !t.trim().is_empty());
 
     if !oauth_active {
-        // Bind safety is already enforced by `validate_auth_config`, but we
-        // double-check here so `LoopbackDev` is never accidentally produced
-        // for a non-loopback bind without auth, even if validation drifts.
-        if !static_token_active {
-            let bind_is_loopback = IpAddr::from_str(&config.mcp.host)
-                .map(|ip| ip.is_loopback())
-                .unwrap_or(false);
-            if !bind_is_loopback {
-                anyhow::bail!(
-                    "internal invariant violated: no auth wired but bind `{}` is non-loopback",
-                    config.mcp.host
-                );
-            }
+        if static_token_active {
+            // Bearer-only: middleware (AuthLayer) is mounted with just the
+            // static token. Scope checks in S5 MUST run — use Mounted so the
+            // tool dispatcher knows auth is enforced.
+            tracing::info!(
+                mcp_bind = %config.mcp.bind_addr(),
+                "syslog-mcp auth policy: Mounted {{ auth_state: None }} (bearer-only; lab-auth OAuth not wired)"
+            );
+            return Ok(AuthPolicy::Mounted { auth_state: None });
+        }
+
+        // No auth at all — only legal on loopback (validated by validate_auth_config,
+        // but double-checked here so LoopbackDev can never slip past on a non-loopback bind).
+        let bind_is_loopback = IpAddr::from_str(&config.mcp.host)
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false);
+        if !bind_is_loopback {
+            anyhow::bail!(
+                "internal invariant violated: no auth wired but bind `{}` is non-loopback",
+                config.mcp.host
+            );
         }
         tracing::info!(
             mcp_bind = %config.mcp.bind_addr(),
-            static_token_active,
-            "syslog-mcp auth policy: LoopbackDev (lab-auth not initialized; legacy bearer middleware owns auth if any)"
+            "syslog-mcp auth policy: LoopbackDev (no auth wired; loopback bind)"
         );
         return Ok(AuthPolicy::LoopbackDev);
     }
@@ -502,7 +509,9 @@ async fn build_auth_policy(config: &Config) -> Result<AuthPolicy> {
         "syslog-mcp auth policy: Mounted (lab-auth state initialized)"
     );
 
-    Ok(AuthPolicy::Mounted(Arc::new(auth_state)))
+    Ok(AuthPolicy::Mounted {
+        auth_state: Some(Arc::new(auth_state)),
+    })
 }
 
 fn push_var(vars: &mut Vec<(String, String)>, key: &str, value: &str) {
