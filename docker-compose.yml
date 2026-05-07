@@ -7,8 +7,6 @@ services:
     restart: unless-stopped
     user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"
     env_file:
-      - path: ~/.claude-homelab/.env
-        required: false
       - path: .env
         required: false
     ports:

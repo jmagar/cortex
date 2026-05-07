@@ -2,8 +2,9 @@ use std::{borrow::Cow, net::Ipv6Addr, sync::Arc, time::Instant};
 
 use rmcp::{
     model::{
-        CallToolRequestParams, CallToolResult, Content, Implementation, ListToolsResult,
-        PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+        CallToolRequestParams, CallToolResult, Content, Implementation, ListResourcesResult,
+        ListToolsResult, PaginatedRequestParams, RawResource, ReadResourceRequestParams,
+        ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerInfo, Tool,
     },
     service::RequestContext,
     transport::streamable_http_server::{
@@ -95,13 +96,50 @@ impl ServerHandler for SyslogRmcpServer {
         }
     }
 
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
-            Implementation::new(
-                self.state.config.server_name.clone(),
-                env!("CARGO_PKG_VERSION"),
-            ),
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        Ok(ListResourcesResult {
+            resources: vec![schema_resource()],
+            ..Default::default()
+        })
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, ErrorData> {
+        if request.uri != SCHEMA_RESOURCE_URI {
+            return Err(ErrorData::invalid_params(
+                format!("unknown resource: {}", request.uri),
+                None,
+            ));
+        }
+        let schema = tool_definitions();
+        let text = serde_json::to_string_pretty(&schema).map_err(|error| {
+            ErrorData::internal_error(format!("serialization error: {error}"), None)
+        })?;
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(
+            text,
+            SCHEMA_RESOURCE_URI,
         )
+        .with_mime_type("application/json")]))
+    }
+
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+        )
+        .with_server_info(Implementation::new(
+            self.state.config.server_name.clone(),
+            env!("CARGO_PKG_VERSION"),
+        ))
     }
 }
 
@@ -121,6 +159,17 @@ pub fn streamable_http_service(
         move || Ok(SyslogRmcpServer::new(state.clone())),
         Default::default(),
         config,
+    )
+}
+
+const SCHEMA_RESOURCE_URI: &str = "syslog://schema/mcp-tool";
+
+fn schema_resource() -> Resource {
+    Resource::new(
+        RawResource::new(SCHEMA_RESOURCE_URI, "syslog tool schema")
+            .with_description("JSON schema for the syslog MCP tool and its action-based parameters")
+            .with_mime_type("application/json"),
+        None,
     )
 }
 

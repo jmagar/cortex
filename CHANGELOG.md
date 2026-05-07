@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-07
+
+### Added
+
+- **MCP resource: `syslog://schema/mcp-tool`** — the `syslog` tool's full input
+  schema (all actions, parameters, enums, descriptions) is now exposed as an
+  MCP resource. Agents that negotiate the handshake see `resources: {}` in the
+  server capabilities and can fetch the schema via `resources/list` and
+  `resources/read` without invoking `tools/list`. Useful for clients that want
+  to introspect the tool surface as a discoverable, cached document.
+
 ## [0.11.1] - 2026-05-07
 
 ### Changed
