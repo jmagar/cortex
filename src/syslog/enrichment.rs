@@ -86,21 +86,24 @@ const AI_SOURCES: &[&str] = &[
     "codex",
 ];
 
-/// Minimal AdGuard query log row. We deliberately use named fields with
-/// `default` so unknown JSON keys are dropped without allocation.
+/// Minimal AdGuard query log row. AdGuard emits PascalCase JSON keys; the
+/// container-level `rename_all` keeps Rust field names idiomatic snake_case.
+/// `default` per field tolerates partial / future-incompatible payloads.
 #[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 struct AdGuardQuery {
-    #[serde(rename = "Result", default)]
+    #[serde(default)]
     result: AdGuardResult,
-    #[serde(rename = "Upstream", default)]
+    #[serde(default)]
     upstream: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 struct AdGuardResult {
-    #[serde(rename = "IsFiltered", default)]
+    #[serde(default)]
     is_filtered: bool,
-    #[serde(rename = "Reason", default)]
+    #[serde(default)]
     reason: String,
 }
 

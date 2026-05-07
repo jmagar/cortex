@@ -182,13 +182,23 @@ impl RuntimeCore {
                 // through to the global retention_days policy.
                 match tokio::task::spawn_blocking(move || {
                     let _permit = permit;
+                    // Tag-window purges are independent maintenance ops. A
+                    // transient SQLITE_BUSY on one tag must NOT abort the
+                    // others or the global retention purge — that would stall
+                    // all retention for an hour.
                     for tag in ADGUARD_RETENTION_TAGS {
-                        db::purge_by_tag_window(
+                        if let Err(e) = db::purge_by_tag_window(
                             &pool,
                             tag,
                             ADGUARD_RETENTION_DAYS,
                             fts_merge_pages,
-                        )?;
+                        ) {
+                            tracing::error!(
+                                tag,
+                                error = %e,
+                                "Tag-window purge failed; continuing"
+                            );
+                        }
                     }
                     db::purge_old_logs(&pool, retention_days, fts_merge_pages)
                 })
