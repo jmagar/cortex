@@ -33,7 +33,7 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "stats" => tool_get_stats(state, args).await,
         "status" => tool_get_status(state, args).await,
         "apps" => tool_list_apps(state, args).await,
-        "source_ips" => tool_list_source_ips(state).await,
+        "source_ips" => tool_list_source_ips(state, args).await,
         "timeline" => tool_timeline(state, args).await,
         "patterns" => tool_patterns(state, args).await,
         "context" => tool_context(state, args).await,
@@ -113,7 +113,7 @@ async fn tool_list_apps(state: &AppState, args: Value) -> anyhow::Result<Value> 
     Ok(serde_json::to_value(response)?)
 }
 
-async fn tool_list_source_ips(state: &AppState) -> anyhow::Result<Value> {
+async fn tool_list_source_ips(state: &AppState, _args: Value) -> anyhow::Result<Value> {
     let response = state.service.list_source_ips().await?;
     tracing::debug!(
         source_ip_count = response.source_ips.len(),

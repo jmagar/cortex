@@ -1,12 +1,22 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 
 use super::{ServiceError, ServiceResult};
+
+/// Format a UTC instant in the same `Z`-suffixed shape SQLite stores in
+/// `received_at` (and that OTLP ingest writes for `timestamp`), so
+/// lexicographic TEXT comparisons line up at boundary instants. Plain
+/// `to_rfc3339()` produces the `+00:00` form, which sorts strictly less than
+/// `Z` character-by-character and can silently drop equal-instant rows from
+/// boundary windows.
+pub(crate) fn rfc3339_z(dt: DateTime<Utc>) -> String {
+    dt.to_rfc3339_opts(SecondsFormat::Millis, true)
+}
 
 pub fn parse_optional_timestamp(
     raw: Option<&str>,
     field_name: &str,
 ) -> ServiceResult<Option<String>> {
-    raw.map(|s| parse_required_timestamp(s, field_name).map(|dt| dt.to_rfc3339()))
+    raw.map(|s| parse_required_timestamp(s, field_name).map(rfc3339_z))
         .transpose()
 }
 

@@ -172,8 +172,8 @@ fn context_around_returns_neighbours() {
     let (before, after) = context_around(&pool, &r, 3, 3).unwrap();
     assert_eq!(before.len(), 3);
     assert_eq!(after.len(), 3);
-    assert!(before.last().unwrap().timestamp.as_str() <= "2026-01-01T00:00:04Z");
-    assert!(after.first().unwrap().timestamp.as_str() >= "2026-01-01T00:00:04Z");
+    assert!(before.last().unwrap().timestamp.as_str() < "2026-01-01T00:00:04Z");
+    assert!(after.first().unwrap().timestamp.as_str() > "2026-01-01T00:00:04Z");
 }
 
 #[test]

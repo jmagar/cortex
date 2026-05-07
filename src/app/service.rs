@@ -1,17 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
+use chrono::{TimeDelta, Utc};
 use tokio::sync::Semaphore;
-
-/// Format a UTC instant in the same shape SQLite uses for `received_at`
-/// (`%Y-%m-%dT%H:%M:%fZ`), so lexicographic TEXT comparisons line up at
-/// boundary instants. `to_rfc3339()` on its own produces `+00:00` form,
-/// which sorts strictly less than the stored `Z` form character-by-character
-/// and would silently drop equal-instant rows from boundary windows.
-fn rfc3339_z(dt: DateTime<Utc>) -> String {
-    dt.to_rfc3339_opts(SecondsFormat::Millis, true)
-}
 
 use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
@@ -23,7 +14,7 @@ use super::models::{
     SearchLogsRequest, SearchLogsResponse, SilentHostsRequest, SilentHostsResponse,
     TailLogsRequest, TimelineRequest, TimelineResponse,
 };
-use super::time::{parse_optional_timestamp, parse_required_timestamp};
+use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
 use crate::config::StorageConfig;
 use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy};
@@ -168,8 +159,8 @@ impl SyslogService {
         let ref_dt = parse_required_timestamp(&req.reference_time, "reference_time")?;
         let delta = TimeDelta::try_minutes(i64::from(window))
             .ok_or_else(|| ServiceError::InvalidInput("duration overflow".into()))?;
-        let from = (ref_dt - delta).to_rfc3339();
-        let to = (ref_dt + delta).to_rfc3339();
+        let from = rfc3339_z(ref_dt - delta);
+        let to = rfc3339_z(ref_dt + delta);
         let limit = req.limit.unwrap_or(500).min(999);
         let params = SearchParams {
             query: req.query,
@@ -311,7 +302,7 @@ impl SyslogService {
         // — TEXT comparisons in SQLite would otherwise treat them as different.
         let synthetic_timestamp = if req.log_id.is_none() {
             match req.timestamp.as_deref() {
-                Some(raw) => Some(parse_required_timestamp(raw, "timestamp")?.to_rfc3339()),
+                Some(raw) => Some(rfc3339_z(parse_required_timestamp(raw, "timestamp")?)),
                 None => None,
             }
         } else {
@@ -470,12 +461,12 @@ impl SyslogService {
         let recent_minutes = req.recent_minutes.unwrap_or(15).clamp(1, 60 * 24);
         let baseline_minutes = req.baseline_minutes.unwrap_or(360).clamp(1, 60 * 24 * 7);
         let now_dt = chrono::Utc::now();
-        let recent_to = now_dt.to_rfc3339();
+        let recent_to = rfc3339_z(now_dt);
         let recent_from_dt = now_dt - chrono::Duration::minutes(i64::from(recent_minutes));
-        let recent_from = recent_from_dt.to_rfc3339();
+        let recent_from = rfc3339_z(recent_from_dt);
         let baseline_to = recent_from.clone();
         let baseline_from =
-            (recent_from_dt - chrono::Duration::minutes(i64::from(baseline_minutes))).to_rfc3339();
+            rfc3339_z(recent_from_dt - chrono::Duration::minutes(i64::from(baseline_minutes)));
 
         let rf = recent_from.clone();
         let rt = recent_to.clone();
@@ -498,12 +489,10 @@ impl SyslogService {
     }
 
     pub async fn compare(&self, req: CompareRequest) -> ServiceResult<CompareResponse> {
-        let a_from =
-            parse_optional_timestamp(Some(&req.a_from), "a_from")?.expect("required field");
-        let a_to = parse_optional_timestamp(Some(&req.a_to), "a_to")?.expect("required field");
-        let b_from =
-            parse_optional_timestamp(Some(&req.b_from), "b_from")?.expect("required field");
-        let b_to = parse_optional_timestamp(Some(&req.b_to), "b_to")?.expect("required field");
+        let a_from = rfc3339_z(parse_required_timestamp(&req.a_from, "a_from")?);
+        let a_to = rfc3339_z(parse_required_timestamp(&req.a_to, "a_to")?);
+        let b_from = rfc3339_z(parse_required_timestamp(&req.b_from, "b_from")?);
+        let b_to = rfc3339_z(parse_required_timestamp(&req.b_to, "b_to")?);
 
         let a_from_q = a_from.clone();
         let a_to_q = a_to.clone();

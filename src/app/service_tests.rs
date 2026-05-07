@@ -71,8 +71,8 @@ async fn correlate_events_normalizes_window_groups_and_truncates() {
         .await
         .unwrap();
 
-    assert_eq!(response.window_from, "2025-12-31T23:58:00+00:00");
-    assert_eq!(response.window_to, "2026-01-01T00:02:00+00:00");
+    assert_eq!(response.window_from, "2025-12-31T23:58:00.000Z");
+    assert_eq!(response.window_to, "2026-01-01T00:02:00.000Z");
     assert!(response.truncated);
     assert_eq!(response.total_events, 1);
     assert_eq!(response.hosts_count, 1);

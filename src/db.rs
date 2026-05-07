@@ -9,9 +9,9 @@ mod queries;
 
 pub use analytics::{
     anomalies, clock_skew, context_around, fetch_log_by_id, ingest_rate, ingest_rate_by_host,
-    list_apps, list_source_ips, normalize_template, patterns, silent_hosts, summarize_range,
-    timeline, AnomalyEntry, AppEntry, Bucket, ClockSkewEntry, ContextRef, IngestRateBuckets,
-    IngestRatePerHost, LogEntryWithRaw, PatternEntry, RangeSummary, SilentHostEntry, SourceIpEntry,
+    list_apps, list_source_ips, patterns, silent_hosts, summarize_range, timeline, AnomalyEntry,
+    AppEntry, Bucket, ClockSkewEntry, ContextRef, IngestRateBuckets, IngestRatePerHost,
+    LogEntryWithRaw, PatternEntry, RangeSummary, SilentHostEntry, SourceIpEntry,
     SourceIpHostBreakdown, TimelineGroupBy, TimelinePoint,
 };
 pub use ingest::insert_logs_batch;

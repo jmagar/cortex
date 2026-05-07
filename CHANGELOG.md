@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-05-07
+
+### Fixed
+
+- **Timestamp normalization**: All time-window query bounds (`correlate`, `context`, `compare`, `anomalies`) and stored `timestamp` from the syslog and Docker parsers now produce the canonical `Z`-suffixed RFC3339 form (`rfc3339_z` helper, lifted to `app::time`). Previously, mixed `+00:00`/`Z` forms could silently drop boundary rows under SQLite TEXT comparison.
+- **`compare` panic**: Replaced four `.expect("required field")` calls on parsed user input with `parse_required_timestamp`, returning a clean `InvalidInput` error instead of panicking the request thread.
+- **`tail` placeholder index**: Severity-IN block in `tail_logs` now advances the placeholder index, preventing latent `?N` collisions if future filters are appended after it.
+- **`anomalies` ranking**: Hosts active in the recent window with no baseline (`recent_count > 0 && baseline_count == 0`) now sort to the top of the response, matching the docstring's promise to flag new-but-active hosts.
+- **`source_ips` dispatch**: `tool_list_source_ips` now accepts `(state, args)` for parity with the other action handlers, so future filters won't silently swallow client args.
+
+### Changed
+
+- **`normalize_template`** (`db::patterns` helper) is no longer re-exported at the crate root; it is `pub(super)` and only reachable from inside the `analytics` module.
+- **Test assertion tightened**: `context` neighbor bounds are now strict (`<` / `>`) for the id-anchored case, matching the documented contract.
+
 ## [0.15.0] - 2026-05-07
 
 ### Added

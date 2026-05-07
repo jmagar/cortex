@@ -17,7 +17,7 @@ fn module_reexports_request_types_and_helpers() {
         parse_optional_timestamp(Some("2026-01-01T01:00:00+01:00"), "from")
             .unwrap()
             .as_deref(),
-        Some("2026-01-01T00:00:00+00:00")
+        Some("2026-01-01T00:00:00.000Z")
     );
     assert_eq!(
         severity_at_or_above("err").unwrap(),

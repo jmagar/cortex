@@ -319,7 +319,7 @@ pub struct PatternEntry {
 /// Pattern detection is byte-level (all targets — digits, hex, IPv4, UUIDs —
 /// are ASCII), but non-ASCII bytes are passed through as their proper
 /// codepoint so internationalised log messages stay valid UTF-8.
-pub fn normalize_template(msg: &str) -> String {
+pub(super) fn normalize_template(msg: &str) -> String {
     let bytes = msg.as_bytes();
     let mut out = String::with_capacity(msg.len());
     let mut i = 0;
@@ -990,10 +990,20 @@ pub fn anomalies(
             baseline_errors,
         });
     }
+    // Surface new-but-active hosts (`recent_count > 0` against a zero baseline)
+    // at the top — they have no defined `z_score`, but they are exactly the
+    // signal the docstring promises. Other unscored entries (e.g. recent zero
+    // activity, dormant hosts) sink to the bottom.
+    let sort_key = |e: &AnomalyEntry| -> f64 {
+        if e.baseline_count == 0 && e.recent_count > 0 {
+            f64::INFINITY
+        } else {
+            e.z_score.unwrap_or(f64::NEG_INFINITY)
+        }
+    };
     out.sort_by(|a, b| {
-        b.z_score
-            .unwrap_or(f64::NEG_INFINITY)
-            .partial_cmp(&a.z_score.unwrap_or(f64::NEG_INFINITY))
+        sort_key(b)
+            .partial_cmp(&sort_key(a))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(out)

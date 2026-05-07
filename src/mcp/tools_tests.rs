@@ -207,7 +207,7 @@ fn parse_optional_timestamp_normalizes_offsets_to_utc() {
     let parsed = crate::app::parse_optional_timestamp(Some("2026-01-01T01:00:00+01:00"), "from")
         .unwrap()
         .unwrap();
-    assert_eq!(parsed, "2026-01-01T00:00:00+00:00");
+    assert_eq!(parsed, "2026-01-01T00:00:00.000Z");
 }
 
 #[test]

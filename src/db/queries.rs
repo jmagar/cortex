@@ -122,6 +122,10 @@ pub fn tail_logs(
             sql.push_str(&format!(" AND severity IN ({})", placeholders.join(", ")));
             for lvl in levels {
                 bindings.push(Box::new(lvl.clone()));
+                #[allow(unused_assignments)]
+                {
+                    idx += 1;
+                }
             }
         }
     }
