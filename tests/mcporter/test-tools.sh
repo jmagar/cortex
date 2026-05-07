@@ -4,7 +4,10 @@
 #
 # Exercises broad non-destructive coverage of the action-based syslog MCP tool:
 #   syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate,
-#   syslog stats, syslog status, syslog help
+#   syslog stats, syslog status, syslog apps, syslog source_ips,
+#   syslog timeline, syslog patterns, syslog context, syslog get,
+#   syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
+#   syslog anomalies, syslog compare, syslog help
 #
 # The server runs as a Docker container over HTTP. No stdio launch needed.
 # Credentials are sourced from ~/.claude-homelab/.env:

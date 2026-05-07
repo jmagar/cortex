@@ -6,13 +6,13 @@ use crate::mcp::AppState;
 use serde_json::json;
 use std::sync::Arc;
 
-fn test_state_with_token(token: Option<String>) -> (AppState, tempfile::TempDir) {
+fn test_state_with_token(token: Option<String>) -> (AppState, Arc<db::DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("mcp-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
     (
         AppState {
-            service: SyslogService::new(pool, storage.clone()),
+            service: SyslogService::new(Arc::clone(&pool), storage.clone()),
             config: McpConfig {
                 host: "127.0.0.1".into(),
                 port: 3100,
@@ -24,19 +24,25 @@ fn test_state_with_token(token: Option<String>) -> (AppState, tempfile::TempDir)
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
             observability: Arc::new(crate::observability::RuntimeObservability::default()),
         },
+        pool,
         dir,
     )
 }
 
 struct TestHarness {
     state: AppState,
+    pool: Arc<db::DbPool>,
     _dir: tempfile::TempDir,
 }
 
 impl TestHarness {
     fn new() -> Self {
-        let (state, dir) = test_state_with_token(None);
-        TestHarness { state, _dir: dir }
+        let (state, pool, dir) = test_state_with_token(None);
+        TestHarness {
+            state,
+            pool,
+            _dir: dir,
+        }
     }
 }
 
@@ -93,10 +99,33 @@ async fn numeric_args_reject_wrong_type_values() {
 #[tokio::test]
 async fn schema_actions_are_dispatchable() {
     let h = TestHarness::new();
+    db::insert_logs_batch(
+        &h.pool,
+        &[db::LogBatchEntry {
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            hostname: "schema-test-host".to_string(),
+            facility: Some("auth".to_string()),
+            severity: "err".to_string(),
+            app_name: Some("schema-test".to_string()),
+            process_id: Some("42".to_string()),
+            message: "schema dispatch test".to_string(),
+            raw: "<11>schema dispatch test".to_string(),
+            source_ip: "127.0.0.1:514".to_string(),
+            docker_checkpoint: None,
+        }],
+    )
+    .unwrap();
     for action in SYSLOG_ACTIONS {
         let args = match *action {
             "correlate" => {
                 json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"})
+            }
+            "context" => {
+                json!({"action": action, "hostname": "schema-test-host", "timestamp": "2026-01-01T00:00:00Z"})
+            }
+            "get" => json!({"action": action, "id": 1}),
+            "compare" => {
+                json!({"action": action, "a_from": "2026-01-01T00:00:00Z", "a_to": "2026-01-01T00:01:00Z", "b_from": "2026-01-01T00:01:00Z", "b_to": "2026-01-01T00:02:00Z"})
             }
             _ => json!({"action": action}),
         };

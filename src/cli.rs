@@ -90,6 +90,8 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                     source_ip: args.source_ip,
                     severity: args.severity,
                     app_name: args.app_name,
+                    facility: None,
+                    process_id: None,
                     from: args.from,
                     to: args.to,
                     limit: args.limit,
@@ -104,6 +106,7 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                     hostname: args.hostname,
                     source_ip: args.source_ip,
                     app_name: args.app_name,
+                    severity_min: None,
                     n: args.n,
                 })
                 .await?;
@@ -115,6 +118,7 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                 .get_errors(GetErrorsRequest {
                     from: args.from,
                     to: args.to,
+                    group_by: None,
                 })
                 .await?;
             print_errors_response(&response, json)?;

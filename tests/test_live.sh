@@ -17,6 +17,13 @@
 #   SYSLOG_MCP_TOKEN       Bearer token for auth (optional — server may run without it)
 #   PORT                   Override server port (default: 3100)
 #
+# Action coverage reference:
+#   syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate,
+#   syslog stats, syslog status, syslog apps, syslog source_ips,
+#   syslog timeline, syslog patterns, syslog context, syslog get,
+#   syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
+#   syslog anomalies, syslog compare, syslog help
+#
 # Exit codes:
 #   0 — all tests passed (SKIPs do not count as failures)
 #   1 — one or more tests failed

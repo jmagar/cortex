@@ -20,6 +20,17 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics |
 | `status` | Lightweight runtime and DB health |
+| `apps` | Distinct app names with log and host counts |
+| `source_ips` | Source identifiers with hostname breakdown |
+| `timeline` | Bucketed counts over time |
+| `patterns` | Near-duplicate message template clusters |
+| `context` | Surrounding logs around an event |
+| `get` | One log by id, including raw frame |
+| `ingest_rate` | Recent ingest throughput |
+| `silent_hosts` | Hosts quiet beyond a threshold |
+| `clock_skew` | Per-host clock skew distribution |
+| `anomalies` | Recent vs baseline volume/error comparison |
+| `compare` | Compare two time ranges |
 | `help` | Canonical in-tree action reference (use as ground truth if this doc drifts) |
 
 **Always prefer the MCP tool**. Fall back to HTTP only when MCP is unavailable.
