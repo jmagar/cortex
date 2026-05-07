@@ -282,6 +282,9 @@ fn require_auth_context<'a>(
 
 /// Enforce that `auth` carries `required_scope`.
 ///
+/// `syslog:admin` is treated as a superset of `syslog:read` — a caller with
+/// admin access implicitly satisfies any read-level scope requirement.
+///
 /// Logs a warning with subject + action on denial (audit trail).
 /// Only called when `auth` is `Some` (i.e., policy is Mounted).
 fn check_scope(
@@ -293,7 +296,11 @@ fn check_scope(
         // LoopbackDev path — no scope enforcement needed.
         return Ok(());
     };
-    if auth.scopes.iter().any(|s| s == required_scope) {
+    let satisfied = auth
+        .scopes
+        .iter()
+        .any(|s| s == required_scope || (required_scope == "syslog:read" && s == "syslog:admin"));
+    if satisfied {
         return Ok(());
     }
     tracing::warn!(

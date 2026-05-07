@@ -497,18 +497,13 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
     }
 }
 
-/// `AuthPolicy::Mounted` + AuthContext with `syslog:admin` (superset) → all
-/// read actions permitted (admin implies read in scope check).
+/// `AuthPolicy::Mounted` + AuthContext with `syslog:admin` (superset) → read
+/// actions permitted because `syslog:admin` implies `syslog:read`.
 #[tokio::test]
 async fn mounted_policy_with_admin_scope_permits_read_actions() {
     let (state, _pool, _dir) = mounted_state();
-    // syslog:admin is NOT syslog:read, so this test verifies that scope check
-    // is exact-string match — admin does NOT currently imply read. The bead
-    // spec says "AuthContext with syslog:admin + read action → permitted",
-    // but the scope table maps read actions to syslog:read, not syslog:admin.
-    // Per bead scope table: syslog:admin is for future write actions only.
-    // This test documents the ACTUAL behavior: admin alone → denied for reads.
-    // NOTE: If hierarchy is added later (admin ⊃ read), update this test.
+    // syslog:admin is a superset of syslog:read — check_scope treats it as
+    // satisfying any syslog:read requirement (admin ⊃ read superset semantics).
     let auth = auth_ctx_with_scopes(vec!["syslog:admin"]);
     let router = rmcp_router_with_auth(state, auth);
 
@@ -522,10 +517,14 @@ async fn mounted_policy_with_admin_scope_permits_read_actions() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    // syslog:admin alone does not satisfy syslog:read — denied.
-    assert_eq!(
+    // syslog:admin implies syslog:read — must be permitted.
+    assert_ne!(
         response["error"]["code"], -32600,
-        "syslog:admin alone should not permit read actions; response: {response}"
+        "syslog:admin should satisfy syslog:read requirement; response: {response}"
+    );
+    assert!(
+        response["result"].is_object(),
+        "stats should return result; response: {response}"
     );
 }
 
