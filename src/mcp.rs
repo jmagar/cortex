@@ -82,8 +82,13 @@ pub struct AppState {
 /// [`AuthPolicy::LoopbackDev`] (no layer needed — loopback bind is the trust
 /// boundary).
 ///
-/// Centralises the duplicated `AuthLayer` construction that previously lived
-/// separately in `api.rs` and `mcp/routes.rs`.
+/// Centralises the `AuthLayer` construction shared by `api.rs` and
+/// `mcp/routes.rs`.
+///
+/// # Invariant
+/// `AuthLayer` MUST NOT add any DB write path. JWT validation is stateless
+/// RS256 verify; static token is constant-time compare. If audit logging is
+/// ever needed, push to an async background channel.
 pub fn build_auth_layer(
     policy: &AuthPolicy,
     static_token: Option<Arc<str>>,

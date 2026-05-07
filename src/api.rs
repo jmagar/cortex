@@ -43,13 +43,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/correlate", get(correlate))
         .route("/api/stats", get(stats));
 
-    // Apply auth layer based on policy. LoopbackDev skips auth (loopback bind
-    // is the trust boundary). Mounted applies AuthLayer (bearer-only:
-    // allow_session_cookie=false — no browser UI on /api/*).
-    //
-    // AuthLayer MUST NOT add any DB write path. JWT validation is stateless RS256
-    // verify; static token is constant-time compare. If audit logging is ever
-    // added, push to async background channel only.
+    // Apply auth layer based on policy (see `build_auth_layer` for invariants).
     let routes = if let Some(layer) = build_auth_layer(
         &state.auth_policy,
         state.config.api_token.as_deref().map(Arc::<str>::from),

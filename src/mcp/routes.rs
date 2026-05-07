@@ -29,19 +29,18 @@ pub fn router(state: AppState) -> Router {
     let mcp_service =
         Router::new().nest_service("/mcp", streamable_http_service(state.clone(), rmcp_config));
 
-    // Apply auth layer based on policy. LoopbackDev skips auth entirely —
-    // the loopback bind is the trust boundary. For Mounted variants, apply
-    // AuthLayer (bearer-only: allow_session_cookie=false).
-    //
-    // AuthLayer MUST NOT add any DB write path. JWT validation is stateless RS256
-    // verify; static token is constant-time compare. If audit logging is ever
-    // added, push to async background channel only.
-    let resource_url = state
-        .config
-        .auth
-        .public_url
-        .as_deref()
-        .map(|u| Arc::<str>::from(format!("{}/mcp", u.trim_end_matches('/'))));
+    // Apply auth layer based on policy (see `build_auth_layer` for invariants).
+    // `resource_url` is only used when a layer is actually mounted, so compute
+    // it lazily inside the Mounted branch via the helper's Option parameter.
+    let resource_url = match &state.auth_policy {
+        AuthPolicy::Mounted { .. } => state
+            .config
+            .auth
+            .public_url
+            .as_deref()
+            .map(|u| Arc::<str>::from(format!("{}/mcp", u.trim_end_matches('/')))),
+        AuthPolicy::LoopbackDev => None,
+    };
     let authenticated = if let Some(layer) = build_auth_layer(
         &state.auth_policy,
         state.config.api_token.as_deref().map(Arc::<str>::from),
