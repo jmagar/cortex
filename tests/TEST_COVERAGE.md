@@ -238,7 +238,8 @@ All subsequent assertions operate on this inner JSON payload, not the raw JSON-R
 
 #### Tool: `syslog help`
 
-**Arguments:** `{}` (no arguments)
+**Arguments:** `{"action":"status"}`. The action has no additional
+action-specific parameters.
 
 **Purpose:** Confirm the help tool returns a non-empty help string containing the word "syslog".
 

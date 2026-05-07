@@ -116,10 +116,10 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null; then
         pass "$label"
-    elif echo "$output" | grep -q "MCP error"; then
+    elif echo "$output" | grep -q "^\[mcporter\] MCP error -32602:"; then
         pass "$label"
     else
-        fail "$label (expected isError=true, got success)"
+        fail "$label (expected tool isError=true or MCP invalid-params error)"
     fi
 }
 
