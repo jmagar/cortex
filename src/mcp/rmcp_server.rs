@@ -61,17 +61,19 @@ impl ServerHandler for SyslogRmcpServer {
         let tool_name = request.name.to_string();
 
         // Extract action for scope check before any DB work fires.
-        let action = request
+        // Clone into an owned String so request.arguments can be consumed below.
+        let action: String = request
             .arguments
             .as_ref()
             .and_then(|m| m.get("action"))
             .and_then(Value::as_str)
-            .unwrap_or("");
+            .unwrap_or("")
+            .to_owned();
 
         // Fail-closed auth check: require AuthContext when Mounted, then scope.
         let auth = require_auth_context(&self.state, &context)?;
-        if let Some(required_scope) = required_scope_for(action) {
-            check_scope(auth, required_scope, action)?;
+        if let Some(required_scope) = required_scope_for(&action) {
+            check_scope(auth, required_scope, &action)?;
         }
 
         let arguments = request
@@ -110,7 +112,7 @@ impl ServerHandler for SyslogRmcpServer {
                     "MCP tool execution failed"
                 );
                 Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Tool execution failed for action '{tool_name}'. Check server logs for details."
+                    "Tool execution failed for action '{action}'. Check server logs for details."
                 ))]))
             }
         }
