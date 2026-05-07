@@ -8,7 +8,8 @@ mod queries;
 
 pub use ingest::insert_logs_batch;
 pub use maintenance::{
-    enforce_storage_budget, get_storage_metrics, purge_old_logs, DiskSpaceProbe,
+    enforce_storage_budget, get_storage_metrics, purge_by_tag_window, purge_old_logs,
+    DiskSpaceProbe,
 };
 pub use models::{
     DbStats, DockerCheckpoint, ErrorSummaryEntry, HostEntry, LogBatchEntry, LogEntry, SearchParams,

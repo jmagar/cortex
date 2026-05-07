@@ -31,6 +31,7 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
         },
+        otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
     };
     (state, pool, dir)
 }

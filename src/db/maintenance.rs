@@ -142,7 +142,9 @@ pub fn enforce_storage_budget_with_probe(
         // (DELETE trigger is intentionally absent).
         // drop the connection before checkpoint_wal_and_incremental_vacuum to
         // avoid pool exhaustion when pool_size = 1.
-        fts_incremental_merge(pool, deleted_rows);
+        // Hardcoded M=0 here — storage enforcement is rare, force unconditional
+        // merge. Tunable M only matters for the regular retention path.
+        fts_incremental_merge(pool, deleted_rows, 0);
 
         checkpoint_wal_and_incremental_vacuum(pool)?;
     }
@@ -173,17 +175,22 @@ pub fn enforce_storage_budget_with_probe(
 /// fragmented FTS index.
 ///
 /// Best-effort: errors are logged but never propagated.
-fn fts_incremental_merge(pool: &DbPool, deleted_rows: usize) {
-    // Budget one merge=500,250 call per 5 000 deleted rows (rough heuristic),
+fn fts_incremental_merge(pool: &DbPool, deleted_rows: usize, merge_pages: u32) {
+    // Budget one merge=500,M call per 5 000 deleted rows (rough heuristic),
     // with a floor of 1 and a ceiling of 20 to bound wall-clock time.
     let iterations = deleted_rows.div_ceil(5000).clamp(1, 20);
     let mut consecutive_failures: u32 = 0;
+    // M=0 forces unconditional merge regardless of segment count, which is
+    // the right choice after bulk DELETEs (level-0 segments may be too few
+    // to satisfy the default M=250 threshold). Operators can raise M via
+    // SYSLOG_MCP_FTS_MERGE_PAGES if M=0 holds the write lock too long on a
+    // very large index — config rollback rather than binary rollback.
+    let merge_stmt = format!("INSERT INTO logs_fts(logs_fts) VALUES('merge=500,{merge_pages}');");
 
     for i in 0..iterations {
         match pool.get() {
             Ok(conn) => {
-                match conn.execute_batch("INSERT INTO logs_fts(logs_fts) VALUES('merge=500,250');")
-                {
+                match conn.execute_batch(&merge_stmt) {
                     Ok(()) => {
                         consecutive_failures = 0;
                         tracing::trace!(
@@ -246,10 +253,17 @@ fn fts_incremental_merge(pool: &DbPool, deleted_rows: usize) {
 /// Uses chunked DELETEs (10 000 rows per iteration) so the WAL write lock is
 /// released between chunks, letting the batch writer proceed without timing out
 /// or overflowing its 1 000-entry cap.  After all chunks complete, an
-/// incremental FTS5 merge is issued instead of a full rebuild — `merge=500,250`
+/// incremental FTS5 merge is issued instead of a full rebuild — `merge=500,M`
 /// processes at most a bounded number of index pages per call and holds the
 /// write lock for milliseconds rather than seconds.
-pub fn purge_old_logs(pool: &DbPool, retention_days: u32) -> Result<usize> {
+///
+/// **High-severity exemption:** rows with `severity IN ('err','crit','alert','emerg')`
+/// are excluded from time-based purge — they are never aged out by retention.
+/// They CAN still be deleted by `enforce_storage_budget` under disk pressure
+/// (oldest-first, no severity filter). Permanent err+ retention is therefore
+/// only guaranteed if the DB never breaches `max_db_size_mb` or
+/// `min_free_disk_mb`. See CLAUDE.md "Retention" for the policy interaction.
+pub fn purge_old_logs(pool: &DbPool, retention_days: u32, fts_merge_pages: u32) -> Result<usize> {
     if retention_days == 0 {
         return Ok(0);
     }
@@ -273,7 +287,10 @@ pub fn purge_old_logs(pool: &DbPool, retention_days: u32) -> Result<usize> {
         let conn = pool.get()?;
         let chunk = conn.execute(
             "DELETE FROM logs WHERE id IN (
-                 SELECT id FROM logs WHERE received_at < ?1 LIMIT 10000
+                 SELECT id FROM logs
+                 WHERE received_at < ?1
+                   AND severity NOT IN ('err', 'crit', 'alert', 'emerg')
+                 LIMIT 10000
              )",
             params![cutoff],
         )?;
@@ -287,7 +304,7 @@ pub fn purge_old_logs(pool: &DbPool, retention_days: u32) -> Result<usize> {
 
     // Incremental FTS merge — much shorter write-lock duration than full rebuild.
     if total_deleted > 0 {
-        fts_incremental_merge(pool, total_deleted);
+        fts_incremental_merge(pool, total_deleted, fts_merge_pages);
     }
 
     // Passive WAL checkpoint: attempt to move WAL pages into the main DB file
@@ -300,6 +317,72 @@ pub fn purge_old_logs(pool: &DbPool, retention_days: u32) -> Result<usize> {
     }
 
     tracing::info!(deleted = total_deleted, cutoff = %cutoff, "Purged old logs");
+    Ok(total_deleted)
+}
+
+/// Delete rows for a single `app_name` older than `max_days`.
+///
+/// Same chunked-DELETE pattern as [`purge_old_logs`] (10 000 rows per
+/// iteration with the WAL lock released between chunks). Rows with
+/// `severity IN ('err','crit','alert','emerg')` are excluded — high-severity
+/// log entries are protected from time-based purge regardless of source.
+///
+/// Designed for short-retention tags (e.g. `adguard-allowed` at 7 days)
+/// running on the new composite index `(app_name, received_at)` introduced
+/// by Migration 3. **MUST run before [`purge_old_logs`]** in the maintenance
+/// task to avoid SQLite write-lock contention from concurrent chunked
+/// DELETEs over the same table.
+///
+/// Uses [`fts_incremental_merge`] after the loop because FTS5 DELETE triggers
+/// were intentionally dropped in Migration 1 — phantoms otherwise accumulate.
+pub fn purge_by_tag_window(
+    pool: &DbPool,
+    app_name: &str,
+    max_days: u32,
+    fts_merge_pages: u32,
+) -> Result<usize> {
+    if max_days == 0 {
+        return Ok(0);
+    }
+
+    let cutoff = Utc::now()
+        .checked_sub_signed(chrono::TimeDelta::days(max_days as i64))
+        .ok_or_else(|| anyhow::anyhow!("date arithmetic overflow for max_days={max_days}"))?
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+
+    let mut total_deleted: usize = 0;
+    loop {
+        let conn = pool.get()?;
+        let chunk = conn.execute(
+            "DELETE FROM logs WHERE id IN (
+                 SELECT id FROM logs
+                 WHERE app_name = ?1
+                   AND received_at < ?2
+                   AND severity NOT IN ('err', 'crit', 'alert', 'emerg')
+                 LIMIT 10000
+             )",
+            params![app_name, cutoff],
+        )?;
+        total_deleted += chunk;
+        drop(conn);
+        if chunk == 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    if total_deleted > 0 {
+        fts_incremental_merge(pool, total_deleted, fts_merge_pages);
+    }
+
+    tracing::info!(
+        app_name,
+        max_days,
+        deleted = total_deleted,
+        cutoff = %cutoff,
+        "Purged tag window"
+    );
     Ok(total_deleted)
 }
 
@@ -325,6 +408,25 @@ fn delete_oldest_logs_chunk(pool: &DbPool, chunk_size: usize) -> Result<DeletedC
             .collect::<rusqlite::Result<Vec<_>>>()?;
         result
     };
+
+    // Pre-flight: count high-severity rows in the chunk so we can warn the
+    // operator that disk-pressure cleanup is overriding the time-based
+    // retention exemption for err+ logs.
+    let high_severity_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM logs \
+         WHERE id IN (SELECT id FROM logs ORDER BY received_at ASC, id ASC LIMIT ?1) \
+           AND severity IN ('err', 'crit', 'alert', 'emerg')",
+        [chunk_size as i64],
+        |row| row.get(0),
+    )?;
+    if high_severity_count > 0 {
+        tracing::warn!(
+            high_severity_count,
+            chunk_size,
+            "Storage enforcement deleting high-severity rows — \
+             disk pressure overrides time-based retention exemption"
+        );
+    }
 
     // Delete the oldest chunk using a subquery — O(1) SQL string size regardless
     // of chunk_size, no expression depth issues.

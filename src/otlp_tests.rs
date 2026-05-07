@@ -1,0 +1,284 @@
+//! Tests for the OTLP HTTP receiver (logs handler, severity mapping,
+//! AnyValue extraction, auth gate, status-code contract).
+
+use super::*;
+
+use std::sync::atomic::Ordering;
+
+use opentelemetry_proto::tonic::{
+    collector::logs::v1::ExportLogsServiceRequest,
+    common::v1::{any_value::Value as AnyValueKind, AnyValue, KeyValue},
+    logs::v1::{LogRecord, ResourceLogs, ScopeLogs},
+    resource::v1::Resource,
+};
+
+fn av_string(s: &str) -> AnyValue {
+    AnyValue {
+        value: Some(AnyValueKind::StringValue(s.to_string())),
+    }
+}
+
+fn kv(key: &str, value: AnyValue) -> KeyValue {
+    KeyValue {
+        key: key.to_string(),
+        value: Some(value),
+    }
+}
+
+fn sample_request(
+    host: &str,
+    service: &str,
+    body: &str,
+    severity: i32,
+) -> ExportLogsServiceRequest {
+    ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: vec![
+                    kv("host.name", av_string(host)),
+                    kv("service.name", av_string(service)),
+                ],
+                dropped_attributes_count: 0,
+                entity_refs: vec![],
+            }),
+            scope_logs: vec![ScopeLogs {
+                scope: None,
+                log_records: vec![LogRecord {
+                    time_unix_nano: 1_700_000_000_000_000_000,
+                    observed_time_unix_nano: 0,
+                    severity_number: severity,
+                    severity_text: String::new(),
+                    body: Some(av_string(body)),
+                    attributes: vec![],
+                    dropped_attributes_count: 0,
+                    flags: 0,
+                    trace_id: vec![],
+                    span_id: vec![],
+                    event_name: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    }
+}
+
+// ---- severity mapping ----
+
+#[test]
+fn severity_unspecified_falls_back_to_info() {
+    assert_eq!(severity_from_number(0), "info");
+    assert_eq!(severity_from_number(99), "info");
+    assert_eq!(severity_from_number(-1), "info");
+}
+
+#[test]
+fn severity_buckets_match_otlp_spec() {
+    assert_eq!(severity_from_number(1), "debug"); // TRACE
+    assert_eq!(severity_from_number(5), "debug"); // DEBUG
+    assert_eq!(severity_from_number(9), "info"); // INFO
+    assert_eq!(severity_from_number(13), "warning"); // WARN
+    assert_eq!(severity_from_number(17), "err"); // ERROR
+    assert_eq!(severity_from_number(21), "crit"); // FATAL
+}
+
+// ---- AnyValue extraction ----
+
+#[test]
+fn any_value_string() {
+    assert_eq!(any_value_to_string(&av_string("hi")).as_deref(), Some("hi"));
+}
+
+#[test]
+fn any_value_none_returns_none() {
+    let v = AnyValue { value: None };
+    assert!(any_value_to_string(&v).is_none());
+}
+
+#[test]
+fn any_value_int_and_bool_stringify() {
+    let int_val = AnyValue {
+        value: Some(AnyValueKind::IntValue(42)),
+    };
+    assert_eq!(any_value_to_string(&int_val).as_deref(), Some("42"));
+    let bool_val = AnyValue {
+        value: Some(AnyValueKind::BoolValue(true)),
+    };
+    assert_eq!(any_value_to_string(&bool_val).as_deref(), Some("true"));
+}
+
+// ---- build_entries ----
+
+#[test]
+fn build_entries_extracts_resource_attrs() {
+    let peer = "127.0.0.1:12345".parse().unwrap();
+    let req = sample_request("dookie", "claude-code", "tool_call started", 9);
+    let entries = build_entries(&req, peer);
+    assert_eq!(entries.len(), 1);
+    let e = &entries[0];
+    assert_eq!(e.hostname, "dookie");
+    assert_eq!(e.app_name.as_deref(), Some("claude-code"));
+    assert_eq!(e.message, "tool_call started");
+    assert_eq!(e.severity, "info");
+    assert_eq!(e.facility.as_deref(), Some("otlp"));
+    assert_eq!(e.source_ip, "127.0.0.1:12345");
+}
+
+#[test]
+fn build_entries_missing_host_name_uses_empty_string() {
+    let peer = "127.0.0.1:1".parse().unwrap();
+    let req = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: vec![],
+                dropped_attributes_count: 0,
+                entity_refs: vec![],
+            }),
+            scope_logs: vec![ScopeLogs {
+                scope: None,
+                log_records: vec![LogRecord {
+                    time_unix_nano: 0,
+                    observed_time_unix_nano: 0,
+                    severity_number: 9,
+                    severity_text: String::new(),
+                    body: Some(av_string("orphan")),
+                    attributes: vec![],
+                    dropped_attributes_count: 0,
+                    flags: 0,
+                    trace_id: vec![],
+                    span_id: vec![],
+                    event_name: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    };
+    let entries = build_entries(&req, peer);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].hostname, "");
+    assert!(entries[0].app_name.is_none());
+}
+
+#[test]
+fn build_entries_no_panic_on_empty_body() {
+    let peer = "127.0.0.1:1".parse().unwrap();
+    let req = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: None,
+            scope_logs: vec![ScopeLogs {
+                scope: None,
+                log_records: vec![LogRecord {
+                    time_unix_nano: 0,
+                    observed_time_unix_nano: 0,
+                    severity_number: 9,
+                    severity_text: String::new(),
+                    body: None,
+                    attributes: vec![],
+                    dropped_attributes_count: 0,
+                    flags: 0,
+                    trace_id: vec![],
+                    span_id: vec![],
+                    event_name: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    };
+    let entries = build_entries(&req, peer);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].message, "");
+}
+
+#[test]
+fn build_entries_handles_multiple_resource_logs() {
+    let peer = "10.0.0.1:9999".parse().unwrap();
+    let req = ExportLogsServiceRequest {
+        resource_logs: vec![
+            sample_request("dookie", "claude-code", "msg one", 9)
+                .resource_logs
+                .into_iter()
+                .next()
+                .unwrap(),
+            sample_request("squirts", "codex", "msg two", 17)
+                .resource_logs
+                .into_iter()
+                .next()
+                .unwrap(),
+        ],
+    };
+    let entries = build_entries(&req, peer);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].hostname, "dookie");
+    assert_eq!(entries[1].hostname, "squirts");
+    assert_eq!(entries[1].severity, "err");
+}
+
+// ---- auth gate ----
+
+fn state_with_token(token: Option<&str>) -> OtlpState {
+    let (tx, _rx) = tokio::sync::mpsc::channel::<crate::db::LogBatchEntry>(10);
+    let ingest = crate::ingest::IngestTx::from_sender_for_test(tx);
+    OtlpState::new(
+        ingest,
+        token.map(String::from),
+        Arc::new(OtlpCounters::default()),
+    )
+}
+
+#[test]
+fn auth_disabled_when_no_token() {
+    let state = state_with_token(None);
+    let headers = HeaderMap::new();
+    assert!(is_authorized(&state, &headers));
+}
+
+#[test]
+fn auth_required_with_correct_bearer() {
+    let state = state_with_token(Some("secret"));
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::AUTHORIZATION,
+        HeaderValue::from_static("Bearer secret"),
+    );
+    assert!(is_authorized(&state, &headers));
+}
+
+#[test]
+fn auth_rejects_wrong_token() {
+    let state = state_with_token(Some("secret"));
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::AUTHORIZATION,
+        HeaderValue::from_static("Bearer wrong"),
+    );
+    assert!(!is_authorized(&state, &headers));
+}
+
+#[test]
+fn auth_rejects_missing_header() {
+    let state = state_with_token(Some("secret"));
+    let headers = HeaderMap::new();
+    assert!(!is_authorized(&state, &headers));
+}
+
+#[test]
+fn auth_rejects_non_bearer_scheme() {
+    let state = state_with_token(Some("secret"));
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::AUTHORIZATION,
+        HeaderValue::from_static("Basic secret"),
+    );
+    assert!(!is_authorized(&state, &headers));
+}
+
+// ---- counters ----
+
+#[test]
+fn counters_default_to_zero() {
+    let counters = OtlpCounters::default();
+    assert_eq!(counters.logs_received.load(Ordering::Relaxed), 0);
+    assert_eq!(counters.decode_errors.load(Ordering::Relaxed), 0);
+}

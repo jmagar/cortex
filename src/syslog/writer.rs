@@ -4,6 +4,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
+use super::enrichment::{enrich_entry, EnrichmentConfig};
 use crate::config::StorageConfig;
 use crate::db::{self, DbPool};
 
@@ -19,6 +20,7 @@ pub(crate) async fn batch_writer(
     storage_state: Arc<Mutex<Option<db::StorageBudgetState>>>,
     batch_size: usize,
     flush_interval: tokio::time::Duration,
+    enrichment: EnrichmentConfig,
 ) {
     let mut batch: Vec<db::LogBatchEntry> = Vec::with_capacity(batch_size);
     let mut storage_blocked = false;
@@ -60,6 +62,7 @@ pub(crate) async fn batch_writer(
                                     &mut batch,
                                     &mut storage_blocked,
                                     &mut summary,
+                                    &enrichment,
                                 )
                                 .await;
                             }
@@ -83,6 +86,7 @@ pub(crate) async fn batch_writer(
                 &mut batch,
                 &mut storage_blocked,
                 &mut summary,
+                &enrichment,
             )
             .await;
         }
@@ -102,9 +106,15 @@ pub(super) async fn flush_batch(
     batch: &mut Vec<db::LogBatchEntry>,
     storage_blocked: &mut bool,
     summary: &mut IngestSummary,
+    enrichment: &EnrichmentConfig,
 ) {
     let pool = Arc::clone(pool);
-    let batch_to_write = std::mem::take(batch);
+    // Enrichment runs in the async context (cheap regex/JSON work) so the
+    // spawn_blocking call below stays focused on the SQL write.
+    let batch_to_write: Vec<db::LogBatchEntry> = std::mem::take(batch)
+        .into_iter()
+        .map(|e| enrich_entry(e, enrichment))
+        .collect();
     let count = batch_to_write.len();
     let started = Instant::now();
     debug!(count, "Attempting batch flush");

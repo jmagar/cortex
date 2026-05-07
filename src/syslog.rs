@@ -7,6 +7,7 @@ use crate::config::{StorageConfig, SyslogConfig};
 use crate::db::{self, DbPool};
 use crate::ingest;
 
+pub(crate) mod enrichment;
 mod listener;
 mod parser;
 pub(crate) mod writer;
@@ -19,7 +20,15 @@ pub async fn start_with_storage_state(
     pool: Arc<DbPool>,
     storage_state: Arc<Mutex<Option<db::StorageBudgetState>>>,
 ) -> Result<()> {
-    let ingest_tx = ingest::start_writer_from_syslog_config(&config, storage, pool, storage_state);
+    // No-op enrichment for the legacy convenience entry point — production
+    // runtime uses RuntimeCore which builds enrichment from Config.
+    let ingest_tx = ingest::start_writer_from_syslog_config(
+        &config,
+        storage,
+        pool,
+        storage_state,
+        crate::syslog::enrichment::EnrichmentConfig::default(),
+    );
     start_listeners(config, ingest_tx.sender()).await
 }
 

@@ -2,6 +2,7 @@ pub mod api;
 pub mod app;
 pub mod config;
 pub mod mcp;
+pub mod otlp;
 pub mod runtime;
 pub mod syslog;
 
