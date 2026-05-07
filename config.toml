@@ -57,10 +57,9 @@ access_token_ttl_secs = 3600   # 1h
 refresh_token_ttl_secs = 28800 # 8h (intentionally shorter than lab-auth's 30d default for read-only homelab)
 auth_code_ttl_secs = 300       # 5m
 
-# Per-process rate limits. `register_rpm` is moot for syslog-mcp (the
-# bearer-only router does not mount /register) but is preserved for parity
-# with lab-auth.
-register_rpm = 20
+# Per-process rate limits for OAuth endpoints.
+# /register is not mounted (bearer_only_router excludes it), so only
+# authorize_rpm applies.
 authorize_rpm = 60
 
 # When OAuth is active, also reject requests carrying SYSLOG_MCP_TOKEN. Set

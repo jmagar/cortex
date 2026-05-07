@@ -7,7 +7,6 @@ use axum::{
     routing::get,
     Router,
 };
-use lab_auth::AuthLayer;
 use serde::Deserialize;
 use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
@@ -16,7 +15,7 @@ use crate::app::{
     CorrelateEventsRequest, GetErrorsRequest, SearchLogsRequest, SyslogService, TailLogsRequest,
 };
 use crate::config::ApiConfig;
-use crate::mcp::AuthPolicy;
+use crate::mcp::{build_auth_layer, AuthPolicy};
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -51,16 +50,14 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
     // AuthLayer MUST NOT add any DB write path. JWT validation is stateless RS256
     // verify; static token is constant-time compare. If audit logging is ever
     // added, push to async background channel only.
-    let routes = match &state.auth_policy {
-        AuthPolicy::LoopbackDev => routes,
-        AuthPolicy::Mounted { auth_state } => {
-            let layer = AuthLayer::new()
-                .with_static_token(state.config.api_token.as_deref().map(Arc::<str>::from))
-                .with_auth_state(auth_state.clone())
-                .with_resource_url(None)
-                .with_allow_session_cookie(false);
-            routes.layer(layer)
-        }
+    let routes = if let Some(layer) = build_auth_layer(
+        &state.auth_policy,
+        state.config.api_token.as_deref().map(Arc::<str>::from),
+        None,
+    ) {
+        routes.layer(layer)
+    } else {
+        routes
     };
 
     let routes = routes.layer(cors_layer(state.cors_port)).with_state(state);

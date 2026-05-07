@@ -12,13 +12,15 @@ pub(crate) mod ingest;
 
 /// Test support: factory helpers for building [`mcp::AppState`] variants.
 ///
-/// These live in a `pub` module (not `#[cfg(test)]`) so that integration tests
-/// in `tests/` can import them. They are `#[doc(hidden)]` so they don't
-/// pollute the public API surface.
+/// Gated by `cfg(any(test, feature = "test-support"))` so the helpers are
+/// compiled in unit-test builds (crate-internal, via `#[cfg(test)]`) and for
+/// integration tests that explicitly opt in with `--features test-support`.
+/// They are `#[doc(hidden)]` so they don't pollute the public API surface.
 ///
 /// All helpers take a `data_dir: &std::path::Path` so the caller controls the
 /// lifetime of the temporary directory — no `tempfile` dep in this crate.
 /// Integration tests pass `tempfile::TempDir::path()` or any other `Path`.
+#[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod testing {
     use std::{path::Path, sync::Arc};
@@ -86,7 +88,7 @@ pub mod testing {
 
     fn state_with_policy(data_dir: &Path, policy: AuthPolicy, token: Option<String>) -> AppState {
         let storage = minimal_storage(data_dir);
-        let pool = Arc::new(db::init_pool(&storage).unwrap());
+        let pool = Arc::new(db::init_pool(&storage).expect("test db pool should init"));
         AppState {
             service: SyslogService::new(pool, storage),
             config: base_config(None, token),
@@ -101,7 +103,7 @@ pub mod testing {
         token: Option<String>,
     ) -> AppState {
         let storage = minimal_storage(data_dir);
-        let pool = Arc::new(db::init_pool(&storage).unwrap());
+        let pool = Arc::new(db::init_pool(&storage).expect("test db pool should init"));
         AppState {
             service: SyslogService::new(pool, storage),
             config: base_config(Some("https://syslog.example.com"), token),
@@ -148,11 +150,19 @@ pub mod testing {
             ),
             (
                 "SYSLOG_MCP_AUTH_SQLITE_PATH".into(),
-                data_dir.join("auth.db").to_str().unwrap().into(),
+                data_dir
+                    .join("auth.db")
+                    .to_str()
+                    .expect("auth.db path should be valid UTF-8")
+                    .into(),
             ),
             (
                 "SYSLOG_MCP_AUTH_KEY_PATH".into(),
-                data_dir.join("auth-jwt.pem").to_str().unwrap().into(),
+                data_dir
+                    .join("auth-jwt.pem")
+                    .to_str()
+                    .expect("auth-jwt.pem path should be valid UTF-8")
+                    .into(),
             ),
         ];
 

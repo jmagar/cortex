@@ -325,7 +325,7 @@ fn check_scope(
 fn required_scope_for(action: &str) -> Option<&'static str> {
     match action {
         // Informational — AuthContext required when Mounted, but no scope gate.
-        "help" | "" => None,
+        "help" => None,
         // All current read actions require syslog:read.
         "search" | "tail" | "errors" | "hosts" | "correlate" | "stats" => Some("syslog:read"),
         // Future write/admin actions would map to syslog:admin here.

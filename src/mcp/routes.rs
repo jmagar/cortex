@@ -9,7 +9,6 @@ use axum::{
     routing::get,
     Router,
 };
-use lab_auth::AuthLayer;
 use serde_json::json;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -17,7 +16,7 @@ use tower_http::{
 };
 
 use super::rmcp_server::allowed_origins;
-use super::{streamable_http_config, streamable_http_service};
+use super::{build_auth_layer, streamable_http_config, streamable_http_service};
 use super::{AppState, AuthPolicy};
 
 const MCP_BODY_LIMIT_BYTES: u64 = 65_536;
@@ -37,22 +36,20 @@ pub fn router(state: AppState) -> Router {
     // AuthLayer MUST NOT add any DB write path. JWT validation is stateless RS256
     // verify; static token is constant-time compare. If audit logging is ever
     // added, push to async background channel only.
-    let authenticated = match &state.auth_policy {
-        AuthPolicy::LoopbackDev => mcp_service,
-        AuthPolicy::Mounted { auth_state } => {
-            let resource_url = state
-                .config
-                .auth
-                .public_url
-                .as_deref()
-                .map(|u| Arc::<str>::from(format!("{}/mcp", u.trim_end_matches('/'))));
-            let layer = AuthLayer::new()
-                .with_static_token(state.config.api_token.as_deref().map(Arc::<str>::from))
-                .with_auth_state(auth_state.clone())
-                .with_resource_url(resource_url)
-                .with_allow_session_cookie(false);
-            mcp_service.layer(layer)
-        }
+    let resource_url = state
+        .config
+        .auth
+        .public_url
+        .as_deref()
+        .map(|u| Arc::<str>::from(format!("{}/mcp", u.trim_end_matches('/'))));
+    let authenticated = if let Some(layer) = build_auth_layer(
+        &state.auth_policy,
+        state.config.api_token.as_deref().map(Arc::<str>::from),
+        resource_url,
+    ) {
+        mcp_service.layer(layer)
+    } else {
+        mcp_service
     };
 
     // Build the OAuth router (Router<()> — state already baked in) when

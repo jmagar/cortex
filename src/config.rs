@@ -722,7 +722,7 @@ fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
 }
 
 fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()> {
-    if token_is_blank(&config.mcp.api_token) {
+    if token_is_set_but_blank(&config.mcp.api_token) {
         return Err(anyhow::anyhow!("mcp.api_token must not be empty"));
     }
     if config.api.enabled {
@@ -735,7 +735,7 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
                 ));
             }
         }
-    } else if token_is_blank(&config.api.api_token) {
+    } else if token_is_set_but_blank(&config.api.api_token) {
         return Err(anyhow::anyhow!("api.api_token must not be empty"));
     }
 
@@ -854,7 +854,10 @@ pub(crate) fn validate_docker_ingest_config(config: &DockerIngestConfig) -> anyh
     Ok(())
 }
 
-fn token_is_blank(token: &Option<String>) -> bool {
+/// Returns `true` only when the token is `Some` but contains only whitespace.
+/// Returns `false` for `None` — an absent token is not an error; callers that
+/// need to enforce token presence must check for `None` separately.
+fn token_is_set_but_blank(token: &Option<String>) -> bool {
     token
         .as_deref()
         .is_some_and(|value| value.trim().is_empty())

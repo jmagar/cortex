@@ -1425,6 +1425,7 @@ dependencies = [
 [[package]]
 name = "lab-auth"
 version = "0.15.0"
+source = "git+https://github.com/jmagar/lab.git?rev=5dfed1921ca4169af169b6688c933879d1cd8e57#5dfed1921ca4169af169b6688c933879d1cd8e57"
 dependencies = [
  "axum",
  "base64",

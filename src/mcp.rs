@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use lab_auth::AuthLayer;
+
 use crate::app::SyslogService;
 use crate::config::McpConfig;
 use crate::otlp::OtlpCounters;
@@ -74,6 +76,29 @@ pub struct AppState {
     /// Authentication policy. Construction MUST name a variant — there is no
     /// implicit default. See [`AuthPolicy`].
     pub auth_policy: AuthPolicy,
+}
+
+/// Build an [`AuthLayer`] from an [`AuthPolicy`], or return `None` for
+/// [`AuthPolicy::LoopbackDev`] (no layer needed — loopback bind is the trust
+/// boundary).
+///
+/// Centralises the duplicated `AuthLayer` construction that previously lived
+/// separately in `api.rs` and `mcp/routes.rs`.
+pub fn build_auth_layer(
+    policy: &AuthPolicy,
+    static_token: Option<Arc<str>>,
+    resource_url: Option<Arc<str>>,
+) -> Option<AuthLayer> {
+    match policy {
+        AuthPolicy::LoopbackDev => None,
+        AuthPolicy::Mounted { auth_state } => Some(
+            AuthLayer::new()
+                .with_static_token(static_token)
+                .with_auth_state(auth_state.clone())
+                .with_resource_url(resource_url)
+                .with_allow_session_cookie(false),
+        ),
+    }
 }
 
 #[cfg(test)]

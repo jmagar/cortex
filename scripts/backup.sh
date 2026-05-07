@@ -61,11 +61,11 @@ else
     echo "Auth DB not found at ${AUTH_DB_PATH}; skipping (oauth not configured?)"
 fi
 
-# JWT signing key — flat copy with restrictive perms.
+# JWT signing key — atomic copy with restrictive perms (install -m 600 avoids
+# the chmod race window that exists with cp + chmod).
 if [[ -f "$AUTH_KEY_PATH" ]]; then
     AUTH_KEY_BACKUP="${BACKUP_DIR}/auth-jwt-${TIMESTAMP}.pem"
-    cp -p "$AUTH_KEY_PATH" "$AUTH_KEY_BACKUP"
-    chmod 600 "$AUTH_KEY_BACKUP" 2>/dev/null || true
+    install -m 600 "$AUTH_KEY_PATH" "$AUTH_KEY_BACKUP"
     echo "Auth JWT key backup complete: ${AUTH_KEY_BACKUP}"
 else
     echo "Auth JWT key not found at ${AUTH_KEY_PATH}; skipping"

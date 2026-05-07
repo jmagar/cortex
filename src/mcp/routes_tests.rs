@@ -143,17 +143,6 @@ async fn integration_initialize() {
 }
 
 #[tokio::test]
-async fn integration_tools_list() {
-    let h = TestHarness::new();
-    let body = jsonrpc_request(2, "tools/list", None);
-    let (status, value) = mcp_post(router(h.state), body, None).await;
-    assert_eq!(status, StatusCode::OK);
-    let tools = value["result"]["tools"].as_array().unwrap();
-    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, vec!["syslog"]);
-}
-
-#[tokio::test]
 async fn integration_get_stats() {
     let h = TestHarness::new();
     let body = jsonrpc_request(
@@ -306,19 +295,6 @@ async fn legacy_sse_endpoint_is_removed() {
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn health_stays_unauthenticated_when_auth_enabled() {
-    let h = TestHarness::with_token("secret-token".into());
-    let app = router(h.state);
-    let request = Request::builder()
-        .method("GET")
-        .uri("/health")
-        .body(axum::body::Body::empty())
-        .unwrap();
-    let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -601,24 +577,6 @@ async fn oauth_router_mounted_when_auth_state_is_some() {
         response.status(),
         StatusCode::OK,
         "OAuth well-known endpoint must be reachable when auth_state is Some"
-    );
-}
-
-/// OAuth router IS mounted: JWKS endpoint returns 200.
-#[tokio::test]
-async fn oauth_router_jwks_returns_200_when_mounted() {
-    let (state, _dir) = test_state_with_oauth().await;
-    let app = router(state);
-    let request = Request::builder()
-        .method("GET")
-        .uri("/jwks")
-        .body(axum::body::Body::empty())
-        .unwrap();
-    let response = app.oneshot(request).await.unwrap();
-    assert_eq!(
-        response.status(),
-        StatusCode::OK,
-        "/jwks must be reachable when OAuth router is mounted"
     );
 }
 

@@ -74,15 +74,11 @@ impl RuntimeCore {
     }
 
     pub async fn query_only(config: Config) -> Result<Self> {
-        // Stdio / query-only mode uses process isolation as the trust boundary.
-        // Build the core normally (DB pool, service), then unconditionally override
-        // auth_policy to LoopbackDev — stdio never has HTTP request headers to
-        // validate, so AuthLayer and scope checks don't apply. We use
-        // from_config_with_stdio(true) to tell build_auth_policy to skip its
-        // bind-address check (no TCP port is bound in stdio mode).
-        let mut core = Self::from_config_inner(config, false, true).await?;
-        core.auth_policy = AuthPolicy::LoopbackDev;
-        Ok(core)
+        // Stdio / query-only mode: build_auth_policy short-circuits to
+        // LoopbackDev when is_stdio=true. Process isolation is the trust
+        // boundary — no TCP port is bound, so AuthLayer and scope checks
+        // don't apply.
+        Self::from_config_inner(config, false, true).await
     }
 
     async fn from_config_inner(
@@ -365,6 +361,13 @@ impl RuntimeCore {
 /// `lab_auth::AuthState::new` is only called for the OAuth row — it requires
 /// mode == OAuth and initialises Google OIDC + SQLite session storage.
 async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy> {
+    if is_stdio {
+        tracing::info!(
+            "syslog-mcp auth policy: LoopbackDev (stdio mode — process isolation is the trust boundary)"
+        );
+        return Ok(AuthPolicy::LoopbackDev);
+    }
+
     let auth = &config.mcp.auth;
     let oauth_active = auth.mode == AuthMode::OAuth;
     let static_token_active = config
