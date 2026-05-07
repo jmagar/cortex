@@ -5,34 +5,48 @@ Lifecycle hooks that run automatically during Claude Code sessions.
 ## File location
 
 ```
-hooks/
-  hooks.json                    # Hook definitions
-  scripts/
-    sync-env.sh                 # Sync .env.example with server variables
-    fix-env-perms.sh            # Fix .env file permissions
-
+plugins/
+  hooks/
+    hooks.json              # Hook definitions
+scripts/
+  plugin-setup.sh           # SessionStart hook: env sync + permission fixes
 ```
 
 ## Hook definitions
 
-Hooks are registered in `hooks/hooks.json` and executed by Claude Code at the appropriate lifecycle point.
+Hooks are registered in `plugins/hooks/hooks.json` and executed by Claude Code at the appropriate lifecycle point.
 
-### sync-env
+### SessionStart — plugin-setup.sh
 
-Ensures `.env.example` documents all environment variables that the server reads. Detects new variables added to `src/config.rs` that are missing from `.env.example`.
+Runs `${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh` at the start of every Claude Code session.
 
-### fix-env-perms
+Responsibilities:
+- Syncs `.env.example` with environment variables read from `src/config.rs` (detects new vars not yet documented)
+- Sets `.env` to `chmod 600` (owner read/write only) if the file exists
 
-Sets `.env` to `chmod 600` (owner read/write only) if the file exists. Prevents accidental world-readable credential files.
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
 ## Manual execution
 
-Run hooks outside of Claude Code:
+Run the setup script outside of Claude Code:
 
 ```bash
-bash hooks/scripts/sync-env.sh
-bash hooks/scripts/fix-env-perms.sh
-
+bash scripts/plugin-setup.sh
 ```
 
 ## See also

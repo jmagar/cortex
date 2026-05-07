@@ -74,24 +74,18 @@ such as `https://syslog.example.com`.
 
 This optional mode pulls stdout/stderr logs from remote Docker hosts through `docker-socket-proxy` instead of changing Docker's daemon-level logging driver. Containers keep their existing local logging behavior, and remote host/container startup does not depend on syslog-mcp being online.
 
-The hosts file is a TOML file with `[[hosts]]` entries:
+Set `SYSLOG_DOCKER_HOSTS` to a comma-separated list of hostnames. Each hostname becomes `http://<host>:2375` with insecure HTTP allowed — use only on trusted private networks.
 
-```toml
-[[hosts]]
-name = "edge-host-a"
-base_url = "http://edge-host-a:2375"
-allow_insecure_http = true
-
-[[hosts]]
-name = "app-host-b"
-base_url = "http://app-host-b:2375"
-allow_insecure_http = true
+```env
+SYSLOG_DOCKER_HOSTS=squirts,tootie,dookie
 ```
+
+`SYSLOG_DOCKER_HOSTS_FILE` (path to a legacy `[[hosts]]` TOML file) is still accepted as a fallback when `SYSLOG_DOCKER_HOSTS` is not set.
 
 | Variable | Required | Default | Sensitive | Description |
 | --- | --- | --- | --- | --- |
 | `SYSLOG_DOCKER_INGEST_ENABLED` | no | `false` | no | Enable pull-based Docker log ingestion |
-| `SYSLOG_DOCKER_HOSTS_FILE` | yes, if hosts are not configured elsewhere | (none) | no | Path to TOML hosts file |
+| `SYSLOG_DOCKER_HOSTS` | yes, if Docker ingest is enabled | (none) | no | Comma-separated hostnames — each becomes `http://<host>:2375` |
 | `SYSLOG_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | no | Initial reconnect delay after host stream failure |
 | `SYSLOG_DOCKER_RECONNECT_MAX_MS` | no | `30000` | no | Maximum reconnect delay after repeated failures |
 
@@ -184,10 +178,8 @@ Set both `max_db_size_mb` and `min_free_disk_mb` to 0 to disable all storage enf
 - `SYSLOG_API_TOKEN` is required when `SYSLOG_API_ENABLED=true`
 - Bind host fields (`SYSLOG_HOST`, `SYSLOG_MCP_HOST`) must not contain a colon (port is a separate setting)
 - `SYSLOG_MCP_ALLOWED_HOSTS` values may include `host:port` to match reverse-proxy Host headers
-- `docker_ingest.hosts` or `SYSLOG_DOCKER_HOSTS_FILE` must contain at least one host when Docker ingest is enabled
+- `SYSLOG_DOCKER_HOSTS` must contain at least one hostname when Docker ingest is enabled
 - Docker ingest host names must be unique
-- Docker ingest host `base_url` values must start with `http://` or `https://`
-- Docker ingest `http://` hosts must set `allow_insecure_http = true`
 
 ## Plugin deployment
 

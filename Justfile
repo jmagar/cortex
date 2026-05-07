@@ -48,7 +48,7 @@ gen-token:
 
 
 validate-skills:
-    @test -f skills/syslog/SKILL.md && echo "OK" || { echo "MISSING: skills/syslog/SKILL.md"; exit 1; }
+    @test -f plugins/skills/syslog/SKILL.md && echo "OK" || { echo "MISSING: plugins/skills/syslog/SKILL.md"; exit 1; }
 
 # Generate a standalone CLI for this server (requires running server; HTTP-only transport)
 generate-cli:

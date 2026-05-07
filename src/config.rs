@@ -372,15 +372,44 @@ impl Config {
             &mut config.docker_ingest.reconnect_max_ms,
         )?;
         if config.docker_ingest.enabled {
-            if let Ok(path) = std::env::var("SYSLOG_DOCKER_HOSTS_FILE") {
+            if let Ok(val) = std::env::var("SYSLOG_DOCKER_HOSTS") {
+                if !val.is_empty() {
+                    config.docker_ingest.hosts = val
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(|name| DockerHostConfig {
+                            name: name.to_string(),
+                            base_url: format!("http://{}:2375", name),
+                            allow_insecure_http: true,
+                        })
+                        .collect();
+                }
+            } else if let Ok(path) = std::env::var("SYSLOG_DOCKER_HOSTS_FILE") {
                 if !path.is_empty() {
-                    let contents = std::fs::read_to_string(&path).map_err(|e| {
-                        anyhow::anyhow!("Failed to read SYSLOG_DOCKER_HOSTS_FILE={path}: {e}")
-                    })?;
-                    let parsed: DockerHostsFile = toml::from_str(&contents).map_err(|e| {
-                        anyhow::anyhow!("Failed to parse SYSLOG_DOCKER_HOSTS_FILE={path}: {e}")
-                    })?;
-                    config.docker_ingest.hosts = parsed.hosts;
+                    match std::fs::read_to_string(&path) {
+                        Ok(contents) => {
+                            let parsed: DockerHostsFile =
+                                toml::from_str(&contents).map_err(|e| {
+                                    anyhow::anyhow!(
+                                        "Failed to parse SYSLOG_DOCKER_HOSTS_FILE={path}: {e}"
+                                    )
+                                })?;
+                            config.docker_ingest.hosts = parsed.hosts;
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                            tracing::warn!(
+                                path = %path,
+                                "SYSLOG_DOCKER_HOSTS_FILE not found — no docker hosts loaded. \
+                                 Create the file or use SYSLOG_DOCKER_HOSTS instead."
+                            );
+                        }
+                        Err(e) => {
+                            return Err(anyhow::anyhow!(
+                                "Failed to read SYSLOG_DOCKER_HOSTS_FILE={path}: {e}"
+                            ));
+                        }
+                    }
                 }
             }
         }
