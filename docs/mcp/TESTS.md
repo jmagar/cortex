@@ -45,13 +45,14 @@ The smoke test (`scripts/smoke-test.sh`) exercises all `syslog` actions via mcpo
 
 ```bash
 # List available tools
-mcporter list syslog-mcp --config config/mcporter.json
+mcporter list syslog --config config/mcporter.json
 
 # Call actions through the single syslog tool
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=stats
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=tail n=10
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=search query=error limit=5
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=hosts
+mcporter call --config config/mcporter.json syslog.syslog action=stats
+mcporter call --config config/mcporter.json syslog.syslog action=status
+mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
+mcporter call --config config/mcporter.json syslog.syslog action=search query=error limit=5
+mcporter call --config config/mcporter.json syslog.syslog action=hosts
 ```
 
 ### curl-based testing
@@ -77,11 +78,17 @@ curl -s -X POST http://localhost:3100/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"stats"}}}'
+
+# Status
+curl -s -X POST http://localhost:3100/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"status"}}}'
 ```
 
 ## Testing checklist
 
-- [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog help
+- [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog help
 - [ ] **Auth: valid token** -- 200 with correct Bearer token
 - [ ] **Auth: invalid token** -- 401 Unauthorized
 - [ ] **Auth: no token when required** -- 401 Unauthorized

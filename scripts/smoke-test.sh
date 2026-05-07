@@ -116,8 +116,10 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null; then
         pass "$label"
+    elif echo "$output" | grep -q "^\[mcporter\] MCP error -32602:"; then
+        pass "$label"
     else
-        fail "$label (expected isError=true, got success)"
+        fail "$label (expected tool isError=true or MCP invalid-params error)"
     fi
 }
 
@@ -144,7 +146,7 @@ echo -e "${COLOR_BOLD}[2/4] Seeding test data${COLOR_RESET}"
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     printf '<14>%s %s sshd[42]: smoke-test: info message\n'           "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     printf '<11>%s %s sshd[42]: smoke-test: error authentication failure\n' "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
-    printf '<3>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
+    printf '<2>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     printf '<12>%s %s dockerd[99]: smoke-test: warning container restart\n'  "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     sleep 2
     echo "Seeded 4 messages (info, err, crit, warning) from $SEED_HOST"
@@ -164,6 +166,25 @@ fi
 # ─── Phase 3: Action tests ───────────────────────────────────────────────────
 echo ""
 echo -e "${COLOR_BOLD}[3/4] Action tests${COLOR_RESET}"
+
+# ── status ────────────────────────────────────────────────────────────────────
+echo ""
+echo "Action: status"
+STATUS=$(mcp_call status 2>&1)
+assert_no_error "status: no error" "$STATUS"
+
+STATUS_VALUE=$(json_get "$STATUS" "['status']")
+STATUS_DB_OK=$(json_get "$STATUS" "['db_ok']")
+STATUS_OBS=$(json_get "$STATUS" "['runtime_observability']['ingest_queue_depth']")
+STATUS_OTLP=$(json_get "$STATUS" "['otlp']['logs_received']")
+assert_eq "status: status is ok" "$STATUS_VALUE" "ok"
+assert_eq "status: db_ok is true" "$STATUS_DB_OK" "True"
+[[ -n "$STATUS_OBS" ]] \
+    && pass "status: runtime_observability present" \
+    || fail "status: runtime_observability missing"
+[[ -n "$STATUS_OTLP" ]] \
+    && pass "status: otlp counters present" \
+    || fail "status: otlp counters missing"
 
 # ── stats ─────────────────────────────────────────────────────────────────────
 echo ""
@@ -424,7 +445,7 @@ print('ok' if '${SEED_HOST}' in hosts else f'missing (got {hosts})')
 fi
 
 # Missing required arg must return an error
-CORRELATE_NO_REF=$(mcp_call correlate 2>&1)
+CORRELATE_NO_REF=$(mcp_call correlate 2>&1 || true)
 assert_is_error "correlate(missing reference_time): returns error" "$CORRELATE_NO_REF"
 
 # ── help ──────────────────────────────────────────────────────────────────────
@@ -438,7 +459,7 @@ d = json.load(sys.stdin)
 assert 'help' in d, 'help key missing'
 text = d['help']
 assert len(text) > 100, 'help text suspiciously short'
-for section in ('search', 'tail', 'errors', 'hosts', 'correlate', 'stats'):
+for section in ('search', 'tail', 'errors', 'hosts', 'correlate', 'stats', 'status'):
     assert section in text.lower(), f'help text missing section: {section}'
 print('ok')
 " 2>/dev/null || echo "error")
@@ -447,7 +468,7 @@ assert_eq "help: contains all action sections" "$HELP_VALID" "ok"
 # ── invalid action (negative test) ───────────────────────────────────────────
 echo ""
 echo "Negative tests"
-INVALID=$(mcp_call notanaction 2>&1)
+INVALID=$(mcp_call notanaction 2>&1 || true)
 assert_is_error "invalid action: returns error" "$INVALID"
 
 # ─── Phase 4: Summary ────────────────────────────────────────────────────────

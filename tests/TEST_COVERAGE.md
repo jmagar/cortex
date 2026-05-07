@@ -238,7 +238,8 @@ All subsequent assertions operate on this inner JSON payload, not the raw JSON-R
 
 #### Tool: `syslog help`
 
-**Arguments:** `{}` (no arguments)
+**Arguments:** `{"action":"status"}`. The action has no additional
+action-specific parameters.
 
 **Purpose:** Confirm the help tool returns a non-empty help string containing the word "syslog".
 
@@ -249,6 +250,21 @@ All subsequent assertions operate on this inner JSON payload, not the raw JSON-R
 | `syslog help — help text contains 'syslog'` | `.help \| ascii_downcase \| contains("syslog")` | Evaluates to `true` |
 
 The third assertion is case-insensitive via `ascii_downcase` — the word "syslog" or "Syslog" or "SYSLOG" all pass.
+
+---
+
+#### Tool: `syslog status`
+
+**Arguments:** `{}` (no arguments)
+
+**Purpose:** Confirm the lightweight status action returns DB health and runtime observability without running the heavier stats query.
+
+| Test label | jq expression | PASS condition |
+|---|---|---|
+| `syslog status — status is ok` | `.status` | Equals `"ok"` |
+| `syslog status — db_ok field present` | `.db_ok != null` | Evaluates to `true` |
+| `syslog status — runtime_observability present` | `.runtime_observability` | Non-null object |
+| `syslog status — otlp counters present` | `.otlp` | Non-null object |
 
 ---
 
@@ -445,6 +461,7 @@ No write operations exist in the syslog-mcp tool surface (it is a read-only serv
 | `syslog hosts` | Yes |
 | `syslog correlate` | Yes |
 | `syslog stats` | Yes |
+| `syslog status` | Yes |
 | `syslog help` | Yes |
 
 ---
@@ -454,6 +471,7 @@ No write operations exist in the syslog-mcp tool surface (it is a read-only serv
 | Action | What correctness means beyond "responded" |
 |---|---|
 | `syslog help` | `.help` is a non-empty string that mentions "syslog" — proves the help content is not empty or boilerplate |
+| `syslog status` | `.status`, `.db_ok`, `.runtime_observability`, and `.otlp` are present — proves the lightweight runtime health path works through MCP |
 | `syslog stats` | All numeric fields are present AND `>= 0` — proves the DB query ran and returned sensible (not negative) values; `write_blocked` is proven non-null (may be `false`) |
 | `syslog hosts` | `.hosts` is a JSON array (not an object or string); if populated, each entry has `hostname`, `log_count`, `first_seen`, `last_seen` — proves the host aggregation query produced correctly shaped rows |
 | `syslog search` | `.count` is numeric `>= 0` and `.logs` is an array; if populated, entries have all four log fields — proves the full-text search plumbing returns correctly shaped log rows |

@@ -23,6 +23,7 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         Some("hosts") => tool_list_hosts(state, args).await,
         Some("correlate") => tool_correlate_events(state, args).await,
         Some("stats") => tool_get_stats(state, args).await,
+        Some("status") => tool_get_status(state, args).await,
         Some("help") => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!("action is required")),
     }

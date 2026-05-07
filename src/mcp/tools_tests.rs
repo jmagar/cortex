@@ -77,16 +77,86 @@ async fn numeric_args_reject_out_of_range_values() {
 }
 
 #[tokio::test]
-async fn numeric_args_preserve_lenient_wrong_type_behavior() {
+async fn numeric_args_reject_wrong_type_values() {
     let h = TestHarness::new();
-    let value = execute_tool(
-        &h.state,
-        "syslog",
+    for args in [
         json!({"action": "tail", "n": "not-a-number"}),
-    )
-    .await
-    .unwrap();
-    assert_eq!(value["count"], 0);
+        json!({"action": "search", "limit": "5"}),
+        json!({"action": "correlate", "reference_time": "2026-01-01T00:00:00Z", "window_minutes": "5"}),
+        json!({"action": "correlate", "reference_time": "2026-01-01T00:00:00Z", "limit": null}),
+    ] {
+        let err = execute_tool(&h.state, "syslog", args).await.unwrap_err();
+        assert!(err.to_string().contains("must be an unsigned integer"));
+    }
+}
+
+#[tokio::test]
+async fn schema_actions_are_dispatchable() {
+    let h = TestHarness::new();
+    for action in SYSLOG_ACTIONS {
+        let args = match *action {
+            "correlate" => {
+                json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"})
+            }
+            _ => json!({"action": action}),
+        };
+        execute_tool(&h.state, "syslog", args)
+            .await
+            .unwrap_or_else(|error| panic!("schema action {action} did not dispatch: {error}"));
+    }
+}
+
+#[tokio::test]
+async fn public_action_references_cover_schema_registry() {
+    let help = tool_syslog_help().await.unwrap();
+    let help = help["help"].as_str().unwrap().to_ascii_lowercase();
+    for action in SYSLOG_ACTIONS {
+        assert!(
+            help.contains(&format!("## syslog {action}")),
+            "help text missing action section: {action}"
+        );
+    }
+
+    for (path, content) in [
+        (
+            "scripts/smoke-test.sh",
+            include_str!("../../scripts/smoke-test.sh"),
+        ),
+        (
+            "tests/test_live.sh",
+            include_str!("../../tests/test_live.sh"),
+        ),
+        (
+            "tests/mcporter/test-tools.sh",
+            include_str!("../../tests/mcporter/test-tools.sh"),
+        ),
+    ] {
+        for action in SYSLOG_ACTIONS {
+            assert!(
+                content.contains(&format!("syslog {action}"))
+                    || content.contains(&format!("mcp_call {action}"))
+                    || content.contains(&format!("\"action\":\"{action}\"")),
+                "{path} missing action coverage for {action}"
+            );
+        }
+    }
+
+    for (path, content) in [
+        ("docs/mcp/TOOLS.md", include_str!("../../docs/mcp/TOOLS.md")),
+        ("docs/mcp/TESTS.md", include_str!("../../docs/mcp/TESTS.md")),
+        (
+            "plugins/skills/syslog/SKILL.md",
+            include_str!("../../plugins/skills/syslog/SKILL.md"),
+        ),
+    ] {
+        for action in SYSLOG_ACTIONS {
+            assert!(
+                content.contains(&format!("`{action}`"))
+                    || content.contains(&format!("syslog {action}")),
+                "{path} missing action reference for {action}"
+            );
+        }
+    }
 }
 
 #[tokio::test]

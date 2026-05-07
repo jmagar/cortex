@@ -15,6 +15,7 @@ argument selects the operation.
 | `hosts` | List all hosts with first/last seen timestamps and total log counts | no |
 | `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |
 | `stats` | Database statistics: total logs, hosts, time range, DB size, free disk, write-block status | no |
+| `status` | Lightweight runtime status: DB health, queue/backpressure state, listener/writer counters, OTLP counters | no |
 | `help` | Returns markdown documentation for all actions | no |
 
 All MCP actions are read-only. syslog-mcp exposes no destructive operations via MCP.
@@ -37,7 +38,7 @@ methods as the MCP actions.
 
 | URI | Description | MIME type |
 | --- | --- | --- |
-| -- | No resources exposed | -- |
+| `syslog://schema/mcp-tool` | JSON schema for the `syslog` MCP tool and action-based parameters | `application/json` |
 
 ## Environment variables
 
@@ -125,7 +126,7 @@ methods as the MCP actions.
 
 | Script | Purpose |
 | --- | --- |
-| `scripts/smoke-test.sh` | Live smoke test -- all 7 MCP tools via mcporter (25 assertions) |
+| `scripts/smoke-test.sh` | Live smoke test -- all 8 MCP actions via mcporter |
 | `scripts/backup.sh` | WAL-safe SQLite backup (checkpoint + `.backup` method) |
 | `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset for dev recovery |
 
