@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-05-07
+
+### Added
+
+- **OAuth router mount** — when `AuthPolicy::Mounted { auth_state: Some(_) }` (OAuth mode),
+  the `lab_auth::routes::bearer_only_router` is merged onto the main axum router, exposing
+  `GET /.well-known/oauth-authorization-server`, `GET /.well-known/oauth-protected-resource`,
+  `GET /jwks`, `GET /authorize`, `GET /auth/google/callback`, and `POST /token`.
+  Not mounted in bearer-only or LoopbackDev modes. `/register` and `/auth/login` excluded
+  per Locked Decision.
+- **`SYSLOG_MCP_PUBLIC_URL` in host/origin allowlists** — `allowed_hosts()` and
+  `allowed_origins()` now derive the host and origin from `SYSLOG_MCP_PUBLIC_URL` (set
+  automatically when OAuth mode is active), so the OAuth callback origin is accepted by
+  rmcp's DNS-rebinding guard and the tower-http CORS layer.
+
 ## [0.14.0] - 2026-05-07
 
 ### Changed

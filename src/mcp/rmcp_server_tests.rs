@@ -15,7 +15,7 @@ use crate::{
     mcp::{streamable_http_config, streamable_http_service, AppState},
 };
 
-use super::{allowed_hosts, is_validation_error};
+use super::{allowed_hosts, allowed_origins, is_validation_error};
 
 fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -280,4 +280,85 @@ async fn rmcp_correlate_events_preserves_truncation_and_host_grouping() {
     assert_eq!(result["total_events"], 1);
     assert_eq!(result["hosts_count"], 1);
     assert_eq!(result["truncated"], true);
+}
+
+// ── PUBLIC_URL host/origin allowlist extension ───────────────────────────────
+
+/// `SYSLOG_MCP_PUBLIC_URL` bare host is added to `allowed_hosts`.
+#[test]
+fn public_url_host_added_to_allowed_hosts() {
+    let config = McpConfig {
+        host: "0.0.0.0".into(),
+        port: 3100,
+        server_name: "syslog-mcp".into(),
+        api_token: None,
+        allowed_hosts: Vec::new(),
+        allowed_origins: Vec::new(),
+        auth: crate::config::AuthConfig {
+            public_url: Some("https://syslog.example.com".into()),
+            ..Default::default()
+        },
+    };
+
+    let hosts = allowed_hosts(&config);
+    assert!(
+        hosts.contains(&"syslog.example.com".to_string()),
+        "public_url bare host must be in allowed_hosts; got: {hosts:?}"
+    );
+}
+
+/// `SYSLOG_MCP_PUBLIC_URL` standard-port https origin is added to `allowed_origins`
+/// without the port (browsers omit default ports from the Origin header).
+#[test]
+fn public_url_origin_added_to_allowed_origins() {
+    let config = McpConfig {
+        host: "0.0.0.0".into(),
+        port: 3100,
+        server_name: "syslog-mcp".into(),
+        api_token: None,
+        allowed_hosts: Vec::new(),
+        allowed_origins: Vec::new(),
+        auth: crate::config::AuthConfig {
+            public_url: Some("https://syslog.example.com".into()),
+            ..Default::default()
+        },
+    };
+
+    let origins = allowed_origins(&config);
+    // https on port 443 (default) — browser omits port from Origin header.
+    assert!(
+        origins.contains(&"https://syslog.example.com".to_string()),
+        "public_url origin must be in allowed_origins; got: {origins:?}"
+    );
+}
+
+/// Non-standard port: host and origin variants both include the explicit port.
+#[test]
+fn public_url_non_standard_port_included_in_host_and_origin() {
+    let config = McpConfig {
+        host: "0.0.0.0".into(),
+        port: 3100,
+        server_name: "syslog-mcp".into(),
+        api_token: None,
+        allowed_hosts: Vec::new(),
+        allowed_origins: Vec::new(),
+        auth: crate::config::AuthConfig {
+            public_url: Some("https://syslog.example.com:8443".into()),
+            ..Default::default()
+        },
+    };
+
+    let hosts = allowed_hosts(&config);
+    assert!(
+        hosts.contains(&"syslog.example.com".to_string())
+            || hosts.contains(&"syslog.example.com:8443".to_string()),
+        "expected host variants for non-standard port; got: {hosts:?}"
+    );
+
+    let origins = allowed_origins(&config);
+    // Non-standard port is included in the Origin header by browsers.
+    assert!(
+        origins.contains(&"https://syslog.example.com:8443".to_string()),
+        "expected https://syslog.example.com:8443 in allowed_origins; got: {origins:?}"
+    );
 }

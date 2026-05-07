@@ -499,3 +499,261 @@ async fn health_unauthenticated_under_mounted_policy() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+// ── OAuth router mount tests ─────────────────────────────────────────────────
+
+/// Helper: build an AppState with `AuthPolicy::Mounted { auth_state: Some(...) }`.
+///
+/// Uses tempfiles for the SQLite store and JWT key so no real filesystem paths
+/// are required. Calls `lab_auth::state::AuthState::new` with a minimal OAuth
+/// config (mode=oauth, public_url, fake Google credentials).
+async fn test_state_with_oauth() -> (AppState, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    // Auth files live in the same tempdir as the syslog DB.
+    let auth_db = dir.path().join("auth.db");
+    let auth_key = dir.path().join("auth.pem");
+
+    // Key names match lab-auth's AuthConfigBuilder env_key() function:
+    // env_key(prefix, suffix) → "{PREFIX}_{SUFFIX}" (uppercased).
+    // e.g. env_key("SYSLOG_MCP", "AUTH_MODE") → "SYSLOG_MCP_AUTH_MODE"
+    //      env_key("SYSLOG_MCP", "GOOGLE_CLIENT_ID") → "SYSLOG_MCP_GOOGLE_CLIENT_ID"
+    let vars: Vec<(String, String)> = vec![
+        ("SYSLOG_MCP_AUTH_MODE".into(), "oauth".into()),
+        (
+            "SYSLOG_MCP_PUBLIC_URL".into(),
+            "https://syslog.example.com".into(),
+        ),
+        // Google credential keys do NOT have "AUTH_" prefix in lab-auth's schema.
+        (
+            "SYSLOG_MCP_GOOGLE_CLIENT_ID".into(),
+            "test-client-id".into(),
+        ),
+        (
+            "SYSLOG_MCP_GOOGLE_CLIENT_SECRET".into(),
+            "test-client-secret".into(),
+        ),
+        (
+            "SYSLOG_MCP_AUTH_ADMIN_EMAIL".into(),
+            "admin@example.com".into(),
+        ),
+        (
+            "SYSLOG_MCP_AUTH_SQLITE_PATH".into(),
+            auth_db.to_str().unwrap().into(),
+        ),
+        (
+            "SYSLOG_MCP_AUTH_KEY_PATH".into(),
+            auth_key.to_str().unwrap().into(),
+        ),
+    ];
+
+    let auth_config = lab_auth::config::AuthConfigBuilder::new()
+        .env_prefix("SYSLOG_MCP")
+        .session_cookie_name("syslog_mcp_session")
+        .scopes_supported(vec!["syslog:read".into(), "syslog:admin".into()])
+        .default_scope("syslog:read")
+        .resource_path("/mcp")
+        .build_from_sources(vars)
+        .expect("test auth config should build");
+
+    let auth_state = lab_auth::state::AuthState::new(auth_config)
+        .await
+        .expect("test auth state should init");
+
+    let storage = StorageConfig::for_test(dir.path().join("mcp-test.db"));
+    let pool = Arc::new(db::init_pool(&storage).unwrap());
+
+    let state = AppState {
+        service: SyslogService::new(pool, storage.clone()),
+        config: McpConfig {
+            host: "127.0.0.1".into(),
+            port: 3100,
+            server_name: "syslog-mcp".into(),
+            api_token: None,
+            allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
+            auth: crate::config::AuthConfig {
+                public_url: Some("https://syslog.example.com".into()),
+                ..Default::default()
+            },
+        },
+        otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
+        auth_policy: AuthPolicy::Mounted {
+            auth_state: Some(Arc::new(auth_state)),
+        },
+    };
+
+    (state, dir)
+}
+
+/// OAuth router IS mounted when auth_state: Some(_).
+/// GET /.well-known/oauth-authorization-server returns 200.
+#[tokio::test]
+async fn oauth_router_mounted_when_auth_state_is_some() {
+    let (state, _dir) = test_state_with_oauth().await;
+    let app = router(state);
+    let request = Request::builder()
+        .method("GET")
+        .uri("/.well-known/oauth-authorization-server")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "OAuth well-known endpoint must be reachable when auth_state is Some"
+    );
+}
+
+/// OAuth router IS mounted: JWKS endpoint returns 200.
+#[tokio::test]
+async fn oauth_router_jwks_returns_200_when_mounted() {
+    let (state, _dir) = test_state_with_oauth().await;
+    let app = router(state);
+    let request = Request::builder()
+        .method("GET")
+        .uri("/jwks")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "/jwks must be reachable when OAuth router is mounted"
+    );
+}
+
+/// OAuth router NOT mounted when auth_state: None (bearer-only).
+/// GET /.well-known/oauth-authorization-server returns 404.
+#[tokio::test]
+async fn oauth_router_not_mounted_when_bearer_only() {
+    // Mounted { auth_state: None } = bearer-only; no OAuth router.
+    let (state, _dir) = test_state_with_token("some-token".into());
+    let app = router(state);
+    let request = Request::builder()
+        .method("GET")
+        .uri("/.well-known/oauth-authorization-server")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "OAuth well-known endpoint must NOT be mounted in bearer-only mode"
+    );
+}
+
+/// OAuth router NOT mounted when LoopbackDev.
+#[tokio::test]
+async fn oauth_router_not_mounted_when_loopback_dev() {
+    let (state, _dir) = test_state_no_auth();
+    let app = router(state);
+    let request = Request::builder()
+        .method("GET")
+        .uri("/.well-known/oauth-authorization-server")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "OAuth well-known endpoint must NOT be mounted in LoopbackDev mode"
+    );
+}
+
+/// POST /register is 404 in ALL modes — not in bearer_only_router.
+/// Locked Decision: /register is excluded from the headless router subset.
+#[tokio::test]
+async fn register_returns_404_in_all_modes() {
+    // Test all three modes.
+    let (loopback_state, _dir1) = test_state_no_auth();
+    let (bearer_state, _dir2) = test_state_with_token("tok".into());
+    let (oauth_state, _dir3) = test_state_with_oauth().await;
+
+    for (label, state) in [
+        ("LoopbackDev", loopback_state),
+        ("bearer-only", bearer_state),
+        ("OAuth", oauth_state),
+    ] {
+        let app = router(state);
+        let request = Request::builder()
+            .method("POST")
+            .uri("/register")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(r#"{"redirect_uris":[]}"#))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "POST /register must not be mounted in {label} mode (Locked Decision)"
+        );
+    }
+}
+
+/// GET /auth/login is 404 in ALL modes — excluded from bearer_only_router.
+/// Locked Decision: /auth/login (browser HTML) excluded from headless subset.
+#[tokio::test]
+async fn auth_login_returns_404_in_all_modes() {
+    let (loopback_state, _dir1) = test_state_no_auth();
+    let (bearer_state, _dir2) = test_state_with_token("tok".into());
+    let (oauth_state, _dir3) = test_state_with_oauth().await;
+
+    for (label, state) in [
+        ("LoopbackDev", loopback_state),
+        ("bearer-only", bearer_state),
+        ("OAuth", oauth_state),
+    ] {
+        let app = router(state);
+        let request = Request::builder()
+            .method("GET")
+            .uri("/auth/login")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "GET /auth/login must not be mounted in {label} mode (Locked Decision)"
+        );
+    }
+}
+
+/// null-Origin is rejected (403 Forbidden) by rmcp's internal origin validator
+/// on the /mcp endpoint.
+///
+/// rmcp's StreamableHttpService validates the Origin header before routing and
+/// parses "null" as NormalizedOrigin::Null. Since "null" is never in our
+/// allowed_origins list, the request is rejected with 403 Forbidden. This
+/// makes the implicit rejection of spoofed sandboxed-iframe origins explicit
+/// and verifiable.
+///
+/// Note: tower-http CorsLayer (applied to /health and other non-rmcp routes)
+/// does NOT actively reject null-Origin — it simply omits the ACAO header and
+/// relies on the browser to block the cross-origin read. The active 403 comes
+/// from rmcp's DNS-rebinding guard on /mcp.
+#[tokio::test]
+async fn null_origin_rejected_by_rmcp_validator_on_mcp_endpoint() {
+    let h = TestHarness::new(); // LoopbackDev — no auth so we reach the origin check
+    let app = router(h.state);
+    let request = Request::builder()
+        .method("POST")
+        .uri("/mcp")
+        .header(header::HOST, "localhost:3100")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, "application/json, text/event-stream")
+        .header("Origin", "null")
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&jsonrpc_request(99, "tools/list", None)).unwrap(),
+        ))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "Origin: null must be rejected by rmcp's origin validator (NormalizedOrigin::Null \
+         is never in the allowed_origins list)"
+    );
+}
+
+// NOTE: Tests for allowed_hosts() / allowed_origins() public_url extension
+// live in rmcp_server_tests.rs (same module as the functions, via `use super::*`).
