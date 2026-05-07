@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-05-07
+
+### Added
+
+- **Integration tests for auth modes** (`tests/auth_modes.rs`) — 12 tests covering discovery
+  endpoints (200/404 by policy), `/register` and `/auth/login` 404 in all modes, `/health`
+  unauthenticated in all modes, `/mcp` credential enforcement, and `tools/list` scope gate.
+- **JWT-level OAuth flow tests** (`tests/oauth_flow.rs`) — 6 tests: valid JWT with
+  `syslog:read`/`syslog:admin` succeeds, expired JWT rejected (401), wrong-issuer JWT rejected
+  (401), empty-scope JWT denied at MCP layer (200 + JSON-RPC error), `tools/list` with JWT.
+- **`syslog_mcp::testing` module** — public test-support helpers (`loopback_state`,
+  `bearer_state`, `oauth_state`, `oauth_state_with_auth_state`) for building `AppState`
+  variants in integration tests without `pub(crate)` access.
+- **`docs/OAUTH.md`** — full OAuth setup guide: architecture diagram, Google Console setup,
+  env var + TOML reference, gotchas, operator FAQ (revoke user, rotate JWT key).
+- **OAuth section in `README.md`** — brief two-mode summary with link to docs/OAUTH.md.
+- **OAuth subsection in `docs/SETUP.md`** — pointer to docs/OAUTH.md.
+- **OAuth env vars in `CLAUDE.md` config section** and three new gotchas (refresh token TTL,
+  stdio LoopbackDev policy, Docker bind-mount ownership).
+- **OAuth env vars in `.env.example`** — all four OAuth vars commented with guidance.
+- **OAuth discovery checks in `scripts/smoke-test.sh`** — unconditional check of
+  `/.well-known/oauth-authorization-server` and `/jwks`; gracefully skips when 404.
+- **`.github/workflows/lab-auth-bump.yml`** — weekly scheduled workflow to bump the
+  `lab-auth` SHA via `cargo update -p lab-auth` (active once dep migrates from path to
+  git+rev per the TODO in Cargo.toml).
+
+### Notes
+
+- RFC 9700 refresh-token rotation is tracked as known follow-up debt.
+- `lab-auth` is currently a path dependency; the bump workflow is a no-op until it
+  migrates to a `git+rev` reference.
+
 ## [0.16.0] - 2026-05-07
 
 ### Added

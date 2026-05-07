@@ -211,3 +211,14 @@ Plain `http://` docker-socket-proxy URLs require `allow_insecure_http = true`. U
 - Run `/plugin list` and confirm syslog-mcp appears
 - Check `~/.claude/plugins/cache/` for the plugin directory
 - Re-run `/plugin marketplace add jmagar/claude-homelab` to refresh
+
+---
+
+## OAuth Authentication
+
+syslog-mcp supports Google OAuth 2.0 in addition to the static bearer token. See **[docs/OAUTH.md](OAUTH.md)** for the full setup guide, including:
+
+- Google Console configuration (redirect URI, credentials)
+- Required env vars (`SYSLOG_MCP_AUTH_MODE`, `SYSLOG_MCP_PUBLIC_URL`, Google client ID/secret)
+- `config.toml` fields for allowlist, TTLs, and signing key path
+- Operator FAQ (revoking users, rotating the JWT key)

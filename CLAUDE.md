@@ -106,6 +106,13 @@ SYSLOG_MCP_RECOVERY_FREE_DISK_MB=768  # cleanup target after free-disk breach
 SYSLOG_MCP_CLEANUP_INTERVAL_SECS=60   # storage-budget enforcement interval (>= 5)
 SYSLOG_MCP_CLEANUP_CHUNK_SIZE=1000    # rows deleted per enforcement cycle
 
+# OAuth / JWT auth (disabled by default — set AUTH_MODE=oauth to activate)
+SYSLOG_MCP_AUTH_MODE=bearer             # bearer (default) or oauth
+SYSLOG_MCP_PUBLIC_URL=https://syslog.example.com  # required when AUTH_MODE=oauth
+SYSLOG_MCP_GOOGLE_CLIENT_ID=...         # required when AUTH_MODE=oauth
+SYSLOG_MCP_GOOGLE_CLIENT_SECRET=...     # required when AUTH_MODE=oauth
+# Paths, TTLs, allowlist → config.toml [mcp.auth] (not env vars). See docs/OAUTH.md.
+
 # Non-MCP REST API (disabled by default)
 SYSLOG_API_ENABLED=false                # set true to mount /api/* endpoints
 SYSLOG_API_TOKEN=your-api-token         # required when SYSLOG_API_ENABLED=true
@@ -155,6 +162,9 @@ RUST_LOG=info
 - **correlate action limit cap** — The `limit` parameter is silently capped at 999 (not 1000) because the implementation fetches `limit+1` rows to detect truncation, and `search` hard-caps at 1000.
 - **Auth / trust model** — MCP endpoint is unauthenticated by default; any client reaching port 3100 has full log read access. Set `SYSLOG_MCP_TOKEN` to require Bearer auth. CORS is restricted to `localhost:3100` (browser-only; curl/mcporter unaffected). If exposing via SWAG/reverse proxy, add auth at the proxy layer or set the token. See README Security section for details.
 - **FTS5 phantom rows** — When logs are deleted by retention purge or storage enforcement, their FTS5 index entries persist as phantom rows in `logs_fts` until the next merge cycle. The MCP query path is unaffected (the JOIN to `logs` prunes phantoms at query time), but direct SQLite access to `logs_fts` reveals porter-stemmed tokens for deleted messages. For right-to-erasure compliance (GDPR/HIPAA), use `INSERT INTO logs_fts(logs_fts) VALUES('rebuild')` after deletion instead of the periodic incremental merge. Monitor phantom row count via `stats` action → `phantom_fts_rows`.
+- **OAuth refresh token TTL** — Refresh tokens default to 8h (`refresh_token_ttl_secs = 28800`). lab-auth's default is 30 days; syslog-mcp deliberately uses 8h for the read-only homelab profile. Adjustable via `[mcp.auth].refresh_token_ttl_secs` in config.toml.
+- **Stdio mode always uses LoopbackDev** — `cargo run -- mcp` (stdio query-only) always uses `AuthPolicy::LoopbackDev` regardless of config. No auth is enforced. This is intentional: the local process boundary is the trust boundary for stdio clients.
+- **Docker bind-mount ownership** — `auth.db` and `auth-jwt.pem` are written by the container UID. Host-side backup scripts or file managers may need `sudo` or a sidecar copy step to read them without permission errors.
 
 ## Testing MCP Tools
 

@@ -450,6 +450,27 @@ echo "Negative tests"
 INVALID=$(mcp_call notanaction 2>&1)
 assert_is_error "invalid action: returns error" "$INVALID"
 
+# ─── OAuth discovery endpoints (unconditional — no Google creds needed) ─────
+echo ""
+echo "OAuth discovery endpoints"
+OAUTH_BASE="${MCP_URL%/mcp}"
+DISCOVERY=$(curl -s -o /dev/null -w "%{http_code}" "$OAUTH_BASE/.well-known/oauth-authorization-server")
+if [ "$DISCOVERY" = "200" ]; then
+    echo "PASS: OAuth discovery endpoint reachable (/.well-known/oauth-authorization-server)"
+    PASS=$((PASS + 1))
+    JWKS=$(curl -s -o /dev/null -w "%{http_code}" "$OAUTH_BASE/jwks")
+    if [ "$JWKS" = "200" ]; then
+        echo "PASS: /jwks reachable"
+        PASS=$((PASS + 1))
+    else
+        echo "WARN: /jwks returned $JWKS (expected 200 when OAuth mounted)"
+        FAIL=$((FAIL + 1))
+        ERRORS+=("/jwks returned $JWKS")
+    fi
+else
+    echo "INFO: OAuth not enabled (/.well-known returned $DISCOVERY) — skipping OAuth endpoint checks"
+fi
+
 # ─── Phase 4: Summary ────────────────────────────────────────────────────────
 echo ""
 echo -e "${COLOR_BOLD}[4/4] Results${COLOR_RESET}"
