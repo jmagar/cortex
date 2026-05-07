@@ -83,7 +83,7 @@ fn test_purge_old_logs_removes_old() {
     .unwrap();
     drop(conn);
 
-    let deleted = purge_old_logs(&pool, 90).unwrap();
+    let deleted = purge_old_logs(&pool, 90, 0).unwrap();
     assert_eq!(deleted, 1, "should have deleted exactly the old entry");
 
     let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
@@ -97,7 +97,7 @@ fn test_purge_zero_retention_noop() {
     let entries = vec![make_entry("2020-01-01T00:00:00Z", "host-a", "info", "old")];
     insert_logs_batch(&pool, &entries).unwrap();
 
-    let deleted = purge_old_logs(&pool, 0).unwrap();
+    let deleted = purge_old_logs(&pool, 0, 0).unwrap();
     assert_eq!(deleted, 0, "retention_days=0 should be a no-op");
 }
 
@@ -230,4 +230,164 @@ fn test_enforce_storage_budget_is_noop_when_limits_disabled() {
     let outcome = enforce_storage_budget(&pool, &disabled).unwrap();
     assert_eq!(outcome.deleted_rows, 0);
     assert!(!outcome.write_blocked);
+}
+
+// ---- purge_by_tag_window ----
+
+fn make_tagged(ts: &str, host: &str, severity: &str, app: &str, msg: &str) -> LogBatchEntry {
+    LogBatchEntry {
+        timestamp: ts.to_string(),
+        hostname: host.to_string(),
+        facility: None,
+        severity: severity.to_string(),
+        app_name: Some(app.to_string()),
+        process_id: None,
+        message: msg.to_string(),
+        raw: msg.to_string(),
+        source_ip: "127.0.0.1:514".to_string(),
+        docker_checkpoint: None,
+    }
+}
+
+#[test]
+fn test_purge_by_tag_window_zero_days_is_noop() {
+    let (pool, _dir) = test_pool();
+    let entries = vec![make_tagged(
+        "2020-01-01T00:00:00Z",
+        "h",
+        "info",
+        "adguard-allowed",
+        "old",
+    )];
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let deleted = super::purge_by_tag_window(&pool, "adguard-allowed", 0, 0).unwrap();
+    assert_eq!(deleted, 0, "max_days=0 must be a no-op");
+
+    let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
+    assert_eq!(remaining.len(), 1, "row must still be present");
+}
+
+#[test]
+fn test_purge_by_tag_window_only_targets_named_tag() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_tagged(
+                "2020-01-01T00:00:00Z",
+                "h",
+                "info",
+                "adguard-allowed",
+                "old-allowed",
+            ),
+            make_tagged("2020-01-01T00:00:00Z", "h", "info", "nginx", "old-nginx"),
+            make_tagged("2020-01-01T00:00:00Z", "h", "info", "kernel", "old-kernel"),
+        ],
+    )
+    .unwrap();
+    // Backdate received_at past the 7-day window
+    update_received_at(&pool, "old-allowed", "2020-01-01T00:00:00Z");
+    update_received_at(&pool, "old-nginx", "2020-01-01T00:00:00Z");
+    update_received_at(&pool, "old-kernel", "2020-01-01T00:00:00Z");
+
+    let deleted = super::purge_by_tag_window(&pool, "adguard-allowed", 7, 0).unwrap();
+    assert_eq!(deleted, 1, "only the adguard-allowed row must be deleted");
+
+    let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
+    let messages: Vec<&str> = remaining.iter().map(|r| r.message.as_str()).collect();
+    assert!(messages.contains(&"old-nginx"), "nginx must survive");
+    assert!(messages.contains(&"old-kernel"), "kernel must survive");
+    assert!(
+        !messages.contains(&"old-allowed"),
+        "adguard-allowed must be gone"
+    );
+}
+
+#[test]
+fn test_purge_by_tag_window_excludes_high_severity_rows() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_tagged(
+                "2020-01-01T00:00:00Z",
+                "h",
+                "info",
+                "adguard-allowed",
+                "info-old",
+            ),
+            make_tagged(
+                "2020-01-01T00:00:00Z",
+                "h",
+                "err",
+                "adguard-allowed",
+                "err-old",
+            ),
+            make_tagged(
+                "2020-01-01T00:00:00Z",
+                "h",
+                "crit",
+                "adguard-allowed",
+                "crit-old",
+            ),
+        ],
+    )
+    .unwrap();
+    update_received_at(&pool, "info-old", "2020-01-01T00:00:00Z");
+    update_received_at(&pool, "err-old", "2020-01-01T00:00:00Z");
+    update_received_at(&pool, "crit-old", "2020-01-01T00:00:00Z");
+
+    let deleted = super::purge_by_tag_window(&pool, "adguard-allowed", 7, 0).unwrap();
+    assert_eq!(deleted, 1, "only the info row should be purged");
+
+    let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
+    let messages: Vec<&str> = remaining.iter().map(|r| r.message.as_str()).collect();
+    assert!(
+        messages.contains(&"err-old"),
+        "err must be exempt from time-based purge"
+    );
+    assert!(
+        messages.contains(&"crit-old"),
+        "crit must be exempt from time-based purge"
+    );
+}
+
+#[test]
+fn test_purge_by_tag_window_respects_cutoff_boundary() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_tagged(
+                "2020-01-01T00:00:00Z",
+                "h",
+                "info",
+                "adguard-allowed",
+                "old",
+            ),
+            make_tagged(
+                "2020-01-01T00:00:00Z",
+                "h",
+                "info",
+                "adguard-allowed",
+                "fresh",
+            ),
+        ],
+    )
+    .unwrap();
+    // 'old' is past the 7-day window, 'fresh' is well inside it
+    update_received_at(&pool, "old", "2020-01-01T00:00:00Z");
+    update_received_at(
+        &pool,
+        "fresh",
+        &chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+    );
+
+    let deleted = super::purge_by_tag_window(&pool, "adguard-allowed", 7, 0).unwrap();
+    assert_eq!(deleted, 1, "only the old row should be deleted");
+
+    let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
+    let messages: Vec<&str> = remaining.iter().map(|r| r.message.as_str()).collect();
+    assert!(messages.contains(&"fresh"), "fresh row must survive");
 }

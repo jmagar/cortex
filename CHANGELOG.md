@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-07
+
+### Added
+
+- **OTLP HTTP receiver** (`src/otlp.rs`): `POST /v1/logs` decodes
+  `ExportLogsServiceRequest` protobuf and feeds records through the existing
+  ingest pipeline. `POST /v1/metrics` returns 200 and discards. `POST /v1/traces`
+  returns 404 — span flattening was deferred (FTS5 cannot meaningfully query
+  hex trace IDs). New deps: `opentelemetry-proto = 0.31` (logs feature only,
+  no full gRPC) and `prost = 0.14`.
+- **OTLP receiver hardening**: `RequestBodyLimitLayer` of 4 MiB on `/v1/*`
+  with automatic `Retry-After: 86400` header on 413 to prevent OTel exporter
+  retry storms. Optional Bearer auth via the existing `SYSLOG_MCP_API_TOKEN`.
+  Peer IP captured via `ConnectInfo<SocketAddr>` and stored as `source_ip`
+  to mirror the syslog provenance model — OTLP `host.name` is client-asserted
+  and untrusted.
+- **`/health` enrichment**: response now includes `otlp_logs_received` and
+  `otlp_decode_errors` counters so operators can see ingest activity at a
+  glance.
+- **Pre-insert enrichment** (`src/syslog/enrichment.rs`): Authelia
+  `level=` parsing maps `info/warn/error/fatal` to syslog severities;
+  AdGuard JSON query log gets reclassified to `adguard-blocked` /
+  `adguard-allowed` / `adguard-rewrite`. Source-IP gating via
+  `SYSLOG_MCP_AUTHELIA_SOURCE_IP` and `SYSLOG_MCP_ADGUARD_SOURCE_IP`
+  prevents other tailnet hosts from spoofing the classification.
+- **Best-effort secret scrubbing** for AI-source records (Claude/Codex
+  transcripts and OTLP records carrying `service.name=claude-code|codex`).
+  Eight pattern classes plus the `SYSLOG_MCP_API_TOKEN` literal value.
+  Toggle with `SYSLOG_MCP_SCRUB_PROMPTS` (default `true`). Documented as
+  defense-in-depth, **not** a compliance control — regex has structural
+  bypass classes.
+- **Tag-based retention** (`db::purge_by_tag_window`): adguard-allowed,
+  adguard-query, and adguard-rewrite are purged at 7 days regardless of
+  the global `retention_days`. High-severity rows are exempt from time-based
+  purge in both `purge_by_tag_window` and `purge_old_logs`.
+- **Configurable FTS merge** via `SYSLOG_MCP_FTS_MERGE_PAGES` (default 0
+  = unconditional merge after every purge cycle).
+- **Deploy artifacts** (`deploy/`): rsyslog drop-ins for imjournal +
+  AI transcripts + squirts specialty sources, OTel client config examples
+  for Claude Code and Codex, and a step-by-step manual SSH deploy runbook.
+
+### Changed
+
+- **Migration v3**: composite index `idx_logs_app_name_received_at ON
+  logs(app_name, received_at)` added to make tag-based retention
+  O(rows-deleted) instead of O(rows-in-tag-partition × chunks). On a
+  multi-million-row DB the first-run `CREATE INDEX` may hold the write
+  lock for several minutes; `/health` will not respond and syslog UDP may
+  drop during that window. Plan a brief health-check gap when upgrading.
+- **`enforce_storage_budget` instrumentation**: emits `tracing::warn!`
+  when deleting rows with `severity IN ('err','crit','alert','emerg')` so
+  operators are not surprised when disk pressure overrides the time-based
+  retention exemption.
+- **Maintenance task ordering**: tag-window purges now run *before* global
+  retention purge to avoid SQLite write-lock contention from concurrent
+  chunked DELETEs.
+- **`IngestTx::try_send`**: new non-blocking send used by the OTLP handler
+  so HTTP requests return 503 on backpressure instead of awaiting and
+  holding the connection open.
+
+### Notes
+
+- **Phases 3–5 are deploy-only.** The Rust binary is complete; deploying
+  rsyslog drop-ins and OTel client configs to dookie / squirts /
+  steamy-wsl / vivobook-wsl requires manual SSH per `deploy/README.md`.
+
 ## [0.10.2] - 2026-05-07
 
 ### Fixed

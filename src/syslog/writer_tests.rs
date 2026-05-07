@@ -56,6 +56,7 @@ async fn flush_batch_retains_entries_while_storage_is_write_blocked() {
         &mut batch,
         &mut storage_blocked,
         &mut summary,
+        &crate::syslog::enrichment::EnrichmentConfig::default(),
     )
     .await;
 
@@ -81,6 +82,7 @@ async fn flush_batch_resumes_after_storage_recovers() {
         &mut batch,
         &mut storage_blocked,
         &mut summary,
+        &crate::syslog::enrichment::EnrichmentConfig::default(),
     )
     .await;
 

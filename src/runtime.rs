@@ -9,6 +9,8 @@ use crate::app::SyslogService;
 use crate::config::Config;
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::ingest::IngestTx;
+use crate::otlp::{self, OtlpCounters, OtlpState};
+use crate::syslog::enrichment::EnrichmentConfig;
 use crate::{docker_ingest, mcp, syslog};
 
 pub struct RuntimeCore {
@@ -18,6 +20,7 @@ pub struct RuntimeCore {
     service: SyslogService,
     maintenance_permit: Arc<Semaphore>,
     ingest: IngestTx,
+    otlp_counters: Arc<OtlpCounters>,
 }
 
 pub struct MaintenanceHandles {
@@ -43,6 +46,12 @@ impl Drop for MaintenanceHandles {
 pub(crate) fn background_interval(period: tokio::time::Duration) -> tokio::time::Interval {
     tokio::time::interval_at(tokio::time::Instant::now() + period, period)
 }
+
+/// Tags whose retention is hard-capped at 7 days regardless of the global
+/// `retention_days` setting. AdGuard query volume would otherwise dominate
+/// the FTS5 index at homelab volumes (50k+ DNS queries/day).
+const ADGUARD_RETENTION_TAGS: &[&str] = &["adguard-allowed", "adguard-query", "adguard-rewrite"];
+const ADGUARD_RETENTION_DAYS: u32 = 7;
 
 impl RuntimeCore {
     pub fn load() -> Result<Self> {
@@ -83,11 +92,18 @@ impl RuntimeCore {
             );
         }
         let service = SyslogService::new(Arc::clone(&pool), config.storage.clone());
+        let enrichment = EnrichmentConfig {
+            authelia_source_ip: config.enrichment.authelia_source_ip.clone(),
+            adguard_source_ip: config.enrichment.adguard_source_ip.clone(),
+            scrub_prompts: config.enrichment.scrub_prompts,
+            api_token: config.mcp.api_token.clone(),
+        };
         let ingest = crate::ingest::start_writer_from_syslog_config(
             &config.syslog,
             config.storage.clone(),
             Arc::clone(&pool),
             Arc::clone(&storage_state),
+            enrichment,
         );
         Ok(Self {
             config,
@@ -96,6 +112,7 @@ impl RuntimeCore {
             service,
             maintenance_permit: Arc::new(Semaphore::new(1)),
             ingest,
+            otlp_counters: Arc::new(OtlpCounters::default()),
         })
     }
 
@@ -103,10 +120,21 @@ impl RuntimeCore {
         self.service.clone()
     }
 
+    /// Build the OTLP router with shared counters and the MCP API token (if any).
+    pub fn otlp_router(&self) -> axum::Router {
+        let state = OtlpState::new(
+            self.ingest.clone(),
+            self.config.mcp.api_token.clone(),
+            Arc::clone(&self.otlp_counters),
+        );
+        otlp::router(state)
+    }
+
     pub fn mcp_state(&self) -> mcp::AppState {
         mcp::AppState {
             service: self.service(),
             config: self.config.mcp.clone(),
+            otlp_counters: Arc::clone(&self.otlp_counters),
         }
     }
 
@@ -136,6 +164,7 @@ impl RuntimeCore {
         }
         let purge_pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let fts_merge_pages = self.config.enrichment.fts_merge_pages;
         let handle = tokio::spawn(async move {
             let mut interval = background_interval(tokio::time::Duration::from_secs(3600));
             loop {
@@ -147,17 +176,45 @@ impl RuntimeCore {
                 };
                 let pool = Arc::clone(&purge_pool);
                 tracing::debug!(retention_days, "Retention purge tick started");
+                // Tag-based purge runs FIRST so the global purge below scans
+                // a smaller working set and FTS merge work consolidates.
+                // Hardcoded 7-day windows for AdGuard tags. Other tags fall
+                // through to the global retention_days policy.
                 match tokio::task::spawn_blocking(move || {
                     let _permit = permit;
-                    db::purge_old_logs(&pool, retention_days)
+                    // Tag-window purges are independent maintenance ops. A
+                    // transient SQLITE_BUSY on one tag must NOT abort the
+                    // others or the global retention purge — that would stall
+                    // all retention for an hour.
+                    let mut tag_deleted: usize = 0;
+                    for tag in ADGUARD_RETENTION_TAGS {
+                        match db::purge_by_tag_window(
+                            &pool,
+                            tag,
+                            ADGUARD_RETENTION_DAYS,
+                            fts_merge_pages,
+                        ) {
+                            Ok(n) => tag_deleted += n,
+                            Err(e) => tracing::error!(
+                                tag,
+                                error = %e,
+                                "Tag-window purge failed; continuing"
+                            ),
+                        }
+                    }
+                    let global_deleted =
+                        db::purge_old_logs(&pool, retention_days, fts_merge_pages)?;
+                    Ok::<(usize, usize), anyhow::Error>((tag_deleted, global_deleted))
                 })
                 .await
                 .map_err(|e| anyhow::anyhow!("spawn_blocking error: {e}"))
                 .and_then(|r| r)
                 {
-                    Ok(deleted) => tracing::info!(
+                    Ok((tag_deleted, global_deleted)) => tracing::info!(
                         retention_days,
-                        deleted,
+                        tag_deleted,
+                        global_deleted,
+                        total_deleted = tag_deleted + global_deleted,
                         elapsed_ms = started.elapsed().as_millis(),
                         "Retention purge tick completed"
                     ),

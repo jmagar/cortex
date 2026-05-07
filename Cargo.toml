@@ -1,6 +1,6 @@
 [package]
 name = "syslog-mcp"
-version = "0.10.1"
+version = "0.11.0"
 edition = "2021"
 rust-version = "1.86"
 description = "Syslog receiver + MCP server for homelab log intelligence"
@@ -60,8 +60,17 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 subtle = "2"
 rustix = { version = "0.38", features = ["fs"] }
+regex = "1"
 
 futures-util = "0.3"
+
+# OTLP HTTP receiver — message types only, no gRPC transport
+opentelemetry-proto = { version = "0.31", default-features = false, features = [
+  "gen-tonic-messages",
+  "logs",
+] }
+prost = "0.14"
+
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"
