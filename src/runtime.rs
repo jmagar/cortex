@@ -47,6 +47,12 @@ pub(crate) fn background_interval(period: tokio::time::Duration) -> tokio::time:
     tokio::time::interval_at(tokio::time::Instant::now() + period, period)
 }
 
+/// Tags whose retention is hard-capped at 7 days regardless of the global
+/// `retention_days` setting. AdGuard query volume would otherwise dominate
+/// the FTS5 index at homelab volumes (50k+ DNS queries/day).
+const ADGUARD_RETENTION_TAGS: &[&str] = &["adguard-allowed", "adguard-query", "adguard-rewrite"];
+const ADGUARD_RETENTION_DAYS: u32 = 7;
+
 impl RuntimeCore {
     pub fn load() -> Result<Self> {
         Self::for_server(Config::load()?)
@@ -176,9 +182,14 @@ impl RuntimeCore {
                 // through to the global retention_days policy.
                 match tokio::task::spawn_blocking(move || {
                     let _permit = permit;
-                    db::purge_by_tag_window(&pool, "adguard-allowed", 7, fts_merge_pages)?;
-                    db::purge_by_tag_window(&pool, "adguard-query", 7, fts_merge_pages)?;
-                    db::purge_by_tag_window(&pool, "adguard-rewrite", 7, fts_merge_pages)?;
+                    for tag in ADGUARD_RETENTION_TAGS {
+                        db::purge_by_tag_window(
+                            &pool,
+                            tag,
+                            ADGUARD_RETENTION_DAYS,
+                            fts_merge_pages,
+                        )?;
+                    }
                     db::purge_old_logs(&pool, retention_days, fts_merge_pages)
                 })
                 .await
