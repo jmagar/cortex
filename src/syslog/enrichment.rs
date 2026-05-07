@@ -137,11 +137,29 @@ fn matches_app(entry: &LogBatchEntry, expected: &str) -> bool {
     entry.app_name.as_deref() == Some(expected)
 }
 
+/// Match `entry.source_ip` against an operator-configured prefix at the
+/// IP-octet boundary. Plain `starts_with` would let an attacker on
+/// `10.0.0.10` (or `10.0.0.123`) pass a gate configured for `10.0.0.1`
+/// because `"10.0.0.10:1234".starts_with("10.0.0.1")` is true. Two cases:
+///
+/// * **Subnet prefix** ending with `.` (e.g. `"10.0.0."`): match any IP
+///   in the subnet — the byte after the prefix must be a digit (next octet).
+/// * **Exact host** without trailing dot (e.g. `"10.0.0.5"`): match only
+///   that IP — extract the IP portion of `"<ip>:<port>"` and require equality.
+///
+/// `None` or empty prefix preserves the legacy "apply to all matching
+/// app_name" default.
 fn source_ip_matches(entry: &LogBatchEntry, configured_prefix: Option<&str>) -> bool {
-    match configured_prefix {
-        Some(prefix) if !prefix.is_empty() => entry.source_ip.starts_with(prefix),
-        // Unset: apply to all matching app_name. Less safe but simpler default.
-        _ => true,
+    let Some(prefix) = configured_prefix.filter(|p| !p.is_empty()) else {
+        return true;
+    };
+    let ip_only = entry.source_ip.split(':').next().unwrap_or("");
+    if prefix.ends_with('.') {
+        // Subnet match: prefix is a partial dotted-quad like "10.0.0."
+        ip_only.starts_with(prefix)
+    } else {
+        // Exact-host match: prefix is a full IP literal
+        ip_only == prefix
     }
 }
 

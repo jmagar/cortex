@@ -84,6 +84,37 @@ fn authelia_source_ip_gating_allows_matching() {
     assert_eq!(out.severity, "err");
 }
 
+/// Regression: prefix `10.0.0.1` must NOT match a spoofer at `10.0.0.10`.
+/// Plain `starts_with` would have, allowing an attacker one IP off from the
+/// configured authelia host to inject `level=` reclassifications.
+#[test]
+fn authelia_source_ip_gating_blocks_prefix_collision() {
+    let cfg = EnrichmentConfig {
+        authelia_source_ip: Some("10.0.0.1".into()),
+        ..Default::default()
+    };
+    // Attacker on 10.0.0.10 — would pass naive starts_with(10.0.0.1)
+    let e = entry("authelia", "level=err msg=spoof", "10.0.0.10:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(
+        out.severity, "info",
+        "prefix-collision must not bypass gate"
+    );
+}
+
+/// Subnet match: prefix ending in `.` (e.g. `10.0.0.`) matches any host in
+/// that octet boundary.
+#[test]
+fn authelia_source_ip_gating_subnet_match_with_trailing_dot() {
+    let cfg = EnrichmentConfig {
+        authelia_source_ip: Some("10.0.0.".into()),
+        ..Default::default()
+    };
+    let e = entry("authelia", "level=warn msg=ok", "10.0.0.42:9000", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.severity, "warning");
+}
+
 // ---- adguard tag classification ----
 
 #[test]
