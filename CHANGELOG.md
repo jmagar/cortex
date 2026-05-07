@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-05-07
+
+### Fixed
+
+- **Docker hosts file**: Missing `SYSLOG_DOCKER_HOSTS_FILE` no longer crashes the container at startup. Logs a warning and continues with no hosts loaded. Other read errors (permissions, I/O) still hard-fail.
+
+### Changed
+
+- **Plugin restructure**: Moved plugin manifests under `plugins/`. Removed top-level `Dockerfile`, `entrypoint.sh`, `gemini-extension.json`, `.codex-plugin/`, `.mcp.json`, and obsolete `skills/syslog/`. Added `config/Dockerfile` and `scripts/plugin-setup.sh`.
+- **Docs**: Clarified `SYSLOG_DOCKER_HOSTS` (simple) vs `SYSLOG_DOCKER_HOSTS_FILE` (advanced) in README and `.env.example`. Documented graceful behavior when the hosts file is missing.
+
 ## [0.10.1] - 2026-05-06
 
 ### Changed

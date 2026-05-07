@@ -290,11 +290,37 @@ Ordered from most to least severe:
 
 ### Claude Code plugin (recommended)
 
-Install as a Claude Code plugin. You will be prompted for:
-- **Syslog MCP URL** -- full endpoint URL of your running syslog-mcp server
-- **API Token** -- bearer token for authentication (leave empty if auth is disabled)
+Install as a Claude Code plugin. The plugin handles deployment automatically — you choose between server mode (this machine hosts the syslog receiver + MCP server) and client mode (connect to a remote server).
 
-The plugin connects to a running syslog-mcp instance over HTTP. The server must be deployed separately (Docker or bare metal).
+**Prompted at install time** (via `userConfig`):
+
+| Field | Required | Default | Notes |
+|-------|----------|---------|-------|
+| `is_server` | yes | `true` | Server mode hosts the receiver; client mode connects to a remote server |
+| `use_docker` | no | `false` | Server mode only — `true` deploys via `docker compose`, `false` via systemd user service |
+| `server_url` | no | `http://localhost:3100` | Server mode: leave default. Client mode: remote host URL (e.g. `http://shart:3100`) |
+| `api_token` | yes | — | Bearer token. Server mode: server requires this token. Client mode: token from the server admin. Stored in the system keychain. |
+| `syslog_host` / `syslog_port` | no | `0.0.0.0` / `1514` | Syslog listener bind (server mode) |
+| `mcp_host` / `mcp_port` | no | `0.0.0.0` / `3100` | MCP HTTP server bind (server mode) |
+| `data_dir` | no | `${CLAUDE_PLUGIN_DATA}` | SQLite directory (persists across plugin updates) |
+| `max_db_size_mb` | no | `1024` | DB size cap; oldest logs deleted when exceeded |
+| `retention_days` | no | `90` | `0` = keep forever |
+| `docker_ingest_enabled` | no | `false` | Pull container logs from remote `docker-socket-proxy` endpoints |
+| `fleet_hosts` | no | — | SSH aliases of fleet hosts. Used for Docker ingest (when enabled, each becomes `http://<alias>:2375`) and the `/syslog:deploy-dropins` command |
+
+**SessionStart hook automation** (in server mode):
+
+- Symlinks `bin/syslog` to `~/.local/bin/syslog` so the binary is on your PATH
+- Writes `${CLAUDE_PLUGIN_DATA}/syslog-mcp.env` with the resolved config
+- Generates and starts the systemd user unit (or runs `docker compose up -d`) and restarts only when config actually changed
+- All idempotent — safe to run on every session
+
+**Bundled commands**:
+
+- `/syslog:doctor` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
+- `/syslog:deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
+
+The plugin includes the `syslog` binary in `bin/` and is the simplest path. You can still deploy via Docker or build locally if you prefer to run the server outside the plugin.
 
 ### Docker
 
@@ -367,7 +393,8 @@ Optional pull-based Docker log ingestion keeps each remote host on its normal Do
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SYSLOG_DOCKER_INGEST_ENABLED` | no | `false` | Enable remote Docker log ingestion |
-| `SYSLOG_DOCKER_HOSTS_FILE` | yes, if hosts are not configured elsewhere | — | TOML file containing remote Docker socket-proxy hosts |
+| `SYSLOG_DOCKER_HOSTS` | one of the two | — | Comma-separated hostnames; each becomes `http://<name>:2375` with `allow_insecure_http = true`. Takes priority over `SYSLOG_DOCKER_HOSTS_FILE`. |
+| `SYSLOG_DOCKER_HOSTS_FILE` | one of the two | — | Path to a TOML file with a `[[hosts]]` array (use when you need per-host `base_url` or TLS). If the file does not exist, a warning is logged and no hosts are loaded — the container will not crash. Mount the file via `SYSLOG_MCP_CONFIG_VOLUME`. |
 | `SYSLOG_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | Initial reconnect delay after host stream failure |
 | `SYSLOG_DOCKER_RECONNECT_MAX_MS` | no | `30000` | Maximum reconnect delay after repeated failures |
 
@@ -422,6 +449,8 @@ Place `config.toml` next to the binary (or in the working directory). Environmen
 host = "0.0.0.0"
 port = 1514
 max_message_size = 8192
+max_tcp_connections = 512
+tcp_idle_timeout_secs = 300
 
 [storage]
 db_path = "/data/syslog.db"
@@ -821,7 +850,7 @@ The Docker image remains daemon-focused and exposes HTTP MCP via `syslog serve m
 | `.env.example` | Canonical environment variable reference |
 | `docs/SETUP.md` | Per-device syslog forwarder setup notes |
 | `CHANGELOG.md` | Release history |
-| `Dockerfile` | Container image definition |
+| `config/Dockerfile` | Container image definition |
 | `docker-compose.yml` | Docker Compose stack |
 | `Justfile` | Development command shortcuts |
 | `src/main.rs` | `syslog` binary entrypoint for HTTP and stdio MCP modes |
@@ -830,12 +859,10 @@ The Docker image remains daemon-focused and exposes HTTP MCP via `syslog serve m
 | `src/runtime.rs` | Config, DB, syslog, and maintenance orchestration |
 | `src/api.rs` | Optional non-MCP JSON API routes |
 | `src/config.rs` | Configuration loading and validation |
-| `src/db.rs` | SQLite schema, FTS5, retention, storage budget |
-| `src/syslog.rs` | UDP/TCP listeners, syslog parser, batch writer |
+| `src/db.rs` + `src/db/` | SQLite schema, FTS5, retention, storage budget |
+| `src/syslog.rs` + `src/syslog/` | UDP/TCP listeners, syslog parser, batch writer |
 | `src/mcp.rs` + `src/mcp/` | MCP HTTP server, RMCP adapter, auth middleware, tools, health endpoint |
 | `.claude-plugin/plugin.json` | Claude plugin manifest |
-| `.codex-plugin/plugin.json` | Codex plugin manifest |
-| `gemini-extension.json` | Gemini extension manifest |
 
 ---
 

@@ -167,26 +167,14 @@ VERSION=1
 POST=0
 ```
 
-Create a hosts file mounted into the syslog-mcp container, for example `/config/docker-hosts.toml`. You can start from `config/docker-hosts.example.toml`:
-
-```toml
-[[hosts]]
-name = "edge-host-a"
-base_url = "http://edge-host-a:2375"
-allow_insecure_http = true
-
-[[hosts]]
-name = "app-host-b"
-base_url = "http://app-host-b:2375"
-allow_insecure_http = true
-```
-
-Enable it in `.env`:
+Set `SYSLOG_DOCKER_HOSTS` to a comma-separated list of hostnames in `.env`:
 
 ```env
 SYSLOG_DOCKER_INGEST_ENABLED=true
-SYSLOG_DOCKER_HOSTS_FILE=/config/docker-hosts.toml
+SYSLOG_DOCKER_HOSTS=squirts,tootie,dookie
 ```
+
+Each hostname resolves to `http://<host>:2375`. Use only on trusted private networks (e.g. tailscale).
 
 The ingest loop follows existing containers, listens for container start events, records checkpoints in SQLite, and reconnects with backoff if a host is unavailable. Remote containers still start normally if syslog-mcp is down because this path does not use Docker's daemon-level syslog logging driver.
 

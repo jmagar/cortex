@@ -1,6 +1,8 @@
 services:
   syslog-mcp:
-    build: .
+    build:
+      context: .
+      dockerfile: config/Dockerfile
     container_name: syslog-mcp
     restart: unless-stopped
     user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"

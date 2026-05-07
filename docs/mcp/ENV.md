@@ -58,11 +58,11 @@ Concise reference. See [CONFIG.md](../CONFIG.md) for full documentation includin
 | Variable | Required | Default | Description | Sensitive |
 | --- | --- | --- | --- | --- |
 | `SYSLOG_DOCKER_INGEST_ENABLED` | no | `false` | Enable pull-based Docker log ingestion from remote docker-socket-proxy hosts | no |
-| `SYSLOG_DOCKER_HOSTS_FILE` | yes, if hosts are not configured elsewhere | (none) | TOML file with `[[hosts]]` entries containing `name` and `base_url` | no |
+| `SYSLOG_DOCKER_HOSTS` | yes, if Docker ingest is enabled | (none) | Comma-separated hostnames — each becomes `http://<host>:2375` (e.g. `squirts,tootie`) | no |
 | `SYSLOG_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | Initial reconnect delay after host stream failure | no |
 | `SYSLOG_DOCKER_RECONNECT_MAX_MS` | no | `30000` | Maximum reconnect delay after repeated failures | no |
 
-Plain `http://` hosts in the hosts file must set `allow_insecure_http = true`; use that only on trusted private networks or behind firewall/TLS controls.
+Hosts specified via `SYSLOG_DOCKER_HOSTS` default to plain `http://` on port 2375 — use only on trusted private networks or behind firewall/TLS controls.
 
 ## Logging
 
@@ -76,7 +76,7 @@ Plain `http://` hosts in the hosts file must set `allow_insecure_http = true`; u
 | --- | --- | --- | --- | --- |
 | `SYSLOG_UID` | no | `1000` | Container user ID | no |
 | `SYSLOG_GID` | no | `1000` | Container group ID | no |
-| `SYSLOG_MCP_CONFIG_VOLUME` | no | `./config` | Read-only config mount for optional files such as `docker-hosts.toml` | no |
+| `SYSLOG_MCP_CONFIG_VOLUME` | no | `./config` | Read-only config mount for optional config files | no |
 | `DOCKER_NETWORK` | no | `syslog-mcp` | External Docker network name | no |
 
 ## Token generation

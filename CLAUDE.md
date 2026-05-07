@@ -66,6 +66,15 @@ One MCP tool: **`syslog`** — dispatches by `action` argument.
 | `stats` | DB stats (total logs, logical/physical size, free disk, configured thresholds, write-block state, time range) |
 | `help` | Built-in usage reference |
 
+## Plugin Commands
+
+Slash commands available after installing the Claude Code plugin (`plugins/commands/`):
+
+| Command | Description |
+|---------|-------------|
+| `/syslog:doctor` | Full health check: MCP, HTTP /health, service status, syslog port, Docker ingest, fleet drop-ins |
+| `/syslog:deploy-dropins` | Push rsyslog forwarding configs to `fleet_hosts` via SSH (idempotent) |
+
 ## Config
 
 `config.toml` at repo root for local dev. **Not copied into Docker** — the Dockerfile was cleaned up (no COPY for config.toml). In Docker, defaults + env vars apply exclusively.
@@ -103,7 +112,7 @@ SYSLOG_API_TOKEN=your-api-token         # required when SYSLOG_API_ENABLED=true
 
 # Docker container log ingestion (disabled by default)
 SYSLOG_DOCKER_INGEST_ENABLED=false      # set true to ingest from docker-socket-proxy hosts
-SYSLOG_DOCKER_HOSTS_FILE=config/docker-hosts.toml  # path to [[hosts]] config file
+SYSLOG_DOCKER_HOSTS=host-a,host-b      # comma-separated hostnames → http://<host>:2375
 SYSLOG_DOCKER_RECONNECT_INITIAL_MS=1000
 SYSLOG_DOCKER_RECONNECT_MAX_MS=60000
 
@@ -121,7 +130,7 @@ RUST_LOG=info
 | `src/db/queries.rs` | All SQL queries and FTS5 search implementation |
 | `src/mcp/tools.rs` | Single `syslog` tool with action dispatch |
 | `config/mcporter.json` | mcporter config (HTTP transport to localhost:3100) |
-| `config/docker-hosts.toml` | Docker ingest host list (when `SYSLOG_DOCKER_INGEST_ENABLED=true`) |
+| `SYSLOG_DOCKER_HOSTS` env var | Docker ingest host list — comma-separated hostnames, each becomes `http://<host>:2375` |
 | `scripts/smoke-test.sh` | Live smoke test — all MCP actions via mcporter, strict PASS/FAIL |
 | `scripts/backup.sh` | WAL-safe SQLite backup script (checkpoint + `.backup` method) |
 | `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset helper for local/dev recovery |

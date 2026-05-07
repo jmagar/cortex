@@ -19,9 +19,6 @@ COPY --from=builder /app/target/release/syslog /usr/local/bin/syslog
 
 RUN groupadd --gid 1000 syslog && useradd --uid 1000 --gid syslog --no-create-home --shell /sbin/nologin syslog && mkdir -p /data && chown syslog:syslog /data
 
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
 ENV RUST_LOG=info
 ENV SYSLOG_MCP_DB_PATH=/data/syslog.db
 
@@ -34,5 +31,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 LABEL io.modelcontextprotocol.server.name="tv.tootie/syslog-mcp"
 
-ENTRYPOINT ["/entrypoint.sh"]
 CMD ["syslog", "serve", "mcp"]
