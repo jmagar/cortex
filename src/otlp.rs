@@ -3,7 +3,8 @@
 //! returns 404 (deferred) and `/v1/metrics` returns 200 + discards.
 //!
 //! Mounted on the same axum server as MCP. Body limit: 4 MiB. Optional Bearer
-//! auth via the same `SYSLOG_MCP_API_TOKEN` as MCP.
+//! auth via the same `SYSLOG_MCP_TOKEN` as MCP (`SYSLOG_MCP_API_TOKEN` is
+//! accepted as a deprecated alias).
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -64,8 +65,9 @@ impl OtlpState {
     }
 }
 
-/// Build the OTLP router. Mounts `/v1/logs`, `/v1/metrics`, `/v1/traces` on the
-/// same axum server as MCP.
+/// Build the OTLP router. Mounts `/v1/logs` (functional ingest),
+/// `/v1/metrics` (200 + discard), `/v1/traces` (404 — deferred) on the same
+/// axum server as MCP.
 pub fn router(state: OtlpState) -> Router {
     Router::new()
         .route("/v1/logs", post(logs_handler))
@@ -98,6 +100,11 @@ async fn logs_handler(
     body: Bytes,
 ) -> axum::response::Response {
     if !is_authorized(&state, &headers) {
+        tracing::warn!(
+            source_ip = %peer,
+            has_auth = headers.contains_key(axum::http::header::AUTHORIZATION),
+            "OTLP /v1/logs unauthorized"
+        );
         return unauthorized();
     }
 
