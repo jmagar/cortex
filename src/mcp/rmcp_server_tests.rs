@@ -30,6 +30,7 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
             api_token: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
+            auth: Default::default(),
         },
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
     };
@@ -101,6 +102,7 @@ fn allowed_hosts_include_bracketed_ipv6_authority_variants() {
         api_token: None,
         allowed_hosts: vec!["[fd00::1]".into(), "syslog.example.com:443".into()],
         allowed_origins: Vec::new(),
+        auth: Default::default(),
     };
 
     let hosts = allowed_hosts(&config);

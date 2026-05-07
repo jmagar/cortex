@@ -1,6 +1,6 @@
 [package]
 name = "syslog-mcp"
-version = "0.12.0"
+version = "0.13.0"
 edition = "2021"
 rust-version = "1.86"
 description = "Syslog receiver + MCP server for homelab log intelligence"
@@ -25,9 +25,9 @@ rmcp = { version = "1.6.0", default-features = false, features = [
 tower-http = { version = "0.6", features = ["cors", "limit", "trace"] }
 
 # SQLite
-rusqlite = { version = "0.32", features = ["bundled", "vtab"] }
+rusqlite = { version = "0.39", features = ["bundled", "vtab"] }
 r2d2 = "0.8"
-r2d2_sqlite = "0.25"
+r2d2_sqlite = "0.33"
 scheduled-thread-pool = "0.2"
 
 # Syslog parsing
@@ -51,6 +51,12 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Config
 toml = "0.8"
+
+# OAuth + JWT (shared with lab via parameterizable lab-auth crate)
+# TODO: switch to git+rev once lab branch is pushed and merged (epic syslog-mcp-brt0).
+# Path dep is provisional for development against lab worktrees on the same branch.
+lab-auth = { path = "../../../../lab-l1-pin/crates/lab-auth" }
+url = "2"
 
 # Logging
 tracing = "0.1"

@@ -41,8 +41,10 @@ fn new_token_takes_precedence_over_deprecated() {
 #[test]
 #[serial]
 fn env_var_overrides_mcp_port() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_MCP_PORT", "3200");
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_MCP_PORT");
 
     let cfg = result.expect("Config::load() should succeed");
@@ -52,8 +54,10 @@ fn env_var_overrides_mcp_port() {
 #[test]
 #[serial]
 fn env_var_overrides_syslog_port() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_PORT", "2514");
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_PORT");
 
     let cfg = result.expect("Config::load() should succeed");
@@ -89,17 +93,25 @@ fn defaults_are_applied_without_env_vars() {
         "SYSLOG_DOCKER_HOSTS_FILE",
         "SYSLOG_DOCKER_RECONNECT_INITIAL_MS",
         "SYSLOG_DOCKER_RECONNECT_MAX_MS",
+        "SYSLOG_MCP_AUTH_MODE",
+        "SYSLOG_MCP_PUBLIC_URL",
+        "SYSLOG_MCP_GOOGLE_CLIENT_ID",
+        "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
     ] {
         std::env::remove_var(key);
     }
 
+    // Bind syslog-mcp to loopback so the non-loopback safety gate (added in
+    // syslog-mcp-brt0.4) does not reject the unauthenticated default config.
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     let cfg = Config::load().expect("Config::load() should succeed with defaults");
+    std::env::remove_var("SYSLOG_MCP_HOST");
     assert_eq!(cfg.syslog.host, "0.0.0.0");
     assert_eq!(cfg.syslog.port, 1514);
     assert_eq!(cfg.syslog.bind_addr(), "0.0.0.0:1514");
-    assert_eq!(cfg.mcp.host, "0.0.0.0");
+    assert_eq!(cfg.mcp.host, "127.0.0.1");
     assert_eq!(cfg.mcp.port, 3100);
-    assert_eq!(cfg.mcp.bind_addr(), "0.0.0.0:3100");
+    assert_eq!(cfg.mcp.bind_addr(), "127.0.0.1:3100");
     assert!(cfg.mcp.allowed_hosts.is_empty());
     assert!(cfg.mcp.allowed_origins.is_empty());
     assert_eq!(cfg.storage.pool_size, 4);
@@ -123,6 +135,7 @@ fn defaults_are_applied_without_env_vars() {
 #[test]
 #[serial]
 fn env_var_overrides_mcp_allowed_hosts_and_origins() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var(
         "SYSLOG_MCP_ALLOWED_HOSTS",
         "syslog.example.com, syslog.example.com:443",
@@ -132,6 +145,7 @@ fn env_var_overrides_mcp_allowed_hosts_and_origins() {
         "https://app.example.com, https://syslog.example.com",
     );
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_MCP_ALLOWED_HOSTS");
     std::env::remove_var("SYSLOG_MCP_ALLOWED_ORIGINS");
 
@@ -167,9 +181,11 @@ fn env_var_can_clear_mcp_allowed_hosts_and_origins() {
 #[test]
 #[serial]
 fn api_enabled_requires_separate_token() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_API_ENABLED", "true");
     std::env::remove_var("SYSLOG_API_TOKEN");
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_API_ENABLED");
 
     assert!(result.is_err());
@@ -196,6 +212,7 @@ fn api_token_is_separate_from_mcp_token() {
 #[test]
 #[serial]
 fn api_enabled_accepts_common_truthy_values() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     for value in ["1", "yes", "Y", "on", "TRUE"] {
         std::env::set_var("SYSLOG_API_ENABLED", value);
         std::env::set_var("SYSLOG_API_TOKEN", "api-token");
@@ -206,11 +223,13 @@ fn api_enabled_accepts_common_truthy_values() {
         let cfg = result.unwrap_or_else(|err| panic!("value {value} should parse: {err}"));
         assert!(cfg.api.enabled);
     }
+    std::env::remove_var("SYSLOG_MCP_HOST");
 }
 
 #[test]
 #[serial]
 fn api_enabled_accepts_common_falsy_values() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     for value in ["0", "no", "N", "off", "FALSE"] {
         std::env::set_var("SYSLOG_API_ENABLED", value);
         std::env::remove_var("SYSLOG_API_TOKEN");
@@ -220,13 +239,16 @@ fn api_enabled_accepts_common_falsy_values() {
         let cfg = result.unwrap_or_else(|err| panic!("value {value} should parse: {err}"));
         assert!(!cfg.api.enabled);
     }
+    std::env::remove_var("SYSLOG_MCP_HOST");
 }
 
 #[test]
 #[serial]
 fn api_enabled_rejects_invalid_bool_values() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_API_ENABLED", "maybe");
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_API_ENABLED");
 
     assert!(result.is_err());
@@ -258,11 +280,17 @@ fn auth_validation_rejects_blank_api_token_when_enabled() {
 #[test]
 #[serial]
 fn host_with_port_is_rejected() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_HOST", "0.0.0.0:1514");
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_HOST");
 
-    assert!(result.is_err(), "Host containing ':' should be rejected");
+    let err = result.expect_err("Host containing ':' should be rejected");
+    assert!(
+        err.to_string().contains("should not contain a port"),
+        "wrong error: {err}"
+    );
 }
 
 #[test]
@@ -278,6 +306,7 @@ fn defaults_include_storage_budget_settings() {
 #[test]
 #[serial]
 fn env_var_overrides_storage_budget_settings() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_MCP_MAX_DB_SIZE_MB", "2048");
     std::env::set_var("SYSLOG_MCP_RECOVERY_DB_SIZE_MB", "1800");
     std::env::set_var("SYSLOG_MCP_MIN_FREE_DISK_MB", "1024");
@@ -287,6 +316,7 @@ fn env_var_overrides_storage_budget_settings() {
     let result = Config::load();
 
     for key in [
+        "SYSLOG_MCP_HOST",
         "SYSLOG_MCP_MAX_DB_SIZE_MB",
         "SYSLOG_MCP_RECOVERY_DB_SIZE_MB",
         "SYSLOG_MCP_MIN_FREE_DISK_MB",
@@ -307,9 +337,11 @@ fn env_var_overrides_storage_budget_settings() {
 #[test]
 #[serial]
 fn rejects_invalid_storage_budget_relationships() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_MCP_MAX_DB_SIZE_MB", "100");
     std::env::set_var("SYSLOG_MCP_RECOVERY_DB_SIZE_MB", "100");
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_MCP_MAX_DB_SIZE_MB");
     std::env::remove_var("SYSLOG_MCP_RECOVERY_DB_SIZE_MB");
 
@@ -320,8 +352,10 @@ fn rejects_invalid_storage_budget_relationships() {
 #[test]
 #[serial]
 fn rejects_cleanup_chunk_size_zero() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE", "0");
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE");
 
     let err = result.expect_err("Config::load() should reject cleanup_chunk_size == 0");
@@ -331,8 +365,10 @@ fn rejects_cleanup_chunk_size_zero() {
 #[test]
 #[serial]
 fn rejects_cleanup_chunk_size_over_max() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE", "1000001");
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE");
 
     let err = result.expect_err("Config::load() should reject cleanup_chunk_size > 1_000_000");
@@ -345,8 +381,10 @@ fn rejects_cleanup_chunk_size_over_max() {
 #[test]
 #[serial]
 fn accepts_cleanup_chunk_size_at_max() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE", "1000000");
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE");
 
     let cfg = result.expect("cleanup_chunk_size == 1_000_000 should be accepted");
@@ -441,9 +479,11 @@ fn docker_ingest_loads_hosts_file_from_env() {
     )
     .unwrap();
 
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "true");
     std::env::set_var("SYSLOG_DOCKER_HOSTS_FILE", &path);
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_DOCKER_INGEST_ENABLED");
     std::env::remove_var("SYSLOG_DOCKER_HOSTS_FILE");
 
@@ -456,12 +496,14 @@ fn docker_ingest_loads_hosts_file_from_env() {
 #[test]
 #[serial]
 fn docker_ingest_ignores_hosts_file_when_disabled() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "false");
     std::env::set_var(
         "SYSLOG_DOCKER_HOSTS_FILE",
         "/tmp/syslog-mcp-missing-docker-hosts.toml",
     );
     let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_DOCKER_INGEST_ENABLED");
     std::env::remove_var("SYSLOG_DOCKER_HOSTS_FILE");
 
@@ -483,4 +525,327 @@ fn docker_ingest_rejects_insecure_http_without_explicit_opt_in() {
 
     let err = validate_docker_ingest_config(&config).unwrap_err();
     assert!(err.to_string().contains("allow_insecure_http"));
+}
+
+// ---------------------------------------------------------------------------
+// [mcp.auth] config schema (syslog-mcp-brt0.4)
+// ---------------------------------------------------------------------------
+
+/// Build a baseline loopback-bound config with a static token. Tests start
+/// from this and mutate the AuthConfig in isolation.
+fn loopback_config_with_token() -> Config {
+    let mut cfg = Config::default();
+    cfg.mcp.host = "127.0.0.1".into();
+    cfg.mcp.api_token = Some("static-token".into());
+    cfg
+}
+
+#[test]
+fn auth_defaults_are_bearer_with_disable_static_token_enabled() {
+    let cfg = AuthConfig::default();
+    assert_eq!(cfg.mode, AuthMode::Bearer);
+    assert!(cfg.public_url.is_none());
+    assert!(cfg.google_client_id.is_none());
+    assert!(cfg.google_client_secret.is_none());
+    assert!(cfg.admin_email.is_empty());
+    assert!(cfg.allowed_emails.is_empty());
+    assert_eq!(cfg.access_token_ttl_secs, 3_600);
+    assert_eq!(cfg.refresh_token_ttl_secs, 28_800);
+    assert_eq!(cfg.auth_code_ttl_secs, 300);
+    assert_eq!(cfg.register_rpm, 20);
+    assert_eq!(cfg.authorize_rpm, 60);
+    assert!(
+        cfg.disable_static_token_with_oauth,
+        "syslog-mcp default flips lab-auth's opt-in to opt-out"
+    );
+    assert!(cfg.allowed_client_redirect_uris.is_empty());
+    assert_eq!(cfg.sqlite_path, std::path::PathBuf::from("auth.db"));
+    assert_eq!(cfg.key_path, std::path::PathBuf::from("auth-jwt.pem"));
+}
+
+#[test]
+#[serial]
+fn config_load_defaults_to_bearer_mode() {
+    std::env::remove_var("SYSLOG_MCP_AUTH_MODE");
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
+
+    let cfg = result.expect("loopback bind, no token, no oauth → permitted");
+    assert_eq!(cfg.mcp.auth.mode, AuthMode::Bearer);
+}
+
+#[test]
+#[serial]
+fn syslog_mcp_auth_mode_env_flips_to_oauth() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_MCP_AUTH_MODE", "oauth");
+    std::env::set_var("SYSLOG_MCP_PUBLIC_URL", "https://syslog.example.com");
+    std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_ID", "client-id");
+    std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_SECRET", "client-secret");
+    let raw = r#"
+        [mcp.auth]
+        allowed_emails = ["admin@example.com"]
+    "#;
+    // Inject via TOML directly because Config::load reads ./config.toml only;
+    // we emulate the auth.allowed_emails field by deserializing here and
+    // confirming the env layer flips the mode.
+    let _: Config = toml::from_str(raw).unwrap();
+    let result = Config::load();
+    for k in [
+        "SYSLOG_MCP_HOST",
+        "SYSLOG_MCP_AUTH_MODE",
+        "SYSLOG_MCP_PUBLIC_URL",
+        "SYSLOG_MCP_GOOGLE_CLIENT_ID",
+        "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
+    ] {
+        std::env::remove_var(k);
+    }
+    // Without an allowlist on disk, validation rejects the oauth combo. The
+    // mode-toggle wiring is exercised via the in-memory validate_auth_config
+    // tests below; here we just assert the env reaches the field.
+    let err = result.expect_err("oauth without allowlist must bail at startup");
+    assert!(
+        err.to_string().contains("allowed_emails"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
+#[serial]
+fn syslog_mcp_auth_mode_env_rejects_invalid_value() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_MCP_AUTH_MODE", "magic");
+    let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
+    std::env::remove_var("SYSLOG_MCP_AUTH_MODE");
+
+    let err = result.expect_err("bogus AUTH_MODE must be rejected");
+    assert!(err.to_string().contains("SYSLOG_MCP_AUTH_MODE"));
+}
+
+#[test]
+#[serial]
+fn auth_env_overrides_propagate_to_config() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_MCP_PUBLIC_URL", "https://syslog.example.com");
+    std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_ID", "id-from-env");
+    std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_SECRET", "secret-from-env");
+    // Stay in bearer mode so validation doesn't require an allowlist.
+    std::env::remove_var("SYSLOG_MCP_AUTH_MODE");
+    let result = Config::load();
+    for k in [
+        "SYSLOG_MCP_HOST",
+        "SYSLOG_MCP_PUBLIC_URL",
+        "SYSLOG_MCP_GOOGLE_CLIENT_ID",
+        "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
+    ] {
+        std::env::remove_var(k);
+    }
+
+    let cfg = result.expect("env overrides should land in config");
+    assert_eq!(
+        cfg.mcp.auth.public_url.as_deref(),
+        Some("https://syslog.example.com")
+    );
+    assert_eq!(
+        cfg.mcp.auth.google_client_id.as_deref(),
+        Some("id-from-env")
+    );
+    assert_eq!(
+        cfg.mcp.auth.google_client_secret.as_deref(),
+        Some("secret-from-env")
+    );
+}
+
+#[test]
+fn oauth_mode_rejects_missing_public_url() {
+    let mut cfg = loopback_config_with_token();
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+
+    let err = validate_auth_config(&cfg).unwrap_err();
+    assert!(err.to_string().contains("SYSLOG_MCP_PUBLIC_URL"));
+}
+
+#[test]
+fn oauth_mode_rejects_missing_google_client_id() {
+    let mut cfg = loopback_config_with_token();
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+
+    let err = validate_auth_config(&cfg).unwrap_err();
+    assert!(err.to_string().contains("SYSLOG_MCP_GOOGLE_CLIENT_ID"));
+}
+
+#[test]
+fn oauth_mode_rejects_missing_google_client_secret() {
+    let mut cfg = loopback_config_with_token();
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+
+    let err = validate_auth_config(&cfg).unwrap_err();
+    assert!(err.to_string().contains("SYSLOG_MCP_GOOGLE_CLIENT_SECRET"));
+}
+
+#[test]
+fn oauth_mode_rejects_empty_allowlist_and_admin() {
+    let mut cfg = loopback_config_with_token();
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    // Both empty.
+    cfg.mcp.auth.allowed_emails.clear();
+    cfg.mcp.auth.admin_email.clear();
+
+    let err = validate_auth_config(&cfg).unwrap_err();
+    assert!(
+        err.to_string().contains("allowed_emails"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
+fn oauth_mode_accepts_non_empty_allowlist() {
+    let mut cfg = loopback_config_with_token();
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+
+    validate_auth_config(&cfg).expect("valid oauth config");
+}
+
+#[test]
+fn oauth_mode_accepts_admin_email_alone() {
+    let mut cfg = loopback_config_with_token();
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    cfg.mcp.auth.admin_email = "admin@example.com".into();
+
+    validate_auth_config(&cfg).expect("admin_email alone counts as allowlist");
+}
+
+#[test]
+fn bearer_and_oauth_can_coexist() {
+    // Static token + OAuth fully configured = both pass validation.
+    let mut cfg = loopback_config_with_token();
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+
+    validate_auth_config(&cfg).expect("bearer + oauth coexistence");
+    assert!(cfg.mcp.api_token.is_some());
+    assert_eq!(cfg.mcp.auth.mode, AuthMode::OAuth);
+}
+
+#[test]
+fn loopback_bind_with_no_auth_is_permitted() {
+    let mut cfg = Config::default();
+    cfg.mcp.host = "127.0.0.1".into();
+    cfg.mcp.api_token = None;
+    validate_auth_config(&cfg).expect("loopback dev mode");
+}
+
+#[test]
+fn loopback_variants_pass_safety_gate() {
+    for host in ["127.0.0.1", "::1", "127.0.0.5"] {
+        let mut cfg = Config::default();
+        cfg.mcp.host = host.into();
+        cfg.mcp.api_token = None;
+        validate_auth_config(&cfg).unwrap_or_else(|err| panic!("{host} should be loopback: {err}"));
+    }
+}
+
+#[test]
+fn non_loopback_bind_without_auth_bails() {
+    for host in ["0.0.0.0", "::", "localhost", "myhost.example.com"] {
+        let mut cfg = Config::default();
+        cfg.mcp.host = host.into();
+        cfg.mcp.api_token = None;
+        let err = validate_auth_config(&cfg)
+            .err()
+            .unwrap_or_else(|| panic!("{host} must be rejected without auth"));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not a loopback") || msg.contains("loopback"),
+            "wrong error for {host}: {msg}"
+        );
+    }
+}
+
+#[test]
+fn non_loopback_bind_with_static_token_passes() {
+    let mut cfg = Config::default();
+    cfg.mcp.host = "0.0.0.0".into();
+    cfg.mcp.api_token = Some("token".into());
+    validate_auth_config(&cfg).expect("static token unlocks non-loopback bind");
+}
+
+#[test]
+fn non_loopback_bind_with_oauth_passes() {
+    let mut cfg = Config::default();
+    cfg.mcp.host = "0.0.0.0".into();
+    cfg.mcp.api_token = Some("token".into()); // satisfies existing token-shape check
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+    validate_auth_config(&cfg).expect("oauth unlocks non-loopback bind");
+}
+
+#[test]
+fn auth_mode_parses_lowercase_only() {
+    let mut mode = AuthMode::Bearer;
+    std::env::set_var("__TEST_AUTH_MODE_PARSE", "OAUTH");
+    env_override_auth_mode("__TEST_AUTH_MODE_PARSE", &mut mode).unwrap();
+    std::env::remove_var("__TEST_AUTH_MODE_PARSE");
+    assert_eq!(mode, AuthMode::OAuth, "case-insensitive");
+}
+
+#[test]
+fn auth_toml_section_parses() {
+    let raw = r#"
+        [mcp.auth]
+        admin_email = "admin@example.com"
+        allowed_emails = ["admin@example.com", "ops@example.com"]
+        sqlite_path = "custom-auth.db"
+        key_path = "custom-key.pem"
+        access_token_ttl_secs = 1800
+        refresh_token_ttl_secs = 14400
+        auth_code_ttl_secs = 120
+        register_rpm = 5
+        authorize_rpm = 30
+        disable_static_token_with_oauth = false
+        allowed_client_redirect_uris = ["https://claude.ai/api/mcp/auth_callback"]
+    "#;
+    let cfg: Config = toml::from_str(raw).expect("auth section should parse");
+    let auth = &cfg.mcp.auth;
+    assert_eq!(auth.admin_email, "admin@example.com");
+    assert_eq!(auth.allowed_emails.len(), 2);
+    assert_eq!(auth.sqlite_path, std::path::PathBuf::from("custom-auth.db"));
+    assert_eq!(auth.key_path, std::path::PathBuf::from("custom-key.pem"));
+    assert_eq!(auth.access_token_ttl_secs, 1_800);
+    assert_eq!(auth.refresh_token_ttl_secs, 14_400);
+    assert_eq!(auth.auth_code_ttl_secs, 120);
+    assert_eq!(auth.register_rpm, 5);
+    assert_eq!(auth.authorize_rpm, 30);
+    assert!(!auth.disable_static_token_with_oauth);
+    assert_eq!(
+        auth.allowed_client_redirect_uris,
+        vec!["https://claude.ai/api/mcp/auth_callback".to_string()]
+    );
 }

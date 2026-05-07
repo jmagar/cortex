@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::net::IpAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 const MAX_CLEANUP_CHUNK_SIZE: usize = 1_000_000;
 
@@ -137,6 +139,91 @@ pub struct McpConfig {
     /// Optional browser Origin values accepted by RMCP Origin validation.
     #[serde(default)]
     pub allowed_origins: Vec<String>,
+    /// OAuth / JWT authentication policy (consumed by lab-auth at runtime).
+    #[serde(default)]
+    pub auth: AuthConfig,
+}
+
+/// Authentication mode for the MCP HTTP endpoint.
+///
+/// `Bearer` (default) preserves the legacy single static-token flow. `OAuth`
+/// activates the dual-mode middleware shipped by `lab-auth` (Google-issued
+/// JWTs with optional static-token coexistence governed by
+/// [`AuthConfig::disable_static_token_with_oauth`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthMode {
+    #[default]
+    Bearer,
+    OAuth,
+}
+
+/// `[mcp.auth]` policy table — TOML-driven; the only env-var overrides are the
+/// 5 keys explicitly wired in [`Config::load`] (mode, public URL, Google
+/// client id/secret, plus the existing static `SYSLOG_MCP_TOKEN`). Everything
+/// else lives in `config.toml` per the OAuth epic's locked decisions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AuthConfig {
+    /// Runtime mode toggle. Defaults to `bearer`; set to `oauth` to activate
+    /// the dual-mode middleware. Overridable via `SYSLOG_MCP_AUTH_MODE`.
+    #[serde(default)]
+    pub mode: AuthMode,
+    /// Base URL the OAuth issuer + audience are derived from. Required when
+    /// `mode == OAuth`. Overridable via `SYSLOG_MCP_PUBLIC_URL`.
+    #[serde(default)]
+    pub public_url: Option<String>,
+    /// Google OAuth client id. Required when `mode == OAuth`. Overridable via
+    /// `SYSLOG_MCP_GOOGLE_CLIENT_ID`.
+    #[serde(default)]
+    pub google_client_id: Option<String>,
+    /// Google OAuth client secret. Required when `mode == OAuth`. Overridable
+    /// via `SYSLOG_MCP_GOOGLE_CLIENT_SECRET`.
+    #[serde(default)]
+    pub google_client_secret: Option<String>,
+    /// Single bootstrap admin email permitted to log in via Google OAuth.
+    /// Supplements `allowed_emails`.
+    #[serde(default)]
+    pub admin_email: String,
+    /// Email allowlist that augments the (future) DB-backed allowlist. MUST be
+    /// non-empty (or `admin_email` set) when `mode == OAuth` — without an
+    /// allowlist any Google account that completes OAuth would gain access.
+    #[serde(default)]
+    pub allowed_emails: Vec<String>,
+    /// Path to the auth SQLite store. Relative paths are resolved against the
+    /// directory containing `[storage].db_path` at runtime startup.
+    #[serde(default = "default_auth_sqlite_path")]
+    pub sqlite_path: PathBuf,
+    /// Path to the JWT signing key (PEM). Relative paths are resolved against
+    /// the directory containing `[storage].db_path` at runtime startup.
+    #[serde(default = "default_auth_key_path")]
+    pub key_path: PathBuf,
+    /// Access-token TTL in seconds (default 1h).
+    #[serde(default = "default_access_token_ttl_secs")]
+    pub access_token_ttl_secs: u64,
+    /// Refresh-token TTL in seconds (default 8h, deliberately shorter than
+    /// lab-auth's 30d for the read-only homelab profile).
+    #[serde(default = "default_refresh_token_ttl_secs")]
+    pub refresh_token_ttl_secs: u64,
+    /// Authorization-code TTL in seconds (default 5m).
+    #[serde(default = "default_auth_code_ttl_secs")]
+    pub auth_code_ttl_secs: u64,
+    /// Per-process rate limit on `/register`. Moot for syslog-mcp (the
+    /// bearer-only router defined in lab-auth's L2 work does not mount
+    /// `/register`) but kept for lab-auth signature parity.
+    #[serde(default = "default_register_rpm")]
+    pub register_rpm: u32,
+    /// Per-process rate limit on `/authorize`.
+    #[serde(default = "default_authorize_rpm")]
+    pub authorize_rpm: u32,
+    /// When `mode == OAuth`, also reject the static `SYSLOG_MCP_TOKEN`. Set
+    /// `false` to keep the static token as a break-glass path. Default `true`.
+    #[serde(default = "default_true")]
+    pub disable_static_token_with_oauth: bool,
+    /// Allowed redirect URIs for OAuth clients (loopback URIs are accepted
+    /// implicitly by lab-auth; entries here are non-loopback URIs).
+    #[serde(default)]
+    pub allowed_client_redirect_uris: Vec<String>,
 }
 
 impl McpConfig {
@@ -255,6 +342,27 @@ fn default_docker_reconnect_initial_ms() -> u64 {
 fn default_docker_reconnect_max_ms() -> u64 {
     30_000
 }
+fn default_auth_sqlite_path() -> PathBuf {
+    PathBuf::from("auth.db")
+}
+fn default_auth_key_path() -> PathBuf {
+    PathBuf::from("auth-jwt.pem")
+}
+fn default_access_token_ttl_secs() -> u64 {
+    3_600 // 1h
+}
+fn default_refresh_token_ttl_secs() -> u64 {
+    28_800 // 8h
+}
+fn default_auth_code_ttl_secs() -> u64 {
+    300 // 5m
+}
+fn default_register_rpm() -> u32 {
+    20
+}
+fn default_authorize_rpm() -> u32 {
+    60
+}
 
 impl Default for SyslogConfig {
     fn default() -> Self {
@@ -296,6 +404,29 @@ impl Default for McpConfig {
             api_token: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
+            auth: AuthConfig::default(),
+        }
+    }
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            mode: AuthMode::default(),
+            public_url: None,
+            google_client_id: None,
+            google_client_secret: None,
+            admin_email: String::new(),
+            allowed_emails: Vec::new(),
+            sqlite_path: default_auth_sqlite_path(),
+            key_path: default_auth_key_path(),
+            access_token_ttl_secs: default_access_token_ttl_secs(),
+            refresh_token_ttl_secs: default_refresh_token_ttl_secs(),
+            auth_code_ttl_secs: default_auth_code_ttl_secs(),
+            register_rpm: default_register_rpm(),
+            authorize_rpm: default_authorize_rpm(),
+            disable_static_token_with_oauth: true,
+            allowed_client_redirect_uris: Vec::new(),
         }
     }
 }
@@ -389,6 +520,18 @@ impl Config {
             "SYSLOG_MCP_CLEANUP_CHUNK_SIZE",
             &mut config.storage.cleanup_chunk_size,
         )?;
+
+        // [mcp.auth] env overrides — locked to 5 keys per the OAuth epic.
+        env_override_auth_mode("SYSLOG_MCP_AUTH_MODE", &mut config.mcp.auth.mode)?;
+        env_override_opt_str("SYSLOG_MCP_PUBLIC_URL", &mut config.mcp.auth.public_url);
+        env_override_opt_str(
+            "SYSLOG_MCP_GOOGLE_CLIENT_ID",
+            &mut config.mcp.auth.google_client_id,
+        );
+        env_override_opt_str(
+            "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
+            &mut config.mcp.auth.google_client_secret,
+        );
 
         env_override_bool("SYSLOG_API_ENABLED", &mut config.api.enabled)?;
         env_override_opt_str("SYSLOG_API_TOKEN", &mut config.api.api_token);
@@ -524,6 +667,25 @@ fn env_override_list(key: &str, target: &mut Vec<String>) {
     *target = values;
 }
 
+fn env_override_auth_mode(key: &str, target: &mut AuthMode) -> anyhow::Result<()> {
+    let Ok(v) = std::env::var(key) else {
+        return Ok(());
+    };
+    if v.is_empty() {
+        return Ok(());
+    }
+    *target = match v.trim().to_ascii_lowercase().as_str() {
+        "bearer" => AuthMode::Bearer,
+        "oauth" => AuthMode::OAuth,
+        other => {
+            return Err(anyhow::anyhow!(
+                "Invalid value for {key}={other}: expected `bearer` or `oauth`"
+            ));
+        }
+    };
+    Ok(())
+}
+
 fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
     let Ok(v) = std::env::var(key) else {
         return Ok(());
@@ -561,7 +723,77 @@ fn validate_auth_config(config: &Config) -> anyhow::Result<()> {
     } else if token_is_blank(&config.api.api_token) {
         return Err(anyhow::anyhow!("api.api_token must not be empty"));
     }
+
+    // ---- OAuth prerequisites ----------------------------------------------
+    let auth = &config.mcp.auth;
+    if auth.mode == AuthMode::OAuth {
+        if option_is_blank(&auth.public_url) {
+            return Err(anyhow::anyhow!(
+                "SYSLOG_MCP_PUBLIC_URL is required when SYSLOG_MCP_AUTH_MODE=oauth — \
+                 set the externally reachable base URL (e.g. https://syslog.example.com)"
+            ));
+        }
+        if option_is_blank(&auth.google_client_id) {
+            return Err(anyhow::anyhow!(
+                "SYSLOG_MCP_GOOGLE_CLIENT_ID is required when SYSLOG_MCP_AUTH_MODE=oauth"
+            ));
+        }
+        if option_is_blank(&auth.google_client_secret) {
+            return Err(anyhow::anyhow!(
+                "SYSLOG_MCP_GOOGLE_CLIENT_SECRET is required when SYSLOG_MCP_AUTH_MODE=oauth"
+            ));
+        }
+        // Empty allowlist + empty admin_email → ANY Google account that
+        // completes OAuth would gain access. Reject at startup. (DB-row
+        // allowlist is checked at runtime once the auth store is available.)
+        let admin_blank = auth.admin_email.trim().is_empty();
+        let allowlist_blank = auth
+            .allowed_emails
+            .iter()
+            .all(|entry| entry.trim().is_empty());
+        if admin_blank && allowlist_blank {
+            return Err(anyhow::anyhow!(
+                "[mcp.auth] requires at least one entry in `allowed_emails` (or a non-empty \
+                 `admin_email`) when SYSLOG_MCP_AUTH_MODE=oauth — without an allowlist any \
+                 Google account that completes OAuth would gain access"
+            ));
+        }
+    }
+    // Note: `disable_static_token_with_oauth` defaults to `true`; in pure
+    // bearer mode the flag is a no-op (no OAuth path to disable) so we do not
+    // reject the default combo. The flag only takes effect at middleware
+    // mount time when OAuth is active (S3's job).
+
+    // ---- Non-loopback safety gate -----------------------------------------
+    // If syslog-mcp is bound to a non-loopback address AND no auth is wired,
+    // refuse to start. Use IpAddr::is_loopback() (covers 127.0.0.0/8, ::1, and
+    // IPv4-mapped IPv6 loopback). Strings that fail to parse as IpAddr (DNS
+    // hostnames like `localhost` or `myhost.example.com`) are treated as
+    // non-loopback per the locked decision.
+    let bind_is_loopback = IpAddr::from_str(&config.mcp.host)
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false);
+    if !bind_is_loopback {
+        let has_static_token = config
+            .mcp
+            .api_token
+            .as_deref()
+            .is_some_and(|t| !t.trim().is_empty());
+        let has_oauth = auth.mode == AuthMode::OAuth;
+        if !has_static_token && !has_oauth {
+            return Err(anyhow::anyhow!(
+                "MCP host `{}` is not a loopback address but no authentication is configured — \
+                 set SYSLOG_MCP_TOKEN, set SYSLOG_MCP_AUTH_MODE=oauth, or bind to 127.0.0.1 / ::1",
+                config.mcp.host
+            ));
+        }
+    }
+
     Ok(())
+}
+
+fn option_is_blank(value: &Option<String>) -> bool {
+    value.as_deref().is_none_or(|v| v.trim().is_empty())
 }
 
 pub(crate) fn validate_docker_ingest_config(config: &DockerIngestConfig) -> anyhow::Result<()> {

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-07
+
+### Added
+
+- **OAuth config schema (`[mcp.auth]`)** — new TOML section + 5 env vars
+  (`SYSLOG_MCP_AUTH_MODE`, `SYSLOG_MCP_PUBLIC_URL`, `SYSLOG_MCP_GOOGLE_CLIENT_ID`,
+  `SYSLOG_MCP_GOOGLE_CLIENT_SECRET`, plus the existing `SYSLOG_MCP_TOKEN`)
+  wiring the dual-mode bearer/OAuth policy that the upcoming runtime
+  integration (S2/S3/S4) will consume. All policy knobs (TTLs, rate limits,
+  paths, allowlists) live in `config.toml`; only secrets, URLs, and the mode
+  toggle flow through env vars per the OAuth epic's locked decisions.
+- **Non-loopback safety gate** — `Config::load()` now refuses to start when
+  `mcp.host` is bound to a non-loopback address with no static token AND no
+  OAuth configured. Loopback detection uses `IpAddr::is_loopback()`
+  (covering `127.0.0.0/8` and `::1`); strings that fail to parse as IP are
+  treated as non-loopback. Loopback + no-auth remains permitted for
+  developer convenience.
+- **OAuth allowlist enforcement** — when `mode == oauth`, startup fails
+  unless `[mcp.auth].admin_email` or `[mcp.auth].allowed_emails` is
+  non-empty, preventing the "any Google account that completes OAuth gets
+  in" footgun.
+- New `lab-auth` dependency (path-dep against the L1 SHA pin in the
+  development worktree; will be swapped to `git+rev` before merge per the
+  S6 bead).
+
+### Changed
+
+- **`rusqlite` 0.32 → 0.39 / `r2d2_sqlite` 0.25 → 0.33** — required so
+  `lab-auth` (which uses rusqlite 0.39) can coexist with syslog-mcp under
+  the `links = "sqlite3"` constraint. No source changes needed at the
+  syslog-mcp callsites; the bumps are API-compatible for the patterns we
+  use.
+
 ## [0.12.0] - 2026-05-07
 
 ### Added
