@@ -186,29 +186,35 @@ impl RuntimeCore {
                     // transient SQLITE_BUSY on one tag must NOT abort the
                     // others or the global retention purge — that would stall
                     // all retention for an hour.
+                    let mut tag_deleted: usize = 0;
                     for tag in ADGUARD_RETENTION_TAGS {
-                        if let Err(e) = db::purge_by_tag_window(
+                        match db::purge_by_tag_window(
                             &pool,
                             tag,
                             ADGUARD_RETENTION_DAYS,
                             fts_merge_pages,
                         ) {
-                            tracing::error!(
+                            Ok(n) => tag_deleted += n,
+                            Err(e) => tracing::error!(
                                 tag,
                                 error = %e,
                                 "Tag-window purge failed; continuing"
-                            );
+                            ),
                         }
                     }
-                    db::purge_old_logs(&pool, retention_days, fts_merge_pages)
+                    let global_deleted =
+                        db::purge_old_logs(&pool, retention_days, fts_merge_pages)?;
+                    Ok::<(usize, usize), anyhow::Error>((tag_deleted, global_deleted))
                 })
                 .await
                 .map_err(|e| anyhow::anyhow!("spawn_blocking error: {e}"))
                 .and_then(|r| r)
                 {
-                    Ok(deleted) => tracing::info!(
+                    Ok((tag_deleted, global_deleted)) => tracing::info!(
                         retention_days,
-                        deleted,
+                        tag_deleted,
+                        global_deleted,
+                        total_deleted = tag_deleted + global_deleted,
                         elapsed_ms = started.elapsed().as_millis(),
                         "Retention purge tick completed"
                     ),
