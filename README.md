@@ -411,7 +411,9 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 |----------|----------|---------|-------------|
 | `SYSLOG_HOST` | no | `0.0.0.0` | Bind host for UDP + TCP syslog listeners |
 | `SYSLOG_PORT` | no | `1514` | Bind port for UDP + TCP syslog listeners |
-| `SYSLOG_MAX_MESSAGE_SIZE` | no | `8192` | Max message size in bytes (oversized messages are dropped) |
+| `SYSLOG_MAX_MESSAGE_SIZE` | no | `8192` | Max bytes per UDP datagram or newline-delimited TCP frame. Oversized newline-delimited TCP frames are dropped and the connection stays open; oversized unterminated frames are dropped and the connection is closed. |
+| `SYSLOG_MAX_TCP_CONNECTIONS` | no | `1024` | Maximum simultaneous TCP syslog connections |
+| `SYSLOG_TCP_IDLE_TIMEOUT_SECS` | no | `300` | Idle timeout per TCP read before closing inactive connections |
 | `SYSLOG_BATCH_SIZE` | no | `100` | Number of messages per batch write |
 | `SYSLOG_FLUSH_INTERVAL` | no | `500` | Batch flush interval in milliseconds |
 
@@ -442,6 +444,8 @@ allow_insecure_http = true
 ```
 
 The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to syslog-mcp, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
+
+Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. The expected stored `source_ip` shape is `docker://<host>/<container>/<stream>`.
 
 #### Storage
 
@@ -681,6 +685,19 @@ If enforcement cannot free enough space (e.g. the DB is empty but storage is sti
 
 Disable either guard by setting its trigger to `0` (also set the recovery target to `0`).
 
+### Heavy SQLite migrations
+
+Most schema setup runs automatically during startup. Heavy migrations, such as creating a new index on a populated multi-million-row `logs` table, can hold SQLite's write lock for several minutes before syslog listeners and `/health` are available. During that window TCP senders may back up and UDP packets may be dropped by kernel buffers.
+
+Before upgrading a populated database:
+
+1. Take a WAL-safe backup with `scripts/backup.sh` or `sqlite3 /data/syslog.db ".backup /data/syslog-pre-upgrade.db"`.
+2. Schedule a short ingest maintenance window for large databases.
+3. Start the new version and monitor logs for `Migration N: starting ...` and `Migration N: ... created`.
+4. Keep the previous image or binary available until `/health` returns `ok` and `syslog stats` reports sane counts.
+
+See [docs/runbooks/deploy.md](docs/runbooks/deploy.md) for the deploy checklist.
+
 ---
 
 ## Batch Writer
@@ -821,6 +838,14 @@ just check
 just lint
 just test
 ```
+
+Run the live smoke test against a running server:
+
+```bash
+bash scripts/smoke-test.sh
+```
+
+The smoke test seeds UDP and TCP syslog messages and verifies MCP search/tail results. Docker ingest coverage is handled by the explicit integration path described in the Docker socket-proxy ingest section because it requires an external Docker-compatible log endpoint.
 
 ---
 
