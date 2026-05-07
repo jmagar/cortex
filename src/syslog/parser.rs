@@ -169,8 +169,11 @@ pub(super) fn parse_syslog(raw: &str, source_ip: String) -> db::LogBatchEntry {
 
     let timestamp = msg
         .timestamp
-        .map(|dt| dt.with_timezone(&Utc).to_rfc3339())
-        .unwrap_or_else(|| Utc::now().to_rfc3339());
+        .map(|dt| {
+            dt.with_timezone(&Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        })
+        .unwrap_or_else(|| Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
 
     let raw_hostname = msg.hostname.map(|h| h.to_string()).unwrap_or_default();
     let raw_app_name = msg.appname.map(|a| a.to_string());

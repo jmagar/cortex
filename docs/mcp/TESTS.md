@@ -41,6 +41,11 @@ just test-live
 
 The smoke test (`scripts/smoke-test.sh`) exercises all `syslog` actions via mcporter.
 
+Action registry covered by live/script references: `search`, `tail`, `errors`,
+`hosts`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`,
+`patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`,
+`anomalies`, `compare`, `help`.
+
 ### mcporter-based testing
 
 ```bash
@@ -53,6 +58,17 @@ mcporter call --config config/mcporter.json syslog.syslog action=status
 mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
 mcporter call --config config/mcporter.json syslog.syslog action=search query=error limit=5
 mcporter call --config config/mcporter.json syslog.syslog action=hosts
+mcporter call --config config/mcporter.json syslog.syslog action=apps
+mcporter call --config config/mcporter.json syslog.syslog action=source_ips
+mcporter call --config config/mcporter.json syslog.syslog action=timeline
+mcporter call --config config/mcporter.json syslog.syslog action=patterns
+mcporter call --config config/mcporter.json syslog.syslog action=context hostname=host timestamp=2026-01-01T00:00:00Z
+mcporter call --config config/mcporter.json syslog.syslog action=get id=1
+mcporter call --config config/mcporter.json syslog.syslog action=ingest_rate
+mcporter call --config config/mcporter.json syslog.syslog action=silent_hosts
+mcporter call --config config/mcporter.json syslog.syslog action=clock_skew
+mcporter call --config config/mcporter.json syslog.syslog action=anomalies
+mcporter call --config config/mcporter.json syslog.syslog action=compare a_from=2026-01-01T00:00:00Z a_to=2026-01-01T01:00:00Z b_from=2026-01-01T01:00:00Z b_to=2026-01-01T02:00:00Z
 ```
 
 ### curl-based testing

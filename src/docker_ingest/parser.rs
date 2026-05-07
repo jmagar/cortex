@@ -48,7 +48,10 @@ fn split_docker_timestamp(raw: &str) -> (String, String) {
         Some((ts, rest)) if chrono::DateTime::parse_from_rfc3339(ts).is_ok() => {
             (ts.to_string(), rest.to_string())
         }
-        _ => (chrono::Utc::now().to_rfc3339(), raw.to_string()),
+        _ => (
+            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            raw.to_string(),
+        ),
     }
 }
 
