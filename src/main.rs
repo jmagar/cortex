@@ -73,6 +73,14 @@ async fn serve_mcp() -> Result<()> {
     }
     app = app.merge(runtime.otlp_router());
     info!("OTLP receiver mounted at /v1/logs (and /v1/metrics → 200, /v1/traces → 404)");
+    if runtime.config.mcp.api_token.is_none() && !runtime.config.mcp.host.starts_with("127.") {
+        tracing::warn!(
+            bind = %runtime.config.mcp.bind_addr(),
+            "OTLP /v1/logs is mounted WITHOUT authentication on a non-loopback bind. \
+             Anyone reachable on this address can write log records. \
+             Set SYSLOG_MCP_TOKEN to require Bearer auth."
+        );
+    }
     app = app.layer(tower_http::trace::TraceLayer::new_for_http());
 
     let mcp_bind = runtime.config.mcp.bind_addr();
