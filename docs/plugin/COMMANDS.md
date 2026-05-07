@@ -1,6 +1,6 @@
 # Slash Commands -- syslog-mcp
 
-Two slash commands are defined in `plugins/commands/`. They are installed as `/syslog:dr` and `/syslog:deploy-dropins` in Claude Code. (`dr` is short for "doctor" — renamed to avoid colliding with Claude Code's built-in `/doctor`.)
+Five slash commands are defined in `plugins/commands/`. They are installed under the `/syslog:` prefix in Claude Code. (`dr` is short for "doctor" — renamed to avoid colliding with Claude Code's built-in `/doctor`.)
 
 ## Commands
 
@@ -8,6 +8,9 @@ Two slash commands are defined in `plugins/commands/`. They are installed as `/s
 | --- | --- | --- |
 | `/syslog:dr` | `plugins/commands/dr.md` | Comprehensive health check: environment, config quality, storage, ports, service, MCP, listener, fleet hosts. Doubles as a first-run preflight after configuring the plugin. |
 | `/syslog:deploy-dropins` | `plugins/commands/deploy-dropins.md` | Push rsyslog forwarding drop-ins to fleet hosts via SSH (one-shot setup) |
+| `/syslog:redeploy` | `plugins/commands/redeploy.md` | Re-run `plugin-setup.sh` directly — apply config changes without waiting for SessionStart or ConfigChange |
+| `/syslog:logs [N\|--follow]` | `plugins/commands/logs.md` | Tail or follow service logs; mode-aware (docker compose logs vs journalctl --user) |
+| `/syslog:cutover docker\|systemd` | `plugins/commands/cutover.md` | One-shot deploy-mode switch — stops the running mode, starts the chosen mode, verifies health, with rollback guidance |
 
 ## `/syslog:dr`
 
@@ -37,6 +40,25 @@ For each host in `fleet_hosts` (plugin config):
 4. Outputs a per-host results table
 
 Idempotent — re-running overwrites the existing drop-in with the current `server_url` and `syslog_port`.
+
+## `/syslog:redeploy`
+
+Manually triggers `${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh` — equivalent to what `SessionStart` runs automatically and what `ConfigChange` runs on `/plugin` save. Use when iterating on the plugin or when an automated trigger didn't fire. Verifies `/health`, container/unit state on completion, and points at `/syslog:dr` if anything failed.
+
+## `/syslog:logs`
+
+Mode-aware tail of the service binary's own logs (NOT the syslog database — for that, use `syslog action=tail`).
+
+- No args → last 50 lines, no follow
+- Bare integer (e.g. `200`) → that many lines, no follow
+- `--follow` / `-f` → 50 lines + stream new ones live
+- Both → N lines + stream
+
+In docker mode it uses `docker compose logs` from the plugin's compose dir; in systemd mode it uses `journalctl --user -u syslog-mcp.service`.
+
+## `/syslog:cutover`
+
+Switch deploy mode (`docker` ↔ `systemd`) in one command. Updates `~/.claude/settings.json`'s `use_docker` directly, runs `plugin-setup.sh` (which now stops the other mode before starting the chosen one), and verifies health afterwards. Includes a rollback snippet if the cutover fails midway. Both modes share the same `${data_dir}/syslog.db` file, so no log data is lost.
 
 ## See also
 

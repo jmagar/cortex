@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-05-07
+
+### Added
+
+- **Three new slash commands** for routine server management:
+  - `/syslog:redeploy` — runs `plugin-setup.sh` directly so config
+    changes apply without waiting for `SessionStart` or `ConfigChange`
+  - `/syslog:logs [N|--follow]` — mode-aware tail/follow of service
+    logs (`docker compose logs` or `journalctl --user`)
+  - `/syslog:cutover docker|systemd` — one-shot deploy-mode switch
+    with health verification and rollback guidance
+- **`syslog-troubleshoot` skill** (`plugins/skills/syslog-troubleshoot/`)
+  — auto-triggers when the user reports MCP connection failures,
+  missing logs from specific hosts, service crashes, or vague
+  "syslog isn't working" reports. Walks a decision tree (MCP /
+  ingest / service / unknown) instead of running every diagnostic;
+  uses runtime observability counters from v0.13.0 to localize
+  ingest-path vs writer-path failures.
+- Updated `CLAUDE.md` and `docs/plugin/COMMANDS.md` command tables
+  to register the three new commands.
+
 ## [0.13.0] - 2026-05-07
 
 ### Added
