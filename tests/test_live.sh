@@ -17,7 +17,7 @@
 #   SYSLOG_MCP_TOKEN       Bearer token for auth (optional — server may run without it)
 #   PORT                   Override server port (default: 3100)
 #
-# Action coverage reference:
+# Action inventory reference (not every action is exercised by this live test):
 #   syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate,
 #   syslog stats, syslog status, syslog apps, syslog source_ips,
 #   syslog timeline, syslog patterns, syslog context, syslog get,

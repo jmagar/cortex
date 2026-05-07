@@ -33,7 +33,7 @@ Full-text search across all syslog messages. Uses SQLite FTS5 with porter stemmi
 
 Required argument: `action = "search"`
 
-Optional arguments: `query`, `hostname`, `source_ip`, `severity`, `app_name`, `from`, `to`, `limit`.
+Optional arguments: `query`, `hostname`, `source_ip`, `severity`, `app_name`, `facility`, `process_id`, `from`, `to`, `limit`.
 
 ## syslog tail
 
@@ -41,7 +41,7 @@ Get the N most recent log entries. Equivalent to `tail -f` across all hosts.
 
 Required argument: `action = "tail"`
 
-Optional arguments: `hostname`, `source_ip`, `app_name`, `n`.
+Optional arguments: `hostname`, `source_ip`, `app_name`, `severity_min`, `n`.
 
 ## syslog errors
 
@@ -49,7 +49,9 @@ Get a summary of errors and warnings across all hosts in a time window, grouped 
 
 Required argument: `action = "errors"`
 
-Optional arguments: `from`, `to`.
+Optional arguments: `from`, `to`, `group_by`.
+
+`group_by` currently supports `app_name` for hostname + app + severity grouping.
 
 ## syslog hosts
 

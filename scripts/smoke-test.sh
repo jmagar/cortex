@@ -9,7 +9,7 @@
 #
 # Requirements: mcporter, nc, curl, python3
 #
-# Action coverage reference:
+# Action inventory reference (not every action is exercised by this smoke test):
 #   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
 #   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
 #   mcp_call source_ips, mcp_call timeline, mcp_call patterns, mcp_call context,

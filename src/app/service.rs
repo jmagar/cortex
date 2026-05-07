@@ -210,12 +210,16 @@ impl SyslogService {
         let apps = self
             .run_db(move |pool| db::list_apps(pool, req.hostname.as_deref()))
             .await?;
-        Ok(ListAppsResponse { apps })
+        Ok(ListAppsResponse {
+            apps: apps.into_iter().map(Into::into).collect(),
+        })
     }
 
     pub async fn list_source_ips(&self) -> ServiceResult<ListSourceIpsResponse> {
         let source_ips = self.run_db(db::list_source_ips).await?;
-        Ok(ListSourceIpsResponse { source_ips })
+        Ok(ListSourceIpsResponse {
+            source_ips: source_ips.into_iter().map(Into::into).collect(),
+        })
     }
 
     pub async fn timeline(&self, req: TimelineRequest) -> ServiceResult<TimelineResponse> {
@@ -257,7 +261,7 @@ impl SyslogService {
         Ok(TimelineResponse {
             bucket: bucket_str,
             group_by: group_by_label,
-            points,
+            points: points.into_iter().map(Into::into).collect(),
         })
     }
 
@@ -285,7 +289,7 @@ impl SyslogService {
             })
             .await?;
         Ok(PatternsResponse {
-            patterns,
+            patterns: patterns.into_iter().map(Into::into).collect(),
             scanned,
             truncated,
         })
@@ -381,7 +385,7 @@ impl SyslogService {
             .run_db(move |pool| db::fetch_log_by_id(pool, id))
             .await?
             .ok_or_else(|| ServiceError::InvalidInput(format!("No log found for id {id}")))?;
-        Ok(GetLogResponse { log: row })
+        Ok(GetLogResponse { log: row.into() })
     }
 
     pub async fn ingest_rate(&self, req: IngestRateRequest) -> ServiceResult<IngestRateResponse> {
@@ -414,9 +418,9 @@ impl SyslogService {
         let (buckets, by_host, write_blocked) = result;
         Ok(IngestRateResponse {
             now,
-            buckets,
+            buckets: buckets.into(),
             write_blocked,
-            by_host,
+            by_host: by_host.map(|rows| rows.into_iter().map(Into::into).collect()),
         })
     }
 
@@ -438,7 +442,7 @@ impl SyslogService {
             silent_minutes,
             cutoff,
             now,
-            hosts,
+            hosts: hosts.into_iter().map(Into::into).collect(),
         })
     }
 
@@ -453,7 +457,7 @@ impl SyslogService {
         let hosts = self.run_db(move |pool| db::clock_skew(pool, &q)).await?;
         Ok(ClockSkewResponse {
             since: since_str,
-            hosts,
+            hosts: hosts.into_iter().map(Into::into).collect(),
         })
     }
 
@@ -484,7 +488,7 @@ impl SyslogService {
             baseline_to,
             recent_minutes,
             baseline_minutes,
-            hosts,
+            hosts: hosts.into_iter().map(Into::into).collect(),
         })
     }
 
@@ -509,8 +513,8 @@ impl SyslogService {
         let delta_total_logs = b.total_logs - a.total_logs;
         let delta_total_errors = b.total_errors - a.total_errors;
         Ok(CompareResponse {
-            a,
-            b,
+            a: a.into(),
+            b: b.into(),
             delta_total_logs,
             delta_total_errors,
         })

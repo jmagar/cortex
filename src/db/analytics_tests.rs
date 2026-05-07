@@ -10,6 +10,17 @@ fn test_pool() -> (DbPool, tempfile::TempDir) {
 }
 
 fn entry(ts: &str, host: &str, severity: &str, app: Option<&str>, msg: &str) -> LogBatchEntry {
+    entry_with_source_ip(ts, host, severity, app, msg, "127.0.0.1:514")
+}
+
+fn entry_with_source_ip(
+    ts: &str,
+    host: &str,
+    severity: &str,
+    app: Option<&str>,
+    msg: &str,
+    source_ip: &str,
+) -> LogBatchEntry {
     LogBatchEntry {
         timestamp: ts.to_string(),
         hostname: host.to_string(),
@@ -19,7 +30,7 @@ fn entry(ts: &str, host: &str, severity: &str, app: Option<&str>, msg: &str) -> 
         process_id: None,
         message: msg.to_string(),
         raw: format!("<14>{ts} {host} {}: {msg}", app.unwrap_or("test")),
-        source_ip: "127.0.0.1:514".to_string(),
+        source_ip: source_ip.to_string(),
         docker_checkpoint: None,
     }
 }
@@ -244,25 +255,41 @@ fn summarize_range_counts_errors() {
 #[test]
 fn list_source_ips_aggregates_hostnames() {
     let (pool, _d) = test_pool();
-    let make = |ts: &str, host: &str, ip: &str| LogBatchEntry {
-        timestamp: ts.to_string(),
-        hostname: host.to_string(),
-        facility: None,
-        severity: "info".to_string(),
-        app_name: None,
-        process_id: None,
-        message: "x".to_string(),
-        raw: "x".to_string(),
-        source_ip: ip.to_string(),
-        docker_checkpoint: None,
-    };
     insert_logs_batch(
         &pool,
         &[
-            make("2026-01-01T00:00:01Z", "h1", "10.0.0.1:514"),
-            make("2026-01-01T00:00:02Z", "h2", "10.0.0.1:514"),
-            make("2026-01-01T00:00:03Z", "h2", "10.0.0.1:514"),
-            make("2026-01-01T00:00:04Z", "h3", "10.0.0.2:514"),
+            entry_with_source_ip(
+                "2026-01-01T00:00:01Z",
+                "h1",
+                "info",
+                None,
+                "x",
+                "10.0.0.1:514",
+            ),
+            entry_with_source_ip(
+                "2026-01-01T00:00:02Z",
+                "h2",
+                "info",
+                None,
+                "x",
+                "10.0.0.1:514",
+            ),
+            entry_with_source_ip(
+                "2026-01-01T00:00:03Z",
+                "h2",
+                "info",
+                None,
+                "x",
+                "10.0.0.1:514",
+            ),
+            entry_with_source_ip(
+                "2026-01-01T00:00:04Z",
+                "h3",
+                "info",
+                None,
+                "x",
+                "10.0.0.2:514",
+            ),
         ],
     )
     .unwrap();

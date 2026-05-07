@@ -127,6 +127,8 @@ pub fn tail_logs(
                     idx += 1;
                 }
             }
+            idx += levels.len();
+            debug_assert_eq!(bindings.len() + 1, idx);
         }
     }
 

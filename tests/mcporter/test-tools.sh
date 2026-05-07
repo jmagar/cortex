@@ -2,7 +2,8 @@
 # =============================================================================
 # test-tools.sh — Integration smoke-test for syslog-mcp MCP server tools
 #
-# Exercises broad non-destructive coverage of the action-based syslog MCP tool:
+# Exercises broad non-destructive checks for the action-based syslog MCP tool.
+# Action inventory reference (not every action is exercised below):
 #   syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate,
 #   syslog stats, syslog status, syslog apps, syslog source_ips,
 #   syslog timeline, syslog patterns, syslog context, syslog get,
