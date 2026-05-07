@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-05-07
+
+### Added
+
+- Added bounded TCP syslog frame handling with oversized-frame regression coverage.
+- Added fail-fast validation for zero-valued syslog ingest settings.
+- Added Docker ingest supervisor policy/backoff tests, sidecar supervisor tests,
+  and Docker ingest producer observability in status/stats.
+- Added TCP ingest smoke coverage and a tracked ingestion full-review artifact.
+
+### Changed
+
+- Hardened Docker ingest reconnect backoff with deterministic jitter and durable
+  stream-duration reset semantics.
+- Improved failed batch handling so retryable storage failures retain bounded
+  rows, while permanent failures retry chunks and isolate bad rows.
+- Capped ingest summary cardinality with overflow buckets while preserving total
+  log counts.
+- Documented Docker ingest trust boundaries and heavy SQLite migration runbooks.
+
 ## [0.14.1] - 2026-05-07
 
 ### Fixed
