@@ -33,7 +33,13 @@ ssh <host> 'sudo mv /tmp/10-imjournal.conf /etc/rsyslog.d/ \
   && sudo rsyslogd -N1 \
   && sudo systemctl restart rsyslog'
 
-# AI transcripts — dookie, steamy-wsl, vivobook-wsl ONLY (skip squirts)
+# imfile loader — required before any file-tail drop-ins
+scp deploy/rsyslog/11-imfile.conf <host>:/tmp/
+ssh <host> 'sudo mv /tmp/11-imfile.conf /etc/rsyslog.d/ \
+  && sudo rsyslogd -N1 \
+  && sudo systemctl restart rsyslog'
+
+# AI transcripts — dookie, squirts, steamy-wsl, vivobook-wsl
 scp deploy/rsyslog/40-ai-transcripts.conf <host>:/tmp/
 ssh <host> 'sudo mv /tmp/40-ai-transcripts.conf /etc/rsyslog.d/ \
   && sudo rsyslogd -N1 \
@@ -73,9 +79,50 @@ ssh squirts 'find /mnt /opt /srv -name querylog.json    2>/dev/null | head -3'
 
 Edit each `.conf` to substitute the real paths before scp'ing.
 
+### AppArmor + file permissions
+
+Ubuntu's `rsyslogd` AppArmor profile allows `/var/log/**` by default, but not
+the `/mnt/appdata/**` service paths or normal `~/.claude`, `~/.codex`, and
+`~/.gemini` transcript paths on squirts. Install the local profile override and
+grant the `syslog` user read ACLs for private Authelia/AdGuard logs and AI
+transcript trees before restarting rsyslog:
+
+```bash
+scp deploy/apparmor/usr.sbin.rsyslogd.syslog-mcp squirts:/tmp/
+ssh squirts 'sudo install -o root -g root -m 0644 \
+  /tmp/usr.sbin.rsyslogd.syslog-mcp /etc/apparmor.d/local/usr.sbin.rsyslogd \
+  && sudo apparmor_parser -r /etc/apparmor.d/usr.sbin.rsyslogd \
+  && sudo setfacl -m u:syslog:rx \
+    /mnt/appdata/authelia /mnt/appdata/authelia/logs \
+    /mnt/appdata/adguard /mnt/appdata/adguard/var /mnt/appdata/adguard/var/data \
+  && sudo setfacl -m u:syslog:r \
+    /mnt/appdata/authelia/logs/authelia.log \
+    /mnt/appdata/adguard/var/data/querylog.json \
+  && sudo setfacl -d -m u:syslog:rx \
+    /mnt/appdata/authelia/logs /mnt/appdata/adguard/var /mnt/appdata/adguard/var/data \
+  && sudo setfacl -m u:syslog:rx \
+    /home/jmagar /home/jmagar/.claude /home/jmagar/.claude/projects \
+    /home/jmagar/.codex /home/jmagar/.codex/sessions \
+    /home/jmagar/.gemini /home/jmagar/.gemini/tmp \
+  && sudo find /home/jmagar/.claude/projects /home/jmagar/.codex/sessions /home/jmagar/.gemini/tmp \
+    -type d -exec setfacl -m u:syslog:rx {} + \
+  && sudo find /home/jmagar/.claude/projects /home/jmagar/.codex/sessions \
+    -type f -name "*.jsonl" -exec setfacl -m u:syslog:r {} + \
+  && sudo find /home/jmagar/.gemini/tmp \
+    -type f -name "session-*.json" -exec setfacl -m u:syslog:r {} + \
+  && sudo find /home/jmagar/.claude/projects /home/jmagar/.codex/sessions /home/jmagar/.gemini/tmp \
+    -type d -exec setfacl -d -m u:syslog:rx {} +'
+```
+
 ### Deploy
 
 ```bash
+# Shared imfile loader. Install once before source-specific drop-ins.
+scp deploy/rsyslog/11-imfile.conf squirts:/tmp/
+ssh squirts 'sudo mv /tmp/11-imfile.conf /etc/rsyslog.d/ \
+  && sudo rsyslogd -N1 \
+  && sudo systemctl restart rsyslog'
+
 # 1. authelia
 scp deploy/rsyslog/35-authelia.conf squirts:/tmp/
 ssh squirts 'sudo mv /tmp/35-authelia.conf /etc/rsyslog.d/ \

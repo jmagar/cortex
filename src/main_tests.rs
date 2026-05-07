@@ -9,6 +9,10 @@ fn mode_parse_accepts_single_binary_transport_commands() {
     );
     assert_eq!(Mode::parse(vec!["mcp".into()]).unwrap(), Mode::StdioMcp);
     assert_eq!(Mode::parse(vec!["--help".into()]).unwrap(), Mode::Help);
+    assert_eq!(
+        Mode::parse(vec!["--version".into()]).unwrap(),
+        Mode::Version
+    );
     assert!(matches!(
         Mode::parse(vec!["stats".into(), "--json".into()]).unwrap(),
         Mode::Cli(_)

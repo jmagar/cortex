@@ -9,11 +9,26 @@ plugins/
   skills/
     syslog/
       SKILL.md           # Skill definition with tool reference and workflows
+    syslog-dr/
+      SKILL.md           # Full deployment diagnostic workflow
+    syslog-deploy-dropins/
+      SKILL.md           # Fleet rsyslog drop-in deployment workflow
+    ...
 ```
 
-## Skill: syslog
+## Skills
 
-The `syslog` skill provides the client-facing documentation for the syslog-mcp tool. It is consumed by Claude Code, Codex, and Gemini to understand available capabilities.
+| Skill | Purpose |
+| --- | --- |
+| `syslog` | Client-facing documentation for the syslog MCP tool and its action dispatch. |
+| `syslog-troubleshoot` | Narrow troubleshooting decision tree for MCP, ingest, service, and missing-host issues. |
+| `syslog-report` | Generate actionable 24-hour markdown reports from syslog MCP evidence. |
+| `syslog-dr` | Comprehensive deployment health check, including runtime freshness. |
+| `syslog-deploy-dropins` | Deploy rsyslog forwarding drop-ins to fleet hosts over SSH. |
+| `syslog-redeploy` | Re-run the plugin setup hook and verify health plus runtime freshness. |
+| `syslog-logs` | Tail or follow syslog-mcp service logs from Docker or systemd. |
+| `syslog-cutover` | Switch between Docker and systemd deployment modes and verify health. |
+| `syslog-version-check` | Check whether the running runtime matches the installed binary or image. Docker `--pull` checks after refreshing the local image; without it, Docker checks only the local cache. |
 
 ### Contents
 
@@ -28,17 +43,17 @@ The `syslog` skill provides the client-facing documentation for the syslog-mcp t
 
 ```bash
 just validate-skills
-# Checks: plugins/skills/syslog/SKILL.md exists
+# Checks skill definitions under plugins/skills/
 ```
 
 ## Adding a skill
 
-syslog-mcp ships a single skill. If additional skills are needed:
+If additional skills are needed:
 
 1. Create `plugins/skills/<name>/SKILL.md`
 2. Add frontmatter with `name` and `description`
 3. Document tools, workflows, and examples
-4. Update `just validate-skills` to check the new path
+4. Run `just validate-skills`
 
 ## See also
 

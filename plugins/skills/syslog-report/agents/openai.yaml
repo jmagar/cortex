@@ -1,0 +1,9 @@
+interface:
+  display_name: "Syslog Report"
+  short_description: "Summarize 24h syslog activity"
+  default_prompt: "Use $syslog-report to check all device logs from the last 24 hours and write an actionable markdown report."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "syslog"
+      description: "Syslog MCP server exposing the syslog action-dispatch tool"

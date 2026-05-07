@@ -11,7 +11,6 @@
     "homelab"
   ],
   "mcpServers": "./plugins/.mcp.json",
-  "commands": "./plugins/commands",
   "hooks": "./plugins/hooks/hooks.json",
   "skills": "./plugins/skills",
   "userConfig": {
@@ -87,6 +86,20 @@
       "default": 90,
       "min": 0
     },
+    "batch_size": {
+      "type": "number",
+      "title": "Ingest batch size",
+      "description": "Number of parsed syslog messages written per SQLite batch. Higher values reduce transaction overhead during bursts but can add write latency. Server mode only.",
+      "default": 100,
+      "min": 1
+    },
+    "write_channel_capacity": {
+      "type": "number",
+      "title": "Ingest queue capacity",
+      "description": "In-memory parsed-message queue capacity before listener backpressure. Increase this for bursty senders like journald backfill or high-volume network devices. Server mode only.",
+      "default": 10000,
+      "min": 1
+    },
     "docker_ingest_enabled": {
       "type": "boolean",
       "title": "Enable Docker log ingestion",
@@ -97,7 +110,7 @@
     "fleet_hosts": {
       "type": "string",
       "title": "Fleet hosts",
-      "description": "Hostnames or SSH config aliases for hosts in your fleet — used by TWO features. (1) Docker ingest: when docker_ingest_enabled is true, each entry becomes the docker-socket-proxy URL http://<host>:2375. (2) /syslog:deploy-dropins command: pushes rsyslog forwarding drop-ins to each host over SSH so they start forwarding logs here. Entries must be reachable by name (resolvable DNS or in /etc/hosts) AND, for deploy-dropins, configured in ~/.ssh/config with a working key. Add one entry per host, e.g. dookie, squirts, tootie. Leave empty if you don't want either feature.",
+      "description": "Hostnames or SSH config aliases for hosts in your fleet — used by TWO features. (1) Docker ingest: when docker_ingest_enabled is true, each entry becomes the docker-socket-proxy URL http://<host>:2375. (2) The syslog-deploy-dropins skill pushes rsyslog forwarding drop-ins to each host over SSH so they start forwarding logs here. Entries must be reachable by name (resolvable DNS or in /etc/hosts) AND, for deploy-dropins, configured in ~/.ssh/config with a working key. Add one entry per host, e.g. dookie, squirts, tootie. Leave empty if you don't want either feature.",
       "required": true,
       "multiple": true
     }

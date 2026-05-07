@@ -1,0 +1,4 @@
+interface:
+  display_name: "Syslog Cutover"
+  short_description: "Switch syslog deployment modes"
+  default_prompt: "Use $syslog-cutover to switch syslog-mcp between Docker and systemd deployment modes."
