@@ -141,16 +141,13 @@ EOF
     unit_changed=true
   fi
 
-  local env_changed=false
-  write_env && env_changed=true || true
+  write_env || true
 
   if [[ "${unit_changed}" == "true" ]]; then
     systemctl --user daemon-reload
     systemctl --user enable --now syslog-mcp
-  elif [[ "${env_changed}" == "true" ]]; then
+  else
     systemctl --user restart syslog-mcp
-  elif ! systemctl --user is-active --quiet syslog-mcp; then
-    systemctl --user start syslog-mcp
   fi
 
   echo "syslog-mcp: systemd service running on ${MCP_HOST}:${MCP_PORT}"
