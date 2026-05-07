@@ -67,11 +67,12 @@ impl SyslogService {
     }
 
     pub async fn search_logs(&self, req: SearchLogsRequest) -> ServiceResult<SearchLogsResponse> {
+        let severity = validate_optional_severity(req.severity)?;
         let params = SearchParams {
             query: req.query,
             hostname: req.hostname,
             source_ip: req.source_ip,
-            severity: req.severity,
+            severity,
             severity_in: None,
             app_name: req.app_name,
             from: parse_optional_timestamp(req.from.as_deref(), "from")?,
@@ -179,6 +180,20 @@ impl SyslogService {
             .into();
         Ok(stats)
     }
+}
+
+fn validate_optional_severity(severity: Option<String>) -> ServiceResult<Option<String>> {
+    let Some(severity) = severity else {
+        return Ok(None);
+    };
+    if db::severity_to_num(&severity).is_some() {
+        return Ok(Some(severity));
+    }
+    Err(ServiceError::InvalidInput(format!(
+        "Invalid severity '{}'. Must be one of: {}",
+        severity,
+        db::SEVERITY_LEVELS.join(", ")
+    )))
 }
 
 #[cfg(test)]

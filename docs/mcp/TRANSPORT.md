@@ -117,7 +117,7 @@ SYSLOG_MCP_ALLOWED_ORIGINS=https://syslog.example.com
 
 `syslog mcp` is a local query-only MCP server over stdin/stdout:
 
-- It exposes the same seven read-only tools as HTTP.
+- It exposes the same one read-only `syslog` tool with eight actions as HTTP.
 - It loads `RuntimeCore::load_query_only()`.
 - It does not start UDP/TCP syslog listeners.
 - It does not start the HTTP server.

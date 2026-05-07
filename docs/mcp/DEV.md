@@ -63,7 +63,7 @@ syslog-mcp/
 
 ## Adding a new MCP tool
 
-1. **Define the action schema** -- add or update action-specific properties in the `syslog` schema in `src/mcp/schemas.rs`.
+1. **Define the action schema** -- add the action to `SYSLOG_ACTIONS` and update any action-specific properties in `src/mcp/schemas.rs`.
 2. **Add adapter entry** -- add a match arm in `tool_syslog()`.
 3. **Implement handler** -- write an async function that calls `SyslogService`.
 4. **Add database query** -- implement the query function in `src/db.rs` with parameterized SQL.
@@ -95,9 +95,9 @@ RUST_LOG=syslog_mcp=debug,tower_http=info cargo run
 ### mcporter testing
 
 ```bash
-mcporter list syslog-mcp --config config/mcporter.json
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=stats
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=tail n=10
+mcporter list syslog --config config/mcporter.json
+mcporter call --config config/mcporter.json syslog.syslog action=stats
+mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
 ```
 
 ### MCP Inspector
