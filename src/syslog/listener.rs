@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
@@ -11,6 +11,13 @@ use crate::ingest::IngestTx;
 use super::parser::parse_syslog;
 use super::writer::source_addr_ip;
 use super::WRITE_CHANNEL_CAPACITY;
+
+#[derive(Debug)]
+enum TcpFrame {
+    Line(String),
+    Oversize { line_bytes: usize, terminated: bool },
+    Eof,
+}
 
 /// UDP syslog receiver.
 pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) -> Result<()> {
@@ -34,23 +41,24 @@ pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) 
                     "UDP syslog packet received"
                 );
 
-                let at_capacity = ingest.capacity() == 0;
-                if at_capacity && !backpressure {
-                    warn!(
-                        src = %addr,
-                        queue_depth = ingest.queue_depth(),
-                        channel_capacity = WRITE_CHANNEL_CAPACITY,
-                        "syslog write channel full — backpressure applied"
-                    );
-                    backpressure = true;
-                } else if !at_capacity && backpressure {
-                    info!(
-                        src = %addr,
-                        queue_depth = ingest.queue_depth(),
-                        channel_capacity = WRITE_CHANNEL_CAPACITY,
-                        "syslog write channel cleared — backpressure lifted"
-                    );
-                    backpressure = false;
+                match update_backpressure(&mut backpressure, ingest.capacity() == 0) {
+                    Some(BackpressureTransition::Applied) => {
+                        warn!(
+                            src = %addr,
+                            queue_depth = ingest.queue_depth(),
+                            channel_capacity = WRITE_CHANNEL_CAPACITY,
+                            "syslog write channel full — backpressure applied"
+                        );
+                    }
+                    Some(BackpressureTransition::Cleared) => {
+                        info!(
+                            src = %addr,
+                            queue_depth = ingest.queue_depth(),
+                            channel_capacity = WRITE_CHANNEL_CAPACITY,
+                            "syslog write channel cleared — backpressure lifted"
+                        );
+                    }
+                    None => {}
                 }
 
                 if ingest
@@ -84,8 +92,7 @@ pub(super) async fn handle_tcp_connection(
     // Persistent forwarders like rsyslog reuse a single TCP session for many
     // syslog frames, so max_size must apply per message line, not to the whole
     // connection lifetime.
-    let reader = BufReader::new(stream);
-    let mut lines = reader.lines();
+    let mut reader = BufReader::new(stream);
     let mut backpressure = false;
     let mut line_count: u64 = 0;
     let mut total_bytes: usize = 0;
@@ -95,47 +102,37 @@ pub(super) async fn handle_tcp_connection(
         // Idle timeout is per read, not wall-clock lifetime.
         let next = tokio::time::timeout(
             tokio::time::Duration::from_secs(idle_timeout_secs),
-            lines.next_line(),
+            read_bounded_line(&mut reader, max_size),
         );
         match next.await {
-            Ok(Ok(Some(line))) => {
+            Ok(Ok(TcpFrame::Line(line))) => {
                 if line.is_empty() {
-                    continue;
-                }
-                if line.len() > max_size {
-                    observability.record_tcp_line_dropped_oversize();
-                    warn!(
-                        peer = %addr,
-                        line_count,
-                        line_bytes = line.len(),
-                        max_message_size = max_size,
-                        "Dropping oversized TCP syslog line"
-                    );
                     continue;
                 }
                 line_count += 1;
                 total_bytes += line.len();
                 observability.record_tcp_line(line.len());
 
-                let at_capacity = ingest.capacity() == 0;
-                if at_capacity && !backpressure {
-                    warn!(
-                        peer = %addr,
-                        queue_depth = ingest.queue_depth(),
-                        channel_capacity = WRITE_CHANNEL_CAPACITY,
-                        line_count,
-                        "syslog write channel full — backpressure applied"
-                    );
-                    backpressure = true;
-                } else if !at_capacity && backpressure {
-                    info!(
-                        peer = %addr,
-                        queue_depth = ingest.queue_depth(),
-                        channel_capacity = WRITE_CHANNEL_CAPACITY,
-                        line_count,
-                        "syslog write channel cleared — backpressure lifted"
-                    );
-                    backpressure = false;
+                match update_backpressure(&mut backpressure, ingest.capacity() == 0) {
+                    Some(BackpressureTransition::Applied) => {
+                        warn!(
+                            peer = %addr,
+                            queue_depth = ingest.queue_depth(),
+                            channel_capacity = WRITE_CHANNEL_CAPACITY,
+                            line_count,
+                            "syslog write channel full — backpressure applied"
+                        );
+                    }
+                    Some(BackpressureTransition::Cleared) => {
+                        info!(
+                            peer = %addr,
+                            queue_depth = ingest.queue_depth(),
+                            channel_capacity = WRITE_CHANNEL_CAPACITY,
+                            line_count,
+                            "syslog write channel cleared — backpressure lifted"
+                        );
+                    }
+                    None => {}
                 }
                 debug!(
                     peer = %addr,
@@ -158,7 +155,25 @@ pub(super) async fn handle_tcp_connection(
                     break "write_channel_closed";
                 }
             }
-            Ok(Ok(None)) => break "eof",
+            Ok(Ok(TcpFrame::Oversize {
+                line_bytes,
+                terminated,
+            })) => {
+                observability.record_tcp_line_dropped_oversize();
+                warn!(
+                    peer = %addr,
+                    line_count,
+                    line_bytes,
+                    max_message_size = max_size,
+                    terminated,
+                    "Dropping oversized TCP syslog line"
+                );
+                if terminated {
+                    continue;
+                }
+                break "oversized_unterminated_line";
+            }
+            Ok(Ok(TcpFrame::Eof)) => break "eof",
             Ok(Err(e)) => {
                 error!(peer = %addr, error = %e, "TCP syslog read error");
                 break "read_error";
@@ -179,6 +194,68 @@ pub(super) async fn handle_tcp_connection(
         "TCP syslog connection closed"
     );
     observability.record_tcp_connection_closed();
+}
+
+async fn read_bounded_line<R>(reader: &mut R, max_size: usize) -> std::io::Result<TcpFrame>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut line = Vec::with_capacity(max_size.min(8192));
+
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return if line.is_empty() {
+                Ok(TcpFrame::Eof)
+            } else {
+                Ok(TcpFrame::Line(decode_tcp_line(&line)))
+            };
+        }
+
+        if let Some(pos) = available.iter().position(|byte| *byte == b'\n') {
+            let take = pos + 1;
+            let total = line.len().saturating_add(take);
+            let payload_bytes = line
+                .len()
+                .saturating_add(pos)
+                .saturating_sub(usize::from(pos > 0 && available[pos - 1] == b'\r'));
+            if payload_bytes > max_size {
+                reader.consume(take);
+                return Ok(TcpFrame::Oversize {
+                    line_bytes: total,
+                    terminated: true,
+                });
+            }
+            line.extend_from_slice(&available[..take]);
+            reader.consume(take);
+            return Ok(TcpFrame::Line(decode_tcp_line(&line)));
+        }
+
+        let available_len = available.len();
+        let total = line.len().saturating_add(available_len);
+        if total > max_size {
+            let remaining = max_size.saturating_sub(line.len());
+            if remaining > 0 {
+                line.extend_from_slice(&available[..remaining]);
+            }
+            reader.consume(available_len);
+            return Ok(TcpFrame::Oversize {
+                line_bytes: total,
+                terminated: false,
+            });
+        }
+
+        line.extend_from_slice(available);
+        reader.consume(available_len);
+    }
+}
+
+fn decode_tcp_line(raw: &[u8]) -> String {
+    let mut end = raw.len();
+    while end > 0 && matches!(raw[end - 1], b'\n' | b'\r') {
+        end -= 1;
+    }
+    String::from_utf8_lossy(&raw[..end]).to_string()
 }
 
 /// TCP syslog receiver (newline-delimited).
@@ -260,6 +337,29 @@ pub(super) async fn tcp_listener(
         }
     }
     Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum BackpressureTransition {
+    Applied,
+    Cleared,
+}
+
+pub(super) fn update_backpressure(
+    backpressure: &mut bool,
+    at_capacity: bool,
+) -> Option<BackpressureTransition> {
+    match (at_capacity, *backpressure) {
+        (true, false) => {
+            *backpressure = true;
+            Some(BackpressureTransition::Applied)
+        }
+        (false, true) => {
+            *backpressure = false;
+            Some(BackpressureTransition::Cleared)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

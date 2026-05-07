@@ -68,6 +68,11 @@ fn defaults_are_applied_without_env_vars() {
     for key in [
         "SYSLOG_HOST",
         "SYSLOG_PORT",
+        "SYSLOG_MAX_MESSAGE_SIZE",
+        "SYSLOG_MAX_TCP_CONNECTIONS",
+        "SYSLOG_TCP_IDLE_TIMEOUT_SECS",
+        "SYSLOG_BATCH_SIZE",
+        "SYSLOG_FLUSH_INTERVAL",
         "SYSLOG_MCP_HOST",
         "SYSLOG_MCP_PORT",
         "SYSLOG_MCP_ALLOWED_HOSTS",
@@ -118,6 +123,53 @@ fn defaults_are_applied_without_env_vars() {
     assert!(cfg.docker_ingest.hosts.is_empty());
     assert_eq!(cfg.docker_ingest.reconnect_initial_ms, 1_000);
     assert_eq!(cfg.docker_ingest.reconnect_max_ms, 30_000);
+}
+
+#[test]
+#[serial]
+fn rejects_invalid_syslog_ingest_env_settings() {
+    for (key, expected) in [
+        ("SYSLOG_MAX_MESSAGE_SIZE", "max_message_size"),
+        ("SYSLOG_MAX_TCP_CONNECTIONS", "max_tcp_connections"),
+        ("SYSLOG_TCP_IDLE_TIMEOUT_SECS", "tcp_idle_timeout_secs"),
+        ("SYSLOG_BATCH_SIZE", "batch_size"),
+        ("SYSLOG_FLUSH_INTERVAL", "flush_interval"),
+    ] {
+        std::env::set_var(key, "0");
+        let result = Config::load();
+        std::env::remove_var(key);
+
+        let err = result.expect_err(&format!("Config::load should reject {key}=0"));
+        assert!(
+            err.to_string().contains(expected),
+            "expected {key}=0 error to mention {expected}, got: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_invalid_syslog_ingest_toml_settings() {
+    for (toml, expected) in [
+        ("[syslog]\nmax_message_size = 0\n", "max_message_size"),
+        ("[syslog]\nmax_tcp_connections = 0\n", "max_tcp_connections"),
+        (
+            "[syslog]\ntcp_idle_timeout_secs = 0\n",
+            "tcp_idle_timeout_secs",
+        ),
+        ("[syslog]\nbatch_size = 0\n", "batch_size"),
+        ("[syslog]\nflush_interval = 0\n", "flush_interval"),
+    ] {
+        let mut config: Config = toml::from_str(toml).unwrap();
+        let err = validate_syslog_config(&config.syslog)
+            .expect_err(&format!("validate_syslog_config should reject {toml}"));
+        assert!(
+            err.to_string().contains(expected),
+            "expected TOML error to mention {expected}, got: {err}"
+        );
+
+        config.syslog = SyslogConfig::default();
+        validate_syslog_config(&config.syslog).unwrap();
+    }
 }
 
 #[test]
