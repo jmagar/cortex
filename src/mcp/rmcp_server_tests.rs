@@ -5,7 +5,6 @@ use axum::{
     extract::Request as AxumRequest,
     http::{header, Request, StatusCode},
     middleware::{self, Next},
-    response::Response,
     Router,
 };
 use lab_auth::AuthContext;
