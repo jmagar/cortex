@@ -29,23 +29,25 @@ pub struct AppEntry {
 
 pub fn list_apps(pool: &DbPool, hostname: Option<&str>) -> Result<Vec<AppEntry>> {
     let conn = pool.get()?;
+    // first_seen / last_seen come from `received_at` (server clock) so they match
+    // how the `hosts` table is updated and aren't skewed by a misconfigured device clock.
     let (sql, want_host) = match hostname {
         Some(_) => (
             "SELECT app_name, COUNT(*), COUNT(DISTINCT hostname),
-                    MIN(timestamp), MAX(timestamp)
+                    MIN(received_at), MAX(received_at)
              FROM logs
              WHERE app_name IS NOT NULL AND app_name != '' AND hostname = ?1
              GROUP BY app_name
-             ORDER BY MAX(timestamp) DESC",
+             ORDER BY MAX(received_at) DESC",
             true,
         ),
         None => (
             "SELECT app_name, COUNT(*), COUNT(DISTINCT hostname),
-                    MIN(timestamp), MAX(timestamp)
+                    MIN(received_at), MAX(received_at)
              FROM logs
              WHERE app_name IS NOT NULL AND app_name != ''
              GROUP BY app_name
-             ORDER BY MAX(timestamp) DESC",
+             ORDER BY MAX(received_at) DESC",
             false,
         ),
     };
@@ -93,10 +95,11 @@ pub struct SourceIpEntry {
 
 pub fn list_source_ips(pool: &DbPool) -> Result<Vec<SourceIpEntry>> {
     let conn = pool.get()?;
-    // Pull (source_ip, hostname) pairs grouped, then aggregate in Rust to
-    // avoid GROUP_CONCAT blowing up for noisy senders.
+    // first_seen / last_seen come from `received_at` (server clock): for sender
+    // identity / spoof-detection use cases, the network arrival time is the
+    // verified value, while the message `timestamp` is whatever the sender claimed.
     let mut stmt = conn.prepare(
-        "SELECT source_ip, hostname, COUNT(*), MIN(timestamp), MAX(timestamp)
+        "SELECT source_ip, hostname, COUNT(*), MIN(received_at), MAX(received_at)
          FROM logs
          WHERE source_ip != ''
          GROUP BY source_ip, hostname
@@ -311,12 +314,26 @@ pub struct PatternEntry {
 /// Normalise a message into a template by replacing variable runs with
 /// placeholders. Designed to collapse near-duplicates without external regex
 /// dependencies — character-class scan only.
+///
+/// Pattern detection is byte-level (all targets — digits, hex, IPv4, UUIDs —
+/// are ASCII), but non-ASCII bytes are passed through as their proper
+/// codepoint so internationalised log messages stay valid UTF-8.
 pub fn normalize_template(msg: &str) -> String {
     let bytes = msg.as_bytes();
     let mut out = String::with_capacity(msg.len());
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
+        if !b.is_ascii() {
+            // Multi-byte UTF-8 sequence — copy the whole codepoint intact rather
+            // than splitting it into mojibake. Indexing `msg[i..]` is safe because
+            // the index lands on a char boundary (we only advance by char widths
+            // or full ASCII pattern matches).
+            let ch = msg[i..].chars().next().expect("char at boundary");
+            out.push(ch);
+            i += ch.len_utf8();
+            continue;
+        }
         // UUID: 8-4-4-4-12 hex with dashes
         if is_hex(b) && looks_like_uuid_at(bytes, i) {
             out.push_str("<uuid>");
@@ -541,7 +558,11 @@ pub fn patterns(
 // -----------------------------------------------------------------------------
 
 pub struct ContextRef {
-    pub id: i64,
+    /// `Some(id)` anchors with stable (timestamp, id) tiebreaking; `None` means
+    /// the caller only has a timestamp (e.g. `context` invoked with
+    /// `hostname` + `timestamp`), in which case the query splits cleanly on
+    /// `< timestamp` / `> timestamp`.
+    pub id: Option<i64>,
     pub hostname: String,
     pub timestamp: String,
 }
@@ -571,45 +592,83 @@ pub fn context_around(
     let before = before.min(500);
     let after = after.min(500);
 
-    // Before: timestamp < ref OR (timestamp = ref AND id < ref.id)
-    let mut before_stmt = conn.prepare(
-        "SELECT id, timestamp, hostname, facility, severity,
-                app_name, process_id, message, received_at, source_ip
-         FROM logs
-         WHERE hostname = ?1
-           AND (timestamp < ?2 OR (timestamp = ?2 AND id < ?3))
-         ORDER BY timestamp DESC, id DESC
-         LIMIT ?4",
-    )?;
-    let mut before_rows = before_stmt
-        .query_map(
-            params![
-                reference.hostname,
-                reference.timestamp,
-                reference.id,
-                before
-            ],
-            super::queries::map_row,
-        )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    // Reverse so the result reads chronologically.
-    before_rows.reverse();
+    let (mut before_rows, after_rows) = match reference.id {
+        Some(id) => {
+            // ID-anchored: stable (timestamp, id) tiebreaker — symmetrical because
+            // we know exactly which row at `timestamp` is the reference.
+            let mut before_stmt = conn.prepare(
+                "SELECT id, timestamp, hostname, facility, severity,
+                        app_name, process_id, message, received_at, source_ip
+                 FROM logs
+                 WHERE hostname = ?1
+                   AND (timestamp < ?2 OR (timestamp = ?2 AND id < ?3))
+                 ORDER BY timestamp DESC, id DESC
+                 LIMIT ?4",
+            )?;
+            let before_rows = before_stmt
+                .query_map(
+                    params![reference.hostname, reference.timestamp, id, before],
+                    super::queries::map_row,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    let mut after_stmt = conn.prepare(
-        "SELECT id, timestamp, hostname, facility, severity,
-                app_name, process_id, message, received_at, source_ip
-         FROM logs
-         WHERE hostname = ?1
-           AND (timestamp > ?2 OR (timestamp = ?2 AND id > ?3))
-         ORDER BY timestamp ASC, id ASC
-         LIMIT ?4",
-    )?;
-    let after_rows = after_stmt
-        .query_map(
-            params![reference.hostname, reference.timestamp, reference.id, after],
-            super::queries::map_row,
-        )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut after_stmt = conn.prepare(
+                "SELECT id, timestamp, hostname, facility, severity,
+                        app_name, process_id, message, received_at, source_ip
+                 FROM logs
+                 WHERE hostname = ?1
+                   AND (timestamp > ?2 OR (timestamp = ?2 AND id > ?3))
+                 ORDER BY timestamp ASC, id ASC
+                 LIMIT ?4",
+            )?;
+            let after_rows = after_stmt
+                .query_map(
+                    params![reference.hostname, reference.timestamp, id, after],
+                    super::queries::map_row,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            (before_rows, after_rows)
+        }
+        None => {
+            // Timestamp-anchored: no row identity, so split strictly on the
+            // timestamp boundary. Rows that share the exact reference timestamp
+            // are excluded from both sides rather than dumped onto one —
+            // symmetry over completeness.
+            let mut before_stmt = conn.prepare(
+                "SELECT id, timestamp, hostname, facility, severity,
+                        app_name, process_id, message, received_at, source_ip
+                 FROM logs
+                 WHERE hostname = ?1 AND timestamp < ?2
+                 ORDER BY timestamp DESC, id DESC
+                 LIMIT ?3",
+            )?;
+            let before_rows = before_stmt
+                .query_map(
+                    params![reference.hostname, reference.timestamp, before],
+                    super::queries::map_row,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let mut after_stmt = conn.prepare(
+                "SELECT id, timestamp, hostname, facility, severity,
+                        app_name, process_id, message, received_at, source_ip
+                 FROM logs
+                 WHERE hostname = ?1 AND timestamp > ?2
+                 ORDER BY timestamp ASC, id ASC
+                 LIMIT ?3",
+            )?;
+            let after_rows = after_stmt
+                .query_map(
+                    params![reference.hostname, reference.timestamp, after],
+                    super::queries::map_row,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            (before_rows, after_rows)
+        }
+    };
+
+    // Reverse the "before" rows so the result reads chronologically.
+    before_rows.reverse();
 
     Ok((before_rows, after_rows))
 }

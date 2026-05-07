@@ -296,7 +296,7 @@ impl SyslogService {
         let after = req.after.unwrap_or(10).min(500);
         let resolved = self
             .run_db(move |pool| -> anyhow::Result<_> {
-                let (reference, hostname, timestamp, id): (LogEntry, String, String, i64) =
+                let (reference, hostname, timestamp, id): (LogEntry, String, String, Option<i64>) =
                     if let Some(id) = req.log_id {
                         let row = db::fetch_log_by_id(pool, id)?
                             .ok_or_else(|| anyhow::anyhow!("No log found for id {id}"))?;
@@ -312,7 +312,7 @@ impl SyslogService {
                             received_at: row.received_at.clone(),
                             source_ip: row.source_ip.clone(),
                         };
-                        (entry, row.hostname, row.timestamp, row.id)
+                        (entry, row.hostname, row.timestamp, Some(row.id))
                     } else {
                         let hostname = req.hostname.clone().ok_or_else(|| {
                             anyhow::anyhow!(
@@ -336,7 +336,7 @@ impl SyslogService {
                             received_at: timestamp.clone(),
                             source_ip: String::new(),
                         };
-                        (synthetic, hostname, timestamp, i64::MAX)
+                        (synthetic, hostname, timestamp, None)
                     };
 
                 let (before_rows, after_rows) = db::context_around(

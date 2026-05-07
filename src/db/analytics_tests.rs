@@ -34,6 +34,18 @@ fn template_normalises_numbers_ips_uuids() {
 }
 
 #[test]
+fn template_preserves_non_ascii_codepoints() {
+    // Multi-byte UTF-8 sequences must round-trip rather than getting split into
+    // mojibake by `b as char`.
+    let msg = "файл 1234 не найден";
+    let t = normalize_template(msg);
+    assert!(t.contains("файл"));
+    assert!(t.contains("не найден"));
+    assert!(t.contains("<n>"));
+    assert!(t.is_char_boundary(t.len()));
+}
+
+#[test]
 fn list_apps_returns_distinct_apps_with_counts() {
     let (pool, _d) = test_pool();
     insert_logs_batch(
@@ -153,7 +165,7 @@ fn context_around_returns_neighbours() {
     }
     insert_logs_batch(&pool, &entries).unwrap();
     let r = ContextRef {
-        id: 5,
+        id: Some(5),
         hostname: "h1".to_string(),
         timestamp: "2026-01-01T00:00:04Z".to_string(),
     };
@@ -162,6 +174,53 @@ fn context_around_returns_neighbours() {
     assert_eq!(after.len(), 3);
     assert!(before.last().unwrap().timestamp.as_str() <= "2026-01-01T00:00:04Z");
     assert!(after.first().unwrap().timestamp.as_str() >= "2026-01-01T00:00:04Z");
+}
+
+#[test]
+fn context_timestamp_only_anchor_splits_symmetrically() {
+    // Two rows share the exact reference timestamp; with id=None they must not
+    // all land on one side. The before/after split is strict on `< ts` / `> ts`,
+    // so simultaneous rows are excluded from both — consistent regardless of id ordering.
+    let (pool, _d) = test_pool();
+    let mut entries = Vec::new();
+    for i in 0..5 {
+        entries.push(entry(
+            &format!("2026-01-01T00:00:{:02}Z", i),
+            "h1",
+            "info",
+            None,
+            "msg",
+        ));
+    }
+    // Two rows at the exact reference time.
+    entries.push(entry("2026-01-01T00:00:05Z", "h1", "info", None, "ref-a"));
+    entries.push(entry("2026-01-01T00:00:05Z", "h1", "info", None, "ref-b"));
+    for i in 6..10 {
+        entries.push(entry(
+            &format!("2026-01-01T00:00:{:02}Z", i),
+            "h1",
+            "info",
+            None,
+            "msg",
+        ));
+    }
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let r = ContextRef {
+        id: None,
+        hostname: "h1".to_string(),
+        timestamp: "2026-01-01T00:00:05Z".to_string(),
+    };
+    let (before, after) = context_around(&pool, &r, 10, 10).unwrap();
+    // 5 strictly-less timestamps, 4 strictly-greater. Neither contains a row at 05.
+    assert_eq!(before.len(), 5);
+    assert_eq!(after.len(), 4);
+    assert!(before
+        .iter()
+        .all(|r| r.timestamp.as_str() < "2026-01-01T00:00:05Z"));
+    assert!(after
+        .iter()
+        .all(|r| r.timestamp.as_str() > "2026-01-01T00:00:05Z"));
 }
 
 #[test]
