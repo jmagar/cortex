@@ -4,12 +4,12 @@ End-to-end verification against a running syslog-mcp server. Complements unit te
 
 ## Purpose
 
-`scripts/smoke-test.sh` exercises the full MCP server stack: auth, tool dispatch, and response validation against a live syslog-mcp instance with 25 assertions.
+`scripts/smoke-test.sh` exercises the full MCP server stack: auth, tool dispatch, and response validation against a live syslog-mcp instance.
 
 ## Location
 
 ```
-scripts/smoke-test.sh       # Full smoke test (25 assertions)
+scripts/smoke-test.sh       # Full smoke test
 tests/test_live.sh          # Extended live integration tests
 tests/mcporter/test-tools.sh  # mcporter-based tool tests
 ```
@@ -44,15 +44,16 @@ mcporter config is at `config/mcporter.json`:
 
 ```bash
 # List available tools
-mcporter list syslog-mcp --config config/mcporter.json
+mcporter list syslog --config config/mcporter.json
 
 # Call actions through the single syslog tool
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=stats
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=tail n=10
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=search query=error limit=5
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=hosts
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=errors
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=help
+mcporter call --config config/mcporter.json syslog.syslog action=stats
+mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
+mcporter call --config config/mcporter.json syslog.syslog action=search query=error limit=5
+mcporter call --config config/mcporter.json syslog.syslog action=hosts
+mcporter call --config config/mcporter.json syslog.syslog action=errors
+mcporter call --config config/mcporter.json syslog.syslog action=status
+mcporter call --config config/mcporter.json syslog.syslog action=help
 ```
 
 ## Test assertions
@@ -66,6 +67,7 @@ The smoke test validates:
 - `syslog hosts` returns `hosts` array
 - `syslog correlate` returns `hosts` grouped by hostname
 - `syslog stats` returns numeric fields (total_logs, total_hosts, etc.)
+- `syslog status` returns DB health and runtime/OTLP observability fields
 - `syslog help` returns non-empty markdown text
 
 ## Failure output
@@ -75,7 +77,7 @@ The smoke test validates:
   PASS: syslog search returns count field
   FAIL: syslog tail count should be <= 10, got 50
   ---
-  25 assertions: 24 PASS, 1 FAIL
+  30 assertions: 29 PASS, 1 FAIL
 ```
 
 Exit code is non-zero if any assertion fails.

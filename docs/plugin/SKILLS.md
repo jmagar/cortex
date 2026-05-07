@@ -18,7 +18,7 @@ The `syslog` skill provides the client-facing documentation for the syslog-mcp t
 ### Contents
 
 `plugins/skills/syslog/SKILL.md` includes:
-- Tool inventory (1 tool: `syslog`, with all 7 actions described)
+- Tool inventory (1 tool: `syslog`, with all 8 actions described)
 - Parameter reference for each tool
 - FTS5 query syntax guide
 - Common workflow patterns (health check, incident investigation, host onboarding)

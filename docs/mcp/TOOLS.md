@@ -13,6 +13,7 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `hosts` | Host registry with first/last seen |
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics and storage health |
+| `status` | Lightweight runtime and DB health |
 | `help` | Markdown reference for all actions |
 
 ## syslog search

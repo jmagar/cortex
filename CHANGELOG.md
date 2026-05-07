@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-05-07
+
+### Fixed
+
+- Tightened MCP numeric argument validation so present wrong-type values for
+  `n`, `limit`, and `window_minutes` now return invalid params instead of
+  silently falling back to defaults.
+- Validated `search.severity` against the shared syslog severity list across
+  MCP, REST, and CLI callers.
+- Added `syslog status` to live smoke coverage, mcporter coverage, plugin skill
+  docs, and active MCP documentation.
+- Added a cross-surface action registry test to keep schema, dispatch, help,
+  smoke scripts, and action docs aligned.
+
 ## [0.14.0] - 2026-05-07
 
 ### Added

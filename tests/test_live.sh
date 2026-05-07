@@ -409,6 +409,16 @@ phase_tools() {
   assert_jq "syslog help — help text is non-empty"      "${help_result}" '.help | length > 0'
   assert_jq "syslog help — help text contains 'syslog'" "${help_result}" '.help | ascii_downcase | contains("syslog")'
 
+  # --- syslog status ---
+  section "  syslog status"
+  local status_result
+  status_result="$(call_tool syslog '{"action":"status"}')" || status_result=""
+
+  assert_jq "syslog status — status is ok"                    "${status_result}" '.status' "ok"
+  assert_jq "syslog status — db_ok field present"             "${status_result}" '.db_ok != null'
+  assert_jq "syslog status — runtime_observability present"   "${status_result}" '.runtime_observability'
+  assert_jq "syslog status — otlp counters present"           "${status_result}" '.otlp'
+
   # --- syslog stats ---
   section "  syslog stats"
   local stats_result

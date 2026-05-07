@@ -150,6 +150,10 @@ The direct CLI and MCP tool share the same business layer:
 | `syslog correlate` | `syslog` with `action="correlate"` |
 | `syslog stats` | `syslog` with `action="stats"` |
 
+The MCP-only `status` and `help` actions are runtime/protocol helpers, not
+direct database queries. Use `syslog action=status` through MCP for live server
+queue/backpressure state, and use `syslog --help` for direct CLI usage.
+
 Use direct CLI mode for terminal queries and scripts on a host that can read the
 SQLite database. Use MCP HTTP or `syslog mcp` when an MCP client needs tool
 access.

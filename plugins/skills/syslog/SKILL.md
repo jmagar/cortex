@@ -19,6 +19,7 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `hosts` | List all known hosts with first/last seen |
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics |
+| `status` | Lightweight runtime and DB health |
 | `help` | Canonical in-tree action reference (use as ground truth if this doc drifts) |
 
 **Always prefer the MCP tool**. Fall back to HTTP only when MCP is unavailable.
@@ -181,6 +182,20 @@ mcp__syslog__syslog(action="stats")
 ```
 
 **Response fields:** `total_logs`, `total_hosts`, `oldest_log`, `newest_log`, `logical_db_size_mb`, `physical_db_size_mb`, `free_disk_mb`, `write_blocked`, plus configured threshold values.
+
+---
+
+### `action="status"` — Lightweight runtime status
+
+Use this for dashboards and doctor checks that need current queue depth,
+backpressure, writer failure/drop state, listener counters, and OTLP receiver
+counters without the heavier DB statistics query.
+
+```
+mcp__syslog__syslog(action="status")
+```
+
+**Response fields:** `status`, `db_ok`, `runtime_observability`, and `otlp`.
 
 ---
 

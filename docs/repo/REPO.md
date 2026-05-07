@@ -28,7 +28,7 @@ syslog-mcp/
 │   ├── hooks.json               # Hook definitions
 │   └── scripts/                 # Hook scripts (sync-env, fix-perms, ignore-files)
 ├── scripts/
-│   ├── smoke-test.sh            # Live smoke test (25 assertions)
+│   ├── smoke-test.sh            # Live smoke test
 │   ├── backup.sh                # WAL-safe SQLite backup
 │   ├── reset-db.sh              # Backup + destructive DB reset
 
