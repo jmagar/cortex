@@ -8,6 +8,7 @@
 
 use anyhow::Result;
 use rusqlite::params;
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
 use super::pool::DbPool;
@@ -143,7 +144,7 @@ pub fn list_source_ips(pool: &DbPool) -> Result<Vec<SourceIpEntry>> {
     }
 
     let mut out: Vec<SourceIpEntry> = by_ip.into_values().collect();
-    out.sort_by(|a, b| b.log_count.cmp(&a.log_count));
+    out.sort_by_key(|entry| Reverse(entry.log_count));
     Ok(out)
 }
 
@@ -534,7 +535,7 @@ pub fn patterns(
         .into_iter()
         .map(|(template, acc)| {
             let mut hosts: Vec<(String, i64)> = acc.hosts.into_iter().collect();
-            hosts.sort_by(|a, b| b.1.cmp(&a.1));
+            hosts.sort_by_key(|(_, count)| Reverse(*count));
             let host_count = hosts.len() as i64;
             let hostnames: Vec<String> = hosts.into_iter().take(5).map(|(h, _)| h).collect();
             PatternEntry {
@@ -548,7 +549,7 @@ pub fn patterns(
             }
         })
         .collect();
-    out.sort_by(|a, b| b.count.cmp(&a.count));
+    out.sort_by_key(|entry| Reverse(entry.count));
     out.truncate(top_n as usize);
     Ok((out, total_scanned, overflow))
 }
