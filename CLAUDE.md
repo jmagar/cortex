@@ -72,7 +72,7 @@ Slash commands available after installing the Claude Code plugin (`plugins/comma
 
 | Command | Description |
 |---------|-------------|
-| `/syslog:doctor` | Full health check: MCP, HTTP /health, service status, syslog port, Docker ingest, fleet drop-ins |
+| `/syslog:dr` | Full health check: MCP, HTTP /health, service status, syslog port, Docker ingest, fleet drop-ins (named `dr` to avoid colliding with Claude Code's built-in `/doctor`) |
 | `/syslog:deploy-dropins` | Push rsyslog forwarding configs to `fleet_hosts` via SSH (idempotent) |
 
 ## Config
