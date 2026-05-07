@@ -218,9 +218,10 @@ Use only when the MCP tool is unavailable. The plugin exports connection setting
 
 **Sensitive value handling:** `api_token` is declared `sensitive: true` in the plugin manifest. It is **never** substituted into skill content as `${user_config.api_token}` — only the env var path above is valid. Do not inline the token in this document or any skill text.
 
-### Health check (no auth)
+### Health check (no auth required)
 
 ```bash
+# /health is unauthenticated — no Authorization header needed
 curl -s "$CLAUDE_PLUGIN_OPTION_SERVER_URL/health"
 ```
 

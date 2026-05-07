@@ -72,6 +72,9 @@ pub struct SyslogConfig {
     /// Batch writer: flush interval in milliseconds
     #[serde(default = "default_flush_interval")]
     pub flush_interval: u64,
+    /// Internal parsed-message channel capacity.
+    #[serde(default = "default_write_channel_capacity")]
+    pub write_channel_capacity: usize,
 }
 
 impl SyslogConfig {
@@ -219,6 +222,9 @@ fn default_batch_size() -> usize {
 fn default_flush_interval() -> u64 {
     500
 }
+fn default_write_channel_capacity() -> usize {
+    10_000
+}
 fn default_pool_size() -> u32 {
     4
 }
@@ -266,6 +272,7 @@ impl Default for SyslogConfig {
             tcp_idle_timeout_secs: default_tcp_idle_timeout_secs(),
             batch_size: default_batch_size(),
             flush_interval: default_flush_interval(),
+            write_channel_capacity: default_write_channel_capacity(),
         }
     }
 }
@@ -346,6 +353,10 @@ impl Config {
         )?;
         env_override_parse("SYSLOG_BATCH_SIZE", &mut config.syslog.batch_size)?;
         env_override_parse("SYSLOG_FLUSH_INTERVAL", &mut config.syslog.flush_interval)?;
+        env_override_parse(
+            "SYSLOG_WRITE_CHANNEL_CAPACITY",
+            &mut config.syslog.write_channel_capacity,
+        )?;
 
         env_override_str("SYSLOG_MCP_HOST", &mut config.mcp.host);
         env_override_parse("SYSLOG_MCP_PORT", &mut config.mcp.port)?;
@@ -641,6 +652,9 @@ pub(crate) fn validate_syslog_config(config: &SyslogConfig) -> anyhow::Result<()
     }
     if config.flush_interval == 0 {
         return Err(anyhow::anyhow!("syslog.flush_interval must be > 0"));
+    }
+    if config.write_channel_capacity == 0 {
+        return Err(anyhow::anyhow!("syslog.write_channel_capacity must be > 0"));
     }
     Ok(())
 }

@@ -29,6 +29,15 @@ COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.yml"
 write_env() {
   mkdir -p "${CLAUDE_PLUGIN_DATA}"
 
+  local batch_size="${CLAUDE_PLUGIN_OPTION_BATCH_SIZE:-}"
+  local write_channel_capacity="${CLAUDE_PLUGIN_OPTION_WRITE_CHANNEL_CAPACITY:-}"
+  if [[ -f "${ENV_FILE}" ]]; then
+    [[ -n "${batch_size}" ]] || batch_size="$(awk -F= '$1 == "SYSLOG_BATCH_SIZE" {print substr($0, index($0, "=") + 1); exit}' "${ENV_FILE}")"
+    [[ -n "${write_channel_capacity}" ]] || write_channel_capacity="$(awk -F= '$1 == "SYSLOG_WRITE_CHANNEL_CAPACITY" {print substr($0, index($0, "=") + 1); exit}' "${ENV_FILE}")"
+  fi
+  batch_size="${batch_size:-100}"
+  write_channel_capacity="${write_channel_capacity:-10000}"
+
   if [[ "${USE_DOCKER}" == "true" ]]; then
     # Docker compose reads these directly from .env. Pin UID/GID so the
     # container writes syslog.db with the host user's ownership — keeps the
@@ -55,6 +64,8 @@ SYSLOG_MCP_API_TOKEN=${API_TOKEN}
 ${db_line}
 SYSLOG_MCP_MAX_DB_SIZE_MB=${MAX_DB_SIZE_MB}
 SYSLOG_MCP_RETENTION_DAYS=${RETENTION_DAYS}
+SYSLOG_BATCH_SIZE=${batch_size}
+SYSLOG_WRITE_CHANNEL_CAPACITY=${write_channel_capacity}
 SYSLOG_DOCKER_INGEST_ENABLED=${DOCKER_INGEST}
 EOF
 )

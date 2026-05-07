@@ -8,8 +8,6 @@ use crate::observability::RuntimeObservability;
 use crate::syslog;
 use crate::syslog::enrichment::EnrichmentConfig;
 
-pub const WRITE_CHANNEL_CAPACITY: usize = 10_000;
-
 /// Lightweight error type for [`IngestTx::try_send`] — the entry is dropped on
 /// backpressure rather than returned to the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +20,23 @@ pub(crate) enum TrySendErr {
 pub(crate) struct IngestTx {
     tx: mpsc::Sender<db::LogBatchEntry>,
     observability: Arc<RuntimeObservability>,
+    channel_capacity: usize,
+}
+
+struct WriterTuning {
+    batch_size: usize,
+    flush_interval_ms: u64,
+    channel_capacity: usize,
+}
+
+impl WriterTuning {
+    fn from_syslog_config(config: &SyslogConfig) -> Self {
+        Self {
+            batch_size: config.batch_size,
+            flush_interval_ms: config.flush_interval,
+            channel_capacity: config.write_channel_capacity,
+        }
+    }
 }
 
 impl IngestTx {
@@ -67,7 +82,11 @@ impl IngestTx {
     }
 
     pub(crate) fn queue_depth(&self) -> usize {
-        WRITE_CHANNEL_CAPACITY.saturating_sub(self.tx.capacity())
+        self.channel_capacity.saturating_sub(self.tx.capacity())
+    }
+
+    pub(crate) fn queue_capacity(&self) -> usize {
+        self.channel_capacity
     }
 
     pub(crate) fn observability(&self) -> Arc<RuntimeObservability> {
@@ -79,22 +98,31 @@ impl IngestTx {
     #[cfg(test)]
     pub(crate) fn from_sender_for_test(tx: mpsc::Sender<db::LogBatchEntry>) -> Self {
         let observability = Arc::new(RuntimeObservability::default());
-        observability.set_queue_capacity(WRITE_CHANNEL_CAPACITY);
-        Self { tx, observability }
+        let channel_capacity = tx.max_capacity();
+        observability.set_queue_capacity(channel_capacity);
+        Self {
+            tx,
+            observability,
+            channel_capacity,
+        }
     }
 }
 
-pub(crate) fn start_writer(
+fn start_writer(
     storage: StorageConfig,
     pool: Arc<DbPool>,
     storage_state: Arc<Mutex<Option<db::StorageBudgetState>>>,
-    batch_size: usize,
-    flush_interval_ms: u64,
+    tuning: WriterTuning,
     enrichment: EnrichmentConfig,
     observability: Arc<RuntimeObservability>,
 ) -> IngestTx {
-    let (tx, rx) = mpsc::channel::<db::LogBatchEntry>(WRITE_CHANNEL_CAPACITY);
-    observability.set_queue_capacity(WRITE_CHANNEL_CAPACITY);
+    let WriterTuning {
+        batch_size,
+        flush_interval_ms,
+        channel_capacity,
+    } = tuning;
+    let (tx, rx) = mpsc::channel::<db::LogBatchEntry>(channel_capacity);
+    observability.set_queue_capacity(channel_capacity);
     let writer_observability = Arc::clone(&observability);
     tokio::spawn(async move {
         let context = syslog::writer::WriterContext::new(
@@ -112,7 +140,11 @@ pub(crate) fn start_writer(
         )
         .await;
     });
-    IngestTx { tx, observability }
+    IngestTx {
+        tx,
+        observability,
+        channel_capacity,
+    }
 }
 
 pub(crate) fn start_writer_from_syslog_config(
@@ -127,8 +159,7 @@ pub(crate) fn start_writer_from_syslog_config(
         storage,
         pool,
         storage_state,
-        syslog.batch_size,
-        syslog.flush_interval,
+        WriterTuning::from_syslog_config(syslog),
         enrichment,
         observability,
     )

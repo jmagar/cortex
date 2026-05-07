@@ -27,6 +27,7 @@ MCP transports and do not use `SYSLOG_MCP_TOKEN`.
 | `SYSLOG_MAX_MESSAGE_SIZE` | no | `8192` | Max message size in bytes | no |
 | `SYSLOG_BATCH_SIZE` | no | `100` | Entries per batch flush | no |
 | `SYSLOG_FLUSH_INTERVAL` | no | `500` | Batch flush interval in ms | no |
+| `SYSLOG_WRITE_CHANNEL_CAPACITY` | no | `10000` | Internal parsed-message queue capacity | no |
 
 ## MCP server
 

@@ -12,8 +12,6 @@ mod listener;
 mod parser;
 pub(crate) mod writer;
 
-pub(crate) const WRITE_CHANNEL_CAPACITY: usize = ingest::WRITE_CHANNEL_CAPACITY;
-
 pub async fn start_with_storage_state(
     config: SyslogConfig,
     storage: StorageConfig,
@@ -71,7 +69,7 @@ pub(crate) async fn start_listeners(config: SyslogConfig, ingest: ingest::Ingest
         max_message_size = config.max_message_size,
         max_tcp_connections = config.max_tcp_connections,
         tcp_idle_timeout_secs = config.tcp_idle_timeout_secs,
-        write_channel_capacity = WRITE_CHANNEL_CAPACITY,
+        write_channel_capacity = config.write_channel_capacity,
         "Syslog listeners started"
     );
 

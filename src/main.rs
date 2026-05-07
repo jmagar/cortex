@@ -14,6 +14,10 @@ async fn main() -> Result<()> {
         print_usage();
         return Ok(());
     }
+    if mode == Mode::Version {
+        println!("syslog-mcp {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
 
     fmt()
         .with_env_filter(
@@ -31,6 +35,7 @@ async fn main() -> Result<()> {
         Mode::StdioMcp => serve_stdio_mcp().await,
         Mode::Cli(command) => run_cli(command).await,
         Mode::Help => unreachable!("handled before logging initialization"),
+        Mode::Version => unreachable!("handled before logging initialization"),
     }
 }
 
@@ -112,6 +117,7 @@ enum Mode {
     StdioMcp,
     Cli(cli::CliCommand),
     Help,
+    Version,
 }
 
 impl Mode {
@@ -119,6 +125,7 @@ impl Mode {
         match args.as_slice() {
             [] => Ok(Self::ServeMcp),
             [flag] if flag == "--help" || flag == "-h" || flag == "help" => Ok(Self::Help),
+            [flag] if flag == "--version" || flag == "-V" || flag == "version" => Ok(Self::Version),
             [command] if command == "mcp" => Ok(Self::StdioMcp),
             [serve, service] if serve == "serve" && service == "mcp" => Ok(Self::ServeMcp),
             [command, rest @ ..]
@@ -145,6 +152,7 @@ impl Mode {
             Self::StdioMcp => "warn",
             Self::Cli(_) => "warn",
             Self::Help => "info",
+            Self::Version => "info",
         }
     }
 }
@@ -152,6 +160,7 @@ impl Mode {
 fn print_usage() {
     eprintln!(
         "Usage:
+  syslog --version     Print version
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
   syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]

@@ -71,6 +71,7 @@ such as `https://syslog.example.com`.
 | `SYSLOG_TCP_IDLE_TIMEOUT_SECS` | no | `300` | no | Idle timeout per TCP read before closing inactive connections |
 | `SYSLOG_BATCH_SIZE` | no | `100` | no | Entries per batch flush to SQLite |
 | `SYSLOG_FLUSH_INTERVAL` | no | `500` | no | Batch flush interval in milliseconds |
+| `SYSLOG_WRITE_CHANNEL_CAPACITY` | no | `10000` | no | Internal parsed-message queue capacity |
 
 TCP forwarders can keep a connection open and send multiple newline-delimited syslog frames. The size limit applies to each frame, not to the full TCP connection lifetime. An oversized newline-delimited frame is dropped and later bounded frames on the same connection can still be ingested. An oversized unterminated frame is dropped and the connection is closed because the listener cannot safely find the next frame boundary.
 

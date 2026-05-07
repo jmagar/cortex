@@ -332,10 +332,12 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 | `syslog_host` / `syslog_port` | no | `0.0.0.0` / `1514` | Syslog listener bind (server mode) |
 | `mcp_host` / `mcp_port` | no | `0.0.0.0` / `3100` | MCP HTTP server bind (server mode) |
 | `data_dir` | no | `${CLAUDE_PLUGIN_DATA}` | SQLite directory (persists across plugin updates) |
-| `max_db_size_mb` | no | `1024` | DB size cap; oldest logs deleted when exceeded |
+| `max_db_size_mb` | no | `8192` | DB size cap; oldest logs deleted when exceeded |
 | `retention_days` | no | `90` | `0` = keep forever |
+| `batch_size` | no | `100` | Number of parsed messages per SQLite batch |
+| `write_channel_capacity` | no | `10000` | Internal parsed-message queue capacity before listener backpressure |
 | `docker_ingest_enabled` | no | `false` | Pull container logs from remote `docker-socket-proxy` endpoints |
-| `fleet_hosts` | no | — | SSH aliases of fleet hosts. Used for Docker ingest (when enabled, each becomes `http://<alias>:2375`) and the `/syslog:deploy-dropins` command |
+| `fleet_hosts` | no | — | SSH aliases of fleet hosts. Used for Docker ingest (when enabled, each becomes `http://<alias>:2375`) and the `syslog-deploy-dropins` skill |
 
 **SessionStart hook automation** (in server mode):
 
@@ -344,10 +346,14 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 - Generates and starts the systemd user unit (or runs `docker compose up -d`) and restarts only when config actually changed
 - All idempotent — safe to run on every session
 
-**Bundled commands**:
+**Bundled skills**:
 
-- `/syslog:dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
-- `/syslog:deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
+- `syslog-dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
+- `syslog-deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
+- `syslog-redeploy` — re-run plugin setup after config or plugin changes
+- `syslog-logs` — mode-aware service log tailing from systemd or Docker
+- `syslog-cutover` — switch between systemd and Docker deployment modes with health verification
+- `syslog-version-check` — check whether the running systemd service or Docker container matches the installed binary or local image; add `--pull` in Docker mode to pull first, otherwise Docker checks only the local image cache
 
 The plugin includes the `syslog` binary in `bin/` and is the simplest path. You can still deploy via Docker or build locally if you prefer to run the server outside the plugin.
 
@@ -416,6 +422,7 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 | `SYSLOG_TCP_IDLE_TIMEOUT_SECS` | no | `300` | Idle timeout per TCP read before closing inactive connections |
 | `SYSLOG_BATCH_SIZE` | no | `100` | Number of messages per batch write |
 | `SYSLOG_FLUSH_INTERVAL` | no | `500` | Batch flush interval in milliseconds |
+| `SYSLOG_WRITE_CHANNEL_CAPACITY` | no | `10000` | Internal parsed-message queue capacity |
 
 #### Docker socket-proxy ingest
 
@@ -681,7 +688,7 @@ When available disk drops below `min_free_disk_mb`, the oldest logs are deleted 
 
 **Write-blocking behavior**
 
-If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (channel capacity 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `syslog stats` reflects the current state.
+If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (`SYSLOG_WRITE_CHANNEL_CAPACITY`, default 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `syslog stats` reflects the current state.
 
 Disable either guard by setting its trigger to `0` (also set the recovery target to `0`).
 
@@ -708,10 +715,11 @@ The batch writer improves throughput by collecting parsed syslog messages into b
 |----------|---------|-------------|
 | `SYSLOG_BATCH_SIZE` | `100` | Write when this many messages are queued |
 | `SYSLOG_FLUSH_INTERVAL` | `500` ms | Write every N ms even if batch is not full |
+| `SYSLOG_WRITE_CHANNEL_CAPACITY` | `10000` | Parsed-message queue capacity before listener backpressure |
 
 Batches are written in a single SQLite transaction. If the DB is busy (locked), the writer retries up to 3 times with exponential backoff (25 ms, 100 ms, 250 ms). Batches that fail insertion are retained in memory and retried on the next flush cycle. If a retained batch grows beyond 1,000 entries, it is discarded to prevent unbounded memory growth.
 
-The internal write channel holds up to 10,000 parsed messages. When the channel is full, backpressure is logged and further UDP/TCP receives block until space is available.
+The internal write channel holds up to `SYSLOG_WRITE_CHANNEL_CAPACITY` parsed messages. When the channel is full, backpressure is logged and further UDP/TCP receives block until space is available.
 
 ---
 
@@ -864,6 +872,7 @@ For higher ingest rates (IoT, high-traffic network devices):
 
 - Increase `SYSLOG_BATCH_SIZE` (e.g. `500`) to reduce transaction overhead
 - Increase `SYSLOG_FLUSH_INTERVAL` (e.g. `1000` ms) to widen batch windows
+- Increase `SYSLOG_WRITE_CHANNEL_CAPACITY` (e.g. `100000`) to absorb bursts
 - Increase `SYSLOG_MCP_POOL_SIZE` (e.g. `8`) for more read concurrency
 - Place the database on an SSD or tmpfs-backed volume
 

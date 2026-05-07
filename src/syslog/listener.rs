@@ -10,7 +10,6 @@ use crate::ingest::IngestTx;
 
 use super::parser::parse_syslog;
 use super::writer::source_addr_ip;
-use super::WRITE_CHANNEL_CAPACITY;
 
 #[derive(Debug)]
 enum TcpFrame {
@@ -46,7 +45,7 @@ pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) 
                         warn!(
                             src = %addr,
                             queue_depth = ingest.queue_depth(),
-                            channel_capacity = WRITE_CHANNEL_CAPACITY,
+                            channel_capacity = ingest.queue_capacity(),
                             "syslog write channel full — backpressure applied"
                         );
                     }
@@ -54,7 +53,7 @@ pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) 
                         info!(
                             src = %addr,
                             queue_depth = ingest.queue_depth(),
-                            channel_capacity = WRITE_CHANNEL_CAPACITY,
+                            channel_capacity = ingest.queue_capacity(),
                             "syslog write channel cleared — backpressure lifted"
                         );
                     }
@@ -118,7 +117,7 @@ pub(super) async fn handle_tcp_connection(
                         warn!(
                             peer = %addr,
                             queue_depth = ingest.queue_depth(),
-                            channel_capacity = WRITE_CHANNEL_CAPACITY,
+                            channel_capacity = ingest.queue_capacity(),
                             line_count,
                             "syslog write channel full — backpressure applied"
                         );
@@ -127,7 +126,7 @@ pub(super) async fn handle_tcp_connection(
                         info!(
                             peer = %addr,
                             queue_depth = ingest.queue_depth(),
-                            channel_capacity = WRITE_CHANNEL_CAPACITY,
+                            channel_capacity = ingest.queue_capacity(),
                             line_count,
                             "syslog write channel cleared — backpressure lifted"
                         );
