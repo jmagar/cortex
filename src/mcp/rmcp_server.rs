@@ -109,9 +109,9 @@ impl ServerHandler for SyslogRmcpServer {
                     error_class = "tool_execution",
                     "MCP tool execution failed"
                 );
-                Ok(CallToolResult::error(vec![Content::text(
-                    "Tool execution failed",
-                )]))
+                Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Tool execution failed for action '{tool_name}'. Check server logs for details."
+                ))]))
             }
         }
     }
@@ -270,9 +270,22 @@ fn require_auth_context<'a>(
                 .extensions
                 .get::<axum::http::request::Parts>()
                 .ok_or_else(|| {
+                    // This indicates a framework-level invariant violation —
+                    // rmcp changed how it propagates HTTP Parts, or the middleware
+                    // ordering is broken at startup.
+                    tracing::error!(
+                        "rmcp HTTP Parts extension absent — middleware ordering may be broken; \
+                         see docs/internal/rmcp-auth-spike.md"
+                    );
                     ErrorData::invalid_request("forbidden: missing http context", None)
                 })?;
             let auth = parts.extensions.get::<AuthContext>().ok_or_else(|| {
+                // AuthLayer should always insert AuthContext on the happy path.
+                // Absence here means AuthLayer is not mounted or failed to run.
+                tracing::warn!(
+                    "AuthContext absent from request extensions — \
+                     AuthLayer may not be mounted or rejected the request without inserting context"
+                );
                 ErrorData::invalid_request("forbidden: missing auth context", None)
             })?;
             Ok(Some(auth))

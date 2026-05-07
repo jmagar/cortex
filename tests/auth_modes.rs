@@ -280,3 +280,73 @@ async fn tools_list_succeeds_with_auth_context() {
         "tools/list must return the syslog tool"
     );
 }
+
+// ── oauth-protected-resource discovery ───────────────────────────────────────
+
+/// `/.well-known/oauth-protected-resource` → 200 when OAuth mounted.
+/// This companion endpoint is required by RFC 9728 and some MCP clients.
+#[tokio::test]
+async fn protected_resource_returns_200_when_oauth_mounted() {
+    let dir = TempDir::new().unwrap();
+    let state = testing::oauth_state(dir.path()).await;
+    assert_eq!(
+        get_status(router(state), "/.well-known/oauth-protected-resource").await,
+        StatusCode::OK,
+        "/.well-known/oauth-protected-resource must be 200 when auth_state is Some"
+    );
+}
+
+/// `/.well-known/oauth-protected-resource` → 404 in bearer-only mode.
+#[tokio::test]
+async fn protected_resource_returns_404_when_bearer_only() {
+    let dir = TempDir::new().unwrap();
+    let state = testing::bearer_state(dir.path(), "test-token");
+    assert_eq!(
+        get_status(router(state), "/.well-known/oauth-protected-resource").await,
+        StatusCode::NOT_FOUND,
+        "/.well-known/oauth-protected-resource must be 404 in bearer-only mode"
+    );
+}
+
+// ── discovery response body validation ───────────────────────────────────────
+
+/// `/.well-known/oauth-authorization-server` response body must include
+/// `issuer`, `authorization_endpoint`, `token_endpoint`, and `jwks_uri`.
+#[tokio::test]
+async fn well_known_response_body_has_required_fields() {
+    let dir = TempDir::new().unwrap();
+    let state = testing::oauth_state(dir.path()).await;
+    let req = Request::builder()
+        .method("GET")
+        .uri("/.well-known/oauth-authorization-server")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let resp = router(state).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).expect("discovery body must be valid JSON");
+    for field in &["issuer", "authorization_endpoint", "token_endpoint", "jwks_uri"] {
+        assert!(
+            body[field].is_string(),
+            "/.well-known/oauth-authorization-server must contain field '{field}'; got: {body}"
+        );
+    }
+}
+
+/// `/jwks` response body must contain a non-empty `keys` array.
+#[tokio::test]
+async fn jwks_response_body_has_keys_array() {
+    let dir = TempDir::new().unwrap();
+    let state = testing::oauth_state(dir.path()).await;
+    let req = Request::builder()
+        .method("GET")
+        .uri("/jwks")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let resp = router(state).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).expect("JWKS body must be valid JSON");
+    let keys = body["keys"].as_array().expect("JWKS must have a 'keys' array");
+    assert!(!keys.is_empty(), "JWKS 'keys' array must be non-empty");
+}

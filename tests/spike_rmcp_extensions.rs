@@ -1,4 +1,5 @@
-// SPIKE: DELETE AFTER syslog-mcp-brt0.10 closed
+// Regression test: verifies rmcp 1.6 axum-extension propagation (syslog-mcp-brt0.10).
+// See docs/internal/rmcp-auth-spike.md for the investigation that confirmed Pattern (a).
 //
 // Proves that axum request extensions set by middleware ARE propagated into
 // rmcp 1.6's `RequestContext.extensions` for tool handlers, when using

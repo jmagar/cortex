@@ -55,7 +55,7 @@ if [[ -f "$AUTH_DB_PATH" ]]; then
     sqlite3 "$AUTH_DB_PATH" "PRAGMA wal_checkpoint(FULL);" >/dev/null
     sqlite3 "$AUTH_DB_PATH" ".backup '${ESCAPED_AUTH_BACKUP}'"
     AUTH_SIZE=$(du -h "$AUTH_BACKUP_FILE" | cut -f1)
-    chmod 600 "$AUTH_BACKUP_FILE" 2>/dev/null || true
+    chmod 600 "$AUTH_BACKUP_FILE"
     echo "Auth DB backup complete: ${AUTH_BACKUP_FILE} (${AUTH_SIZE})"
 else
     echo "Auth DB not found at ${AUTH_DB_PATH}; skipping (oauth not configured?)"

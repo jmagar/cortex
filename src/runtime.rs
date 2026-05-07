@@ -362,6 +362,13 @@ impl RuntimeCore {
 /// mode == OAuth and initialises Google OIDC + SQLite session storage.
 async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy> {
     if is_stdio {
+        if config.mcp.auth.mode == AuthMode::OAuth {
+            tracing::warn!(
+                "SYSLOG_MCP_AUTH_MODE=oauth is set but syslog-mcp is starting in stdio mode — \
+                 OAuth config is ignored; LoopbackDev policy applies (process isolation is the \
+                 trust boundary). If auth enforcement is required, use the HTTP server mode instead."
+            );
+        }
         tracing::info!(
             "syslog-mcp auth policy: LoopbackDev (stdio mode — process isolation is the trust boundary)"
         );

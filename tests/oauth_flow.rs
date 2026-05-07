@@ -216,3 +216,55 @@ async fn tools_list_succeeds_with_valid_jwt() {
         "tools/list must return the syslog tool"
     );
 }
+
+/// JWT signed with a *different* RSA key must be rejected (signature verification).
+///
+/// This is the canonical test for the cryptographic layer: if `jsonwebtoken`'s
+/// `Validation` ever loses signature checking (e.g., `validate_signature` set
+/// to false), all other tests would still pass because they use the server's
+/// own key. Only this test catches that regression.
+#[tokio::test]
+async fn jwt_signed_with_wrong_key_returns_401() {
+    let dir = TempDir::new().unwrap();
+    let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
+
+    // Build a *second* AuthState with a different RSA key pair under a
+    // separate TempDir — same config, different key material.
+    let dir2 = TempDir::new().unwrap();
+    let (_, auth_state2) = testing::oauth_state_with_auth_state(dir2.path()).await;
+    let claims = make_claims(&auth_state, "syslog:read", 60); // valid iss/aud for server
+    let token = auth_state2
+        .signing_keys
+        .issue_access_token(&claims) // signed with wrong key
+        .unwrap();
+
+    let (status, _) = post_mcp(router(state), "tools/call", Some(stats_call()), &token).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "JWT signed with a different RSA key must be rejected with 401"
+    );
+}
+
+/// JWT with wrong `aud` claim → 401.
+///
+/// Audience confusion: a valid token issued for a different resource server
+/// (e.g., `"https://attacker.example.com/mcp"`) must not be accepted.
+#[tokio::test]
+async fn jwt_with_wrong_audience_returns_401() {
+    let dir = TempDir::new().unwrap();
+    let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
+    let mut bad_claims = make_claims(&auth_state, "syslog:read", 60);
+    bad_claims.aud = "https://other-service.example.com/mcp".to_string();
+    let token = auth_state
+        .signing_keys
+        .issue_access_token(&bad_claims)
+        .unwrap();
+
+    let (status, _) = post_mcp(router(state), "tools/call", Some(stats_call()), &token).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "JWT with wrong audience must be rejected with 401 (audience confusion)"
+    );
+}
