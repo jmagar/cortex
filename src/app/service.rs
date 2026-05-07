@@ -1,8 +1,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::TimeDelta;
+use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
 use tokio::sync::Semaphore;
+
+/// Format a UTC instant in the same shape SQLite uses for `received_at`
+/// (`%Y-%m-%dT%H:%M:%fZ`), so lexicographic TEXT comparisons line up at
+/// boundary instants. `to_rfc3339()` on its own produces `+00:00` form,
+/// which sorts strictly less than the stored `Z` form character-by-character
+/// and would silently drop equal-instant rows from boundary windows.
+fn rfc3339_z(dt: DateTime<Utc>) -> String {
+    dt.to_rfc3339_opts(SecondsFormat::Millis, true)
+}
 
 use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
@@ -294,6 +303,21 @@ impl SyslogService {
     pub async fn context(&self, req: ContextRequest) -> ServiceResult<ContextResponse> {
         let before = req.before.unwrap_or(10).min(500);
         let after = req.after.unwrap_or(10).min(500);
+
+        // When the caller anchors via hostname+timestamp, parse and re-emit the
+        // timestamp through the same path used elsewhere in the service so
+        // `2026-01-01T00:00:00Z` and `2026-01-01T00:00:00+00:00` (and offset
+        // forms like `+02:00`) compare correctly against stored RFC3339 values
+        // — TEXT comparisons in SQLite would otherwise treat them as different.
+        let synthetic_timestamp = if req.log_id.is_none() {
+            match req.timestamp.as_deref() {
+                Some(raw) => Some(parse_required_timestamp(raw, "timestamp")?.to_rfc3339()),
+                None => None,
+            }
+        } else {
+            None
+        };
+
         let resolved = self
             .run_db(move |pool| -> anyhow::Result<_> {
                 let (reference, hostname, timestamp, id): (LogEntry, String, String, Option<i64>) =
@@ -319,7 +343,7 @@ impl SyslogService {
                                 "Either `log_id` or both `hostname` + `timestamp` are required"
                             )
                         })?;
-                        let timestamp = req.timestamp.clone().ok_or_else(|| {
+                        let timestamp = synthetic_timestamp.ok_or_else(|| {
                             anyhow::anyhow!(
                                 "Either `log_id` or both `hostname` + `timestamp` are required"
                             )
@@ -370,11 +394,11 @@ impl SyslogService {
     }
 
     pub async fn ingest_rate(&self, req: IngestRateRequest) -> ServiceResult<IngestRateResponse> {
-        let now_dt = chrono::Utc::now();
-        let now = now_dt.to_rfc3339();
-        let cut_1m = (now_dt - chrono::Duration::seconds(60)).to_rfc3339();
-        let cut_5m = (now_dt - chrono::Duration::seconds(300)).to_rfc3339();
-        let cut_15m = (now_dt - chrono::Duration::seconds(900)).to_rfc3339();
+        let now_dt = Utc::now();
+        let now = rfc3339_z(now_dt);
+        let cut_1m = rfc3339_z(now_dt - chrono::Duration::seconds(60));
+        let cut_5m = rfc3339_z(now_dt - chrono::Duration::seconds(300));
+        let cut_15m = rfc3339_z(now_dt - chrono::Duration::seconds(900));
         let want_by_host = req.by_host.unwrap_or(false);
 
         let storage = self.storage.clone();
@@ -410,10 +434,10 @@ impl SyslogService {
         req: SilentHostsRequest,
     ) -> ServiceResult<SilentHostsResponse> {
         let silent_minutes = req.silent_minutes.unwrap_or(30).min(60 * 24 * 7);
-        let now_dt = chrono::Utc::now();
-        let now = now_dt.to_rfc3339();
+        let now_dt = Utc::now();
+        let now = rfc3339_z(now_dt);
         let cutoff_dt = now_dt - chrono::Duration::minutes(i64::from(silent_minutes));
-        let cutoff = cutoff_dt.to_rfc3339();
+        let cutoff = rfc3339_z(cutoff_dt);
         let now_unix = now_dt.timestamp();
         let cutoff_q = cutoff.clone();
         let hosts = self
@@ -428,10 +452,11 @@ impl SyslogService {
     }
 
     pub async fn clock_skew(&self, req: ClockSkewRequest) -> ServiceResult<ClockSkewResponse> {
+        // Compared against `received_at`, which SQLite stores in `Z` form, so
+        // emit the canonical Z-form regardless of input shape.
         let since_str = match req.since {
-            Some(s) => parse_optional_timestamp(Some(&s), "since")?
-                .expect("parse_optional_timestamp returns Some when input is Some"),
-            None => (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339(),
+            Some(s) => rfc3339_z(parse_required_timestamp(&s, "since")?),
+            None => rfc3339_z(Utc::now() - chrono::Duration::hours(24)),
         };
         let q = since_str.clone();
         let hosts = self.run_db(move |pool| db::clock_skew(pool, &q)).await?;
