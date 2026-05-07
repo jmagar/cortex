@@ -106,11 +106,11 @@ SYSLOG_MCP_RECOVERY_FREE_DISK_MB=768  # cleanup target after free-disk breach
 SYSLOG_MCP_CLEANUP_INTERVAL_SECS=60   # storage-budget enforcement interval (>= 5)
 SYSLOG_MCP_CLEANUP_CHUNK_SIZE=1000    # rows deleted per enforcement cycle
 
-# OAuth / JWT auth (disabled by default — set AUTH_MODE=oauth to activate)
+# OAuth / JWT auth (disabled by default — set SYSLOG_MCP_AUTH_MODE=oauth to activate)
 SYSLOG_MCP_AUTH_MODE=bearer             # bearer (default) or oauth
-SYSLOG_MCP_PUBLIC_URL=https://syslog.example.com  # required when AUTH_MODE=oauth
-SYSLOG_MCP_GOOGLE_CLIENT_ID=...         # required when AUTH_MODE=oauth
-SYSLOG_MCP_GOOGLE_CLIENT_SECRET=...     # required when AUTH_MODE=oauth
+SYSLOG_MCP_PUBLIC_URL=https://syslog.example.com  # required when SYSLOG_MCP_AUTH_MODE=oauth
+SYSLOG_MCP_GOOGLE_CLIENT_ID=...         # required when SYSLOG_MCP_AUTH_MODE=oauth
+SYSLOG_MCP_GOOGLE_CLIENT_SECRET=...     # required when SYSLOG_MCP_AUTH_MODE=oauth
 # Paths, TTLs, allowlist → config.toml [mcp.auth] (not env vars). See docs/OAUTH.md.
 
 # Non-MCP REST API (disabled by default)

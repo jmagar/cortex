@@ -42,9 +42,12 @@ Options:
   --help            Show this help text
 
 Environment:
-  SYSLOG_MCP_DB_PATH            SQLite syslog database path (default: ./data/syslog.db)
-  SYSLOG_MCP_AUTH_SQLITE_PATH   lab-auth SQLite path (default: <db dir>/auth.db)
-  SYSLOG_MCP_AUTH_KEY_PATH      lab-auth JWT key path (default: <db dir>/auth-jwt.pem)
+  SYSLOG_MCP_DB_PATH   SQLite syslog database path (default: ./data/syslog.db)
+
+Auth artifact paths (auth.db, auth-jwt.pem) come from [mcp.auth].sqlite_path and
+[mcp.auth].key_path in config.toml (resolved relative to the syslog DB directory).
+Defaults below match the out-of-the-box config.toml values; set AUTH_DB_PATH or
+AUTH_KEY_PATH in your environment to override if you changed them in config.toml.
 
 Important:
   Stop the syslog-mcp service before running this reset. The backup step is
@@ -96,8 +99,8 @@ fi
 mkdir -p "$BACKUP_DIR"
 
 DB_DIR="$(dirname "$DB_PATH")"
-AUTH_DB_PATH="${SYSLOG_MCP_AUTH_SQLITE_PATH:-${DB_DIR}/auth.db}"
-AUTH_KEY_PATH="${SYSLOG_MCP_AUTH_KEY_PATH:-${DB_DIR}/auth-jwt.pem}"
+AUTH_DB_PATH="${AUTH_DB_PATH:-${DB_DIR}/auth.db}"
+AUTH_KEY_PATH="${AUTH_KEY_PATH:-${DB_DIR}/auth-jwt.pem}"
 
 TIMESTAMP=$(date -u +%Y-%m-%d-%H%M%S)
 BACKUP_FILE="${BACKUP_DIR}/syslog-pre-reset-${TIMESTAMP}.db"
@@ -139,6 +142,7 @@ echo "Backup complete: ${BACKUP_FILE} (${BACKUP_SIZE})"
 echo "Reset complete: removed ${DB_PATH}, ${DB_PATH}-wal, and ${DB_PATH}-shm"
 
 if [[ "$INCLUDE_AUTH" -eq 1 ]]; then
+    AUTH_FILES_WIPED=0
     if [[ -f "$AUTH_DB_PATH" ]]; then
         AUTH_BACKUP_FILE="${BACKUP_DIR}/auth-pre-reset-${TIMESTAMP}.db"
         ESCAPED_AUTH_BACKUP="${AUTH_BACKUP_FILE//\'/\'\'}"
@@ -147,6 +151,7 @@ if [[ "$INCLUDE_AUTH" -eq 1 ]]; then
         chmod 600 "$AUTH_BACKUP_FILE" 2>/dev/null || true
         rm -f "$AUTH_DB_PATH" "${AUTH_DB_PATH}-wal" "${AUTH_DB_PATH}-shm"
         echo "Auth DB backup + reset complete: ${AUTH_BACKUP_FILE}"
+        AUTH_FILES_WIPED=1
     else
         echo "Auth DB not found at ${AUTH_DB_PATH}; nothing to reset"
     fi
@@ -156,10 +161,13 @@ if [[ "$INCLUDE_AUTH" -eq 1 ]]; then
         chmod 600 "$AUTH_KEY_BACKUP" 2>/dev/null || true
         rm -f "$AUTH_KEY_PATH"
         echo "Auth JWT key backup + reset complete: ${AUTH_KEY_BACKUP}"
+        AUTH_FILES_WIPED=1
     else
         echo "Auth JWT key not found at ${AUTH_KEY_PATH}; nothing to reset"
     fi
-    echo "Auth state reset: every issued access/refresh token is now invalid."
+    if [[ "$AUTH_FILES_WIPED" -eq 1 ]]; then
+        echo "Auth state reset: every issued access/refresh token is now invalid."
+    fi
 fi
 
 echo "Next step: restart syslog-mcp to recreate the database."

@@ -418,18 +418,44 @@ fn push_public_url_hosts(hosts: &mut Vec<String>, url: &str, listen_port: u16) {
         );
         return;
     }
-    // Add bare host and the explicit port from the URL (or the listen_port
-    // as a fallback so rmcp's port-aware comparison works for direct access).
+    // `url::Url::port()` returns None for default ports (443 for https, 80 for
+    // http). Browsers omit the port from the Host header when it matches the
+    // scheme default, so we must allowlist the bare host in that case.
+    //
+    // For non-standard ports, browsers include the port in Host, so we emit
+    // both `host` and `host:port`.
+    //
+    // For standard ports we additionally emit `host:default_port` so that
+    // rmcp's port-aware comparison passes even when the port is explicit.
     let explicit_port = parsed.port();
-    push_host_variants(hosts, host, explicit_port.unwrap_or(listen_port));
-    // Also add with the URL's explicit port if it's non-standard, so both
-    // `host` and `host:port` appear in the list for reverse-proxy deployments
-    // where the Host header may or may not include the port.
+    let scheme_default_port = match parsed.scheme() {
+        "https" => Some(443u16),
+        "http" => Some(80u16),
+        _ => None,
+    };
+
     if let Some(p) = explicit_port {
+        // Non-standard port: push `host`, `host:p` (both forms browsers use).
+        push_host_variants(hosts, host, p);
         let with_port = format!("{host}:{p}");
         if !hosts.contains(&with_port) {
             hosts.push(with_port);
         }
+    } else if let Some(default_port) = scheme_default_port {
+        // Standard port (implicit): push bare `host` and `host:default_port`.
+        // The bare host is the form browsers put in the Host header; the
+        // `host:port` form satisfies rmcp's port-aware allowlist comparison.
+        let bare = host.to_string();
+        if !hosts.contains(&bare) {
+            hosts.push(bare);
+        }
+        let with_default = format!("{host}:{default_port}");
+        if !hosts.contains(&with_default) {
+            hosts.push(with_default);
+        }
+    } else {
+        // Unknown scheme: fall back to listen_port as before.
+        push_host_variants(hosts, host, listen_port);
     }
 }
 

@@ -452,6 +452,12 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
     if !auth.admin_email.is_empty() {
         push_var(&mut vars, "SYSLOG_MCP_AUTH_ADMIN_EMAIL", &auth.admin_email);
     }
+    // NOTE: auth.allowed_emails is validated by syslog-mcp's config layer
+    // (validate_auth_config rejects an empty allowlist when OAuth is active)
+    // but lab-auth's AuthConfig has no `allowed_emails` field — it only
+    // enforces `admin_email`. The full email allowlist is a TODO for a future
+    // lab-auth release. Do NOT add a no-op push_var for allowed_emails here;
+    // the entries would be silently ignored by AuthConfigBuilder.build_from_sources.
     push_var(
         &mut vars,
         "SYSLOG_MCP_AUTH_SQLITE_PATH",

@@ -20,11 +20,13 @@ BACKUP_DIR="${1:-./backups}"
 TIMESTAMP=$(date -u +%Y-%m-%d-%H%M%S)
 BACKUP_FILE="${BACKUP_DIR}/syslog-${TIMESTAMP}.db"
 
-# Auth artifacts live next to the syslog DB by default. Override with the same
-# env vars the syslog-mcp binary honors so the script tracks runtime config.
+# Auth artifact paths come from [mcp.auth].sqlite_path and [mcp.auth].key_path
+# in config.toml (resolved relative to the syslog DB directory at runtime).
+# Defaults below match the out-of-the-box config.toml values. Override here
+# if you changed the paths in config.toml.
 DB_DIR="$(dirname "$DB_PATH")"
-AUTH_DB_PATH="${SYSLOG_MCP_AUTH_SQLITE_PATH:-${DB_DIR}/auth.db}"
-AUTH_KEY_PATH="${SYSLOG_MCP_AUTH_KEY_PATH:-${DB_DIR}/auth-jwt.pem}"
+AUTH_DB_PATH="${AUTH_DB_PATH:-${DB_DIR}/auth.db}"
+AUTH_KEY_PATH="${AUTH_KEY_PATH:-${DB_DIR}/auth-jwt.pem}"
 
 # Ensure backup directory exists
 mkdir -p "$BACKUP_DIR"
@@ -49,10 +51,12 @@ echo "Backup complete: ${BACKUP_FILE} (${SIZE})"
 if [[ -f "$AUTH_DB_PATH" ]]; then
     AUTH_BACKUP_FILE="${BACKUP_DIR}/auth-${TIMESTAMP}.db"
     ESCAPED_AUTH_BACKUP="${AUTH_BACKUP_FILE//\'/\'\'}"
-    # Explicit checkpoint first so even a sidecar copy of the WAL would be
-    # consistent. The .backup command itself is WAL-safe but the checkpoint is
-    # cheap insurance for environments where operators sidestep this script.
-    sqlite3 "$AUTH_DB_PATH" "PRAGMA wal_checkpoint(FULL);" >/dev/null
+    # Best-effort checkpoint before backup. The .backup command is already
+    # WAL-safe; this just keeps the WAL trimmed. We tolerate failure (e.g.
+    # SQLITE_BUSY while syslog-mcp is writing) because .backup will still
+    # produce a consistent snapshot.
+    sqlite3 "$AUTH_DB_PATH" "PRAGMA wal_checkpoint(FULL);" >/dev/null 2>&1 \
+        || echo "Auth DB WAL checkpoint skipped (busy); .backup will still be consistent"
     sqlite3 "$AUTH_DB_PATH" ".backup '${ESCAPED_AUTH_BACKUP}'"
     AUTH_SIZE=$(du -h "$AUTH_BACKUP_FILE" | cut -f1)
     chmod 600 "$AUTH_BACKUP_FILE"

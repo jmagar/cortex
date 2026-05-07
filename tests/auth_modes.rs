@@ -324,8 +324,14 @@ async fn well_known_response_body_has_required_fields() {
     let resp = router(state).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-    let body: serde_json::Value = serde_json::from_slice(&bytes).expect("discovery body must be valid JSON");
-    for field in &["issuer", "authorization_endpoint", "token_endpoint", "jwks_uri"] {
+    let body: serde_json::Value =
+        serde_json::from_slice(&bytes).expect("discovery body must be valid JSON");
+    for field in &[
+        "issuer",
+        "authorization_endpoint",
+        "token_endpoint",
+        "jwks_uri",
+    ] {
         assert!(
             body[field].is_string(),
             "/.well-known/oauth-authorization-server must contain field '{field}'; got: {body}"
@@ -346,7 +352,10 @@ async fn jwks_response_body_has_keys_array() {
     let resp = router(state).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-    let body: serde_json::Value = serde_json::from_slice(&bytes).expect("JWKS body must be valid JSON");
-    let keys = body["keys"].as_array().expect("JWKS must have a 'keys' array");
+    let body: serde_json::Value =
+        serde_json::from_slice(&bytes).expect("JWKS body must be valid JSON");
+    let keys = body["keys"]
+        .as_array()
+        .expect("JWKS must have a 'keys' array");
     assert!(!keys.is_empty(), "JWKS 'keys' array must be non-empty");
 }

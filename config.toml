@@ -20,6 +20,9 @@ recovery_free_disk_mb = 768 # cleanup target after free-disk breach
 cleanup_interval_secs = 60  # storage-budget enforcement interval
 
 [mcp]
+# Safety gate: if host is non-loopback (e.g. "0.0.0.0"), startup requires either
+# SYSLOG_MCP_TOKEN (static bearer) or SYSLOG_MCP_AUTH_MODE=oauth to be set.
+# Binding to a non-loopback address without auth will cause startup to fail.
 host = "0.0.0.0"
 port = 3100
 server_name = "syslog-mcp"

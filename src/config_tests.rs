@@ -809,6 +809,7 @@ fn non_loopback_bind_with_oauth_passes() {
 }
 
 #[test]
+#[serial]
 fn auth_mode_parses_lowercase_only() {
     let mut mode = AuthMode::Bearer;
     std::env::set_var("__TEST_AUTH_MODE_PARSE", "OAUTH");

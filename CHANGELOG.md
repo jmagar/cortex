@@ -59,9 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pattern: `AuthContext` read from `ctx.extensions.get::<axum::http::request::Parts>()?.extensions.get::<AuthContext>()`
     (Pattern (a) locked by spike syslog-mcp-brt0.10; no AppState map, no task-local needed).
   - 9 new unit tests covering all branches: LoopbackDev permit, Mounted+read scope, Mounted+admin
-    scope alone (denied for reads), Mounted+both scopes, empty scopes+read (denied), empty
-    scopes+help (permitted), missing AuthContext fail-closed, tools/list with AuthContext, and
-    scope-check-before-DB verification.
+    scope (syslog:admin is treated as a superset of syslog:read and satisfies read requirements),
+    Mounted+both scopes, empty scopes+read (denied), empty scopes+help (permitted), missing
+    AuthContext fail-closed, tools/list with AuthContext, and scope-check-before-DB verification.
 
 ## [0.15.0] - 2026-05-07
 
@@ -647,7 +647,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/jmagar/syslog-mcp/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/jmagar/syslog-mcp/compare/v0.15.0...v0.16.0
+[0.15.0]: https://github.com/jmagar/syslog-mcp/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/jmagar/syslog-mcp/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/jmagar/syslog-mcp/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/jmagar/syslog-mcp/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/jmagar/syslog-mcp/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/jmagar/syslog-mcp/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/jmagar/syslog-mcp/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/jmagar/syslog-mcp/compare/v0.7.0...v0.8.0

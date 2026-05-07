@@ -411,10 +411,15 @@ fn public_url_non_standard_port_included_in_host_and_origin() {
     };
 
     let hosts = allowed_hosts(&config);
+    // Non-standard port: both bare host and host:port must be present.
+    // Browsers include the port in the Host header for non-standard ports.
     assert!(
-        hosts.contains(&"syslog.example.com".to_string())
-            || hosts.contains(&"syslog.example.com:8443".to_string()),
-        "expected host variants for non-standard port; got: {hosts:?}"
+        hosts.contains(&"syslog.example.com".to_string()),
+        "expected bare host in allowed_hosts for non-standard port; got: {hosts:?}"
+    );
+    assert!(
+        hosts.contains(&"syslog.example.com:8443".to_string()),
+        "expected host:port in allowed_hosts for non-standard port; got: {hosts:?}"
     );
 
     let origins = allowed_origins(&config);
@@ -422,6 +427,37 @@ fn public_url_non_standard_port_included_in_host_and_origin() {
     assert!(
         origins.contains(&"https://syslog.example.com:8443".to_string()),
         "expected https://syslog.example.com:8443 in allowed_origins; got: {origins:?}"
+    );
+}
+
+/// Standard port (https:443): bare host AND host:443 must be in allowed_hosts.
+/// Browsers omit the default port from the Host header, so bare host is required.
+/// host:443 is also added so rmcp's port-aware comparison passes.
+#[test]
+fn public_url_standard_https_port_host_variants() {
+    let config = McpConfig {
+        host: "0.0.0.0".into(),
+        port: 3100,
+        server_name: "syslog-mcp".into(),
+        api_token: None,
+        allowed_hosts: Vec::new(),
+        allowed_origins: Vec::new(),
+        auth: crate::config::AuthConfig {
+            public_url: Some("https://syslog.example.com".into()),
+            ..Default::default()
+        },
+    };
+
+    let hosts = allowed_hosts(&config);
+    // Bare host: what browsers send when using the default port.
+    assert!(
+        hosts.contains(&"syslog.example.com".to_string()),
+        "expected bare host in allowed_hosts for standard port; got: {hosts:?}"
+    );
+    // host:443: for rmcp's port-aware comparison when the URL port is explicit.
+    assert!(
+        hosts.contains(&"syslog.example.com:443".to_string()),
+        "expected host:443 in allowed_hosts for standard-https URL; got: {hosts:?}"
     );
 }
 
