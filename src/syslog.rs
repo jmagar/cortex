@@ -20,8 +20,11 @@ pub async fn start_with_storage_state(
     pool: Arc<DbPool>,
     storage_state: Arc<Mutex<Option<db::StorageBudgetState>>>,
 ) -> Result<()> {
-    // No-op enrichment for the legacy convenience entry point — production
-    // runtime uses RuntimeCore which builds enrichment from Config.
+    // Default enrichment for the legacy convenience entry point: Authelia
+    // and AdGuard reclassification are still applied (gating is "ungated"
+    // when no source-IP prefix is configured), but secret scrubbing stays
+    // on (default). Production runtime uses RuntimeCore which builds
+    // enrichment from Config including operator overrides.
     let ingest_tx = ingest::start_writer_from_syslog_config(
         &config,
         storage,
