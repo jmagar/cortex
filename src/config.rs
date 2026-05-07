@@ -12,6 +12,40 @@ pub struct Config {
     pub mcp: McpConfig,
     pub api: ApiConfig,
     pub docker_ingest: DockerIngestConfig,
+    pub enrichment: EnrichmentConfigToml,
+}
+
+/// Enrichment + scrubbing knobs. Loaded from `[enrichment]` in `config.toml`
+/// or from `SYSLOG_MCP_*` env vars at runtime startup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EnrichmentConfigToml {
+    /// If set, only apply Authelia severity reclassification when an entry's
+    /// `source_ip` starts with this prefix. Prevents non-Authelia hosts from
+    /// spoofing severity by sending crafted messages with `tag=authelia`.
+    pub authelia_source_ip: Option<String>,
+    /// Same gating, for AdGuard JSON tag classification.
+    pub adguard_source_ip: Option<String>,
+    /// Best-effort credential scrubbing on AI-source records. Default true.
+    /// Set to false only if downstream consumers need raw prompt text and
+    /// you trust every tailnet node.
+    pub scrub_prompts: bool,
+    /// FTS5 incremental merge segment threshold. M=0 forces unconditional
+    /// merge after every purge cycle (recommended for the AdGuard delete
+    /// workload). Increase if M=0 holds the write lock too long on a large
+    /// index. Range: 0..=10000.
+    pub fts_merge_pages: u32,
+}
+
+impl Default for EnrichmentConfigToml {
+    fn default() -> Self {
+        Self {
+            authelia_source_ip: None,
+            adguard_source_ip: None,
+            scrub_prompts: true,
+            fts_merge_pages: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -358,6 +392,23 @@ impl Config {
 
         env_override_bool("SYSLOG_API_ENABLED", &mut config.api.enabled)?;
         env_override_opt_str("SYSLOG_API_TOKEN", &mut config.api.api_token);
+
+        env_override_opt_str(
+            "SYSLOG_MCP_AUTHELIA_SOURCE_IP",
+            &mut config.enrichment.authelia_source_ip,
+        );
+        env_override_opt_str(
+            "SYSLOG_MCP_ADGUARD_SOURCE_IP",
+            &mut config.enrichment.adguard_source_ip,
+        );
+        env_override_bool(
+            "SYSLOG_MCP_SCRUB_PROMPTS",
+            &mut config.enrichment.scrub_prompts,
+        )?;
+        env_override_parse(
+            "SYSLOG_MCP_FTS_MERGE_PAGES",
+            &mut config.enrichment.fts_merge_pages,
+        )?;
 
         env_override_bool(
             "SYSLOG_DOCKER_INGEST_ENABLED",

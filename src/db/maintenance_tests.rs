@@ -83,7 +83,7 @@ fn test_purge_old_logs_removes_old() {
     .unwrap();
     drop(conn);
 
-    let deleted = purge_old_logs(&pool, 90).unwrap();
+    let deleted = purge_old_logs(&pool, 90, 0).unwrap();
     assert_eq!(deleted, 1, "should have deleted exactly the old entry");
 
     let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
@@ -97,7 +97,7 @@ fn test_purge_zero_retention_noop() {
     let entries = vec![make_entry("2020-01-01T00:00:00Z", "host-a", "info", "old")];
     insert_logs_batch(&pool, &entries).unwrap();
 
-    let deleted = purge_old_logs(&pool, 0).unwrap();
+    let deleted = purge_old_logs(&pool, 0, 0).unwrap();
     assert_eq!(deleted, 0, "retention_days=0 should be a no-op");
 }
 

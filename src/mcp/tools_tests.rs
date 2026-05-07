@@ -21,6 +21,7 @@ fn test_state_with_token(token: Option<String>) -> (AppState, tempfile::TempDir)
                 allowed_hosts: Vec::new(),
                 allowed_origins: Vec::new(),
             },
+            otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
         },
         dir,
     )

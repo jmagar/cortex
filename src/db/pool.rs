@@ -166,6 +166,44 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 2: created docker_ingest_checkpoints table");
     }
 
+    // Migration 3: composite index on (app_name, received_at).
+    //
+    // The new `purge_by_tag_window` function deletes rows by `app_name` within
+    // a `received_at` window (e.g. all `adguard-allowed` older than 7 days).
+    // Without this composite index, each chunked DELETE scans the entire
+    // app_name partition before applying the time filter — pathological at
+    // AdGuard volumes.
+    //
+    // First-run cost: on a multi-million-row database the CREATE INDEX may
+    // take several minutes and holds the write lock for that duration. The
+    // /health endpoint will not respond and syslog UDP packets may be dropped
+    // at the kernel buffer during that window. Operators upgrading on a
+    // populated DB should plan for a brief health-check gap.
+    let migration_3_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 3",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_3_applied {
+        tracing::info!(
+            "Migration 3: starting CREATE INDEX idx_logs_app_name_received_at \
+             — may take several minutes on large databases, write lock held"
+        );
+        let started = std::time::Instant::now();
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_logs_app_name_received_at \
+                 ON logs(app_name, received_at);
+             INSERT INTO schema_migrations (version) VALUES (3);",
+        )?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "Migration 3: composite index (app_name, received_at) created"
+        );
+    }
+
     tracing::info!(path = %config.db_path.display(), "Database initialized");
     Ok(pool)
 }

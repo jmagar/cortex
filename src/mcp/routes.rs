@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use axum::{
@@ -132,16 +133,24 @@ fn token_matches(provided: &str, expected: &str) -> bool {
 }
 
 /// Health check — lightweight probe that verifies DB connectivity without
-/// running COUNT(*) over the entire logs table.
+/// running COUNT(*) over the entire logs table. Also surfaces OTLP receiver
+/// counters so operators can see ingest activity at a glance.
 async fn health(State(state): State<AppState>) -> impl IntoResponse {
     let started = Instant::now();
+    let logs_received = state.otlp_counters.logs_received.load(Ordering::Relaxed);
+    let decode_errors = state.otlp_counters.decode_errors.load(Ordering::Relaxed);
     match state.service.health_check().await {
         Ok(()) => {
             tracing::debug!(
                 elapsed_ms = started.elapsed().as_millis(),
                 "Health check passed"
             );
-            Json(json!({ "status": "ok" })).into_response()
+            Json(json!({
+                "status": "ok",
+                "otlp_logs_received": logs_received,
+                "otlp_decode_errors": decode_errors,
+            }))
+            .into_response()
         }
         Err(e) => {
             tracing::error!(
@@ -151,7 +160,11 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
             );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "status": "error" })),
+                Json(json!({
+                    "status": "error",
+                    "otlp_logs_received": logs_received,
+                    "otlp_decode_errors": decode_errors,
+                })),
             )
                 .into_response()
         }

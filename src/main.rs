@@ -71,15 +71,21 @@ async fn serve_mcp() -> Result<()> {
         })?);
         info!("Non-MCP API mounted under /api");
     }
+    app = app.merge(runtime.otlp_router());
+    info!("OTLP receiver mounted at /v1/logs (and /v1/metrics → 200, /v1/traces → 404)");
     app = app.layer(tower_http::trace::TraceLayer::new_for_http());
 
     let mcp_bind = runtime.config.mcp.bind_addr();
     let listener = tokio::net::TcpListener::bind(&mcp_bind).await?;
     info!(bind = %mcp_bind, "MCP server listening");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // OTLP handler needs ConnectInfo<SocketAddr> for source_ip provenance.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     Ok(())
 }
