@@ -19,7 +19,7 @@ Index for the `mcp/` documentation subdirectory. These docs cover the MCP server
 | `PATTERNS.md` | Code patterns: flat tool dispatch, run_db helper, batch writer |
 | `PRE-COMMIT.md` | Pre-commit hook configuration |
 | `PUBLISH.md` | Publishing: versioning, crates.io, GHCR, MCP registry |
-| `RESOURCES.md` | MCP resources: syslog-mcp exposes no resources |
+| `RESOURCES.md` | MCP resources: schema resource and URI conventions |
 | `SCHEMA.md` | Tool schema documentation: JSON Schema definitions in Rust |
 | `TESTS.md` | Testing: cargo test, live smoke tests, test coverage |
 | `TOOLS.md` | MCP tools reference: one `syslog` tool with all 8 action shapes |
