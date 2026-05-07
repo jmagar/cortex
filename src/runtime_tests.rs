@@ -67,7 +67,9 @@ fn oauth_mcp(tmp: &std::path::Path) -> McpConfig {
 async fn build_auth_policy_returns_loopback_dev_when_no_auth_and_loopback_bind() {
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path(), loopback_mcp());
-    let policy = build_auth_policy(&config, false).await.expect("build policy");
+    let policy = build_auth_policy(&config, false)
+        .await
+        .expect("build policy");
     assert!(matches!(policy, AuthPolicy::LoopbackDev));
 }
 
@@ -80,7 +82,9 @@ async fn build_auth_policy_returns_mounted_bearer_only_when_static_token_only() 
     let config = test_config(tmp.path(), mcp);
     // Bearer-only: AuthLayer is mounted (auth is enforced), but no OAuth state.
     // Scope checks in S5 must still run — Mounted { auth_state: None } is correct.
-    let policy = build_auth_policy(&config, false).await.expect("build policy");
+    let policy = build_auth_policy(&config, false)
+        .await
+        .expect("build policy");
     assert!(matches!(policy, AuthPolicy::Mounted { auth_state: None }));
 }
 
