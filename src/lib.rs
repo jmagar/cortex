@@ -6,6 +6,8 @@ pub mod otlp;
 pub mod runtime;
 pub mod syslog;
 
+pub(crate) mod auth;
+
 pub(crate) mod db;
 pub(crate) mod docker_ingest;
 pub(crate) mod ingest;

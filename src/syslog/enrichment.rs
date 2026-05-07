@@ -18,6 +18,7 @@
 //! costs 10–50 ms each and would saturate the writer at any non-trivial
 //! volume.
 
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -62,12 +63,15 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"\bsk-ant-api03-[A-Za-z0-9_\-]{20,}\b",
         // OpenAI project keys
         r"\bsk-proj-[A-Za-z0-9_\-]{20,}\b",
-        // Generic Bearer tokens in Authorization headers
-        r"(?i)Authorization:\s*Bearer\s+[A-Za-z0-9._\-]+",
-        // password=value, api_key=value, secret=value
-        r"(?i)\b(?:password|api[_-]?key|secret)\s*[:=]\s*[^\s,;\}\]]+",
-        // PEM private key block (any line containing the BEGIN marker)
-        r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+        // Standalone JWTs (3 base64url segments separated by `.`)
+        r"\beyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b",
+        // Bearer tokens in Authorization headers (broad token charset incl. base64 +/=)
+        r"(?i)Authorization:\s*Bearer\s+[A-Za-z0-9._+/=\-]+",
+        // password=value / api_key=value / secret=value (handles quoted values)
+        r#"(?i)\b(?:password|api[_-]?key|secret)\s*[:=]\s*"?[^\s,;\}\]"]+"?"#,
+        // PEM private key block — match the WHOLE block including key body. (?s)
+        // makes `.` cross newlines; lazy `.+?` stops at the first END marker.
+        r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.+?-----END [A-Z ]*PRIVATE KEY-----",
     ];
     raw.into_iter()
         .map(|p| Regex::new(p).expect("static secret pattern"))
@@ -172,17 +176,22 @@ fn is_ai_source(app_name: &str) -> bool {
 /// Replace any token matching the secret pattern set with `[REDACTED]`. The
 /// raw API token (if configured) is appended as a literal pattern so a leaked
 /// copy in tool output is scrubbed before storage.
+///
+/// Common case (no match) returns `Cow::Borrowed` and allocates nothing —
+/// hot-path optimization for AI bursts where most messages have no secrets.
 fn scrub_secrets(message: &str, api_token: Option<&str>) -> String {
-    let mut out = message.to_string();
+    let mut out: Cow<str> = Cow::Borrowed(message);
     for re in SECRET_PATTERNS.iter() {
-        out = re.replace_all(&out, "[REDACTED]").to_string();
+        if let Cow::Owned(replaced) = re.replace_all(&out, "[REDACTED]") {
+            out = Cow::Owned(replaced);
+        }
     }
     if let Some(token) = api_token {
         if !token.is_empty() && out.contains(token) {
-            out = out.replace(token, "[REDACTED]");
+            out = Cow::Owned(out.replace(token, "[REDACTED]"));
         }
     }
-    out
+    out.into_owned()
 }
 
 #[cfg(test)]

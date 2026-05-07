@@ -25,9 +25,9 @@ use opentelemetry_proto::tonic::{
 };
 use prost::Message;
 use serde_json::json;
-use subtle::ConstantTimeEq;
 use tower_http::limit::RequestBodyLimitLayer;
 
+use crate::auth::{bearer_token, token_matches};
 use crate::db::LogBatchEntry;
 use crate::ingest::IngestTx;
 
@@ -254,13 +254,12 @@ fn format_otlp_timestamp(time_unix_nano: u64) -> Option<String> {
 /// than dropping the record.
 fn severity_from_number(n: i32) -> &'static str {
     match n {
-        1..=4 => "debug",
-        5..=8 => "debug",
+        1..=8 => "debug", // OTLP TRACE (1..=4) and DEBUG (5..=8) both map here
         9..=12 => "info",
         13..=16 => "warning",
         17..=20 => "err",
         21..=24 => "crit",
-        _ => "info",
+        _ => "info", // 0=UNSPECIFIED and out-of-range fall back to info
     }
 }
 
@@ -289,33 +288,6 @@ fn is_authorized(state: &OtlpState, headers: &HeaderMap) -> bool {
         return false;
     };
     bearer_token(auth).is_some_and(|tok| token_matches(tok, expected))
-}
-
-fn bearer_token(auth: &str) -> Option<&str> {
-    let mut parts = auth.split_whitespace();
-    let scheme = parts.next()?;
-    let token = parts.next()?;
-    if parts.next().is_some() || !scheme.eq_ignore_ascii_case("bearer") {
-        return None;
-    }
-    Some(token)
-}
-
-fn token_matches(provided: &str, expected: &str) -> bool {
-    const MAX_TOKEN_LEN: usize = 4096;
-    if provided.len() > MAX_TOKEN_LEN || expected.len() > MAX_TOKEN_LEN {
-        return false;
-    }
-    let mut a = [0_u8; MAX_TOKEN_LEN];
-    let mut b = [0_u8; MAX_TOKEN_LEN];
-    a[..provided.len()].copy_from_slice(provided.as_bytes());
-    b[..expected.len()].copy_from_slice(expected.as_bytes());
-    let bytes_match = a.ct_eq(&b).unwrap_u8() == 1;
-    let lens_match = (provided.len() as u64)
-        .ct_eq(&(expected.len() as u64))
-        .unwrap_u8()
-        == 1;
-    bytes_match && lens_match
 }
 
 fn unauthorized() -> axum::response::Response {
