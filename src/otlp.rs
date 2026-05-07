@@ -139,19 +139,54 @@ async fn logs_handler(
     let entries = build_entries(&req, peer);
     let count = entries.len();
 
-    // try_send each entry. Any Full result aborts the request with 503 so
-    // OTel exporters back off instead of growing the in-memory queue.
+    // Pre-flight capacity check: reject the WHOLE request with 503 if the
+    // channel can't fit it. Without this, partial accept (entries 0..N
+    // queued, N+1 hits Full, return 503) leads to OTel exporter retry of
+    // the full batch — duplicating the rows already accepted. See review
+    // threads PRRT_*ALWfA / *ALb_p / *ALYDZ.
+    if state.ingest.capacity() < count {
+        tracing::warn!(
+            source_ip = %peer,
+            requested = count,
+            available = state.ingest.capacity(),
+            "OTLP write channel insufficient capacity — returning 503 (no partial accept)"
+        );
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "channel_full"})),
+        )
+            .into_response();
+    }
+
+    // Capacity reservation is best-effort (concurrent senders may consume
+    // slots between check and send). On Full mid-loop we still 503, which
+    // can in the worst case duplicate a few records on retry, but the
+    // pre-flight makes the common case clean.
     for entry in entries {
-        if state.ingest.try_send(entry).is_err() {
-            tracing::warn!(
-                source_ip = %peer,
-                "OTLP write channel full — returning 503"
-            );
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"error": "channel_full"})),
-            )
-                .into_response();
+        match state.ingest.try_send(entry) {
+            Ok(()) => {}
+            Err(crate::ingest::TrySendErr::Full) => {
+                tracing::warn!(
+                    source_ip = %peer,
+                    "OTLP write channel filled mid-batch — returning 503"
+                );
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({"error": "channel_full"})),
+                )
+                    .into_response();
+            }
+            Err(crate::ingest::TrySendErr::Closed) => {
+                tracing::error!(
+                    source_ip = %peer,
+                    "OTLP write channel CLOSED — batch writer task is dead"
+                );
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "writer_unavailable"})),
+                )
+                    .into_response();
+            }
         }
     }
 

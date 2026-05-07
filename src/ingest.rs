@@ -46,6 +46,13 @@ impl IngestTx {
         self.tx.clone()
     }
 
+    /// Best-effort current channel capacity (slots currently free). Used by
+    /// the OTLP handler to pre-flight a multi-record batch and reject with
+    /// 503 *before* any partial enqueue, avoiding duplicate-on-retry.
+    pub(crate) fn capacity(&self) -> usize {
+        self.tx.capacity()
+    }
+
     /// Test-only constructor: builds an `IngestTx` from a raw sender so tests
     /// don't have to spawn a real batch writer.
     #[cfg(test)]

@@ -1,7 +1,7 @@
 # Fleet Deployment — syslog-mcp expansion
 
 These artifacts deploy the operational side of epic
-[`syslog-mcp-6uoy`](#) (full-fleet log ingest + OTLP). Phase 1 (OTLP receiver)
+`syslog-mcp-6uoy` (full-fleet log ingest + OTLP). Phase 1 (OTLP receiver)
 and Phase 2 (enrichment + retention) are pure Rust changes already in the
 syslog-mcp binary; the files in this directory are the manual deployment
 steps for Phases 3–5.

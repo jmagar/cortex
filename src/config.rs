@@ -409,6 +409,12 @@ impl Config {
             "SYSLOG_MCP_FTS_MERGE_PAGES",
             &mut config.enrichment.fts_merge_pages,
         )?;
+        if config.enrichment.fts_merge_pages > 10_000 {
+            return Err(anyhow::anyhow!(
+                "SYSLOG_MCP_FTS_MERGE_PAGES must be in 0..=10000, got {}",
+                config.enrichment.fts_merge_pages
+            ));
+        }
 
         env_override_bool(
             "SYSLOG_DOCKER_INGEST_ENABLED",
