@@ -2,6 +2,21 @@
 # SessionStart hook — deploys or connects syslog-mcp based on userConfig
 set -euo pipefail
 
+# When invoked directly (e.g. /syslog:redeploy), the plugin runtime vars are
+# absent. Derive CLAUDE_PLUGIN_ROOT from the script's own location and default
+# CLAUDE_PLUGIN_DATA to the well-known plugin data directory so the hook works
+# both from the plugin system and from manual invocation.
+: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+: "${CLAUDE_PLUGIN_DATA:=${HOME}/.claude/plugins/data/syslog-jmagar-lab}"
+
+# Seed the token from the existing env file when the plugin option isn't set,
+# so /syslog:redeploy doesn't fail just because the env var wasn't injected.
+if [[ -z "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}" && -f "${CLAUDE_PLUGIN_DATA}/syslog-mcp.env" ]]; then
+  _tok=$(grep -m1 '^SYSLOG_MCP_API_TOKEN=' "${CLAUDE_PLUGIN_DATA}/syslog-mcp.env" | cut -d= -f2- || true)
+  [[ -n "${_tok}" ]] && CLAUDE_PLUGIN_OPTION_API_TOKEN="${_tok}"
+  unset _tok
+fi
+
 # ── Config from userConfig ────────────────────────────────────────────────────
 IS_SERVER="${CLAUDE_PLUGIN_OPTION_IS_SERVER:-true}"
 USE_DOCKER="${CLAUDE_PLUGIN_OPTION_USE_DOCKER:-false}"
