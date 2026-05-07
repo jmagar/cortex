@@ -55,7 +55,7 @@ toml = "0.8"
 # OAuth + JWT (shared with lab via parameterizable lab-auth crate)
 # TODO: switch to git+rev once lab branch is pushed and merged (epic syslog-mcp-brt0).
 # Path dep is provisional for development against lab worktrees on the same branch.
-lab-auth = { path = "../../../../lab-l1-pin/crates/lab-auth" }
+lab-auth = { path = "../../../../lab/.claude/worktrees/oauth-integration/crates/lab-auth" }
 url = "2"
 
 # Logging
