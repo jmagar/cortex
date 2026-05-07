@@ -33,6 +33,7 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
             auth: Default::default(),
         },
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
+        auth_policy: crate::mcp::AuthPolicy::LoopbackDev,
     };
     (state, pool, dir)
 }

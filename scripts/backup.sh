@@ -5,7 +5,10 @@
 #   bash scripts/backup.sh [/path/to/backup/dir]
 #
 # Default backup dir: ./backups/
-# Backup file: syslog-YYYY-MM-DD-HHMMSS.db
+# Backup files (per timestamp):
+#   syslog-YYYY-MM-DD-HHMMSS.db        — live syslog log database
+#   auth-YYYY-MM-DD-HHMMSS.db          — lab-auth OAuth/JWT store (if present)
+#   auth-jwt-YYYY-MM-DD-HHMMSS.pem     — RSA signing key (if present)
 #
 # Schedule via cron:
 #   0 */6 * * * cd /path/to/syslog-mcp && bash scripts/backup.sh
@@ -16,6 +19,12 @@ DB_PATH="${SYSLOG_MCP_DB_PATH:-./data/syslog.db}"
 BACKUP_DIR="${1:-./backups}"
 TIMESTAMP=$(date -u +%Y-%m-%d-%H%M%S)
 BACKUP_FILE="${BACKUP_DIR}/syslog-${TIMESTAMP}.db"
+
+# Auth artifacts live next to the syslog DB by default. Override with the same
+# env vars the syslog-mcp binary honors so the script tracks runtime config.
+DB_DIR="$(dirname "$DB_PATH")"
+AUTH_DB_PATH="${SYSLOG_MCP_AUTH_SQLITE_PATH:-${DB_DIR}/auth.db}"
+AUTH_KEY_PATH="${SYSLOG_MCP_AUTH_KEY_PATH:-${DB_DIR}/auth-jwt.pem}"
 
 # Ensure backup directory exists
 mkdir -p "$BACKUP_DIR"
@@ -33,7 +42,38 @@ sqlite3 "$DB_PATH" ".backup '${ESCAPED_BACKUP_FILE}'"
 SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
 echo "Backup complete: ${BACKUP_FILE} (${SIZE})"
 
+# --- Auth state backup --------------------------------------------------------
+# auth.db is a separate SQLite store managed by lab-auth. Use the same
+# `.backup` (online, WAL-safe) approach so a running syslog-mcp doesn't need
+# to be stopped to capture a consistent OAuth state snapshot.
+if [[ -f "$AUTH_DB_PATH" ]]; then
+    AUTH_BACKUP_FILE="${BACKUP_DIR}/auth-${TIMESTAMP}.db"
+    ESCAPED_AUTH_BACKUP="${AUTH_BACKUP_FILE//\'/\'\'}"
+    # Explicit checkpoint first so even a sidecar copy of the WAL would be
+    # consistent. The .backup command itself is WAL-safe but the checkpoint is
+    # cheap insurance for environments where operators sidestep this script.
+    sqlite3 "$AUTH_DB_PATH" "PRAGMA wal_checkpoint(FULL);" >/dev/null
+    sqlite3 "$AUTH_DB_PATH" ".backup '${ESCAPED_AUTH_BACKUP}'"
+    AUTH_SIZE=$(du -h "$AUTH_BACKUP_FILE" | cut -f1)
+    chmod 600 "$AUTH_BACKUP_FILE" 2>/dev/null || true
+    echo "Auth DB backup complete: ${AUTH_BACKUP_FILE} (${AUTH_SIZE})"
+else
+    echo "Auth DB not found at ${AUTH_DB_PATH}; skipping (oauth not configured?)"
+fi
+
+# JWT signing key — flat copy with restrictive perms.
+if [[ -f "$AUTH_KEY_PATH" ]]; then
+    AUTH_KEY_BACKUP="${BACKUP_DIR}/auth-jwt-${TIMESTAMP}.pem"
+    cp -p "$AUTH_KEY_PATH" "$AUTH_KEY_BACKUP"
+    chmod 600 "$AUTH_KEY_BACKUP" 2>/dev/null || true
+    echo "Auth JWT key backup complete: ${AUTH_KEY_BACKUP}"
+else
+    echo "Auth JWT key not found at ${AUTH_KEY_PATH}; skipping"
+fi
+
 # Prune backups older than 30 days
 find "$BACKUP_DIR" -name "syslog-*.db" -mtime +30 -delete 2>/dev/null || true
+find "$BACKUP_DIR" -name "auth-*.db" -mtime +30 -delete 2>/dev/null || true
+find "$BACKUP_DIR" -name "auth-jwt-*.pem" -mtime +30 -delete 2>/dev/null || true
 REMAINING=$(find "$BACKUP_DIR" -name "syslog-*.db" | wc -l | tr -d ' ')
-echo "Retained ${REMAINING} backup(s) in ${BACKUP_DIR}"
+echo "Retained ${REMAINING} syslog backup(s) in ${BACKUP_DIR}"

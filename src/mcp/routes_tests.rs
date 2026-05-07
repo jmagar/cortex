@@ -25,6 +25,7 @@ fn test_state_with_token(token: Option<String>) -> (AppState, tempfile::TempDir)
                 auth: Default::default(),
             },
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
+            auth_policy: crate::mcp::AuthPolicy::LoopbackDev,
         },
         dir,
     )
