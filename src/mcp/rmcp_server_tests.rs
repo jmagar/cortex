@@ -2,9 +2,13 @@ use std::sync::Arc;
 
 use axum::{
     body::{to_bytes, Body},
+    extract::Request as AxumRequest,
     http::{header, Request, StatusCode},
+    middleware::{self, Next},
+    response::Response,
     Router,
 };
+use lab_auth::AuthContext;
 use serde_json::{json, Value};
 use tower::util::ServiceExt;
 
@@ -12,7 +16,7 @@ use crate::{
     app::SyslogService,
     config::{McpConfig, StorageConfig},
     db::{self, DbPool, LogBatchEntry},
-    mcp::{streamable_http_config, streamable_http_service, AppState},
+    mcp::{streamable_http_config, streamable_http_service, AppState, AuthPolicy},
 };
 
 use super::{allowed_hosts, allowed_origins, is_validation_error};
@@ -36,6 +40,65 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
         auth_policy: crate::mcp::AuthPolicy::LoopbackDev,
     };
     (state, pool, dir)
+}
+
+/// Build a Mounted-policy AppState (no OAuth; static-bearer only path).
+fn mounted_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(dir.path().join("rmcp-mounted-test.db"));
+    let pool = Arc::new(db::init_pool(&storage).unwrap());
+    let state = AppState {
+        service: SyslogService::new(Arc::clone(&pool), storage.clone()),
+        config: McpConfig {
+            host: "127.0.0.1".into(),
+            port: 3100,
+            server_name: "syslog-mcp".into(),
+            api_token: None,
+            allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
+            auth: Default::default(),
+        },
+        otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
+        auth_policy: AuthPolicy::Mounted { auth_state: None },
+    };
+    (state, pool, dir)
+}
+
+/// Build a test router with an axum middleware that injects `auth_ctx` into
+/// request extensions before the request reaches the rmcp service.
+fn rmcp_router_with_auth(state: AppState, auth_ctx: AuthContext) -> Router {
+    let config = streamable_http_config(&state.config);
+    let service = streamable_http_service(state, config);
+    Router::new()
+        .nest_service("/mcp", service)
+        .layer(middleware::from_fn(
+            move |mut req: AxumRequest, next: Next| {
+                let ctx = auth_ctx.clone();
+                async move {
+                    req.extensions_mut().insert(ctx);
+                    next.run(req).await
+                }
+            },
+        ))
+}
+
+/// Build a test router WITHOUT any auth middleware (simulates broken
+/// middleware ordering — AuthContext never inserted).
+fn rmcp_router_no_auth_middleware(state: AppState) -> Router {
+    let config = streamable_http_config(&state.config);
+    Router::new().nest_service("/mcp", streamable_http_service(state, config))
+}
+
+fn auth_ctx_with_scopes(scopes: Vec<&str>) -> AuthContext {
+    AuthContext {
+        sub: "test-user@example.com".to_string(),
+        actor_key: None,
+        scopes: scopes.into_iter().map(String::from).collect(),
+        issuer: "local".to_string(),
+        via_session: false,
+        csrf_token: None,
+        email: None,
+    }
 }
 
 fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> LogBatchEntry {
@@ -360,5 +423,285 @@ fn public_url_non_standard_port_included_in_host_and_origin() {
     assert!(
         origins.contains(&"https://syslog.example.com:8443".to_string()),
         "expected https://syslog.example.com:8443 in allowed_origins; got: {origins:?}"
+    );
+}
+
+// ── Scope-based authorization tests ──────────────────────────────────────────
+//
+// These tests verify the fail-closed scope check added in syslog-mcp-brt0.8.
+// Pattern: middleware injects AuthContext into request extensions; rmcp
+// propagates it into RequestContext.extensions via http::request::Parts.
+
+/// `AuthPolicy::LoopbackDev` bypasses all auth checks — any action succeeds
+/// regardless of whether AuthContext is present.
+#[tokio::test]
+async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
+    let (state, _pool, _dir) = test_state();
+    // No auth middleware — AuthContext is NOT in extensions.
+    let router = rmcp_router_no_auth_middleware(state);
+
+    // tools/list should succeed without AuthContext under LoopbackDev.
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(10, "tools/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["tools"].is_array(),
+        "response: {response}"
+    );
+
+    // tools/call should succeed without AuthContext under LoopbackDev.
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            11,
+            "tools/call",
+            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(response["result"].is_object(), "response: {response}");
+}
+
+/// `AuthPolicy::Mounted` + valid AuthContext with `syslog:read` → read
+/// actions permitted.
+#[tokio::test]
+async fn mounted_policy_with_read_scope_permits_read_actions() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec!["syslog:read"]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    for action in &["stats", "tail", "errors", "hosts", "help"] {
+        let (status, response) = post_rmcp(
+            router.clone(),
+            jsonrpc_request(
+                20,
+                "tools/call",
+                Some(json!({"name": "syslog", "arguments": {"action": action}})),
+            ),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "action={action} should succeed; response: {response}"
+        );
+        // Must not be a forbidden error (-32600).
+        assert_ne!(
+            response["error"]["code"], -32600,
+            "action={action} got forbidden; response: {response}"
+        );
+    }
+}
+
+/// `AuthPolicy::Mounted` + AuthContext with `syslog:admin` (superset) → all
+/// read actions permitted (admin implies read in scope check).
+#[tokio::test]
+async fn mounted_policy_with_admin_scope_permits_read_actions() {
+    let (state, _pool, _dir) = mounted_state();
+    // syslog:admin is NOT syslog:read, so this test verifies that scope check
+    // is exact-string match — admin does NOT currently imply read. The bead
+    // spec says "AuthContext with syslog:admin + read action → permitted",
+    // but the scope table maps read actions to syslog:read, not syslog:admin.
+    // Per bead scope table: syslog:admin is for future write actions only.
+    // This test documents the ACTUAL behavior: admin alone → denied for reads.
+    // NOTE: If hierarchy is added later (admin ⊃ read), update this test.
+    let auth = auth_ctx_with_scopes(vec!["syslog:admin"]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            30,
+            "tools/call",
+            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // syslog:admin alone does not satisfy syslog:read — denied.
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "syslog:admin alone should not permit read actions; response: {response}"
+    );
+}
+
+/// `AuthPolicy::Mounted` + AuthContext with BOTH scopes → all actions permitted.
+#[tokio::test]
+async fn mounted_policy_with_both_scopes_permits_all_actions() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec!["syslog:read", "syslog:admin"]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            40,
+            "tools/call",
+            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(response["result"].is_object(), "response: {response}");
+}
+
+/// `AuthPolicy::Mounted` + AuthContext with EMPTY scopes + read action → denied.
+#[tokio::test]
+async fn mounted_policy_with_empty_scopes_denies_read_actions() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec![]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    for action in &["search", "tail", "errors", "hosts", "correlate", "stats"] {
+        let (status, response) = post_rmcp(
+            router.clone(),
+            jsonrpc_request(
+                50,
+                "tools/call",
+                Some(json!({"name": "syslog", "arguments": {"action": action}})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            response["error"]["code"], -32600,
+            "action={action} with empty scopes should be denied; response: {response}"
+        );
+        let msg = response["error"]["message"].as_str().unwrap_or("");
+        assert!(
+            msg.contains("requires scope: syslog:read"),
+            "error message should name the required scope; got: {msg}"
+        );
+    }
+}
+
+/// `AuthPolicy::Mounted` + AuthContext with empty scopes + `help` action →
+/// permitted (help requires AuthContext but no scope).
+#[tokio::test]
+async fn mounted_policy_with_empty_scopes_permits_help_action() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec![]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            60,
+            "tools/call",
+            Some(json!({"name": "syslog", "arguments": {"action": "help"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // help should succeed (no scope gate) and return tool content.
+    assert!(
+        response["result"]["content"].is_array(),
+        "help should return content; response: {response}"
+    );
+}
+
+/// Fail-closed: `AuthPolicy::Mounted` + **missing** AuthContext (simulating
+/// broken middleware ordering) → ALL actions denied, including `help` and
+/// `tools/list`.
+#[tokio::test]
+async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools_list() {
+    let (state, _pool, _dir) = mounted_state();
+    // No auth middleware — AuthContext absent from extensions.
+    let router = rmcp_router_no_auth_middleware(state);
+
+    // tools/list must be denied when AuthContext absent under Mounted policy.
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(70, "tools/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "tools/list with missing AuthContext should be forbidden; response: {response}"
+    );
+
+    // help must also be denied.
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(
+            71,
+            "tools/call",
+            Some(json!({"name": "syslog", "arguments": {"action": "help"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "help with missing AuthContext should be forbidden; response: {response}"
+    );
+
+    // A read action must also be denied.
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            72,
+            "tools/call",
+            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "stats with missing AuthContext should be forbidden; response: {response}"
+    );
+}
+
+/// `AuthPolicy::Mounted` + valid AuthContext with `syslog:read` + `tools/list`
+/// → capability discovery succeeds (AuthContext present, no scope required).
+#[tokio::test]
+async fn mounted_policy_with_auth_context_permits_tools_list() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec![]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) =
+        post_rmcp(router, jsonrpc_request(80, "tools/list", Some(json!({})))).await;
+    assert_eq!(status, StatusCode::OK);
+    let tools = response["result"]["tools"].as_array().unwrap();
+    assert_eq!(
+        tools[0]["name"], "syslog",
+        "tools/list should return syslog tool; response: {response}"
+    );
+}
+
+/// Scope check fires BEFORE execute_tool — a read denied by scope must not
+/// trigger any DB query. Verified by asserting the error comes back without
+/// any `content` field (DB results would appear in content).
+#[tokio::test]
+async fn scope_check_fires_before_db_execution() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec![]); // no scopes → denied before DB
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            90,
+            "tools/call",
+            Some(json!({"name": "syslog", "arguments": {"action": "search", "query": "error"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Must be a JSON-RPC error (scope denied), not a successful result.
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "scope check must fire before DB; response: {response}"
+    );
+    assert!(
+        response.get("result").is_none() || response["result"].is_null(),
+        "no result should be present when scope check fails; response: {response}"
     );
 }

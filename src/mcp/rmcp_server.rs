@@ -1,5 +1,6 @@
 use std::{borrow::Cow, net::Ipv6Addr, sync::Arc, time::Instant};
 
+use lab_auth::AuthContext;
 use rmcp::{
     model::{
         CallToolRequestParams, CallToolResult, Content, Implementation, ListResourcesResult,
@@ -17,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::app::ServiceError;
 use crate::config::McpConfig;
 
-use super::{schemas::tool_definitions, tools::execute_tool, AppState};
+use super::{schemas::tool_definitions, tools::execute_tool, AppState, AuthPolicy};
 
 #[derive(Clone)]
 pub struct SyslogRmcpServer {
@@ -38,8 +39,12 @@ impl ServerHandler for SyslogRmcpServer {
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
+        // tools/list requires AuthContext when policy is Mounted (but no scope).
+        // LoopbackDev bypasses the check entirely.
+        require_auth_context(&self.state, &context)?;
+
         let tools = rmcp_tool_definitions()?;
         tracing::info!(tool_count = tools.len(), "MCP tools listed");
         Ok(ListToolsResult {
@@ -51,9 +56,24 @@ impl ServerHandler for SyslogRmcpServer {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let tool_name = request.name.to_string();
+
+        // Extract action for scope check before any DB work fires.
+        let action = request
+            .arguments
+            .as_ref()
+            .and_then(|m| m.get("action"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+
+        // Fail-closed auth check: require AuthContext when Mounted, then scope.
+        let auth = require_auth_context(&self.state, &context)?;
+        if let Some(required_scope) = required_scope_for(action) {
+            check_scope(auth, required_scope, action)?;
+        }
+
         let arguments = request
             .arguments
             .map(Value::Object)
@@ -225,6 +245,86 @@ fn safe_result_count(value: &Value) -> Option<usize> {
         .and_then(|count| usize::try_from(count).ok())
         .or_else(|| value.get("hosts").and_then(Value::as_array).map(Vec::len))
         .or_else(|| value.get("summary").and_then(Value::as_array).map(Vec::len))
+}
+
+// ── Auth helpers ─────────────────────────────────────────────────────────────
+
+/// Extract and enforce the authentication context from the rmcp request.
+///
+/// - `AuthPolicy::LoopbackDev`: always returns `Ok(None)` — the loopback bind
+///   is the trust boundary; no per-request credential needed.
+/// - `AuthPolicy::Mounted(_)`: the middleware MUST have inserted an
+///   [`AuthContext`] into the request extensions. If it is absent, this
+///   returns a forbidden error immediately (fail-closed).
+///
+/// Returns `Ok(Some(&AuthContext))` for Mounted+present, `Ok(None)` for
+/// LoopbackDev. Callers can skip the scope check when the result is `None`.
+fn require_auth_context<'a>(
+    state: &AppState,
+    ctx: &'a RequestContext<RoleServer>,
+) -> Result<Option<&'a AuthContext>, ErrorData> {
+    match &state.auth_policy {
+        AuthPolicy::LoopbackDev => Ok(None),
+        AuthPolicy::Mounted { .. } => {
+            let parts = ctx
+                .extensions
+                .get::<axum::http::request::Parts>()
+                .ok_or_else(|| {
+                    ErrorData::invalid_request("forbidden: missing http context", None)
+                })?;
+            let auth = parts.extensions.get::<AuthContext>().ok_or_else(|| {
+                ErrorData::invalid_request("forbidden: missing auth context", None)
+            })?;
+            Ok(Some(auth))
+        }
+    }
+}
+
+/// Enforce that `auth` carries `required_scope`.
+///
+/// Logs a warning with subject + action on denial (audit trail).
+/// Only called when `auth` is `Some` (i.e., policy is Mounted).
+fn check_scope(
+    auth: Option<&AuthContext>,
+    required_scope: &str,
+    action: &str,
+) -> Result<(), ErrorData> {
+    let Some(auth) = auth else {
+        // LoopbackDev path — no scope enforcement needed.
+        return Ok(());
+    };
+    if auth.scopes.iter().any(|s| s == required_scope) {
+        return Ok(());
+    }
+    tracing::warn!(
+        subject = %auth.sub,
+        action = %action,
+        required_scope = %required_scope,
+        "MCP tool invocation denied: insufficient scope"
+    );
+    Err(ErrorData::invalid_request(
+        format!("forbidden: requires scope: {required_scope}"),
+        None,
+    ))
+}
+
+/// Map a syslog tool action to the minimum required scope.
+///
+/// Returns `None` for informational actions that require AuthContext (when
+/// Mounted) but no specific scope — e.g. `help`.
+/// Returns `Some(scope)` for actions that require an explicit scope grant.
+/// Unknown actions default to `syslog:read` so that future actions added
+/// without a mapping entry are denied rather than accidentally permitted.
+fn required_scope_for(action: &str) -> Option<&'static str> {
+    match action {
+        // Informational — AuthContext required when Mounted, but no scope gate.
+        "help" | "" => None,
+        // All current read actions require syslog:read.
+        "search" | "tail" | "errors" | "hosts" | "correlate" | "stats" => Some("syslog:read"),
+        // Future write/admin actions would map to syslog:admin here.
+        // Default: unknown actions fall through to syslog:read (fail-conservative).
+        _ => Some("syslog:read"),
+    }
 }
 
 pub(super) fn allowed_hosts(config: &McpConfig) -> Vec<String> {

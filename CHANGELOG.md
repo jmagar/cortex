@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-05-07
+
+### Added
+
+- **Fail-closed scope-based authorization on MCP tool dispatch** (syslog-mcp-brt0.8) — all
+  `tools/call` and `tools/list` dispatches now enforce `AuthPolicy` at the entry point of
+  `call_tool` and `list_tools`, before any DB query fires.
+  - `AuthPolicy::LoopbackDev`: scope check bypassed entirely (loopback bind is the trust boundary).
+  - `AuthPolicy::Mounted(_)`: `AuthContext` must be present in request extensions (injected by
+    `lab-auth`'s `AuthLayer` middleware). Missing context → `-32600 forbidden` immediately.
+  - Scope mapping: `search`, `tail`, `errors`, `hosts`, `correlate`, `stats` require `syslog:read`;
+    `help` requires no scope (but still requires `AuthContext` when Mounted); unknown actions default
+    to `syslog:read` (fail-conservative).
+  - `tools/list` requires `AuthContext` when Mounted but no scope (MCP spec conformance: clients
+    must be able to discover the tool before authenticating to call it, but only if they hold a
+    valid credential).
+  - Denied invocations logged at `warn` level with `subject` + `action` for audit trail.
+  - Pattern: `AuthContext` read from `ctx.extensions.get::<axum::http::request::Parts>()?.extensions.get::<AuthContext>()`
+    (Pattern (a) locked by spike syslog-mcp-brt0.10; no AppState map, no task-local needed).
+  - 9 new unit tests covering all branches: LoopbackDev permit, Mounted+read scope, Mounted+admin
+    scope alone (denied for reads), Mounted+both scopes, empty scopes+read (denied), empty
+    scopes+help (permitted), missing AuthContext fail-closed, tools/list with AuthContext, and
+    scope-check-before-DB verification.
+
 ## [0.15.0] - 2026-05-07
 
 ### Added
