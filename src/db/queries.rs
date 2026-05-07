@@ -86,6 +86,7 @@ pub fn tail_logs(
     hostname: Option<&str>,
     source_ip: Option<&str>,
     app_name: Option<&str>,
+    severity_in: Option<&[String]>,
     n: u32,
 ) -> Result<Vec<LogEntry>> {
     let conn = pool.get()?;
@@ -112,6 +113,23 @@ pub fn tail_logs(
     if let Some(a) = app_name {
         sql.push_str(&format!(" AND app_name = ?{idx}"));
         bindings.push(Box::new(a.to_string()));
+        idx += 1;
+    }
+    if let Some(levels) = severity_in {
+        if !levels.is_empty() {
+            let placeholders: Vec<String> =
+                (0..levels.len()).map(|i| format!("?{}", idx + i)).collect();
+            sql.push_str(&format!(" AND severity IN ({})", placeholders.join(", ")));
+            for lvl in levels {
+                bindings.push(Box::new(lvl.clone()));
+                #[allow(unused_assignments)]
+                {
+                    idx += 1;
+                }
+            }
+            idx += levels.len();
+            debug_assert_eq!(bindings.len() + 1, idx);
+        }
     }
 
     sql.push_str(&format!(" ORDER BY timestamp DESC LIMIT {n}"));
@@ -124,11 +142,13 @@ pub fn tail_logs(
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-/// Get error/warning summary per host in a time window
+/// Get error/warning summary per host in a time window. When `group_by_app` is
+/// true, results also include `app_name` as a secondary grouping key.
 pub fn get_error_summary(
     pool: &DbPool,
     from: Option<&str>,
     to: Option<&str>,
+    group_by_app: bool,
 ) -> Result<Vec<ErrorSummaryEntry>> {
     let conn = pool.get()?;
 
@@ -136,24 +156,43 @@ pub fn get_error_summary(
     // Upper sentinel: any valid RFC 3339 timestamp will sort before this.
     let to = to.unwrap_or("9999-12-31T23:59:59Z");
 
-    let mut stmt = conn.prepare(
-        "SELECT hostname, severity, COUNT(*) as count
-         FROM logs
-         WHERE severity IN ('emerg', 'alert', 'crit', 'err', 'warning')
-           AND timestamp BETWEEN ?1 AND ?2
-         GROUP BY hostname, severity
-         ORDER BY hostname, count DESC",
-    )?;
-
-    let rows = stmt.query_map(params![from, to], |row| {
-        Ok(ErrorSummaryEntry {
-            hostname: row.get(0)?,
-            severity: row.get(1)?,
-            count: row.get(2)?,
-        })
-    })?;
-
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    if group_by_app {
+        let mut stmt = conn.prepare(
+            "SELECT hostname, app_name, severity, COUNT(*) as count
+             FROM logs
+             WHERE severity IN ('emerg', 'alert', 'crit', 'err', 'warning')
+               AND timestamp BETWEEN ?1 AND ?2
+             GROUP BY hostname, app_name, severity
+             ORDER BY hostname, app_name, count DESC",
+        )?;
+        let rows = stmt.query_map(params![from, to], |row| {
+            Ok(ErrorSummaryEntry {
+                hostname: row.get(0)?,
+                app_name: row.get::<_, Option<String>>(1)?,
+                severity: row.get(2)?,
+                count: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT hostname, severity, COUNT(*) as count
+             FROM logs
+             WHERE severity IN ('emerg', 'alert', 'crit', 'err', 'warning')
+               AND timestamp BETWEEN ?1 AND ?2
+             GROUP BY hostname, severity
+             ORDER BY hostname, count DESC",
+        )?;
+        let rows = stmt.query_map(params![from, to], |row| {
+            Ok(ErrorSummaryEntry {
+                hostname: row.get(0)?,
+                app_name: None,
+                severity: row.get(1)?,
+                count: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
 }
 
 /// List all known hosts with stats
@@ -271,6 +310,16 @@ fn append_filters(
         bindings.push(rusqlite::types::Value::Text(a.clone()));
         *idx += 1;
     }
+    if let Some(ref f) = params.facility {
+        sql.push_str(&format!(" AND l.facility = ?{}", *idx));
+        bindings.push(rusqlite::types::Value::Text(f.clone()));
+        *idx += 1;
+    }
+    if let Some(ref pid) = params.process_id {
+        sql.push_str(&format!(" AND l.process_id = ?{}", *idx));
+        bindings.push(rusqlite::types::Value::Text(pid.clone()));
+        *idx += 1;
+    }
     if let Some(ref from) = params.from {
         sql.push_str(&format!(" AND l.timestamp >= ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
@@ -283,7 +332,7 @@ fn append_filters(
     }
 }
 
-fn map_row(row: &rusqlite::Row) -> rusqlite::Result<LogEntry> {
+pub(super) fn map_row(row: &rusqlite::Row) -> rusqlite::Result<LogEntry> {
     Ok(LogEntry {
         id: row.get(0)?,
         timestamp: row.get(1)?,
@@ -295,6 +344,25 @@ fn map_row(row: &rusqlite::Row) -> rusqlite::Result<LogEntry> {
         message: row.get(7)?,
         received_at: row.get(8)?,
         source_ip: row.get(9)?,
+    })
+}
+
+/// Map a row that includes the unparsed `raw` syslog frame (column index 8).
+pub(super) fn map_row_with_raw(
+    row: &rusqlite::Row,
+) -> rusqlite::Result<super::analytics::LogEntryWithRaw> {
+    Ok(super::analytics::LogEntryWithRaw {
+        id: row.get(0)?,
+        timestamp: row.get(1)?,
+        hostname: row.get(2)?,
+        facility: row.get(3)?,
+        severity: row.get(4)?,
+        app_name: row.get(5)?,
+        process_id: row.get(6)?,
+        message: row.get(7)?,
+        raw: row.get(8)?,
+        received_at: row.get(9)?,
+        source_ip: row.get(10)?,
     })
 }
 

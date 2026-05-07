@@ -31,10 +31,12 @@ pub struct DockerCheckpoint {
     pub timestamp: String,
 }
 
-/// Error/warning summary entry (one row per hostname+severity)
+/// Error/warning summary entry (one row per hostname+severity, plus optional app_name)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorSummaryEntry {
     pub hostname: String,
+    /// Populated when the summary was requested with `group_by=app_name`.
+    pub app_name: Option<String>,
     pub severity: String,
     pub count: i64,
 }
@@ -116,7 +118,7 @@ pub struct LogEntry {
 }
 
 /// Parameters for searching logs
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct SearchParams {
     /// Full-text search query (FTS5 syntax)
     pub query: Option<String>,
@@ -131,6 +133,10 @@ pub struct SearchParams {
     pub severity_in: Option<Vec<String>>,
     /// Filter by app name
     pub app_name: Option<String>,
+    /// Filter by syslog facility name (e.g. `kern`, `auth`, `daemon`)
+    pub facility: Option<String>,
+    /// Filter by process_id (exact match)
+    pub process_id: Option<String>,
     /// Start of time range (ISO 8601)
     pub from: Option<String>,
     /// End of time range (ISO 8601)

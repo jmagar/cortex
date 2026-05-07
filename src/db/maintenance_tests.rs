@@ -86,7 +86,7 @@ fn test_purge_old_logs_removes_old() {
     let deleted = purge_old_logs(&pool, 90, 0).unwrap();
     assert_eq!(deleted, 1, "should have deleted exactly the old entry");
 
-    let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
+    let remaining = tail_logs(&pool, None, None, None, None, 10).unwrap();
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].message, "future message");
 }
@@ -122,7 +122,7 @@ fn test_enforce_storage_budget_deletes_by_received_at_until_recovery_target() {
     assert!(outcome.deleted_rows > 0);
     assert!(outcome.metrics.logical_db_size_bytes <= outcome.recovery.logical_db_size_bytes);
 
-    let rows = tail_logs(&pool, None, None, None, 10).unwrap();
+    let rows = tail_logs(&pool, None, None, None, None, 10).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].message, large_new);
 }
@@ -264,7 +264,7 @@ fn test_purge_by_tag_window_zero_days_is_noop() {
     let deleted = super::purge_by_tag_window(&pool, "adguard-allowed", 0, 0).unwrap();
     assert_eq!(deleted, 0, "max_days=0 must be a no-op");
 
-    let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
+    let remaining = tail_logs(&pool, None, None, None, None, 10).unwrap();
     assert_eq!(remaining.len(), 1, "row must still be present");
 }
 
@@ -294,7 +294,7 @@ fn test_purge_by_tag_window_only_targets_named_tag() {
     let deleted = super::purge_by_tag_window(&pool, "adguard-allowed", 7, 0).unwrap();
     assert_eq!(deleted, 1, "only the adguard-allowed row must be deleted");
 
-    let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
+    let remaining = tail_logs(&pool, None, None, None, None, 10).unwrap();
     let messages: Vec<&str> = remaining.iter().map(|r| r.message.as_str()).collect();
     assert!(messages.contains(&"old-nginx"), "nginx must survive");
     assert!(messages.contains(&"old-kernel"), "kernel must survive");
@@ -341,7 +341,7 @@ fn test_purge_by_tag_window_excludes_high_severity_rows() {
     let deleted = super::purge_by_tag_window(&pool, "adguard-allowed", 7, 0).unwrap();
     assert_eq!(deleted, 1, "only the info row should be purged");
 
-    let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
+    let remaining = tail_logs(&pool, None, None, None, None, 10).unwrap();
     let messages: Vec<&str> = remaining.iter().map(|r| r.message.as_str()).collect();
     assert!(
         messages.contains(&"err-old"),
@@ -387,7 +387,7 @@ fn test_purge_by_tag_window_respects_cutoff_boundary() {
     let deleted = super::purge_by_tag_window(&pool, "adguard-allowed", 7, 0).unwrap();
     assert_eq!(deleted, 1, "only the old row should be deleted");
 
-    let remaining = tail_logs(&pool, None, None, None, 10).unwrap();
+    let remaining = tail_logs(&pool, None, None, None, None, 10).unwrap();
     let messages: Vec<&str> = remaining.iter().map(|r| r.message.as_str()).collect();
     assert!(messages.contains(&"fresh"), "fresh row must survive");
 }

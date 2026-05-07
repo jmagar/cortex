@@ -14,6 +14,17 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics and storage health |
 | `status` | Lightweight runtime and DB health |
+| `apps` | Distinct application names with log and host counts |
+| `source_ips` | Distinct source identifiers with hostname breakdown |
+| `timeline` | Bucketed counts over time |
+| `patterns` | Near-duplicate message template clusters |
+| `context` | Surrounding logs around a log id or timestamp |
+| `get` | One log entry by id, including raw frame |
+| `ingest_rate` | Recent ingest throughput and write-block state |
+| `silent_hosts` | Hosts whose last_seen is older than a threshold |
+| `clock_skew` | Per-host received_at minus timestamp distribution |
+| `anomalies` | Recent vs baseline volume/error comparison |
+| `compare` | Side-by-side comparison of two time ranges |
 | `help` | Markdown reference for all actions |
 
 ## syslog search
@@ -22,7 +33,7 @@ Full-text search across all syslog messages. Uses SQLite FTS5 with porter stemmi
 
 Required argument: `action = "search"`
 
-Optional arguments: `query`, `hostname`, `source_ip`, `severity`, `app_name`, `from`, `to`, `limit`.
+Optional arguments: `query`, `hostname`, `source_ip`, `severity`, `app_name`, `facility`, `process_id`, `from`, `to`, `limit`.
 
 ## syslog tail
 
@@ -30,7 +41,7 @@ Get the N most recent log entries. Equivalent to `tail -f` across all hosts.
 
 Required argument: `action = "tail"`
 
-Optional arguments: `hostname`, `source_ip`, `app_name`, `n`.
+Optional arguments: `hostname`, `source_ip`, `app_name`, `severity_min`, `n`.
 
 ## syslog errors
 
@@ -38,7 +49,9 @@ Get a summary of errors and warnings across all hosts in a time window, grouped 
 
 Required argument: `action = "errors"`
 
-Optional arguments: `from`, `to`.
+Optional arguments: `from`, `to`, `group_by`.
+
+`group_by` currently supports `app_name` for hostname + app + severity grouping.
 
 ## syslog hosts
 

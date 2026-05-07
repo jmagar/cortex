@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-05-07
+
+### Fixed
+
+- **Timestamp normalization**: All time-window query bounds (`correlate`, `context`, `compare`, `anomalies`) and stored `timestamp` from the syslog and Docker parsers now produce the canonical `Z`-suffixed RFC3339 form (`rfc3339_z` helper, lifted to `app::time`). Previously, mixed `+00:00`/`Z` forms could silently drop boundary rows under SQLite TEXT comparison.
+- **`compare` panic**: Replaced four `.expect("required field")` calls on parsed user input with `parse_required_timestamp`, returning a clean `InvalidInput` error instead of panicking the request thread.
+- **`tail` placeholder index**: Severity-IN block in `tail_logs` now advances the placeholder index, preventing latent `?N` collisions if future filters are appended after it.
+- **`anomalies` ranking**: Hosts active in the recent window with no baseline (`recent_count > 0 && baseline_count == 0`) now sort to the top of the response, matching the docstring's promise to flag new-but-active hosts.
+- **`source_ips` dispatch**: `tool_list_source_ips` now accepts `(state, args)` for parity with the other action handlers, so future filters won't silently swallow client args.
+- **App response boundary**: New action responses now use app-layer DTOs instead of exporting database model types directly.
+- **Action documentation**: Added the new `search`, `tail`, and `errors` parameters to MCP docs and expanded the syslog skill reference for every new action.
+- **Test comments/helpers**: Clarified smoke/live script action inventories and removed duplicated source-IP test fixture setup.
+
+### Changed
+
+- **`normalize_template`** (`db::patterns` helper) is no longer re-exported at the crate root; it is `pub(super)` and only reachable from inside the `analytics` module.
+- **Test assertion tightened**: `context` neighbor bounds are now strict (`<` / `>`) for the id-anchored case, matching the documented contract.
+
+## [0.15.0] - 2026-05-07
+
+### Added
+
+- **Eleven new `syslog` actions** for log intelligence beyond raw search/tail:
+  - `apps` — distinct application names with log/host counts and first/last seen (mirror of `hosts` for the `app_name` dimension).
+  - `source_ips` — distinct source identifiers with hostname breakdown; supports spoof detection on hostname-spoofable formats (e.g. UniFi CEF).
+  - `timeline` — bucketed counts (`minute`/`hour`/`day`) over a time range, optionally split by `hostname` / `severity` / `app_name`.
+  - `patterns` — cluster near-duplicate messages by template (numbers, IPv4, UUIDs, long hex strings normalised to placeholders); returns top templates with counts, sample, and host distribution.
+  - `context` — surrounding logs around a single point of interest by `log_id` or `hostname`+`timestamp`.
+  - `get` — fetch one log by `id`, including the unparsed `raw` syslog frame.
+  - `ingest_rate` — recent throughput (last 1m / 5m / 15m using `received_at`) plus current `write_blocked` flag and optional per-host buckets.
+  - `silent_hosts` — hosts whose `last_seen` is older than `silent_minutes` ago, with their typical inter-arrival interval.
+  - `clock_skew` — per-host distribution of `received_at - timestamp` (seconds), sorted by absolute mean.
+  - `anomalies` — per-host comparison of recent volume/error count against a baseline window; returns ratio and Poisson-style z-score.
+  - `compare` — side-by-side summary of two time ranges (volume, error count, severity mix, top hosts/apps) with deltas.
+- **New filters on existing actions**:
+  - `search` accepts `facility` and `process_id`.
+  - `tail` accepts `severity_min` (returns entries at or above the threshold).
+  - `errors` accepts `group_by=app_name` for hostname x app_name x severity grouping.
+- **`logs.raw` column is now exposed** via the new `get` action.
+
+### Changed
+
+- `tail_logs` query and `get_error_summary` query gained additional parameters (`severity_in`, `group_by_app`); internal callers updated.
+- Help text (`syslog help`) expanded to cover all 19 actions and updated parameters.
+
 ## [0.14.2] - 2026-05-07
 
 ### Added
