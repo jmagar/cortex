@@ -6,13 +6,24 @@ use tower::util::ServiceExt;
 
 use crate::config::{ApiConfig, StorageConfig};
 use crate::db::{self, DbPool, LogBatchEntry};
+use crate::mcp::AuthPolicy;
 
 use super::*;
 
+/// Build an ApiState with Mounted { auth_state: None } policy (static-bearer auth via AuthLayer).
+/// API always requires a token when enabled, so we always supply one here and let callers
+/// mutate if they need a different token.
 fn test_state(token: Option<String>) -> (ApiState, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("api-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
+    // When a token is provided we use Mounted policy so AuthLayer actually enforces it.
+    // When token is None the router() call itself returns Err, so the policy variant doesn't matter.
+    let auth_policy = if token.is_some() {
+        AuthPolicy::Mounted { auth_state: None }
+    } else {
+        AuthPolicy::LoopbackDev
+    };
     (
         ApiState {
             service: crate::app::SyslogService::new(Arc::clone(&pool), storage),
@@ -21,6 +32,7 @@ fn test_state(token: Option<String>) -> (ApiState, Arc<DbPool>, tempfile::TempDi
                 api_token: token,
             },
             cors_port: 3100,
+            auth_policy,
         },
         pool,
         dir,
@@ -205,4 +217,51 @@ async fn tail_route_returns_plain_api_json() {
     );
     assert_eq!(value["count"], 1);
     assert_eq!(value["logs"][0]["message"], "from two");
+}
+
+// ── AuthPolicy coverage on /api/* ────────────────────────────────────────────
+
+/// Mounted static-bearer: wrong token → 401 (no fall-through to permit).
+#[tokio::test]
+async fn api_wrong_token_returns_401_no_fallthrough() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/stats", Some("wrong")).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::UNAUTHORIZED,
+        "AuthLayer must not fall through on bad token"
+    );
+}
+
+/// Mounted static-bearer: no credentials → 401 (fail-closed).
+#[tokio::test]
+async fn api_missing_credentials_returns_401_fail_closed() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/stats", None).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::UNAUTHORIZED,
+        "missing credentials must be rejected, not permitted"
+    );
+}
+
+/// Mounted: session cookie without Authorization header is rejected (bearer-only).
+#[tokio::test]
+async fn api_cookie_without_bearer_is_rejected() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/stats")
+        .header("Cookie", "session=some-session-id")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::UNAUTHORIZED,
+        "session cookie must not bypass bearer-only AuthLayer on /api/*"
+    );
 }

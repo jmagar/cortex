@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-05-07
+
+### Changed
+
+- **Replace bearer middleware with `lab_auth::AuthLayer`** — deleted the
+  duplicated `require_auth` / `bearer_token` / `token_matches` helpers from
+  both `src/mcp/routes.rs` and `src/api.rs`. Both surfaces now apply
+  `lab_auth::AuthLayer` (bearer-only, `allow_session_cookie=false`) when
+  `AuthPolicy::Mounted` is active; `LoopbackDev` skips the layer entirely.
+  Static-token path is identical for existing users; JWT path activates when
+  `AuthState` is `Some` (OAuth mode).
+- `src/auth.rs` deleted; `src/otlp.rs` migrated to `lab_auth::middleware`
+  equivalents (`parse_bearer_token`, `tokens_equal`).
+- `subtle` removed as a direct dependency (still transitive via `lab-auth →
+  jsonwebtoken`).
+- `ApiState` gains `auth_policy: AuthPolicy` field; `main.rs` passes
+  `runtime.auth_policy().clone()` when constructing `ApiState`.
+
 ## [0.13.0] - 2026-05-07
 
 ### Added

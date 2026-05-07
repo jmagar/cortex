@@ -1,25 +1,24 @@
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{
     extract::State,
     http::{HeaderValue, Method, StatusCode},
-    middleware,
     response::{IntoResponse, Json},
     routing::get,
     Router,
 };
+use lab_auth::AuthLayer;
 use serde_json::json;
 use tower_http::{
     cors::{Any, CorsLayer},
     limit::RequestBodyLimitLayer,
 };
 
-use crate::auth::{bearer_token, token_matches};
-
 use super::rmcp_server::allowed_origins;
-use super::AppState;
 use super::{streamable_http_config, streamable_http_service};
+use super::{AppState, AuthPolicy};
 
 const MCP_BODY_LIMIT_BYTES: u64 = 65_536;
 
@@ -28,9 +27,33 @@ pub fn router(state: AppState) -> Router {
     // Authenticated RMCP Streamable HTTP endpoint. /health is mounted separately
     // so Docker HEALTHCHECK, docker-compose health probes, and SWAG can reach it.
     let rmcp_config = streamable_http_config(&state.config);
-    let authenticated = Router::new()
-        .nest_service("/mcp", streamable_http_service(state.clone(), rmcp_config))
-        .layer(middleware::from_fn_with_state(state.clone(), require_auth));
+    let mcp_service =
+        Router::new().nest_service("/mcp", streamable_http_service(state.clone(), rmcp_config));
+
+    // Apply auth layer based on policy. LoopbackDev skips auth entirely —
+    // the loopback bind is the trust boundary. For Mounted variants, apply
+    // AuthLayer (bearer-only: allow_session_cookie=false).
+    //
+    // AuthLayer MUST NOT add any DB write path. JWT validation is stateless RS256
+    // verify; static token is constant-time compare. If audit logging is ever
+    // added, push to async background channel only.
+    let authenticated = match &state.auth_policy {
+        AuthPolicy::LoopbackDev => mcp_service,
+        AuthPolicy::Mounted { auth_state } => {
+            let resource_url = state
+                .config
+                .auth
+                .public_url
+                .as_deref()
+                .map(|u| Arc::<str>::from(format!("{}/mcp", u.trim_end_matches('/'))));
+            let layer = AuthLayer::new()
+                .with_static_token(state.config.api_token.as_deref().map(Arc::<str>::from))
+                .with_auth_state(auth_state.clone())
+                .with_resource_url(resource_url)
+                .with_allow_session_cookie(false);
+            mcp_service.layer(layer)
+        }
+    };
 
     let unauthenticated = Router::new().route("/health", get(health));
 
@@ -41,49 +64,6 @@ pub fn router(state: AppState) -> Router {
         .layer(RequestBodyLimitLayer::new(MCP_BODY_LIMIT_BYTES as usize))
         .layer(cors_layer(&state.config))
         .with_state(state)
-}
-
-/// Bearer-token authentication middleware.
-///
-/// When `config.api_token` is `Some(token)`, every request must carry:
-///   `Authorization: Bearer <token>`
-/// Requests with a missing or incorrect token receive HTTP 401.
-/// When `api_token` is `None` (the default), all requests pass through unchanged.
-async fn require_auth(
-    State(state): State<AppState>,
-    req: axum::extract::Request,
-    next: middleware::Next,
-) -> axum::response::Response {
-    let method = req.method().clone();
-    let path = req.uri().path().to_string();
-    if let Some(ref expected) = state.config.api_token {
-        let auth = req
-            .headers()
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok());
-        let authorized = auth
-            .and_then(bearer_token)
-            .map(|token| token_matches(token, expected))
-            .unwrap_or(false);
-        if !authorized {
-            tracing::warn!(
-                method = %method,
-                path = %path,
-                has_auth_header = auth.is_some(),
-                "Unauthorized MCP request rejected"
-            );
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": {"code": -32001, "message": "unauthorized"}
-                })),
-            )
-                .into_response();
-        }
-    }
-    next.run(req).await
 }
 
 fn cors_layer(config: &crate::config::McpConfig) -> CorsLayer {

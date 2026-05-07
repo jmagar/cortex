@@ -28,9 +28,9 @@ use prost::Message;
 use serde_json::json;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use crate::auth::{bearer_token, token_matches};
 use crate::db::LogBatchEntry;
 use crate::ingest::IngestTx;
+use lab_auth::middleware::{parse_bearer_token, tokens_equal};
 
 /// Per-request body cap. Matches the OpenTelemetry Collector default for
 /// HTTP receivers. Larger payloads receive 413 + `Retry-After: 86400`.
@@ -329,7 +329,7 @@ fn is_authorized(state: &OtlpState, headers: &HeaderMap) -> bool {
     else {
         return false;
     };
-    bearer_token(auth).is_some_and(|tok| token_matches(tok, expected))
+    parse_bearer_token(auth).is_some_and(|tok| tokens_equal(&tok, expected))
 }
 
 fn unauthorized() -> axum::response::Response {

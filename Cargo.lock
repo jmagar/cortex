@@ -3031,7 +3031,7 @@ dependencies = [
 
 [[package]]
 name = "syslog-mcp"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -3054,7 +3054,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "subtle",
  "syslog_loose",
  "tempfile",
  "tokio",

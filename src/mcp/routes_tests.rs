@@ -2,13 +2,14 @@ use super::*;
 use crate::app::SyslogService;
 use crate::config::{McpConfig, StorageConfig};
 use crate::db;
-use crate::mcp::AppState;
+use crate::mcp::{AppState, AuthPolicy};
 use axum::body::to_bytes;
 use axum::http::{header, Method, Request, StatusCode};
 use std::sync::Arc;
 use tower::util::ServiceExt;
 
-fn test_state_with_token(token: Option<String>) -> (AppState, tempfile::TempDir) {
+/// Build an AppState with LoopbackDev policy (no auth applied).
+fn test_state_no_auth() -> (AppState, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("mcp-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
@@ -19,13 +20,38 @@ fn test_state_with_token(token: Option<String>) -> (AppState, tempfile::TempDir)
                 host: "127.0.0.1".into(),
                 port: 3100,
                 server_name: "syslog-mcp".into(),
-                api_token: token,
+                api_token: None,
                 allowed_hosts: Vec::new(),
                 allowed_origins: Vec::new(),
                 auth: Default::default(),
             },
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
-            auth_policy: crate::mcp::AuthPolicy::LoopbackDev,
+            auth_policy: AuthPolicy::LoopbackDev,
+        },
+        dir,
+    )
+}
+
+/// Build an AppState with Mounted { auth_state: None } policy (static-bearer auth via AuthLayer).
+fn test_state_with_token(token: String) -> (AppState, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(dir.path().join("mcp-test.db"));
+    let pool = Arc::new(db::init_pool(&storage).unwrap());
+    (
+        AppState {
+            service: SyslogService::new(pool, storage.clone()),
+            config: McpConfig {
+                host: "127.0.0.1".into(),
+                port: 3100,
+                server_name: "syslog-mcp".into(),
+                api_token: Some(token),
+                allowed_hosts: Vec::new(),
+                allowed_origins: Vec::new(),
+                auth: Default::default(),
+            },
+            otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
+            // Mounted { auth_state: None } = static-bearer only; AuthLayer IS applied.
+            auth_policy: AuthPolicy::Mounted { auth_state: None },
         },
         dir,
     )
@@ -38,12 +64,12 @@ struct TestHarness {
 
 impl TestHarness {
     fn new() -> Self {
-        let (state, dir) = test_state_with_token(None);
+        let (state, dir) = test_state_no_auth();
         TestHarness { state, _dir: dir }
     }
 
     fn with_token(token: String) -> Self {
-        let (state, dir) = test_state_with_token(Some(token));
+        let (state, dir) = test_state_with_token(token);
         TestHarness { state, _dir: dir }
     }
 }
@@ -210,7 +236,7 @@ async fn mcp_accepts_case_insensitive_bearer_scheme() {
 
 #[tokio::test]
 async fn mcp_cors_uses_configured_port() {
-    let (mut state, _dir) = test_state_with_token(None);
+    let (mut state, _dir) = test_state_no_auth();
     state.config.port = 3201;
     let app = router(state);
     let request = Request::builder()
@@ -232,7 +258,7 @@ async fn mcp_cors_uses_configured_port() {
 
 #[tokio::test]
 async fn mcp_cors_allows_configured_origins() {
-    let (mut state, _dir) = test_state_with_token(None);
+    let (mut state, _dir) = test_state_no_auth();
     state.config.allowed_origins = vec!["https://syslog.example.com".into()];
     let app = router(state);
     let request = Request::builder()
@@ -384,4 +410,92 @@ async fn stateless_mcp_rejects_get_and_delete() {
         let response = app.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     }
+}
+
+// ── AuthPolicy coverage ──────────────────────────────────────────────────────
+
+/// LoopbackDev: AuthLayer is NOT applied; requests reach /mcp without any token.
+#[tokio::test]
+async fn loopback_dev_policy_skips_auth_layer() {
+    let h = TestHarness::new(); // LoopbackDev, no token
+    let body = jsonrpc_request(20, "tools/list", None);
+    let (status, _) = mcp_post(router(h.state), body, None).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "LoopbackDev must not require bearer token"
+    );
+}
+
+/// Mounted { auth_state: None }: valid static token → 200.
+#[tokio::test]
+async fn mounted_static_bearer_valid_token_succeeds() {
+    let h = TestHarness::with_token("static-secret".into());
+    let body = jsonrpc_request(21, "tools/list", None);
+    let (status, _) = mcp_post(router(h.state), body, Some("static-secret")).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+/// Mounted { auth_state: None }: wrong static token → 401 (no fall-through to permit).
+#[tokio::test]
+async fn mounted_static_bearer_wrong_token_returns_401_no_fallthrough() {
+    let h = TestHarness::with_token("static-secret".into());
+    let body = jsonrpc_request(22, "tools/list", None);
+    let (status, _) = mcp_post(router(h.state), body, Some("wrong-token")).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "AuthLayer must not fall through on bad token"
+    );
+}
+
+/// Mounted { auth_state: None }: no credentials at all → 401 (fail-closed; no permit fallthrough).
+#[tokio::test]
+async fn mounted_missing_credentials_returns_401_fail_closed() {
+    let h = TestHarness::with_token("static-secret".into());
+    let body = jsonrpc_request(23, "tools/list", None);
+    let (status, _) = mcp_post(router(h.state), body, None).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "missing credentials must be rejected, not permitted"
+    );
+}
+
+/// Mounted: cookie header without Authorization is ignored — bearer-only mode.
+#[tokio::test]
+async fn mounted_cookie_without_bearer_is_rejected() {
+    let h = TestHarness::with_token("static-secret".into());
+    let app = router(h.state);
+    let request = Request::builder()
+        .method("POST")
+        .uri("/mcp")
+        .header(header::HOST, "localhost:3100")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, "application/json, text/event-stream")
+        .header(header::COOKIE, "session=some-session-id")
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&jsonrpc_request(24, "tools/list", None)).unwrap(),
+        ))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "session cookie must not bypass bearer-only AuthLayer"
+    );
+}
+
+/// /health stays unauthenticated even when Mounted policy is active.
+#[tokio::test]
+async fn health_unauthenticated_under_mounted_policy() {
+    let h = TestHarness::with_token("static-secret".into());
+    let app = router(h.state);
+    let request = Request::builder()
+        .method("GET")
+        .uri("/health")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }

@@ -68,6 +68,7 @@ async fn serve_mcp() -> Result<()> {
             service: runtime.service(),
             config: runtime.config.api.clone(),
             cors_port: runtime.config.mcp.port,
+            auth_policy: runtime.auth_policy().clone(),
         })?);
         info!("Non-MCP API mounted under /api");
     }
