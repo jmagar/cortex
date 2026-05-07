@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures_util::StreamExt;
@@ -8,11 +9,16 @@ use tokio::task::JoinHandle;
 use crate::config::{DockerHostConfig, DockerIngestConfig};
 use crate::db::DbPool;
 use crate::ingest::IngestTx;
+use crate::observability::RuntimeObservability;
 
 use super::checkpoint::load_checkpoint;
 use super::client::DockerHostClient;
 use super::models::ContainerMeta;
 use super::parser::log_output_to_entry;
+
+const MIN_STREAM_DURATION_FOR_BACKOFF_RESET: Duration = Duration::from_secs(30);
+const RECONNECT_JITTER_MIN_PCT: u64 = 80;
+const RECONNECT_JITTER_SPREAD_PCT: u64 = 41;
 
 pub(crate) fn spawn_all(
     config: DockerIngestConfig,
@@ -31,8 +37,9 @@ pub(crate) fn spawn_all(
             let config = config.clone();
             let pool = Arc::clone(&pool);
             let ingest = ingest.clone();
+            let observability = ingest.observability();
             tokio::spawn(async move {
-                run_host_forever(config, host, pool, ingest).await;
+                run_host_forever(config, host, pool, ingest, observability).await;
             })
         })
         .collect()
@@ -43,32 +50,85 @@ async fn run_host_forever(
     host: DockerHostConfig,
     pool: Arc<DbPool>,
     ingest: IngestTx,
+    observability: Arc<RuntimeObservability>,
 ) {
     let mut delay_ms = config.reconnect_initial_ms;
     loop {
-        let reset_backoff = match run_host_once(&config, &host, Arc::clone(&pool), ingest.clone())
+        let stream_started = Instant::now();
+        let outcome = {
+            let _active = ActiveDockerHostStream::new(Arc::clone(&observability));
+            match run_host_once(
+                &config,
+                &host,
+                Arc::clone(&pool),
+                ingest.clone(),
+                Arc::clone(&observability),
+            )
             .await
-        {
-            Ok(()) => {
-                tracing::warn!(host = %host.name, "Docker ingest host stream ended; reconnecting");
-                true
-            }
-            Err(e) => {
-                tracing::warn!(
-                    host = %host.name,
-                    error = %e,
-                    delay_ms,
-                    "Docker ingest host failed; retrying"
-                );
-                false
+            {
+                Ok(()) => {
+                    tracing::warn!(host = %host.name, "Docker ingest host stream ended; reconnecting");
+                    StreamEnd::Clean
+                }
+                Err(e) => {
+                    observability.record_docker_ingest_stream_failure();
+                    tracing::warn!(
+                        host = %host.name,
+                        error = %e,
+                        delay_ms,
+                        "Docker ingest host failed; retrying"
+                    );
+                    StreamEnd::Failed
+                }
             }
         };
-        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-        delay_ms = if reset_backoff {
-            config.reconnect_initial_ms
-        } else {
-            (delay_ms * 2).min(config.reconnect_max_ms)
-        };
+        let reset_backoff = should_reset_reconnect_backoff(outcome, stream_started.elapsed());
+        observability.record_docker_ingest_stream_reconnect();
+        tokio::time::sleep(Duration::from_millis(jittered_reconnect_delay_ms(
+            delay_ms, &host.name,
+        )))
+        .await;
+        delay_ms = next_reconnect_backoff_ms(
+            delay_ms,
+            config.reconnect_initial_ms,
+            config.reconnect_max_ms,
+            reset_backoff,
+        );
+    }
+}
+
+struct ActiveDockerHostStream {
+    observability: Arc<RuntimeObservability>,
+}
+
+impl ActiveDockerHostStream {
+    fn new(observability: Arc<RuntimeObservability>) -> Self {
+        observability.record_docker_ingest_host_stream_started();
+        Self { observability }
+    }
+}
+
+impl Drop for ActiveDockerHostStream {
+    fn drop(&mut self) {
+        self.observability.record_docker_ingest_host_stream_ended();
+    }
+}
+
+struct ActiveDockerContainerStream {
+    observability: Arc<RuntimeObservability>,
+}
+
+impl ActiveDockerContainerStream {
+    fn new(observability: Arc<RuntimeObservability>) -> Self {
+        observability.record_docker_ingest_container_stream_started();
+        Self { observability }
+    }
+}
+
+impl Drop for ActiveDockerContainerStream {
+    fn drop(&mut self) {
+        self.observability
+            .record_docker_ingest_container_stream_ended();
     }
 }
 
@@ -77,6 +137,7 @@ async fn run_host_once(
     host: &DockerHostConfig,
     pool: Arc<DbPool>,
     ingest: IngestTx,
+    observability: Arc<RuntimeObservability>,
 ) -> Result<()> {
     let event_since_unix = chrono::Utc::now().timestamp().saturating_sub(60);
     let client = DockerHostClient::connect(&host.base_url)?;
@@ -88,49 +149,46 @@ async fn run_host_once(
     );
 
     let mut log_tasks: HashMap<String, JoinHandle<()>> = HashMap::new();
-    for container in containers {
-        spawn_log_task_if_absent(
-            config,
-            host,
-            &client,
-            Arc::clone(&pool),
-            ingest.clone(),
-            &mut log_tasks,
-            container,
-        );
-    }
-
-    let result = follow_container_events(
+    let runtime = HostRuntime {
         config,
         host,
-        &client,
+        client: &client,
         pool,
         ingest,
-        &mut log_tasks,
-        event_since_unix,
-    )
-    .await;
+        observability,
+    };
+    for container in containers {
+        spawn_log_task_if_absent(&runtime, &mut log_tasks, container);
+    }
+
+    let result = follow_container_events(&runtime, &mut log_tasks, event_since_unix).await;
     for handle in log_tasks.into_values() {
         handle.abort();
     }
     result
 }
 
-async fn follow_container_events(
-    config: &DockerIngestConfig,
-    host: &DockerHostConfig,
-    client: &DockerHostClient,
+struct HostRuntime<'a> {
+    config: &'a DockerIngestConfig,
+    host: &'a DockerHostConfig,
+    client: &'a DockerHostClient,
     pool: Arc<DbPool>,
     ingest: IngestTx,
+    observability: Arc<RuntimeObservability>,
+}
+
+async fn follow_container_events(
+    runtime: &HostRuntime<'_>,
     log_tasks: &mut HashMap<String, JoinHandle<()>>,
     event_since_unix: i64,
 ) -> Result<()> {
-    let docker = client.docker();
+    let docker = runtime.client.docker();
     let mut events = docker.events(Some(DockerHostClient::container_events_options(
         event_since_unix,
     )));
     while let Some(event) = events.next().await {
         let event = event?;
+        runtime.observability.record_docker_ingest_event();
         let action = event.action.unwrap_or_default();
         let Some(actor) = event.actor else {
             continue;
@@ -139,33 +197,26 @@ async fn follow_container_events(
             continue;
         };
 
-        match action.as_str() {
-            "start" | "restart" | "rename" => {
+        let policy = event_task_policy(&action);
+        match policy {
+            DockerEventTaskPolicy::EnsureLogTask | DockerEventTaskPolicy::ReplaceLogTask => {
                 prune_finished_tasks(log_tasks);
-                if action == "rename" {
+                if policy == DockerEventTaskPolicy::ReplaceLogTask {
                     if let Some(handle) = log_tasks.remove(&id) {
                         handle.abort();
                     }
                 }
-                let containers = client.list_containers().await?;
+                let containers = runtime.client.list_containers().await?;
                 for container in containers.into_iter().filter(|c| c.id == id) {
-                    spawn_log_task_if_absent(
-                        config,
-                        host,
-                        client,
-                        Arc::clone(&pool),
-                        ingest.clone(),
-                        log_tasks,
-                        container,
-                    );
+                    spawn_log_task_if_absent(runtime, log_tasks, container);
                 }
             }
-            "die" | "destroy" | "stop" => {
+            DockerEventTaskPolicy::StopLogTask => {
                 if let Some(handle) = log_tasks.remove(&id) {
                     handle.abort();
                 }
             }
-            _ => {}
+            DockerEventTaskPolicy::Ignore => {}
         }
     }
     Ok(())
@@ -182,70 +233,130 @@ fn is_expected_disconnect(e: &anyhow::Error) -> bool {
         || msg.contains("broken pipe")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DockerEventTaskPolicy {
+    EnsureLogTask,
+    ReplaceLogTask,
+    StopLogTask,
+    Ignore,
+}
+
+fn event_task_policy(action: &str) -> DockerEventTaskPolicy {
+    match action {
+        "start" | "restart" => DockerEventTaskPolicy::EnsureLogTask,
+        "rename" => DockerEventTaskPolicy::ReplaceLogTask,
+        "die" | "destroy" | "stop" => DockerEventTaskPolicy::StopLogTask,
+        _ => DockerEventTaskPolicy::Ignore,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamEnd {
+    Clean,
+    ExpectedDisconnect,
+    Failed,
+}
+
+fn should_reset_reconnect_backoff(outcome: StreamEnd, stream_duration: Duration) -> bool {
+    matches!(outcome, StreamEnd::Clean | StreamEnd::ExpectedDisconnect)
+        && stream_duration >= MIN_STREAM_DURATION_FOR_BACKOFF_RESET
+}
+
+fn next_reconnect_backoff_ms(current_ms: u64, initial_ms: u64, max_ms: u64, reset: bool) -> u64 {
+    if reset {
+        initial_ms
+    } else {
+        current_ms.saturating_mul(2).min(max_ms)
+    }
+}
+
+fn jittered_reconnect_delay_ms(base_ms: u64, key: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in key.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    let pct = RECONNECT_JITTER_MIN_PCT + (hash % RECONNECT_JITTER_SPREAD_PCT);
+    ((u128::from(base_ms) * u128::from(pct)) / 100).max(1) as u64
+}
+
 fn spawn_log_task_if_absent(
-    config: &DockerIngestConfig,
-    host: &DockerHostConfig,
-    client: &DockerHostClient,
-    pool: Arc<DbPool>,
-    ingest: IngestTx,
+    runtime: &HostRuntime<'_>,
     tasks: &mut HashMap<String, JoinHandle<()>>,
     container: ContainerMeta,
 ) {
     if tasks.contains_key(&container.id) {
         return;
     }
-    let docker = client.docker();
-    let host_name = host.name.clone();
-    let reconnect_initial_ms = config.reconnect_initial_ms;
-    let reconnect_max_ms = config.reconnect_max_ms;
+    let docker = runtime.client.docker();
+    let host_name = runtime.host.name.clone();
+    let reconnect_initial_ms = runtime.config.reconnect_initial_ms;
+    let reconnect_max_ms = runtime.config.reconnect_max_ms;
+    let pool = Arc::clone(&runtime.pool);
+    let ingest = runtime.ingest.clone();
+    let observability = Arc::clone(&runtime.observability);
     let container_id = container.id.clone();
     let task_container_id = container_id.clone();
+    observability.record_docker_ingest_task_spawned();
     let handle = tokio::spawn(async move {
         let mut delay_ms = reconnect_initial_ms;
         loop {
-            let reset_backoff = match follow_container_logs_once(
-                &docker,
-                &pool,
-                &ingest,
-                &host_name,
+            let stream_started = Instant::now();
+            let outcome = {
+                let _active = ActiveDockerContainerStream::new(Arc::clone(&observability));
+                match follow_container_logs_once(
+                    &docker,
+                    &pool,
+                    &ingest,
+                    &observability,
+                    &host_name,
+                    &task_container_id,
+                    &container,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        tracing::debug!(
+                            host = %host_name,
+                            container_id = %task_container_id,
+                            "Docker log stream ended; reconnecting"
+                        );
+                        StreamEnd::Clean
+                    }
+                    Err(ref e) if is_expected_disconnect(e) => {
+                        tracing::debug!(
+                            host = %host_name,
+                            container_id = %task_container_id,
+                            "Docker log stream closed by daemon; reconnecting"
+                        );
+                        StreamEnd::ExpectedDisconnect
+                    }
+                    Err(e) => {
+                        observability.record_docker_ingest_stream_failure();
+                        tracing::warn!(
+                            host = %host_name,
+                            container_id = %task_container_id,
+                            error = %e,
+                            delay_ms,
+                            "Docker log stream failed; retrying"
+                        );
+                        StreamEnd::Failed
+                    }
+                }
+            };
+            let reset_backoff = should_reset_reconnect_backoff(outcome, stream_started.elapsed());
+            observability.record_docker_ingest_stream_reconnect();
+            tokio::time::sleep(Duration::from_millis(jittered_reconnect_delay_ms(
+                delay_ms,
                 &task_container_id,
-                &container,
-            )
-            .await
-            {
-                Ok(()) => {
-                    tracing::debug!(
-                        host = %host_name,
-                        container_id = %task_container_id,
-                        "Docker log stream ended; reconnecting"
-                    );
-                    true
-                }
-                Err(ref e) if is_expected_disconnect(e) => {
-                    tracing::debug!(
-                        host = %host_name,
-                        container_id = %task_container_id,
-                        "Docker log stream closed by daemon; reconnecting"
-                    );
-                    true
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        host = %host_name,
-                        container_id = %task_container_id,
-                        error = %e,
-                        delay_ms,
-                        "Docker log stream failed; retrying"
-                    );
-                    false
-                }
-            };
-            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-            delay_ms = if reset_backoff {
-                reconnect_initial_ms
-            } else {
-                (delay_ms * 2).min(reconnect_max_ms)
-            };
+            )))
+            .await;
+            delay_ms = next_reconnect_backoff_ms(
+                delay_ms,
+                reconnect_initial_ms,
+                reconnect_max_ms,
+                reset_backoff,
+            );
         }
     });
     tasks.insert(container_id, handle);
@@ -255,6 +366,7 @@ async fn follow_container_logs_once(
     docker: &bollard::Docker,
     pool: &Arc<DbPool>,
     ingest: &IngestTx,
+    observability: &RuntimeObservability,
     host_name: &str,
     container_id: &str,
     container: &ContainerMeta,
@@ -270,6 +382,7 @@ async fn follow_container_logs_once(
     while let Some(output) = logs.next().await {
         match log_output_to_entry(host_name, container, output?) {
             Ok(Some(entry)) => {
+                observability.record_docker_ingest_log_entry();
                 if checkpoint
                     .as_ref()
                     .is_some_and(|checkpoint| entry_is_at_or_before_checkpoint(&entry, checkpoint))
@@ -281,12 +394,15 @@ async fn follow_container_logs_once(
                 }
             }
             Ok(None) => {}
-            Err(e) => tracing::warn!(
-                host = %host_name,
-                container_id = %container_id,
-                error = %e,
-                "Failed to parse Docker log frame"
-            ),
+            Err(e) => {
+                observability.record_docker_ingest_parse_error();
+                tracing::warn!(
+                    host = %host_name,
+                    container_id = %container_id,
+                    error = %e,
+                    "Failed to parse Docker log frame"
+                );
+            }
         }
     }
     Ok(())
@@ -304,48 +420,6 @@ fn entry_is_at_or_before_checkpoint(
         })
         .is_some_and(|entry_ts| entry_ts <= *checkpoint)
 }
-
 #[cfg(test)]
-mod tests {
-    use crate::db::{DockerCheckpoint, LogBatchEntry};
-
-    use super::entry_is_at_or_before_checkpoint;
-
-    fn docker_entry(timestamp: &str) -> LogBatchEntry {
-        LogBatchEntry {
-            timestamp: timestamp.into(),
-            hostname: "edge-host-a".into(),
-            facility: Some("local0".into()),
-            severity: "info".into(),
-            app_name: Some("nginx".into()),
-            process_id: Some("abcdef123456".into()),
-            message: "line".into(),
-            raw: format!("{timestamp} line"),
-            source_ip: "docker://edge-host-a/abcdef123456/stdout".into(),
-            docker_checkpoint: Some(DockerCheckpoint {
-                host_name: "edge-host-a".into(),
-                container_id: "abcdef123456".into(),
-                timestamp: timestamp.into(),
-            }),
-        }
-    }
-
-    #[test]
-    fn checkpoint_filter_skips_only_entries_at_or_before_precise_checkpoint() {
-        let checkpoint =
-            chrono::DateTime::parse_from_rfc3339("2026-05-05T01:02:03.500000000Z").unwrap();
-
-        assert!(entry_is_at_or_before_checkpoint(
-            &docker_entry("2026-05-05T01:02:03.123456789Z"),
-            &checkpoint
-        ));
-        assert!(entry_is_at_or_before_checkpoint(
-            &docker_entry("2026-05-05T01:02:03.500000000Z"),
-            &checkpoint
-        ));
-        assert!(!entry_is_at_or_before_checkpoint(
-            &docker_entry("2026-05-05T01:02:03.500000001Z"),
-            &checkpoint
-        ));
-    }
-}
+#[path = "supervisor_tests.rs"]
+mod tests;

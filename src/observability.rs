@@ -15,6 +15,14 @@ pub struct RuntimeObservability {
     syslog_tcp_lines_received: AtomicU64,
     syslog_tcp_bytes_received: AtomicU64,
     syslog_tcp_lines_dropped_oversize: AtomicU64,
+    docker_ingest_events_received: AtomicU64,
+    docker_ingest_log_entries_received: AtomicU64,
+    docker_ingest_parse_errors: AtomicU64,
+    docker_ingest_stream_reconnects: AtomicU64,
+    docker_ingest_stream_failures: AtomicU64,
+    docker_ingest_tasks_spawned: AtomicU64,
+    docker_ingest_host_streams_active: AtomicU64,
+    docker_ingest_container_streams_active: AtomicU64,
     ingest_entries_enqueued: AtomicU64,
     ingest_enqueue_errors: AtomicU64,
     ingest_queue_depth: AtomicUsize,
@@ -28,6 +36,9 @@ pub struct RuntimeObservability {
     last_ingest_at: Mutex<Option<String>>,
     last_write_at: Mutex<Option<String>>,
     last_error_at: Mutex<Option<String>>,
+    last_docker_ingest_event_at: Mutex<Option<String>>,
+    last_docker_ingest_log_at: Mutex<Option<String>>,
+    last_docker_ingest_error_at: Mutex<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -41,6 +52,14 @@ pub struct RuntimeObservabilitySnapshot {
     pub syslog_tcp_lines_received: u64,
     pub syslog_tcp_bytes_received: u64,
     pub syslog_tcp_lines_dropped_oversize: u64,
+    pub docker_ingest_events_received: u64,
+    pub docker_ingest_log_entries_received: u64,
+    pub docker_ingest_parse_errors: u64,
+    pub docker_ingest_stream_reconnects: u64,
+    pub docker_ingest_stream_failures: u64,
+    pub docker_ingest_tasks_spawned: u64,
+    pub docker_ingest_host_streams_active: u64,
+    pub docker_ingest_container_streams_active: u64,
     pub ingest_entries_enqueued: u64,
     pub ingest_enqueue_errors: u64,
     pub ingest_queue_depth: usize,
@@ -55,6 +74,9 @@ pub struct RuntimeObservabilitySnapshot {
     pub last_ingest_at: Option<String>,
     pub last_write_at: Option<String>,
     pub last_error_at: Option<String>,
+    pub last_docker_ingest_event_at: Option<String>,
+    pub last_docker_ingest_log_at: Option<String>,
+    pub last_docker_ingest_error_at: Option<String>,
 }
 
 impl RuntimeObservability {
@@ -110,6 +132,73 @@ impl RuntimeObservability {
         self.syslog_tcp_lines_dropped_oversize
             .fetch_add(1, Ordering::Relaxed);
         self.touch_error();
+    }
+
+    pub fn record_docker_ingest_event(&self) {
+        self.docker_ingest_events_received
+            .fetch_add(1, Ordering::Relaxed);
+        *self
+            .last_docker_ingest_event_at
+            .lock()
+            .expect("last_docker_ingest_event_at mutex poisoned") = Some(now_iso());
+    }
+
+    pub fn record_docker_ingest_log_entry(&self) {
+        self.docker_ingest_log_entries_received
+            .fetch_add(1, Ordering::Relaxed);
+        *self
+            .last_docker_ingest_log_at
+            .lock()
+            .expect("last_docker_ingest_log_at mutex poisoned") = Some(now_iso());
+        self.touch_ingest();
+    }
+
+    pub fn record_docker_ingest_parse_error(&self) {
+        self.docker_ingest_parse_errors
+            .fetch_add(1, Ordering::Relaxed);
+        self.touch_docker_ingest_error();
+    }
+
+    pub fn record_docker_ingest_stream_reconnect(&self) {
+        self.docker_ingest_stream_reconnects
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_docker_ingest_stream_failure(&self) {
+        self.docker_ingest_stream_failures
+            .fetch_add(1, Ordering::Relaxed);
+        self.touch_docker_ingest_error();
+    }
+
+    pub fn record_docker_ingest_task_spawned(&self) {
+        self.docker_ingest_tasks_spawned
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_docker_ingest_host_stream_started(&self) {
+        self.docker_ingest_host_streams_active
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_docker_ingest_host_stream_ended(&self) {
+        self.docker_ingest_host_streams_active
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                Some(n.saturating_sub(1))
+            })
+            .ok();
+    }
+
+    pub fn record_docker_ingest_container_stream_started(&self) {
+        self.docker_ingest_container_streams_active
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_docker_ingest_container_stream_ended(&self) {
+        self.docker_ingest_container_streams_active
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                Some(n.saturating_sub(1))
+            })
+            .ok();
     }
 
     pub fn record_enqueue_ok(&self, queue_depth: usize) {
@@ -178,6 +267,26 @@ impl RuntimeObservability {
             syslog_tcp_lines_dropped_oversize: self
                 .syslog_tcp_lines_dropped_oversize
                 .load(Ordering::Relaxed),
+            docker_ingest_events_received: self
+                .docker_ingest_events_received
+                .load(Ordering::Relaxed),
+            docker_ingest_log_entries_received: self
+                .docker_ingest_log_entries_received
+                .load(Ordering::Relaxed),
+            docker_ingest_parse_errors: self.docker_ingest_parse_errors.load(Ordering::Relaxed),
+            docker_ingest_stream_reconnects: self
+                .docker_ingest_stream_reconnects
+                .load(Ordering::Relaxed),
+            docker_ingest_stream_failures: self
+                .docker_ingest_stream_failures
+                .load(Ordering::Relaxed),
+            docker_ingest_tasks_spawned: self.docker_ingest_tasks_spawned.load(Ordering::Relaxed),
+            docker_ingest_host_streams_active: self
+                .docker_ingest_host_streams_active
+                .load(Ordering::Relaxed),
+            docker_ingest_container_streams_active: self
+                .docker_ingest_container_streams_active
+                .load(Ordering::Relaxed),
             ingest_entries_enqueued: self.ingest_entries_enqueued.load(Ordering::Relaxed),
             ingest_enqueue_errors: self.ingest_enqueue_errors.load(Ordering::Relaxed),
             ingest_queue_depth: queue_depth,
@@ -204,6 +313,21 @@ impl RuntimeObservability {
                 .lock()
                 .expect("last_error_at mutex poisoned")
                 .clone(),
+            last_docker_ingest_event_at: self
+                .last_docker_ingest_event_at
+                .lock()
+                .expect("last_docker_ingest_event_at mutex poisoned")
+                .clone(),
+            last_docker_ingest_log_at: self
+                .last_docker_ingest_log_at
+                .lock()
+                .expect("last_docker_ingest_log_at mutex poisoned")
+                .clone(),
+            last_docker_ingest_error_at: self
+                .last_docker_ingest_error_at
+                .lock()
+                .expect("last_docker_ingest_error_at mutex poisoned")
+                .clone(),
         }
     }
 
@@ -219,6 +343,14 @@ impl RuntimeObservability {
             .last_error_at
             .lock()
             .expect("last_error_at mutex poisoned") = Some(now_iso());
+    }
+
+    fn touch_docker_ingest_error(&self) {
+        *self
+            .last_docker_ingest_error_at
+            .lock()
+            .expect("last_docker_ingest_error_at mutex poisoned") = Some(now_iso());
+        self.touch_error();
     }
 }
 
@@ -252,5 +384,43 @@ mod tests {
         obs.record_tcp_connection_accepted();
         obs.record_tcp_connection_closed();
         assert_eq!(obs.snapshot().syslog_tcp_connections_active, 0);
+    }
+
+    #[test]
+    fn snapshot_reports_docker_ingest_counters() {
+        let obs = RuntimeObservability::default();
+        obs.record_docker_ingest_event();
+        obs.record_docker_ingest_log_entry();
+        obs.record_docker_ingest_parse_error();
+        obs.record_docker_ingest_stream_reconnect();
+        obs.record_docker_ingest_stream_failure();
+        obs.record_docker_ingest_task_spawned();
+        obs.record_docker_ingest_host_stream_started();
+        obs.record_docker_ingest_container_stream_started();
+
+        let snapshot = obs.snapshot();
+
+        assert_eq!(snapshot.docker_ingest_events_received, 1);
+        assert_eq!(snapshot.docker_ingest_log_entries_received, 1);
+        assert_eq!(snapshot.docker_ingest_parse_errors, 1);
+        assert_eq!(snapshot.docker_ingest_stream_reconnects, 1);
+        assert_eq!(snapshot.docker_ingest_stream_failures, 1);
+        assert_eq!(snapshot.docker_ingest_tasks_spawned, 1);
+        assert_eq!(snapshot.docker_ingest_host_streams_active, 1);
+        assert_eq!(snapshot.docker_ingest_container_streams_active, 1);
+        assert!(snapshot.last_ingest_at.is_some());
+        assert!(snapshot.last_error_at.is_some());
+        assert!(snapshot.last_docker_ingest_event_at.is_some());
+        assert!(snapshot.last_docker_ingest_log_at.is_some());
+        assert!(snapshot.last_docker_ingest_error_at.is_some());
+
+        obs.record_docker_ingest_host_stream_ended();
+        obs.record_docker_ingest_host_stream_ended();
+        obs.record_docker_ingest_container_stream_ended();
+        obs.record_docker_ingest_container_stream_ended();
+
+        let snapshot = obs.snapshot();
+        assert_eq!(snapshot.docker_ingest_host_streams_active, 0);
+        assert_eq!(snapshot.docker_ingest_container_streams_active, 0);
     }
 }

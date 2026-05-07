@@ -336,6 +336,14 @@ impl Config {
             "SYSLOG_MAX_MESSAGE_SIZE",
             &mut config.syslog.max_message_size,
         )?;
+        env_override_parse(
+            "SYSLOG_MAX_TCP_CONNECTIONS",
+            &mut config.syslog.max_tcp_connections,
+        )?;
+        env_override_parse(
+            "SYSLOG_TCP_IDLE_TIMEOUT_SECS",
+            &mut config.syslog.tcp_idle_timeout_secs,
+        )?;
         env_override_parse("SYSLOG_BATCH_SIZE", &mut config.syslog.batch_size)?;
         env_override_parse("SYSLOG_FLUSH_INTERVAL", &mut config.syslog.flush_interval)?;
 
@@ -441,6 +449,13 @@ impl Config {
                             allow_insecure_http: true,
                         })
                         .collect();
+                    for host in &config.docker_ingest.hosts {
+                        tracing::warn!(
+                            host = %host.name,
+                            base_url = %host.base_url,
+                            "SYSLOG_DOCKER_HOSTS expands to insecure HTTP docker-socket-proxy endpoints; use only on trusted private networks or SYSLOG_DOCKER_HOSTS_FILE with TLS/custom base_url"
+                        );
+                    }
                 }
             } else if let Ok(path) = std::env::var("SYSLOG_DOCKER_HOSTS_FILE") {
                 if !path.is_empty() {
@@ -475,6 +490,7 @@ impl Config {
         if config.storage.pool_size == 0 {
             return Err(anyhow::anyhow!("SYSLOG_MCP_POOL_SIZE must be > 0"));
         }
+        validate_syslog_config(&config.syslog)?;
         validate_storage_config(&config.storage)?;
         validate_host(&config.syslog.host)?;
         validate_host(&config.mcp.host)?;
@@ -606,6 +622,25 @@ pub(crate) fn validate_docker_ingest_config(config: &DockerIngestConfig) -> anyh
                 host.name
             ));
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_syslog_config(config: &SyslogConfig) -> anyhow::Result<()> {
+    if config.max_message_size == 0 {
+        return Err(anyhow::anyhow!("syslog.max_message_size must be > 0"));
+    }
+    if config.max_tcp_connections == 0 {
+        return Err(anyhow::anyhow!("syslog.max_tcp_connections must be > 0"));
+    }
+    if config.tcp_idle_timeout_secs == 0 {
+        return Err(anyhow::anyhow!("syslog.tcp_idle_timeout_secs must be > 0"));
+    }
+    if config.batch_size == 0 {
+        return Err(anyhow::anyhow!("syslog.batch_size must be > 0"));
+    }
+    if config.flush_interval == 0 {
+        return Err(anyhow::anyhow!("syslog.flush_interval must be > 0"));
     }
     Ok(())
 }

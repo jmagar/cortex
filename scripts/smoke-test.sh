@@ -21,6 +21,8 @@ MCPORTER_CONFIG="config/mcporter.json"
 _MCPORTER_CONFIG_TMPFILE=""
 SEED_HOST="smoke-test-host"
 GHOST_HOST="nonexistent-host-xyz-404"
+RUN_ID="${SYSLOG_SMOKE_RUN_ID:-$(date -u +%Y%m%d%H%M%S)}"
+TCP_MARKER="smoketcp${RUN_ID}"
 
 trap '[[ -n "$_MCPORTER_CONFIG_TMPFILE" ]] && rm -f "$_MCPORTER_CONFIG_TMPFILE"' EXIT
 
@@ -123,6 +125,14 @@ except Exception:
     fi
 }
 
+send_tcp_seed() {
+    local message="$1"
+    if printf '%s\n' "$message" | nc -w2 -N "$SYSLOG_HOST" "$SYSLOG_PORT" >/dev/null 2>&1; then
+        return 0
+    fi
+    printf '%s\n' "$message" | nc -w2 "$SYSLOG_HOST" "$SYSLOG_PORT" >/dev/null
+}
+
 # ─── Phase 1: Pre-flight ─────────────────────────────────────────────────────
 echo ""
 echo -e "${COLOR_BOLD}=== syslog-mcp smoke test ===${COLOR_RESET}"
@@ -148,8 +158,9 @@ if [[ "$SKIP_SEED" -eq 0 ]]; then
     printf '<11>%s %s sshd[42]: smoke-test: error authentication failure\n' "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     printf '<2>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     printf '<12>%s %s dockerd[99]: smoke-test: warning container restart\n'  "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
+    send_tcp_seed "<14>$(date '+%b %e %H:%M:%S') ${SEED_HOST} tcpsmoke[77]: smoke-test tcp seed ${TCP_MARKER} bounded frame ok"
     sleep 2
-    echo "Seeded 4 messages (info, err, crit, warning) from $SEED_HOST"
+    echo "Seeded 5 messages (4 UDP, 1 TCP) from $SEED_HOST; TCP marker=$TCP_MARKER"
 else
     echo "Skipping seed (--skip-seed)"
 fi
@@ -282,6 +293,15 @@ assert not wrong, f'hostname filter leaked other hosts: {wrong}'
 print('ok')
 " 2>/dev/null || echo "error")
     assert_eq "tail(hostname filter): only returns logs for '$SEED_HOST'" "$TAIL_FILTER_VALID" "ok"
+
+    TAIL_TCP_MARKER=$(echo "$TAIL_FILTERED" | python3 -c "
+import sys, json
+logs = json.load(sys.stdin)['logs']
+matches = [l for l in logs if '${TCP_MARKER}' in (l.get('message') or '')]
+assert matches, 'TCP seed marker not present in tail(hostname filter)'
+print('ok')
+" 2>/dev/null || echo "error")
+    assert_eq "tail(hostname filter): TCP seed marker appears" "$TAIL_TCP_MARKER" "ok"
 fi
 
 # ── search ────────────────────────────────────────────────────────────────────
@@ -342,6 +362,19 @@ assert not wrong, f'severity filter leaked wrong levels: {set(wrong)}'
 print('ok')
 " 2>/dev/null || echo "error")
     assert_eq "search(severity filter): only returns warning-level logs" "$SEARCH_SEV_VALID" "ok"
+
+    SEARCH_TCP=$(mcp_call search "query=${TCP_MARKER}" "hostname=${SEED_HOST}" "limit=10" 2>&1)
+    assert_no_error "search(TCP seed marker): no error" "$SEARCH_TCP"
+    SEARCH_TCP_VALID=$(echo "$SEARCH_TCP" | python3 -c "
+import sys, json
+logs = json.load(sys.stdin)['logs']
+assert logs, 'TCP seed marker search returned no logs'
+for l in logs:
+    assert l['hostname'] == '${SEED_HOST}', f'wrong hostname: {l[\"hostname\"]}'
+    assert '${TCP_MARKER}' in (l.get('message') or ''), 'marker missing from result'
+print('ok')
+" 2>/dev/null || echo "error")
+    assert_eq "search(TCP seed marker): returns TCP-ingested message" "$SEARCH_TCP_VALID" "ok"
 fi
 
 # Nonexistent hostname must return 0 results (filter is not ignored)
