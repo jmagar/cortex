@@ -443,7 +443,22 @@ impl Default for DockerIngestConfig {
 }
 
 impl Config {
+    /// Load config for stdio / query-only mode.
+    ///
+    /// Identical to [`Config::load`] but skips the non-loopback bind safety
+    /// gate in `validate_auth_config`. In stdio mode syslog-mcp never binds an
+    /// HTTP port, so the gate is irrelevant and would falsely reject
+    /// configurations like `mcp.host = "0.0.0.0"` that are valid for the HTTP
+    /// server but harmless in stdio mode.
+    pub fn load_for_stdio() -> anyhow::Result<Self> {
+        Self::load_inner(false)
+    }
+
     pub fn load() -> anyhow::Result<Self> {
+        Self::load_inner(true)
+    }
+
+    fn load_inner(check_bind: bool) -> anyhow::Result<Self> {
         // 1. Start with defaults
         let mut config = Config::default();
 
@@ -621,7 +636,7 @@ impl Config {
         validate_storage_config(&config.storage)?;
         validate_host(&config.syslog.host)?;
         validate_host(&config.mcp.host)?;
-        validate_auth_config(&config)?;
+        validate_auth_config(&config, check_bind)?;
         validate_docker_ingest_config(&config.docker_ingest)?;
 
         Ok(config)
@@ -706,7 +721,7 @@ fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn validate_auth_config(config: &Config) -> anyhow::Result<()> {
+fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()> {
     if token_is_blank(&config.mcp.api_token) {
         return Err(anyhow::anyhow!("mcp.api_token must not be empty"));
     }
@@ -765,15 +780,12 @@ fn validate_auth_config(config: &Config) -> anyhow::Result<()> {
     // mount time when OAuth is active (S3's job).
 
     // ---- Non-loopback safety gate -----------------------------------------
-    // If syslog-mcp is bound to a non-loopback address AND no auth is wired,
-    // refuse to start. Use IpAddr::is_loopback() (covers 127.0.0.0/8, ::1, and
-    // IPv4-mapped IPv6 loopback). Strings that fail to parse as IpAddr (DNS
-    // hostnames like `localhost` or `myhost.example.com`) are treated as
-    // non-loopback per the locked decision.
+    // Skip in stdio / query-only mode: no HTTP port is bound so the gate is
+    // irrelevant. `check_bind` is false when called from Config::load_for_stdio.
     let bind_is_loopback = IpAddr::from_str(&config.mcp.host)
         .map(|ip| ip.is_loopback())
         .unwrap_or(false);
-    if !bind_is_loopback {
+    if check_bind && !bind_is_loopback {
         let has_static_token = config
             .mcp
             .api_token

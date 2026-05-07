@@ -67,7 +67,7 @@ fn oauth_mcp(tmp: &std::path::Path) -> McpConfig {
 async fn build_auth_policy_returns_loopback_dev_when_no_auth_and_loopback_bind() {
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path(), loopback_mcp());
-    let policy = build_auth_policy(&config).await.expect("build policy");
+    let policy = build_auth_policy(&config, false).await.expect("build policy");
     assert!(matches!(policy, AuthPolicy::LoopbackDev));
 }
 
@@ -80,7 +80,7 @@ async fn build_auth_policy_returns_mounted_bearer_only_when_static_token_only() 
     let config = test_config(tmp.path(), mcp);
     // Bearer-only: AuthLayer is mounted (auth is enforced), but no OAuth state.
     // Scope checks in S5 must still run — Mounted { auth_state: None } is correct.
-    let policy = build_auth_policy(&config).await.expect("build policy");
+    let policy = build_auth_policy(&config, false).await.expect("build policy");
     assert!(matches!(policy, AuthPolicy::Mounted { auth_state: None }));
 }
 
@@ -88,7 +88,7 @@ async fn build_auth_policy_returns_mounted_bearer_only_when_static_token_only() 
 async fn build_auth_policy_returns_mounted_when_oauth_configured() {
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path(), oauth_mcp(tmp.path()));
-    let policy = build_auth_policy(&config)
+    let policy = build_auth_policy(&config, false)
         .await
         .expect("oauth init should succeed");
     assert!(matches!(
@@ -113,7 +113,7 @@ async fn build_auth_policy_propagates_lab_auth_errors() {
     let mut mcp = oauth_mcp(tmp.path());
     mcp.auth.public_url = Some("not a url".into());
     let config = test_config(tmp.path(), mcp);
-    let err = build_auth_policy(&config)
+    let err = build_auth_policy(&config, false)
         .await
         .expect_err("invalid public_url should fail");
     let msg = format!("{err:#}");
@@ -130,7 +130,7 @@ async fn build_auth_policy_enforces_restrictive_permissions_on_auth_db() {
 
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(tmp.path(), oauth_mcp(tmp.path()));
-    let _policy = build_auth_policy(&config).await.expect("oauth init");
+    let _policy = build_auth_policy(&config, false).await.expect("oauth init");
 
     let db_path: PathBuf = tmp.path().join("auth.db");
     let mode = std::fs::metadata(&db_path)

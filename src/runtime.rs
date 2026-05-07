@@ -64,18 +64,32 @@ impl RuntimeCore {
     }
 
     pub async fn load_query_only() -> Result<Self> {
-        Self::query_only(Config::load()?).await
+        // Use load_for_stdio() to skip the non-loopback bind safety gate —
+        // stdio mode never binds an HTTP port so the gate is irrelevant.
+        Self::query_only(Config::load_for_stdio()?).await
     }
 
     pub async fn for_server(config: Config) -> Result<Self> {
-        Self::from_config(config, true).await
+        Self::from_config_inner(config, true, false).await
     }
 
     pub async fn query_only(config: Config) -> Result<Self> {
-        Self::from_config(config, false).await
+        // Stdio / query-only mode uses process isolation as the trust boundary.
+        // Build the core normally (DB pool, service), then unconditionally override
+        // auth_policy to LoopbackDev — stdio never has HTTP request headers to
+        // validate, so AuthLayer and scope checks don't apply. We use
+        // from_config_with_stdio(true) to tell build_auth_policy to skip its
+        // bind-address check (no TCP port is bound in stdio mode).
+        let mut core = Self::from_config_inner(config, false, true).await?;
+        core.auth_policy = AuthPolicy::LoopbackDev;
+        Ok(core)
     }
 
-    async fn from_config(config: Config, enforce_initial_storage_budget: bool) -> Result<Self> {
+    async fn from_config_inner(
+        config: Config,
+        enforce_initial_storage_budget: bool,
+        is_stdio: bool,
+    ) -> Result<Self> {
         let pool = Arc::new(db::init_pool(&config.storage)?);
         let storage_state = Arc::new(Mutex::new(None));
         if enforce_initial_storage_budget
@@ -111,7 +125,7 @@ impl RuntimeCore {
             enrichment,
         );
 
-        let auth_policy = build_auth_policy(&config).await?;
+        let auth_policy = build_auth_policy(&config, is_stdio).await?;
 
         Ok(Self {
             config,
@@ -350,7 +364,7 @@ impl RuntimeCore {
 /// that scope checks in tool dispatch (S5) know middleware is enforcing auth.
 /// `lab_auth::AuthState::new` is only called for the OAuth row — it requires
 /// mode == OAuth and initialises Google OIDC + SQLite session storage.
-async fn build_auth_policy(config: &Config) -> Result<AuthPolicy> {
+async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy> {
     let auth = &config.mcp.auth;
     let oauth_active = auth.mode == AuthMode::OAuth;
     let static_token_active = config
@@ -373,10 +387,11 @@ async fn build_auth_policy(config: &Config) -> Result<AuthPolicy> {
 
         // No auth at all — only legal on loopback (validated by validate_auth_config,
         // but double-checked here so LoopbackDev can never slip past on a non-loopback bind).
+        // Skip the bind check in stdio mode — no TCP port is ever opened.
         let bind_is_loopback = IpAddr::from_str(&config.mcp.host)
             .map(|ip| ip.is_loopback())
             .unwrap_or(false);
-        if !bind_is_loopback {
+        if !is_stdio && !bind_is_loopback {
             anyhow::bail!(
                 "internal invariant violated: no auth wired but bind `{}` is non-loopback",
                 config.mcp.host

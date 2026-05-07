@@ -263,7 +263,7 @@ fn auth_validation_rejects_blank_mcp_token() {
     let mut cfg = Config::default();
     cfg.mcp.api_token = Some("  ".into());
 
-    let err = validate_auth_config(&cfg).unwrap_err();
+    let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(err.to_string().contains("mcp.api_token"));
 }
 
@@ -273,7 +273,7 @@ fn auth_validation_rejects_blank_api_token_when_enabled() {
     cfg.api.enabled = true;
     cfg.api.api_token = Some("\t".into());
 
-    let err = validate_auth_config(&cfg).unwrap_err();
+    let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(err.to_string().contains("api.api_token"));
 }
 
@@ -666,7 +666,7 @@ fn oauth_mode_rejects_missing_public_url() {
     cfg.mcp.auth.google_client_secret = Some("secret".into());
     cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
 
-    let err = validate_auth_config(&cfg).unwrap_err();
+    let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(err.to_string().contains("SYSLOG_MCP_PUBLIC_URL"));
 }
 
@@ -678,7 +678,7 @@ fn oauth_mode_rejects_missing_google_client_id() {
     cfg.mcp.auth.google_client_secret = Some("secret".into());
     cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
 
-    let err = validate_auth_config(&cfg).unwrap_err();
+    let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(err.to_string().contains("SYSLOG_MCP_GOOGLE_CLIENT_ID"));
 }
 
@@ -690,7 +690,7 @@ fn oauth_mode_rejects_missing_google_client_secret() {
     cfg.mcp.auth.google_client_id = Some("id".into());
     cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
 
-    let err = validate_auth_config(&cfg).unwrap_err();
+    let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(err.to_string().contains("SYSLOG_MCP_GOOGLE_CLIENT_SECRET"));
 }
 
@@ -705,7 +705,7 @@ fn oauth_mode_rejects_empty_allowlist_and_admin() {
     cfg.mcp.auth.allowed_emails.clear();
     cfg.mcp.auth.admin_email.clear();
 
-    let err = validate_auth_config(&cfg).unwrap_err();
+    let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(
         err.to_string().contains("allowed_emails"),
         "wrong error: {err}"
@@ -721,7 +721,7 @@ fn oauth_mode_accepts_non_empty_allowlist() {
     cfg.mcp.auth.google_client_secret = Some("secret".into());
     cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
 
-    validate_auth_config(&cfg).expect("valid oauth config");
+    validate_auth_config(&cfg, true).expect("valid oauth config");
 }
 
 #[test]
@@ -733,7 +733,7 @@ fn oauth_mode_accepts_admin_email_alone() {
     cfg.mcp.auth.google_client_secret = Some("secret".into());
     cfg.mcp.auth.admin_email = "admin@example.com".into();
 
-    validate_auth_config(&cfg).expect("admin_email alone counts as allowlist");
+    validate_auth_config(&cfg, true).expect("admin_email alone counts as allowlist");
 }
 
 #[test]
@@ -746,7 +746,7 @@ fn bearer_and_oauth_can_coexist() {
     cfg.mcp.auth.google_client_secret = Some("secret".into());
     cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
 
-    validate_auth_config(&cfg).expect("bearer + oauth coexistence");
+    validate_auth_config(&cfg, true).expect("bearer + oauth coexistence");
     assert!(cfg.mcp.api_token.is_some());
     assert_eq!(cfg.mcp.auth.mode, AuthMode::OAuth);
 }
@@ -756,7 +756,7 @@ fn loopback_bind_with_no_auth_is_permitted() {
     let mut cfg = Config::default();
     cfg.mcp.host = "127.0.0.1".into();
     cfg.mcp.api_token = None;
-    validate_auth_config(&cfg).expect("loopback dev mode");
+    validate_auth_config(&cfg, true).expect("loopback dev mode");
 }
 
 #[test]
@@ -765,7 +765,8 @@ fn loopback_variants_pass_safety_gate() {
         let mut cfg = Config::default();
         cfg.mcp.host = host.into();
         cfg.mcp.api_token = None;
-        validate_auth_config(&cfg).unwrap_or_else(|err| panic!("{host} should be loopback: {err}"));
+        validate_auth_config(&cfg, true)
+            .unwrap_or_else(|err| panic!("{host} should be loopback: {err}"));
     }
 }
 
@@ -775,7 +776,7 @@ fn non_loopback_bind_without_auth_bails() {
         let mut cfg = Config::default();
         cfg.mcp.host = host.into();
         cfg.mcp.api_token = None;
-        let err = validate_auth_config(&cfg)
+        let err = validate_auth_config(&cfg, true)
             .err()
             .unwrap_or_else(|| panic!("{host} must be rejected without auth"));
         let msg = err.to_string();
@@ -791,7 +792,7 @@ fn non_loopback_bind_with_static_token_passes() {
     let mut cfg = Config::default();
     cfg.mcp.host = "0.0.0.0".into();
     cfg.mcp.api_token = Some("token".into());
-    validate_auth_config(&cfg).expect("static token unlocks non-loopback bind");
+    validate_auth_config(&cfg, true).expect("static token unlocks non-loopback bind");
 }
 
 #[test]
@@ -804,7 +805,7 @@ fn non_loopback_bind_with_oauth_passes() {
     cfg.mcp.auth.google_client_id = Some("id".into());
     cfg.mcp.auth.google_client_secret = Some("secret".into());
     cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
-    validate_auth_config(&cfg).expect("oauth unlocks non-loopback bind");
+    validate_auth_config(&cfg, true).expect("oauth unlocks non-loopback bind");
 }
 
 #[test]
