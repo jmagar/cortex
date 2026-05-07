@@ -41,7 +41,7 @@ fn test_insert_and_tail() {
     let n = insert_logs_batch(&pool, &entries).unwrap();
     assert_eq!(n, 3);
 
-    let rows = tail_logs(&pool, None, None, None, 10).unwrap();
+    let rows = tail_logs(&pool, None, None, None, None, 10).unwrap();
     assert_eq!(rows.len(), 3);
 }
 
@@ -85,7 +85,7 @@ fn test_batch_empty() {
     assert!(result.is_ok(), "empty batch should not error");
     assert_eq!(result.unwrap(), 0);
 
-    let rows = tail_logs(&pool, None, None, None, 10).unwrap();
+    let rows = tail_logs(&pool, None, None, None, None, 10).unwrap();
     assert_eq!(rows.len(), 0, "no rows should exist after empty batch");
 
     let hosts = list_hosts(&pool).unwrap();

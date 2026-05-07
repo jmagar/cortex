@@ -40,6 +40,8 @@ pub struct SearchLogsRequest {
     pub source_ip: Option<String>,
     pub severity: Option<String>,
     pub app_name: Option<String>,
+    pub facility: Option<String>,
+    pub process_id: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
     pub limit: Option<u32>,
@@ -56,12 +58,17 @@ pub struct TailLogsRequest {
     pub hostname: Option<String>,
     pub source_ip: Option<String>,
     pub app_name: Option<String>,
+    /// Minimum severity to return (e.g. `warning` returns warning + worse).
+    pub severity_min: Option<String>,
     pub n: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorSummaryEntry {
     pub hostname: String,
+    /// Optional secondary grouping key (e.g. app_name) when `group_by` is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
     pub severity: String,
     pub count: i64,
 }
@@ -70,16 +77,19 @@ impl From<db::ErrorSummaryEntry> for ErrorSummaryEntry {
     fn from(value: db::ErrorSummaryEntry) -> Self {
         Self {
             hostname: value.hostname,
+            app_name: value.app_name,
             severity: value.severity,
             count: value.count,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetErrorsRequest {
     pub from: Option<String>,
     pub to: Option<String>,
+    /// Secondary grouping key. Currently supports `app_name`.
+    pub group_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +183,161 @@ impl From<db::DbStats> for DbStats {
             phantom_fts_rows: value.phantom_fts_rows,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// New analytics actions
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListAppsRequest {
+    pub hostname: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListAppsResponse {
+    pub apps: Vec<db::AppEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListSourceIpsResponse {
+    pub source_ips: Vec<db::SourceIpEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TimelineRequest {
+    pub bucket: Option<String>,
+    pub group_by: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub hostname: Option<String>,
+    pub app_name: Option<String>,
+    pub severity_min: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimelineResponse {
+    pub bucket: String,
+    pub group_by: Option<String>,
+    pub points: Vec<db::TimelinePoint>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PatternsRequest {
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub hostname: Option<String>,
+    pub app_name: Option<String>,
+    pub severity_min: Option<String>,
+    pub scan_limit: Option<u32>,
+    pub top_n: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatternsResponse {
+    pub patterns: Vec<db::PatternEntry>,
+    pub scanned: i64,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ContextRequest {
+    pub log_id: Option<i64>,
+    pub hostname: Option<String>,
+    pub timestamp: Option<String>,
+    pub before: Option<u32>,
+    pub after: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextResponse {
+    pub reference: LogEntry,
+    pub before: Vec<LogEntry>,
+    pub after: Vec<LogEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GetLogRequest {
+    pub id: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetLogResponse {
+    pub log: db::LogEntryWithRaw,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IngestRateRequest {
+    pub by_host: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IngestRateResponse {
+    pub now: String,
+    pub buckets: db::IngestRateBuckets,
+    pub write_blocked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub by_host: Option<Vec<db::IngestRatePerHost>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SilentHostsRequest {
+    /// Hosts whose `last_seen` is older than `silent_minutes` ago (default 30).
+    pub silent_minutes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SilentHostsResponse {
+    pub silent_minutes: u32,
+    pub cutoff: String,
+    pub now: String,
+    pub hosts: Vec<db::SilentHostEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClockSkewRequest {
+    pub since: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClockSkewResponse {
+    pub since: String,
+    pub hosts: Vec<db::ClockSkewEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AnomaliesRequest {
+    /// Recent window in minutes (default 15, max 1440).
+    pub recent_minutes: Option<u32>,
+    /// Baseline window in minutes preceding the recent window (default 360, max 10080).
+    pub baseline_minutes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnomaliesResponse {
+    pub recent_from: String,
+    pub recent_to: String,
+    pub baseline_from: String,
+    pub baseline_to: String,
+    pub recent_minutes: u32,
+    pub baseline_minutes: u32,
+    pub hosts: Vec<db::AnomalyEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompareRequest {
+    pub a_from: String,
+    pub a_to: String,
+    pub b_from: String,
+    pub b_to: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompareResponse {
+    pub a: db::RangeSummary,
+    pub b: db::RangeSummary,
+    pub delta_total_logs: i64,
+    pub delta_total_errors: i64,
 }
 
 #[cfg(test)]

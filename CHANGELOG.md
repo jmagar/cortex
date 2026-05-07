@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-05-07
+
+### Added
+
+- **Eleven new `syslog` actions** for log intelligence beyond raw search/tail:
+  - `apps` — distinct application names with log/host counts and first/last seen (mirror of `hosts` for the `app_name` dimension).
+  - `source_ips` — distinct source identifiers with hostname breakdown; supports spoof detection on hostname-spoofable formats (e.g. UniFi CEF).
+  - `timeline` — bucketed counts (`minute`/`hour`/`day`) over a time range, optionally split by `hostname` / `severity` / `app_name`.
+  - `patterns` — cluster near-duplicate messages by template (numbers, IPv4, UUIDs, long hex strings normalised to placeholders); returns top templates with counts, sample, and host distribution.
+  - `context` — surrounding logs around a single point of interest by `log_id` or `hostname`+`timestamp`.
+  - `get` — fetch one log by `id`, including the unparsed `raw` syslog frame.
+  - `ingest_rate` — recent throughput (last 1m / 5m / 15m using `received_at`) plus current `write_blocked` flag and optional per-host buckets.
+  - `silent_hosts` — hosts whose `last_seen` is older than `silent_minutes` ago, with their typical inter-arrival interval.
+  - `clock_skew` — per-host distribution of `received_at - timestamp` (seconds), sorted by absolute mean.
+  - `anomalies` — per-host comparison of recent volume/error count against a baseline window; returns ratio and Poisson-style z-score.
+  - `compare` — side-by-side summary of two time ranges (volume, error count, severity mix, top hosts/apps) with deltas.
+- **New filters on existing actions**:
+  - `search` accepts `facility` and `process_id`.
+  - `tail` accepts `severity_min` (returns entries at or above the threshold).
+  - `errors` accepts `group_by=app_name` for hostname x app_name x severity grouping.
+- **`logs.raw` column is now exposed** via the new `get` action.
+
+### Changed
+
+- `tail_logs` query and `get_error_summary` query gained additional parameters (`severity_in`, `group_by_app`); internal callers updated.
+- Help text (`syslog help`) expanded to cover all 19 actions and updated parameters.
+
 ## [0.14.2] - 2026-05-07
 
 ### Added

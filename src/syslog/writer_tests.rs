@@ -96,7 +96,7 @@ async fn flush_batch_resumes_after_storage_recovers() {
     assert!(batch.is_empty());
     assert!(!storage_blocked);
     assert_eq!(observability.snapshot().writer_logs_written, 1);
-    let rows = db::tail_logs(&pool, None, None, None, 10).unwrap();
+    let rows = db::tail_logs(&pool, None, None, None, None, 10).unwrap();
     assert_eq!(rows.len(), 1);
 }
 
