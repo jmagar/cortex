@@ -2,6 +2,7 @@ use serde_json::{json, Value};
 
 use crate::app::{CorrelateEventsRequest, GetErrorsRequest, SearchLogsRequest, TailLogsRequest};
 
+use super::schemas::SYSLOG_ACTIONS;
 use super::AppState;
 
 /// Execute a tool by name
@@ -29,7 +30,8 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "status" => tool_get_status(state, args).await,
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
-            "unknown syslog action: {action}; expected one of search, tail, errors, hosts, correlate, stats, status, help"
+            "unknown syslog action: {action}; expected one of {}",
+            SYSLOG_ACTIONS.join(", ")
         )),
     }
 }
@@ -154,9 +156,9 @@ fn u32_arg(args: &Value, name: &str) -> anyhow::Result<Option<u32>> {
     let Some(value) = args.get(name) else {
         return Ok(None);
     };
-    let Some(unsigned) = value.as_u64() else {
-        return Ok(None);
-    };
+    let unsigned = value
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("{name} must be an unsigned integer"))?;
     u32::try_from(unsigned)
         .map(Some)
         .map_err(|_| anyhow::anyhow!("{name} must be <= {}", u32::MAX))

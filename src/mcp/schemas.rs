@@ -1,4 +1,16 @@
+use crate::db::SEVERITY_LEVELS;
 use serde_json::{json, Value};
+
+pub(super) const SYSLOG_ACTIONS: &[&str] = &[
+    "search",
+    "tail",
+    "errors",
+    "hosts",
+    "correlate",
+    "stats",
+    "status",
+    "help",
+];
 
 /// Define the public MCP tool surface.
 pub(super) fn tool_definitions() -> Vec<Value> {
@@ -10,7 +22,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["search", "tail", "errors", "hosts", "correlate", "stats", "status", "help"],
+                    "enum": SYSLOG_ACTIONS,
                     "description": "Action to run: search, tail, errors, hosts, correlate, stats, status, or help."
                 },
                 "query": {
@@ -27,12 +39,12 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "severity": {
                     "type": "string",
-                    "enum": ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"],
+                    "enum": SEVERITY_LEVELS,
                     "description": "For action=search: syslog severity filter."
                 },
                 "severity_min": {
                     "type": "string",
-                    "enum": ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"],
+                    "enum": SEVERITY_LEVELS,
                     "description": "For action=correlate: minimum severity to include. Defaults to warning."
                 },
                 "app_name": {

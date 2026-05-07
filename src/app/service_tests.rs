@@ -114,6 +114,21 @@ async fn source_ip_filter_uses_network_sender_identity() {
 }
 
 #[tokio::test]
+async fn search_logs_rejects_invalid_severity() {
+    let (service, _pool, _dir) = test_service();
+
+    let err = service
+        .search_logs(SearchLogsRequest {
+            severity: Some("critical".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("Invalid severity 'critical'"));
+    assert!(err.to_string().contains("emerg, alert, crit"));
+}
+
+#[tokio::test]
 async fn health_check_runs_simple_database_query() {
     let (service, _pool, _dir) = test_service();
 

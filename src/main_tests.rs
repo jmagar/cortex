@@ -20,3 +20,9 @@ fn mode_parse_rejects_unknown_commands() {
     let err = Mode::parse(vec!["serve".into(), "http".into()]).unwrap_err();
     assert!(err.to_string().contains("unknown command"));
 }
+
+#[test]
+fn mode_parse_keeps_runtime_status_mcp_only() {
+    let err = Mode::parse(vec!["status".into()]).unwrap_err();
+    assert!(err.to_string().contains("unknown command"));
+}

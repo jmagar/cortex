@@ -22,6 +22,6 @@ Index for the `mcp/` documentation subdirectory. These docs cover the MCP server
 | `RESOURCES.md` | MCP resources: syslog-mcp exposes no resources |
 | `SCHEMA.md` | Tool schema documentation: JSON Schema definitions in Rust |
 | `TESTS.md` | Testing: cargo test, live smoke tests, test coverage |
-| `TOOLS.md` | MCP tools reference: all 7 tools with parameters and response shapes |
+| `TOOLS.md` | MCP tools reference: one `syslog` tool with all 8 action shapes |
 | `TRANSPORT.md` | RMCP Streamable HTTP transport, stateless mode, port assignment |
 | `WEBMCP.md` | Web MCP: CORS configuration, browser access restrictions |
