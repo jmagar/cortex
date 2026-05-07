@@ -26,9 +26,10 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "hosts" => tool_list_hosts(state, args).await,
         "correlate" => tool_correlate_events(state, args).await,
         "stats" => tool_get_stats(state, args).await,
+        "status" => tool_get_status(state, args).await,
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
-            "unknown syslog action: {action}; expected one of search, tail, errors, hosts, correlate, stats, help"
+            "unknown syslog action: {action}; expected one of search, tail, errors, hosts, correlate, stats, status, help"
         )),
     }
 }
@@ -106,6 +107,20 @@ async fn tool_correlate_events(state: &AppState, args: Value) -> anyhow::Result<
 
 pub(super) async fn tool_get_stats(state: &AppState, _args: Value) -> anyhow::Result<Value> {
     let stats = state.service.get_stats().await?;
+    let mut value = serde_json::to_value(&stats)?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "runtime_observability".into(),
+            serde_json::to_value(state.observability.snapshot())?,
+        );
+        object.insert(
+            "otlp".into(),
+            json!({
+                "logs_received": state.otlp_counters.logs_received.load(std::sync::atomic::Ordering::Relaxed),
+                "decode_errors": state.otlp_counters.decode_errors.load(std::sync::atomic::Ordering::Relaxed),
+            }),
+        );
+    }
     tracing::debug!(
         total_logs = stats.total_logs,
         total_hosts = stats.total_hosts,
@@ -115,7 +130,20 @@ pub(super) async fn tool_get_stats(state: &AppState, _args: Value) -> anyhow::Re
         phantom_fts_rows = stats.phantom_fts_rows,
         "get_stats completed"
     );
-    Ok(serde_json::to_value(&stats)?)
+    Ok(value)
+}
+
+pub(super) async fn tool_get_status(state: &AppState, _args: Value) -> anyhow::Result<Value> {
+    let db_ok = state.service.health_check().await.is_ok();
+    Ok(json!({
+        "status": if db_ok { "ok" } else { "error" },
+        "db_ok": db_ok,
+        "runtime_observability": state.observability.snapshot(),
+        "otlp": {
+            "logs_received": state.otlp_counters.logs_received.load(std::sync::atomic::Ordering::Relaxed),
+            "decode_errors": state.otlp_counters.decode_errors.load(std::sync::atomic::Ordering::Relaxed),
+        }
+    }))
 }
 
 fn string_arg(args: &Value, name: &str) -> Option<String> {
@@ -203,8 +231,16 @@ of a reference timestamp. Results are grouped by host and ordered by time.
 ---
 
 ## syslog stats
-Get database statistics: total logs, total hosts, time range covered, logical and physical
-DB size, free disk, configured thresholds, and current write-block status.
+Get database statistics plus runtime ingest observability: listener counters, queue depth,
+writer flush/failure/drop counters, last activity timestamps, and OTLP receiver counters.
+
+**Parameters:** none
+
+---
+
+## syslog status
+Get lightweight runtime status without full DB statistics. Use this for dashboards and
+doctor checks that need queue/backpressure/writer state quickly.
 
 **Parameters:** none
 

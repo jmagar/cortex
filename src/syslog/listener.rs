@@ -3,21 +3,17 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::{TcpListener, UdpSocket};
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
-use crate::db;
+use crate::ingest::IngestTx;
 
 use super::parser::parse_syslog;
-use super::writer::{queue_depth, source_addr_ip};
+use super::writer::source_addr_ip;
 use super::WRITE_CHANNEL_CAPACITY;
 
 /// UDP syslog receiver.
-pub(super) async fn udp_listener(
-    bind: &str,
-    max_size: usize,
-    tx: mpsc::Sender<db::LogBatchEntry>,
-) -> Result<()> {
+pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) -> Result<()> {
     let socket = UdpSocket::bind(bind).await?;
     info!(bind = %bind, "UDP syslog listener bound");
 
@@ -28,20 +24,21 @@ pub(super) async fn udp_listener(
         match socket.recv_from(&mut buf).await {
             Ok((len, addr)) => {
                 received_packets += 1;
+                ingest.observability().record_udp_packet(len);
                 let raw = String::from_utf8_lossy(&buf[..len]).to_string();
                 debug!(
                     src = %addr,
                     len,
                     packet_index = received_packets,
-                    queue_depth = queue_depth(&tx),
-                    "UDP syslog received"
+                    queue_depth = ingest.queue_depth(),
+                    "UDP syslog packet received"
                 );
 
-                let at_capacity = tx.capacity() == 0;
+                let at_capacity = ingest.capacity() == 0;
                 if at_capacity && !backpressure {
                     warn!(
                         src = %addr,
-                        queue_depth = queue_depth(&tx),
+                        queue_depth = ingest.queue_depth(),
                         channel_capacity = WRITE_CHANNEL_CAPACITY,
                         "syslog write channel full — backpressure applied"
                     );
@@ -49,14 +46,18 @@ pub(super) async fn udp_listener(
                 } else if !at_capacity && backpressure {
                     info!(
                         src = %addr,
-                        queue_depth = queue_depth(&tx),
+                        queue_depth = ingest.queue_depth(),
                         channel_capacity = WRITE_CHANNEL_CAPACITY,
                         "syslog write channel cleared — backpressure lifted"
                     );
                     backpressure = false;
                 }
 
-                if tx.send(parse_syslog(&raw, addr.to_string())).await.is_err() {
+                if ingest
+                    .send(parse_syslog(&raw, addr.to_string()))
+                    .await
+                    .is_err()
+                {
                     error!("Write channel closed");
                     break;
                 }
@@ -73,10 +74,12 @@ pub(super) async fn udp_listener(
 pub(super) async fn handle_tcp_connection(
     stream: tokio::net::TcpStream,
     addr: std::net::SocketAddr,
-    tx: mpsc::Sender<db::LogBatchEntry>,
+    ingest: IngestTx,
     max_size: usize,
     idle_timeout_secs: u64,
 ) {
+    let observability = ingest.observability();
+    observability.record_tcp_connection_accepted();
     info!(peer = %addr, "TCP syslog connection accepted");
     // Persistent forwarders like rsyslog reuse a single TCP session for many
     // syslog frames, so max_size must apply per message line, not to the whole
@@ -100,6 +103,7 @@ pub(super) async fn handle_tcp_connection(
                     continue;
                 }
                 if line.len() > max_size {
+                    observability.record_tcp_line_dropped_oversize();
                     warn!(
                         peer = %addr,
                         line_count,
@@ -111,12 +115,13 @@ pub(super) async fn handle_tcp_connection(
                 }
                 line_count += 1;
                 total_bytes += line.len();
+                observability.record_tcp_line(line.len());
 
-                let at_capacity = tx.capacity() == 0;
+                let at_capacity = ingest.capacity() == 0;
                 if at_capacity && !backpressure {
                     warn!(
                         peer = %addr,
-                        queue_depth = queue_depth(&tx),
+                        queue_depth = ingest.queue_depth(),
                         channel_capacity = WRITE_CHANNEL_CAPACITY,
                         line_count,
                         "syslog write channel full — backpressure applied"
@@ -125,7 +130,7 @@ pub(super) async fn handle_tcp_connection(
                 } else if !at_capacity && backpressure {
                     info!(
                         peer = %addr,
-                        queue_depth = queue_depth(&tx),
+                        queue_depth = ingest.queue_depth(),
                         channel_capacity = WRITE_CHANNEL_CAPACITY,
                         line_count,
                         "syslog write channel cleared — backpressure lifted"
@@ -136,7 +141,7 @@ pub(super) async fn handle_tcp_connection(
                     peer = %addr,
                     line_count,
                     line_bytes = line.len(),
-                    queue_depth = queue_depth(&tx),
+                    queue_depth = ingest.queue_depth(),
                     "TCP syslog line received"
                 );
                 let entry = parse_syslog(&line, addr.to_string());
@@ -149,7 +154,7 @@ pub(super) async fn handle_tcp_connection(
                         "TCP syslog sender identified"
                     );
                 }
-                if tx.send(entry).await.is_err() {
+                if ingest.send(entry).await.is_err() {
                     break "write_channel_closed";
                 }
             }
@@ -173,6 +178,7 @@ pub(super) async fn handle_tcp_connection(
         elapsed_ms = started.elapsed().as_millis(),
         "TCP syslog connection closed"
     );
+    observability.record_tcp_connection_closed();
 }
 
 /// TCP syslog receiver (newline-delimited).
@@ -182,7 +188,7 @@ pub(super) async fn handle_tcp_connection(
 /// to evict zombie connections.
 pub(super) async fn tcp_listener(
     bind: &str,
-    tx: mpsc::Sender<db::LogBatchEntry>,
+    ingest: IngestTx,
     max_size: usize,
     max_connections: usize,
     idle_timeout_secs: u64,
@@ -202,11 +208,17 @@ pub(super) async fn tcp_listener(
                 match Arc::clone(&sem).try_acquire_owned() {
                     Ok(permit) => {
                         let available_permits = sem.available_permits();
-                        let tx = tx.clone();
+                        let ingest = ingest.clone();
                         tokio::spawn(async move {
                             let _permit = permit;
-                            handle_tcp_connection(stream, addr, tx, max_size, idle_timeout_secs)
-                                .await;
+                            handle_tcp_connection(
+                                stream,
+                                addr,
+                                ingest,
+                                max_size,
+                                idle_timeout_secs,
+                            )
+                            .await;
                         });
                         debug!(
                             peer = %addr,
@@ -217,6 +229,7 @@ pub(super) async fn tcp_listener(
                     }
                     Err(tokio::sync::TryAcquireError::NoPermits) => {
                         total_rejected += 1;
+                        ingest.observability().record_tcp_connection_rejected();
                         if !reject_logged
                             || last_reject_log.elapsed() >= std::time::Duration::from_secs(10)
                         {

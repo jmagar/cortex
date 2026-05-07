@@ -22,6 +22,7 @@ fn test_state_with_token(token: Option<String>) -> (AppState, tempfile::TempDir)
                 allowed_origins: Vec::new(),
             },
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
+            observability: Arc::new(crate::observability::RuntimeObservability::default()),
         },
         dir,
     )
@@ -48,6 +49,18 @@ async fn tool_get_stats_returns_storage_guard_fields() {
     assert!(value.get("physical_db_size_mb").is_some());
     assert!(value.get("write_blocked").is_some());
     assert!(value.get("phantom_fts_rows").is_some());
+    assert!(value.get("runtime_observability").is_some());
+    assert!(value.get("otlp").is_some());
+}
+
+#[tokio::test]
+async fn tool_get_status_returns_runtime_observability() {
+    let h = TestHarness::new();
+    let value = tool_get_status(&h.state, json!({})).await.unwrap();
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["db_ok"], true);
+    assert!(value["runtime_observability"]["ingest_queue_depth"].is_number());
+    assert!(value["otlp"]["logs_received"].is_number());
 }
 
 #[tokio::test]

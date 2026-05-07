@@ -7,20 +7,42 @@ use tracing::{debug, error, info};
 use super::enrichment::{enrich_entry, EnrichmentConfig};
 use crate::config::StorageConfig;
 use crate::db::{self, DbPool};
-
-use super::WRITE_CHANNEL_CAPACITY;
+use crate::observability::RuntimeObservability;
 
 const INGEST_SUMMARY_INTERVAL_SECS: u64 = 60;
 
 /// Batch writer — collects messages and writes in batches for throughput.
-pub(crate) async fn batch_writer(
-    mut rx: mpsc::Receiver<db::LogBatchEntry>,
+pub(crate) struct WriterContext {
     pool: Arc<DbPool>,
     storage: StorageConfig,
     storage_state: Arc<Mutex<Option<db::StorageBudgetState>>>,
+    enrichment: EnrichmentConfig,
+    observability: Arc<RuntimeObservability>,
+}
+
+impl WriterContext {
+    pub(crate) fn new(
+        pool: Arc<DbPool>,
+        storage: StorageConfig,
+        storage_state: Arc<Mutex<Option<db::StorageBudgetState>>>,
+        enrichment: EnrichmentConfig,
+        observability: Arc<RuntimeObservability>,
+    ) -> Self {
+        Self {
+            pool,
+            storage,
+            storage_state,
+            enrichment,
+            observability,
+        }
+    }
+}
+
+pub(crate) async fn batch_writer(
+    mut rx: mpsc::Receiver<db::LogBatchEntry>,
+    context: WriterContext,
     batch_size: usize,
     flush_interval: tokio::time::Duration,
-    enrichment: EnrichmentConfig,
 ) {
     let mut batch: Vec<db::LogBatchEntry> = Vec::with_capacity(batch_size);
     let mut storage_blocked = false;
@@ -56,13 +78,10 @@ pub(crate) async fn batch_writer(
                         None => {
                             if !batch.is_empty() {
                                 flush_batch(
-                                    &pool,
-                                    &storage,
-                                    &storage_state,
                                     &mut batch,
                                     &mut storage_blocked,
                                     &mut summary,
-                                    &enrichment,
+                                    &context,
                                 )
                                 .await;
                             }
@@ -79,16 +98,7 @@ pub(crate) async fn batch_writer(
         }
 
         if !batch.is_empty() {
-            flush_batch(
-                &pool,
-                &storage,
-                &storage_state,
-                &mut batch,
-                &mut storage_blocked,
-                &mut summary,
-                &enrichment,
-            )
-            .await;
+            flush_batch(&mut batch, &mut storage_blocked, &mut summary, &context).await;
         }
 
         if tokio::time::Instant::now() >= summary_deadline {
@@ -100,25 +110,23 @@ pub(crate) async fn batch_writer(
 }
 
 pub(super) async fn flush_batch(
-    pool: &Arc<DbPool>,
-    storage: &StorageConfig,
-    storage_state: &Arc<Mutex<Option<db::StorageBudgetState>>>,
     batch: &mut Vec<db::LogBatchEntry>,
     storage_blocked: &mut bool,
     summary: &mut IngestSummary,
-    enrichment: &EnrichmentConfig,
+    context: &WriterContext,
 ) {
-    let pool = Arc::clone(pool);
+    let pool = Arc::clone(&context.pool);
     // Enrichment runs in the async context (cheap regex/JSON work) so the
     // spawn_blocking call below stays focused on the SQL write.
     let batch_to_write: Vec<db::LogBatchEntry> = std::mem::take(batch)
         .into_iter()
-        .map(|e| enrich_entry(e, enrichment))
+        .map(|e| enrich_entry(e, &context.enrichment))
         .collect();
     let count = batch_to_write.len();
     let started = Instant::now();
     debug!(count, "Attempting batch flush");
-    let enforcement = storage_state
+    let enforcement = context
+        .storage_state
         .lock()
         .expect("storage state mutex poisoned")
         .clone();
@@ -135,12 +143,15 @@ pub(super) async fn flush_batch(
                     count,
                     retained_batch = batch_to_write.len(),
                     elapsed_ms = started.elapsed().as_millis(),
-                    max_db_size_mb = storage.max_db_size_mb,
-                    min_free_disk_mb = storage.min_free_disk_mb,
+                    max_db_size_mb = context.storage.max_db_size_mb,
+                    min_free_disk_mb = context.storage.min_free_disk_mb,
                     "Storage budget exceeded — retaining batch until space recovers"
                 );
                 *storage_blocked = true;
             }
+            context
+                .observability
+                .record_writer_retained(batch_to_write.len(), true);
             *batch = batch_to_write;
             tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
             return;
@@ -156,6 +167,7 @@ pub(super) async fn flush_batch(
     {
         Ok(Ok((n, inserted_batch))) => {
             summary.record_batch(&inserted_batch[..n.min(inserted_batch.len())]);
+            context.observability.record_writer_flushed(n);
             if *storage_blocked {
                 info!(
                     count = n,
@@ -172,6 +184,9 @@ pub(super) async fn flush_batch(
         }
         Ok(Err((e, failed_batch, blocked_by_storage))) => {
             if failed_batch.len() < 1000 {
+                context
+                    .observability
+                    .record_writer_retained(failed_batch.len(), blocked_by_storage);
                 if blocked_by_storage {
                     if !*storage_blocked {
                         error!(
@@ -195,6 +210,9 @@ pub(super) async fn flush_batch(
                 *batch = failed_batch;
                 tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
             } else {
+                context
+                    .observability
+                    .record_writer_discarded(failed_batch.len());
                 error!(
                     error = %e,
                     count,
@@ -205,6 +223,7 @@ pub(super) async fn flush_batch(
             }
         }
         Err(e) => {
+            context.observability.record_writer_discarded(count);
             error!(
                 error = %e,
                 count,
@@ -213,10 +232,6 @@ pub(super) async fn flush_batch(
             );
         }
     }
-}
-
-pub(super) fn queue_depth<T>(tx: &mpsc::Sender<T>) -> usize {
-    WRITE_CHANNEL_CAPACITY.saturating_sub(tx.capacity())
 }
 
 #[derive(Default)]

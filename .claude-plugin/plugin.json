@@ -70,8 +70,8 @@
     "max_db_size_mb": {
       "type": "number",
       "title": "Max database size (MB)",
-      "description": "Soft cap on logical SQLite DB size. When exceeded, oldest logs (ordered by received_at) are deleted in batches until the recovery target is met; if cleanup can't free enough space, NEW WRITES are blocked until storage recovers. 0 disables this guard entirely (logs grow until disk fills or retention purges them). Default 1024 MB suits most homelabs — bump higher only if you ingest heavy Docker stdout. Server mode only.",
-      "default": 1024,
+      "description": "Soft cap on logical SQLite DB size. When exceeded, oldest logs (ordered by received_at) are deleted in batches until the recovery target is met; if cleanup can't free enough space, NEW WRITES are blocked until storage recovers. 0 disables this guard entirely (logs grow until disk fills or retention purges them). Default 8192 MB (8 GB) is sized for a homelab ingesting from a handful of hosts plus Docker stdout — bump much higher (50000+) if you have lots of free disk and want long retention, lower if storage is tight. Server mode only.",
+      "default": 8192,
       "min": 0
     },
     "data_dir": {

@@ -12,7 +12,7 @@ SYSLOG_PORT="${CLAUDE_PLUGIN_OPTION_SYSLOG_PORT:-1514}"
 MCP_HOST="${CLAUDE_PLUGIN_OPTION_MCP_HOST:-0.0.0.0}"
 MCP_PORT="${CLAUDE_PLUGIN_OPTION_MCP_PORT:-3100}"
 DATA_DIR="${CLAUDE_PLUGIN_OPTION_DATA_DIR:-${CLAUDE_PLUGIN_DATA}}"
-MAX_DB_SIZE_MB="${CLAUDE_PLUGIN_OPTION_MAX_DB_SIZE_MB:-1024}"
+MAX_DB_SIZE_MB="${CLAUDE_PLUGIN_OPTION_MAX_DB_SIZE_MB:-8192}"
 RETENTION_DAYS="${CLAUDE_PLUGIN_OPTION_RETENTION_DAYS:-90}"
 DOCKER_INGEST="${CLAUDE_PLUGIN_OPTION_DOCKER_INGEST_ENABLED:-false}"
 FLEET_HOSTS="${CLAUDE_PLUGIN_OPTION_FLEET_HOSTS:-}"
@@ -30,13 +30,19 @@ write_env() {
   mkdir -p "${CLAUDE_PLUGIN_DATA}"
 
   if [[ "${USE_DOCKER}" == "true" ]]; then
-    # Docker compose reads these directly from .env
+    # Docker compose reads these directly from .env. Pin UID/GID so the
+    # container writes syslog.db with the host user's ownership — keeps the
+    # same file readable by the systemd binary if you switch modes back.
     local db_line="SYSLOG_MCP_DATA_VOLUME=${DATA_DIR}"
-    local config_line="SYSLOG_MCP_CONFIG_VOLUME=${CLAUDE_PLUGIN_DATA}/config"
+    local config_line=""
+    local uid_line="SYSLOG_UID=$(id -u)"
+    local gid_line="SYSLOG_GID=$(id -g)"
   else
     # Systemd binary reads these as direct env vars
     local db_line="SYSLOG_MCP_DB_PATH=${DATA_DIR}/syslog.db"
     local config_line=""
+    local uid_line=""
+    local gid_line=""
   fi
 
   local new_env
@@ -52,6 +58,9 @@ SYSLOG_MCP_RETENTION_DAYS=${RETENTION_DAYS}
 SYSLOG_DOCKER_INGEST_ENABLED=${DOCKER_INGEST}
 EOF
 )
+  [[ -n "${uid_line}" ]] && new_env="${new_env}
+${uid_line}
+${gid_line}"
 
   [[ -n "${config_line}" ]] && new_env="${new_env}
 ${config_line}"
@@ -73,6 +82,15 @@ SYSLOG_DOCKER_HOSTS=${FLEET_HOSTS}"
 
 setup_systemd() {
   mkdir -p "${HOME}/.config/systemd/user"
+
+  # If a previous run deployed via docker, stop the container first so the
+  # systemd binary can bind the same ports. Idempotent.
+  if [[ -f "${COMPOSE_FILE}" ]] && command -v docker >/dev/null 2>&1; then
+    if (cd "${COMPOSE_DIR}" && docker compose ps --quiet syslog-mcp 2>/dev/null | grep -q .); then
+      echo "syslog-mcp: stopping existing docker container before systemd cutover"
+      (cd "${COMPOSE_DIR}" && docker compose down)
+    fi
+  fi
 
   local new_unit
   new_unit=$(cat << EOF
@@ -115,6 +133,15 @@ EOF
 setup_docker() {
   mkdir -p "${COMPOSE_DIR}"
 
+  # If a previous run deployed via systemd, stop it first so the docker
+  # container can bind the same ports. Idempotent — silent if absent/inactive.
+  if systemctl --user list-unit-files syslog-mcp.service >/dev/null 2>&1 \
+     && systemctl --user is-active --quiet syslog-mcp.service; then
+    echo "syslog-mcp: stopping existing systemd unit before docker cutover"
+    systemctl --user stop syslog-mcp.service
+    systemctl --user disable syslog-mcp.service >/dev/null 2>&1 || true
+  fi
+
   # Refresh compose file if plugin updated
   if ! diff -q "${CLAUDE_PLUGIN_ROOT}/docker-compose.yml" "${COMPOSE_FILE}" >/dev/null 2>&1; then
     cp "${CLAUDE_PLUGIN_ROOT}/docker-compose.yml" "${COMPOSE_FILE}"
@@ -125,10 +152,18 @@ setup_docker() {
   cp "${ENV_FILE}" "${COMPOSE_DIR}/.env"
 
   cd "${COMPOSE_DIR}"
+
+  # Pull the published image. If the registry is unreachable or the tag
+  # doesn't exist, fall through to `up` which will use a cached image or
+  # (if --build is added) build from source — neither is expected in the
+  # plugin path, but this keeps the hook resilient in dev workflows.
+  docker compose pull --quiet syslog-mcp 2>&1 || \
+    echo "syslog-mcp: pull failed; will try cached image" >&2
+
   if docker compose ps --quiet syslog-mcp 2>/dev/null | grep -q .; then
-    docker compose up -d --force-recreate
+    docker compose up -d --force-recreate --no-build
   else
-    docker compose up -d
+    docker compose up -d --no-build
   fi
 
   echo "syslog-mcp: docker container running on ${MCP_HOST}:${MCP_PORT}"

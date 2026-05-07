@@ -9,6 +9,7 @@ use crate::app::SyslogService;
 use crate::config::Config;
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::ingest::IngestTx;
+use crate::observability::RuntimeObservability;
 use crate::otlp::{self, OtlpCounters, OtlpState};
 use crate::syslog::enrichment::EnrichmentConfig;
 use crate::{docker_ingest, mcp, syslog};
@@ -21,6 +22,7 @@ pub struct RuntimeCore {
     maintenance_permit: Arc<Semaphore>,
     ingest: IngestTx,
     otlp_counters: Arc<OtlpCounters>,
+    observability: Arc<RuntimeObservability>,
 }
 
 pub struct MaintenanceHandles {
@@ -98,12 +100,14 @@ impl RuntimeCore {
             scrub_prompts: config.enrichment.scrub_prompts,
             api_token: config.mcp.api_token.clone(),
         };
+        let observability = Arc::new(RuntimeObservability::default());
         let ingest = crate::ingest::start_writer_from_syslog_config(
             &config.syslog,
             config.storage.clone(),
             Arc::clone(&pool),
             Arc::clone(&storage_state),
             enrichment,
+            Arc::clone(&observability),
         );
         Ok(Self {
             config,
@@ -113,6 +117,7 @@ impl RuntimeCore {
             maintenance_permit: Arc::new(Semaphore::new(1)),
             ingest,
             otlp_counters: Arc::new(OtlpCounters::default()),
+            observability,
         })
     }
 
@@ -135,11 +140,12 @@ impl RuntimeCore {
             service: self.service(),
             config: self.config.mcp.clone(),
             otlp_counters: Arc::clone(&self.otlp_counters),
+            observability: Arc::clone(&self.observability),
         }
     }
 
     pub async fn start_syslog(&self) -> Result<()> {
-        syslog::start_listeners(self.config.syslog.clone(), self.ingest.sender()).await
+        syslog::start_listeners(self.config.syslog.clone(), self.ingest.clone()).await
     }
 
     pub fn spawn_maintenance_tasks(&self) -> MaintenanceHandles {

@@ -3,12 +3,13 @@ use super::*;
 #[tokio::test]
 async fn tcp_connection_allows_multiple_lines_beyond_connection_total_size() {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::db::LogBatchEntry>(16);
+    let ingest = crate::ingest::IngestTx::from_sender_for_test(tx);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
     let accept_task = tokio::spawn(async move {
         let (server_stream, peer) = listener.accept().await.unwrap();
-        handle_tcp_connection(server_stream, peer, tx, 64, 5).await;
+        handle_tcp_connection(server_stream, peer, ingest, 64, 5).await;
     });
 
     let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();

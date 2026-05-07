@@ -26,6 +26,7 @@ fn tool_definitions_include_expected_public_tools() {
             "hosts",
             "correlate",
             "stats",
+            "status",
             "help"
         ]
     );

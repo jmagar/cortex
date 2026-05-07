@@ -14,6 +14,10 @@ Concise reference. See [CONFIG.md](../CONFIG.md) for full documentation includin
 
 `syslog mcp` is a query-only local child process mode for stdio MCP clients. It uses `SYSLOG_MCP_DB_PATH` and logging variables, but does not require `SYSLOG_MCP_TOKEN` and does not bind network ports.
 
+Direct CLI commands such as `syslog search`, `syslog tail`, and `syslog stats`
+use the same query-only runtime and the same `SYSLOG_MCP_DB_PATH`. They are not
+MCP transports and do not use `SYSLOG_MCP_TOKEN`.
+
 ## Syslog listener
 
 | Variable | Required | Default | Description | Sensitive |

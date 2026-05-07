@@ -10,6 +10,7 @@ syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument s
 - `hosts`
 - `correlate`
 - `stats`
+- `status`
 - `help`
 
 The schema is defined in `src/mcp/schemas.rs` as a `serde_json::json!()` object returned by `tool_definitions()`.
@@ -25,7 +26,7 @@ json!({
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["search", "tail", "errors", "hosts", "correlate", "stats", "help"]
+                "enum": ["search", "tail", "errors", "hosts", "correlate", "stats", "status", "help"]
             },
             "query": { "type": "string" },
             "hostname": { "type": "string" },
