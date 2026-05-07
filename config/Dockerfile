@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 FROM rust:1.88-slim-bookworm AS builder
 
 WORKDIR /app
@@ -5,17 +7,23 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/li
 
 # Cache deps
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release && rm -rf src
+RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=syslog-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=syslog-cargo-target,target=/app/target,sharing=locked \
+    mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release --locked && rm -rf src
 
 # Build real binary
 COPY src/ src/
-RUN touch src/main.rs && cargo build --release
+RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=syslog-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=syslog-cargo-target,target=/app/target,sharing=locked \
+    touch src/main.rs && cargo build --release --locked && cp target/release/syslog /usr/local/bin/syslog
 
 # Runtime
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/syslog /usr/local/bin/syslog
+COPY --from=builder /usr/local/bin/syslog /usr/local/bin/syslog
 
 RUN groupadd --gid 1000 syslog && useradd --uid 1000 --gid syslog --no-create-home --shell /sbin/nologin syslog && mkdir -p /data && chown syslog:syslog /data
 
