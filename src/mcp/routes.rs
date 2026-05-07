@@ -102,15 +102,11 @@ pub fn router(state: AppState) -> Router {
         .merge(health_route)
         .with_state(health_state);
 
-    let mut combined: Router<()> = base_with_state;
+    let combined = match oauth_router {
+        Some(oauth) => base_with_state.merge(oauth),
+        None => base_with_state,
+    };
 
-    if let Some(oauth) = oauth_router {
-        // Both are Router<()> — merge is straightforward.
-        combined = combined.merge(oauth);
-    }
-
-    // Re-wrap as the final Router (Router<()> is the return type since all state
-    // is already embedded). The outer caller uses Router<> (= Router<()>).
     combined
         .fallback(|| async { (StatusCode::NOT_FOUND, Json(json!({"error": "not_found"}))) })
         .layer(RequestBodyLimitLayer::new(MCP_BODY_LIMIT_BYTES as usize))

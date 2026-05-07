@@ -397,11 +397,12 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
 
         // No auth at all — only legal on loopback (validated by validate_auth_config,
         // but double-checked here so LoopbackDev can never slip past on a non-loopback bind).
-        // Skip the bind check in stdio mode — no TCP port is ever opened.
+        // The early return above guarantees `is_stdio` is false here, so the bind
+        // check always applies.
         let bind_is_loopback = IpAddr::from_str(&config.mcp.host)
             .map(|ip| ip.is_loopback())
             .unwrap_or(false);
-        if !is_stdio && !bind_is_loopback {
+        if !bind_is_loopback {
             anyhow::bail!(
                 "internal invariant violated: no auth wired but bind `{}` is non-loopback",
                 config.mcp.host

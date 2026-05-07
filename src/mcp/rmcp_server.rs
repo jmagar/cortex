@@ -71,8 +71,9 @@ impl ServerHandler for SyslogRmcpServer {
             .to_owned();
 
         // Fail-closed auth check: require AuthContext when Mounted, then scope.
+        // LoopbackDev returns None — no scope enforcement applies.
         let auth = require_auth_context(&self.state, &context)?;
-        if let Some(required_scope) = required_scope_for(&action) {
+        if let (Some(auth), Some(required_scope)) = (auth, required_scope_for(&action)) {
             check_scope(auth, required_scope, &action)?;
         }
 
@@ -301,16 +302,9 @@ fn require_auth_context<'a>(
 /// admin access implicitly satisfies any read-level scope requirement.
 ///
 /// Logs a warning with subject + action on denial (audit trail).
-/// Only called when `auth` is `Some` (i.e., policy is Mounted).
-fn check_scope(
-    auth: Option<&AuthContext>,
-    required_scope: &str,
-    action: &str,
-) -> Result<(), ErrorData> {
-    let Some(auth) = auth else {
-        // LoopbackDev path — no scope enforcement needed.
-        return Ok(());
-    };
+/// Only called when policy is Mounted (LoopbackDev short-circuits at the
+/// caller via `require_auth_context` returning `None`).
+fn check_scope(auth: &AuthContext, required_scope: &str, action: &str) -> Result<(), ErrorData> {
     let satisfied = auth
         .scopes
         .iter()
