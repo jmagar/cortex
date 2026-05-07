@@ -54,7 +54,7 @@ Print a results table:
 |------|------------------|-------------------|--------|
 | <host> | ✓ / ✗ | ✓ / ✗ | active / failed |
 
-After deployment, suggest the user run `/syslog:doctor` after a few seconds to confirm logs are flowing in (the `hosts` action should now list the deployed hosts), or `bash scripts/smoke-test.sh` for full validation.
+After deployment, suggest the user run `/syslog:dr` after a few seconds to confirm logs are flowing in (the `hosts` action should now list the deployed hosts), or `bash scripts/smoke-test.sh` for full validation.
 
 ## Idempotency
 

@@ -18,83 +18,87 @@
     "is_server": {
       "type": "boolean",
       "title": "Run as server",
-      "description": "True: this machine hosts the syslog receiver and MCP server. False: connect to a remote syslog-mcp server.",
+      "description": "True on the ONE machine in your fleet that should ingest and store logs — it runs the syslog receiver (UDP+TCP), the SQLite store, and the MCP HTTP server. False on every other machine that just needs to query logs from Claude Code; those instances skip all local server setup and act as MCP clients only.",
       "required": true,
       "default": true
     },
     "use_docker": {
       "type": "boolean",
       "title": "Deploy with Docker",
-      "description": "True: run via docker compose. False: install as a systemd user service. Only used in server mode.",
+      "description": "Server-mode deployment method. True: run via the bundled docker compose stack (containerized, easier to upgrade/move, exposes ports 1514 and 3100, mounts data_dir as a volume). False: run the bundled binary as a systemd user service (lighter weight, no Docker dependency, logs go to journald). Both produce identical syslog-mcp behavior — pick based on your host's conventions. Ignored in client mode.",
+      "required": true,
       "default": false
     },
     "server_url": {
       "type": "string",
       "title": "Server URL",
-      "description": "MCP server base URL. Server mode: leave as default. Client mode: set to remote host (e.g. http://squirts:3100).",
+      "description": "Base URL the MCP client in this Claude Code session connects to (always used — both modes). Server mode: keep the default http://localhost:3100 so the local MCP client talks to the local server. Client mode: set to the remote server, e.g. http://dookie:3100, http://syslog.lan:3100, or https://syslog.example.com if fronted by a reverse proxy. Must include the scheme and (if non-default) port; do NOT include a trailing /mcp path — the plugin appends it.",
+      "required": true,
       "default": "http://localhost:3100"
     },
     "api_token": {
       "type": "string",
       "title": "API token",
-      "description": "Bearer token for MCP authentication. Server mode: the server will require this token. Client mode: token provided by the server admin.",
+      "description": "Bearer token for MCP HTTP authentication, sent on every request as `Authorization: Bearer <token>`. Server mode: pick any value — that becomes the secret the server enforces (generate one with `openssl rand -hex 32`, or use `just gen-token`). Client mode: paste the token your server admin configured. The same token must match on both sides; mismatched tokens return 401.",
       "sensitive": true,
       "required": true
     },
     "syslog_host": {
       "type": "string",
       "title": "Syslog bind host",
-      "description": "Network interface to bind the syslog listener to. Only used in server mode.",
+      "description": "Interface address the syslog receiver binds to. 0.0.0.0 listens on every interface so other hosts on the LAN/VPN can forward to you (the normal homelab choice). 127.0.0.1 restricts to local-only ingestion (useful when only this host's rsyslog forwards in). Server mode only.",
       "default": "0.0.0.0"
     },
     "syslog_port": {
       "type": "number",
       "title": "Syslog port",
-      "description": "UDP/TCP port for syslog ingestion. Only used in server mode.",
+      "description": "UDP and TCP port the syslog receiver binds to (the same port serves both protocols). Default 1514 avoids needing CAP_NET_BIND_SERVICE for the privileged port 514. If clients can only forward to 514 (some routers, IoT gear), keep 1514 here and add an iptables PREROUTING redirect 514→1514 — see docs/SETUP.md. Server mode only.",
       "default": 1514
     },
     "mcp_host": {
       "type": "string",
       "title": "MCP bind host",
-      "description": "Network interface to bind the MCP HTTP server to. Only used in server mode.",
+      "description": "Interface address the MCP HTTP server binds to. 0.0.0.0 makes the MCP endpoint reachable from other hosts (required if any client-mode peer needs to connect). 127.0.0.1 keeps it local-only (use this if you front the server with a reverse proxy on the same host, or only query from this machine). Server mode only.",
       "default": "0.0.0.0"
     },
     "mcp_port": {
       "type": "number",
       "title": "MCP HTTP port",
-      "description": "Port for the MCP HTTP server. Only used in server mode.",
+      "description": "TCP port the MCP HTTP server listens on (serves POST /mcp, GET /health, GET /sse). Default 3100. Must match the port in server_url for clients to reach you. Avoid 3000 to dodge the common Node.js dev server collision. Server mode only.",
       "default": 3100
     },
     "max_db_size_mb": {
       "type": "number",
       "title": "Max database size (MB)",
-      "description": "Logical DB size cap. Oldest logs are deleted when exceeded. 0 = disabled. Only used in server mode.",
+      "description": "Soft cap on logical SQLite DB size. When exceeded, oldest logs (ordered by received_at) are deleted in batches until the recovery target is met; if cleanup can't free enough space, NEW WRITES are blocked until storage recovers. 0 disables this guard entirely (logs grow until disk fills or retention purges them). Default 1024 MB suits most homelabs — bump higher only if you ingest heavy Docker stdout. Server mode only.",
       "default": 1024,
       "min": 0
     },
     "data_dir": {
       "type": "directory",
       "title": "Data directory",
-      "description": "Directory for the SQLite database. Defaults to the plugin's persistent data directory. Only used in server mode.",
+      "description": "Directory holding the SQLite database file (syslog.db plus its WAL/SHM sidecars in WAL mode). Defaults to the plugin's persistent data directory ($CLAUDE_PLUGIN_DATA), which survives plugin upgrades. Override only if you need the DB on a different volume — e.g. a larger or faster disk. The directory must exist and be writable by the user running the service. Server mode only.",
       "default": "${CLAUDE_PLUGIN_DATA}"
     },
     "retention_days": {
       "type": "number",
       "title": "Log retention (days)",
-      "description": "How many days to keep logs. 0 = keep forever. Only used in server mode.",
+      "description": "Age-based purge: log entries older than this are PERMANENTLY DELETED hourly with no recovery path — back up first with `scripts/backup.sh` if you need archival. 0 disables age-based purging entirely (storage guards from max_db_size_mb still apply). Default 90 days balances forensic value against DB size for a typical homelab. Server mode only.",
       "default": 90,
       "min": 0
     },
     "docker_ingest_enabled": {
       "type": "boolean",
       "title": "Enable Docker log ingestion",
-      "description": "Pull container logs from remote docker-socket-proxy endpoints. Only used in server mode.",
+      "description": "Pull container stdout/stderr from remote Docker socket proxies in addition to syslog. When true, each fleet_host is treated as a docker-socket-proxy endpoint at http://<host>:2375 and continuously polled for container logs. Logs land in the DB tagged hostname=<host>, app_name=<container>, source_ip=docker://<host>/<container>/<stream>. Each fleet host MUST be running docker-socket-proxy (or equivalent) on port 2375 with at least containers/logs read access — exposing the raw Docker socket is unsafe. Server mode only.",
+      "required": true,
       "default": false
     },
     "fleet_hosts": {
       "type": "string",
       "title": "Fleet hosts",
-      "description": "SSH config aliases for hosts in your fleet — used for Docker ingest (when enabled, each becomes http://<alias>:2375) and for the /deploy-dropins command that pushes rsyslog drop-in configs.",
+      "description": "Hostnames or SSH config aliases for hosts in your fleet — used by TWO features. (1) Docker ingest: when docker_ingest_enabled is true, each entry becomes the docker-socket-proxy URL http://<host>:2375. (2) /syslog:deploy-dropins command: pushes rsyslog forwarding drop-ins to each host over SSH so they start forwarding logs here. Entries must be reachable by name (resolvable DNS or in /etc/hosts) AND, for deploy-dropins, configured in ~/.ssh/config with a working key. Add one entry per host, e.g. dookie, squirts, tootie. Leave empty if you don't want either feature.",
+      "required": true,
       "multiple": true
     }
   }

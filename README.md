@@ -317,7 +317,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 
 **Bundled commands**:
 
-- `/syslog:doctor` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
+- `/syslog:dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
 - `/syslog:deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
 
 The plugin includes the `syslog` binary in `bin/` and is the simplest path. You can still deploy via Docker or build locally if you prefer to run the server outside the plugin.

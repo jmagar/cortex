@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-05-07
+
+### Changed
+
+- **Plugin user config (`/.claude-plugin/plugin.json`)**: rewrote every field's
+  description to be self-explanatory — naming the consequence of each setting,
+  the mode it applies in, and the recommended fix when defaults aren't right.
+  Marked `use_docker`, `server_url`, `docker_ingest_enabled`, and `fleet_hosts`
+  as `required: true` so first-run users see them in the TUI flow.
+- **Plugin command rename**: `/syslog:doctor` → `/syslog:dr` to avoid colliding
+  with Claude Code's built-in `/doctor`. Command file moved
+  `plugins/commands/doctor.md` → `plugins/commands/dr.md`. Doc references
+  updated in `README.md`, `CLAUDE.md`, `docs/plugin/CLAUDE.md`,
+  `docs/plugin/COMMANDS.md`, and `plugins/commands/deploy-dropins.md`.
+  Historical session notes left intact.
+- **`/syslog:dr` scope expanded** — now doubles as a first-run preflight in
+  addition to ongoing health check. Added pre-deployment checks: environment
+  prerequisites (kernel/virt info, systemd vs docker availability per mode),
+  storage & permissions on `data_dir` (existence, writability, free space ≥
+  120% of `max_db_size_mb`), binary symlink + PATH validation, API token
+  quality (empty / weak placeholder / length warning, never echoes the value),
+  and port availability (free or held by our PID, fail otherwise). Existing
+  health checks (MCP, HTTP, service state, listener reachability, fleet
+  drop-ins) preserved. Result table now uses PASS / WARN / FAIL with a
+  one-line verdict and concrete next-step fixes per failure.
+
 ## [0.11.0] - 2026-05-07
 
 ### Added
