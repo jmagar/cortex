@@ -548,7 +548,7 @@ run_docker_mode() {
   # Build image
   section "Docker — Build"
   log_info "Building Docker image ${IMAGE_NAME}..."
-  if ! docker build -t "${IMAGE_NAME}" "${project_dir}"; then
+  if ! docker build -f "${project_dir}/config/Dockerfile" -t "${IMAGE_NAME}" "${project_dir}"; then
     log_error "Docker build failed"
     return 2
   fi
