@@ -71,15 +71,29 @@ async fn serve_mcp() -> Result<()> {
         })?);
         info!("Non-MCP API mounted under /api");
     }
+    app = app.merge(runtime.otlp_router());
+    info!("OTLP receiver mounted at /v1/logs (and /v1/metrics → 200, /v1/traces → 404)");
+    if runtime.config.mcp.api_token.is_none() && !runtime.config.mcp.host.starts_with("127.") {
+        tracing::warn!(
+            bind = %runtime.config.mcp.bind_addr(),
+            "OTLP /v1/logs is mounted WITHOUT authentication on a non-loopback bind. \
+             Anyone reachable on this address can write log records. \
+             Set SYSLOG_MCP_TOKEN to require Bearer auth."
+        );
+    }
     app = app.layer(tower_http::trace::TraceLayer::new_for_http());
 
     let mcp_bind = runtime.config.mcp.bind_addr();
     let listener = tokio::net::TcpListener::bind(&mcp_bind).await?;
     info!(bind = %mcp_bind, "MCP server listening");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // OTLP handler needs ConnectInfo<SocketAddr> for source_ip provenance.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     Ok(())
 }
