@@ -32,6 +32,7 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
             allowed_origins: Vec::new(),
         },
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
+        observability: Arc::new(crate::observability::RuntimeObservability::default()),
     };
     (state, pool, dir)
 }

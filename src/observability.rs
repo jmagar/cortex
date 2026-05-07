@@ -1,0 +1,256 @@
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Mutex;
+
+use chrono::Utc;
+use serde::Serialize;
+
+#[derive(Debug, Default)]
+pub struct RuntimeObservability {
+    syslog_udp_packets_received: AtomicU64,
+    syslog_udp_bytes_received: AtomicU64,
+    syslog_tcp_connections_accepted: AtomicU64,
+    syslog_tcp_connections_active: AtomicU64,
+    syslog_tcp_connections_closed: AtomicU64,
+    syslog_tcp_connections_rejected: AtomicU64,
+    syslog_tcp_lines_received: AtomicU64,
+    syslog_tcp_bytes_received: AtomicU64,
+    syslog_tcp_lines_dropped_oversize: AtomicU64,
+    ingest_entries_enqueued: AtomicU64,
+    ingest_enqueue_errors: AtomicU64,
+    ingest_queue_depth: AtomicUsize,
+    ingest_queue_capacity: AtomicUsize,
+    writer_batches_flushed: AtomicU64,
+    writer_logs_written: AtomicU64,
+    writer_flush_failures: AtomicU64,
+    writer_logs_retained: AtomicU64,
+    writer_logs_discarded: AtomicU64,
+    writer_storage_blocked: AtomicBool,
+    last_ingest_at: Mutex<Option<String>>,
+    last_write_at: Mutex<Option<String>>,
+    last_error_at: Mutex<Option<String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeObservabilitySnapshot {
+    pub syslog_udp_packets_received: u64,
+    pub syslog_udp_bytes_received: u64,
+    pub syslog_tcp_connections_accepted: u64,
+    pub syslog_tcp_connections_active: u64,
+    pub syslog_tcp_connections_closed: u64,
+    pub syslog_tcp_connections_rejected: u64,
+    pub syslog_tcp_lines_received: u64,
+    pub syslog_tcp_bytes_received: u64,
+    pub syslog_tcp_lines_dropped_oversize: u64,
+    pub ingest_entries_enqueued: u64,
+    pub ingest_enqueue_errors: u64,
+    pub ingest_queue_depth: usize,
+    pub ingest_queue_capacity: usize,
+    pub ingest_queue_utilization_pct: String,
+    pub writer_batches_flushed: u64,
+    pub writer_logs_written: u64,
+    pub writer_flush_failures: u64,
+    pub writer_logs_retained: u64,
+    pub writer_logs_discarded: u64,
+    pub writer_storage_blocked: bool,
+    pub last_ingest_at: Option<String>,
+    pub last_write_at: Option<String>,
+    pub last_error_at: Option<String>,
+}
+
+impl RuntimeObservability {
+    pub fn set_queue_capacity(&self, capacity: usize) {
+        self.ingest_queue_capacity
+            .store(capacity, Ordering::Relaxed);
+    }
+
+    pub fn set_queue_depth(&self, depth: usize) {
+        self.ingest_queue_depth.store(depth, Ordering::Relaxed);
+    }
+
+    pub fn record_udp_packet(&self, bytes: usize) {
+        self.syslog_udp_packets_received
+            .fetch_add(1, Ordering::Relaxed);
+        self.syslog_udp_bytes_received
+            .fetch_add(bytes as u64, Ordering::Relaxed);
+        self.touch_ingest();
+    }
+
+    pub fn record_tcp_connection_accepted(&self) {
+        self.syslog_tcp_connections_accepted
+            .fetch_add(1, Ordering::Relaxed);
+        self.syslog_tcp_connections_active
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_tcp_connection_closed(&self) {
+        self.syslog_tcp_connections_closed
+            .fetch_add(1, Ordering::Relaxed);
+        self.syslog_tcp_connections_active
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                Some(n.saturating_sub(1))
+            })
+            .ok();
+    }
+
+    pub fn record_tcp_connection_rejected(&self) {
+        self.syslog_tcp_connections_rejected
+            .fetch_add(1, Ordering::Relaxed);
+        self.touch_error();
+    }
+
+    pub fn record_tcp_line(&self, bytes: usize) {
+        self.syslog_tcp_lines_received
+            .fetch_add(1, Ordering::Relaxed);
+        self.syslog_tcp_bytes_received
+            .fetch_add(bytes as u64, Ordering::Relaxed);
+        self.touch_ingest();
+    }
+
+    pub fn record_tcp_line_dropped_oversize(&self) {
+        self.syslog_tcp_lines_dropped_oversize
+            .fetch_add(1, Ordering::Relaxed);
+        self.touch_error();
+    }
+
+    pub fn record_enqueue_ok(&self, queue_depth: usize) {
+        self.ingest_entries_enqueued.fetch_add(1, Ordering::Relaxed);
+        self.set_queue_depth(queue_depth);
+    }
+
+    pub fn record_enqueue_error(&self, queue_depth: usize) {
+        self.ingest_enqueue_errors.fetch_add(1, Ordering::Relaxed);
+        self.set_queue_depth(queue_depth);
+        self.touch_error();
+    }
+
+    pub fn record_writer_flushed(&self, logs_written: usize) {
+        self.writer_batches_flushed.fetch_add(1, Ordering::Relaxed);
+        self.writer_logs_written
+            .fetch_add(logs_written as u64, Ordering::Relaxed);
+        self.writer_storage_blocked.store(false, Ordering::Relaxed);
+        *self
+            .last_write_at
+            .lock()
+            .expect("last_write_at mutex poisoned") = Some(now_iso());
+    }
+
+    pub fn record_writer_retained(&self, retained: usize, storage_blocked: bool) {
+        self.writer_flush_failures.fetch_add(1, Ordering::Relaxed);
+        self.writer_logs_retained
+            .fetch_add(retained as u64, Ordering::Relaxed);
+        self.writer_storage_blocked
+            .store(storage_blocked, Ordering::Relaxed);
+        self.touch_error();
+    }
+
+    pub fn record_writer_discarded(&self, discarded: usize) {
+        self.writer_flush_failures.fetch_add(1, Ordering::Relaxed);
+        self.writer_logs_discarded
+            .fetch_add(discarded as u64, Ordering::Relaxed);
+        self.touch_error();
+    }
+
+    pub fn snapshot(&self) -> RuntimeObservabilitySnapshot {
+        let queue_depth = self.ingest_queue_depth.load(Ordering::Relaxed);
+        let queue_capacity = self.ingest_queue_capacity.load(Ordering::Relaxed);
+        let queue_utilization = if queue_capacity == 0 {
+            0.0
+        } else {
+            (queue_depth as f64 / queue_capacity as f64) * 100.0
+        };
+        RuntimeObservabilitySnapshot {
+            syslog_udp_packets_received: self.syslog_udp_packets_received.load(Ordering::Relaxed),
+            syslog_udp_bytes_received: self.syslog_udp_bytes_received.load(Ordering::Relaxed),
+            syslog_tcp_connections_accepted: self
+                .syslog_tcp_connections_accepted
+                .load(Ordering::Relaxed),
+            syslog_tcp_connections_active: self
+                .syslog_tcp_connections_active
+                .load(Ordering::Relaxed),
+            syslog_tcp_connections_closed: self
+                .syslog_tcp_connections_closed
+                .load(Ordering::Relaxed),
+            syslog_tcp_connections_rejected: self
+                .syslog_tcp_connections_rejected
+                .load(Ordering::Relaxed),
+            syslog_tcp_lines_received: self.syslog_tcp_lines_received.load(Ordering::Relaxed),
+            syslog_tcp_bytes_received: self.syslog_tcp_bytes_received.load(Ordering::Relaxed),
+            syslog_tcp_lines_dropped_oversize: self
+                .syslog_tcp_lines_dropped_oversize
+                .load(Ordering::Relaxed),
+            ingest_entries_enqueued: self.ingest_entries_enqueued.load(Ordering::Relaxed),
+            ingest_enqueue_errors: self.ingest_enqueue_errors.load(Ordering::Relaxed),
+            ingest_queue_depth: queue_depth,
+            ingest_queue_capacity: queue_capacity,
+            ingest_queue_utilization_pct: format!("{queue_utilization:.2}"),
+            writer_batches_flushed: self.writer_batches_flushed.load(Ordering::Relaxed),
+            writer_logs_written: self.writer_logs_written.load(Ordering::Relaxed),
+            writer_flush_failures: self.writer_flush_failures.load(Ordering::Relaxed),
+            writer_logs_retained: self.writer_logs_retained.load(Ordering::Relaxed),
+            writer_logs_discarded: self.writer_logs_discarded.load(Ordering::Relaxed),
+            writer_storage_blocked: self.writer_storage_blocked.load(Ordering::Relaxed),
+            last_ingest_at: self
+                .last_ingest_at
+                .lock()
+                .expect("last_ingest_at mutex poisoned")
+                .clone(),
+            last_write_at: self
+                .last_write_at
+                .lock()
+                .expect("last_write_at mutex poisoned")
+                .clone(),
+            last_error_at: self
+                .last_error_at
+                .lock()
+                .expect("last_error_at mutex poisoned")
+                .clone(),
+        }
+    }
+
+    fn touch_ingest(&self) {
+        *self
+            .last_ingest_at
+            .lock()
+            .expect("last_ingest_at mutex poisoned") = Some(now_iso());
+    }
+
+    fn touch_error(&self) {
+        *self
+            .last_error_at
+            .lock()
+            .expect("last_error_at mutex poisoned") = Some(now_iso());
+    }
+}
+
+fn now_iso() -> String {
+    Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_reports_queue_utilization() {
+        let obs = RuntimeObservability::default();
+        obs.set_queue_capacity(100);
+        obs.set_queue_depth(25);
+
+        let snapshot = obs.snapshot();
+
+        assert_eq!(snapshot.ingest_queue_depth, 25);
+        assert_eq!(snapshot.ingest_queue_capacity, 100);
+        assert_eq!(snapshot.ingest_queue_utilization_pct, "25.00");
+    }
+
+    #[test]
+    fn tcp_connection_active_count_saturates() {
+        let obs = RuntimeObservability::default();
+        obs.record_tcp_connection_closed();
+        assert_eq!(obs.snapshot().syslog_tcp_connections_active, 0);
+
+        obs.record_tcp_connection_accepted();
+        obs.record_tcp_connection_closed();
+        assert_eq!(obs.snapshot().syslog_tcp_connections_active, 0);
+    }
+}

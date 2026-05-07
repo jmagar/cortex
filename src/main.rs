@@ -5,6 +5,8 @@ use syslog_mcp::{api, mcp, runtime::RuntimeCore};
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
+mod cli;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mode = Mode::parse(std::env::args().skip(1).collect())?;
@@ -27,6 +29,7 @@ async fn main() -> Result<()> {
     match mode {
         Mode::ServeMcp => serve_mcp().await,
         Mode::StdioMcp => serve_stdio_mcp().await,
+        Mode::Cli(command) => run_cli(command).await,
         Mode::Help => unreachable!("handled before logging initialization"),
     }
 }
@@ -36,6 +39,11 @@ async fn serve_stdio_mcp() -> Result<()> {
     let service = mcp::rmcp_server(runtime.mcp_state()).serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
+}
+
+async fn run_cli(command: cli::CliCommand) -> Result<()> {
+    let runtime = RuntimeCore::load_query_only()?;
+    cli::run(runtime.service(), command).await
 }
 
 async fn serve_mcp() -> Result<()> {
@@ -98,10 +106,11 @@ async fn serve_mcp() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Mode {
     ServeMcp,
     StdioMcp,
+    Cli(cli::CliCommand),
     Help,
 }
 
@@ -112,6 +121,17 @@ impl Mode {
             [flag] if flag == "--help" || flag == "-h" || flag == "help" => Ok(Self::Help),
             [command] if command == "mcp" => Ok(Self::StdioMcp),
             [serve, service] if serve == "serve" && service == "mcp" => Ok(Self::ServeMcp),
+            [command, rest @ ..]
+                if matches!(
+                    command.as_str(),
+                    "search" | "tail" | "errors" | "hosts" | "correlate" | "stats"
+                ) =>
+            {
+                let mut cli_args = Vec::with_capacity(rest.len() + 1);
+                cli_args.push(command.clone());
+                cli_args.extend(rest.iter().cloned());
+                Ok(Self::Cli(cli::CliCommand::parse(cli_args)?))
+            }
             _ => {
                 print_usage();
                 anyhow::bail!("unknown command: {}", args.join(" "));
@@ -119,10 +139,11 @@ impl Mode {
         }
     }
 
-    fn default_log_filter(self) -> &'static str {
+    fn default_log_filter(&self) -> &'static str {
         match self {
             Self::ServeMcp => "info",
             Self::StdioMcp => "warn",
+            Self::Cli(_) => "warn",
             Self::Help => "info",
         }
     }
@@ -133,6 +154,12 @@ fn print_usage() {
         "Usage:
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
+  syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]
+  syslog tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
+  syslog errors [--from TIME] [--to TIME] [--json]
+  syslog hosts [--json]
+  syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
+  syslog stats [--json]
 
 Environment:
   SYSLOG_MCP_DB_PATH  SQLite database path used by both transports

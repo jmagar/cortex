@@ -4,14 +4,14 @@ use serde_json::{json, Value};
 pub(super) fn tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "syslog",
-        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, and syslog help.",
+        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, and syslog help.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["search", "tail", "errors", "hosts", "correlate", "stats", "help"],
-                    "description": "Action to run: search, tail, errors, hosts, correlate, stats, or help."
+                    "enum": ["search", "tail", "errors", "hosts", "correlate", "stats", "status", "help"],
+                    "description": "Action to run: search, tail, errors, hosts, correlate, stats, status, or help."
                 },
                 "query": {
                     "type": "string",

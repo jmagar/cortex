@@ -7,7 +7,11 @@ syslog-mcp supports two first-party MCP transports:
 - `syslog serve mcp`: receives syslog over UDP/TCP and exposes RMCP Streamable HTTP.
 - `syslog mcp`: query-only child process mode for local stdio MCP clients.
 
-The same `syslog` binary supports both modes. `syslog mcp` is intentionally query-only so child-process clients do not accidentally start network listeners or maintenance tasks.
+The same `syslog` binary also includes direct non-MCP CLI commands such as
+`syslog search` and `syslog stats`. Those commands use the same service layer as
+the MCP tool, but they are terminal commands, not MCP transports.
+
+`syslog mcp` is intentionally query-only so child-process clients do not accidentally start network listeners or maintenance tasks.
 
 | Transport | Auth | Use Case | Default |
 | --- | --- | --- | --- |
@@ -140,6 +144,25 @@ Ingestion still requires the daemon to be running somewhere. Stdio mode only que
 
 SQLite WAL mode supports the normal deployment shape: one daemon writing log batches while one or more query-only stdio child processes read concurrently. `syslog stats` reports current storage metrics from the database and configured thresholds; query-only stdio processes do not mutate the shared storage guard state.
 
+## Direct non-MCP CLI
+
+Use direct CLI commands when a human or script on the host wants to query the
+database without speaking MCP:
+
+```bash
+syslog search 'error AND nginx' --limit 10
+syslog tail -n 20
+syslog errors --from 2026-01-01T00:00:00Z
+syslog hosts
+syslog correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10
+syslog stats --json
+```
+
+These commands load `RuntimeCore::load_query_only()` and call the shared
+`SyslogService` methods directly. They do not use `/mcp`, stdin/stdout MCP
+framing, or bearer auth. See [../CLI.md](../CLI.md) for the full command
+reference.
+
 ## HTTP-to-stdio bridge mode
 
 Use `mcp-remote` instead of direct stdio when the database path is not local to the MCP host, when syslog-mcp is only available through Docker/reverse proxy, or when you want to preserve HTTP bearer auth:
@@ -166,5 +189,6 @@ Use `mcp-remote` instead of direct stdio when the database path is not local to 
 ## See also
 
 - [AUTH.md](AUTH.md) -- bearer token setup for HTTP transport
+- [../CLI.md](../CLI.md) -- direct local CLI command reference
 - [ENV.md](ENV.md) -- transport-related environment variables
 - [CONNECT.md](CONNECT.md) -- client connection methods

@@ -9,6 +9,10 @@ syslog-mcp ships one `syslog` binary with two MCP modes:
 - `syslog serve mcp` -- long-lived daemon with syslog listener + MCP HTTP server.
 - `syslog mcp` -- local query-only stdio MCP server.
 
+The binary also includes direct local CLI commands such as `syslog search`,
+`syslog tail`, and `syslog stats`. These are useful for host-local scripts and
+manual diagnostics, but they are not plugin connection modes.
+
 The published Claude Code plugin remains HTTP-first because plugin installs commonly target a running Docker, systemd, or reverse-proxy deployment.
 
 Credentials flow through two files:
@@ -40,4 +44,5 @@ Syslog ingestion is daemon-oriented: something must listen on UDP/TCP and keep w
 ## See also
 
 - [PLUGINS.md](PLUGINS.md) -- plugin manifest reference
+- [../CLI.md](../CLI.md) -- direct local CLI command reference
 - [../CONFIG.md](../CONFIG.md) -- full configuration reference

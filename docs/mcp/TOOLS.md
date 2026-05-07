@@ -55,9 +55,15 @@ Optional arguments: `window_minutes`, `severity_min`, `hostname`, `source_ip`, `
 
 ## syslog stats
 
-Get database statistics including storage health.
+Get database statistics including storage health, runtime ingest counters, queue depth, writer failure/drop state, and OTLP receiver counters.
 
 Required argument: `action = "stats"`
+
+## syslog status
+
+Get lightweight runtime status without the full DB statistics query.
+
+Required argument: `action = "status"`
 
 ## syslog help
 
@@ -86,6 +92,7 @@ JSON-RPC level errors use standard codes:
 
 ## See Also
 
+- [../CLI.md](../CLI.md) -- direct CLI commands backed by the same service methods
 - [SCHEMA.md](SCHEMA.md) -- JSON Schema definitions for tool inputs
 - [AUTH.md](AUTH.md) -- authentication required before tool calls
 - [ENV.md](ENV.md) -- environment variables affecting tool behavior

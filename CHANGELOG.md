@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-07
+
+### Added
+
+- **Direct CLI commands** (`src/cli.rs`, `docs/CLI.md`): `syslog search /
+  tail / errors / hosts / correlate / stats` queries now run directly
+  against the SQLite database without starting the MCP server, syslog
+  listeners, REST API, retention, or Docker ingest. Reuses the same
+  `SyslogService` methods as the MCP tool, with a `--json` output flag
+  for shell-script consumption.
+- **Runtime observability counters** (`src/observability.rs`): atomic
+  counters for syslog UDP/TCP packets and bytes, ingest queue depth,
+  writer batches and flush failures, plus last-ingest/write/error
+  timestamps. Surfaced via the existing `/health` endpoint and `stats`
+  MCP action.
+
+### Changed
+
+- **Plugin docker deploy now pulls the published image** instead of
+  building from source. `docker-compose.yml` adds
+  `image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}`
+  alongside the existing `build:`. `setup_docker()` runs
+  `docker compose pull` then `up -d --no-build`, so plugin installs
+  never require the Dockerfile or source code that the plugin doesn't
+  ship. Source-repo development paths still work unchanged via
+  `docker compose build` / `up --build`.
+- **`/config:ro` volume removed** from the compose file. It was
+  vestigial — runtime config flows through env vars, and the missing
+  `${COMPOSE_DIR}/config` directory was the literal cause of failed
+  plugin deploys. The TOML alternative (`SYSLOG_MCP_DOCKER_HOSTS_FILE`)
+  is still supported via direct path env var if needed.
+- **Plugin hook resilience**:
+  - `ConfigChange` event added to `plugins/hooks/hooks.json` (matcher
+    `user_settings`) so editing `/plugin` re-runs deployment without a
+    session restart.
+  - 600 s timeout set on both `SessionStart` and `ConfigChange` to
+    cover first-time docker pulls or builds.
+  - `setup_docker()` stops a running systemd unit before bringing the
+    container up; `setup_systemd()` does `docker compose down`
+    symmetrically. Cutovers between deploy modes no longer port-conflict.
+  - `SYSLOG_UID` and `SYSLOG_GID` written to the env file in docker
+    mode so the container writes `syslog.db` with host-user ownership;
+    same file remains readable by the systemd binary if you switch
+    modes back.
+- **`max_db_size_mb` default raised from 1024 → 8192** (1 GB → 8 GB)
+  in both `plugin.json` and `plugin-setup.sh` fallback. The 1 GB
+  default was too aggressive for fleets ingesting Docker stdout from
+  multiple hosts.
+
+### Fixed
+
+- **Empty `server_url` no longer breaks MCP client connection** —
+  documented in plugin.json description that an empty value cannot be
+  used (substitution is literal text replacement, not a shell
+  expansion).
+
 ## [0.12.0] - 2026-05-07
 
 ### Added

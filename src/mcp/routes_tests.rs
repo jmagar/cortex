@@ -24,6 +24,7 @@ fn test_state_with_token(token: Option<String>) -> (AppState, tempfile::TempDir)
                 allowed_origins: Vec::new(),
             },
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
+            observability: Arc::new(crate::observability::RuntimeObservability::default()),
         },
         dir,
     )
@@ -94,6 +95,10 @@ async fn integration_health_returns_200() {
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["status"], "ok");
+    assert!(value["ingest"]["ingest_queue_depth"].is_number());
 }
 
 #[tokio::test]

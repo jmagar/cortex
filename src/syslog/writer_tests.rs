@@ -48,20 +48,20 @@ async fn flush_batch_retains_entries_while_storage_is_write_blocked() {
     let mut batch = vec![make_entry("blocked write")];
     let mut storage_blocked = false;
     let mut summary = IngestSummary::default();
+    let observability = Arc::new(crate::observability::RuntimeObservability::default());
+    let context = WriterContext::new(
+        Arc::clone(&pool),
+        storage.clone(),
+        Arc::clone(&storage_state),
+        crate::syslog::enrichment::EnrichmentConfig::default(),
+        Arc::clone(&observability),
+    );
 
-    flush_batch(
-        &pool,
-        &storage,
-        &storage_state,
-        &mut batch,
-        &mut storage_blocked,
-        &mut summary,
-        &crate::syslog::enrichment::EnrichmentConfig::default(),
-    )
-    .await;
+    flush_batch(&mut batch, &mut storage_blocked, &mut summary, &context).await;
 
     assert_eq!(batch.len(), 1);
     assert!(storage_blocked);
+    assert_eq!(observability.snapshot().writer_logs_retained, 1);
 }
 
 #[tokio::test]
@@ -74,20 +74,20 @@ async fn flush_batch_resumes_after_storage_recovers() {
     let mut batch = vec![make_entry("resumed write")];
     let mut storage_blocked = true;
     let mut summary = IngestSummary::default();
+    let observability = Arc::new(crate::observability::RuntimeObservability::default());
+    let context = WriterContext::new(
+        Arc::clone(&pool),
+        storage.clone(),
+        Arc::clone(&storage_state),
+        crate::syslog::enrichment::EnrichmentConfig::default(),
+        Arc::clone(&observability),
+    );
 
-    flush_batch(
-        &pool,
-        &storage,
-        &storage_state,
-        &mut batch,
-        &mut storage_blocked,
-        &mut summary,
-        &crate::syslog::enrichment::EnrichmentConfig::default(),
-    )
-    .await;
+    flush_batch(&mut batch, &mut storage_blocked, &mut summary, &context).await;
 
     assert!(batch.is_empty());
     assert!(!storage_blocked);
+    assert_eq!(observability.snapshot().writer_logs_written, 1);
     let rows = db::tail_logs(&pool, None, None, None, 10).unwrap();
     assert_eq!(rows.len(), 1);
 }

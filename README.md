@@ -24,7 +24,7 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `correlate`, `stats`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `correlate`, `stats`, `status`, or `help`.
 
 ### `syslog search`
 
@@ -192,7 +192,7 @@ Search for related events across multiple hosts within a ±N minute window aroun
 
 ### `syslog stats`
 
-Return database statistics including total logs, total hosts, time range covered, logical and physical DB size, free disk, configured thresholds, and current write-block status.
+Return database statistics including total logs, total hosts, time range covered, logical and physical DB size, free disk, configured thresholds, current write-block status, and runtime ingest observability.
 
 **Parameters:** none
 
@@ -209,11 +209,40 @@ Return database statistics including total logs, total hosts, time range covered
   "free_disk_mb": "14200.00",
   "max_db_size_mb": 1024,
   "min_free_disk_mb": 512,
-  "write_blocked": false
+  "write_blocked": false,
+  "runtime_observability": {
+    "syslog_udp_packets_received": 280000,
+    "syslog_tcp_connections_active": 3,
+    "ingest_entries_enqueued": 284917,
+    "ingest_queue_depth": 0,
+    "ingest_queue_capacity": 10000,
+    "ingest_queue_utilization_pct": "0.00",
+    "writer_batches_flushed": 2850,
+    "writer_logs_written": 284917,
+    "writer_flush_failures": 0,
+    "writer_logs_retained": 0,
+    "writer_logs_discarded": 0,
+    "writer_storage_blocked": false,
+    "last_ingest_at": "2025-01-15T14:30:05.123Z",
+    "last_write_at": "2025-01-15T14:30:05.400Z",
+    "last_error_at": null
+  },
+  "otlp": {
+    "logs_received": 42,
+    "decode_errors": 0
+  }
 }
 ```
 
 `write_blocked: true` means the storage budget is exceeded and new log ingestion is paused. See [Storage budget enforcement](#storage-budget-enforcement).
+
+---
+
+### `syslog status`
+
+Return lightweight runtime status without the heavier DB statistics query. Use this for dashboards and doctor checks that need current queue depth, backpressure, writer failure/drop state, listener counters, and last activity timestamps.
+
+**Parameters:** none
 
 ---
 
@@ -487,9 +516,23 @@ allow_insecure_http = true
 ```bash
 syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 syslog mcp        # query-only MCP stdio transport
+syslog stats      # query the SQLite DB directly from the CLI
 ```
 
 Both modes use the same config and environment variable loader. `syslog mcp` is for local child-process MCP clients that can read `SYSLOG_MCP_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs.
+
+The direct CLI uses the same shared service layer as the MCP tool, so results and validation match the MCP actions without needing an MCP client:
+
+```bash
+syslog search 'error AND nginx' --hostname proxy --limit 10
+syslog tail -n 20 --app-name kernel
+syslog errors --from 2026-01-01T00:00:00Z
+syslog hosts
+syslog correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
+syslog stats --json
+```
+
+See [docs/CLI.md](docs/CLI.md) for the full direct CLI reference, including flags, JSON output, and how CLI commands map to MCP actions.
 
 ---
 
