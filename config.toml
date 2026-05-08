@@ -14,21 +14,67 @@ write_channel_capacity = 10000
 [storage]
 db_path = "/data/syslog.db"
 pool_size = 4
-retention_days = 90   # 0 = keep forever
+retention_days = 90         # 0 = keep forever
 wal_mode = true
-max_db_size_mb = 1024         # 0 = disable DB logical-size guard
-recovery_db_size_mb = 900     # cleanup target after DB-size breach
-min_free_disk_mb = 512        # 0 = disable free-disk guard
-recovery_free_disk_mb = 768   # cleanup target after free-disk breach
-cleanup_interval_secs = 60    # storage-budget enforcement interval
+max_db_size_mb = 1024       # 0 = disable DB logical-size guard
+recovery_db_size_mb = 900   # cleanup target after DB-size breach
+min_free_disk_mb = 512      # 0 = disable free-disk guard
+recovery_free_disk_mb = 768 # cleanup target after free-disk breach
+cleanup_interval_secs = 60  # storage-budget enforcement interval
 
 [mcp]
+# Safety gate: if host is non-loopback (e.g. "0.0.0.0"), startup requires either
+# SYSLOG_MCP_TOKEN (static bearer) or SYSLOG_MCP_AUTH_MODE=oauth to be set.
+# Binding to a non-loopback address without auth will cause startup to fail.
 host = "0.0.0.0"
 port = 3100
 server_name = "syslog-mcp"
 # Optional extra RMCP Host/Origin allow-lists for reverse proxies.
 # allowed_hosts = ["syslog.example.com", "syslog.example.com:443"]
 # allowed_origins = ["https://syslog.example.com"]
+
+# ----------------------------------------------------------------------------
+# OAuth / JWT authentication policy.
+#
+# Env vars:
+#   SYSLOG_MCP_AUTH_MODE              bearer (default) | oauth
+#   SYSLOG_MCP_PUBLIC_URL             required when mode=oauth
+#   SYSLOG_MCP_GOOGLE_CLIENT_ID       required when mode=oauth
+#   SYSLOG_MCP_GOOGLE_CLIENT_SECRET   required when mode=oauth
+#   SYSLOG_MCP_TOKEN                  static break-glass bearer (existing)
+#
+# Everything else below is TOML-only by design.
+# ----------------------------------------------------------------------------
+[mcp.auth]
+# Bootstrap admin email permitted to log in via Google OAuth. Supplements
+# `allowed_emails`. At least one of these MUST be non-empty when OAuth is
+# active — without an allowlist any Google account that completes OAuth
+# would gain access.
+admin_email = ""
+allowed_emails = []
+
+# Path policy. Relative paths are resolved against the directory containing
+# [storage].db_path at runtime startup.
+sqlite_path = "auth.db"
+key_path = "auth-jwt.pem"
+
+# Token policy.
+access_token_ttl_secs = 3600   # 1h
+refresh_token_ttl_secs = 28800 # 8h (intentionally shorter than lab-auth's 30d default for read-only homelab)
+auth_code_ttl_secs = 300       # 5m
+
+# Per-process rate limits for OAuth endpoints.
+# /register is not mounted (bearer_only_router excludes it), so only
+# authorize_rpm applies.
+authorize_rpm = 60
+
+# When OAuth is active, also reject requests carrying SYSLOG_MCP_TOKEN. Set
+# to false to keep the static token as a break-glass path. Defaults to true.
+disable_static_token_with_oauth = true
+
+# Allowed redirect URIs for OAuth clients (loopback URIs are accepted
+# implicitly by lab-auth).
+allowed_client_redirect_uris = []
 
 [docker_ingest]
 enabled = false

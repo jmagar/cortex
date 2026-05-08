@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-05-07
+
+### Added
+
+- **Integration tests for auth modes** (`tests/auth_modes.rs`) — 12 tests covering discovery
+  endpoints (200/404 by policy), `/register` and `/auth/login` 404 in all modes, `/health`
+  unauthenticated in all modes, `/mcp` credential enforcement, and `tools/list` scope gate.
+- **JWT-level OAuth flow tests** (`tests/oauth_flow.rs`) — 6 tests: valid JWT with
+  `syslog:read`/`syslog:admin` succeeds, expired JWT rejected (401), wrong-issuer JWT rejected
+  (401), empty-scope JWT denied at MCP layer (200 + JSON-RPC error), `tools/list` with JWT.
+- **`syslog_mcp::testing` module** — public test-support helpers (`loopback_state`,
+  `bearer_state`, `oauth_state`, `oauth_state_with_auth_state`) for building `AppState`
+  variants in integration tests without `pub(crate)` access.
+- **`docs/OAUTH.md`** — full OAuth setup guide: architecture diagram, Google Console setup,
+  env var + TOML reference, gotchas, operator FAQ (revoke user, rotate JWT key).
+- **OAuth section in `README.md`** — brief two-mode summary with link to docs/OAUTH.md.
+- **OAuth subsection in `docs/SETUP.md`** — pointer to docs/OAUTH.md.
+- **OAuth env vars in `CLAUDE.md` config section** and three new gotchas (refresh token TTL,
+  stdio LoopbackDev policy, Docker bind-mount ownership).
+- **OAuth env vars in `.env.example`** — all four OAuth vars commented with guidance.
+- **OAuth discovery checks in `scripts/smoke-test.sh`** — unconditional check of
+  `/.well-known/oauth-authorization-server` and `/jwks`; gracefully skips when 404.
+- **`.github/workflows/lab-auth-bump.yml`** — weekly scheduled workflow to bump the
+  `lab-auth` SHA via `cargo update -p lab-auth` (active once dep migrates from path to
+  git+rev per the TODO in Cargo.toml).
+
+### Notes
+
+- RFC 9700 refresh-token rotation is tracked as known follow-up debt.
+- `lab-auth` is currently a path dependency; the bump workflow is a no-op until it
+  migrates to a `git+rev` reference.
+
+## [0.16.0] - 2026-05-07
+
+### Added
+
+- **Fail-closed scope-based authorization on MCP tool dispatch** (syslog-mcp-brt0.8) — all
+  `tools/call` and `tools/list` dispatches now enforce `AuthPolicy` at the entry point of
+  `call_tool` and `list_tools`, before any DB query fires.
+  - `AuthPolicy::LoopbackDev`: scope check bypassed entirely (loopback bind is the trust boundary).
+  - `AuthPolicy::Mounted(_)`: `AuthContext` must be present in request extensions (injected by
+    `lab-auth`'s `AuthLayer` middleware). Missing context → `-32600 forbidden` immediately.
+  - Scope mapping: `search`, `tail`, `errors`, `hosts`, `correlate`, `stats` require `syslog:read`;
+    `help` requires no scope (but still requires `AuthContext` when Mounted); unknown actions default
+    to `syslog:read` (fail-conservative).
+  - `tools/list` requires `AuthContext` when Mounted but no scope (MCP spec conformance: clients
+    must be able to discover the tool before authenticating to call it, but only if they hold a
+    valid credential).
+  - Denied invocations logged at `warn` level with `subject` + `action` for audit trail.
+  - Pattern: `AuthContext` read from `ctx.extensions.get::<axum::http::request::Parts>()?.extensions.get::<AuthContext>()`
+    (Pattern (a) locked by spike syslog-mcp-brt0.10; no AppState map, no task-local needed).
+  - 9 new unit tests covering all branches: LoopbackDev permit, Mounted+read scope, Mounted+admin
+    scope (syslog:admin is treated as a superset of syslog:read and satisfies read requirements),
+    Mounted+both scopes, empty scopes+read (denied), empty scopes+help (permitted), missing
+    AuthContext fail-closed, tools/list with AuthContext, and scope-check-before-DB verification.
+
 ## [0.15.1] - 2026-05-07
 
 ### Fixed
@@ -29,6 +85,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OAuth router mount** — when `AuthPolicy::Mounted { auth_state: Some(_) }` (OAuth mode),
+  the `lab_auth::routes::bearer_only_router` is merged onto the main axum router, exposing
+  `GET /.well-known/oauth-authorization-server`, `GET /.well-known/oauth-protected-resource`,
+  `GET /jwks`, `GET /authorize`, `GET /auth/google/callback`, and `POST /token`.
+  Not mounted in bearer-only or LoopbackDev modes. `/register` and `/auth/login` excluded
+  per Locked Decision.
+- **`SYSLOG_MCP_PUBLIC_URL` in host/origin allowlists** — `allowed_hosts()` and
+  `allowed_origins()` now derive the host and origin from `SYSLOG_MCP_PUBLIC_URL` (set
+  automatically when OAuth mode is active), so the OAuth callback origin is accepted by
+  rmcp's DNS-rebinding guard and the tower-http CORS layer.
 - **Eleven new `syslog` actions** for log intelligence beyond raw search/tail:
   - `apps` — distinct application names with log/host counts and first/last seen (mirror of `hosts` for the `app_name` dimension).
   - `source_ips` — distinct source identifiers with hostname breakdown; supports spoof detection on hostname-spoofable formats (e.g. UniFi CEF).
@@ -49,6 +115,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Replace bearer middleware with `lab_auth::AuthLayer`** — deleted the
+  duplicated `require_auth` / `bearer_token` / `token_matches` helpers from
+  both `src/mcp/routes.rs` and `src/api.rs`. Both surfaces now apply
+  `lab_auth::AuthLayer` (bearer-only, `allow_session_cookie=false`) when
+  `AuthPolicy::Mounted` is active; `LoopbackDev` skips the layer entirely.
+  Static-token path is identical for existing users; JWT path activates when
+  `AuthState` is `Some` (OAuth mode).
+- `src/auth.rs` deleted; `src/otlp.rs` migrated to `lab_auth::middleware`
+  equivalents (`parse_bearer_token`, `tokens_equal`).
+- `subtle` removed as a direct dependency (still transitive via `lab-auth →
+  jsonwebtoken`).
+- `ApiState` gains `auth_policy: AuthPolicy` field; `main.rs` passes
+  `runtime.auth_policy().clone()` when constructing `ApiState`.
 - `tail_logs` query and `get_error_summary` query gained additional parameters (`severity_in`, `group_by_app`); internal callers updated.
 - Help text (`syslog help`) expanded to cover all 19 actions and updated parameters.
 
@@ -111,6 +190,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OAuth config schema (`[mcp.auth]`)** — new TOML section + 5 env vars
+  (`SYSLOG_MCP_AUTH_MODE`, `SYSLOG_MCP_PUBLIC_URL`, `SYSLOG_MCP_GOOGLE_CLIENT_ID`,
+  `SYSLOG_MCP_GOOGLE_CLIENT_SECRET`, plus the existing `SYSLOG_MCP_TOKEN`)
+  wiring the dual-mode bearer/OAuth policy that the upcoming runtime
+  integration (S2/S3/S4) will consume. All policy knobs (TTLs, rate limits,
+  paths, allowlists) live in `config.toml`; only secrets, URLs, and the mode
+  toggle flow through env vars per the OAuth epic's locked decisions.
+- **Non-loopback safety gate** — `Config::load()` now refuses to start when
+  `mcp.host` is bound to a non-loopback address with no static token AND no
+  OAuth configured. Loopback detection uses `IpAddr::is_loopback()`
+  (covering `127.0.0.0/8` and `::1`); strings that fail to parse as IP are
+  treated as non-loopback. Loopback + no-auth remains permitted for
+  developer convenience.
+- **OAuth allowlist enforcement** — when `mode == oauth`, startup fails
+  unless `[mcp.auth].admin_email` or `[mcp.auth].allowed_emails` is
+  non-empty, preventing the "any Google account that completes OAuth gets
+  in" footgun.
+- New `lab-auth` dependency (path-dep against the L1 SHA pin in the
+  development worktree; will be swapped to `git+rev` before merge per the
+  S6 bead).
 - **Direct CLI commands** (`src/cli.rs`, `docs/CLI.md`): `syslog search /
   tail / errors / hosts / correlate / stats` queries now run directly
   against the SQLite database without starting the MCP server, syslog
@@ -125,6 +224,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`rusqlite` 0.32 → 0.39 / `r2d2_sqlite` 0.25 → 0.33** — required so
+  `lab-auth` (which uses rusqlite 0.39) can coexist with syslog-mcp under
+  the `links = "sqlite3"` constraint. No source changes needed at the
+  syslog-mcp callsites; the bumps are API-compatible for the patterns we
+  use.
 - **Plugin docker deploy now pulls the published image** instead of
   building from source. `docker-compose.yml` adds
   `image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}`
@@ -681,7 +785,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/jmagar/syslog-mcp/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/jmagar/syslog-mcp/compare/v0.15.0...v0.16.0
+[0.15.0]: https://github.com/jmagar/syslog-mcp/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/jmagar/syslog-mcp/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/jmagar/syslog-mcp/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/jmagar/syslog-mcp/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/jmagar/syslog-mcp/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/jmagar/syslog-mcp/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/jmagar/syslog-mcp/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/jmagar/syslog-mcp/compare/v0.7.0...v0.8.0

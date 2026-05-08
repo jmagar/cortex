@@ -40,19 +40,19 @@ async fn main() -> Result<()> {
 }
 
 async fn serve_stdio_mcp() -> Result<()> {
-    let runtime = RuntimeCore::load_query_only()?;
+    let runtime = RuntimeCore::load_query_only().await?;
     let service = mcp::rmcp_server(runtime.mcp_state()).serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
 }
 
 async fn run_cli(command: cli::CliCommand) -> Result<()> {
-    let runtime = RuntimeCore::load_query_only()?;
+    let runtime = RuntimeCore::load_query_only().await?;
     cli::run(runtime.service(), command).await
 }
 
 async fn serve_mcp() -> Result<()> {
-    let runtime = RuntimeCore::load()?;
+    let runtime = RuntimeCore::load().await?;
     info!(
         syslog_bind = %runtime.config.syslog.bind_addr(),
         mcp_bind = %runtime.config.mcp.bind_addr(),
@@ -81,6 +81,7 @@ async fn serve_mcp() -> Result<()> {
             service: runtime.service(),
             config: runtime.config.api.clone(),
             cors_port: runtime.config.mcp.port,
+            auth_policy: runtime.auth_policy().clone(),
         })?);
         info!("Non-MCP API mounted under /api");
     }

@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use lab_auth::AuthLayer;
+
 use crate::app::SyslogService;
 use crate::config::McpConfig;
 use crate::observability::RuntimeObservability;
@@ -15,11 +17,97 @@ pub use rmcp_server::{
 };
 pub use routes::router;
 
+/// Authentication policy attached to [`AppState`].
+///
+/// This is intentionally an enum (not `Option<Arc<AuthState>>` and not a
+/// `bool`) so that constructing an `AppState` requires an *explicit* choice
+/// between "no auth wired (loopback dev)" and "auth wired". There is no
+/// `Default` impl — code that builds an `AppState` must name the variant.
+///
+/// Locked by the OAuth epic post-spike: when `auth_state` is `Some`, the
+/// shared [`lab_auth::state::AuthState`] backs both the dual-mode middleware
+/// and the OAuth router. When `None`, only static-bearer auth is active —
+/// middleware still validates the token but no OAuth flow is wired.
+/// AuthContext flows per-request via axum extension propagation
+/// (see `docs/internal/rmcp-auth-spike.md`); no session-keyed map on
+/// `AppState`.
+#[derive(Clone)]
+pub enum AuthPolicy {
+    /// No authentication is wired. Only legal when the MCP listener is
+    /// bound to a loopback address (validated by [`crate::config::Config::load`]).
+    /// Scope checks are bypassed in this variant — the bind itself is the
+    /// trust boundary.
+    LoopbackDev,
+    /// Authentication middleware is mounted. Scope checks MUST run.
+    /// `auth_state` is:
+    /// - `Some` when OAuth mode is active (Google flow + JWKS issuance
+    ///   available; the OAuth router is mounted on these paths);
+    /// - `None` when only static-bearer mode is active (no OAuth router
+    ///   mounted; middleware validates `SYSLOG_MCP_TOKEN` via lab-auth's
+    ///   `AuthLayer::with_static_token`).
+    Mounted {
+        auth_state: Option<Arc<lab_auth::state::AuthState>>,
+    },
+}
+
+// Manual Debug impl: `lab_auth::state::AuthState` does not implement Debug
+// (it holds RSA signing keys we never want printed), but we still want
+// `AuthPolicy` to be `Debug` for use in `Result::expect`/`expect_err` and
+// startup tracing.
+impl std::fmt::Debug for AuthPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthPolicy::LoopbackDev => f.write_str("AuthPolicy::LoopbackDev"),
+            AuthPolicy::Mounted {
+                auth_state: Some(_),
+            } => f.write_str("AuthPolicy::Mounted { auth_state: Some(<lab_auth::AuthState>) }"),
+            AuthPolicy::Mounted { auth_state: None } => {
+                f.write_str("AuthPolicy::Mounted { auth_state: None /* bearer-only */ }")
+            }
+        }
+    }
+}
+
 /// Shared app state
 #[derive(Clone)]
 pub struct AppState {
     pub service: SyslogService,
     pub config: McpConfig,
     pub otlp_counters: Arc<OtlpCounters>,
+    /// Authentication policy. Construction MUST name a variant — there is no
+    /// implicit default. See [`AuthPolicy`].
+    pub auth_policy: AuthPolicy,
     pub observability: Arc<RuntimeObservability>,
 }
+
+/// Build an [`AuthLayer`] from an [`AuthPolicy`], or return `None` for
+/// [`AuthPolicy::LoopbackDev`] (no layer needed — loopback bind is the trust
+/// boundary).
+///
+/// Centralises the `AuthLayer` construction shared by `api.rs` and
+/// `mcp/routes.rs`.
+///
+/// # Invariant
+/// `AuthLayer` MUST NOT add any DB write path. JWT validation is stateless
+/// RS256 verify; static token is constant-time compare. If audit logging is
+/// ever needed, push to an async background channel.
+pub fn build_auth_layer(
+    policy: &AuthPolicy,
+    static_token: Option<Arc<str>>,
+    resource_url: Option<Arc<str>>,
+) -> Option<AuthLayer> {
+    match policy {
+        AuthPolicy::LoopbackDev => None,
+        AuthPolicy::Mounted { auth_state } => Some(
+            AuthLayer::new()
+                .with_static_token(static_token)
+                .with_auth_state(auth_state.clone())
+                .with_resource_url(resource_url)
+                .with_allow_session_cookie(false),
+        ),
+    }
+}
+
+#[cfg(test)]
+#[path = "mcp_tests.rs"]
+mod tests;

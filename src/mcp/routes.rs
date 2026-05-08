@@ -1,10 +1,10 @@
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{
     extract::State,
     http::{HeaderValue, Method, StatusCode},
-    middleware,
     response::{IntoResponse, Json},
     routing::get,
     Router,
@@ -15,11 +15,9 @@ use tower_http::{
     limit::RequestBodyLimitLayer,
 };
 
-use crate::auth::{bearer_token, token_matches};
-
 use super::rmcp_server::allowed_origins;
-use super::AppState;
-use super::{streamable_http_config, streamable_http_service};
+use super::{build_auth_layer, streamable_http_config, streamable_http_service};
+use super::{AppState, AuthPolicy};
 
 const MCP_BODY_LIMIT_BYTES: u64 = 65_536;
 
@@ -28,62 +26,92 @@ pub fn router(state: AppState) -> Router {
     // Authenticated RMCP Streamable HTTP endpoint. /health is mounted separately
     // so Docker HEALTHCHECK, docker-compose health probes, and SWAG can reach it.
     let rmcp_config = streamable_http_config(&state.config);
-    let authenticated = Router::new()
-        .nest_service("/mcp", streamable_http_service(state.clone(), rmcp_config))
-        .layer(middleware::from_fn_with_state(state.clone(), require_auth));
+    let mcp_service =
+        Router::new().nest_service("/mcp", streamable_http_service(state.clone(), rmcp_config));
 
-    let unauthenticated = Router::new().route("/health", get(health));
+    // Apply auth layer based on policy (see `build_auth_layer` for invariants).
+    // `resource_url` is only used when a layer is actually mounted, so compute
+    // it lazily inside the Mounted branch via the helper's Option parameter.
+    let resource_url = match &state.auth_policy {
+        AuthPolicy::Mounted { .. } => state
+            .config
+            .auth
+            .public_url
+            .as_deref()
+            .map(|u| Arc::<str>::from(format!("{}/mcp", u.trim_end_matches('/')))),
+        AuthPolicy::LoopbackDev => None,
+    };
+    let authenticated = if let Some(layer) = build_auth_layer(
+        &state.auth_policy,
+        state.config.api_token.as_deref().map(Arc::<str>::from),
+        resource_url,
+    ) {
+        mcp_service.layer(layer)
+    } else {
+        mcp_service
+    };
 
-    Router::new()
+    // Build the OAuth router (Router<()> — state already baked in) when
+    // auth_state is Some (OAuth mode active). These routes ARE the auth flow
+    // and must be unauthenticated. They are merged before applying AppState so
+    // that axum's type-checker sees a consistent Router<AppState> merge target.
+    //
+    // Locked Decision: OAuth router only when auth_state: Some(_).
+    // bearer-only (auth_state: None) and LoopbackDev have no OAuth routes.
+    //
+    // Locked Decision: /register and /auth/login are NOT in bearer_only_router
+    // (confirmed by lab-auth's BEARER_ONLY_ROUTER_FORBIDDEN_PATHS snapshot test).
+    let oauth_router: Option<Router> = if let AuthPolicy::Mounted {
+        auth_state: Some(ref state_arc),
+    } = state.auth_policy
+    {
+        tracing::info!(
+            "OAuth router mounted: /.well-known/oauth-authorization-server, \
+                 /.well-known/oauth-protected-resource, /jwks, /authorize, \
+                 /auth/google/callback, /token, /register"
+        );
+        // Use the full router() so /register (DCR) is available for MCP clients.
+        // bearer_only_router excludes /register unconditionally; full router gates
+        // it on enable_dynamic_registration which we set true in build_auth_policy.
+        Some(lab_auth::routes::router(state_arc.as_ref().clone()))
+    } else {
+        None
+    };
+
+    // Build the combined router.
+    //
+    // authenticated: Router<()> — mcp_service embeds AppState in its service
+    //   closure via nest_service; does NOT use the axum State extractor.
+    //   After .layer(AuthLayer) it is still Router<()>.
+    //
+    // oauth_router: Router<()> — bearer_only_router bakes AuthState in via
+    //   .with_state(auth_state). No axum State extractor used.
+    //
+    // /health: needs State<AppState>. It is added via .route() which constrains
+    //   the router to Router<AppState>. The outer router is therefore Router<AppState>
+    //   and .with_state(state) satisfies it at the end.
+    //
+    // OAuth router is a Router<()> (state already satisfied). To merge it into a
+    // Router<AppState> we use .with_state(state.clone()) on the combined base first,
+    // producing Router<()>, merge the oauth Router<()>, then re-add the health route
+    // (which requires AppState) and call .with_state(state) at the end.
+    let health_state = state.clone();
+    let health_route = Router::new().route("/health", get(health));
+
+    let base_with_state: Router<()> = Router::new()
         .merge(authenticated)
-        .merge(unauthenticated)
+        .merge(health_route)
+        .with_state(health_state);
+
+    let combined = match oauth_router {
+        Some(oauth) => base_with_state.merge(oauth),
+        None => base_with_state,
+    };
+
+    combined
         .fallback(|| async { (StatusCode::NOT_FOUND, Json(json!({"error": "not_found"}))) })
         .layer(RequestBodyLimitLayer::new(MCP_BODY_LIMIT_BYTES as usize))
         .layer(cors_layer(&state.config))
-        .with_state(state)
-}
-
-/// Bearer-token authentication middleware.
-///
-/// When `config.api_token` is `Some(token)`, every request must carry:
-///   `Authorization: Bearer <token>`
-/// Requests with a missing or incorrect token receive HTTP 401.
-/// When `api_token` is `None` (the default), all requests pass through unchanged.
-async fn require_auth(
-    State(state): State<AppState>,
-    req: axum::extract::Request,
-    next: middleware::Next,
-) -> axum::response::Response {
-    let method = req.method().clone();
-    let path = req.uri().path().to_string();
-    if let Some(ref expected) = state.config.api_token {
-        let auth = req
-            .headers()
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok());
-        let authorized = auth
-            .and_then(bearer_token)
-            .map(|token| token_matches(token, expected))
-            .unwrap_or(false);
-        if !authorized {
-            tracing::warn!(
-                method = %method,
-                path = %path,
-                has_auth_header = auth.is_some(),
-                "Unauthorized MCP request rejected"
-            );
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": {"code": -32001, "message": "unauthorized"}
-                })),
-            )
-                .into_response();
-        }
-    }
-    next.run(req).await
 }
 
 fn cors_layer(config: &crate::config::McpConfig) -> CorsLayer {
