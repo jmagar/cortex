@@ -68,11 +68,12 @@ pub fn router(state: AppState) -> Router {
         tracing::info!(
             "OAuth router mounted: /.well-known/oauth-authorization-server, \
                  /.well-known/oauth-protected-resource, /jwks, /authorize, \
-                 /auth/google/callback, /token"
+                 /auth/google/callback, /token, /register"
         );
-        Some(lab_auth::routes::bearer_only_router(
-            state_arc.as_ref().clone(),
-        ))
+        // Use the full router() so /register (DCR) is available for MCP clients.
+        // bearer_only_router excludes /register unconditionally; full router gates
+        // it on enable_dynamic_registration which we set true in build_auth_policy.
+        Some(lab_auth::routes::router(state_arc.as_ref().clone()))
     } else {
         None
     };

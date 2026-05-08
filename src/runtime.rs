@@ -510,6 +510,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
         .resource_path("/mcp")
         .static_token_scopes(vec!["syslog:read".into(), "syslog:admin".into()])
         .disable_static_token_with_oauth(auth.disable_static_token_with_oauth)
+        .enable_dynamic_registration(true)
         .build_from_sources(vars)
         .context("failed to build lab-auth AuthConfig from syslog-mcp config")?;
 

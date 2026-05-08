@@ -53,7 +53,7 @@ chrono = { version = "0.4", features = ["serde"] }
 toml = "0.8"
 
 # OAuth + JWT (shared with lab via parameterizable lab-auth crate)
-lab-auth = { git = "https://github.com/jmagar/lab.git", rev = "5dfed1921ca4169af169b6688c933879d1cd8e57", package = "lab-auth" }
+lab-auth = { git = "https://github.com/jmagar/lab.git", rev = "8b1dc2d8e9ad8e8a93474020d2e0ac8e7b50195d", package = "lab-auth" }
 url = "2"
 
 # Logging
