@@ -382,6 +382,20 @@ cargo build --release
 
 ---
 
+## Authentication
+
+syslog-mcp supports two auth modes, selectable via `SYSLOG_MCP_AUTH_MODE`.
+
+**Bearer-only (default)** — set `SYSLOG_MCP_TOKEN` and all `/mcp` requests must present that token as `Authorization: Bearer <token>`. No OAuth routes are mounted.
+
+**OAuth (Google)** — set `SYSLOG_MCP_AUTH_MODE=oauth` and the four OAuth env vars. The server issues RS256 JWTs after users authenticate via Google. Bearer tokens and OAuth JWTs can coexist (OAuth mode disables the static token by default; set `disable_static_token_with_oauth = false` in `config.toml` for break-glass access).
+
+Both modes leave `/health` unauthenticated so health probes always work.
+
+See [docs/OAUTH.md](docs/OAUTH.md) for full setup instructions, architecture diagram, and operator FAQ.
+
+---
+
 ## Configuration
 
 Configuration is loaded from three sources in priority order (highest wins):

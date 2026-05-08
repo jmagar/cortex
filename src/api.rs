@@ -1,7 +1,8 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    middleware,
     response::{IntoResponse, Json},
     routing::get,
     Router,
@@ -10,18 +11,20 @@ use serde::Deserialize;
 use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::auth::{bearer_token, token_matches};
-
 use crate::app::{
     CorrelateEventsRequest, GetErrorsRequest, SearchLogsRequest, SyslogService, TailLogsRequest,
 };
 use crate::config::ApiConfig;
+use crate::mcp::{build_auth_layer, AuthPolicy};
 
 #[derive(Clone)]
 pub struct ApiState {
     pub service: SyslogService,
     pub config: ApiConfig,
     pub cors_port: u16,
+    /// Authentication policy — mirrors mcp::AppState so /api/* can apply the
+    /// same AuthLayer as /mcp.
+    pub auth_policy: AuthPolicy,
 }
 
 pub fn router(state: ApiState) -> anyhow::Result<Router> {
@@ -31,47 +34,28 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
     if state.config.enabled && state.config.api_token.is_none() {
         anyhow::bail!("non-MCP API requires SYSLOG_API_TOKEN when enabled");
     }
+
     let routes = Router::new()
         .route("/api/search", get(search))
         .route("/api/tail", get(tail))
         .route("/api/errors", get(errors))
         .route("/api/hosts", get(hosts))
         .route("/api/correlate", get(correlate))
-        .route("/api/stats", get(stats))
-        .layer(middleware::from_fn_with_state(state.clone(), require_auth))
-        .layer(cors_layer(state.cors_port))
-        .with_state(state);
-    Ok(routes)
-}
+        .route("/api/stats", get(stats));
 
-async fn require_auth(
-    State(state): State<ApiState>,
-    req: axum::extract::Request,
-    next: middleware::Next,
-) -> axum::response::Response {
-    let Some(expected) = state.config.api_token.as_deref() else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "api_token_required"})),
-        )
-            .into_response();
+    // Apply auth layer based on policy (see `build_auth_layer` for invariants).
+    let routes = if let Some(layer) = build_auth_layer(
+        &state.auth_policy,
+        state.config.api_token.as_deref().map(Arc::<str>::from),
+        None,
+    ) {
+        routes.layer(layer)
+    } else {
+        routes
     };
-    let auth = req
-        .headers()
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok());
-    let authorized = auth
-        .and_then(bearer_token)
-        .map(|token| token_matches(token, expected))
-        .unwrap_or(false);
-    if !authorized {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "unauthorized"})),
-        )
-            .into_response();
-    }
-    next.run(req).await
+
+    let routes = routes.layer(cors_layer(state.cors_port)).with_state(state);
+    Ok(routes)
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,14 +1,18 @@
+use std::net::IpAddr;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::app::SyslogService;
-use crate::config::Config;
+use crate::config::{AuthMode, Config};
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::ingest::IngestTx;
+use crate::mcp::AuthPolicy;
 use crate::observability::RuntimeObservability;
 use crate::otlp::{self, OtlpCounters, OtlpState};
 use crate::syslog::enrichment::EnrichmentConfig;
@@ -22,6 +26,7 @@ pub struct RuntimeCore {
     maintenance_permit: Arc<Semaphore>,
     ingest: IngestTx,
     otlp_counters: Arc<OtlpCounters>,
+    auth_policy: AuthPolicy,
     observability: Arc<RuntimeObservability>,
 }
 
@@ -56,23 +61,33 @@ const ADGUARD_RETENTION_TAGS: &[&str] = &["adguard-allowed", "adguard-query", "a
 const ADGUARD_RETENTION_DAYS: u32 = 7;
 
 impl RuntimeCore {
-    pub fn load() -> Result<Self> {
-        Self::for_server(Config::load()?)
+    pub async fn load() -> Result<Self> {
+        Self::for_server(Config::load()?).await
     }
 
-    pub fn load_query_only() -> Result<Self> {
-        Self::query_only(Config::load()?)
+    pub async fn load_query_only() -> Result<Self> {
+        // Use load_for_stdio() to skip the non-loopback bind safety gate —
+        // stdio mode never binds an HTTP port so the gate is irrelevant.
+        Self::query_only(Config::load_for_stdio()?).await
     }
 
-    pub fn for_server(config: Config) -> Result<Self> {
-        Self::from_config(config, true)
+    pub async fn for_server(config: Config) -> Result<Self> {
+        Self::from_config_inner(config, true, false).await
     }
 
-    pub fn query_only(config: Config) -> Result<Self> {
-        Self::from_config(config, false)
+    pub async fn query_only(config: Config) -> Result<Self> {
+        // Stdio / query-only mode: build_auth_policy short-circuits to
+        // LoopbackDev when is_stdio=true. Process isolation is the trust
+        // boundary — no TCP port is bound, so AuthLayer and scope checks
+        // don't apply.
+        Self::from_config_inner(config, false, true).await
     }
 
-    fn from_config(config: Config, enforce_initial_storage_budget: bool) -> Result<Self> {
+    async fn from_config_inner(
+        config: Config,
+        enforce_initial_storage_budget: bool,
+        is_stdio: bool,
+    ) -> Result<Self> {
         let pool = Arc::new(db::init_pool(&config.storage)?);
         let storage_state = Arc::new(Mutex::new(None));
         if enforce_initial_storage_budget
@@ -109,6 +124,9 @@ impl RuntimeCore {
             enrichment,
             Arc::clone(&observability),
         );
+
+        let auth_policy = build_auth_policy(&config, is_stdio).await?;
+
         Ok(Self {
             config,
             pool,
@@ -117,6 +135,7 @@ impl RuntimeCore {
             maintenance_permit: Arc::new(Semaphore::new(1)),
             ingest,
             otlp_counters: Arc::new(OtlpCounters::default()),
+            auth_policy,
             observability,
         })
     }
@@ -140,8 +159,15 @@ impl RuntimeCore {
             service: self.service(),
             config: self.config.mcp.clone(),
             otlp_counters: Arc::clone(&self.otlp_counters),
+            auth_policy: self.auth_policy.clone(),
             observability: Arc::clone(&self.observability),
         }
+    }
+
+    /// Borrow the resolved authentication policy. Useful for boot-time
+    /// diagnostics and for tests.
+    pub fn auth_policy(&self) -> &AuthPolicy {
+        &self.auth_policy
     }
 
     pub async fn start_syslog(&self) -> Result<()> {
@@ -322,6 +348,254 @@ impl RuntimeCore {
         );
         Some(handle)
     }
+}
+
+/// Decide which [`AuthPolicy`] to install on [`mcp::AppState`] given the
+/// fully-loaded [`Config`].
+///
+/// Decision table (locked by the OAuth epic, post eng-review):
+///
+/// | `auth.mode` | `api_token` | bind         | result                                         |
+/// |-------------|-------------|--------------|------------------------------------------------|
+/// | `OAuth`     | any         | any          | `Mounted { auth_state: Some(_) }` (full OAuth) |
+/// | `Bearer`    | set         | any          | `Mounted { auth_state: None }` (bearer-only)   |
+/// | `Bearer`    | unset       | loopback     | `LoopbackDev` (dev mode; no auth enforced)     |
+/// | `Bearer`    | unset       | non-loopback | rejected by `validate_auth_config` at startup  |
+///
+/// Bearer-only (`static_token` set, no OAuth) produces `Mounted { auth_state: None }` so
+/// that scope checks in tool dispatch (S5) know middleware is enforcing auth.
+/// `lab_auth::AuthState::new` is only called for the OAuth row — it requires
+/// mode == OAuth and initialises Google OIDC + SQLite session storage.
+async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy> {
+    if is_stdio {
+        if config.mcp.auth.mode == AuthMode::OAuth {
+            tracing::warn!(
+                "SYSLOG_MCP_AUTH_MODE=oauth is set but syslog-mcp is starting in stdio mode — \
+                 OAuth config is ignored; LoopbackDev policy applies (process isolation is the \
+                 trust boundary). If auth enforcement is required, use the HTTP server mode instead."
+            );
+        }
+        tracing::info!(
+            "syslog-mcp auth policy: LoopbackDev (stdio mode — process isolation is the trust boundary)"
+        );
+        return Ok(AuthPolicy::LoopbackDev);
+    }
+
+    let auth = &config.mcp.auth;
+    let oauth_active = auth.mode == AuthMode::OAuth;
+    let static_token_active = config
+        .mcp
+        .api_token
+        .as_deref()
+        .is_some_and(|t| !t.trim().is_empty());
+
+    if !oauth_active {
+        if static_token_active {
+            // Bearer-only: middleware (AuthLayer) is mounted with just the
+            // static token. Scope checks in S5 MUST run — use Mounted so the
+            // tool dispatcher knows auth is enforced.
+            tracing::info!(
+                mcp_bind = %config.mcp.bind_addr(),
+                "syslog-mcp auth policy: Mounted {{ auth_state: None }} (bearer-only; lab-auth OAuth not wired)"
+            );
+            return Ok(AuthPolicy::Mounted { auth_state: None });
+        }
+
+        // No auth at all — only legal on loopback (validated by validate_auth_config,
+        // but double-checked here so LoopbackDev can never slip past on a non-loopback bind).
+        // The early return above guarantees `is_stdio` is false here, so the bind
+        // check always applies.
+        let bind_is_loopback = IpAddr::from_str(&config.mcp.host)
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false);
+        if !bind_is_loopback {
+            anyhow::bail!(
+                "internal invariant violated: no auth wired but bind `{}` is non-loopback",
+                config.mcp.host
+            );
+        }
+        tracing::info!(
+            mcp_bind = %config.mcp.bind_addr(),
+            "syslog-mcp auth policy: LoopbackDev (no auth wired; loopback bind)"
+        );
+        return Ok(AuthPolicy::LoopbackDev);
+    }
+
+    // Resolve auth file paths against the directory containing the syslog DB
+    // so a single `/data` bind-mount captures everything.
+    let storage_dir = config
+        .storage
+        .db_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let resolved_db_path = resolve_auth_path(storage_dir, &auth.sqlite_path);
+    let resolved_key_path = resolve_auth_path(storage_dir, &auth.key_path);
+
+    // Surface the refresh-token TTL override at info level — lab-auth's default
+    // is 30 days; syslog-mcp deliberately ships a tighter (8h) ceiling.
+    tracing::info!(
+        refresh_token_ttl_secs = auth.refresh_token_ttl_secs,
+        "syslog-mcp auth refresh TTL override (lab-auth default is 30d)"
+    );
+
+    // Build the env-var "fake source" that lab-auth's AuthConfigBuilder consumes.
+    // Lab-auth never consults real `std::env::var` here — we hand it exactly
+    // what we want it to see, derived from our typed `Config`.
+    let mut vars: Vec<(String, String)> = Vec::with_capacity(16);
+    push_var(
+        &mut vars,
+        "SYSLOG_MCP_AUTH_MODE",
+        if oauth_active { "oauth" } else { "bearer" },
+    );
+    if let Some(url) = auth.public_url.as_deref() {
+        push_var(&mut vars, "SYSLOG_MCP_PUBLIC_URL", url);
+    }
+    if let Some(id) = auth.google_client_id.as_deref() {
+        push_var(&mut vars, "SYSLOG_MCP_GOOGLE_CLIENT_ID", id);
+    }
+    if let Some(secret) = auth.google_client_secret.as_deref() {
+        push_var(&mut vars, "SYSLOG_MCP_GOOGLE_CLIENT_SECRET", secret);
+    }
+    if !auth.admin_email.is_empty() {
+        push_var(&mut vars, "SYSLOG_MCP_AUTH_ADMIN_EMAIL", &auth.admin_email);
+    }
+    // NOTE: auth.allowed_emails is validated by syslog-mcp's config layer
+    // (validate_auth_config rejects an empty allowlist when OAuth is active)
+    // but lab-auth's AuthConfig has no `allowed_emails` field — it only
+    // enforces `admin_email`. The full email allowlist is a TODO for a future
+    // lab-auth release. Do NOT add a no-op push_var for allowed_emails here;
+    // the entries would be silently ignored by AuthConfigBuilder.build_from_sources.
+    push_var(
+        &mut vars,
+        "SYSLOG_MCP_AUTH_SQLITE_PATH",
+        &resolved_db_path.to_string_lossy(),
+    );
+    push_var(
+        &mut vars,
+        "SYSLOG_MCP_AUTH_KEY_PATH",
+        &resolved_key_path.to_string_lossy(),
+    );
+    push_var(
+        &mut vars,
+        "SYSLOG_MCP_AUTH_ACCESS_TOKEN_TTL_SECS",
+        &auth.access_token_ttl_secs.to_string(),
+    );
+    push_var(
+        &mut vars,
+        "SYSLOG_MCP_AUTH_REFRESH_TOKEN_TTL_SECS",
+        &auth.refresh_token_ttl_secs.to_string(),
+    );
+    push_var(
+        &mut vars,
+        "SYSLOG_MCP_AUTH_CODE_TTL_SECS",
+        &auth.auth_code_ttl_secs.to_string(),
+    );
+    push_var(
+        &mut vars,
+        "SYSLOG_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE",
+        &auth.register_rpm.to_string(),
+    );
+    push_var(
+        &mut vars,
+        "SYSLOG_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE",
+        &auth.authorize_rpm.to_string(),
+    );
+    if !auth.allowed_client_redirect_uris.is_empty() {
+        push_var(
+            &mut vars,
+            "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+            &auth.allowed_client_redirect_uris.join(","),
+        );
+    }
+
+    let auth_config = lab_auth::config::AuthConfigBuilder::new()
+        .env_prefix("SYSLOG_MCP")
+        .session_cookie_name("syslog_mcp_session")
+        .scopes_supported(vec!["syslog:read".into(), "syslog:admin".into()])
+        .default_scope("syslog:read")
+        .resource_path("/mcp")
+        .static_token_scopes(vec!["syslog:read".into(), "syslog:admin".into()])
+        .disable_static_token_with_oauth(auth.disable_static_token_with_oauth)
+        .enable_dynamic_registration(true)
+        .build_from_sources(vars)
+        .context("failed to build lab-auth AuthConfig from syslog-mcp config")?;
+
+    let auth_state = lab_auth::state::AuthState::new(auth_config)
+        .await
+        .context("failed to initialize lab-auth AuthState")?;
+
+    // lab-auth's SqliteStore::open creates the DB but only *checks* perms when
+    // the file pre-existed. Enforce 0600 explicitly for the freshly-created
+    // case. The JWT key path is already chmodded by lab-auth's jwt::SigningKeys.
+    enforce_restrictive_permissions(&resolved_db_path).with_context(|| {
+        format!(
+            "failed to enforce 0600 permissions on auth db `{}`",
+            resolved_db_path.display()
+        )
+    })?;
+    enforce_restrictive_permissions(&resolved_key_path).with_context(|| {
+        format!(
+            "failed to enforce 0600 permissions on auth key `{}`",
+            resolved_key_path.display()
+        )
+    })?;
+
+    tracing::info!(
+        oauth_active,
+        static_token_active,
+        auth_db = %resolved_db_path.display(),
+        auth_key = %resolved_key_path.display(),
+        "syslog-mcp auth policy: Mounted (lab-auth state initialized)"
+    );
+
+    Ok(AuthPolicy::Mounted {
+        auth_state: Some(Arc::new(auth_state)),
+    })
+}
+
+fn push_var(vars: &mut Vec<(String, String)>, key: &str, value: &str) {
+    vars.push((key.to_string(), value.to_string()));
+}
+
+/// Resolve `path` against `base` if it is relative. Absolute paths are
+/// returned untouched. Mirrors the `[mcp.auth].sqlite_path` and `key_path`
+/// resolution rules documented on `AuthConfig`.
+fn resolve_auth_path(base: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base.join(path)
+    }
+}
+
+/// Enforce `chmod 0600` on a file. Unix-only; on other platforms this is a
+/// no-op (lab-auth makes the same trade-off — see `lab_auth::util`).
+#[cfg(unix)]
+fn enforce_restrictive_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if !path.exists() {
+        // Nothing to lock down. lab-auth owns creation; this guards against
+        // an unexpected order of operations.
+        anyhow::bail!("expected file at {} after auth init", path.display());
+    }
+    let metadata = std::fs::metadata(path).with_context(|| format!("stat `{}`", path.display()))?;
+    let current = metadata.permissions().mode() & 0o777;
+    if current & 0o077 != 0 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("chmod 0600 `{}`", path.display()))?;
+        tracing::warn!(
+            path = %path.display(),
+            previous_mode = format!("{:o}", current),
+            "Tightened auth file permissions to 0600"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn enforce_restrictive_permissions(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
