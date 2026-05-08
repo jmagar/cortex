@@ -800,3 +800,39 @@ async fn scope_check_fires_before_db_execution() {
         "no result should be present when scope check fails; response: {response}"
     );
 }
+
+/// Unknown action → denied by `syslog:__deny__` sentinel, not passed through.
+///
+/// The catch-all arm of `required_scope_for` returns `Some("syslog:__deny__")`
+/// — a scope that is never granted — so unknown actions are rejected at the
+/// auth layer rather than falling through to `execute_tool`.
+/// This prevents future actions added to dispatch but not to the scope map
+/// from being silently accessible with only `syslog:read`.
+#[tokio::test]
+async fn unknown_action_is_denied_by_sentinel_scope() {
+    let (state, _pool, _dir) = mounted_state();
+    // syslog:read + syslog:admin — both real scopes, but neither matches __deny__
+    let auth = auth_ctx_with_scopes(vec!["syslog:read", "syslog:admin"]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            100,
+            "tools/call",
+            Some(json!({"name": "syslog", "arguments": {"action": "not_a_real_action"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Must be a JSON-RPC error — the sentinel scope is never granted.
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "unknown action must be denied by sentinel scope; response: {response}"
+    );
+    let msg = response["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        msg.contains("requires scope"),
+        "denial message should reference scope requirement; got: {msg}"
+    );
+}
