@@ -468,6 +468,36 @@ async fn mounted_cookie_without_bearer_is_rejected() {
     );
 }
 
+/// Bearer-only mode: valid static token + scope-gated action (stats) → 200.
+///
+/// Regression test for the bug where `build_auth_layer` built an `AuthLayer`
+/// with `static_token_scopes: Vec::new()` in bearer-only mode because
+/// `AuthLayer::with_auth_state(None)` does not populate scopes.
+/// After the fix, `build_auth_layer` explicitly calls `.with_static_token_scopes`
+/// so the `AuthContext` injected by the layer carries `["syslog:read", "syslog:admin"]`
+/// and scope-gated actions succeed.
+#[tokio::test]
+async fn mounted_static_bearer_valid_token_can_call_scope_gated_action() {
+    let h = TestHarness::with_token("static-secret".into());
+    // `stats` requires syslog:read — it is scope-gated at the rmcp layer.
+    let body = jsonrpc_request(
+        25,
+        "tools/call",
+        Some(serde_json::json!({"name": "syslog", "arguments": {"action": "stats"}})),
+    );
+    let (status, response) = mcp_post(router(h.state), body, Some("static-secret")).await;
+    assert_eq!(status, StatusCode::OK, "response: {response}");
+    // Must be a successful result, not a JSON-RPC scope-denial error.
+    assert!(
+        response.get("error").is_none() || response["error"].is_null(),
+        "static bearer token must pass scope check for stats; response: {response}"
+    );
+    assert!(
+        response["result"].is_object(),
+        "stats result expected; response: {response}"
+    );
+}
+
 /// /health stays unauthenticated even when Mounted policy is active.
 #[tokio::test]
 async fn health_unauthenticated_under_mounted_policy() {
