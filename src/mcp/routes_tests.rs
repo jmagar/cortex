@@ -648,18 +648,19 @@ async fn register_returns_404_in_all_modes() {
     }
 }
 
-/// GET /auth/login is 404 in ALL modes — excluded from bearer_only_router.
-/// Locked Decision: /auth/login (browser HTML) excluded from headless subset.
+/// GET /auth/login — not reachable in LoopbackDev or bearer-only (no OAuth router
+/// mounted), but IS mounted when OAuth is active because we use the full lab-auth
+/// router() (not bearer_only_router) so that DCR /register is available for MCP
+/// clients. /auth/login is a browser redirect to Google — harmless in a headless
+/// context but present so callers get a redirect rather than a 404.
 #[tokio::test]
-async fn auth_login_returns_404_in_all_modes() {
+async fn auth_login_not_mounted_without_oauth() {
     let (loopback_state, _dir1) = test_state_no_auth();
     let (bearer_state, _dir2) = test_state_with_token("tok".into());
-    let (oauth_state, _dir3) = test_state_with_oauth().await;
 
     for (label, state) in [
         ("LoopbackDev", loopback_state),
         ("bearer-only", bearer_state),
-        ("OAuth", oauth_state),
     ] {
         let app = router(state);
         let request = Request::builder()
@@ -671,7 +672,7 @@ async fn auth_login_returns_404_in_all_modes() {
         assert_eq!(
             response.status(),
             StatusCode::NOT_FOUND,
-            "GET /auth/login must not be mounted in {label} mode (Locked Decision)"
+            "GET /auth/login must not be mounted in {label} mode"
         );
     }
 }
