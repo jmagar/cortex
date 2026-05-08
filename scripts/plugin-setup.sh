@@ -156,13 +156,20 @@ EOF
 setup_docker() {
   mkdir -p "${COMPOSE_DIR}"
 
-  # If a previous run deployed via systemd, stop it first so the docker
-  # container can bind the same ports. Idempotent — silent if absent/inactive.
-  if systemctl --user list-unit-files syslog-mcp.service >/dev/null 2>&1 \
-     && systemctl --user is-active --quiet syslog-mcp.service; then
-    echo "syslog-mcp: stopping existing systemd unit before docker cutover"
-    systemctl --user stop syslog-mcp.service
-    systemctl --user disable syslog-mcp.service >/dev/null 2>&1 || true
+  # Fully remove the systemd unit so it can't start on boot — docker compose
+  # handles restarts via restart: unless-stopped; systemd is not involved.
+  if systemctl --user list-unit-files syslog-mcp.service >/dev/null 2>&1; then
+    if systemctl --user is-active --quiet syslog-mcp.service; then
+      echo "syslog-mcp: stopping existing systemd unit before docker cutover"
+      systemctl --user stop syslog-mcp.service
+    fi
+    if systemctl --user is-enabled --quiet syslog-mcp.service 2>/dev/null; then
+      systemctl --user disable syslog-mcp.service >/dev/null 2>&1 || true
+    fi
+    if [[ -f "${UNIT_FILE}" ]]; then
+      rm -f "${UNIT_FILE}"
+      systemctl --user daemon-reload
+    fi
   fi
 
   # Refresh compose file if plugin updated
@@ -175,6 +182,14 @@ setup_docker() {
   cp "${ENV_FILE}" "${COMPOSE_DIR}/.env"
 
   cd "${COMPOSE_DIR}"
+
+  # Ensure the external docker network exists — compose will fail without it.
+  # Honour the DOCKER_NETWORK env var (same default the compose file uses).
+  local network_name="${DOCKER_NETWORK:-syslog-mcp}"
+  if ! docker network inspect "${network_name}" >/dev/null 2>&1; then
+    echo "syslog-mcp: creating docker network ${network_name}"
+    docker network create "${network_name}"
+  fi
 
   # Pull the published image. If the registry is unreachable or the tag
   # doesn't exist, fall through to `up` which will use a cached image or
