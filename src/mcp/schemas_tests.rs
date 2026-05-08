@@ -17,16 +17,5 @@ fn tool_definitions_include_expected_public_tools() {
         .iter()
         .map(|value| value.as_str().unwrap())
         .collect();
-    assert_eq!(
-        actions,
-        vec![
-            "search",
-            "tail",
-            "errors",
-            "hosts",
-            "correlate",
-            "stats",
-            "help"
-        ]
-    );
+    assert_eq!(actions, SYSLOG_ACTIONS);
 }

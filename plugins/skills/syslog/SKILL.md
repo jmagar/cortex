@@ -19,6 +19,18 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `hosts` | List all known hosts with first/last seen |
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics |
+| `status` | Lightweight runtime and DB health |
+| `apps` | Distinct app names with log and host counts |
+| `source_ips` | Source identifiers with hostname breakdown |
+| `timeline` | Bucketed counts over time |
+| `patterns` | Near-duplicate message template clusters |
+| `context` | Surrounding logs around an event |
+| `get` | One log by id, including raw frame |
+| `ingest_rate` | Recent ingest throughput |
+| `silent_hosts` | Hosts quiet beyond a threshold |
+| `clock_skew` | Per-host clock skew distribution |
+| `anomalies` | Recent vs baseline volume/error comparison |
+| `compare` | Compare two time ranges |
 | `help` | Canonical in-tree action reference (use as ground truth if this doc drifts) |
 
 **Always prefer the MCP tool**. Fall back to HTTP only when MCP is unavailable.
@@ -40,6 +52,8 @@ FTS5 search across all syslog messages with porter stemming.
 | `source_ip` | string | Exact source identifier — `IP:port` for syslog, `docker://host/container/stream` for Docker ingest. The only network-verified identity (hostname can be spoofed in CEF/UniFi messages). |
 | `severity` | string | One of: emerg, alert, crit, err, warning, notice, info, debug |
 | `app_name` | string | Filter by application (e.g. sshd, dockerd, kernel) |
+| `facility` | string | Filter by syslog facility |
+| `process_id` | string | Filter by process id from the syslog frame |
 | `from` | string | Start time (ISO 8601, e.g. `2025-01-15T00:00:00Z`) |
 | `to` | string | End time (ISO 8601) |
 | `limit` | integer | Max results (default 100, max 1000) |
@@ -51,6 +65,7 @@ mcp__syslog__syslog(action="search", query="kernel panic")
 mcp__syslog__syslog(action="search", query="OOM AND killer", limit=50)
 mcp__syslog__syslog(action="search", query='"authentication failure"')
 mcp__syslog__syslog(action="search", query="error", hostname="unraid", severity="err")
+mcp__syslog__syslog(action="search", facility="auth", process_id="1234", limit=20)
 mcp__syslog__syslog(action="search", query="connection refused",
                     from="2025-01-15T00:00:00Z", to="2025-01-15T23:59:59Z")
 mcp__syslog__syslog(action="search", query="docker*")
@@ -74,12 +89,14 @@ Most recent N log entries across all hosts, like `tail -f` but multi-host.
 | `hostname` | string | Filter to a specific host |
 | `source_ip` | string | Filter by exact source identifier (see `search`) |
 | `app_name` | string | Filter to a specific application |
+| `severity_min` | string | Minimum severity to return; `warning` returns warning and worse |
 | `n` | integer | Number of entries (default 50, max 500) |
 
 ```
 mcp__syslog__syslog(action="tail", n=20)
 mcp__syslog__syslog(action="tail", hostname="unraid", n=50)
 mcp__syslog__syslog(action="tail", app_name="dockerd", n=30)
+mcp__syslog__syslog(action="tail", severity_min="warning", n=50)
 ```
 
 ---
@@ -92,10 +109,12 @@ Errors and warnings grouped by hostname and severity with counts. Best for quick
 |-------|------|-------------|
 | `from` | string | Start time (ISO 8601). Defaults to all time. |
 | `to` | string | End time (ISO 8601). Defaults to now. |
+| `group_by` | string | Optional secondary grouping. Currently supports `app_name`. |
 
 ```
 mcp__syslog__syslog(action="errors")
 mcp__syslog__syslog(action="errors", from="2025-01-15T13:00:00Z", to="2025-01-15T14:00:00Z")
+mcp__syslog__syslog(action="errors", group_by="app_name")
 ```
 
 **Response shape:**
@@ -184,6 +203,199 @@ mcp__syslog__syslog(action="stats")
 
 ---
 
+### `action="status"` — Lightweight runtime status
+
+Use this for dashboards and doctor checks that need current queue depth,
+backpressure, writer failure/drop state, listener counters, and OTLP receiver
+counters without the heavier DB statistics query.
+
+```
+mcp__syslog__syslog(action="status")
+```
+
+**Response fields:** `status`, `db_ok`, `runtime_observability`, and `otlp`.
+
+---
+
+### `action="apps"` — Applications seen in logs
+
+Distinct non-empty `app_name` values with log count, host count, and first/last received times.
+
+| param | type | description |
+|-------|------|-------------|
+| `hostname` | string | Optional host filter |
+
+```
+mcp__syslog__syslog(action="apps")
+mcp__syslog__syslog(action="apps", hostname="unraid")
+```
+
+---
+
+### `action="source_ips"` — Source identity breakdown
+
+Network sender identifiers with counts and the top hostnames each source claimed.
+
+```
+mcp__syslog__syslog(action="source_ips")
+```
+
+Use `source_ip` as the trusted sender identity when a syslog hostname can be spoofed.
+
+---
+
+### `action="timeline"` — Bucketed log counts
+
+Counts logs into minute, hour, or day buckets, optionally grouped by host, severity, or app.
+
+| param | type | description |
+|-------|------|-------------|
+| `bucket` | string | `minute`, `hour`, or `day` (default `hour`) |
+| `group_by` | string | Optional: `hostname`, `severity`, or `app_name` |
+| `from` | string | Start time (ISO 8601) |
+| `to` | string | End time (ISO 8601) |
+| `hostname` | string | Exact host filter |
+| `app_name` | string | Exact app filter |
+| `severity_min` | string | Minimum severity to include |
+
+```
+mcp__syslog__syslog(action="timeline", bucket="hour", group_by="severity")
+mcp__syslog__syslog(action="timeline", bucket="minute", severity_min="warning")
+```
+
+---
+
+### `action="patterns"` — Message template clusters
+
+Clusters near-duplicate messages after normalizing variable values such as numbers, IPs, UUIDs, and long hex strings.
+
+| param | type | description |
+|-------|------|-------------|
+| `from` | string | Start time (ISO 8601) |
+| `to` | string | End time (ISO 8601) |
+| `hostname` | string | Exact host filter |
+| `app_name` | string | Exact app filter |
+| `severity_min` | string | Minimum severity to include |
+| `scan_limit` | integer | Rows scanned before clustering (default 10000, max 50000) |
+| `top_n` | integer | Max returned templates (default 20, max 200) |
+
+```
+mcp__syslog__syslog(action="patterns", severity_min="warning", top_n=10)
+```
+
+---
+
+### `action="context"` — Surrounding logs
+
+Returns logs before and after a reference event. Anchor by `log_id` when available, or by `hostname` plus `timestamp`.
+
+| param | type | description |
+|-------|------|-------------|
+| `log_id` | integer | Stable row id anchor |
+| `hostname` | string | Required with `timestamp` when `log_id` is omitted |
+| `timestamp` | string | Required with `hostname` when `log_id` is omitted |
+| `before` | integer | Entries before the reference (default 10, max 500) |
+| `after` | integer | Entries after the reference (default 10, max 500) |
+
+```
+mcp__syslog__syslog(action="context", log_id=123, before=20, after=20)
+```
+
+---
+
+### `action="get"` — Fetch one log by id
+
+Returns a single log entry including its raw frame.
+
+| param | type | description |
+|-------|------|-------------|
+| `id` | integer | Required log row id |
+
+```
+mcp__syslog__syslog(action="get", id=123)
+```
+
+---
+
+### `action="ingest_rate"` — Recent ingest throughput
+
+Returns last 1m/5m/15m ingest counts and per-second rates, plus write-block state.
+
+| param | type | description |
+|-------|------|-------------|
+| `by_host` | boolean | Include per-host bucket counts |
+
+```
+mcp__syslog__syslog(action="ingest_rate")
+mcp__syslog__syslog(action="ingest_rate", by_host=true)
+```
+
+---
+
+### `action="silent_hosts"` — Quiet hosts
+
+Lists hosts whose `last_seen` is older than the configured threshold.
+
+| param | type | description |
+|-------|------|-------------|
+| `silent_minutes` | integer | Silence threshold (default 30, max 10080) |
+
+```
+mcp__syslog__syslog(action="silent_hosts", silent_minutes=60)
+```
+
+---
+
+### `action="clock_skew"` — Sender clock skew
+
+Compares each host's syslog timestamp with server receive time.
+
+| param | type | description |
+|-------|------|-------------|
+| `since` | string | Start time for samples. Defaults to the last 24 hours. |
+
+```
+mcp__syslog__syslog(action="clock_skew")
+```
+
+---
+
+### `action="anomalies"` — Recent vs baseline host activity
+
+Compares recent per-host volume and error counts against a preceding baseline window. Hosts with recent logs and zero baseline sort to the top as new active hosts.
+
+| param | type | description |
+|-------|------|-------------|
+| `recent_minutes` | integer | Recent window (default 15, max 1440) |
+| `baseline_minutes` | integer | Baseline window before recent window (default 360, max 10080) |
+
+```
+mcp__syslog__syslog(action="anomalies", recent_minutes=30, baseline_minutes=720)
+```
+
+---
+
+### `action="compare"` — Compare two ranges
+
+Compares total logs, total errors, severity distribution, top hosts, and top apps across two time ranges.
+
+| param | type | description |
+|-------|------|-------------|
+| `a_from` | string | Required start of range A |
+| `a_to` | string | Required end of range A |
+| `b_from` | string | Required start of range B |
+| `b_to` | string | Required end of range B |
+
+```
+mcp__syslog__syslog(action="compare",
+                    a_from="2025-01-15T00:00:00Z",
+                    a_to="2025-01-15T12:00:00Z",
+                    b_from="2025-01-15T12:00:00Z",
+                    b_to="2025-01-16T00:00:00Z")
+```
+
+---
+
 ### `action="help"` — Canonical reference
 
 Returns the authoritative in-tree action documentation. Use this as ground truth if the rest of this skill appears stale.
@@ -203,9 +415,10 @@ Use only when the MCP tool is unavailable. The plugin exports connection setting
 
 **Sensitive value handling:** `api_token` is declared `sensitive: true` in the plugin manifest. It is **never** substituted into skill content as `${user_config.api_token}` — only the env var path above is valid. Do not inline the token in this document or any skill text.
 
-### Health check (no auth)
+### Health check (no auth required)
 
 ```bash
+# /health is unauthenticated — no Authorization header needed
 curl -s "$CLAUDE_PLUGIN_OPTION_SERVER_URL/health"
 ```
 

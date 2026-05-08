@@ -48,7 +48,18 @@ gen-token:
 
 
 validate-skills:
-    @test -f plugins/skills/syslog/SKILL.md && echo "OK" || { echo "MISSING: plugins/skills/syslog/SKILL.md"; exit 1; }
+    #!/usr/bin/env bash
+    set -euo pipefail
+    found=0
+    for dir in plugins/skills/*; do
+      [[ -d "$dir" ]] || continue
+      found=1
+      test -f "$dir/SKILL.md" || { echo "MISSING: $dir/SKILL.md"; exit 1; }
+      grep -q '^name:' "$dir/SKILL.md" || { echo "MISSING name: $dir/SKILL.md"; exit 1; }
+      grep -q '^description:' "$dir/SKILL.md" || { echo "MISSING description: $dir/SKILL.md"; exit 1; }
+    done
+    [[ "$found" -eq 1 ]] || { echo "MISSING: plugins/skills/*"; exit 1; }
+    echo "OK"
 
 # Generate a standalone CLI for this server (requires running server; HTTP-only transport)
 generate-cli:

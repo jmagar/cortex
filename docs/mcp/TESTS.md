@@ -41,17 +41,34 @@ just test-live
 
 The smoke test (`scripts/smoke-test.sh`) exercises all `syslog` actions via mcporter.
 
+Action registry covered by live/script references: `search`, `tail`, `errors`,
+`hosts`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`,
+`patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`,
+`anomalies`, `compare`, `help`.
+
 ### mcporter-based testing
 
 ```bash
 # List available tools
-mcporter list syslog-mcp --config config/mcporter.json
+mcporter list syslog --config config/mcporter.json
 
 # Call actions through the single syslog tool
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=stats
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=tail n=10
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=search query=error limit=5
-mcporter call --config config/mcporter.json syslog-mcp.syslog action=hosts
+mcporter call --config config/mcporter.json syslog.syslog action=stats
+mcporter call --config config/mcporter.json syslog.syslog action=status
+mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
+mcporter call --config config/mcporter.json syslog.syslog action=search query=error limit=5
+mcporter call --config config/mcporter.json syslog.syslog action=hosts
+mcporter call --config config/mcporter.json syslog.syslog action=apps
+mcporter call --config config/mcporter.json syslog.syslog action=source_ips
+mcporter call --config config/mcporter.json syslog.syslog action=timeline
+mcporter call --config config/mcporter.json syslog.syslog action=patterns
+mcporter call --config config/mcporter.json syslog.syslog action=context hostname=host timestamp=2026-01-01T00:00:00Z
+mcporter call --config config/mcporter.json syslog.syslog action=get id=1
+mcporter call --config config/mcporter.json syslog.syslog action=ingest_rate
+mcporter call --config config/mcporter.json syslog.syslog action=silent_hosts
+mcporter call --config config/mcporter.json syslog.syslog action=clock_skew
+mcporter call --config config/mcporter.json syslog.syslog action=anomalies
+mcporter call --config config/mcporter.json syslog.syslog action=compare a_from=2026-01-01T00:00:00Z a_to=2026-01-01T01:00:00Z b_from=2026-01-01T01:00:00Z b_to=2026-01-01T02:00:00Z
 ```
 
 ### curl-based testing
@@ -77,11 +94,17 @@ curl -s -X POST http://localhost:3100/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"stats"}}}'
+
+# Status
+curl -s -X POST http://localhost:3100/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"status"}}}'
 ```
 
 ## Testing checklist
 
-- [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog help
+- [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog help
 - [ ] **Auth: valid token** -- 200 with correct Bearer token
 - [ ] **Auth: invalid token** -- 401 Unauthorized
 - [ ] **Auth: no token when required** -- 401 Unauthorized

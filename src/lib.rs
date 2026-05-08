@@ -2,6 +2,7 @@ pub mod api;
 pub mod app;
 pub mod config;
 pub mod mcp;
+pub mod observability;
 pub mod otlp;
 pub mod runtime;
 pub mod syslog;
@@ -94,6 +95,7 @@ pub mod testing {
             config: base_config(None, token),
             otlp_counters: Arc::new(OtlpCounters::default()),
             auth_policy: policy,
+            observability: Arc::new(crate::observability::RuntimeObservability::default()),
         }
     }
 
@@ -111,6 +113,7 @@ pub mod testing {
             auth_policy: AuthPolicy::Mounted {
                 auth_state: Some(auth_state),
             },
+            observability: Arc::new(crate::observability::RuntimeObservability::default()),
         }
     }
 

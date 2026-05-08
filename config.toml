@@ -7,6 +7,9 @@
 host = "0.0.0.0"
 port = 1514
 max_message_size = 8192
+batch_size = 100
+flush_interval = 500
+write_channel_capacity = 10000
 
 [storage]
 db_path = "/data/syslog.db"

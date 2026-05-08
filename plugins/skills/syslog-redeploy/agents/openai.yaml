@@ -1,0 +1,4 @@
+interface:
+  display_name: "Syslog Redeploy"
+  short_description: "Rerun syslog plugin deployment hook"
+  default_prompt: "Use $syslog-redeploy to rerun the syslog-mcp plugin deployment hook and verify health."

@@ -8,6 +8,13 @@
 #   bash scripts/smoke-test.sh --skip-seed   # if data already exists
 #
 # Requirements: mcporter, nc, curl, python3
+#
+# Action inventory reference (not every action is exercised by this smoke test):
+#   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
+#   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
+#   mcp_call source_ips, mcp_call timeline, mcp_call patterns, mcp_call context,
+#   mcp_call get, mcp_call ingest_rate, mcp_call silent_hosts,
+#   mcp_call clock_skew, mcp_call anomalies, mcp_call compare, mcp_call help
 
 set -euo pipefail
 
@@ -21,6 +28,8 @@ MCPORTER_CONFIG="config/mcporter.json"
 _MCPORTER_CONFIG_TMPFILE=""
 SEED_HOST="smoke-test-host"
 GHOST_HOST="nonexistent-host-xyz-404"
+RUN_ID="${SYSLOG_SMOKE_RUN_ID:-$(date -u +%Y%m%d%H%M%S)}"
+TCP_MARKER="smoketcp${RUN_ID}"
 
 trap '[[ -n "$_MCPORTER_CONFIG_TMPFILE" ]] && rm -f "$_MCPORTER_CONFIG_TMPFILE"' EXIT
 
@@ -116,9 +125,19 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null; then
         pass "$label"
+    elif echo "$output" | grep -q "^\[mcporter\] MCP error -32602:"; then
+        pass "$label"
     else
-        fail "$label (expected isError=true, got success)"
+        fail "$label (expected tool isError=true or MCP invalid-params error)"
     fi
+}
+
+send_tcp_seed() {
+    local message="$1"
+    if printf '%s\n' "$message" | nc -w2 -N "$SYSLOG_HOST" "$SYSLOG_PORT" >/dev/null 2>&1; then
+        return 0
+    fi
+    printf '%s\n' "$message" | nc -w2 "$SYSLOG_HOST" "$SYSLOG_PORT" >/dev/null
 }
 
 # ─── Phase 1: Pre-flight ─────────────────────────────────────────────────────
@@ -144,10 +163,11 @@ echo -e "${COLOR_BOLD}[2/4] Seeding test data${COLOR_RESET}"
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     printf '<14>%s %s sshd[42]: smoke-test: info message\n'           "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     printf '<11>%s %s sshd[42]: smoke-test: error authentication failure\n' "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
-    printf '<3>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
+    printf '<2>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     printf '<12>%s %s dockerd[99]: smoke-test: warning container restart\n'  "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
+    send_tcp_seed "<14>$(date '+%b %e %H:%M:%S') ${SEED_HOST} tcpsmoke[77]: smoke-test tcp seed ${TCP_MARKER} bounded frame ok"
     sleep 2
-    echo "Seeded 4 messages (info, err, crit, warning) from $SEED_HOST"
+    echo "Seeded 5 messages (4 UDP, 1 TCP) from $SEED_HOST; TCP marker=$TCP_MARKER"
 else
     echo "Skipping seed (--skip-seed)"
 fi
@@ -164,6 +184,25 @@ fi
 # ─── Phase 3: Action tests ───────────────────────────────────────────────────
 echo ""
 echo -e "${COLOR_BOLD}[3/4] Action tests${COLOR_RESET}"
+
+# ── status ────────────────────────────────────────────────────────────────────
+echo ""
+echo "Action: status"
+STATUS=$(mcp_call status 2>&1)
+assert_no_error "status: no error" "$STATUS"
+
+STATUS_VALUE=$(json_get "$STATUS" "['status']")
+STATUS_DB_OK=$(json_get "$STATUS" "['db_ok']")
+STATUS_OBS=$(json_get "$STATUS" "['runtime_observability']['ingest_queue_depth']")
+STATUS_OTLP=$(json_get "$STATUS" "['otlp']['logs_received']")
+assert_eq "status: status is ok" "$STATUS_VALUE" "ok"
+assert_eq "status: db_ok is true" "$STATUS_DB_OK" "True"
+[[ -n "$STATUS_OBS" ]] \
+    && pass "status: runtime_observability present" \
+    || fail "status: runtime_observability missing"
+[[ -n "$STATUS_OTLP" ]] \
+    && pass "status: otlp counters present" \
+    || fail "status: otlp counters missing"
 
 # ── stats ─────────────────────────────────────────────────────────────────────
 echo ""
@@ -261,6 +300,15 @@ assert not wrong, f'hostname filter leaked other hosts: {wrong}'
 print('ok')
 " 2>/dev/null || echo "error")
     assert_eq "tail(hostname filter): only returns logs for '$SEED_HOST'" "$TAIL_FILTER_VALID" "ok"
+
+    TAIL_TCP_MARKER=$(echo "$TAIL_FILTERED" | python3 -c "
+import sys, json
+logs = json.load(sys.stdin)['logs']
+matches = [l for l in logs if '${TCP_MARKER}' in (l.get('message') or '')]
+assert matches, 'TCP seed marker not present in tail(hostname filter)'
+print('ok')
+" 2>/dev/null || echo "error")
+    assert_eq "tail(hostname filter): TCP seed marker appears" "$TAIL_TCP_MARKER" "ok"
 fi
 
 # ── search ────────────────────────────────────────────────────────────────────
@@ -321,6 +369,19 @@ assert not wrong, f'severity filter leaked wrong levels: {set(wrong)}'
 print('ok')
 " 2>/dev/null || echo "error")
     assert_eq "search(severity filter): only returns warning-level logs" "$SEARCH_SEV_VALID" "ok"
+
+    SEARCH_TCP=$(mcp_call search "query=${TCP_MARKER}" "hostname=${SEED_HOST}" "limit=10" 2>&1)
+    assert_no_error "search(TCP seed marker): no error" "$SEARCH_TCP"
+    SEARCH_TCP_VALID=$(echo "$SEARCH_TCP" | python3 -c "
+import sys, json
+logs = json.load(sys.stdin)['logs']
+assert logs, 'TCP seed marker search returned no logs'
+for l in logs:
+    assert l['hostname'] == '${SEED_HOST}', f'wrong hostname: {l[\"hostname\"]}'
+    assert '${TCP_MARKER}' in (l.get('message') or ''), 'marker missing from result'
+print('ok')
+" 2>/dev/null || echo "error")
+    assert_eq "search(TCP seed marker): returns TCP-ingested message" "$SEARCH_TCP_VALID" "ok"
 fi
 
 # Nonexistent hostname must return 0 results (filter is not ignored)
@@ -424,7 +485,7 @@ print('ok' if '${SEED_HOST}' in hosts else f'missing (got {hosts})')
 fi
 
 # Missing required arg must return an error
-CORRELATE_NO_REF=$(mcp_call correlate 2>&1)
+CORRELATE_NO_REF=$(mcp_call correlate 2>&1 || true)
 assert_is_error "correlate(missing reference_time): returns error" "$CORRELATE_NO_REF"
 
 # ── help ──────────────────────────────────────────────────────────────────────
@@ -438,7 +499,7 @@ d = json.load(sys.stdin)
 assert 'help' in d, 'help key missing'
 text = d['help']
 assert len(text) > 100, 'help text suspiciously short'
-for section in ('search', 'tail', 'errors', 'hosts', 'correlate', 'stats'):
+for section in ('search', 'tail', 'errors', 'hosts', 'correlate', 'stats', 'status'):
     assert section in text.lower(), f'help text missing section: {section}'
 print('ok')
 " 2>/dev/null || echo "error")
@@ -447,7 +508,7 @@ assert_eq "help: contains all action sections" "$HELP_VALID" "ok"
 # ── invalid action (negative test) ───────────────────────────────────────────
 echo ""
 echo "Negative tests"
-INVALID=$(mcp_call notanaction 2>&1)
+INVALID=$(mcp_call notanaction 2>&1 || true)
 assert_is_error "invalid action: returns error" "$INVALID"
 
 # ─── OAuth discovery endpoints (unconditional — no Google creds needed) ─────

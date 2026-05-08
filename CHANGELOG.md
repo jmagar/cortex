@@ -63,6 +63,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Mounted+both scopes, empty scopes+read (denied), empty scopes+help (permitted), missing
     AuthContext fail-closed, tools/list with AuthContext, and scope-check-before-DB verification.
 
+## [0.15.1] - 2026-05-07
+
+### Fixed
+
+- **Timestamp normalization**: All time-window query bounds (`correlate`, `context`, `compare`, `anomalies`) and stored `timestamp` from the syslog and Docker parsers now produce the canonical `Z`-suffixed RFC3339 form (`rfc3339_z` helper, lifted to `app::time`). Previously, mixed `+00:00`/`Z` forms could silently drop boundary rows under SQLite TEXT comparison.
+- **`compare` panic**: Replaced four `.expect("required field")` calls on parsed user input with `parse_required_timestamp`, returning a clean `InvalidInput` error instead of panicking the request thread.
+- **`tail` placeholder index**: Severity-IN block in `tail_logs` now advances the placeholder index, preventing latent `?N` collisions if future filters are appended after it.
+- **`anomalies` ranking**: Hosts active in the recent window with no baseline (`recent_count > 0 && baseline_count == 0`) now sort to the top of the response, matching the docstring's promise to flag new-but-active hosts.
+- **`source_ips` dispatch**: `tool_list_source_ips` now accepts `(state, args)` for parity with the other action handlers, so future filters won't silently swallow client args.
+- **App response boundary**: New action responses now use app-layer DTOs instead of exporting database model types directly.
+- **Action documentation**: Added the new `search`, `tail`, and `errors` parameters to MCP docs and expanded the syslog skill reference for every new action.
+- **Test comments/helpers**: Clarified smoke/live script action inventories and removed duplicated source-IP test fixture setup.
+
+### Changed
+
+- **`normalize_template`** (`db::patterns` helper) is no longer re-exported at the crate root; it is `pub(super)` and only reachable from inside the `analytics` module.
+- **Test assertion tightened**: `context` neighbor bounds are now strict (`<` / `>`) for the id-anchored case, matching the documented contract.
+
 ## [0.15.0] - 2026-05-07
 
 ### Added
@@ -77,8 +95,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `allowed_origins()` now derive the host and origin from `SYSLOG_MCP_PUBLIC_URL` (set
   automatically when OAuth mode is active), so the OAuth callback origin is accepted by
   rmcp's DNS-rebinding guard and the tower-http CORS layer.
-
-## [0.14.0] - 2026-05-07
+- **Eleven new `syslog` actions** for log intelligence beyond raw search/tail:
+  - `apps` — distinct application names with log/host counts and first/last seen (mirror of `hosts` for the `app_name` dimension).
+  - `source_ips` — distinct source identifiers with hostname breakdown; supports spoof detection on hostname-spoofable formats (e.g. UniFi CEF).
+  - `timeline` — bucketed counts (`minute`/`hour`/`day`) over a time range, optionally split by `hostname` / `severity` / `app_name`.
+  - `patterns` — cluster near-duplicate messages by template (numbers, IPv4, UUIDs, long hex strings normalised to placeholders); returns top templates with counts, sample, and host distribution.
+  - `context` — surrounding logs around a single point of interest by `log_id` or `hostname`+`timestamp`.
+  - `get` — fetch one log by `id`, including the unparsed `raw` syslog frame.
+  - `ingest_rate` — recent throughput (last 1m / 5m / 15m using `received_at`) plus current `write_blocked` flag and optional per-host buckets.
+  - `silent_hosts` — hosts whose `last_seen` is older than `silent_minutes` ago, with their typical inter-arrival interval.
+  - `clock_skew` — per-host distribution of `received_at - timestamp` (seconds), sorted by absolute mean.
+  - `anomalies` — per-host comparison of recent volume/error count against a baseline window; returns ratio and Poisson-style z-score.
+  - `compare` — side-by-side summary of two time ranges (volume, error count, severity mix, top hosts/apps) with deltas.
+- **New filters on existing actions**:
+  - `search` accepts `facility` and `process_id`.
+  - `tail` accepts `severity_min` (returns entries at or above the threshold).
+  - `errors` accepts `group_by=app_name` for hostname x app_name x severity grouping.
+- **`logs.raw` column is now exposed** via the new `get` action.
 
 ### Changed
 
@@ -95,6 +128,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   jsonwebtoken`).
 - `ApiState` gains `auth_policy: AuthPolicy` field; `main.rs` passes
   `runtime.auth_policy().clone()` when constructing `ApiState`.
+- `tail_logs` query and `get_error_summary` query gained additional parameters (`severity_in`, `group_by_app`); internal callers updated.
+- Help text (`syslog help`) expanded to cover all 19 actions and updated parameters.
+
+## [0.14.2] - 2026-05-07
+
+### Added
+
+- Added bounded TCP syslog frame handling with oversized-frame regression coverage.
+- Added fail-fast validation for zero-valued syslog ingest settings.
+- Added Docker ingest supervisor policy/backoff tests, sidecar supervisor tests,
+  and Docker ingest producer observability in status/stats.
+- Added TCP ingest smoke coverage and a tracked ingestion full-review artifact.
+
+### Changed
+
+- Hardened Docker ingest reconnect backoff with deterministic jitter and durable
+  stream-duration reset semantics.
+- Improved failed batch handling so retryable storage failures retain bounded
+  rows, while permanent failures retry chunks and isolate bad rows.
+- Capped ingest summary cardinality with overflow buckets while preserving total
+  log counts.
+- Documented Docker ingest trust boundaries and heavy SQLite migration runbooks.
+
+## [0.14.1] - 2026-05-07
+
+### Fixed
+
+- Tightened MCP numeric argument validation so present wrong-type values for
+  `n`, `limit`, and `window_minutes` now return invalid params instead of
+  silently falling back to defaults.
+- Validated `search.severity` against the shared syslog severity list across
+  MCP, REST, and CLI callers.
+- Added `syslog status` to live smoke coverage, mcporter coverage, plugin skill
+  docs, and active MCP documentation.
+- Added a cross-surface action registry test to keep schema, dispatch, help,
+  smoke scripts, and action docs aligned.
+
+## [0.14.0] - 2026-05-07
+
+### Added
+
+- **Three new slash commands** for routine server management:
+  - `/syslog:redeploy` — runs `plugin-setup.sh` directly so config
+    changes apply without waiting for `SessionStart` or `ConfigChange`
+  - `/syslog:logs [N|--follow]` — mode-aware tail/follow of service
+    logs (`docker compose logs` or `journalctl --user`)
+  - `/syslog:cutover docker|systemd` — one-shot deploy-mode switch
+    with health verification and rollback guidance
+- **`syslog-troubleshoot` skill** (`plugins/skills/syslog-troubleshoot/`)
+  — auto-triggers when the user reports MCP connection failures,
+  missing logs from specific hosts, service crashes, or vague
+  "syslog isn't working" reports. Walks a decision tree (MCP /
+  ingest / service / unknown) instead of running every diagnostic;
+  uses runtime observability counters from v0.13.0 to localize
+  ingest-path vs writer-path failures.
+- Updated `CLAUDE.md` and `docs/plugin/COMMANDS.md` command tables
+  to register the three new commands.
 
 ## [0.13.0] - 2026-05-07
 
@@ -120,6 +210,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `lab-auth` dependency (path-dep against the L1 SHA pin in the
   development worktree; will be swapped to `git+rev` before merge per the
   S6 bead).
+- **Direct CLI commands** (`src/cli.rs`, `docs/CLI.md`): `syslog search /
+  tail / errors / hosts / correlate / stats` queries now run directly
+  against the SQLite database without starting the MCP server, syslog
+  listeners, REST API, retention, or Docker ingest. Reuses the same
+  `SyslogService` methods as the MCP tool, with a `--json` output flag
+  for shell-script consumption.
+- **Runtime observability counters** (`src/observability.rs`): atomic
+  counters for syslog UDP/TCP packets and bytes, ingest queue depth,
+  writer batches and flush failures, plus last-ingest/write/error
+  timestamps. Surfaced via the existing `/health` endpoint and `stats`
+  MCP action.
 
 ### Changed
 
@@ -128,6 +229,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the `links = "sqlite3"` constraint. No source changes needed at the
   syslog-mcp callsites; the bumps are API-compatible for the patterns we
   use.
+- **Plugin docker deploy now pulls the published image** instead of
+  building from source. `docker-compose.yml` adds
+  `image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}`
+  alongside the existing `build:`. `setup_docker()` runs
+  `docker compose pull` then `up -d --no-build`, so plugin installs
+  never require the Dockerfile or source code that the plugin doesn't
+  ship. Source-repo development paths still work unchanged via
+  `docker compose build` / `up --build`.
+- **`/config:ro` volume removed** from the compose file. It was
+  vestigial — runtime config flows through env vars, and the missing
+  `${COMPOSE_DIR}/config` directory was the literal cause of failed
+  plugin deploys. The TOML alternative (`SYSLOG_MCP_DOCKER_HOSTS_FILE`)
+  is still supported via direct path env var if needed.
+- **Plugin hook resilience**:
+  - `ConfigChange` event added to `plugins/hooks/hooks.json` (matcher
+    `user_settings`) so editing `/plugin` re-runs deployment without a
+    session restart.
+  - 600 s timeout set on both `SessionStart` and `ConfigChange` to
+    cover first-time docker pulls or builds.
+  - `setup_docker()` stops a running systemd unit before bringing the
+    container up; `setup_systemd()` does `docker compose down`
+    symmetrically. Cutovers between deploy modes no longer port-conflict.
+  - `SYSLOG_UID` and `SYSLOG_GID` written to the env file in docker
+    mode so the container writes `syslog.db` with host-user ownership;
+    same file remains readable by the systemd binary if you switch
+    modes back.
+- **`max_db_size_mb` default raised from 1024 → 8192** (1 GB → 8 GB)
+  in both `plugin.json` and `plugin-setup.sh` fallback. The 1 GB
+  default was too aggressive for fleets ingesting Docker stdout from
+  multiple hosts.
+
+### Fixed
+
+- **Empty `server_url` no longer breaks MCP client connection** —
+  documented in plugin.json description that an empty value cannot be
+  used (substitution is literal text replacement, not a shell
+  expansion).
 
 ## [0.12.0] - 2026-05-07
 

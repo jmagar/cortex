@@ -1,18 +1,16 @@
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 use tracing::{error, info};
 
 use crate::config::{StorageConfig, SyslogConfig};
 use crate::db::{self, DbPool};
 use crate::ingest;
+use crate::observability::RuntimeObservability;
 
 pub(crate) mod enrichment;
 mod listener;
 mod parser;
 pub(crate) mod writer;
-
-pub(crate) const WRITE_CHANNEL_CAPACITY: usize = ingest::WRITE_CHANNEL_CAPACITY;
 
 pub async fn start_with_storage_state(
     config: SyslogConfig,
@@ -31,33 +29,31 @@ pub async fn start_with_storage_state(
         pool,
         storage_state,
         crate::syslog::enrichment::EnrichmentConfig::default(),
+        Arc::new(RuntimeObservability::default()),
     );
-    start_listeners(config, ingest_tx.sender()).await
+    start_listeners(config, ingest_tx).await
 }
 
-pub async fn start_listeners(
-    config: SyslogConfig,
-    tx: mpsc::Sender<db::LogBatchEntry>,
-) -> Result<()> {
+pub(crate) async fn start_listeners(config: SyslogConfig, ingest: ingest::IngestTx) -> Result<()> {
     let bind_addr = config.bind_addr();
 
-    let udp_tx = tx.clone();
+    let udp_ingest = ingest.clone();
     let udp_bind = bind_addr.clone();
     let max_size = config.max_message_size;
     tokio::spawn(async move {
-        if let Err(e) = listener::udp_listener(&udp_bind, max_size, udp_tx).await {
+        if let Err(e) = listener::udp_listener(&udp_bind, max_size, udp_ingest).await {
             error!(error = %e, "UDP syslog listener failed");
         }
     });
 
-    let tcp_tx = tx.clone();
+    let tcp_ingest = ingest.clone();
     let tcp_bind = bind_addr.clone();
     let max_tcp_connections = config.max_tcp_connections;
     let tcp_idle_timeout_secs = config.tcp_idle_timeout_secs;
     tokio::spawn(async move {
         if let Err(e) = listener::tcp_listener(
             &tcp_bind,
-            tcp_tx,
+            tcp_ingest,
             max_size,
             max_tcp_connections,
             tcp_idle_timeout_secs,
@@ -73,7 +69,7 @@ pub async fn start_listeners(
         max_message_size = config.max_message_size,
         max_tcp_connections = config.max_tcp_connections,
         tcp_idle_timeout_secs = config.tcp_idle_timeout_secs,
-        write_channel_capacity = WRITE_CHANNEL_CAPACITY,
+        write_channel_capacity = config.write_channel_capacity,
         "Syslog listeners started"
     );
 

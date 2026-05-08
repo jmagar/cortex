@@ -37,6 +37,7 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
         },
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
         auth_policy: crate::mcp::AuthPolicy::LoopbackDev,
+        observability: Arc::new(crate::observability::RuntimeObservability::default()),
     };
     (state, pool, dir)
 }
@@ -59,6 +60,7 @@ fn mounted_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
         },
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
         auth_policy: AuthPolicy::Mounted { auth_state: None },
+        observability: Arc::new(crate::observability::RuntimeObservability::default()),
     };
     (state, pool, dir)
 }
@@ -296,6 +298,65 @@ async fn rmcp_correlate_events_rejects_bad_severity_as_invalid_params() {
 }
 
 #[tokio::test]
+async fn rmcp_search_rejects_bad_severity_as_invalid_params() {
+    let (state, _pool, _dir) = test_state();
+    let (status, response) = post_rmcp(
+        rmcp_router(state),
+        jsonrpc_request(
+            6,
+            "tools/call",
+            Some(json!({
+                "name": "syslog",
+                "arguments": {
+                    "action": "search",
+                    "severity": "critical"
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response["error"]["code"], -32602);
+}
+
+#[tokio::test]
+async fn rmcp_numeric_args_reject_wrong_type_values() {
+    for (id, arguments) in [
+        (7, json!({"action": "tail", "n": "10"})),
+        (8, json!({"action": "search", "limit": "5"})),
+        (
+            9,
+            json!({
+                "action": "correlate",
+                "reference_time": "2026-01-01T00:00:00Z",
+                "window_minutes": "5"
+            }),
+        ),
+        (
+            10,
+            json!({
+                "action": "correlate",
+                "reference_time": "2026-01-01T00:00:00Z",
+                "limit": null
+            }),
+        ),
+    ] {
+        let (state, _pool, _dir) = test_state();
+        let (status, response) = post_rmcp(
+            rmcp_router(state),
+            jsonrpc_request(
+                id,
+                "tools/call",
+                Some(json!({"name": "syslog", "arguments": arguments})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["error"]["code"], -32602);
+    }
+}
+
+#[tokio::test]
 async fn rmcp_correlate_events_preserves_truncation_and_host_grouping() {
     let (state, pool, _dir) = test_state();
     db::insert_logs_batch(
@@ -322,7 +383,7 @@ async fn rmcp_correlate_events_preserves_truncation_and_host_grouping() {
     let (status, response) = post_rmcp(
         rmcp_router(state),
         jsonrpc_request(
-            6,
+            11,
             "tools/call",
             Some(json!({
                 "name": "syslog",

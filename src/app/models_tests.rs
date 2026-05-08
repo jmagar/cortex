@@ -26,6 +26,7 @@ fn log_entry_conversion_preserves_network_sender_identity() {
 fn summary_and_host_conversions_preserve_counts() {
     let summary = ErrorSummaryEntry::from(db::ErrorSummaryEntry {
         hostname: "host-a".into(),
+        app_name: None,
         severity: "err".into(),
         count: 7,
     });

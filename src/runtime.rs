@@ -13,6 +13,7 @@ use crate::config::{AuthMode, Config};
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::ingest::IngestTx;
 use crate::mcp::AuthPolicy;
+use crate::observability::RuntimeObservability;
 use crate::otlp::{self, OtlpCounters, OtlpState};
 use crate::syslog::enrichment::EnrichmentConfig;
 use crate::{docker_ingest, mcp, syslog};
@@ -26,6 +27,7 @@ pub struct RuntimeCore {
     ingest: IngestTx,
     otlp_counters: Arc<OtlpCounters>,
     auth_policy: AuthPolicy,
+    observability: Arc<RuntimeObservability>,
 }
 
 pub struct MaintenanceHandles {
@@ -113,12 +115,14 @@ impl RuntimeCore {
             scrub_prompts: config.enrichment.scrub_prompts,
             api_token: config.mcp.api_token.clone(),
         };
+        let observability = Arc::new(RuntimeObservability::default());
         let ingest = crate::ingest::start_writer_from_syslog_config(
             &config.syslog,
             config.storage.clone(),
             Arc::clone(&pool),
             Arc::clone(&storage_state),
             enrichment,
+            Arc::clone(&observability),
         );
 
         let auth_policy = build_auth_policy(&config, is_stdio).await?;
@@ -132,6 +136,7 @@ impl RuntimeCore {
             ingest,
             otlp_counters: Arc::new(OtlpCounters::default()),
             auth_policy,
+            observability,
         })
     }
 
@@ -155,6 +160,7 @@ impl RuntimeCore {
             config: self.config.mcp.clone(),
             otlp_counters: Arc::clone(&self.otlp_counters),
             auth_policy: self.auth_policy.clone(),
+            observability: Arc::clone(&self.observability),
         }
     }
 
@@ -165,7 +171,7 @@ impl RuntimeCore {
     }
 
     pub async fn start_syslog(&self) -> Result<()> {
-        syslog::start_listeners(self.config.syslog.clone(), self.ingest.sender()).await
+        syslog::start_listeners(self.config.syslog.clone(), self.ingest.clone()).await
     }
 
     pub fn spawn_maintenance_tasks(&self) -> MaintenanceHandles {

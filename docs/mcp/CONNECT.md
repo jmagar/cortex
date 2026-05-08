@@ -74,7 +74,9 @@ claude mcp add --transport http \
 
 ## Direct stdio clients
 
-Use `syslog mcp` for local query-only access. It exposes the same seven read-only tools as HTTP, but it does not receive syslog, start `/mcp`, run cleanup jobs, or require `SYSLOG_MCP_TOKEN`.
+Use `syslog mcp` for local query-only access. It exposes the same one read-only
+`syslog` tool with eight actions as HTTP, but it does not receive syslog, start
+`/mcp`, run cleanup jobs, or require `SYSLOG_MCP_TOKEN`.
 
 ```json
 {

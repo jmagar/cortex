@@ -56,6 +56,8 @@ fn test_search_fts() {
         severity: None,
         severity_in: None,
         app_name: None,
+        facility: None,
+        process_id: None,
         from: None,
         to: None,
         limit: None,
@@ -76,6 +78,8 @@ fn test_search_invalid_fts_returns_error() {
         severity: None,
         severity_in: None,
         app_name: None,
+        facility: None,
+        process_id: None,
         from: None,
         to: None,
         limit: None,
@@ -148,7 +152,7 @@ fn test_tail_filter_by_host() {
     ];
     insert_logs_batch(&pool, &entries).unwrap();
 
-    let rows = tail_logs(&pool, Some("host-a"), None, None, 10).unwrap();
+    let rows = tail_logs(&pool, Some("host-a"), None, None, None, 10).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].hostname, "host-a");
 }
@@ -171,6 +175,8 @@ fn test_search_timestamp_range_filtering() {
         severity: None,
         severity_in: None,
         app_name: None,
+        facility: None,
+        process_id: None,
         from: Some("2026-06-01T00:00:00Z".into()),
         to: None,
         limit: None,
@@ -186,6 +192,8 @@ fn test_search_timestamp_range_filtering() {
         severity: None,
         severity_in: None,
         app_name: None,
+        facility: None,
+        process_id: None,
         from: None,
         to: Some("2026-06-30T00:00:00Z".into()),
         limit: None,
@@ -201,6 +209,8 @@ fn test_search_timestamp_range_filtering() {
         severity: None,
         severity_in: None,
         app_name: None,
+        facility: None,
+        process_id: None,
         from: Some("2026-06-01T00:00:00Z".into()),
         to: Some("2026-06-30T00:00:00Z".into()),
         limit: None,
@@ -242,7 +252,7 @@ fn test_error_summary_severity_filter() {
     ];
     insert_logs_batch(&pool, &entries).unwrap();
 
-    let summary = get_error_summary(&pool, None, None).unwrap();
+    let summary = get_error_summary(&pool, None, None, false).unwrap();
     // Only err and warning should appear (not info, debug)
     assert_eq!(summary.len(), 2);
     let severities: Vec<&str> = summary.iter().map(|e| e.severity.as_str()).collect();
@@ -269,6 +279,8 @@ fn test_search_severity_in_filter() {
         severity: None,
         severity_in: Some(vec!["emerg".into(), "err".into(), "warning".into()]),
         app_name: None,
+        facility: None,
+        process_id: None,
         from: None,
         to: None,
         limit: None,
@@ -313,6 +325,8 @@ fn search_logs_ignores_deleted_fts_phantom_rows() {
         severity: None,
         severity_in: None,
         app_name: None,
+        facility: None,
+        process_id: None,
         from: None,
         to: None,
         limit: None,

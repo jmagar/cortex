@@ -24,7 +24,7 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `correlate`, `stats`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `correlate`, `stats`, `status`, or `help`.
 
 ### `syslog search`
 
@@ -192,7 +192,7 @@ Search for related events across multiple hosts within a ±N minute window aroun
 
 ### `syslog stats`
 
-Return database statistics including total logs, total hosts, time range covered, logical and physical DB size, free disk, configured thresholds, and current write-block status.
+Return database statistics including total logs, total hosts, time range covered, logical and physical DB size, free disk, configured thresholds, current write-block status, and runtime ingest observability.
 
 **Parameters:** none
 
@@ -209,11 +209,40 @@ Return database statistics including total logs, total hosts, time range covered
   "free_disk_mb": "14200.00",
   "max_db_size_mb": 1024,
   "min_free_disk_mb": 512,
-  "write_blocked": false
+  "write_blocked": false,
+  "runtime_observability": {
+    "syslog_udp_packets_received": 280000,
+    "syslog_tcp_connections_active": 3,
+    "ingest_entries_enqueued": 284917,
+    "ingest_queue_depth": 0,
+    "ingest_queue_capacity": 10000,
+    "ingest_queue_utilization_pct": "0.00",
+    "writer_batches_flushed": 2850,
+    "writer_logs_written": 284917,
+    "writer_flush_failures": 0,
+    "writer_logs_retained": 0,
+    "writer_logs_discarded": 0,
+    "writer_storage_blocked": false,
+    "last_ingest_at": "2025-01-15T14:30:05.123Z",
+    "last_write_at": "2025-01-15T14:30:05.400Z",
+    "last_error_at": null
+  },
+  "otlp": {
+    "logs_received": 42,
+    "decode_errors": 0
+  }
 }
 ```
 
 `write_blocked: true` means the storage budget is exceeded and new log ingestion is paused. See [Storage budget enforcement](#storage-budget-enforcement).
+
+---
+
+### `syslog status`
+
+Return lightweight runtime status without the heavier DB statistics query. Use this for dashboards and doctor checks that need current queue depth, backpressure, writer failure/drop state, listener counters, and last activity timestamps.
+
+**Parameters:** none
 
 ---
 
@@ -303,10 +332,12 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 | `syslog_host` / `syslog_port` | no | `0.0.0.0` / `1514` | Syslog listener bind (server mode) |
 | `mcp_host` / `mcp_port` | no | `0.0.0.0` / `3100` | MCP HTTP server bind (server mode) |
 | `data_dir` | no | `${CLAUDE_PLUGIN_DATA}` | SQLite directory (persists across plugin updates) |
-| `max_db_size_mb` | no | `1024` | DB size cap; oldest logs deleted when exceeded |
+| `max_db_size_mb` | no | `8192` | DB size cap; oldest logs deleted when exceeded |
 | `retention_days` | no | `90` | `0` = keep forever |
+| `batch_size` | no | `100` | Number of parsed messages per SQLite batch |
+| `write_channel_capacity` | no | `10000` | Internal parsed-message queue capacity before listener backpressure |
 | `docker_ingest_enabled` | no | `false` | Pull container logs from remote `docker-socket-proxy` endpoints |
-| `fleet_hosts` | no | — | SSH aliases of fleet hosts. Used for Docker ingest (when enabled, each becomes `http://<alias>:2375`) and the `/syslog:deploy-dropins` command |
+| `fleet_hosts` | no | — | SSH aliases of fleet hosts. Used for Docker ingest (when enabled, each becomes `http://<alias>:2375`) and the `syslog-deploy-dropins` skill |
 
 **SessionStart hook automation** (in server mode):
 
@@ -315,10 +346,14 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 - Generates and starts the systemd user unit (or runs `docker compose up -d`) and restarts only when config actually changed
 - All idempotent — safe to run on every session
 
-**Bundled commands**:
+**Bundled skills**:
 
-- `/syslog:dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
-- `/syslog:deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
+- `syslog-dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
+- `syslog-deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
+- `syslog-redeploy` — re-run plugin setup after config or plugin changes
+- `syslog-logs` — mode-aware service log tailing from systemd or Docker
+- `syslog-cutover` — switch between systemd and Docker deployment modes with health verification
+- `syslog-version-check` — check whether the running systemd service or Docker container matches the installed binary or local image; add `--pull` in Docker mode to pull first, otherwise Docker checks only the local image cache
 
 The plugin includes the `syslog` binary in `bin/` and is the simplest path. You can still deploy via Docker or build locally if you prefer to run the server outside the plugin.
 
@@ -396,9 +431,12 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 |----------|----------|---------|-------------|
 | `SYSLOG_HOST` | no | `0.0.0.0` | Bind host for UDP + TCP syslog listeners |
 | `SYSLOG_PORT` | no | `1514` | Bind port for UDP + TCP syslog listeners |
-| `SYSLOG_MAX_MESSAGE_SIZE` | no | `8192` | Max message size in bytes (oversized messages are dropped) |
+| `SYSLOG_MAX_MESSAGE_SIZE` | no | `8192` | Max bytes per UDP datagram or newline-delimited TCP frame. Oversized newline-delimited TCP frames are dropped and the connection stays open; oversized unterminated frames are dropped and the connection is closed. |
+| `SYSLOG_MAX_TCP_CONNECTIONS` | no | `1024` | Maximum simultaneous TCP syslog connections |
+| `SYSLOG_TCP_IDLE_TIMEOUT_SECS` | no | `300` | Idle timeout per TCP read before closing inactive connections |
 | `SYSLOG_BATCH_SIZE` | no | `100` | Number of messages per batch write |
 | `SYSLOG_FLUSH_INTERVAL` | no | `500` | Batch flush interval in milliseconds |
+| `SYSLOG_WRITE_CHANNEL_CAPACITY` | no | `10000` | Internal parsed-message queue capacity |
 
 #### Docker socket-proxy ingest
 
@@ -427,6 +465,8 @@ allow_insecure_http = true
 ```
 
 The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to syslog-mcp, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
+
+Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. The expected stored `source_ip` shape is `docker://<host>/<container>/<stream>`.
 
 #### Storage
 
@@ -501,9 +541,23 @@ allow_insecure_http = true
 ```bash
 syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 syslog mcp        # query-only MCP stdio transport
+syslog stats      # query the SQLite DB directly from the CLI
 ```
 
 Both modes use the same config and environment variable loader. `syslog mcp` is for local child-process MCP clients that can read `SYSLOG_MCP_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs.
+
+The direct CLI uses the same shared service layer as the MCP tool, so results and validation match the MCP actions without needing an MCP client:
+
+```bash
+syslog search 'error AND nginx' --hostname proxy --limit 10
+syslog tail -n 20 --app-name kernel
+syslog errors --from 2026-01-01T00:00:00Z
+syslog hosts
+syslog correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
+syslog stats --json
+```
+
+See [docs/CLI.md](docs/CLI.md) for the full direct CLI reference, including flags, JSON output, and how CLI commands map to MCP actions.
 
 ---
 
@@ -648,9 +702,22 @@ When available disk drops below `min_free_disk_mb`, the oldest logs are deleted 
 
 **Write-blocking behavior**
 
-If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (channel capacity 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `syslog stats` reflects the current state.
+If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (`SYSLOG_WRITE_CHANNEL_CAPACITY`, default 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `syslog stats` reflects the current state.
 
 Disable either guard by setting its trigger to `0` (also set the recovery target to `0`).
+
+### Heavy SQLite migrations
+
+Most schema setup runs automatically during startup. Heavy migrations, such as creating a new index on a populated multi-million-row `logs` table, can hold SQLite's write lock for several minutes before syslog listeners and `/health` are available. During that window TCP senders may back up and UDP packets may be dropped by kernel buffers.
+
+Before upgrading a populated database:
+
+1. Take a WAL-safe backup with `scripts/backup.sh` or `sqlite3 /data/syslog.db ".backup /data/syslog-pre-upgrade.db"`.
+2. Schedule a short ingest maintenance window for large databases.
+3. Start the new version and monitor logs for `Migration N: starting ...` and `Migration N: ... created`.
+4. Keep the previous image or binary available until `/health` returns `ok` and `syslog stats` reports sane counts.
+
+See [docs/runbooks/deploy.md](docs/runbooks/deploy.md) for the deploy checklist.
 
 ---
 
@@ -662,10 +729,11 @@ The batch writer improves throughput by collecting parsed syslog messages into b
 |----------|---------|-------------|
 | `SYSLOG_BATCH_SIZE` | `100` | Write when this many messages are queued |
 | `SYSLOG_FLUSH_INTERVAL` | `500` ms | Write every N ms even if batch is not full |
+| `SYSLOG_WRITE_CHANNEL_CAPACITY` | `10000` | Parsed-message queue capacity before listener backpressure |
 
 Batches are written in a single SQLite transaction. If the DB is busy (locked), the writer retries up to 3 times with exponential backoff (25 ms, 100 ms, 250 ms). Batches that fail insertion are retained in memory and retried on the next flush cycle. If a retained batch grows beyond 1,000 entries, it is discarded to prevent unbounded memory growth.
 
-The internal write channel holds up to 10,000 parsed messages. When the channel is full, backpressure is logged and further UDP/TCP receives block until space is available.
+The internal write channel holds up to `SYSLOG_WRITE_CHANNEL_CAPACITY` parsed messages. When the channel is full, backpressure is logged and further UDP/TCP receives block until space is available.
 
 ---
 
@@ -793,6 +861,14 @@ just lint
 just test
 ```
 
+Run the live smoke test against a running server:
+
+```bash
+bash scripts/smoke-test.sh
+```
+
+The smoke test seeds UDP and TCP syslog messages and verifies MCP search/tail results. Docker ingest coverage is handled by the explicit integration path described in the Docker socket-proxy ingest section because it requires an external Docker-compatible log endpoint.
+
 ---
 
 ## Performance
@@ -810,6 +886,7 @@ For higher ingest rates (IoT, high-traffic network devices):
 
 - Increase `SYSLOG_BATCH_SIZE` (e.g. `500`) to reduce transaction overhead
 - Increase `SYSLOG_FLUSH_INTERVAL` (e.g. `1000` ms) to widen batch windows
+- Increase `SYSLOG_WRITE_CHANNEL_CAPACITY` (e.g. `100000`) to absorb bursts
 - Increase `SYSLOG_MCP_POOL_SIZE` (e.g. `8`) for more read concurrency
 - Place the database on an SSD or tmpfs-backed volume
 

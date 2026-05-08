@@ -237,6 +237,7 @@ fn is_validation_error(error: &anyhow::Error) -> bool {
         error.downcast_ref::<ServiceError>(),
         Some(ServiceError::InvalidInput(_))
     ) || error.to_string().contains(" is required")
+        || error.to_string().contains("must be an unsigned integer")
         || error.to_string().contains(" must be <=")
         || error.to_string().contains("unknown syslog action")
 }

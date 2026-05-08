@@ -4,25 +4,41 @@ Complete listing of all plugin components.
 
 ## MCP tools
 
-syslog-mcp uses a flat tool pattern (7 independent tools) rather than the action/subaction router pattern.
+syslog-mcp exposes one read-only MCP tool named `syslog`. The required `action`
+argument selects the operation.
 
-| Tool | Description | Destructive |
+| Action | Description | Destructive |
 | --- | --- | --- |
-| `search_logs` | Full-text search across syslog messages with FTS5 syntax, host/source_ip/severity/app/time filters | no |
-| `tail_logs` | Get N most recent log entries, optionally filtered by host, source_ip, and/or application | no |
-| `get_errors` | Error/warning summary grouped by hostname and severity level with counts | no |
-| `list_hosts` | List all hosts with first/last seen timestamps and total log counts | no |
-| `correlate_events` | Cross-host event correlation within a time window around a reference timestamp | no |
-| `get_stats` | Database statistics: total logs, hosts, time range, DB size, free disk, write-block status | no |
-| `syslog_help` | Returns markdown documentation for all tools | no |
+| `search` | Full-text search across syslog messages with FTS5 syntax, host/source_ip/severity/app/time filters | no |
+| `tail` | Get N most recent log entries, optionally filtered by host, source_ip, and/or application | no |
+| `errors` | Error/warning summary grouped by hostname and severity level with counts | no |
+| `hosts` | List all hosts with first/last seen timestamps and total log counts | no |
+| `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |
+| `stats` | Database statistics: total logs, hosts, time range, DB size, free disk, write-block status | no |
+| `status` | Lightweight runtime status: DB health, queue/backpressure state, listener/writer counters, OTLP counters | no |
+| `help` | Returns markdown documentation for all actions | no |
 
-All tools are read-only. syslog-mcp exposes no destructive operations via MCP.
+All MCP actions are read-only. syslog-mcp exposes no destructive operations via MCP.
+
+## Direct CLI commands
+
+The `syslog` binary also exposes direct local commands backed by the same service
+methods as the MCP actions.
+
+| Command | Matches MCP action | Description |
+| --- | --- | --- |
+| `syslog search` | `search` | Full-text search with filters |
+| `syslog tail` | `tail` | Recent log entries |
+| `syslog errors` | `errors` | Error/warning summary |
+| `syslog hosts` | `hosts` | Known host list |
+| `syslog correlate` | `correlate` | Cross-host event correlation |
+| `syslog stats` | `stats` | Database and storage metrics |
 
 ## MCP resources
 
 | URI | Description | MIME type |
 | --- | --- | --- |
-| -- | No resources exposed | -- |
+| `syslog://schema/mcp-tool` | JSON schema for the `syslog` MCP tool and action-based parameters | `application/json` |
 
 ## Environment variables
 
@@ -110,7 +126,7 @@ All tools are read-only. syslog-mcp exposes no destructive operations via MCP.
 
 | Script | Purpose |
 | --- | --- |
-| `scripts/smoke-test.sh` | Live smoke test -- all 7 MCP tools via mcporter (25 assertions) |
+| `scripts/smoke-test.sh` | Live smoke test -- all 8 MCP actions via mcporter |
 | `scripts/backup.sh` | WAL-safe SQLite backup (checkpoint + `.backup` method) |
 | `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset for dev recovery |
 

@@ -1,0 +1,106 @@
+use super::*;
+
+fn strings(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| value.to_string()).collect()
+}
+
+#[test]
+fn parse_search_collects_query_and_filters() {
+    let parsed = CliCommand::parse(strings(&[
+        "search",
+        "disk",
+        "full",
+        "--hostname",
+        "nas",
+        "--source-ip=10.0.0.5:514",
+        "--severity",
+        "err",
+        "--app-name=kernel",
+        "--from",
+        "2026-01-01T00:00:00Z",
+        "--to=2026-01-02T00:00:00Z",
+        "--limit",
+        "25",
+        "--json",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Search(SearchArgs {
+            query: Some("disk full".into()),
+            hostname: Some("nas".into()),
+            source_ip: Some("10.0.0.5:514".into()),
+            severity: Some("err".into()),
+            app_name: Some("kernel".into()),
+            from: Some("2026-01-01T00:00:00Z".into()),
+            to: Some("2026-01-02T00:00:00Z".into()),
+            limit: Some(25),
+            json: true,
+        })
+    );
+}
+
+#[test]
+fn parse_tail_accepts_positional_count() {
+    let parsed = CliCommand::parse(strings(&["tail", "10", "--hostname", "router"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Tail(TailArgs {
+            n: Some(10),
+            hostname: Some("router".into()),
+            ..Default::default()
+        })
+    );
+}
+
+#[test]
+fn parse_correlate_requires_reference_time() {
+    let err = CliCommand::parse(strings(&["correlate", "--limit", "5"])).unwrap_err();
+
+    assert!(err.to_string().contains("reference-time"));
+}
+
+#[test]
+fn parse_correlate_accepts_reference_time_and_filters() {
+    let parsed = CliCommand::parse(strings(&[
+        "correlate",
+        "--reference-time=2026-01-01T00:00:00Z",
+        "--window-minutes",
+        "15",
+        "--severity-min=warning",
+        "--query",
+        "timeout",
+        "--limit=50",
+        "--json",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Correlate(CorrelateArgs {
+            reference_time: "2026-01-01T00:00:00Z".into(),
+            window_minutes: Some(15),
+            severity_min: Some("warning".into()),
+            query: Some("timeout".into()),
+            limit: Some(50),
+            json: true,
+            ..Default::default()
+        })
+    );
+}
+
+#[test]
+fn parse_unknown_option_errors() {
+    let err = CliCommand::parse(strings(&["stats", "--bad"])).unwrap_err();
+
+    assert!(err.to_string().contains("unknown stats option"));
+}
+
+#[test]
+fn parse_search_help_points_to_top_level_usage() {
+    let err = CliCommand::parse(strings(&["search", "--help"])).unwrap_err();
+
+    assert!(err.to_string().contains("syslog --help"));
+}

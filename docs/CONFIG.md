@@ -66,9 +66,14 @@ such as `https://syslog.example.com`.
 | --- | --- | --- | --- | --- |
 | `SYSLOG_HOST` | no | `0.0.0.0` | no | Listen host for UDP+TCP syslog (no port -- use separate setting) |
 | `SYSLOG_PORT` | no | `1514` | no | Listen port shared by UDP and TCP syslog listeners |
-| `SYSLOG_MAX_MESSAGE_SIZE` | no | `8192` | no | Max message size in bytes per syslog frame |
+| `SYSLOG_MAX_MESSAGE_SIZE` | no | `8192` | no | Max bytes per UDP datagram or newline-delimited TCP frame. Oversized frames are dropped. |
+| `SYSLOG_MAX_TCP_CONNECTIONS` | no | `1024` | no | Maximum simultaneous TCP syslog connections |
+| `SYSLOG_TCP_IDLE_TIMEOUT_SECS` | no | `300` | no | Idle timeout per TCP read before closing inactive connections |
 | `SYSLOG_BATCH_SIZE` | no | `100` | no | Entries per batch flush to SQLite |
 | `SYSLOG_FLUSH_INTERVAL` | no | `500` | no | Batch flush interval in milliseconds |
+| `SYSLOG_WRITE_CHANNEL_CAPACITY` | no | `10000` | no | Internal parsed-message queue capacity |
+
+TCP forwarders can keep a connection open and send multiple newline-delimited syslog frames. The size limit applies to each frame, not to the full TCP connection lifetime. An oversized newline-delimited frame is dropped and later bounded frames on the same connection can still be ingested. An oversized unterminated frame is dropped and the connection is closed because the listener cannot safely find the next frame boundary.
 
 ### Docker socket-proxy ingest (`SYSLOG_DOCKER_*`)
 
@@ -100,6 +105,8 @@ POST=0
 ```
 
 `CONTAINERS=1` exposes the broader read-only Docker container API to every client that can reach docker-socket-proxy. Bind the proxy on a trusted private network, firewall it so only syslog-mcp can connect, or put it behind authenticated TLS. Hosts using plain `http://` must set `allow_insecure_http = true` in the hosts file; otherwise config validation rejects them.
+
+Docker ingest is not included in the default smoke test because it requires a live docker-socket-proxy-compatible endpoint. For integration coverage, run a disposable docker-socket-proxy or mocked Docker HTTP fixture, set `SYSLOG_DOCKER_INGEST_ENABLED=true`, emit a unique container stdout/stderr line, and verify it with `search` or `tail`. Docker-ingested rows identify their source as `docker://<host>/<container>/<stream>`.
 
 ### MCP server (`SYSLOG_MCP_*`)
 
@@ -167,6 +174,20 @@ The storage budget is a two-threshold system with hysteresis to prevent oscillat
 4. **Enforcement interval**: Checked every `cleanup_interval_secs` seconds (default 60).
 
 Set both `max_db_size_mb` and `min_free_disk_mb` to 0 to disable all storage enforcement.
+
+## SQLite migration upgrades
+
+Startup creates missing schema objects automatically. Small migrations are expected to complete quickly, but heavyweight migrations on a populated database can hold SQLite's write lock before syslog listeners and `/health` are ready. The server logs an operator-visible `Migration N: starting ...` message before such work and a completion message with elapsed time.
+
+For populated databases, treat heavy migrations as a planned upgrade step:
+
+1. Stop or quiet high-volume senders if packet loss is unacceptable.
+2. Take a WAL-safe backup with `scripts/backup.sh` or `sqlite3 /data/syslog.db ".backup /data/syslog-pre-upgrade.db"`.
+3. Start the upgraded container or binary and watch `docker compose logs -f syslog-mcp` or the relevant service log for migration start/completion lines.
+4. Wait for `curl -sf http://localhost:3100/health` to succeed.
+5. Run `syslog stats --json` or `mcporter call ... action=stats` and confirm `total_logs`, storage metrics, and `write_blocked` match expectations.
+
+If a migration must be abandoned, stop the new process before changing files, restore the WAL-safe backup, and restart the previous image or binary. See [runbooks/deploy.md](runbooks/deploy.md) for the full deploy checklist.
 
 ## Validation rules
 

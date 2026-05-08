@@ -180,6 +180,8 @@ The ingest loop follows existing containers, listens for container start events,
 
 Plain `http://` docker-socket-proxy URLs require `allow_insecure_http = true`. Use that only on trusted private networks, firewall the proxy so only syslog-mcp can connect, or put the proxy behind authenticated TLS. `CONTAINERS=1` exposes Docker's broader read-only container API to anything that can reach the proxy, not just the log endpoints syslog-mcp calls.
 
+For Docker ingest integration testing, keep the default smoke test focused on UDP/TCP syslog and run Docker ingest as a separate fixture-backed check. Start syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP endpoint, emit a unique marker from a short-lived container, then verify it with `search` or `tail`. Docker-ingested rows should report `source_ip` as `docker://<host>/<container>/<stream>`.
+
 ## Troubleshooting
 
 ### "Connection refused" on health check

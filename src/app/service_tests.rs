@@ -71,8 +71,8 @@ async fn correlate_events_normalizes_window_groups_and_truncates() {
         .await
         .unwrap();
 
-    assert_eq!(response.window_from, "2025-12-31T23:58:00+00:00");
-    assert_eq!(response.window_to, "2026-01-01T00:02:00+00:00");
+    assert_eq!(response.window_from, "2025-12-31T23:58:00.000Z");
+    assert_eq!(response.window_to, "2026-01-01T00:02:00.000Z");
     assert!(response.truncated);
     assert_eq!(response.total_events, 1);
     assert_eq!(response.hosts_count, 1);
@@ -111,6 +111,21 @@ async fn source_ip_filter_uses_network_sender_identity() {
         .unwrap();
     assert_eq!(response.count, 1);
     assert_eq!(response.logs[0].message, "from two");
+}
+
+#[tokio::test]
+async fn search_logs_rejects_invalid_severity() {
+    let (service, _pool, _dir) = test_service();
+
+    let err = service
+        .search_logs(SearchLogsRequest {
+            severity: Some("critical".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("Invalid severity 'critical'"));
+    assert!(err.to_string().contains("emerg, alert, crit"));
 }
 
 #[tokio::test]

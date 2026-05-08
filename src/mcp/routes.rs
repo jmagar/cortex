@@ -139,6 +139,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     let started = Instant::now();
     let logs_received = state.otlp_counters.logs_received.load(Ordering::Relaxed);
     let decode_errors = state.otlp_counters.decode_errors.load(Ordering::Relaxed);
+    let observability = state.observability.snapshot();
     match state.service.health_check().await {
         Ok(()) => {
             tracing::debug!(
@@ -149,6 +150,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
                 "status": "ok",
                 "otlp_logs_received": logs_received,
                 "otlp_decode_errors": decode_errors,
+                "ingest": observability,
             }))
             .into_response()
         }
@@ -164,6 +166,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
                     "status": "error",
                     "otlp_logs_received": logs_received,
                     "otlp_decode_errors": decode_errors,
+                    "ingest": observability,
                 })),
             )
                 .into_response()

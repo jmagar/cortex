@@ -2,9 +2,13 @@
 # =============================================================================
 # test-tools.sh — Integration smoke-test for syslog-mcp MCP server tools
 #
-# Exercises broad non-destructive coverage of the action-based syslog MCP tool:
+# Exercises broad non-destructive checks for the action-based syslog MCP tool.
+# Action inventory reference (not every action is exercised below):
 #   syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate,
-#   syslog stats, syslog help
+#   syslog stats, syslog status, syslog apps, syslog source_ips,
+#   syslog timeline, syslog patterns, syslog context, syslog get,
+#   syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
+#   syslog anomalies, syslog compare, syslog help
 #
 # The server runs as a Docker container over HTTP. No stdio launch needed.
 # Credentials are sourced from ~/.claude-homelab/.env:
@@ -451,6 +455,10 @@ except Exception:
 suite_meta() {
   printf '\n%b== meta (help + health) ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
   run_test "syslog help: returns documentation"    syslog help '{}'
+  run_test "syslog status: returns lightweight status" syslog status '{}' "status"
+  run_test "syslog status: db_ok field present"        syslog status '{}' "db_ok"
+  run_test "syslog status: runtime observability"      syslog status '{}' "runtime_observability"
+  run_test "syslog status: otlp counters present"      syslog status '{}' "otlp"
   run_test "syslog stats: returns database statistics" syslog stats   '{}' "total_logs"
   run_test "syslog stats: write_blocked field present" syslog stats   '{}' "write_blocked"
   run_test "syslog stats: free_disk_mb field present"  syslog stats   '{}' "free_disk_mb"

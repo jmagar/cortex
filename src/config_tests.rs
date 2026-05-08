@@ -72,6 +72,11 @@ fn defaults_are_applied_without_env_vars() {
     for key in [
         "SYSLOG_HOST",
         "SYSLOG_PORT",
+        "SYSLOG_MAX_MESSAGE_SIZE",
+        "SYSLOG_MAX_TCP_CONNECTIONS",
+        "SYSLOG_TCP_IDLE_TIMEOUT_SECS",
+        "SYSLOG_BATCH_SIZE",
+        "SYSLOG_FLUSH_INTERVAL",
         "SYSLOG_MCP_HOST",
         "SYSLOG_MCP_PORT",
         "SYSLOG_MCP_ALLOWED_HOSTS",
@@ -89,6 +94,7 @@ fn defaults_are_applied_without_env_vars() {
         "SYSLOG_MCP_CLEANUP_CHUNK_SIZE",
         "SYSLOG_API_ENABLED",
         "SYSLOG_API_TOKEN",
+        "SYSLOG_WRITE_CHANNEL_CAPACITY",
         "SYSLOG_DOCKER_INGEST_ENABLED",
         "SYSLOG_DOCKER_HOSTS_FILE",
         "SYSLOG_DOCKER_RECONNECT_INITIAL_MS",
@@ -109,6 +115,7 @@ fn defaults_are_applied_without_env_vars() {
     assert_eq!(cfg.syslog.host, "0.0.0.0");
     assert_eq!(cfg.syslog.port, 1514);
     assert_eq!(cfg.syslog.bind_addr(), "0.0.0.0:1514");
+    assert_eq!(cfg.syslog.write_channel_capacity, 10_000);
     assert_eq!(cfg.mcp.host, "127.0.0.1");
     assert_eq!(cfg.mcp.port, 3100);
     assert_eq!(cfg.mcp.bind_addr(), "127.0.0.1:3100");
@@ -130,6 +137,71 @@ fn defaults_are_applied_without_env_vars() {
     assert!(cfg.docker_ingest.hosts.is_empty());
     assert_eq!(cfg.docker_ingest.reconnect_initial_ms, 1_000);
     assert_eq!(cfg.docker_ingest.reconnect_max_ms, 30_000);
+}
+
+#[test]
+#[serial]
+fn rejects_invalid_syslog_ingest_env_settings() {
+    for (key, expected) in [
+        ("SYSLOG_MAX_MESSAGE_SIZE", "max_message_size"),
+        ("SYSLOG_MAX_TCP_CONNECTIONS", "max_tcp_connections"),
+        ("SYSLOG_TCP_IDLE_TIMEOUT_SECS", "tcp_idle_timeout_secs"),
+        ("SYSLOG_BATCH_SIZE", "batch_size"),
+        ("SYSLOG_FLUSH_INTERVAL", "flush_interval"),
+        ("SYSLOG_WRITE_CHANNEL_CAPACITY", "write_channel_capacity"),
+    ] {
+        std::env::set_var(key, "0");
+        let result = Config::load();
+        std::env::remove_var(key);
+
+        let err = result.expect_err(&format!("Config::load should reject {key}=0"));
+        assert!(
+            err.to_string().contains(expected),
+            "expected {key}=0 error to mention {expected}, got: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_invalid_syslog_ingest_toml_settings() {
+    for (toml, expected) in [
+        ("[syslog]\nmax_message_size = 0\n", "max_message_size"),
+        ("[syslog]\nmax_tcp_connections = 0\n", "max_tcp_connections"),
+        (
+            "[syslog]\ntcp_idle_timeout_secs = 0\n",
+            "tcp_idle_timeout_secs",
+        ),
+        ("[syslog]\nbatch_size = 0\n", "batch_size"),
+        ("[syslog]\nflush_interval = 0\n", "flush_interval"),
+        (
+            "[syslog]\nwrite_channel_capacity = 0\n",
+            "write_channel_capacity",
+        ),
+    ] {
+        let mut config: Config = toml::from_str(toml).unwrap();
+        let err = validate_syslog_config(&config.syslog)
+            .expect_err(&format!("validate_syslog_config should reject {toml}"));
+        assert!(
+            err.to_string().contains(expected),
+            "expected TOML error to mention {expected}, got: {err}"
+        );
+
+        config.syslog = SyslogConfig::default();
+        validate_syslog_config(&config.syslog).unwrap();
+    }
+}
+
+#[test]
+#[serial]
+fn env_var_overrides_write_channel_capacity() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_WRITE_CHANNEL_CAPACITY", "100000");
+    let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
+    std::env::remove_var("SYSLOG_WRITE_CHANNEL_CAPACITY");
+
+    let cfg = result.expect("Config::load() should parse write channel capacity");
+    assert_eq!(cfg.syslog.write_channel_capacity, 100_000);
 }
 
 #[test]

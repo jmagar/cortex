@@ -65,6 +65,8 @@ struct SearchQuery {
     source_ip: Option<String>,
     severity: Option<String>,
     app_name: Option<String>,
+    facility: Option<String>,
+    process_id: Option<String>,
     from: Option<String>,
     to: Option<String>,
     limit: Option<u32>,
@@ -83,6 +85,8 @@ async fn search(
                 source_ip: query.source_ip,
                 severity: query.severity,
                 app_name: query.app_name,
+                facility: query.facility,
+                process_id: query.process_id,
                 from: query.from,
                 to: query.to,
                 limit: query.limit,
@@ -96,6 +100,7 @@ struct TailQuery {
     hostname: Option<String>,
     source_ip: Option<String>,
     app_name: Option<String>,
+    severity_min: Option<String>,
     n: Option<u32>,
 }
 
@@ -107,6 +112,7 @@ async fn tail(State(state): State<ApiState>, Query(query): Query<TailQuery>) -> 
                 hostname: query.hostname,
                 source_ip: query.source_ip,
                 app_name: query.app_name,
+                severity_min: query.severity_min,
                 n: query.n,
             })
             .await,
@@ -117,6 +123,7 @@ async fn tail(State(state): State<ApiState>, Query(query): Query<TailQuery>) -> 
 struct ErrorQuery {
     from: Option<String>,
     to: Option<String>,
+    group_by: Option<String>,
 }
 
 async fn errors(
@@ -129,6 +136,7 @@ async fn errors(
             .get_errors(GetErrorsRequest {
                 from: query.from,
                 to: query.to,
+                group_by: query.group_by,
             })
             .await,
     )

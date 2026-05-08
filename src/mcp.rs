@@ -4,6 +4,7 @@ use lab_auth::AuthLayer;
 
 use crate::app::SyslogService;
 use crate::config::McpConfig;
+use crate::observability::RuntimeObservability;
 use crate::otlp::OtlpCounters;
 
 mod rmcp_server;
@@ -76,6 +77,7 @@ pub struct AppState {
     /// Authentication policy. Construction MUST name a variant — there is no
     /// implicit default. See [`AuthPolicy`].
     pub auth_policy: AuthPolicy,
+    pub observability: Arc<RuntimeObservability>,
 }
 
 /// Build an [`AuthLayer`] from an [`AuthPolicy`], or return `None` for

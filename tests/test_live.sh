@@ -17,6 +17,13 @@
 #   SYSLOG_MCP_TOKEN       Bearer token for auth (optional — server may run without it)
 #   PORT                   Override server port (default: 3100)
 #
+# Action inventory reference (not every action is exercised by this live test):
+#   syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate,
+#   syslog stats, syslog status, syslog apps, syslog source_ips,
+#   syslog timeline, syslog patterns, syslog context, syslog get,
+#   syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
+#   syslog anomalies, syslog compare, syslog help
+#
 # Exit codes:
 #   0 — all tests passed (SKIPs do not count as failures)
 #   1 — one or more tests failed
@@ -408,6 +415,16 @@ phase_tools() {
   assert_jq "syslog help — help field present"          "${help_result}" '.help'
   assert_jq "syslog help — help text is non-empty"      "${help_result}" '.help | length > 0'
   assert_jq "syslog help — help text contains 'syslog'" "${help_result}" '.help | ascii_downcase | contains("syslog")'
+
+  # --- syslog status ---
+  section "  syslog status"
+  local status_result
+  status_result="$(call_tool syslog '{"action":"status"}')" || status_result=""
+
+  assert_jq "syslog status — status is ok"                    "${status_result}" '.status' "ok"
+  assert_jq "syslog status — db_ok field present"             "${status_result}" '.db_ok != null'
+  assert_jq "syslog status — runtime_observability present"   "${status_result}" '.runtime_observability'
+  assert_jq "syslog status — otlp counters present"           "${status_result}" '.otlp'
 
   # --- syslog stats ---
   section "  syslog stats"
