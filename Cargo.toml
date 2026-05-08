@@ -1,6 +1,6 @@
 [package]
 name = "syslog-mcp"
-version = "0.17.0"
+version = "0.17.1"
 edition = "2021"
 rust-version = "1.86"
 description = "Syslog receiver + MCP server for homelab log intelligence"
@@ -78,6 +78,7 @@ prost = "0.14"
 test-support = []
 
 [dev-dependencies]
+syslog-mcp = { path = ".", features = ["test-support"] }
 tempfile = "3"
 serial_test = "3"
 tower = { version = "0.5", features = ["util"] }
