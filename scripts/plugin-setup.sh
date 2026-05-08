@@ -156,6 +156,49 @@ EOF
 setup_docker() {
   mkdir -p "${COMPOSE_DIR}"
 
+  # ── Pre-flight checks ─────────────────────────────────────────────────────
+
+  # 1. Docker daemon must be reachable before we attempt anything else.
+  if ! docker info >/dev/null 2>&1; then
+    echo "ERROR: docker daemon is not reachable — is dockerd running?" >&2
+    return 1
+  fi
+
+  # 2. Port conflict check — only when the container is not already running
+  #    (if it is running, it owns the ports and force-recreate will handle it).
+  local container_running=false
+  if [[ -f "${COMPOSE_FILE}" ]] && \
+     docker compose -f "${COMPOSE_FILE}" ps --quiet syslog-mcp 2>/dev/null | grep -q .; then
+    container_running=true
+  fi
+  if [[ "${container_running}" == "false" ]]; then
+    for port_proto in "1514/udp" "1514/tcp" "3100/tcp"; do
+      local port="${port_proto%%/*}" proto="${port_proto##*/}"
+      if ss -"${proto:0:1}"lnp "sport = :${port}" 2>/dev/null | awk 'NR>1 && NF>0' | grep -q .; then
+        echo "ERROR: port ${port}/${proto} is already in use — cannot start syslog-mcp" >&2
+        return 1
+      fi
+    done
+  fi
+
+  # 3. Data dir must be writable by the container UID.
+  mkdir -p "${DATA_DIR}"
+  if ! touch "${DATA_DIR}/.write_test" 2>/dev/null; then
+    echo "ERROR: data dir ${DATA_DIR} is not writable by UID $(id -u)" >&2
+    return 1
+  fi
+  rm -f "${DATA_DIR}/.write_test"
+
+  # 4. Warn if the data volume is low on disk (server has its own guardrail but
+  #    can't help if it can't open the DB at startup).
+  local free_mb
+  free_mb="$(df -k "${DATA_DIR}" | awk 'NR==2{printf "%d", $4/1024}')"
+  if (( free_mb < 512 )); then
+    echo "WARNING: only ${free_mb}MB free on ${DATA_DIR} — server may fail to start or write logs" >&2
+  fi
+
+  # ── Systemd cleanup ───────────────────────────────────────────────────────
+
   # Fully remove the systemd unit so it can't start on boot — docker compose
   # handles restarts via restart: unless-stopped; systemd is not involved.
   if systemctl --user list-unit-files syslog-mcp.service >/dev/null 2>&1; then
@@ -172,16 +215,23 @@ setup_docker() {
     fi
   fi
 
-  # Refresh compose file if plugin updated
+  # ── Compose setup ─────────────────────────────────────────────────────────
+
+  # Refresh compose file if plugin updated.
   if ! diff -q "${CLAUDE_PLUGIN_ROOT}/docker-compose.yml" "${COMPOSE_FILE}" >/dev/null 2>&1; then
     cp "${CLAUDE_PLUGIN_ROOT}/docker-compose.yml" "${COMPOSE_FILE}"
   fi
 
   write_env || true
-  # Docker compose reads .env from its working directory
+  # Docker compose reads .env from its working directory.
   cp "${ENV_FILE}" "${COMPOSE_DIR}/.env"
 
   cd "${COMPOSE_DIR}"
+
+  # 5. Validate compose config before touching the running container.
+  if ! docker compose config --quiet 2>/dev/null; then
+    echo "WARNING: docker compose config validation failed — proceeding anyway" >&2
+  fi
 
   # Ensure the external docker network exists — compose will fail without it.
   # Honour the DOCKER_NETWORK env var (same default the compose file uses).
