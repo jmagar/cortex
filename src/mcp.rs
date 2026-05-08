@@ -91,6 +91,15 @@ pub struct AppState {
 /// `AuthLayer` MUST NOT add any DB write path. JWT validation is stateless
 /// RS256 verify; static token is constant-time compare. If audit logging is
 /// ever needed, push to an async background channel.
+///
+/// # Static token scopes (bearer-only)
+/// When `auth_state` is `None` (bearer-only mode), `AuthLayer::new()` starts
+/// with `static_token_scopes: Vec::new()` and `with_auth_state(None)` does
+/// not set scopes (it only reads scopes from a `Some(AuthState)`). Without an
+/// explicit call to `with_static_token_scopes`, a static-bearer request would
+/// produce an `AuthContext` with no scopes and fail every scope check.
+/// We therefore call `with_static_token_scopes` unconditionally so that the
+/// bearer-only path grants the same scopes as the OAuth path.
 pub fn build_auth_layer(
     policy: &AuthPolicy,
     static_token: Option<Arc<str>>,
@@ -102,6 +111,11 @@ pub fn build_auth_layer(
             AuthLayer::new()
                 .with_static_token(static_token)
                 .with_auth_state(auth_state.clone())
+                // When auth_state is None (bearer-only), with_auth_state does not
+                // populate static_token_scopes (it only copies from Some(AuthState)).
+                // Explicitly set here so static bearer tokens receive full scopes
+                // in both bearer-only and OAuth modes.
+                .with_static_token_scopes(vec!["syslog:read".into(), "syslog:admin".into()])
                 .with_resource_url(resource_url)
                 .with_allow_session_cookie(false),
         ),

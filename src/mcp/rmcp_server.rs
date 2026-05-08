@@ -330,8 +330,15 @@ fn check_scope(auth: &AuthContext, required_scope: &str, action: &str) -> Result
 /// Returns `None` for informational actions that require AuthContext (when
 /// Mounted) but no specific scope — e.g. `help`.
 /// Returns `Some(scope)` for actions that require an explicit scope grant.
-/// Unknown actions default to `syslog:read` so that future actions added
-/// without a mapping entry are denied rather than accidentally permitted.
+///
+/// Unknown actions return `Some("syslog:__deny__")` — a sentinel scope that
+/// is never granted to any caller, so unmapped actions are unconditionally
+/// rejected. This is fail-closed: a future action added to the dispatcher
+/// but not added here will be denied, not silently permitted with read access.
+///
+/// Note: `None` does NOT deny — it bypasses the scope check and relies on
+/// `execute_tool` to reject invalid actions. `Some("syslog:__deny__")` is
+/// the correct mechanism to guarantee rejection at the auth layer.
 fn required_scope_for(action: &str) -> Option<&'static str> {
     match action {
         // Informational — AuthContext required when Mounted, but no scope gate.
@@ -339,8 +346,9 @@ fn required_scope_for(action: &str) -> Option<&'static str> {
         // All current read actions require syslog:read.
         "search" | "tail" | "errors" | "hosts" | "correlate" | "stats" => Some("syslog:read"),
         // Future write/admin actions would map to syslog:admin here.
-        // Default: unknown actions fall through to syslog:read (fail-conservative).
-        _ => Some("syslog:read"),
+        // Default: unknown actions use an ungrantable sentinel scope so they
+        // are denied at the auth layer rather than falling through to dispatch.
+        _ => Some("syslog:__deny__"),
     }
 }
 
