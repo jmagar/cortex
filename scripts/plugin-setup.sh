@@ -52,6 +52,52 @@ mcp_host_is_loopback() {
   esac
 }
 
+systemd_unit_exists() {
+  systemctl --user list-unit-files "$1" >/dev/null 2>&1 || [[ -f "${HOME}/.config/systemd/user/$1" ]]
+}
+
+stop_disable_remove_systemd_unit() {
+  local unit="$1"
+  local unit_path="${HOME}/.config/systemd/user/${unit}"
+
+  if ! systemd_unit_exists "${unit}"; then
+    return 0
+  fi
+
+  if systemctl --user is-active --quiet "${unit}" 2>/dev/null; then
+    echo "hive-mcp: stopping existing ${unit} before cutover"
+    systemctl --user stop "${unit}" || true
+  fi
+  if systemctl --user is-enabled --quiet "${unit}" 2>/dev/null; then
+    systemctl --user disable "${unit}" >/dev/null 2>&1 || true
+  fi
+  if [[ -f "${unit_path}" ]]; then
+    rm -f "${unit_path}"
+    systemctl --user daemon-reload
+  fi
+}
+
+legacy_compose_file() {
+  local path="${COMPOSE_FILE}"
+  [[ -f "${path}" ]] && printf '%s\n' "${path}"
+}
+
+stop_compose_service_if_running() {
+  local service="$1"
+  local file
+  file="$(legacy_compose_file)"
+  [[ -n "${file}" ]] || return 0
+  if docker compose -f "${file}" ps --quiet "${service}" 2>/dev/null | grep -q .; then
+    echo "hive-mcp: stopping existing docker compose service ${service} before cutover"
+    (cd "${COMPOSE_DIR}" && docker compose down)
+  fi
+}
+
+docker_container_running() {
+  local name="$1"
+  docker ps --filter "name=^/${name}$" --quiet 2>/dev/null | grep -q .
+}
+
 # Seed the token from the existing env file when the plugin option isn't set,
 # so /syslog:redeploy doesn't fail just because the env var wasn't injected.
 NO_AUTH="${CLAUDE_PLUGIN_OPTION_NO_AUTH:-$(existing_env_value NO_AUTH)}"
@@ -322,6 +368,15 @@ setup_systemd() {
   if systemctl --user is-active --quiet hive-mcp.service 2>/dev/null; then
     service_running=true
   fi
+
+  stop_disable_remove_systemd_unit "syslog-mcp.service"
+  if command -v docker >/dev/null 2>&1; then
+    stop_compose_service_if_running "syslog-mcp"
+    if docker_container_running "syslog-mcp"; then
+      echo "hive-mcp: removing existing syslog-mcp container before systemd cutover"
+      docker rm -f syslog-mcp >/dev/null
+    fi
+  fi
   if [[ "${service_running}" == "false" ]]; then
     for port_proto in "${SYSLOG_PORT}/udp" "${SYSLOG_PORT}/tcp" "${MCP_PORT}/tcp"; do
       local port="${port_proto%%/*}" proto="${port_proto##*/}"
@@ -352,9 +407,15 @@ setup_systemd() {
   # If a previous run deployed via docker, stop the container first so the
   # systemd binary can bind the same ports. Idempotent.
   if [[ -f "${COMPOSE_FILE}" ]] && command -v docker >/dev/null 2>&1; then
-    if (cd "${COMPOSE_DIR}" && docker compose ps --quiet hive-mcp 2>/dev/null | grep -q .); then
-      echo "hive-mcp: stopping existing docker container before systemd cutover"
-      (cd "${COMPOSE_DIR}" && docker compose down)
+    stop_compose_service_if_running "hive-mcp"
+    stop_compose_service_if_running "syslog-mcp"
+    if docker_container_running "hive-mcp"; then
+      echo "hive-mcp: removing existing hive-mcp container before systemd cutover"
+      docker rm -f hive-mcp >/dev/null
+    fi
+    if docker_container_running "syslog-mcp"; then
+      echo "hive-mcp: removing existing syslog-mcp container before systemd cutover"
+      docker rm -f syslog-mcp >/dev/null
     fi
   fi
 
@@ -365,7 +426,7 @@ Description=hive-mcp server
 After=network.target
 
 [Service]
-ExecStart=/bin/hive serve mcp
+ExecStart=${CLAUDE_PLUGIN_ROOT}/bin/hive serve mcp
 EnvironmentFile=${ENV_FILE}
 Restart=on-failure
 RestartSec=5
@@ -404,6 +465,14 @@ setup_docker() {
     return 1
   fi
 
+  stop_disable_remove_systemd_unit "hive-mcp.service"
+  stop_disable_remove_systemd_unit "syslog-mcp.service"
+  stop_compose_service_if_running "syslog-mcp"
+  if docker_container_running "syslog-mcp"; then
+    echo "hive-mcp: removing existing syslog-mcp container before docker cutover"
+    docker rm -f syslog-mcp >/dev/null
+  fi
+
   # 2. Port conflict check — only when the container is not already running
   #    (if it is running, it owns the ports and force-recreate will handle it).
   local container_running=false
@@ -411,7 +480,13 @@ setup_docker() {
   if [[ -f "${COMPOSE_FILE}" ]] && \
      docker compose -f "${COMPOSE_FILE}" ps --quiet hive-mcp 2>/dev/null | grep -q .; then
     container_running=true
-  elif docker ps --filter 'name=^/hive-mcp$' --quiet 2>/dev/null | grep -q .; then
+  elif [[ -f "${COMPOSE_FILE}" ]] && \
+     docker compose -f "${COMPOSE_FILE}" ps --quiet syslog-mcp 2>/dev/null | grep -q .; then
+    container_running=true
+  elif docker_container_running "hive-mcp"; then
+    container_running=true
+    external_named_container=true
+  elif docker_container_running "syslog-mcp"; then
     container_running=true
     external_named_container=true
   fi
@@ -445,19 +520,7 @@ setup_docker() {
 
   # Fully remove the systemd unit so it can't start on boot — docker compose
   # handles restarts via restart: unless-stopped; systemd is not involved.
-  if systemctl --user list-unit-files hive-mcp.service >/dev/null 2>&1; then
-    if systemctl --user is-active --quiet hive-mcp.service; then
-      echo "hive-mcp: stopping existing systemd unit before docker cutover"
-      systemctl --user stop hive-mcp.service
-    fi
-    if systemctl --user is-enabled --quiet hive-mcp.service 2>/dev/null; then
-      systemctl --user disable hive-mcp.service >/dev/null 2>&1 || true
-    fi
-    if [[ -f "${UNIT_FILE}" ]]; then
-      rm -f "${UNIT_FILE}"
-      systemctl --user daemon-reload
-    fi
-  fi
+  stop_disable_remove_systemd_unit "hive-mcp.service"
 
   # ── Compose setup ─────────────────────────────────────────────────────────
 
@@ -493,8 +556,14 @@ setup_docker() {
   fi
 
   if [[ "${external_named_container}" == "true" ]]; then
-    echo "hive-mcp: removing existing container before docker compose cutover"
-    docker rm -f hive-mcp >/dev/null
+    if docker_container_running "hive-mcp"; then
+      echo "hive-mcp: removing existing hive-mcp container before docker compose cutover"
+      docker rm -f hive-mcp >/dev/null
+    fi
+    if docker_container_running "syslog-mcp"; then
+      echo "hive-mcp: removing existing syslog-mcp container before docker compose cutover"
+      docker rm -f syslog-mcp >/dev/null
+    fi
   fi
 
   if docker compose ps --quiet hive-mcp 2>/dev/null | grep -q .; then
@@ -519,6 +588,9 @@ link_binary() {
   # changes on plugin update, so we re-link every SessionStart.
   mkdir -p "${HOME}/.local/bin"
   ln -sf "${CLAUDE_PLUGIN_ROOT}/bin/hive" "${HOME}/.local/bin/hive"
+  if [[ -x "${CLAUDE_PLUGIN_ROOT}/bin/syslog" ]]; then
+    ln -sf "${CLAUDE_PLUGIN_ROOT}/bin/syslog" "${HOME}/.local/bin/syslog"
+  fi
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────

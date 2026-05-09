@@ -57,6 +57,7 @@ for file in "${VERSION_FILES[@]}"; do
     [ -f "$file" ] || { echo "  skip (not found): $file"; continue; }
     sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW}\"/" "$file"
     sed -i "s/^version = \"${CURRENT}\"/version = \"${NEW}\"/" "$file"
+    sed -i "s/:${CURRENT}\"/:${NEW}\"/" "$file"
     echo "  updated: ${file#"${REPO_ROOT}/"}"
 done
 

@@ -43,6 +43,24 @@ fi
 if [ -f "server.json" ]; then
   v=$(python3 -c "import json; print(json.load(open('server.json')).get('version',''))" 2>/dev/null)
   [ -n "$v" ] && versions+=("server.json=$v") && files_checked+=("server.json")
+  pkg_versions=$(python3 - <<'PY' 2>/dev/null
+import json
+data = json.load(open("server.json"))
+for package in data.get("packages", []):
+    version = package.get("version", "")
+    if version:
+        print(f"server.json package={version}")
+    identifier = package.get("identifier", "")
+    if ":" in identifier:
+        tag = identifier.rsplit(":", 1)[1]
+        if tag:
+            print(f"server.json package identifier tag={tag}")
+PY
+)
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    versions+=("$entry")
+  done <<< "$pkg_versions"
 fi
 
 # Need at least one version source

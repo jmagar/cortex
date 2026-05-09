@@ -10,7 +10,10 @@ COPY Cargo.toml Cargo.lock ./
 RUN --mount=type=cache,id=hive-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=hive-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=hive-cargo-target,target=/app/target,sharing=locked \
-    mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release --locked && rm -rf src
+    mkdir -p src/bin && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "fn main() {}" > src/bin/syslog.rs && \
+    cargo build --release --locked && rm -rf src
 
 # Build real binary
 COPY src/ src/

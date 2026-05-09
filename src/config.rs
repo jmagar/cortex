@@ -867,9 +867,14 @@ fn env_override_bool_alias(primary: &str, legacy: &str, target: &mut bool) -> an
 
 fn env_alias_value<'a>(primary: &'a str, legacy: &'a str) -> Option<(&'a str, String)> {
     if let Ok(value) = std::env::var(primary) {
-        return Some((primary, value));
+        if !value.is_empty() {
+            return Some((primary, value));
+        }
     }
-    std::env::var(legacy).ok().map(|value| (legacy, value))
+    std::env::var(legacy)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(|value| (legacy, value))
 }
 
 fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()> {

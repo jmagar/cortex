@@ -1,3 +1,4 @@
 # Binary plugin distributions — tracked via Git LFS
 bin/syslog filter=lfs diff=lfs merge=lfs -text
+bin/hive filter=lfs diff=lfs merge=lfs -text
 bin/syslog.exe filter=lfs diff=lfs merge=lfs -text

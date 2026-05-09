@@ -17,7 +17,7 @@ for package, binary, MCP, scope, env-var, and Docker data-preservation details.
                     │   │  SQLite + FTS5 (WAL mode) │   │
                     │   └──────────────────────────┘   │
   Claude / MCP ◀──── ▶  RMCP HTTP :3100/mcp             │
-  local MCP client ◀──▶  syslog mcp query process       │
+  local MCP client ◀──▶  hive mcp query process         │
                     └─────────────────────────────────┘
 ```
 
@@ -53,7 +53,7 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `compare` | Side-by-side comparison of two time ranges |
 | `help` | Markdown reference for all actions |
 
-### `syslog search`
+### `hive search`
 
 Full-text search across all syslog messages with optional filters. Uses SQLite FTS5 with porter stemming.
 
@@ -106,7 +106,7 @@ query: "restart*"              # matches restart, restarted, restarting
 
 ---
 
-### `syslog tail`
+### `hive tail`
 
 Return the N most recent log entries. Equivalent to `tail -f` across all hosts.
 
@@ -121,11 +121,11 @@ Return the N most recent log entries. Equivalent to `tail -f` across all hosts.
 
 **Response**
 
-Same structure as `syslog search`: `{ "count": N, "logs": [...] }`.
+Same structure as `hive search`: `{ "count": N, "logs": [...] }`.
 
 ---
 
-### `syslog errors`
+### `hive errors`
 
 Summarize warnings and errors across all hosts in a time window. Groups by hostname and severity, showing counts. Use this for quick health assessments.
 
@@ -152,7 +152,7 @@ Severities included: `emerg`, `alert`, `crit`, `err`, `warning`.
 
 ---
 
-### `syslog hosts`
+### `hive hosts`
 
 List all hosts that have sent syslog messages, with first/last seen timestamps and total log counts.
 
@@ -175,7 +175,7 @@ List all hosts that have sent syslog messages, with first/last seen timestamps a
 
 ---
 
-### `syslog correlate`
+### `hive correlate`
 
 Search for related events across multiple hosts within a ±N minute window around a reference timestamp. Useful for debugging cascading failures. Results are grouped by host and ordered by time.
 
@@ -213,11 +213,11 @@ Search for related events across multiple hosts within a ±N minute window aroun
 }
 ```
 
-**Note on clock skew:** `syslog correlate` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. If a device clock is skewed, events may fall outside the correlation window. See [Time synchronization](#time-synchronization).
+**Note on clock skew:** `hive correlate` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. If a device clock is skewed, events may fall outside the correlation window. See [Time synchronization](#time-synchronization).
 
 ---
 
-### `syslog stats`
+### `hive stats`
 
 Return database statistics including total logs, total hosts, time range covered, logical and physical DB size, free disk, configured thresholds, current write-block status, and runtime ingest observability.
 
@@ -368,8 +368,8 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 
 **SessionStart hook automation** (in server mode):
 
-- Symlinks `bin/syslog` to `~/.local/bin/syslog` so the binary is on your PATH
-- Writes `${CLAUDE_PLUGIN_DATA}/syslog-mcp.env` with the resolved config
+- Symlinks `bin/hive` to `~/.local/bin/hive` and legacy `bin/syslog` to `~/.local/bin/syslog` so both commands are on your PATH
+- Writes `${CLAUDE_PLUGIN_DATA}/.env` with the resolved config
 - Generates and starts the systemd user unit (or runs `docker compose up -d`) and restarts only when config actually changed
 - All idempotent — safe to run on every session
 
@@ -382,7 +382,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 - `syslog-cutover` — switch between systemd and Docker deployment modes with health verification
 - `syslog-version-check` — check whether the running systemd service or Docker container matches the installed binary or local image; add `--pull` in Docker mode to pull first, otherwise Docker checks only the local image cache
 
-The plugin includes the `syslog` binary in `bin/` and is the simplest path. You can still deploy via Docker or build locally if you prefer to run the server outside the plugin.
+The plugin includes the `hive` binary and a legacy `syslog` alias in `bin/`; it is the simplest path. You can still deploy via Docker or build locally if you prefer to run the server outside the plugin.
 
 ### Docker
 
@@ -404,7 +404,7 @@ Requires Rust 1.86+.
 
 ```bash
 cargo build --release
-./target/release/syslog serve mcp
+./target/release/hive serve mcp
 ```
 
 ---
@@ -496,7 +496,7 @@ allow_insecure_http = true
 
 The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to syslog-mcp, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
 
-Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run Hive with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. The expected stored `source_ip` shape is `docker://<host>/<container>/<stream>`.
+Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run Hive with `HIVE_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `hive search` or `mcporter call ... action=search`. The expected stored `source_ip` shape is `docker://<host>/<container>/<stream>`.
 
 #### Storage
 
@@ -569,22 +569,22 @@ allow_insecure_http = true
 ## Command modes
 
 ```bash
-syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
-syslog mcp        # query-only MCP stdio transport
-syslog stats      # query the SQLite DB directly from the CLI
+hive serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
+hive mcp        # query-only MCP stdio transport
+hive stats      # query the SQLite DB directly from the CLI
 ```
 
-Both modes use the same config and environment variable loader. `syslog mcp` is for local child-process MCP clients that can read `HIVE_MCP_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs.
+Both modes use the same config and environment variable loader. `hive mcp` is for local child-process MCP clients that can read `HIVE_MCP_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs. The legacy `syslog` command runs the same paths during the compatibility window.
 
 The direct CLI uses the same shared service layer as the MCP tool, so results and validation match the MCP actions without needing an MCP client:
 
 ```bash
-syslog search 'error AND nginx' --hostname proxy --limit 10
-syslog tail -n 20 --app-name kernel
-syslog errors --from 2026-01-01T00:00:00Z
-syslog hosts
-syslog correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
-syslog stats --json
+hive search 'error AND nginx' --hostname proxy --limit 10
+hive tail -n 20 --app-name kernel
+hive errors --from 2026-01-01T00:00:00Z
+hive hosts
+hive correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
+hive stats --json
 ```
 
 See [docs/CLI.md](docs/CLI.md) for the full direct CLI reference, including flags, JSON output, and how CLI commands map to MCP actions.
@@ -732,7 +732,7 @@ When available disk drops below `min_free_disk_mb`, the oldest logs are deleted 
 
 **Write-blocking behavior**
 
-If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (`SYSLOG_WRITE_CHANNEL_CAPACITY`, default 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `syslog stats` reflects the current state.
+If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (`SYSLOG_WRITE_CHANNEL_CAPACITY`, default 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `hive stats` reflects the current state.
 
 Disable either guard by setting its trigger to `0` (also set the recovery target to `0`).
 
@@ -745,7 +745,7 @@ Before upgrading a populated database:
 1. Take a WAL-safe backup with `scripts/backup.sh` or `sqlite3 /data/syslog.db ".backup /data/syslog-pre-upgrade.db"`.
 2. Schedule a short ingest maintenance window for large databases.
 3. Start the new version and monitor logs for `Migration N: starting ...` and `Migration N: ... created`.
-4. Keep the previous image or binary available until `/health` returns `ok` and `syslog stats` reports sane counts.
+4. Keep the previous image or binary available until `/health` returns `ok` and `hive stats` reports sane counts.
 
 See [docs/runbooks/deploy.md](docs/runbooks/deploy.md) for the deploy checklist.
 
@@ -769,7 +769,7 @@ The internal write channel holds up to `SYSLOG_WRITE_CHANNEL_CAPACITY` parsed me
 
 ## Multi-Host Deployment
 
-Point multiple hosts at the same Hive instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `syslog hosts` to see all senders. Filter by `hostname` in `syslog search` and `syslog tail`. Use `syslog correlate` to find related events across hosts within a time window.
+Point multiple hosts at the same Hive instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `hive hosts` to see all senders. Filter by `hostname` in `hive search` and `hive tail`. Use `hive correlate` to find related events across hosts within a time window.
 
 For large fleets, consider:
 - Increasing `HIVE_MCP_POOL_SIZE` (default 4) for higher read concurrency
@@ -780,7 +780,7 @@ For large fleets, consider:
 
 ## Time Synchronization
 
-All timestamps are stored in UTC. `syslog correlate` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. Devices with drifted clocks will have their events shifted relative to the correlation window. Run NTP on all senders to minimize skew. `received_at` (the server-side ingestion time) is unaffected by sender clock drift and is used for retention.
+All timestamps are stored in UTC. `hive correlate` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. Devices with drifted clocks will have their events shifted relative to the correlation window. Run NTP on all senders to minimize skew. `received_at` (the server-side ingestion time) is unaffected by sender clock drift and is used for retention.
 
 ---
 
@@ -929,7 +929,7 @@ The daemon implements MCP through RMCP Streamable HTTP in stateless JSON-respons
 - `POST /mcp` — RMCP Streamable HTTP request/response endpoint
 - `GET /mcp` and `DELETE /mcp` — `405 Method Not Allowed` in stateless mode
 - `GET /health` — unauthenticated health probe
-- `syslog mcp` — local query-only stdio MCP mode for clients that launch MCP servers as child processes
+- `hive mcp` — local query-only stdio MCP mode for clients that launch MCP servers as child processes
 
 When `HIVE_MCP_TOKEN` is set, `/mcp` requires:
 
@@ -945,7 +945,7 @@ Stdio mode does not use bearer auth because it is local child-process access. It
 {
   "mcpServers": {
     "hive-mcp": {
-      "command": "/path/to/syslog",
+      "command": "/path/to/hive",
       "args": ["mcp"],
       "env": {
         "HIVE_MCP_DB_PATH": "/data/syslog.db",
@@ -958,7 +958,7 @@ Stdio mode does not use bearer auth because it is local child-process access. It
 
 Use `mcp-remote` instead of direct stdio when the database is only reachable through the running HTTP daemon or a reverse proxy.
 
-The Docker image remains daemon-focused and exposes HTTP MCP via `syslog serve mcp`; use `syslog mcp` on a host that can read the SQLite DB for direct local stdio.
+The Docker image remains daemon-focused and exposes HTTP MCP via `hive serve mcp`; use `hive mcp` on a host that can read the SQLite DB for direct local stdio. Legacy `syslog serve mcp` and `syslog mcp` remain accepted in this release.
 
 ---
 

@@ -667,6 +667,29 @@ fn hive_docker_hosts_override_legacy_docker_hosts() {
 
 #[test]
 #[serial]
+fn empty_hive_docker_hosts_falls_back_to_legacy_docker_hosts() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "true");
+    std::env::set_var("SYSLOG_DOCKER_HOSTS", "legacy-host");
+    std::env::set_var("HIVE_DOCKER_HOSTS", "");
+    let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
+    std::env::remove_var("SYSLOG_DOCKER_INGEST_ENABLED");
+    std::env::remove_var("SYSLOG_DOCKER_HOSTS");
+    std::env::remove_var("HIVE_DOCKER_HOSTS");
+
+    let config = result.expect("Config::load should fall back to legacy docker hosts");
+    assert!(config.docker_ingest.enabled);
+    assert_eq!(config.docker_ingest.hosts.len(), 1);
+    assert_eq!(config.docker_ingest.hosts[0].name, "legacy-host");
+    assert_eq!(
+        config.docker_ingest.hosts[0].base_url,
+        "http://legacy-host:2375"
+    );
+}
+
+#[test]
+#[serial]
 fn docker_ingest_ignores_hosts_file_when_disabled() {
     std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "false");
