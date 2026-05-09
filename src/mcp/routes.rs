@@ -67,13 +67,29 @@ pub fn router(state: AppState) -> Router {
     {
         tracing::info!(
             "OAuth router mounted: /.well-known/oauth-authorization-server, \
-                 /.well-known/oauth-protected-resource, /jwks, /authorize, \
-                 /auth/google/callback, /token, /register"
+                 /.well-known/oauth-protected-resource, /mcp/.well-known/*, \
+                 /jwks, /authorize, /auth/google/callback, /token, /register"
         );
         // Use the full router() so /register (DCR) is available for MCP clients.
         // bearer_only_router excludes /register unconditionally; full router gates
         // it on enable_dynamic_registration which we set true in build_auth_policy.
-        Some(lab_auth::routes::router(state_arc.as_ref().clone()))
+        let auth_state = state_arc.as_ref().clone();
+        let path_based_discovery = Router::new()
+            .route(
+                "/mcp/.well-known/oauth-authorization-server",
+                get(lab_auth::metadata::authorization_server_metadata),
+            )
+            .route(
+                "/mcp/.well-known/openid-configuration",
+                get(lab_auth::metadata::authorization_server_metadata),
+            )
+            .route(
+                "/mcp/.well-known/oauth-protected-resource",
+                get(lab_auth::metadata::protected_resource_metadata),
+            )
+            .with_state(auth_state.clone());
+
+        Some(lab_auth::routes::router(auth_state).merge(path_based_discovery))
     } else {
         None
     };

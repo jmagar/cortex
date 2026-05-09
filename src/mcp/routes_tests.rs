@@ -20,6 +20,7 @@ fn test_state_no_auth() -> (AppState, tempfile::TempDir) {
                 host: "127.0.0.1".into(),
                 port: 3100,
                 server_name: "syslog-mcp".into(),
+                no_auth: false,
                 api_token: None,
                 allowed_hosts: Vec::new(),
                 allowed_origins: Vec::new(),
@@ -45,6 +46,7 @@ fn test_state_with_token(token: String) -> (AppState, tempfile::TempDir) {
                 host: "127.0.0.1".into(),
                 port: 3100,
                 server_name: "syslog-mcp".into(),
+                no_auth: false,
                 api_token: Some(token),
                 allowed_hosts: Vec::new(),
                 allowed_origins: Vec::new(),
@@ -580,6 +582,7 @@ async fn test_state_with_oauth() -> (AppState, tempfile::TempDir) {
             host: "127.0.0.1".into(),
             port: 3100,
             server_name: "syslog-mcp".into(),
+            no_auth: false,
             api_token: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
@@ -615,6 +618,33 @@ async fn oauth_router_mounted_when_auth_state_is_some() {
         StatusCode::OK,
         "OAuth well-known endpoint must be reachable when auth_state is Some"
     );
+}
+
+/// Codex derives OAuth discovery URLs from the configured MCP URL
+/// (`https://host/mcp`) unless `oauth_resource` is set, so support the same
+/// metadata under `/mcp/.well-known/*` when OAuth is active.
+#[tokio::test]
+async fn oauth_router_mounts_path_based_discovery_for_codex() {
+    let (state, _dir) = test_state_with_oauth().await;
+    let app = router(state);
+
+    for path in [
+        "/mcp/.well-known/oauth-authorization-server",
+        "/mcp/.well-known/openid-configuration",
+        "/mcp/.well-known/oauth-protected-resource",
+    ] {
+        let request = Request::builder()
+            .method("GET")
+            .uri(path)
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "OAuth discovery endpoint {path} must be reachable for Codex"
+        );
+    }
 }
 
 /// OAuth router NOT mounted when auth_state: None (bearer-only).

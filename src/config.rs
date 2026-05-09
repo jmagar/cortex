@@ -133,6 +133,10 @@ pub struct McpConfig {
     /// Server name exposed via MCP
     #[serde(default = "default_server_name")]
     pub server_name: String,
+    /// Explicitly disable MCP auth even on non-loopback binds. Intended for
+    /// deployments protected by an upstream gateway or reverse proxy.
+    #[serde(default)]
+    pub no_auth: bool,
     /// Optional bearer token for authenticating MCP requests.
     #[serde(default)]
     pub api_token: Option<String>,
@@ -161,10 +165,9 @@ pub enum AuthMode {
     OAuth,
 }
 
-/// `[mcp.auth]` policy table — TOML-driven; the only env-var overrides are the
-/// 5 keys explicitly wired in [`Config::load`] (mode, public URL, Google
-/// client id/secret, plus the existing static `SYSLOG_MCP_TOKEN`). Everything
-/// else lives in `config.toml` per the OAuth epic's locked decisions.
+/// `[mcp.auth]` policy table. Core deployment secrets and the bootstrap admin
+/// can be provided through env vars so container deployments do not have to
+/// mount a TOML file with credentials or site-local identity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AuthConfig {
@@ -185,7 +188,8 @@ pub struct AuthConfig {
     #[serde(default)]
     pub google_client_secret: Option<String>,
     /// Single bootstrap admin email permitted to log in via Google OAuth.
-    /// Supplements `allowed_emails`.
+    /// Supplements `allowed_emails`. Overridable via
+    /// `SYSLOG_MCP_AUTH_ADMIN_EMAIL`.
     #[serde(default)]
     pub admin_email: String,
     /// Email allowlist that augments the (future) DB-backed allowlist. MUST be
@@ -221,10 +225,12 @@ pub struct AuthConfig {
     pub authorize_rpm: u32,
     /// When `mode == OAuth`, also reject the static `SYSLOG_MCP_TOKEN`. Set
     /// `false` to keep the static token as a break-glass path. Default `true`.
+    /// Overridable via `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH`.
     #[serde(default = "default_true")]
     pub disable_static_token_with_oauth: bool,
     /// Allowed redirect URIs for OAuth clients (loopback URIs are accepted
     /// implicitly by lab-auth; entries here are non-loopback URIs).
+    /// Overridable via `SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS`.
     #[serde(default)]
     pub allowed_client_redirect_uris: Vec<String>,
 }
@@ -408,6 +414,7 @@ impl Default for McpConfig {
             host: default_mcp_host(),
             port: default_mcp_port(),
             server_name: default_server_name(),
+            no_auth: false,
             api_token: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
@@ -506,6 +513,8 @@ impl Config {
 
         env_override_str("SYSLOG_MCP_HOST", &mut config.mcp.host);
         env_override_parse("SYSLOG_MCP_PORT", &mut config.mcp.port)?;
+        env_override_bool("NO_AUTH", &mut config.mcp.no_auth)?;
+        env_override_bool("SYSLOG_MCP_NO_AUTH", &mut config.mcp.no_auth)?;
         env_override_list("SYSLOG_MCP_ALLOWED_HOSTS", &mut config.mcp.allowed_hosts);
         env_override_list(
             "SYSLOG_MCP_ALLOWED_ORIGINS",
@@ -555,7 +564,7 @@ impl Config {
             &mut config.storage.cleanup_chunk_size,
         )?;
 
-        // [mcp.auth] env overrides — locked to 5 keys per the OAuth epic.
+        // [mcp.auth] env overrides.
         env_override_auth_mode("SYSLOG_MCP_AUTH_MODE", &mut config.mcp.auth.mode)?;
         env_override_opt_str("SYSLOG_MCP_PUBLIC_URL", &mut config.mcp.auth.public_url);
         env_override_opt_str(
@@ -566,6 +575,18 @@ impl Config {
             "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
             &mut config.mcp.auth.google_client_secret,
         );
+        env_override_str(
+            "SYSLOG_MCP_AUTH_ADMIN_EMAIL",
+            &mut config.mcp.auth.admin_email,
+        );
+        env_override_list(
+            "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+            &mut config.mcp.auth.allowed_client_redirect_uris,
+        );
+        env_override_bool(
+            "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
+            &mut config.mcp.auth.disable_static_token_with_oauth,
+        )?;
 
         env_override_bool("SYSLOG_API_ENABLED", &mut config.api.enabled)?;
         env_override_opt_str("SYSLOG_API_TOKEN", &mut config.api.api_token);
@@ -809,6 +830,10 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     // ---- Non-loopback safety gate -----------------------------------------
     // Skip in stdio / query-only mode: no HTTP port is bound so the gate is
     // irrelevant. `check_bind` is false when called from Config::load_for_stdio.
+    if config.mcp.no_auth {
+        return Ok(());
+    }
+
     let bind_is_loopback = IpAddr::from_str(&config.mcp.host)
         .map(|ip| ip.is_loopback())
         .unwrap_or(false);

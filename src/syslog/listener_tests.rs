@@ -69,7 +69,7 @@ async fn tcp_connection_closes_oversized_unterminated_line_without_enqueueing() 
 
     let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    client.write_all(&vec![b'x'; 128]).await.unwrap();
+    client.write_all(&[b'x'; 128]).await.unwrap();
 
     let mut buf = [0u8; 1];
     let read = tokio::time::timeout(std::time::Duration::from_secs(1), client.read(&mut buf))
@@ -78,12 +78,13 @@ async fn tcp_connection_closes_oversized_unterminated_line_without_enqueueing() 
         .unwrap();
     assert_eq!(read, 0);
 
-    match tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await {
-        Ok(Some(entry)) => panic!(
+    if let Ok(Some(entry)) =
+        tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await
+    {
+        panic!(
             "oversized unterminated line must not enqueue an entry, got: {:?}",
             entry
-        ),
-        Ok(None) | Err(_) => {}
+        );
     }
 
     accept_task.await.unwrap();
@@ -103,7 +104,7 @@ async fn tcp_connection_drops_oversized_delimited_line_and_keeps_later_frames() 
 
     let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
     use tokio::io::AsyncWriteExt;
-    client.write_all(&vec![b'x'; 64]).await.unwrap();
+    client.write_all(&[b'x'; 64]).await.unwrap();
     client.write_all(b"\nvalid\n").await.unwrap();
     client.shutdown().await.unwrap();
 
