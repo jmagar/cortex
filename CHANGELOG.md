@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-05-08
+
+### Fixed
+
+- **Plugin setup pre-flight checks**: `setup_docker` now fails fast if the
+  Docker daemon is unreachable, a required port is already in use, or the data
+  directory is not writable; warns on low disk space; validates compose config
+  before touching the running container; auto-creates the external Docker
+  network if missing.
+- **Plugin setup systemd parity**: `setup_systemd` gains the same pre-flight
+  checks — binary existence, port conflict detection (skipped when service is
+  already running), data-dir write test, and low-disk warning.
+- **Systemd unit fully removed on docker cutover**: `setup_docker` now stops,
+  disables, and deletes the unit file so systemd cannot restart it on boot;
+  `restart: unless-stopped` in the compose file owns the lifecycle instead.
+
 ## [0.17.1] - 2026-05-08
 
 ### Fixed
