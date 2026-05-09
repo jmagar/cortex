@@ -1,21 +1,26 @@
 use anyhow::Result;
 use axum::Router;
+use hive_mcp::{api, mcp, runtime::RuntimeCore};
 use rmcp::{transport::stdio, ServiceExt};
-use syslog_mcp::{api, mcp, runtime::RuntimeCore};
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
 mod cli;
 
 #[tokio::main]
+#[allow(dead_code)]
 async fn main() -> Result<()> {
+    entry().await
+}
+
+pub(crate) async fn entry() -> Result<()> {
     let mode = Mode::parse(std::env::args().skip(1).collect())?;
     if mode == Mode::Help {
         print_usage();
         return Ok(());
     }
     if mode == Mode::Version {
-        println!("syslog-mcp {}", env!("CARGO_PKG_VERSION"));
+        println!("Hive {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
@@ -28,7 +33,7 @@ async fn main() -> Result<()> {
         .with_target(true)
         .init();
 
-    info!("syslog-mcp v{}", env!("CARGO_PKG_VERSION"));
+    info!("Hive v{}", env!("CARGO_PKG_VERSION"));
 
     match mode {
         Mode::ServeMcp => serve_mcp().await,
@@ -92,7 +97,7 @@ async fn serve_mcp() -> Result<()> {
             bind = %runtime.config.mcp.bind_addr(),
             "OTLP /v1/logs is mounted WITHOUT authentication on a non-loopback bind. \
              Anyone reachable on this address can write log records. \
-             Set SYSLOG_MCP_TOKEN to require Bearer auth."
+             Set HIVE_MCP_TOKEN or legacy SYSLOG_MCP_TOKEN to require Bearer auth."
         );
     }
     app = app.layer(tower_http::trace::TraceLayer::new_for_http());
@@ -161,19 +166,23 @@ impl Mode {
 fn print_usage() {
     eprintln!(
         "Usage:
-  syslog --version     Print version
-  syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
-  syslog mcp          Start query-only MCP stdio transport
-  syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]
-  syslog tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
-  syslog errors [--from TIME] [--to TIME] [--json]
-  syslog hosts [--json]
-  syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
-  syslog stats [--json]
+  hive --version     Print version
+  hive serve mcp     Start syslog UDP/TCP ingest plus HTTP MCP server
+  hive mcp           Start query-only MCP stdio transport
+  hive search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]
+  hive tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
+  hive errors [--from TIME] [--to TIME] [--json]
+  hive hosts [--json]
+  hive correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
+  hive stats [--json]
+
+Legacy alias:
+  syslog            Runs the same commands for this transition release
 
 Environment:
-  SYSLOG_MCP_DB_PATH  SQLite database path used by both transports
-  RUST_LOG            Log filter; stdio logs always go to stderr"
+  HIVE_MCP_DB_PATH     SQLite database path used by both transports
+  SYSLOG_MCP_DB_PATH   Legacy alias for HIVE_MCP_DB_PATH
+  RUST_LOG             Log filter; stdio logs always go to stderr"
     );
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# smoke-test.sh — Live end-to-end smoke test for syslog-mcp
+# smoke-test.sh — Live end-to-end smoke test for Hive
 # Tests all MCP actions via mcporter with strict PASS/FAIL validation.
 # Exit code 0 = all passed. Exit code 1 = one or more failures.
 #
@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
             [[ -z "${2:-}" ]] && { echo "Error: --url requires a value"; exit 1; }
             MCP_URL="$2"; HEALTH_URL="${MCP_URL%/mcp}/health"; shift 2
             _MCPORTER_CONFIG_TMPFILE=$(mktemp /tmp/mcporter-XXXXXX.json)
-            printf '{"mcpServers":{"syslog":{"url":"%s","transport":"http"}}}' "$MCP_URL" > "$_MCPORTER_CONFIG_TMPFILE"
+            printf '{"mcpServers":{"hive":{"url":"%s","transport":"http"}}}' "$MCP_URL" > "$_MCPORTER_CONFIG_TMPFILE"
             MCPORTER_CONFIG="$_MCPORTER_CONFIG_TMPFILE"
             ;;
         --skip-seed) SKIP_SEED=1; shift ;;
@@ -62,7 +62,7 @@ fail() { echo -e "${COLOR_RED}FAIL${COLOR_RESET}  $1"; ERRORS+=("$1"); (( FAIL++
 
 mcp_call() {
     local action="$1"; shift
-    mcporter call --config "$MCPORTER_CONFIG" "syslog.syslog" "action=${action}" "$@" 2>&1
+    mcporter call --config "$MCPORTER_CONFIG" "hive.hive" "action=${action}" "$@" 2>&1
 }
 
 json_get() {
@@ -142,7 +142,7 @@ send_tcp_seed() {
 
 # ─── Phase 1: Pre-flight ─────────────────────────────────────────────────────
 echo ""
-echo -e "${COLOR_BOLD}=== syslog-mcp smoke test ===${COLOR_RESET}"
+echo -e "${COLOR_BOLD}=== Hive smoke test ===${COLOR_RESET}"
 echo "MCP URL: $MCP_URL"
 echo ""
 
@@ -152,9 +152,9 @@ HEALTH=$(curl -sf "$HEALTH_URL" 2>&1) || { echo -e "${COLOR_RED}ABORT${COLOR_RES
 HEALTH_STATUS=$(json_get "$HEALTH" "['status']")
 assert_eq "Health endpoint responds with ok" "$HEALTH_STATUS" "ok"
 
-TOOL_LIST=$(mcporter list syslog --config "$MCPORTER_CONFIG" 2>&1)
+TOOL_LIST=$(mcporter list hive --config "$MCPORTER_CONFIG" 2>&1)
 TOOL_COUNT=$(echo "$TOOL_LIST" | grep -c "^  function " || true)
-assert_eq "mcporter lists exactly 1 tool (syslog)" "$TOOL_COUNT" "1"
+assert_eq "mcporter lists exactly 1 tool (hive)" "$TOOL_COUNT" "1"
 
 # ─── Phase 2: Seed test data ─────────────────────────────────────────────────
 echo ""

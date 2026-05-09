@@ -25,7 +25,10 @@ pub struct SyslogRmcpServer {
     state: AppState,
 }
 
-const READ_SCOPE: &str = "syslog:read";
+const HIVE_READ_SCOPE: &str = "hive:read";
+const LEGACY_SYSLOG_READ_SCOPE: &str = "syslog:read";
+const HIVE_ADMIN_SCOPE: &str = "hive:admin";
+const LEGACY_SYSLOG_ADMIN_SCOPE: &str = "syslog:admin";
 const DENY_SCOPE: &str = "syslog:__deny__";
 /// Public read-only MCP actions. Must mirror non-`help` entries in
 /// [`crate::mcp::schemas::SYSLOG_ACTIONS`]; drift is covered by
@@ -163,7 +166,7 @@ impl ServerHandler for SyslogRmcpServer {
         context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
         require_auth_context(&self.state, &context)?;
-        if request.uri != SCHEMA_RESOURCE_URI {
+        if !schema_resource_uri_is_valid(&request.uri) {
             return Err(ErrorData::invalid_params(
                 format!("unknown resource: {}", request.uri),
                 None,
@@ -175,7 +178,7 @@ impl ServerHandler for SyslogRmcpServer {
         })?;
         Ok(ReadResourceResult::new(vec![ResourceContents::text(
             text,
-            SCHEMA_RESOURCE_URI,
+            HIVE_SCHEMA_RESOURCE_URI,
         )
         .with_mime_type("application/json")]))
     }
@@ -213,14 +216,22 @@ pub fn streamable_http_service(
     )
 }
 
-const SCHEMA_RESOURCE_URI: &str = "syslog://schema/mcp-tool";
+const HIVE_SCHEMA_RESOURCE_URI: &str = "hive://schema/mcp-tool";
+const LEGACY_SYSLOG_SCHEMA_RESOURCE_URI: &str = "syslog://schema/mcp-tool";
 
 fn schema_resource() -> Resource {
     Resource::new(
-        RawResource::new(SCHEMA_RESOURCE_URI, "syslog tool schema")
-            .with_description("JSON schema for the syslog MCP tool and its action-based parameters")
+        RawResource::new(HIVE_SCHEMA_RESOURCE_URI, "Hive tool schema")
+            .with_description("JSON schema for the Hive MCP tool and its action-based parameters")
             .with_mime_type("application/json"),
         None,
+    )
+}
+
+fn schema_resource_uri_is_valid(uri: &str) -> bool {
+    matches!(
+        uri,
+        HIVE_SCHEMA_RESOURCE_URI | LEGACY_SYSLOG_SCHEMA_RESOURCE_URI
     )
 }
 
@@ -327,8 +338,9 @@ fn require_auth_context<'a>(
 
 /// Enforce that `auth` carries `required_scope`.
 ///
-/// `syslog:admin` is treated as a superset of `syslog:read` — a caller with
-/// admin access implicitly satisfies any read-level scope requirement.
+/// `hive:admin` and legacy `syslog:admin` are treated as supersets of
+/// `hive:read` and legacy `syslog:read` — a caller with admin access
+/// implicitly satisfies any read-level scope requirement.
 ///
 /// Logs a warning with subject + action on denial (audit trail).
 /// Only called when policy is Mounted (LoopbackDev short-circuits at the
@@ -337,7 +349,7 @@ fn check_scope(auth: &AuthContext, required_scope: &str, action: &str) -> Result
     let satisfied = auth
         .scopes
         .iter()
-        .any(|s| s == required_scope || (required_scope == "syslog:read" && s == "syslog:admin"));
+        .any(|s| scope_satisfies(s, required_scope));
     if satisfied {
         return Ok(());
     }
@@ -353,7 +365,22 @@ fn check_scope(auth: &AuthContext, required_scope: &str, action: &str) -> Result
     ))
 }
 
-/// Map a syslog tool action to the minimum required scope.
+fn scope_satisfies(candidate: &str, required_scope: &str) -> bool {
+    if candidate == required_scope {
+        return true;
+    }
+    matches!(
+        (candidate, required_scope),
+        (HIVE_ADMIN_SCOPE, HIVE_READ_SCOPE)
+            | (LEGACY_SYSLOG_ADMIN_SCOPE, HIVE_READ_SCOPE)
+            | (HIVE_ADMIN_SCOPE, LEGACY_SYSLOG_READ_SCOPE)
+            | (LEGACY_SYSLOG_ADMIN_SCOPE, LEGACY_SYSLOG_READ_SCOPE)
+            | (LEGACY_SYSLOG_READ_SCOPE, HIVE_READ_SCOPE)
+            | (HIVE_READ_SCOPE, LEGACY_SYSLOG_READ_SCOPE)
+    )
+}
+
+/// Map a Hive tool action to the minimum required scope.
 ///
 /// Returns `None` for informational actions that require AuthContext (when
 /// Mounted) but no specific scope — e.g. `help`.
@@ -372,9 +399,9 @@ fn required_scope_for(action: &str) -> Option<&'static str> {
         // Informational — AuthContext required when Mounted, but no scope gate.
         None
     } else if READ_ONLY_ACTIONS.contains(&action) {
-        Some(READ_SCOPE)
+        Some(HIVE_READ_SCOPE)
     } else {
-        // Future write/admin actions would map to syslog:admin here.
+        // Future write/admin actions would map to hive:admin here.
         // Default: unknown actions use an ungrantable sentinel scope so they
         // are denied at the auth layer rather than falling through to dispatch.
         Some(DENY_SCOPE)

@@ -16,7 +16,7 @@ use axum::{
     body::to_bytes,
     http::{header, Request, StatusCode},
 };
-use syslog_mcp::{mcp::router, testing};
+use hive_mcp::{mcp::router, testing};
 use tempfile::TempDir;
 use tower::util::ServiceExt;
 
@@ -271,8 +271,8 @@ async fn tools_list_succeeds_with_auth_context() {
     );
     let tools = value["result"]["tools"].as_array();
     assert!(
-        tools.is_some_and(|t| t.iter().any(|tool| tool["name"] == "syslog")),
-        "tools/list must return the syslog tool"
+        tools.is_some_and(|t| t.iter().any(|tool| tool["name"] == "hive")),
+        "tools/list must return the hive tool"
     );
 }
 

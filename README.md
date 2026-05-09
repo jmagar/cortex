@@ -1,8 +1,11 @@
-# Syslog MCP
+# Hive
 
-[![crates.io](https://img.shields.io/crates/v/syslog-mcp)](https://crates.io/crates/syslog-mcp) [![ghcr.io](https://img.shields.io/badge/ghcr.io-jmagar%2Fsyslog--mcp-blue?logo=docker)](https://github.com/jmagar/syslog-mcp/pkgs/container/syslog-mcp)
+[![crates.io](https://img.shields.io/crates/v/hive-mcp)](https://crates.io/crates/hive-mcp) [![ghcr.io](https://img.shields.io/badge/ghcr.io-jmagar%2Fhive--mcp-blue?logo=docker)](https://github.com/jmagar/hive/pkgs/container/hive-mcp)
 
-Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog over UDP and TCP, stores it in SQLite with FTS5 full-text indexing, and exposes action-based log search, inventory, correlation, status, and analysis tools to MCP clients.
+Hive is a Rust log intelligence service with syslog, Docker, OTLP, SQLite/FTS5, and MCP query surfaces. Ingests syslog over UDP and TCP, stores it in SQLite with FTS5 full-text indexing, and exposes action-based log search, inventory, correlation, status, and analysis tools to MCP clients.
+
+Migrating from `syslog-mcp`: see [docs/HIVE_MIGRATION.md](docs/HIVE_MIGRATION.md)
+for package, binary, MCP, scope, env-var, and Docker data-preservation details.
 
 ## Overview
 
@@ -18,13 +21,13 @@ Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog
                     └─────────────────────────────────┘
 ```
 
-The daemon listens on a single port for both UDP and TCP syslog (default `1514`). All inbound messages are parsed, batched, and written to SQLite with full-text indexing. The MCP HTTP server runs on a separate port (default `3100`) and uses RMCP Streamable HTTP in stateless JSON-response mode. Local stdio-only MCP clients can launch `syslog mcp`, a query-only MCP process that reads the same SQLite database without starting syslog listeners or the HTTP server.
+The daemon listens on a single port for both UDP and TCP syslog (default `1514`). All inbound messages are parsed, batched, and written to SQLite with full-text indexing. The MCP HTTP server runs on a separate port (default `3100`) and uses RMCP Streamable HTTP in stateless JSON-response mode. Local stdio-only MCP clients can launch `hive mcp`; legacy `syslog mcp` remains accepted, a query-only MCP process that reads the same SQLite database without starting syslog listeners or the HTTP server.
 
 ---
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, or `help`.
+One primary MCP tool, `hive`, is exposed. The legacy `syslog` tool name remains accepted as a transition alias. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md).
 
@@ -59,7 +62,7 @@ Full-text search across all syslog messages with optional filters. Uses SQLite F
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `query` | string | no | — | FTS5 search query (see [FTS5 query syntax](#fts5-query-syntax)) |
-| `hostname` | string | no | — | Exact hostname match. Use `syslog` with `action: "hosts"` to enumerate. |
+| `hostname` | string | no | — | Exact hostname match. Use `hive` with `action: "hosts"` to enumerate. |
 | `source_ip` | string | no | — | Exact source identifier. Syslog entries use the verified network sender address (`IP:port`); Docker ingest entries use `docker://host/container/stream` from configured ingest metadata. |
 | `severity` | string | no | — | One of: `emerg alert crit err warning notice info debug` |
 | `app_name` | string | no | — | Application name, e.g. `sshd`, `dockerd`, `kernel` |
@@ -384,10 +387,10 @@ The plugin includes the `syslog` binary in `bin/` and is the simplest path. You 
 ### Docker
 
 ```bash
-git clone https://github.com/jmagar/syslog-mcp
-cd syslog-mcp
+git clone https://github.com/jmagar/hive
+cd hive
 cp .env.example .env
-# Edit .env — set SYSLOG_MCP_TOKEN at minimum
+# Edit .env — set HIVE_MCP_TOKEN at minimum
 docker compose up -d
 ```
 
@@ -408,13 +411,13 @@ cargo build --release
 
 ## Authentication
 
-syslog-mcp supports two auth modes, selectable via `SYSLOG_MCP_AUTH_MODE`.
+Hive supports two auth modes, selectable via `HIVE_MCP_AUTH_MODE`.
 
-**Bearer-only (default)** — set `SYSLOG_MCP_TOKEN` and all `/mcp` requests must present that token as `Authorization: Bearer <token>`. No OAuth routes are mounted.
+**Bearer-only (default)** — set `HIVE_MCP_TOKEN` and all `/mcp` requests must present that token as `Authorization: Bearer <token>`. No OAuth routes are mounted.
 
-**Gateway-protected no-auth** — set `NO_AUTH=true` only when an upstream gateway or reverse proxy enforces auth before traffic reaches syslog-mcp. This intentionally disables service-local MCP auth even on non-loopback binds.
+**Gateway-protected no-auth** — set `NO_AUTH=true` only when an upstream gateway or reverse proxy enforces auth before traffic reaches Hive. This intentionally disables service-local MCP auth even on non-loopback binds.
 
-**OAuth (Google)** — set `SYSLOG_MCP_AUTH_MODE=oauth`, the OAuth provider env vars, and an allowlisted admin email. The server issues RS256 JWTs after users authenticate via Google. Bearer tokens and OAuth JWTs can coexist (OAuth mode disables the static token by default; set `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in `config.toml` for break-glass access).
+**OAuth (Google)** — set `HIVE_MCP_AUTH_MODE=oauth`, the OAuth provider env vars, and an allowlisted admin email. The server issues RS256 JWTs after users authenticate via Google. Bearer tokens and OAuth JWTs can coexist (OAuth mode disables the static token by default; set `HIVE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in `config.toml` for break-glass access).
 
 Both modes leave `/health` unauthenticated so health probes always work.
 
@@ -436,11 +439,11 @@ Configuration is loaded from three sources in priority order (highest wins):
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYSLOG_MCP_TOKEN` | no | — | Bearer token for `/mcp`. Omit to disable auth. |
-| `SYSLOG_MCP_HOST` | no | `0.0.0.0` | Bind host for the MCP HTTP server |
-| `SYSLOG_MCP_PORT` | no | `3100` | Bind port for the MCP HTTP server |
-| `SYSLOG_MCP_ALLOWED_HOSTS` | no | — | Extra comma-separated Host header values accepted by RMCP Host validation |
-| `SYSLOG_MCP_ALLOWED_ORIGINS` | no | — | Extra comma-separated browser origins accepted by RMCP Origin validation |
+| `HIVE_MCP_TOKEN` | no | — | Bearer token for `/mcp`. Omit to disable auth. |
+| `HIVE_MCP_HOST` | no | `0.0.0.0` | Bind host for the MCP HTTP server |
+| `HIVE_MCP_PORT` | no | `3100` | Bind port for the MCP HTTP server |
+| `HIVE_MCP_ALLOWED_HOSTS` | no | — | Extra comma-separated Host header values accepted by RMCP Host validation |
+| `HIVE_MCP_ALLOWED_ORIGINS` | no | — | Extra comma-separated browser origins accepted by RMCP Origin validation |
 
 #### Non-MCP API
 
@@ -467,13 +470,13 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 
 #### Docker socket-proxy ingest
 
-Optional pull-based Docker log ingestion keeps each remote host on its normal Docker logging driver and has syslog-mcp read container stdout/stderr through read-only `docker-socket-proxy` endpoints. This avoids configuring Docker's daemon-level syslog driver and does not block container startup when syslog-mcp is down.
+Optional pull-based Docker log ingestion keeps each remote host on its normal Docker logging driver and has Hive read container stdout/stderr through read-only `docker-socket-proxy` endpoints. This avoids configuring Docker's daemon-level syslog driver and does not block container startup when Hive is down.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SYSLOG_DOCKER_INGEST_ENABLED` | no | `false` | Enable remote Docker log ingestion |
 | `SYSLOG_DOCKER_HOSTS` | one of the two | — | Comma-separated hostnames; each becomes `http://<name>:2375` with `allow_insecure_http = true`. Takes priority over `SYSLOG_DOCKER_HOSTS_FILE`. |
-| `SYSLOG_DOCKER_HOSTS_FILE` | one of the two | — | Path to a TOML file with a `[[hosts]]` array (use when you need per-host `base_url` or TLS). If the file does not exist, a warning is logged and no hosts are loaded — the container will not crash. Mount the file via `SYSLOG_MCP_CONFIG_VOLUME`. |
+| `SYSLOG_DOCKER_HOSTS_FILE` | one of the two | — | Path to a TOML file with a `[[hosts]]` array (use when you need per-host `base_url` or TLS). If the file does not exist, a warning is logged and no hosts are loaded — the container will not crash. Mount the file via `HIVE_MCP_CONFIG_VOLUME`. |
 | `SYSLOG_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | Initial reconnect delay after host stream failure |
 | `SYSLOG_DOCKER_RECONNECT_MAX_MS` | no | `30000` | Maximum reconnect delay after repeated failures |
 
@@ -493,21 +496,21 @@ allow_insecure_http = true
 
 The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to syslog-mcp, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
 
-Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. The expected stored `source_ip` shape is `docker://<host>/<container>/<stream>`.
+Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run Hive with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. The expected stored `source_ip` shape is `docker://<host>/<container>/<stream>`.
 
 #### Storage
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYSLOG_MCP_DB_PATH` | no | `/data/syslog.db` | SQLite database path |
-| `SYSLOG_MCP_POOL_SIZE` | no | `4` | SQLite connection pool size |
-| `SYSLOG_MCP_RETENTION_DAYS` | no | `90` | Days to retain logs. `0` = keep forever. |
-| `SYSLOG_MCP_MAX_DB_SIZE_MB` | no | `1024` | Logical DB size trigger for write-blocking. `0` = disabled. |
-| `SYSLOG_MCP_RECOVERY_DB_SIZE_MB` | no | `900` | Cleanup target after DB size trigger. Must be less than max. |
-| `SYSLOG_MCP_MIN_FREE_DISK_MB` | no | `512` | Free disk trigger for write-blocking. `0` = disabled. |
-| `SYSLOG_MCP_RECOVERY_FREE_DISK_MB` | no | `768` | Cleanup target after free disk trigger. Must be greater than min. |
-| `SYSLOG_MCP_CLEANUP_INTERVAL_SECS` | no | `60` | Storage budget enforcement interval. Minimum `5`. |
-| `SYSLOG_MCP_CLEANUP_CHUNK_SIZE` | no | `2000` | Rows deleted per enforcement chunk |
+| `HIVE_MCP_DB_PATH` | no | `/data/syslog.db` | SQLite database path |
+| `HIVE_MCP_POOL_SIZE` | no | `4` | SQLite connection pool size |
+| `HIVE_MCP_RETENTION_DAYS` | no | `90` | Days to retain logs. `0` = keep forever. |
+| `HIVE_MCP_MAX_DB_SIZE_MB` | no | `1024` | Logical DB size trigger for write-blocking. `0` = disabled. |
+| `HIVE_MCP_RECOVERY_DB_SIZE_MB` | no | `900` | Cleanup target after DB size trigger. Must be less than max. |
+| `HIVE_MCP_MIN_FREE_DISK_MB` | no | `512` | Free disk trigger for write-blocking. `0` = disabled. |
+| `HIVE_MCP_RECOVERY_FREE_DISK_MB` | no | `768` | Cleanup target after free disk trigger. Must be greater than min. |
+| `HIVE_MCP_CLEANUP_INTERVAL_SECS` | no | `60` | Storage budget enforcement interval. Minimum `5`. |
+| `HIVE_MCP_CLEANUP_CHUNK_SIZE` | no | `2000` | Rows deleted per enforcement chunk |
 
 #### Container
 
@@ -515,8 +518,8 @@ Docker ingest is intentionally not part of the default smoke test because it nee
 |----------|----------|---------|-------------|
 | `SYSLOG_UID` | no | `1000` | Container user ID for data volume ownership |
 | `SYSLOG_GID` | no | `1000` | Container group ID for data volume ownership |
-| `SYSLOG_MCP_DATA_VOLUME` | no | `syslog-mcp-data` | Docker volume name or bind-mount path |
-| `SYSLOG_MCP_CONFIG_VOLUME` | no | `./config` | Read-only config mount for optional files such as `docker-hosts.toml` |
+| `HIVE_MCP_DATA_VOLUME` | no | `syslog-mcp-data` | Docker volume name or bind-mount path |
+| `HIVE_MCP_CONFIG_VOLUME` | no | `./config` | Read-only config mount for optional files such as `docker-hosts.toml` |
 | `DOCKER_NETWORK` | no | `syslog-mcp` | Docker network name (must exist) |
 | `RUST_LOG` | no | `info` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |
 | `TZ` | no | `UTC` | Container timezone |
@@ -547,7 +550,7 @@ cleanup_interval_secs = 60
 [mcp]
 host = "0.0.0.0"
 port = 3100
-server_name = "syslog-mcp"
+server_name = "hive-mcp"
 # api_token = "your-secret-token"
 
 [docker_ingest]
@@ -571,7 +574,7 @@ syslog mcp        # query-only MCP stdio transport
 syslog stats      # query the SQLite DB directly from the CLI
 ```
 
-Both modes use the same config and environment variable loader. `syslog mcp` is for local child-process MCP clients that can read `SYSLOG_MCP_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs.
+Both modes use the same config and environment variable loader. `syslog mcp` is for local child-process MCP clients that can read `HIVE_MCP_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs.
 
 The direct CLI uses the same shared service layer as the MCP tool, so results and validation match the MCP actions without needing an MCP client:
 
@@ -707,9 +710,9 @@ sudo firewall-cmd --reload
 
 ## Retention Policy
 
-Logs are retained for `SYSLOG_MCP_RETENTION_DAYS` days (default `90`). Set to `0` to keep logs forever.
+Logs are retained for `HIVE_MCP_RETENTION_DAYS` days (default `90`). Set to `0` to keep logs forever.
 
-The retention job runs on `SYSLOG_MCP_CLEANUP_INTERVAL_SECS` (default 60 seconds). It deletes logs in chunks of 10,000 rows, releasing the write lock between chunks so ingest can proceed. Retention cutoff uses `received_at` (the server-side ingestion timestamp), not the `timestamp` in the message. This prevents devices with misconfigured clocks from causing premature or indefinite retention.
+The retention job runs on `HIVE_MCP_CLEANUP_INTERVAL_SECS` (default 60 seconds). It deletes logs in chunks of 10,000 rows, releasing the write lock between chunks so ingest can proceed. Retention cutoff uses `received_at` (the server-side ingestion timestamp), not the `timestamp` in the message. This prevents devices with misconfigured clocks from causing premature or indefinite retention.
 
 After large deletions, an incremental FTS5 merge runs to reclaim index space without long write-lock durations.
 
@@ -719,11 +722,11 @@ After large deletions, an incremental FTS5 merge runs to reclaim index space wit
 
 Two independent guards protect against disk exhaustion:
 
-**DB size guard** (`SYSLOG_MCP_MAX_DB_SIZE_MB`, default 1024 MB)
+**DB size guard** (`HIVE_MCP_MAX_DB_SIZE_MB`, default 1024 MB)
 
-When the logical SQLite DB size exceeds `max_db_size_mb`, the oldest logs are deleted in chunks of `SYSLOG_MCP_CLEANUP_CHUNK_SIZE` rows until the size drops below `recovery_db_size_mb`.
+When the logical SQLite DB size exceeds `max_db_size_mb`, the oldest logs are deleted in chunks of `HIVE_MCP_CLEANUP_CHUNK_SIZE` rows until the size drops below `recovery_db_size_mb`.
 
-**Free disk guard** (`SYSLOG_MCP_MIN_FREE_DISK_MB`, default 512 MB)
+**Free disk guard** (`HIVE_MCP_MIN_FREE_DISK_MB`, default 512 MB)
 
 When available disk drops below `min_free_disk_mb`, the oldest logs are deleted until free disk exceeds `recovery_free_disk_mb`.
 
@@ -766,12 +769,12 @@ The internal write channel holds up to `SYSLOG_WRITE_CHANNEL_CAPACITY` parsed me
 
 ## Multi-Host Deployment
 
-Point multiple hosts at the same syslog-mcp instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `syslog hosts` to see all senders. Filter by `hostname` in `syslog search` and `syslog tail`. Use `syslog correlate` to find related events across hosts within a time window.
+Point multiple hosts at the same Hive instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `syslog hosts` to see all senders. Filter by `hostname` in `syslog search` and `syslog tail`. Use `syslog correlate` to find related events across hosts within a time window.
 
 For large fleets, consider:
-- Increasing `SYSLOG_MCP_POOL_SIZE` (default 4) for higher read concurrency
+- Increasing `HIVE_MCP_POOL_SIZE` (default 4) for higher read concurrency
 - Increasing `SYSLOG_BATCH_SIZE` and `SYSLOG_FLUSH_INTERVAL` to reduce write overhead
-- Setting `SYSLOG_MCP_RETENTION_DAYS` to balance history depth against disk cost
+- Setting `HIVE_MCP_RETENTION_DAYS` to balance history depth against disk cost
 
 ---
 
@@ -914,7 +917,7 @@ For higher ingest rates (IoT, high-traffic network devices):
 - Increase `SYSLOG_BATCH_SIZE` (e.g. `500`) to reduce transaction overhead
 - Increase `SYSLOG_FLUSH_INTERVAL` (e.g. `1000` ms) to widen batch windows
 - Increase `SYSLOG_WRITE_CHANNEL_CAPACITY` (e.g. `100000`) to absorb bursts
-- Increase `SYSLOG_MCP_POOL_SIZE` (e.g. `8`) for more read concurrency
+- Increase `HIVE_MCP_POOL_SIZE` (e.g. `8`) for more read concurrency
 - Place the database on an SSD or tmpfs-backed volume
 
 ---
@@ -928,7 +931,7 @@ The daemon implements MCP through RMCP Streamable HTTP in stateless JSON-respons
 - `GET /health` — unauthenticated health probe
 - `syslog mcp` — local query-only stdio MCP mode for clients that launch MCP servers as child processes
 
-When `SYSLOG_MCP_TOKEN` is set, `/mcp` requires:
+When `HIVE_MCP_TOKEN` is set, `/mcp` requires:
 
 ```
 Authorization: Bearer <token>
@@ -936,16 +939,16 @@ Authorization: Bearer <token>
 
 `/health` is always unauthenticated (required for Docker health checks and reverse-proxy probes).
 
-Stdio mode does not use bearer auth because it is local child-process access. It does require `SYSLOG_MCP_DB_PATH` to point at the same SQLite database populated by the daemon:
+Stdio mode does not use bearer auth because it is local child-process access. It does require `HIVE_MCP_DB_PATH` to point at the same SQLite database populated by the daemon:
 
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "hive-mcp": {
       "command": "/path/to/syslog",
       "args": ["mcp"],
       "env": {
-        "SYSLOG_MCP_DB_PATH": "/data/syslog.db",
+        "HIVE_MCP_DB_PATH": "/data/syslog.db",
         "RUST_LOG": "warn"
       }
     }

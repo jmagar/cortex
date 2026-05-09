@@ -242,7 +242,7 @@ async fn rmcp_tools_list_exposes_one_action_tool() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["syslog"]);
+    assert_eq!(names, vec!["hive"]);
     assert_eq!(tools[0]["inputSchema"]["required"], json!(["action"]));
 }
 
@@ -254,7 +254,7 @@ async fn rmcp_get_stats_works_against_temp_db() {
         jsonrpc_request(
             2,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "hive", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -262,6 +262,23 @@ async fn rmcp_get_stats_works_against_temp_db() {
     let stats = content_json(&response);
     assert_eq!(stats["total_logs"], 0);
     assert!(stats.get("logical_db_size_mb").is_some());
+}
+
+#[tokio::test]
+async fn rmcp_legacy_syslog_tool_alias_still_works() {
+    let (state, _pool, _dir) = test_state();
+    let (status, response) = post_rmcp(
+        rmcp_router(state),
+        jsonrpc_request(
+            202,
+            "tools/call",
+            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let stats = content_json(&response);
+    assert_eq!(stats["total_logs"], 0);
 }
 
 #[tokio::test]
@@ -284,7 +301,7 @@ async fn rmcp_search_logs_works_against_seeded_data() {
         jsonrpc_request(
             3,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "search", "query": "disk", "limit": 5}})),
+            Some(json!({"name": "hive", "arguments": {"action": "search", "query": "disk", "limit": 5}})),
         ),
     )
     .await;
@@ -302,7 +319,7 @@ async fn rmcp_correlate_events_rejects_bad_reference_time_as_invalid_params() {
         jsonrpc_request(
             4,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "correlate", "reference_time": "bad"}})),
+            Some(json!({"name": "hive", "arguments": {"action": "correlate", "reference_time": "bad"}})),
         ),
     )
     .await;
@@ -319,7 +336,7 @@ async fn rmcp_correlate_events_rejects_bad_severity_as_invalid_params() {
             5,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "hive",
                 "arguments": {
                     "action": "correlate",
                     "reference_time": "2026-01-01T00:00:00Z",
@@ -342,7 +359,7 @@ async fn rmcp_search_rejects_bad_severity_as_invalid_params() {
             6,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "hive",
                 "arguments": {
                     "action": "search",
                     "severity": "critical"
@@ -383,7 +400,7 @@ async fn rmcp_numeric_args_reject_wrong_type_values() {
             jsonrpc_request(
                 id,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": arguments})),
+                Some(json!({"name": "hive", "arguments": arguments})),
             ),
         )
         .await;
@@ -422,7 +439,7 @@ async fn rmcp_correlate_events_preserves_truncation_and_host_grouping() {
             11,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "hive",
                 "arguments": {
                     "action": "correlate",
                     "reference_time": "2026-01-01T00:00:00Z",
@@ -605,7 +622,7 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
         jsonrpc_request(
             11,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "hive", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -619,7 +636,7 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
 async fn mounted_policy_with_read_scope_permits_read_actions() {
     let (state, pool, _dir) = mounted_state();
     seed_auth_action_log(&pool);
-    let auth = auth_ctx_with_scopes(vec!["syslog:read"]);
+    let auth = auth_ctx_with_scopes(vec!["hive:read"]);
     let router = rmcp_router_with_auth(state, auth);
 
     for action in SYSLOG_ACTIONS
@@ -632,7 +649,7 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
             jsonrpc_request(
                 20,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
+                Some(json!({"name": "hive", "arguments": minimal_args_for_action(action)})),
             ),
         )
         .await;
@@ -649,8 +666,31 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
     }
 }
 
+#[tokio::test]
+async fn mounted_policy_with_legacy_syslog_read_scope_permits_read_actions() {
+    let (state, pool, _dir) = mounted_state();
+    seed_auth_action_log(&pool);
+    let auth = auth_ctx_with_scopes(vec!["syslog:read"]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            21,
+            "tools/call",
+            Some(json!({"name": "hive", "arguments": {"action": "stats"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_ne!(
+        response["error"]["code"], -32600,
+        "legacy syslog:read should satisfy hive:read; response: {response}"
+    );
+}
+
 #[test]
-fn public_read_actions_require_syslog_read_scope() {
+fn public_read_actions_require_hive_read_scope() {
     for action in SYSLOG_ACTIONS
         .iter()
         .copied()
@@ -658,8 +698,8 @@ fn public_read_actions_require_syslog_read_scope() {
     {
         assert_eq!(
             required_scope_for(action),
-            Some("syslog:read"),
-            "action={action} must require syslog:read"
+            Some("hive:read"),
+            "action={action} must require hive:read"
         );
     }
     assert_eq!(required_scope_for("help"), None);
@@ -669,14 +709,14 @@ fn public_read_actions_require_syslog_read_scope() {
     );
 }
 
-/// `AuthPolicy::Mounted` + AuthContext with `syslog:admin` (superset) → read
-/// actions permitted because `syslog:admin` implies `syslog:read`.
+/// `AuthPolicy::Mounted` + AuthContext with `hive:admin` (superset) → read
+/// actions permitted because `hive:admin` implies `hive:read`.
 #[tokio::test]
 async fn mounted_policy_with_admin_scope_permits_read_actions() {
     let (state, _pool, _dir) = mounted_state();
-    // syslog:admin is a superset of syslog:read — check_scope treats it as
-    // satisfying any syslog:read requirement (admin ⊃ read superset semantics).
-    let auth = auth_ctx_with_scopes(vec!["syslog:admin"]);
+    // hive:admin is a superset of hive:read — check_scope treats it as
+    // satisfying any hive:read requirement (admin ⊃ read superset semantics).
+    let auth = auth_ctx_with_scopes(vec!["hive:admin"]);
     let router = rmcp_router_with_auth(state, auth);
 
     let (status, response) = post_rmcp(
@@ -684,15 +724,15 @@ async fn mounted_policy_with_admin_scope_permits_read_actions() {
         jsonrpc_request(
             30,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "hive", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    // syslog:admin implies syslog:read — must be permitted.
+    // hive:admin implies hive:read — must be permitted.
     assert_ne!(
         response["error"]["code"], -32600,
-        "syslog:admin should satisfy syslog:read requirement; response: {response}"
+        "hive:admin should satisfy hive:read requirement; response: {response}"
     );
     assert!(
         response["result"].is_object(),
@@ -700,11 +740,33 @@ async fn mounted_policy_with_admin_scope_permits_read_actions() {
     );
 }
 
+#[tokio::test]
+async fn mounted_policy_with_legacy_syslog_admin_scope_permits_read_actions() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec!["syslog:admin"]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            31,
+            "tools/call",
+            Some(json!({"name": "hive", "arguments": {"action": "stats"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_ne!(
+        response["error"]["code"], -32600,
+        "legacy syslog:admin should satisfy hive:read; response: {response}"
+    );
+}
+
 /// `AuthPolicy::Mounted` + AuthContext with BOTH scopes → all actions permitted.
 #[tokio::test]
 async fn mounted_policy_with_both_scopes_permits_all_actions() {
     let (state, _pool, _dir) = mounted_state();
-    let auth = auth_ctx_with_scopes(vec!["syslog:read", "syslog:admin"]);
+    let auth = auth_ctx_with_scopes(vec!["hive:read", "hive:admin"]);
     let router = rmcp_router_with_auth(state, auth);
 
     let (status, response) = post_rmcp(
@@ -712,7 +774,7 @@ async fn mounted_policy_with_both_scopes_permits_all_actions() {
         jsonrpc_request(
             40,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "hive", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -737,7 +799,7 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
             jsonrpc_request(
                 50,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
+                Some(json!({"name": "hive", "arguments": minimal_args_for_action(action)})),
             ),
         )
         .await;
@@ -748,7 +810,7 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
         );
         let msg = response["error"]["message"].as_str().unwrap_or("");
         assert!(
-            msg.contains("requires scope: syslog:read"),
+            msg.contains("requires scope: hive:read"),
             "error message should name the required scope; got: {msg}"
         );
     }
@@ -767,7 +829,7 @@ async fn mounted_policy_with_empty_scopes_permits_help_action() {
         jsonrpc_request(
             60,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "help"}})),
+            Some(json!({"name": "hive", "arguments": {"action": "help"}})),
         ),
     )
     .await;
@@ -816,7 +878,7 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
         jsonrpc_request(
             74,
             "resources/read",
-            Some(json!({"uri": super::SCHEMA_RESOURCE_URI})),
+            Some(json!({"uri": super::HIVE_SCHEMA_RESOURCE_URI})),
         ),
     )
     .await;
@@ -832,7 +894,7 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
         jsonrpc_request(
             71,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "help"}})),
+            Some(json!({"name": "hive", "arguments": {"action": "help"}})),
         ),
     )
     .await;
@@ -848,7 +910,7 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
         jsonrpc_request(
             72,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "hive", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -859,7 +921,7 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
     );
 }
 
-/// `AuthPolicy::Mounted` + valid AuthContext with `syslog:read` + `tools/list`
+/// `AuthPolicy::Mounted` + valid AuthContext + `tools/list`
 /// → capability discovery succeeds (AuthContext present, no scope required).
 #[tokio::test]
 async fn mounted_policy_with_auth_context_permits_tools_list() {
@@ -872,8 +934,8 @@ async fn mounted_policy_with_auth_context_permits_tools_list() {
     assert_eq!(status, StatusCode::OK);
     let tools = response["result"]["tools"].as_array().unwrap();
     assert_eq!(
-        tools[0]["name"], "syslog",
-        "tools/list should return syslog tool; response: {response}"
+        tools[0]["name"], "hive",
+        "tools/list should return hive tool; response: {response}"
     );
 }
 
@@ -892,16 +954,16 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
     let resources = response["result"]["resources"].as_array().unwrap();
     assert_eq!(
         resources[0]["uri"],
-        super::SCHEMA_RESOURCE_URI,
+        super::HIVE_SCHEMA_RESOURCE_URI,
         "resources/list should expose schema resource; response: {response}"
     );
 
     let (status, response) = post_rmcp(
-        router,
+        router.clone(),
         jsonrpc_request(
             82,
             "resources/read",
-            Some(json!({"uri": super::SCHEMA_RESOURCE_URI})),
+            Some(json!({"uri": super::HIVE_SCHEMA_RESOURCE_URI})),
         ),
     )
     .await;
@@ -909,8 +971,25 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
     assert!(
         response["result"]["contents"][0]["text"]
             .as_str()
-            .is_some_and(|text| text.contains("\"name\": \"syslog\"")),
+            .is_some_and(|text| text.contains("\"name\": \"hive\"")),
         "resources/read should return schema JSON; response: {response}"
+    );
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            83,
+            "resources/read",
+            Some(json!({"uri": super::LEGACY_SYSLOG_SCHEMA_RESOURCE_URI})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["contents"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("\"name\": \"hive\"")),
+        "legacy resources/read should return Hive schema JSON; response: {response}"
     );
 }
 
@@ -928,7 +1007,7 @@ async fn scope_check_fires_before_db_execution() {
         jsonrpc_request(
             90,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "search", "query": "error"}})),
+            Some(json!({"name": "hive", "arguments": {"action": "search", "query": "error"}})),
         ),
     )
     .await;
@@ -955,7 +1034,7 @@ async fn scope_check_fires_before_db_execution() {
 async fn unknown_action_is_denied_by_sentinel_scope() {
     let (state, _pool, _dir) = mounted_state();
     // syslog:read + syslog:admin — both real scopes, but neither matches __deny__
-    let auth = auth_ctx_with_scopes(vec!["syslog:read", "syslog:admin"]);
+    let auth = auth_ctx_with_scopes(vec!["hive:read", "hive:admin"]);
     let router = rmcp_router_with_auth(state, auth);
 
     let (status, response) = post_rmcp(
@@ -963,7 +1042,7 @@ async fn unknown_action_is_denied_by_sentinel_scope() {
         jsonrpc_request(
             100,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "not_a_real_action"}})),
+            Some(json!({"name": "hive", "arguments": {"action": "not_a_real_action"}})),
         ),
     )
     .await;

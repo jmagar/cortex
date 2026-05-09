@@ -23,11 +23,14 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
     "help",
 ];
 
+pub(super) const HIVE_TOOL_NAME: &str = "hive";
+pub(super) const LEGACY_SYSLOG_TOOL_NAME: &str = "syslog";
+
 /// Define the public MCP tool surface.
 pub(super) fn tool_definitions() -> Vec<Value> {
     vec![json!({
-        "name": "syslog",
-        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, and syslog help.",
+        "name": HIVE_TOOL_NAME,
+        "description": "Query Hive logs with action-based subcommands: hive search, hive tail, hive errors, hive hosts, hive correlate, hive stats, hive status, hive apps, hive source_ips, hive timeline, hive patterns, hive context, hive get, hive ingest_rate, hive silent_hosts, hive clock_skew, hive anomalies, hive compare, and hive help. The legacy syslog tool name is accepted as a compatibility alias.",
         "inputSchema": {
             "type": "object",
             "properties": {

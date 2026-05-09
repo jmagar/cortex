@@ -18,13 +18,14 @@ async fn stdio_client(
     let binary = env!("CARGO_BIN_EXE_syslog");
     let (transport, stderr) = TokioChildProcess::builder(Command::new(binary).configure(|cmd| {
         cmd.arg("mcp")
-            .env("SYSLOG_MCP_DB_PATH", db_path)
-            .env("SYSLOG_MCP_RETENTION_DAYS", "0")
-            .env("SYSLOG_MCP_MAX_DB_SIZE_MB", "0")
-            .env("SYSLOG_MCP_RECOVERY_DB_SIZE_MB", "0")
-            .env("SYSLOG_MCP_MIN_FREE_DISK_MB", "0")
-            .env("SYSLOG_MCP_RECOVERY_FREE_DISK_MB", "0")
+            .env("HIVE_MCP_DB_PATH", db_path)
+            .env("HIVE_MCP_RETENTION_DAYS", "0")
+            .env("HIVE_MCP_MAX_DB_SIZE_MB", "0")
+            .env("HIVE_MCP_RECOVERY_DB_SIZE_MB", "0")
+            .env("HIVE_MCP_MIN_FREE_DISK_MB", "0")
+            .env("HIVE_MCP_RECOVERY_FREE_DISK_MB", "0")
             .env("RUST_LOG", "warn")
+            .env_remove("HIVE_MCP_TOKEN")
             .env_remove("SYSLOG_MCP_TOKEN")
             .env_remove("SYSLOG_MCP_API_TOKEN");
     }))
@@ -50,11 +51,11 @@ async fn stdio_child_process_lists_tools_and_calls_queries() {
 
     let tools = service.list_tools(Default::default()).await.unwrap();
     let names: Vec<&str> = tools.tools.iter().map(|tool| tool.name.as_ref()).collect();
-    assert_eq!(names, vec!["syslog"]);
+    assert_eq!(names, vec!["hive"]);
 
     let stats = service
         .call_tool(
-            CallToolRequestParams::new("syslog")
+            CallToolRequestParams::new("hive")
                 .with_arguments(json!({"action": "stats"}).as_object().unwrap().clone()),
         )
         .await
@@ -64,7 +65,7 @@ async fn stdio_child_process_lists_tools_and_calls_queries() {
 
     let search = service
         .call_tool(
-            CallToolRequestParams::new("syslog").with_arguments(
+            CallToolRequestParams::new("hive").with_arguments(
                 json!({"action": "search", "query": "disk", "limit": 5})
                     .as_object()
                     .unwrap()

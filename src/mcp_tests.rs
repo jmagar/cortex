@@ -6,7 +6,7 @@
 //! conscious choice and never the silent fallback.
 //!
 //! ```compile_fail
-//! use syslog_mcp::mcp::AuthPolicy;
+//! use hive_mcp::mcp::AuthPolicy;
 //! let _ = <AuthPolicy as Default>::default();
 //! ```
 

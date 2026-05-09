@@ -20,7 +20,7 @@ test:
     cargo test
 
 docker-build:
-    docker build -t syslog-mcp .
+    docker build -t hive-mcp .
 
 up:
     docker compose up -d
@@ -72,18 +72,18 @@ generate-cli:
       -H "Authorization: Bearer $MCP_TOKEN" \
       -H "Accept: application/json, text/event-stream" \
       http://localhost:3100/mcp/tools/list 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "nohash")
-    cache_file="dist/.cache/syslog-mcp-cli.schema_hash"
-    if [[ -f "$cache_file" ]] && [[ "$(cat "$cache_file")" == "$current_hash" ]] && [[ -f "dist/syslog-mcp-cli" ]]; then
-      echo "SKIP: syslog-mcp tool schema unchanged — use existing dist/syslog-mcp-cli"
+    cache_file="dist/.cache/hive-mcp-cli.schema_hash"
+    if [[ -f "$cache_file" ]] && [[ "$(cat "$cache_file")" == "$current_hash" ]] && [[ -f "dist/hive-mcp-cli" ]]; then
+      echo "SKIP: Hive tool schema unchanged — use existing dist/hive-mcp-cli"
       exit 0
     fi
     timeout 30 mcporter generate-cli \
       --command http://localhost:3100/mcp \
       --header "Authorization: Bearer $MCP_TOKEN" \
-      --name syslog-mcp-cli \
-      --output dist/syslog-mcp-cli
+      --name hive-mcp-cli \
+      --output dist/hive-mcp-cli
     printf '%s' "$current_hash" > "$cache_file"
-    echo "✓ Generated dist/syslog-mcp-cli (requires bun at runtime)"
+    echo "✓ Generated dist/hive-mcp-cli (requires bun at runtime)"
 
 clean:
     cargo clean
@@ -94,9 +94,10 @@ build-plugin: release
     #!/bin/sh
     set -eu
     target_dir="${CARGO_TARGET_DIR:-target}"
-    if [ ! -x "$target_dir/release/syslog" ] && [ -x ".cache/cargo/release/syslog" ]; then
+    if [ ! -x "$target_dir/release/hive" ] && [ -x ".cache/cargo/release/hive" ]; then
       target_dir=".cache/cargo"
     fi
+    install -m 755 "$target_dir/release/hive" bin/hive
     install -m 755 "$target_dir/release/syslog" bin/syslog
 
 # Publish: bump version, tag, push (triggers crates.io + Docker publish)

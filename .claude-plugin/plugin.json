@@ -1,13 +1,15 @@
 {
-  "name": "syslog",
-  "version": "0.17.7",
-  "description": "Syslog management via MCP",
+  "name": "hive",
+  "version": "1.0.0",
+  "description": "Hive log intelligence via MCP",
   "author": { "name": "jmagar" },
-  "repository": "https://github.com/jmagar/syslog-mcp",
+  "repository": "https://github.com/jmagar/hive",
   "license": "MIT",
   "keywords": [
-    "syslog",
+    "hive",
     "mcp",
+    "observability",
+    "syslog",
     "logging",
     "homelab"
   ],
@@ -25,14 +27,14 @@
     "use_docker": {
       "type": "boolean",
       "title": "Deploy with Docker",
-      "description": "Server-mode deployment method. True: run via the bundled docker compose stack (containerized, easier to upgrade/move, exposes ports 1514 and 3100, mounts data_dir as a volume). False: run the bundled binary as a systemd user service (lighter weight, no Docker dependency, logs go to journald). Both produce identical syslog-mcp behavior — pick based on your host's conventions. Ignored in client mode.",
+      "description": "Server-mode deployment method. True: run via the bundled docker compose stack (containerized, easier to upgrade/move, exposes ports 1514 and 3100, mounts data_dir as a volume). False: run the bundled binary as a systemd user service (lighter weight, no Docker dependency, logs go to journald). Both produce identical Hive behavior — pick based on your host's conventions. Ignored in client mode.",
       "required": true,
       "default": false
     },
     "server_url": {
       "type": "string",
       "title": "Server URL",
-      "description": "Base URL the MCP client in this Claude Code session connects to (always used — both modes). Server mode: keep the default http://localhost:3100 so the local MCP client talks to the local server. Client mode: set to the remote server, e.g. http://dookie:3100, http://syslog.lan:3100, or https://syslog.example.com if fronted by a reverse proxy. Must include the scheme and (if non-default) port; do NOT include a trailing /mcp path — the plugin appends it.",
+      "description": "Base URL the MCP client in this Claude Code session connects to (always used — both modes). Server mode: keep the default http://localhost:3100 so the local MCP client talks to the local server. Client mode: set to the remote server, e.g. http://dookie:3100, http://syslog.lan:3100, or https://hive.example.com if fronted by a reverse proxy. Must include the scheme and (if non-default) port; do NOT include a trailing /mcp path — the plugin appends it.",
       "required": true,
       "default": "http://localhost:3100"
     },
@@ -46,7 +48,7 @@
     "no_auth": {
       "type": "boolean",
       "title": "Disable service auth",
-      "description": "Run syslog-mcp without service-local MCP auth. Use this only when an upstream gateway or reverse proxy enforces auth before traffic reaches syslog-mcp. Server mode only.",
+      "description": "Run Hive without service-local MCP auth. Use this only when an upstream gateway or reverse proxy enforces auth before traffic reaches syslog-mcp. Server mode only.",
       "required": true,
       "default": false
     },
@@ -60,7 +62,7 @@
     "public_url": {
       "type": "string",
       "title": "Public URL",
-      "description": "Public base URL for OAuth issuer/resource metadata, e.g. https://syslog.example.com. If auth_mode=oauth and this is empty, setup derives it from an https server_url by stripping a trailing /mcp if present. Server mode only.",
+      "description": "Public base URL for OAuth issuer/resource metadata, e.g. https://hive.example.com. If auth_mode=oauth and this is empty, setup derives it from an https server_url by stripping a trailing /mcp if present. Server mode only.",
       "default": ""
     },
     "google_client_id": {

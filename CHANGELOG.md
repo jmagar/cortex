@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-09
+
+### Changed
+
+- **Hive rebrand**: project identity moves from `syslog-mcp` to Hive with Cargo
+  package `hive-mcp`, primary binary `hive`, primary MCP tool `hive`, primary
+  scopes `hive:read` / `hive:admin`, and primary resource
+  `hive://schema/mcp-tool`.
+- **Compatibility aliases**: legacy `syslog` binary/tool,
+  `syslog:read` / `syslog:admin`, `syslog://schema/mcp-tool`, and
+  `SYSLOG_MCP_*` / `SYSLOG_API_*` / `SYSLOG_DOCKER_*` env vars remain accepted
+  during the transition.
+- **Docker migration**: Compose uses Hive service/image/container defaults while
+  preserving explicit legacy data volumes and the `/data/syslog.db` database
+  path to avoid silent empty-database cutovers.
+
 ## [0.17.7] - 2026-05-09
 
 ### Fixed

@@ -18,7 +18,7 @@ pub struct Config {
 }
 
 /// Enrichment + scrubbing knobs. Loaded from `[enrichment]` in `config.toml`
-/// or from `SYSLOG_MCP_*` env vars at runtime startup.
+/// or from `HIVE_MCP_*` / legacy `SYSLOG_MCP_*` env vars at runtime startup.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EnrichmentConfigToml {
@@ -172,24 +172,27 @@ pub enum AuthMode {
 #[serde(default)]
 pub struct AuthConfig {
     /// Runtime mode toggle. Defaults to `bearer`; set to `oauth` to activate
-    /// the dual-mode middleware. Overridable via `SYSLOG_MCP_AUTH_MODE`.
+    /// the dual-mode middleware. Overridable via `HIVE_MCP_AUTH_MODE` or
+    /// legacy `SYSLOG_MCP_AUTH_MODE`.
     #[serde(default)]
     pub mode: AuthMode,
     /// Base URL the OAuth issuer + audience are derived from. Required when
-    /// `mode == OAuth`. Overridable via `SYSLOG_MCP_PUBLIC_URL`.
+    /// `mode == OAuth`. Overridable via `HIVE_MCP_PUBLIC_URL` or legacy
+    /// `SYSLOG_MCP_PUBLIC_URL`.
     #[serde(default)]
     pub public_url: Option<String>,
     /// Google OAuth client id. Required when `mode == OAuth`. Overridable via
-    /// `SYSLOG_MCP_GOOGLE_CLIENT_ID`.
+    /// `HIVE_MCP_GOOGLE_CLIENT_ID` or legacy `SYSLOG_MCP_GOOGLE_CLIENT_ID`.
     #[serde(default)]
     pub google_client_id: Option<String>,
     /// Google OAuth client secret. Required when `mode == OAuth`. Overridable
-    /// via `SYSLOG_MCP_GOOGLE_CLIENT_SECRET`.
+    /// via `HIVE_MCP_GOOGLE_CLIENT_SECRET` or legacy
+    /// `SYSLOG_MCP_GOOGLE_CLIENT_SECRET`.
     #[serde(default)]
     pub google_client_secret: Option<String>,
     /// Single bootstrap admin email permitted to log in via Google OAuth.
-    /// Supplements `allowed_emails`. Overridable via
-    /// `SYSLOG_MCP_AUTH_ADMIN_EMAIL`.
+    /// Supplements `allowed_emails`. Overridable via `HIVE_MCP_AUTH_ADMIN_EMAIL`
+    /// or legacy `SYSLOG_MCP_AUTH_ADMIN_EMAIL`.
     #[serde(default)]
     pub admin_email: String,
     /// Email allowlist that augments the (future) DB-backed allowlist. MUST be
@@ -223,14 +226,17 @@ pub struct AuthConfig {
     /// Per-process rate limit on `/authorize`.
     #[serde(default = "default_authorize_rpm")]
     pub authorize_rpm: u32,
-    /// When `mode == OAuth`, also reject the static `SYSLOG_MCP_TOKEN`. Set
+    /// When `mode == OAuth`, also reject the static `HIVE_MCP_TOKEN` or legacy
+    /// `SYSLOG_MCP_TOKEN`. Set
     /// `false` to keep the static token as a break-glass path. Default `true`.
-    /// Overridable via `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH`.
+    /// Overridable via `HIVE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH` or
+    /// legacy `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH`.
     #[serde(default = "default_true")]
     pub disable_static_token_with_oauth: bool,
     /// Allowed redirect URIs for OAuth clients (loopback URIs are accepted
     /// implicitly by lab-auth; entries here are non-loopback URIs).
-    /// Overridable via `SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS`.
+    /// Overridable via `HIVE_MCP_AUTH_ALLOWED_REDIRECT_URIS` or legacy
+    /// `SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS`.
     #[serde(default)]
     pub allowed_client_redirect_uris: Vec<String>,
 }
@@ -346,7 +352,7 @@ fn default_true() -> bool {
     true
 }
 fn default_server_name() -> String {
-    "syslog-mcp".into()
+    "hive-mcp".into()
 }
 fn default_docker_reconnect_initial_ms() -> u64 {
     1_000
@@ -487,9 +493,10 @@ impl Config {
             Err(e) => return Err(anyhow::anyhow!("Failed to read config.toml: {e}")),
         }
 
-        // 3. Overlay environment variables (highest priority)
-        //    SYSLOG_*     → syslog listener settings
-        //    SYSLOG_MCP_* → MCP server + storage settings
+        // 3. Overlay environment variables (highest priority).
+        //    SYSLOG_*        → syslog listener settings (protocol-specific)
+        //    HIVE_MCP_*      → MCP server + storage settings
+        //    SYSLOG_MCP_*    → legacy aliases for HIVE_MCP_*
         env_override_str("SYSLOG_HOST", &mut config.syslog.host);
         env_override_parse("SYSLOG_PORT", &mut config.syslog.port)?;
         env_override_parse(
@@ -511,123 +518,176 @@ impl Config {
             &mut config.syslog.write_channel_capacity,
         )?;
 
-        env_override_str("SYSLOG_MCP_HOST", &mut config.mcp.host);
-        env_override_parse("SYSLOG_MCP_PORT", &mut config.mcp.port)?;
+        env_override_str_alias("HIVE_MCP_HOST", "SYSLOG_MCP_HOST", &mut config.mcp.host);
+        env_override_parse_alias("HIVE_MCP_PORT", "SYSLOG_MCP_PORT", &mut config.mcp.port)?;
         env_override_bool("NO_AUTH", &mut config.mcp.no_auth)?;
-        env_override_bool("SYSLOG_MCP_NO_AUTH", &mut config.mcp.no_auth)?;
-        env_override_list("SYSLOG_MCP_ALLOWED_HOSTS", &mut config.mcp.allowed_hosts);
-        env_override_list(
+        env_override_bool_alias(
+            "HIVE_MCP_NO_AUTH",
+            "SYSLOG_MCP_NO_AUTH",
+            &mut config.mcp.no_auth,
+        )?;
+        env_override_list_alias(
+            "HIVE_MCP_ALLOWED_HOSTS",
+            "SYSLOG_MCP_ALLOWED_HOSTS",
+            &mut config.mcp.allowed_hosts,
+        );
+        env_override_list_alias(
+            "HIVE_MCP_ALLOWED_ORIGINS",
             "SYSLOG_MCP_ALLOWED_ORIGINS",
             &mut config.mcp.allowed_origins,
         );
-        // Primary name: SYSLOG_MCP_TOKEN
+        // Primary name: HIVE_MCP_TOKEN. Legacy: SYSLOG_MCP_TOKEN.
         env_override_opt_str("SYSLOG_MCP_TOKEN", &mut config.mcp.api_token);
+        env_override_opt_str("HIVE_MCP_TOKEN", &mut config.mcp.api_token);
         // Deprecated: SYSLOG_MCP_API_TOKEN (removed in a future version)
         if config.mcp.api_token.is_none() {
             if let Ok(v) = std::env::var("SYSLOG_MCP_API_TOKEN") {
                 if !v.is_empty() {
-                    tracing::warn!(
-                        "SYSLOG_MCP_API_TOKEN is deprecated; rename to SYSLOG_MCP_TOKEN"
-                    );
+                    tracing::warn!("SYSLOG_MCP_API_TOKEN is deprecated; rename to HIVE_MCP_TOKEN");
                     config.mcp.api_token = Some(v);
                 }
             }
         }
-        env_override_path("SYSLOG_MCP_DB_PATH", &mut config.storage.db_path);
-        env_override_parse("SYSLOG_MCP_POOL_SIZE", &mut config.storage.pool_size)?;
-        env_override_parse(
+        env_override_path_alias(
+            "HIVE_MCP_DB_PATH",
+            "SYSLOG_MCP_DB_PATH",
+            &mut config.storage.db_path,
+        );
+        env_override_parse_alias(
+            "HIVE_MCP_POOL_SIZE",
+            "SYSLOG_MCP_POOL_SIZE",
+            &mut config.storage.pool_size,
+        )?;
+        env_override_parse_alias(
+            "HIVE_MCP_RETENTION_DAYS",
             "SYSLOG_MCP_RETENTION_DAYS",
             &mut config.storage.retention_days,
         )?;
-        env_override_parse(
+        env_override_parse_alias(
+            "HIVE_MCP_MAX_DB_SIZE_MB",
             "SYSLOG_MCP_MAX_DB_SIZE_MB",
             &mut config.storage.max_db_size_mb,
         )?;
-        env_override_parse(
+        env_override_parse_alias(
+            "HIVE_MCP_RECOVERY_DB_SIZE_MB",
             "SYSLOG_MCP_RECOVERY_DB_SIZE_MB",
             &mut config.storage.recovery_db_size_mb,
         )?;
-        env_override_parse(
+        env_override_parse_alias(
+            "HIVE_MCP_MIN_FREE_DISK_MB",
             "SYSLOG_MCP_MIN_FREE_DISK_MB",
             &mut config.storage.min_free_disk_mb,
         )?;
-        env_override_parse(
+        env_override_parse_alias(
+            "HIVE_MCP_RECOVERY_FREE_DISK_MB",
             "SYSLOG_MCP_RECOVERY_FREE_DISK_MB",
             &mut config.storage.recovery_free_disk_mb,
         )?;
-        env_override_parse(
+        env_override_parse_alias(
+            "HIVE_MCP_CLEANUP_INTERVAL_SECS",
             "SYSLOG_MCP_CLEANUP_INTERVAL_SECS",
             &mut config.storage.cleanup_interval_secs,
         )?;
-        env_override_parse(
+        env_override_parse_alias(
+            "HIVE_MCP_CLEANUP_CHUNK_SIZE",
             "SYSLOG_MCP_CLEANUP_CHUNK_SIZE",
             &mut config.storage.cleanup_chunk_size,
         )?;
 
         // [mcp.auth] env overrides.
-        env_override_auth_mode("SYSLOG_MCP_AUTH_MODE", &mut config.mcp.auth.mode)?;
-        env_override_opt_str("SYSLOG_MCP_PUBLIC_URL", &mut config.mcp.auth.public_url);
-        env_override_opt_str(
+        env_override_auth_mode_alias(
+            "HIVE_MCP_AUTH_MODE",
+            "SYSLOG_MCP_AUTH_MODE",
+            &mut config.mcp.auth.mode,
+        )?;
+        env_override_opt_str_alias(
+            "HIVE_MCP_PUBLIC_URL",
+            "SYSLOG_MCP_PUBLIC_URL",
+            &mut config.mcp.auth.public_url,
+        );
+        env_override_opt_str_alias(
+            "HIVE_MCP_GOOGLE_CLIENT_ID",
             "SYSLOG_MCP_GOOGLE_CLIENT_ID",
             &mut config.mcp.auth.google_client_id,
         );
-        env_override_opt_str(
+        env_override_opt_str_alias(
+            "HIVE_MCP_GOOGLE_CLIENT_SECRET",
             "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
             &mut config.mcp.auth.google_client_secret,
         );
-        env_override_str(
+        env_override_str_alias(
+            "HIVE_MCP_AUTH_ADMIN_EMAIL",
             "SYSLOG_MCP_AUTH_ADMIN_EMAIL",
             &mut config.mcp.auth.admin_email,
         );
-        env_override_list(
+        env_override_list_alias(
+            "HIVE_MCP_AUTH_ALLOWED_REDIRECT_URIS",
             "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
             &mut config.mcp.auth.allowed_client_redirect_uris,
         );
-        env_override_bool(
+        env_override_bool_alias(
+            "HIVE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
             "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
             &mut config.mcp.auth.disable_static_token_with_oauth,
         )?;
 
-        env_override_bool("SYSLOG_API_ENABLED", &mut config.api.enabled)?;
-        env_override_opt_str("SYSLOG_API_TOKEN", &mut config.api.api_token);
+        env_override_bool_alias(
+            "HIVE_API_ENABLED",
+            "SYSLOG_API_ENABLED",
+            &mut config.api.enabled,
+        )?;
+        env_override_opt_str_alias(
+            "HIVE_API_TOKEN",
+            "SYSLOG_API_TOKEN",
+            &mut config.api.api_token,
+        );
 
-        env_override_opt_str(
+        env_override_opt_str_alias(
+            "HIVE_MCP_AUTHELIA_SOURCE_IP",
             "SYSLOG_MCP_AUTHELIA_SOURCE_IP",
             &mut config.enrichment.authelia_source_ip,
         );
-        env_override_opt_str(
+        env_override_opt_str_alias(
+            "HIVE_MCP_ADGUARD_SOURCE_IP",
             "SYSLOG_MCP_ADGUARD_SOURCE_IP",
             &mut config.enrichment.adguard_source_ip,
         );
-        env_override_bool(
+        env_override_bool_alias(
+            "HIVE_MCP_SCRUB_PROMPTS",
             "SYSLOG_MCP_SCRUB_PROMPTS",
             &mut config.enrichment.scrub_prompts,
         )?;
-        env_override_parse(
+        env_override_parse_alias(
+            "HIVE_MCP_FTS_MERGE_PAGES",
             "SYSLOG_MCP_FTS_MERGE_PAGES",
             &mut config.enrichment.fts_merge_pages,
         )?;
         if config.enrichment.fts_merge_pages > 10_000 {
             return Err(anyhow::anyhow!(
-                "SYSLOG_MCP_FTS_MERGE_PAGES must be in 0..=10000, got {}",
+                "HIVE_MCP_FTS_MERGE_PAGES (or legacy SYSLOG_MCP_FTS_MERGE_PAGES) must be in 0..=10000, got {}",
                 config.enrichment.fts_merge_pages
             ));
         }
 
-        env_override_bool(
+        env_override_bool_alias(
+            "HIVE_DOCKER_INGEST_ENABLED",
             "SYSLOG_DOCKER_INGEST_ENABLED",
             &mut config.docker_ingest.enabled,
         )?;
-        env_override_parse(
+        env_override_parse_alias(
+            "HIVE_DOCKER_RECONNECT_INITIAL_MS",
             "SYSLOG_DOCKER_RECONNECT_INITIAL_MS",
             &mut config.docker_ingest.reconnect_initial_ms,
         )?;
-        env_override_parse(
+        env_override_parse_alias(
+            "HIVE_DOCKER_RECONNECT_MAX_MS",
             "SYSLOG_DOCKER_RECONNECT_MAX_MS",
             &mut config.docker_ingest.reconnect_max_ms,
         )?;
         if config.docker_ingest.enabled {
-            if let Ok(val) = std::env::var("SYSLOG_DOCKER_HOSTS") {
+            if let Some((source_key, val)) =
+                env_alias_value("HIVE_DOCKER_HOSTS", "SYSLOG_DOCKER_HOSTS")
+            {
                 if !val.is_empty() {
                     config.docker_ingest.hosts = val
                         .split(',')
@@ -643,33 +703,33 @@ impl Config {
                         tracing::warn!(
                             host = %host.name,
                             base_url = %host.base_url,
-                            "SYSLOG_DOCKER_HOSTS expands to insecure HTTP docker-socket-proxy endpoints; use only on trusted private networks or SYSLOG_DOCKER_HOSTS_FILE with TLS/custom base_url"
+                            source_key,
+                            "Docker host shorthand expands to insecure HTTP docker-socket-proxy endpoints; use only on trusted private networks or HIVE_DOCKER_HOSTS_FILE with TLS/custom base_url"
                         );
                     }
                 }
-            } else if let Ok(path) = std::env::var("SYSLOG_DOCKER_HOSTS_FILE") {
+            } else if let Some((source_key, path)) =
+                env_alias_value("HIVE_DOCKER_HOSTS_FILE", "SYSLOG_DOCKER_HOSTS_FILE")
+            {
                 if !path.is_empty() {
                     match std::fs::read_to_string(&path) {
                         Ok(contents) => {
                             let parsed: DockerHostsFile =
                                 toml::from_str(&contents).map_err(|e| {
-                                    anyhow::anyhow!(
-                                        "Failed to parse SYSLOG_DOCKER_HOSTS_FILE={path}: {e}"
-                                    )
+                                    anyhow::anyhow!("Failed to parse {source_key}={path}: {e}")
                                 })?;
                             config.docker_ingest.hosts = parsed.hosts;
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                             tracing::warn!(
                                 path = %path,
-                                "SYSLOG_DOCKER_HOSTS_FILE not found — no docker hosts loaded. \
-                                 Create the file or use SYSLOG_DOCKER_HOSTS instead."
+                                source_key,
+                                "Docker hosts file not found — no docker hosts loaded. \
+                                 Create the file or use HIVE_DOCKER_HOSTS instead."
                             );
                         }
                         Err(e) => {
-                            return Err(anyhow::anyhow!(
-                                "Failed to read SYSLOG_DOCKER_HOSTS_FILE={path}: {e}"
-                            ));
+                            return Err(anyhow::anyhow!("Failed to read {source_key}={path}: {e}"));
                         }
                     }
                 }
@@ -678,7 +738,9 @@ impl Config {
 
         // Validation
         if config.storage.pool_size == 0 {
-            return Err(anyhow::anyhow!("SYSLOG_MCP_POOL_SIZE must be > 0"));
+            return Err(anyhow::anyhow!(
+                "HIVE_MCP_POOL_SIZE (or legacy SYSLOG_MCP_POOL_SIZE) must be > 0"
+            ));
         }
         validate_syslog_config(&config.syslog)?;
         validate_storage_config(&config.storage)?;
@@ -709,12 +771,27 @@ fn env_override_opt_str(key: &str, target: &mut Option<String>) {
     }
 }
 
+fn env_override_str_alias(primary: &str, legacy: &str, target: &mut String) {
+    env_override_str(legacy, target);
+    env_override_str(primary, target);
+}
+
+fn env_override_opt_str_alias(primary: &str, legacy: &str, target: &mut Option<String>) {
+    env_override_opt_str(legacy, target);
+    env_override_opt_str(primary, target);
+}
+
 fn env_override_path(key: &str, target: &mut PathBuf) {
     if let Ok(v) = std::env::var(key) {
         if !v.is_empty() {
             *target = PathBuf::from(v);
         }
     }
+}
+
+fn env_override_path_alias(primary: &str, legacy: &str, target: &mut PathBuf) {
+    env_override_path(legacy, target);
+    env_override_path(primary, target);
 }
 
 fn env_override_list(key: &str, target: &mut Vec<String>) {
@@ -728,6 +805,11 @@ fn env_override_list(key: &str, target: &mut Vec<String>) {
         .map(ToOwned::to_owned)
         .collect();
     *target = values;
+}
+
+fn env_override_list_alias(primary: &str, legacy: &str, target: &mut Vec<String>) {
+    env_override_list(legacy, target);
+    env_override_list(primary, target);
 }
 
 fn env_override_auth_mode(key: &str, target: &mut AuthMode) -> anyhow::Result<()> {
@@ -747,6 +829,15 @@ fn env_override_auth_mode(key: &str, target: &mut AuthMode) -> anyhow::Result<()
         }
     };
     Ok(())
+}
+
+fn env_override_auth_mode_alias(
+    primary: &str,
+    legacy: &str,
+    target: &mut AuthMode,
+) -> anyhow::Result<()> {
+    env_override_auth_mode(legacy, target)?;
+    env_override_auth_mode(primary, target)
 }
 
 fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
@@ -769,6 +860,18 @@ fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn env_override_bool_alias(primary: &str, legacy: &str, target: &mut bool) -> anyhow::Result<()> {
+    env_override_bool(legacy, target)?;
+    env_override_bool(primary, target)
+}
+
+fn env_alias_value<'a>(primary: &'a str, legacy: &'a str) -> Option<(&'a str, String)> {
+    if let Ok(value) = std::env::var(primary) {
+        return Some((primary, value));
+    }
+    std::env::var(legacy).ok().map(|value| (legacy, value))
+}
+
 fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()> {
     if token_is_set_but_blank(&config.mcp.api_token) {
         return Err(anyhow::anyhow!("mcp.api_token must not be empty"));
@@ -779,7 +882,8 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
             Some(_) => return Err(anyhow::anyhow!("api.api_token must not be empty")),
             None => {
                 return Err(anyhow::anyhow!(
-                    "SYSLOG_API_TOKEN is required when SYSLOG_API_ENABLED=true"
+                    "HIVE_API_TOKEN is required when HIVE_API_ENABLED=true \
+                     (legacy SYSLOG_API_TOKEN / SYSLOG_API_ENABLED are also accepted)"
                 ));
             }
         }
@@ -792,18 +896,21 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     if auth.mode == AuthMode::OAuth {
         if option_is_blank(&auth.public_url) {
             return Err(anyhow::anyhow!(
-                "SYSLOG_MCP_PUBLIC_URL is required when SYSLOG_MCP_AUTH_MODE=oauth — \
-                 set the externally reachable base URL (e.g. https://syslog.example.com)"
+                "HIVE_MCP_PUBLIC_URL is required when HIVE_MCP_AUTH_MODE=oauth \
+                 (legacy SYSLOG_MCP_PUBLIC_URL / SYSLOG_MCP_AUTH_MODE are also accepted) — \
+                 set the externally reachable base URL (e.g. https://hive.example.com)"
             ));
         }
         if option_is_blank(&auth.google_client_id) {
             return Err(anyhow::anyhow!(
-                "SYSLOG_MCP_GOOGLE_CLIENT_ID is required when SYSLOG_MCP_AUTH_MODE=oauth"
+                "HIVE_MCP_GOOGLE_CLIENT_ID is required when HIVE_MCP_AUTH_MODE=oauth \
+                 (legacy SYSLOG_MCP_GOOGLE_CLIENT_ID is also accepted)"
             ));
         }
         if option_is_blank(&auth.google_client_secret) {
             return Err(anyhow::anyhow!(
-                "SYSLOG_MCP_GOOGLE_CLIENT_SECRET is required when SYSLOG_MCP_AUTH_MODE=oauth"
+                "HIVE_MCP_GOOGLE_CLIENT_SECRET is required when HIVE_MCP_AUTH_MODE=oauth \
+                 (legacy SYSLOG_MCP_GOOGLE_CLIENT_SECRET is also accepted)"
             ));
         }
         // Empty allowlist + empty admin_email → ANY Google account that
@@ -817,7 +924,8 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
         if admin_blank && allowlist_blank {
             return Err(anyhow::anyhow!(
                 "[mcp.auth] requires at least one entry in `allowed_emails` (or a non-empty \
-                 `admin_email`) when SYSLOG_MCP_AUTH_MODE=oauth — without an allowlist any \
+                 `admin_email`) when HIVE_MCP_AUTH_MODE=oauth (legacy SYSLOG_MCP_AUTH_MODE=oauth \
+                 is also accepted) — without an allowlist any \
                  Google account that completes OAuth would gain access"
             ));
         }
@@ -844,18 +952,19 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
         let has_oauth = auth.mode == AuthMode::OAuth;
         if has_oauth && !has_static_token {
             return Err(anyhow::anyhow!(
-                "MCP host `{}` is not a loopback address and SYSLOG_MCP_AUTH_MODE=oauth is \
-                 configured without SYSLOG_MCP_TOKEN. OTLP /v1/logs only supports the static \
+                "MCP host `{}` is not a loopback address and HIVE_MCP_AUTH_MODE=oauth is \
+                 configured without HIVE_MCP_TOKEN. OTLP /v1/logs only supports the static \
                  Bearer token gate today, so this would expose unauthenticated OTLP writes. \
-                 Set SYSLOG_MCP_TOKEN, bind to 127.0.0.1 / ::1, or enable an upstream auth \
-                 gateway with SYSLOG_MCP_NO_AUTH=true.",
+                 Set HIVE_MCP_TOKEN (or legacy SYSLOG_MCP_TOKEN), bind to 127.0.0.1 / ::1, \
+                 or enable an upstream auth gateway with HIVE_MCP_NO_AUTH=true.",
                 config.mcp.host
             ));
         }
         if !has_static_token && !has_oauth {
             return Err(anyhow::anyhow!(
                 "MCP host `{}` is not a loopback address but no authentication is configured — \
-                 set SYSLOG_MCP_TOKEN, set SYSLOG_MCP_AUTH_MODE=oauth, or bind to 127.0.0.1 / ::1",
+                 set HIVE_MCP_TOKEN, set HIVE_MCP_AUTH_MODE=oauth, or bind to 127.0.0.1 / ::1 \
+                 (legacy SYSLOG_MCP_TOKEN / SYSLOG_MCP_AUTH_MODE are also accepted)",
                 config.mcp.host
             ));
         }
@@ -963,6 +1072,18 @@ where
         }
     }
     Ok(())
+}
+
+fn env_override_parse_alias<T: std::str::FromStr>(
+    primary: &str,
+    legacy: &str,
+    target: &mut T,
+) -> anyhow::Result<()>
+where
+    T::Err: std::fmt::Display,
+{
+    env_override_parse(legacy, target)?;
+    env_override_parse(primary, target)
 }
 
 fn validate_host(host: &str) -> anyhow::Result<()> {

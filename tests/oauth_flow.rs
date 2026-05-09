@@ -8,9 +8,9 @@ use axum::{
     body::to_bytes,
     http::{header, Request, StatusCode},
 };
+use hive_mcp::{mcp::router, testing};
 use lab_auth::jwt::AccessClaims;
 use lab_auth::metadata::canonical_resource_url;
-use syslog_mcp::{mcp::router, testing};
 use tempfile::TempDir;
 use tower::util::ServiceExt;
 
@@ -77,7 +77,7 @@ async fn post_mcp(
 }
 
 fn stats_call() -> serde_json::Value {
-    serde_json::json!({ "name": "syslog", "arguments": { "action": "stats" } })
+    serde_json::json!({ "name": "hive", "arguments": { "action": "stats" } })
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ async fn valid_jwt_with_read_scope_allows_stats() {
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
     let token = auth_state
         .signing_keys
-        .issue_access_token(&make_claims(&auth_state, "syslog:read", 60))
+        .issue_access_token(&make_claims(&auth_state, "hive:read", 60))
         .unwrap();
 
     let (status, value) = post_mcp(router(state), "tools/call", Some(stats_call()), &token).await;
@@ -114,7 +114,7 @@ async fn valid_jwt_with_admin_scope_satisfies_read() {
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
     let token = auth_state
         .signing_keys
-        .issue_access_token(&make_claims(&auth_state, "syslog:admin", 60))
+        .issue_access_token(&make_claims(&auth_state, "hive:admin", 60))
         .unwrap();
 
     let (status, _) = post_mcp(router(state), "tools/call", Some(stats_call()), &token).await;
@@ -133,7 +133,7 @@ async fn expired_jwt_returns_401() {
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
     let token = auth_state
         .signing_keys
-        .issue_access_token(&make_claims(&auth_state, "syslog:read", -120))
+        .issue_access_token(&make_claims(&auth_state, "hive:read", -120))
         .unwrap();
 
     let (status, _) = post_mcp(router(state), "tools/call", Some(stats_call()), &token).await;
@@ -149,7 +149,7 @@ async fn expired_jwt_returns_401() {
 async fn jwt_with_wrong_issuer_returns_401() {
     let dir = TempDir::new().unwrap();
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
-    let mut bad_claims = make_claims(&auth_state, "syslog:read", 60);
+    let mut bad_claims = make_claims(&auth_state, "hive:read", 60);
     bad_claims.iss = "https://attacker.example.com".to_string();
     let token = auth_state
         .signing_keys
@@ -193,7 +193,7 @@ async fn jwt_with_empty_scope_is_denied_at_scope_check() {
     );
 }
 
-/// `tools/list` with valid JWT → 200 and syslog tool present.
+/// `tools/list` with valid JWT -> 200 and Hive tool present.
 /// Tool discovery does not require any specific scope — only an AuthContext.
 #[tokio::test]
 async fn tools_list_succeeds_with_valid_jwt() {
@@ -201,7 +201,7 @@ async fn tools_list_succeeds_with_valid_jwt() {
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
     let token = auth_state
         .signing_keys
-        .issue_access_token(&make_claims(&auth_state, "syslog:read", 60))
+        .issue_access_token(&make_claims(&auth_state, "hive:read", 60))
         .unwrap();
 
     let (status, value) = post_mcp(router(state), "tools/list", None, &token).await;
@@ -212,8 +212,8 @@ async fn tools_list_succeeds_with_valid_jwt() {
     );
     let tools = value["result"]["tools"].as_array();
     assert!(
-        tools.is_some_and(|t| t.iter().any(|tool| tool["name"] == "syslog")),
-        "tools/list must return the syslog tool"
+        tools.is_some_and(|t| t.iter().any(|tool| tool["name"] == "hive")),
+        "tools/list must return the hive tool"
     );
 }
 
@@ -232,7 +232,7 @@ async fn jwt_signed_with_wrong_key_returns_401() {
     // separate TempDir — same config, different key material.
     let dir2 = TempDir::new().unwrap();
     let (_, auth_state2) = testing::oauth_state_with_auth_state(dir2.path()).await;
-    let claims = make_claims(&auth_state, "syslog:read", 60); // valid iss/aud for server
+    let claims = make_claims(&auth_state, "hive:read", 60); // valid iss/aud for server
     let token = auth_state2
         .signing_keys
         .issue_access_token(&claims) // signed with wrong key
@@ -254,7 +254,7 @@ async fn jwt_signed_with_wrong_key_returns_401() {
 async fn jwt_with_wrong_audience_returns_401() {
     let dir = TempDir::new().unwrap();
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
-    let mut bad_claims = make_claims(&auth_state, "syslog:read", 60);
+    let mut bad_claims = make_claims(&auth_state, "hive:read", 60);
     bad_claims.aud = "https://other-service.example.com/mcp".to_string();
     let token = auth_state
         .signing_keys

@@ -102,5 +102,5 @@ fn parse_unknown_option_errors() {
 fn parse_search_help_points_to_top_level_usage() {
     let err = CliCommand::parse(strings(&["search", "--help"])).unwrap_err();
 
-    assert!(err.to_string().contains("syslog --help"));
+    assert!(err.to_string().contains("hive --help"));
 }

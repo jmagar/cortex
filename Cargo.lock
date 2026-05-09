@@ -1003,6 +1003,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hive-mcp"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bollard",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "hive-mcp",
+ "hyper",
+ "hyper-util",
+ "lab-auth",
+ "opentelemetry-proto",
+ "prost",
+ "r2d2",
+ "r2d2_sqlite",
+ "regex",
+ "rmcp",
+ "rusqlite",
+ "rustix 0.38.44",
+ "scheduled-thread-pool",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "syslog_loose",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "hkdf"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3028,43 +3065,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "syslog-mcp"
-version = "0.17.7"
-dependencies = [
- "anyhow",
- "axum",
- "bollard",
- "bytes",
- "chrono",
- "futures-util",
- "hyper",
- "hyper-util",
- "lab-auth",
- "opentelemetry-proto",
- "prost",
- "r2d2",
- "r2d2_sqlite",
- "regex",
- "rmcp",
- "rusqlite",
- "rustix 0.38.44",
- "scheduled-thread-pool",
- "serde",
- "serde_json",
- "serial_test",
- "syslog-mcp",
- "syslog_loose",
- "tempfile",
- "tokio",
- "toml",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "url",
 ]
 
 [[package]]

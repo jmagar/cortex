@@ -7,7 +7,7 @@ fn tool_definitions_include_expected_public_tools() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["syslog"]);
+    assert_eq!(names, vec!["hive"]);
 
     let action = &tools[0]["inputSchema"]["properties"]["action"];
     assert_eq!(action["type"], "string");

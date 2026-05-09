@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Result};
-use serde::Serialize;
-use syslog_mcp::app::{
+use hive_mcp::app::{
     CorrelateEventsRequest, CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse,
     ListHostsResponse, LogEntry, SearchLogsRequest, SearchLogsResponse, SyslogService,
     TailLogsRequest,
 };
+use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliCommand {
@@ -164,7 +164,7 @@ fn parse_search(args: &[String]) -> Result<CliCommand> {
             "--from" => parsed.from = Some(flags.value("--from")?),
             "--to" => parsed.to = Some(flags.value("--to")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            "-h" | "--help" => bail!("use `syslog --help` for usage"),
+            "-h" | "--help" => bail!("use `hive --help` for usage"),
             _ if arg.starts_with("--hostname=") => {
                 parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
             }

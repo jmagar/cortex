@@ -1,13 +1,13 @@
 services:
-  syslog-mcp:
+  hive-mcp:
     # Default to the published image so plugin deploys can `docker compose pull`
     # without source. Override with --build (or `docker compose build`) for local
     # source development.
-    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}
+    image: ghcr.io/jmagar/hive-mcp:${HIVE_MCP_VERSION:-${SYSLOG_MCP_VERSION:-latest}}
     build:
       context: .
       dockerfile: config/Dockerfile
-    container_name: syslog-mcp
+    container_name: hive-mcp
     restart: unless-stopped
     user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"
     env_file:
@@ -16,9 +16,11 @@ services:
     ports:
       - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/udp"
       - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/tcp"
-      - "${SYSLOG_MCP_PORT:-3100}:3100/tcp"
+      - "${HIVE_MCP_PORT:-${SYSLOG_MCP_PORT:-3100}}:3100/tcp"
     volumes:
-      - ${SYSLOG_MCP_DATA_VOLUME:-syslog-mcp-data}:/data
+      # Data-risk default intentionally keeps the legacy volume unless an
+      # operator explicitly opts into HIVE_MCP_DATA_VOLUME=hive-mcp-data.
+      - ${HIVE_MCP_DATA_VOLUME:-${SYSLOG_MCP_DATA_VOLUME:-syslog-mcp-data}}:/data
     # The container listens on SYSLOG_PORT (default 1514). To serve host port
     # 514, set SYSLOG_HOST_PORT=514 while leaving SYSLOG_PORT at 1514, or add
     # host-level firewall/NAT redirects from 514 to 1514.
@@ -43,8 +45,9 @@ services:
 
 volumes:
   syslog-mcp-data:
+  hive-mcp-data:
 
 networks:
   jakenet:
-    name: ${DOCKER_NETWORK:-syslog-mcp}
+    name: ${DOCKER_NETWORK:-hive-mcp}
     external: true

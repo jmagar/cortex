@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Check whether the running syslog-mcp systemd unit or Docker container is using
+# Check whether the running hive-mcp systemd unit or Docker container is using
 # the currently installed artifact.
 set -euo pipefail
 
 MODE="auto"
 PULL="false"
-UNIT="syslog-mcp.service"
-SERVICE="syslog-mcp"
+UNIT="hive-mcp.service"
+SERVICE="hive-mcp"
 COMPOSE_DIR="${SYSLOG_MCP_COMPOSE_DIR:-${HOME}/.claude/plugins/data/syslog-jmagar-lab}"
 EXPECTED_BINARY="${SYSLOG_MCP_EXPECTED_BINARY:-}"
 
@@ -176,7 +176,7 @@ check_docker() {
     cid="$(docker ps --filter "name=^/${SERVICE}$" --format '{{.ID}}' 2>/dev/null | head -1)"
   fi
   if [[ -z "$cid" ]]; then
-    echo "FAIL: syslog-mcp container is not running"
+    echo "FAIL: hive-mcp container is not running"
     return 1
   fi
 
@@ -219,7 +219,7 @@ case "$MODE" in
   systemd) check_systemd ;;
   docker) check_docker ;;
   none)
-    echo "FAIL: no running syslog-mcp systemd unit or container detected"
+    echo "FAIL: no running hive-mcp systemd unit or container detected"
     exit 1
     ;;
   *)

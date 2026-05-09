@@ -15,6 +15,19 @@ fn syslog_mcp_token_sets_api_token() {
 
 #[test]
 #[serial]
+fn hive_mcp_token_sets_api_token() {
+    std::env::set_var("HIVE_MCP_TOKEN", "hive-token");
+    std::env::remove_var("SYSLOG_MCP_TOKEN");
+    std::env::remove_var("SYSLOG_MCP_API_TOKEN");
+    let result = Config::load();
+    std::env::remove_var("HIVE_MCP_TOKEN");
+
+    let cfg = result.expect("Config::load() should succeed");
+    assert_eq!(cfg.mcp.api_token, Some("hive-token".into()));
+}
+
+#[test]
+#[serial]
 fn deprecated_api_token_still_works() {
     std::env::remove_var("SYSLOG_MCP_TOKEN");
     std::env::set_var("SYSLOG_MCP_API_TOKEN", "legacy-token");
@@ -40,6 +53,21 @@ fn new_token_takes_precedence_over_deprecated() {
 
 #[test]
 #[serial]
+fn hive_token_takes_precedence_over_legacy_syslog_token() {
+    std::env::set_var("HIVE_MCP_TOKEN", "hive-token");
+    std::env::set_var("SYSLOG_MCP_TOKEN", "syslog-token");
+    std::env::set_var("SYSLOG_MCP_API_TOKEN", "old-token");
+    let result = Config::load();
+    std::env::remove_var("HIVE_MCP_TOKEN");
+    std::env::remove_var("SYSLOG_MCP_TOKEN");
+    std::env::remove_var("SYSLOG_MCP_API_TOKEN");
+
+    let cfg = result.expect("Config::load() should succeed");
+    assert_eq!(cfg.mcp.api_token, Some("hive-token".into()));
+}
+
+#[test]
+#[serial]
 fn env_var_overrides_mcp_port() {
     std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_MCP_PORT", "3200");
@@ -49,6 +77,21 @@ fn env_var_overrides_mcp_port() {
 
     let cfg = result.expect("Config::load() should succeed");
     assert_eq!(cfg.mcp.port, 3200);
+}
+
+#[test]
+#[serial]
+fn hive_mcp_env_takes_precedence_over_legacy_mcp_env() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_MCP_PORT", "3200");
+    std::env::set_var("HIVE_MCP_PORT", "3300");
+    let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
+    std::env::remove_var("SYSLOG_MCP_PORT");
+    std::env::remove_var("HIVE_MCP_PORT");
+
+    let cfg = result.expect("Config::load() should succeed");
+    assert_eq!(cfg.mcp.port, 3300);
 }
 
 #[test]
@@ -108,6 +151,34 @@ fn defaults_are_applied_without_env_vars() {
         "SYSLOG_MCP_AUTH_ADMIN_EMAIL",
         "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
         "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
+        "HIVE_MCP_HOST",
+        "HIVE_MCP_PORT",
+        "HIVE_MCP_ALLOWED_HOSTS",
+        "HIVE_MCP_ALLOWED_ORIGINS",
+        "HIVE_MCP_DB_PATH",
+        "HIVE_MCP_POOL_SIZE",
+        "HIVE_MCP_RETENTION_DAYS",
+        "HIVE_MCP_TOKEN",
+        "HIVE_MCP_MAX_DB_SIZE_MB",
+        "HIVE_MCP_RECOVERY_DB_SIZE_MB",
+        "HIVE_MCP_MIN_FREE_DISK_MB",
+        "HIVE_MCP_RECOVERY_FREE_DISK_MB",
+        "HIVE_MCP_CLEANUP_INTERVAL_SECS",
+        "HIVE_MCP_CLEANUP_CHUNK_SIZE",
+        "HIVE_API_ENABLED",
+        "HIVE_API_TOKEN",
+        "HIVE_DOCKER_INGEST_ENABLED",
+        "HIVE_DOCKER_HOSTS",
+        "HIVE_DOCKER_HOSTS_FILE",
+        "HIVE_DOCKER_RECONNECT_INITIAL_MS",
+        "HIVE_DOCKER_RECONNECT_MAX_MS",
+        "HIVE_MCP_AUTH_MODE",
+        "HIVE_MCP_PUBLIC_URL",
+        "HIVE_MCP_GOOGLE_CLIENT_ID",
+        "HIVE_MCP_GOOGLE_CLIENT_SECRET",
+        "HIVE_MCP_AUTH_ADMIN_EMAIL",
+        "HIVE_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+        "HIVE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
     ] {
         std::env::remove_var(key);
     }
@@ -573,6 +644,29 @@ fn docker_ingest_loads_hosts_file_from_env() {
 
 #[test]
 #[serial]
+fn hive_docker_hosts_override_legacy_docker_hosts() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "true");
+    std::env::set_var("SYSLOG_DOCKER_HOSTS", "legacy-host");
+    std::env::set_var("HIVE_DOCKER_HOSTS", "hive-host");
+    let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
+    std::env::remove_var("SYSLOG_DOCKER_INGEST_ENABLED");
+    std::env::remove_var("SYSLOG_DOCKER_HOSTS");
+    std::env::remove_var("HIVE_DOCKER_HOSTS");
+
+    let config = result.expect("Config::load should parse Hive docker host shorthand");
+    assert!(config.docker_ingest.enabled);
+    assert_eq!(config.docker_ingest.hosts.len(), 1);
+    assert_eq!(config.docker_ingest.hosts[0].name, "hive-host");
+    assert_eq!(
+        config.docker_ingest.hosts[0].base_url,
+        "http://hive-host:2375"
+    );
+}
+
+#[test]
+#[serial]
 fn docker_ingest_ignores_hosts_file_when_disabled() {
     std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "false");
@@ -692,6 +786,36 @@ fn syslog_mcp_auth_mode_env_flips_to_oauth() {
 
 #[test]
 #[serial]
+fn hive_mcp_auth_mode_env_flips_to_oauth() {
+    std::env::set_var("HIVE_MCP_HOST", "127.0.0.1");
+    std::env::set_var("HIVE_MCP_AUTH_MODE", "oauth");
+    std::env::set_var("HIVE_MCP_PUBLIC_URL", "https://hive.example.com");
+    std::env::set_var("HIVE_MCP_GOOGLE_CLIENT_ID", "client-id");
+    std::env::set_var("HIVE_MCP_GOOGLE_CLIENT_SECRET", "client-secret");
+    std::env::set_var("HIVE_MCP_AUTH_ADMIN_EMAIL", "admin@example.com");
+    let result = Config::load();
+    for k in [
+        "HIVE_MCP_HOST",
+        "HIVE_MCP_AUTH_MODE",
+        "HIVE_MCP_PUBLIC_URL",
+        "HIVE_MCP_GOOGLE_CLIENT_ID",
+        "HIVE_MCP_GOOGLE_CLIENT_SECRET",
+        "HIVE_MCP_AUTH_ADMIN_EMAIL",
+    ] {
+        std::env::remove_var(k);
+    }
+
+    let cfg = result.expect("Hive oauth env overrides should satisfy startup validation");
+    assert_eq!(cfg.mcp.auth.mode, AuthMode::OAuth);
+    assert_eq!(
+        cfg.mcp.auth.public_url.as_deref(),
+        Some("https://hive.example.com")
+    );
+    assert_eq!(cfg.mcp.auth.admin_email, "admin@example.com");
+}
+
+#[test]
+#[serial]
 fn syslog_mcp_auth_mode_env_rejects_invalid_value() {
     std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_MCP_AUTH_MODE", "magic");
@@ -764,7 +888,7 @@ fn oauth_mode_rejects_missing_public_url() {
     cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
-    assert!(err.to_string().contains("SYSLOG_MCP_PUBLIC_URL"));
+    assert!(err.to_string().contains("HIVE_MCP_PUBLIC_URL"));
 }
 
 #[test]
@@ -776,7 +900,7 @@ fn oauth_mode_rejects_missing_google_client_id() {
     cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
-    assert!(err.to_string().contains("SYSLOG_MCP_GOOGLE_CLIENT_ID"));
+    assert!(err.to_string().contains("HIVE_MCP_GOOGLE_CLIENT_ID"));
 }
 
 #[test]
@@ -788,7 +912,7 @@ fn oauth_mode_rejects_missing_google_client_secret() {
     cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
-    assert!(err.to_string().contains("SYSLOG_MCP_GOOGLE_CLIENT_SECRET"));
+    assert!(err.to_string().contains("HIVE_MCP_GOOGLE_CLIENT_SECRET"));
 }
 
 #[test]
@@ -917,7 +1041,7 @@ fn non_loopback_oauth_without_static_token_rejects_otlp_write_exposure() {
     let err = validate_auth_config(&cfg, true).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("OTLP /v1/logs") && msg.contains("SYSLOG_MCP_TOKEN"),
+        msg.contains("OTLP /v1/logs") && msg.contains("HIVE_MCP_TOKEN"),
         "wrong error: {msg}"
     );
 }

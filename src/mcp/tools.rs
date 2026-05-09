@@ -6,7 +6,7 @@ use crate::app::{
     SearchLogsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
 };
 
-use super::schemas::SYSLOG_ACTIONS;
+use super::schemas::{HIVE_TOOL_NAME, LEGACY_SYSLOG_TOOL_NAME, SYSLOG_ACTIONS};
 use super::AppState;
 
 /// Execute a tool by name
@@ -16,7 +16,7 @@ pub(super) async fn execute_tool(
     args: Value,
 ) -> anyhow::Result<Value> {
     match name {
-        "syslog" => tool_syslog(state, args).await,
+        HIVE_TOOL_NAME | LEGACY_SYSLOG_TOOL_NAME => tool_syslog(state, args).await,
         _ => Err(anyhow::anyhow!("Unknown tool: {name}")),
     }
 }

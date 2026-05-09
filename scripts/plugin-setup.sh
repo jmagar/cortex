@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SessionStart hook — deploys or connects syslog-mcp based on userConfig
+# SessionStart hook — deploys or connects hive-mcp based on userConfig
 set -euo pipefail
 
 # When invoked directly (e.g. /syslog:redeploy), the plugin runtime vars are
@@ -13,9 +13,22 @@ existing_env_value() {
   local key="$1"
   local file
   local value
-  for file in "${CLAUDE_PLUGIN_DATA}/.env" "${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"; do
+  for file in "${CLAUDE_PLUGIN_DATA}/.env" "${CLAUDE_PLUGIN_DATA}/hive-mcp.env"; do
     [[ -f "${file}" ]] || continue
     value="$(awk -F= -v key="${key}" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "${file}")"
+    if [[ -n "${value}" ]]; then
+      printf '%s\n' "${value}"
+      return 0
+    fi
+  done
+  return 0
+}
+
+existing_env_value_any() {
+  local key
+  local value
+  for key in "$@"; do
+    value="$(existing_env_value "${key}")"
     if [[ -n "${value}" ]]; then
       printf '%s\n' "${value}"
       return 0
@@ -44,12 +57,12 @@ mcp_host_is_loopback() {
 NO_AUTH="${CLAUDE_PLUGIN_OPTION_NO_AUTH:-$(existing_env_value NO_AUTH)}"
 NO_AUTH="${NO_AUTH:-false}"
 NO_AUTH="$(printf '%s' "${NO_AUTH}" | tr '[:upper:]' '[:lower:]')"
-AUTH_MODE="${CLAUDE_PLUGIN_OPTION_AUTH_MODE:-$(existing_env_value SYSLOG_MCP_AUTH_MODE)}"
+AUTH_MODE="${CLAUDE_PLUGIN_OPTION_AUTH_MODE:-$(existing_env_value_any HIVE_MCP_AUTH_MODE SYSLOG_MCP_AUTH_MODE)}"
 AUTH_MODE="${AUTH_MODE:-bearer}"
 AUTH_MODE="$(printf '%s' "${AUTH_MODE}" | tr '[:upper:]' '[:lower:]')"
 
 if [[ "${NO_AUTH}" != "true" && -z "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}" ]]; then
-  _tok="$(existing_env_value SYSLOG_MCP_TOKEN)"
+  _tok="$(existing_env_value_any HIVE_MCP_TOKEN SYSLOG_MCP_TOKEN)"
   [[ -n "${_tok}" ]] || _tok="$(existing_env_value SYSLOG_MCP_API_TOKEN)"
   [[ -n "${_tok}" ]] && CLAUDE_PLUGIN_OPTION_API_TOKEN="${_tok}"
   unset _tok
@@ -68,30 +81,30 @@ MCP_HOST="${CLAUDE_PLUGIN_OPTION_MCP_HOST:-0.0.0.0}"
 MCP_PORT="${CLAUDE_PLUGIN_OPTION_MCP_PORT:-3100}"
 validate_port_value SYSLOG_PORT "${SYSLOG_PORT}"
 validate_port_value SYSLOG_HOST_PORT "${SYSLOG_HOST_PORT}"
-validate_port_value SYSLOG_MCP_PORT "${MCP_PORT}"
+validate_port_value HIVE_MCP_PORT "${MCP_PORT}"
 DATA_DIR="${CLAUDE_PLUGIN_OPTION_DATA_DIR:-${CLAUDE_PLUGIN_DATA}}"
 MAX_DB_SIZE_MB="${CLAUDE_PLUGIN_OPTION_MAX_DB_SIZE_MB:-8192}"
 RETENTION_DAYS="${CLAUDE_PLUGIN_OPTION_RETENTION_DAYS:-90}"
 DOCKER_INGEST="${CLAUDE_PLUGIN_OPTION_DOCKER_INGEST_ENABLED:-false}"
 FLEET_HOSTS="${CLAUDE_PLUGIN_OPTION_FLEET_HOSTS:-}"
-PUBLIC_URL="${CLAUDE_PLUGIN_OPTION_PUBLIC_URL:-$(existing_env_value SYSLOG_MCP_PUBLIC_URL)}"
-GOOGLE_CLIENT_ID="${CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_ID:-$(existing_env_value SYSLOG_MCP_GOOGLE_CLIENT_ID)}"
-GOOGLE_CLIENT_SECRET="${CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_SECRET:-$(existing_env_value SYSLOG_MCP_GOOGLE_CLIENT_SECRET)}"
-AUTH_ADMIN_EMAIL="${CLAUDE_PLUGIN_OPTION_AUTH_ADMIN_EMAIL:-$(existing_env_value SYSLOG_MCP_AUTH_ADMIN_EMAIL)}"
-AUTH_ALLOWED_REDIRECT_URIS="${CLAUDE_PLUGIN_OPTION_AUTH_ALLOWED_REDIRECT_URIS:-$(existing_env_value SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS)}"
+PUBLIC_URL="${CLAUDE_PLUGIN_OPTION_PUBLIC_URL:-$(existing_env_value_any HIVE_MCP_PUBLIC_URL SYSLOG_MCP_PUBLIC_URL)}"
+GOOGLE_CLIENT_ID="${CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_ID:-$(existing_env_value_any HIVE_MCP_GOOGLE_CLIENT_ID SYSLOG_MCP_GOOGLE_CLIENT_ID)}"
+GOOGLE_CLIENT_SECRET="${CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_SECRET:-$(existing_env_value_any HIVE_MCP_GOOGLE_CLIENT_SECRET SYSLOG_MCP_GOOGLE_CLIENT_SECRET)}"
+AUTH_ADMIN_EMAIL="${CLAUDE_PLUGIN_OPTION_AUTH_ADMIN_EMAIL:-$(existing_env_value_any HIVE_MCP_AUTH_ADMIN_EMAIL SYSLOG_MCP_AUTH_ADMIN_EMAIL)}"
+AUTH_ALLOWED_REDIRECT_URIS="${CLAUDE_PLUGIN_OPTION_AUTH_ALLOWED_REDIRECT_URIS:-$(existing_env_value_any HIVE_MCP_AUTH_ALLOWED_REDIRECT_URIS SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS)}"
 
 if [[ "${NO_AUTH}" != "true" && -z "${API_TOKEN}" ]]; then
   if ! [[ "${AUTH_MODE}" == "oauth" && "${IS_SERVER}" == "true" ]] || ! mcp_host_is_loopback "${MCP_HOST}"; then
     echo "ERROR: API token is required unless no_auth is true or OAuth server mode binds MCP to loopback" >&2
-    echo "       OAuth mode still needs SYSLOG_MCP_TOKEN when OTLP /v1/logs is exposed on a non-loopback listener." >&2
+    echo "       OAuth mode still needs HIVE_MCP_TOKEN, or legacy SYSLOG_MCP_TOKEN, when OTLP /v1/logs is exposed on a non-loopback listener." >&2
     exit 1
   fi
 fi
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 ENV_FILE="${CLAUDE_PLUGIN_DATA}/.env"
-LEGACY_ENV_FILE="${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"
-UNIT_FILE="${HOME}/.config/systemd/user/syslog-mcp.service"
+LEGACY_ENV_FILE="${CLAUDE_PLUGIN_DATA}/hive-mcp.env"
+UNIT_FILE="${HOME}/.config/systemd/user/hive-mcp.service"
 COMPOSE_DIR="${CLAUDE_PLUGIN_DATA}"
 COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.yml"
 
@@ -186,13 +199,13 @@ oauth_env_block() {
   fi
 
   cat << EOF
-SYSLOG_MCP_AUTH_MODE=oauth
-SYSLOG_MCP_PUBLIC_URL=${public_url}
-SYSLOG_MCP_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-SYSLOG_MCP_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-SYSLOG_MCP_AUTH_ADMIN_EMAIL=${AUTH_ADMIN_EMAIL}
-SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS=${redirects}
-SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false
+HIVE_MCP_AUTH_MODE=oauth
+HIVE_MCP_PUBLIC_URL=${public_url}
+HIVE_MCP_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+HIVE_MCP_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+HIVE_MCP_AUTH_ADMIN_EMAIL=${AUTH_ADMIN_EMAIL}
+HIVE_MCP_AUTH_ALLOWED_REDIRECT_URIS=${redirects}
+HIVE_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false
 EOF
 }
 
@@ -213,13 +226,13 @@ write_env() {
     # Docker compose reads these directly from .env. Pin UID/GID so the
     # container writes syslog.db with the host user's ownership — keeps the
     # same file readable by the systemd binary if you switch modes back.
-    local db_line="SYSLOG_MCP_DATA_VOLUME=${DATA_DIR}"
+    local db_line="HIVE_MCP_DATA_VOLUME=${DATA_DIR}"
     local config_line=""
     local uid_line="SYSLOG_UID=$(id -u)"
     local gid_line="SYSLOG_GID=$(id -g)"
   else
     # Systemd binary reads these as direct env vars
-    local db_line="SYSLOG_MCP_DB_PATH=${DATA_DIR}/syslog.db"
+    local db_line="HIVE_MCP_DB_PATH=${DATA_DIR}/syslog.db"
     local config_line=""
     local uid_line=""
     local gid_line=""
@@ -230,21 +243,21 @@ write_env() {
 SYSLOG_HOST=${SYSLOG_HOST}
 SYSLOG_PORT=${SYSLOG_PORT}
 SYSLOG_HOST_PORT=${SYSLOG_HOST_PORT}
-SYSLOG_MCP_HOST=${MCP_HOST}
-SYSLOG_MCP_PORT=${MCP_PORT}
+HIVE_MCP_HOST=${MCP_HOST}
+HIVE_MCP_PORT=${MCP_PORT}
 NO_AUTH=${NO_AUTH}
 ${db_line}
-SYSLOG_MCP_MAX_DB_SIZE_MB=${MAX_DB_SIZE_MB}
-SYSLOG_MCP_RETENTION_DAYS=${RETENTION_DAYS}
+HIVE_MCP_MAX_DB_SIZE_MB=${MAX_DB_SIZE_MB}
+HIVE_MCP_RETENTION_DAYS=${RETENTION_DAYS}
 SYSLOG_BATCH_SIZE=${batch_size}
 SYSLOG_WRITE_CHANNEL_CAPACITY=${write_channel_capacity}
-SYSLOG_DOCKER_INGEST_ENABLED=${DOCKER_INGEST}
+HIVE_DOCKER_INGEST_ENABLED=${DOCKER_INGEST}
 EOF
 )
 
   if [[ "${NO_AUTH}" != "true" && -n "${API_TOKEN}" ]]; then
     new_env="${new_env}
-SYSLOG_MCP_TOKEN=${API_TOKEN}"
+HIVE_MCP_TOKEN=${API_TOKEN}"
   fi
 
   local auth_block
@@ -264,7 +277,7 @@ ${config_line}"
   # Fleet hosts feed Docker ingest only when ingest is enabled
   if [[ "${DOCKER_INGEST}" == "true" && -n "${FLEET_HOSTS}" ]]; then
     new_env="${new_env}
-SYSLOG_DOCKER_HOSTS=${FLEET_HOSTS}"
+HIVE_DOCKER_HOSTS=${FLEET_HOSTS}"
   fi
 
   if [[ -f "${ENV_FILE}" ]] && diff -q <(echo "${new_env}") "${ENV_FILE}" >/dev/null 2>&1; then
@@ -298,22 +311,22 @@ setup_systemd() {
 
   # 1. Binary must exist — stale symlink after a plugin cache purge is a
   #    common failure mode that would produce a cryptic systemd start error.
-  if [[ ! -x "${CLAUDE_PLUGIN_ROOT}/bin/syslog" ]]; then
-    echo "ERROR: syslog binary not found at ${CLAUDE_PLUGIN_ROOT}/bin/syslog" >&2
+  if [[ ! -x "${CLAUDE_PLUGIN_ROOT}/bin/hive" ]]; then
+    echo "ERROR: hive binary not found at ${CLAUDE_PLUGIN_ROOT}/bin/hive" >&2
     return 1
   fi
 
   # 2. Port conflict check — skip when the service is already running (it owns
   #    the ports; systemctl restart will handle the swap atomically).
   local service_running=false
-  if systemctl --user is-active --quiet syslog-mcp.service 2>/dev/null; then
+  if systemctl --user is-active --quiet hive-mcp.service 2>/dev/null; then
     service_running=true
   fi
   if [[ "${service_running}" == "false" ]]; then
     for port_proto in "${SYSLOG_PORT}/udp" "${SYSLOG_PORT}/tcp" "${MCP_PORT}/tcp"; do
       local port="${port_proto%%/*}" proto="${port_proto##*/}"
       if ss -"${proto:0:1}"lnp "sport = :${port}" 2>/dev/null | awk 'NR>1 && NF>0' | grep -q .; then
-        echo "ERROR: port ${port}/${proto} is already in use — cannot start syslog-mcp" >&2
+        echo "ERROR: port ${port}/${proto} is already in use — cannot start hive-mcp" >&2
         return 1
       fi
     done
@@ -339,8 +352,8 @@ setup_systemd() {
   # If a previous run deployed via docker, stop the container first so the
   # systemd binary can bind the same ports. Idempotent.
   if [[ -f "${COMPOSE_FILE}" ]] && command -v docker >/dev/null 2>&1; then
-    if (cd "${COMPOSE_DIR}" && docker compose ps --quiet syslog-mcp 2>/dev/null | grep -q .); then
-      echo "syslog-mcp: stopping existing docker container before systemd cutover"
+    if (cd "${COMPOSE_DIR}" && docker compose ps --quiet hive-mcp 2>/dev/null | grep -q .); then
+      echo "hive-mcp: stopping existing docker container before systemd cutover"
       (cd "${COMPOSE_DIR}" && docker compose down)
     fi
   fi
@@ -348,11 +361,11 @@ setup_systemd() {
   local new_unit
   new_unit=$(cat << EOF
 [Unit]
-Description=syslog-mcp server
+Description=hive-mcp server
 After=network.target
 
 [Service]
-ExecStart=${CLAUDE_PLUGIN_ROOT}/bin/syslog serve mcp
+ExecStart=/bin/hive serve mcp
 EnvironmentFile=${ENV_FILE}
 Restart=on-failure
 RestartSec=5
@@ -372,12 +385,12 @@ EOF
 
   if [[ "${unit_changed}" == "true" ]]; then
     systemctl --user daemon-reload
-    systemctl --user enable --now syslog-mcp
+    systemctl --user enable --now hive-mcp
   else
-    systemctl --user restart syslog-mcp
+    systemctl --user restart hive-mcp
   fi
 
-  echo "syslog-mcp: systemd service running on ${MCP_HOST}:${MCP_PORT}"
+  echo "hive-mcp: systemd service running on ${MCP_HOST}:${MCP_PORT}"
 }
 
 setup_docker() {
@@ -396,9 +409,9 @@ setup_docker() {
   local container_running=false
   local external_named_container=false
   if [[ -f "${COMPOSE_FILE}" ]] && \
-     docker compose -f "${COMPOSE_FILE}" ps --quiet syslog-mcp 2>/dev/null | grep -q .; then
+     docker compose -f "${COMPOSE_FILE}" ps --quiet hive-mcp 2>/dev/null | grep -q .; then
     container_running=true
-  elif docker ps --filter 'name=^/syslog-mcp$' --quiet 2>/dev/null | grep -q .; then
+  elif docker ps --filter 'name=^/hive-mcp$' --quiet 2>/dev/null | grep -q .; then
     container_running=true
     external_named_container=true
   fi
@@ -406,7 +419,7 @@ setup_docker() {
     for port_proto in "${SYSLOG_HOST_PORT}/udp" "${SYSLOG_HOST_PORT}/tcp" "${MCP_PORT}/tcp"; do
       local port="${port_proto%%/*}" proto="${port_proto##*/}"
       if ss -"${proto:0:1}"lnp "sport = :${port}" 2>/dev/null | awk 'NR>1 && NF>0' | grep -q .; then
-        echo "ERROR: port ${port}/${proto} is already in use — cannot start syslog-mcp" >&2
+        echo "ERROR: port ${port}/${proto} is already in use — cannot start hive-mcp" >&2
         return 1
       fi
     done
@@ -432,13 +445,13 @@ setup_docker() {
 
   # Fully remove the systemd unit so it can't start on boot — docker compose
   # handles restarts via restart: unless-stopped; systemd is not involved.
-  if systemctl --user list-unit-files syslog-mcp.service >/dev/null 2>&1; then
-    if systemctl --user is-active --quiet syslog-mcp.service; then
-      echo "syslog-mcp: stopping existing systemd unit before docker cutover"
-      systemctl --user stop syslog-mcp.service
+  if systemctl --user list-unit-files hive-mcp.service >/dev/null 2>&1; then
+    if systemctl --user is-active --quiet hive-mcp.service; then
+      echo "hive-mcp: stopping existing systemd unit before docker cutover"
+      systemctl --user stop hive-mcp.service
     fi
-    if systemctl --user is-enabled --quiet syslog-mcp.service 2>/dev/null; then
-      systemctl --user disable syslog-mcp.service >/dev/null 2>&1 || true
+    if systemctl --user is-enabled --quiet hive-mcp.service 2>/dev/null; then
+      systemctl --user disable hive-mcp.service >/dev/null 2>&1 || true
     fi
     if [[ -f "${UNIT_FILE}" ]]; then
       rm -f "${UNIT_FILE}"
@@ -464,40 +477,40 @@ setup_docker() {
 
   # Ensure the external docker network exists — compose will fail without it.
   # Honour the DOCKER_NETWORK env var (same default the compose file uses).
-  local network_name="${DOCKER_NETWORK:-syslog-mcp}"
+  local network_name="${DOCKER_NETWORK:-hive-mcp}"
   if ! docker network inspect "${network_name}" >/dev/null 2>&1; then
-    echo "syslog-mcp: creating docker network ${network_name}"
+    echo "hive-mcp: creating docker network ${network_name}"
     docker network create "${network_name}"
   fi
 
   # Source checkouts can build the image directly. Installed plugins normally
   # do not include the Rust source tree, so they pull the published image.
   if [[ "${CLAUDE_PLUGIN_OPTION_BUILD_LOCAL:-false}" == "true" && -f "${CLAUDE_PLUGIN_ROOT}/Cargo.toml" && -f "${CLAUDE_PLUGIN_ROOT}/config/Dockerfile" ]]; then
-    (cd "${CLAUDE_PLUGIN_ROOT}" && docker compose build --no-cache syslog-mcp)
+    (cd "${CLAUDE_PLUGIN_ROOT}" && docker compose build --no-cache hive-mcp)
   else
-    docker compose pull --quiet syslog-mcp 2>&1 || \
-      echo "syslog-mcp: pull failed; will try cached image" >&2
+    docker compose pull --quiet hive-mcp 2>&1 || \
+      echo "hive-mcp: pull failed; will try cached image" >&2
   fi
 
   if [[ "${external_named_container}" == "true" ]]; then
-    echo "syslog-mcp: removing existing container before docker compose cutover"
-    docker rm -f syslog-mcp >/dev/null
+    echo "hive-mcp: removing existing container before docker compose cutover"
+    docker rm -f hive-mcp >/dev/null
   fi
 
-  if docker compose ps --quiet syslog-mcp 2>/dev/null | grep -q .; then
+  if docker compose ps --quiet hive-mcp 2>/dev/null | grep -q .; then
     docker compose up -d --force-recreate --no-build
   else
     docker compose up -d --no-build
   fi
 
-  echo "syslog-mcp: docker container running on ${MCP_HOST}:${MCP_PORT}"
+  echo "hive-mcp: docker container running on ${MCP_HOST}:${MCP_PORT}"
 }
 
 validate_client() {
   if curl -sf "${SERVER_URL}/health" >/dev/null 2>&1; then
-    echo "syslog-mcp: connected to ${SERVER_URL}"
+    echo "hive-mcp: connected to ${SERVER_URL}"
   else
-    echo "WARNING: syslog-mcp server at ${SERVER_URL} is not reachable" >&2
+    echo "WARNING: hive-mcp server at ${SERVER_URL} is not reachable" >&2
   fi
 }
 
@@ -505,7 +518,7 @@ link_binary() {
   # Symlink the bundled binary into the user's PATH. ${CLAUDE_PLUGIN_ROOT}
   # changes on plugin update, so we re-link every SessionStart.
   mkdir -p "${HOME}/.local/bin"
-  ln -sf "${CLAUDE_PLUGIN_ROOT}/bin/syslog" "${HOME}/.local/bin/syslog"
+  ln -sf "${CLAUDE_PLUGIN_ROOT}/bin/hive" "${HOME}/.local/bin/hive"
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
