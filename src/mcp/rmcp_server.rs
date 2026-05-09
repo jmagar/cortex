@@ -27,6 +27,9 @@ pub struct SyslogRmcpServer {
 
 const READ_SCOPE: &str = "syslog:read";
 const DENY_SCOPE: &str = "syslog:__deny__";
+/// Public read-only MCP actions. Must mirror non-`help` entries in
+/// [`crate::mcp::schemas::SYSLOG_ACTIONS`]; drift is covered by
+/// `public_read_actions_require_syslog_read_scope` in `rmcp_server_tests.rs`.
 const READ_ONLY_ACTIONS: &[&str] = &[
     "search",
     "tail",

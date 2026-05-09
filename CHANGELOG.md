@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.7] - 2026-05-09
+
+### Fixed
+
+- **Docker syslog port mapping**: Compose now maps the container-side syslog
+  port to `SYSLOG_PORT`, keeping Docker publishes aligned with the server bind
+  port and avoiding silent ingest breaks when the bind port is customized.
+- **Security audit gate**: documented the temporary `rsa` RustSec exception for
+  `lab-auth` RS256/JWK support while preserving cargo-audit enforcement for all
+  other advisories.
+- **Review hardening**: added cross-references for MCP read scope drift and
+  asserted that unsafe OAuth-only OTLP startup rejection happens before DB
+  initialization side effects.
+
 ## [0.17.6] - 2026-05-09
 
 ### Fixed
@@ -860,7 +874,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.17.6...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.17.7...HEAD
+[0.17.7]: https://github.com/jmagar/syslog-mcp/compare/v0.17.6...v0.17.7
 [0.17.6]: https://github.com/jmagar/syslog-mcp/compare/v0.17.5...v0.17.6
 [0.17.5]: https://github.com/jmagar/syslog-mcp/compare/v0.17.4...v0.17.5
 [0.17.4]: https://github.com/jmagar/syslog-mcp/compare/v0.17.3...v0.17.4

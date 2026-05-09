@@ -349,6 +349,8 @@ impl RuntimeCore {
     }
 }
 
+/// Defense-in-depth duplicate of `validate_auth_config` for callers that use
+/// `RuntimeCore::for_server(config)` without going through `Config::load()`.
 fn reject_unsafe_otlp_oauth_only_exposure(config: &Config, is_stdio: bool) -> Result<()> {
     if is_stdio || config.mcp.no_auth || config.mcp.auth.mode != AuthMode::OAuth {
         return Ok(());

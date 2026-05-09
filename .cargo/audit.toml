@@ -1,0 +1,8 @@
+[advisories]
+ignore = [
+  # lab-auth requires RS256 for Google OAuth/JWK validation and its local JWT
+  # signing path. RUSTSEC-2023-0071 has no patched rsa release; keep the audit
+  # gate active for all other advisories and revisit when upstream RSA support
+  # has a patched migration path.
+  "RUSTSEC-2023-0071",
+]

@@ -141,6 +141,10 @@ async fn runtime_rejects_non_loopback_oauth_without_static_token_before_otlp_mou
         msg.contains("OTLP /v1/logs") && msg.contains("SYSLOG_MCP_TOKEN"),
         "wrong error: {msg}"
     );
+    assert!(
+        !tmp.path().join("syslog.db").exists(),
+        "rejection must occur before db::init_pool runs"
+    );
 }
 
 #[tokio::test]
