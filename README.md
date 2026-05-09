@@ -26,6 +26,8 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, or `help`.
 
+For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md).
+
 | Action | Purpose |
 | --- | --- |
 | `search` | Full-text search with filters |

@@ -24,6 +24,21 @@ existing_env_value() {
   return 0
 }
 
+validate_port_value() {
+  local name="$1" value="$2"
+  if ! [[ "${value}" =~ ^[0-9]+$ ]] || (( value < 1 || value > 65535 )); then
+    echo "ERROR: ${name} must be a TCP/UDP port number (1-65535), got: ${value}" >&2
+    exit 1
+  fi
+}
+
+mcp_host_is_loopback() {
+  case "$1" in
+    127.*|::1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Seed the token from the existing env file when the plugin option isn't set,
 # so /syslog:redeploy doesn't fail just because the env var wasn't injected.
 NO_AUTH="${CLAUDE_PLUGIN_OPTION_NO_AUTH:-$(existing_env_value NO_AUTH)}"
@@ -51,6 +66,9 @@ SYSLOG_HOST_PORT="${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT:-$(existing_env_value 
 SYSLOG_HOST_PORT="${SYSLOG_HOST_PORT:-1514}"
 MCP_HOST="${CLAUDE_PLUGIN_OPTION_MCP_HOST:-0.0.0.0}"
 MCP_PORT="${CLAUDE_PLUGIN_OPTION_MCP_PORT:-3100}"
+validate_port_value SYSLOG_PORT "${SYSLOG_PORT}"
+validate_port_value SYSLOG_HOST_PORT "${SYSLOG_HOST_PORT}"
+validate_port_value SYSLOG_MCP_PORT "${MCP_PORT}"
 DATA_DIR="${CLAUDE_PLUGIN_OPTION_DATA_DIR:-${CLAUDE_PLUGIN_DATA}}"
 MAX_DB_SIZE_MB="${CLAUDE_PLUGIN_OPTION_MAX_DB_SIZE_MB:-8192}"
 RETENTION_DAYS="${CLAUDE_PLUGIN_OPTION_RETENTION_DAYS:-90}"
@@ -63,9 +81,11 @@ AUTH_ADMIN_EMAIL="${CLAUDE_PLUGIN_OPTION_AUTH_ADMIN_EMAIL:-$(existing_env_value 
 AUTH_ALLOWED_REDIRECT_URIS="${CLAUDE_PLUGIN_OPTION_AUTH_ALLOWED_REDIRECT_URIS:-$(existing_env_value SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS)}"
 
 if [[ "${NO_AUTH}" != "true" && -z "${API_TOKEN}" ]]; then
-  echo "ERROR: API token is required unless no_auth is true" >&2
-  echo "       OAuth mode still needs SYSLOG_MCP_TOKEN for OTLP /v1/logs writes." >&2
-  exit 1
+  if ! [[ "${AUTH_MODE}" == "oauth" && "${IS_SERVER}" == "true" ]] || ! mcp_host_is_loopback "${MCP_HOST}"; then
+    echo "ERROR: API token is required unless no_auth is true or OAuth server mode binds MCP to loopback" >&2
+    echo "       OAuth mode still needs SYSLOG_MCP_TOKEN when OTLP /v1/logs is exposed on a non-loopback listener." >&2
+    exit 1
+  fi
 fi
 
 # ── Paths ─────────────────────────────────────────────────────────────────────

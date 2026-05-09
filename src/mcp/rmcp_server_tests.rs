@@ -588,6 +588,17 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
         "response: {response}"
     );
 
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(12, "resources/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["resources"].is_array(),
+        "resources/list should succeed under LoopbackDev; response: {response}"
+    );
+
     // tools/call should succeed without AuthContext under LoopbackDev.
     let (status, response) = post_rmcp(
         router,
@@ -789,6 +800,32 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
         "tools/list with missing AuthContext should be forbidden; response: {response}"
     );
 
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(73, "resources/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "resources/list with missing AuthContext should be forbidden; response: {response}"
+    );
+
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(
+            74,
+            "resources/read",
+            Some(json!({"uri": super::SCHEMA_RESOURCE_URI})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "resources/read with missing AuthContext should be forbidden; response: {response}"
+    );
+
     // help must also be denied.
     let (status, response) = post_rmcp(
         router.clone(),
@@ -837,6 +874,43 @@ async fn mounted_policy_with_auth_context_permits_tools_list() {
     assert_eq!(
         tools[0]["name"], "syslog",
         "tools/list should return syslog tool; response: {response}"
+    );
+}
+
+#[tokio::test]
+async fn mounted_policy_with_auth_context_permits_schema_resources() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec![]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(81, "resources/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let resources = response["result"]["resources"].as_array().unwrap();
+    assert_eq!(
+        resources[0]["uri"],
+        super::SCHEMA_RESOURCE_URI,
+        "resources/list should expose schema resource; response: {response}"
+    );
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            82,
+            "resources/read",
+            Some(json!({"uri": super::SCHEMA_RESOURCE_URI})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["contents"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("\"name\": \"syslog\"")),
+        "resources/read should return schema JSON; response: {response}"
     );
 }
 

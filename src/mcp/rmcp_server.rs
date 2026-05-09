@@ -145,8 +145,9 @@ impl ServerHandler for SyslogRmcpServer {
     async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
+        require_auth_context(&self.state, &context)?;
         Ok(ListResourcesResult {
             resources: vec![schema_resource()],
             ..Default::default()
@@ -156,8 +157,9 @@ impl ServerHandler for SyslogRmcpServer {
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
+        require_auth_context(&self.state, &context)?;
         if request.uri != SCHEMA_RESOURCE_URI {
             return Err(ErrorData::invalid_params(
                 format!("unknown resource: {}", request.uri),

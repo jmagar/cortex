@@ -50,7 +50,7 @@ Tests: unit tests live in sidecar files beside their source modules (e.g. `src/d
 | Port | Protocol | Purpose |
 |------|----------|---------|
 | 1514 | UDP + TCP | Syslog receiver (not 514 — avoids `CAP_NET_BIND_SERVICE`) |
-| 3100 | TCP | MCP HTTP endpoint (`POST /mcp`, `GET /health`) |
+| 3100 | TCP | Shared HTTP listener for MCP (`POST /mcp`, `GET /health`) and OTLP HTTP ingest (`POST /v1/logs`); non-loopback OAuth-only `/v1/logs` exposure is blocked at startup unless `SYSLOG_MCP_TOKEN` is set |
 
 ## MCP Tools
 

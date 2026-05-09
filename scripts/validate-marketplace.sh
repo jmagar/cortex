@@ -79,7 +79,16 @@ check "plugin declares api_token as sensitive" "jq -er '.userConfig.api_token.se
 
 if [[ -f "${PLUGIN_JSON}" && -f Cargo.toml ]]; then
   plugin_version="$(json_value '.version' "${PLUGIN_JSON}" || true)"
-  cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+  cargo_version="$(awk '
+    /^\[/ { section = $0 }
+    section == "[package]" && /^version *= *"[^"]+"/ {
+      line = $0
+      sub(/^[^"]*"/, "", line)
+      sub(/".*/, "", line)
+      print line
+      exit
+    }
+  ' Cargo.toml)"
   check_equals "plugin version matches Cargo.toml" "${cargo_version}" "${plugin_version}"
 else
   check "plugin version matches Cargo.toml" "false"

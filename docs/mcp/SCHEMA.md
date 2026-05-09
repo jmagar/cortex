@@ -89,11 +89,17 @@ json!({
             },
             "scan_limit": { "type": "integer" },
             "top_n": { "type": "integer" },
-            "log_id": { "type": "integer" },
+            "log_id": {
+                "type": "integer",
+                "description": "For action=context: identifies the log entry for context lookup."
+            },
             "timestamp": { "type": "string" },
             "before": { "type": "integer" },
             "after": { "type": "integer" },
-            "id": { "type": "integer" },
+            "id": {
+                "type": "integer",
+                "description": "For action=get: identifies the record to retrieve."
+            },
             "by_host": { "type": "boolean" },
             "silent_minutes": { "type": "integer" },
             "since": { "type": "string" },

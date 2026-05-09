@@ -864,7 +864,7 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     Ok(())
 }
 
-fn mcp_bind_is_loopback(config: &Config) -> bool {
+pub(crate) fn mcp_bind_is_loopback(config: &Config) -> bool {
     IpAddr::from_str(&config.mcp.host)
         .map(|ip| ip.is_loopback())
         .unwrap_or(false)

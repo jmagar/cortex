@@ -1,6 +1,4 @@
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -9,7 +7,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::app::SyslogService;
-use crate::config::{AuthMode, Config};
+use crate::config::{mcp_bind_is_loopback, AuthMode, Config};
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::ingest::IngestTx;
 use crate::mcp::AuthPolicy;
@@ -368,12 +366,6 @@ fn reject_unsafe_otlp_oauth_only_exposure(config: &Config, is_stdio: bool) -> Re
     Ok(())
 }
 
-fn mcp_bind_is_loopback(config: &Config) -> bool {
-    IpAddr::from_str(&config.mcp.host)
-        .map(|ip| ip.is_loopback())
-        .unwrap_or(false)
-}
-
 fn mcp_static_token_active(config: &Config) -> bool {
     config
         .mcp
@@ -424,11 +416,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
 
     let auth = &config.mcp.auth;
     let oauth_active = auth.mode == AuthMode::OAuth;
-    let static_token_active = config
-        .mcp
-        .api_token
-        .as_deref()
-        .is_some_and(|t| !t.trim().is_empty());
+    let static_token_active = mcp_static_token_active(config);
 
     if !oauth_active {
         if static_token_active {
