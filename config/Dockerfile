@@ -32,7 +32,7 @@ ENV SYSLOG_MCP_DB_PATH=/data/syslog.db
 
 USER 1000:1000
 
-EXPOSE 514/udp 514/tcp 3100/tcp
+EXPOSE 1514/udp 1514/tcp 3100/tcp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -sf http://localhost:3100/health || exit 1

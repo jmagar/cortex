@@ -14,12 +14,15 @@ services:
       - path: .env
         required: false
     ports:
-      - "${SYSLOG_PORT:-1514}:1514/udp"
-      - "${SYSLOG_PORT:-1514}:1514/tcp"
+      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/udp"
+      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/tcp"
       - "${SYSLOG_MCP_PORT:-3100}:3100/tcp"
     volumes:
       - ${SYSLOG_MCP_DATA_VOLUME:-syslog-mcp-data}:/data
-    # Needed if redirecting privileged port 514 -> 1514 inside container
+    # The container listens on SYSLOG_PORT (default 1514). To serve host port
+    # 514, set SYSLOG_HOST_PORT=514 while leaving SYSLOG_PORT at 1514, or add
+    # host-level firewall/NAT redirects from 514 to 1514.
+    # NET_BIND_SERVICE is only needed if the container itself binds port 514.
     # cap_add:
     #   - NET_BIND_SERVICE
     networks:

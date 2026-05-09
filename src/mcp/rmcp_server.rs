@@ -25,6 +25,32 @@ pub struct SyslogRmcpServer {
     state: AppState,
 }
 
+const READ_SCOPE: &str = "syslog:read";
+const DENY_SCOPE: &str = "syslog:__deny__";
+/// Public read-only MCP actions. Must mirror non-`help` entries in
+/// [`crate::mcp::schemas::SYSLOG_ACTIONS`]; drift is covered by
+/// `public_read_actions_require_syslog_read_scope` in `rmcp_server_tests.rs`.
+const READ_ONLY_ACTIONS: &[&str] = &[
+    "search",
+    "tail",
+    "errors",
+    "hosts",
+    "correlate",
+    "stats",
+    "status",
+    "apps",
+    "source_ips",
+    "timeline",
+    "patterns",
+    "context",
+    "get",
+    "ingest_rate",
+    "silent_hosts",
+    "clock_skew",
+    "anomalies",
+    "compare",
+];
+
 impl SyslogRmcpServer {
     pub fn new(state: AppState) -> Self {
         Self { state }
@@ -122,8 +148,9 @@ impl ServerHandler for SyslogRmcpServer {
     async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
+        require_auth_context(&self.state, &context)?;
         Ok(ListResourcesResult {
             resources: vec![schema_resource()],
             ..Default::default()
@@ -133,8 +160,9 @@ impl ServerHandler for SyslogRmcpServer {
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
+        require_auth_context(&self.state, &context)?;
         if request.uri != SCHEMA_RESOURCE_URI {
             return Err(ErrorData::invalid_params(
                 format!("unknown resource: {}", request.uri),
@@ -340,17 +368,16 @@ fn check_scope(auth: &AuthContext, required_scope: &str, action: &str) -> Result
 /// `execute_tool` to reject invalid actions. `Some("syslog:__deny__")` is
 /// the correct mechanism to guarantee rejection at the auth layer.
 fn required_scope_for(action: &str) -> Option<&'static str> {
-    match action {
+    if action == "help" {
         // Informational — AuthContext required when Mounted, but no scope gate.
-        "help" => None,
-        // All current read actions require syslog:read.
-        "search" | "tail" | "errors" | "hosts" | "correlate" | "stats" | "status" => {
-            Some("syslog:read")
-        }
+        None
+    } else if READ_ONLY_ACTIONS.contains(&action) {
+        Some(READ_SCOPE)
+    } else {
         // Future write/admin actions would map to syslog:admin here.
         // Default: unknown actions use an ungrantable sentinel scope so they
         // are denied at the auth layer rather than falling through to dispatch.
-        _ => Some("syslog:__deny__"),
+        Some(DENY_SCOPE)
     }
 }
 

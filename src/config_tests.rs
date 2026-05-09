@@ -618,6 +618,17 @@ fn loopback_config_with_token() -> Config {
     cfg
 }
 
+fn valid_oauth_config_without_token() -> Config {
+    let mut cfg = Config::default();
+    cfg.mcp.api_token = None;
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+    cfg
+}
+
 #[test]
 fn auth_defaults_are_bearer_with_disable_static_token_enabled() {
     let cfg = AuthConfig::default();
@@ -891,16 +902,31 @@ fn non_loopback_bind_with_static_token_passes() {
 }
 
 #[test]
-fn non_loopback_bind_with_oauth_passes() {
-    let mut cfg = Config::default();
+fn non_loopback_bind_with_oauth_and_static_token_passes() {
+    let mut cfg = valid_oauth_config_without_token();
     cfg.mcp.host = "0.0.0.0".into();
-    cfg.mcp.api_token = Some("token".into()); // satisfies existing token-shape check
-    cfg.mcp.auth.mode = AuthMode::OAuth;
-    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
-    cfg.mcp.auth.google_client_id = Some("id".into());
-    cfg.mcp.auth.google_client_secret = Some("secret".into());
-    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+    cfg.mcp.api_token = Some("token".into());
     validate_auth_config(&cfg, true).expect("oauth unlocks non-loopback bind");
+}
+
+#[test]
+fn non_loopback_oauth_without_static_token_rejects_otlp_write_exposure() {
+    let mut cfg = valid_oauth_config_without_token();
+    cfg.mcp.host = "0.0.0.0".into();
+
+    let err = validate_auth_config(&cfg, true).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("OTLP /v1/logs") && msg.contains("SYSLOG_MCP_TOKEN"),
+        "wrong error: {msg}"
+    );
+}
+
+#[test]
+fn loopback_oauth_without_static_token_keeps_dev_mode_allowed() {
+    let mut cfg = valid_oauth_config_without_token();
+    cfg.mcp.host = "127.0.0.1".into();
+    validate_auth_config(&cfg, true).expect("loopback OTLP exposure is local-only");
 }
 
 #[test]

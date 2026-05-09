@@ -50,7 +50,7 @@ Tests: unit tests live in sidecar files beside their source modules (e.g. `src/d
 | Port | Protocol | Purpose |
 |------|----------|---------|
 | 1514 | UDP + TCP | Syslog receiver (not 514 — avoids `CAP_NET_BIND_SERVICE`) |
-| 3100 | TCP | MCP HTTP endpoint (`POST /mcp`, `GET /health`, `GET /sse`) |
+| 3100 | TCP | Shared HTTP listener for MCP (`POST /mcp`, `GET /health`) and OTLP HTTP ingest (`POST /v1/logs`); non-loopback OAuth-only `/v1/logs` exposure is blocked at startup unless `SYSLOG_MCP_TOKEN` is set |
 
 ## MCP Tools
 
@@ -64,6 +64,18 @@ One MCP tool: **`syslog`** — dispatches by `action` argument.
 | `hosts` | All known hosts with first/last seen + log counts |
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | DB stats (total logs, logical/physical size, free disk, configured thresholds, write-block state, time range) |
+| `status` | Lightweight runtime and DB health |
+| `apps` | Distinct application names with log and host counts |
+| `source_ips` | Distinct source identifiers with hostname breakdown |
+| `timeline` | Bucketed counts over time |
+| `patterns` | Near-duplicate message template clusters |
+| `context` | Surrounding logs around a log id or timestamp |
+| `get` | One log entry by id, including raw frame |
+| `ingest_rate` | Recent ingest throughput and write-block state |
+| `silent_hosts` | Hosts whose last_seen is older than a threshold |
+| `clock_skew` | Per-host received_at minus timestamp distribution |
+| `anomalies` | Recent vs baseline volume/error comparison |
+| `compare` | Side-by-side comparison of two time ranges |
 | `help` | Built-in usage reference |
 
 ## Plugin Commands
@@ -153,7 +165,7 @@ RUST_LOG=info
 - **Cargo.lock is tracked** — binary crates should commit Cargo.lock for reproducible builds (Cargo docs guidance)
 - **FTS5 query syntax** — `syslog action=search` uses SQLite FTS5: `error AND nginx`, `"disk full"`, `kern OR syslog`; invalid FTS5 syntax returns a db error. **Hyphen is the FTS5 NOT operator** — to search for hyphenated terms, use phrase syntax: `"smoke-test"` not `smoke-test`
 - **WAL mode** — SQLite runs in WAL mode; copying `.db`, `.db-wal`, and `.db-shm` together without a checkpoint captures potentially inconsistent state. Safe backup options: (1) run `PRAGMA wal_checkpoint(FULL);` first, then copy all three files, or (2) use `sqlite3 source.db '.backup dest.db'` which is WAL-safe and requires no manual checkpoint
-- **SSE proxy** — nginx/SWAG must set `proxy_buffering off`, `chunked_transfer_encoding off`, and `proxy_http_version 1.1` for SSE (`GET /sse`) to stream correctly
+- **MCP transport** — HTTP MCP runs in stateless JSON-response mode on `POST /mcp`; SSE streams (`GET /mcp` or `/sse`) are not enabled in the current server.
 - **Data volume** — DB lives in `./data/` (bind mount); `*.db` is gitignored so the database files won't be committed
 - **Retention purge** — `retention_days` defaults to 90; logs older than 90 days are **permanently deleted hourly** with no recovery path. Set `SYSLOG_MCP_RETENTION_DAYS=0` to disable purging entirely.
 - **Storage guardrail** — Logical DB size and free-disk limits are enabled by default (`1024/900 MB` DB, `512/768 MB` free disk). When thresholds are breached, the server deletes oldest logs by `received_at` until recovery targets are met. If cleanup still cannot recover enough space, the batch writer blocks new writes until storage becomes healthy again.
