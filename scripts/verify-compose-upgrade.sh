@@ -21,6 +21,11 @@ render_config() {
   (cd "${tmpdir}" && docker compose -f docker-compose.yml config)
 }
 
+require_rendered_line() {
+  local expected="$1"
+  printf '%s\n' "${rendered}" | grep -F "${expected}" >/dev/null
+}
+
 cat > "${tmpdir}/.env" <<EOF
 HIVE_MCP_VERSION=latest
 HIVE_MCP_PORT=43100
@@ -30,16 +35,16 @@ DOCKER_NETWORK=hive-upgrade-check
 EOF
 
 rendered="$(render_config)"
-printf '%s\n' "${rendered}" | grep -F "source: syslog-mcp-data" >/dev/null
-printf '%s\n' "${rendered}" | grep -F "target: /data" >/dev/null
-printf '%s\n' "${rendered}" | grep -F "ghcr.io/jmagar/hive-mcp:" >/dev/null
+require_rendered_line "source: syslog-mcp-data"
+require_rendered_line "target: /data"
+require_rendered_line "ghcr.io/jmagar/hive-mcp:"
 
 cat >> "${tmpdir}/.env" <<EOF
 SYSLOG_MCP_DATA_VOLUME=${sentinel_dir}
 EOF
 rendered="$(render_config)"
-printf '%s\n' "${rendered}" | grep -F "source: ${sentinel_dir}" >/dev/null
-printf '%s\n' "${rendered}" | grep -F "target: /data" >/dev/null
+require_rendered_line "source: ${sentinel_dir}"
+require_rendered_line "target: /data"
 
 sed -i '/^SYSLOG_MCP_DATA_VOLUME=/d' "${tmpdir}/.env"
 cat >> "${tmpdir}/.env" <<EOF
@@ -47,8 +52,8 @@ SYSLOG_MCP_DATA_VOLUME=ignored-legacy-volume
 HIVE_MCP_DATA_VOLUME=${sentinel_dir}
 EOF
 rendered="$(render_config)"
-printf '%s\n' "${rendered}" | grep -F "source: ${sentinel_dir}" >/dev/null
-printf '%s\n' "${rendered}" | grep -F "target: /data" >/dev/null
+require_rendered_line "source: ${sentinel_dir}"
+require_rendered_line "target: /data"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "SKIP: docker not available; rendered compose data path preserved"

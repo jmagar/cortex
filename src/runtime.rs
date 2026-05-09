@@ -57,6 +57,7 @@ pub(crate) fn background_interval(period: tokio::time::Duration) -> tokio::time:
 /// the FTS5 index at homelab volumes (50k+ DNS queries/day).
 const ADGUARD_RETENTION_TAGS: &[&str] = &["adguard-allowed", "adguard-query", "adguard-rewrite"];
 const ADGUARD_RETENTION_DAYS: u32 = 7;
+const HIVE_AUTH_SCOPES: &[&str] = &["hive:read", "hive:admin", "syslog:read", "syslog:admin"];
 
 impl RuntimeCore {
     pub async fn load() -> Result<Self> {
@@ -539,20 +540,10 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
     let auth_config = lab_auth::config::AuthConfigBuilder::new()
         .env_prefix("SYSLOG_MCP")
         .session_cookie_name("syslog_mcp_session")
-        .scopes_supported(vec![
-            "hive:read".into(),
-            "hive:admin".into(),
-            "syslog:read".into(),
-            "syslog:admin".into(),
-        ])
+        .scopes_supported(hive_auth_scopes())
         .default_scope("hive:read")
         .resource_path("/mcp")
-        .static_token_scopes(vec![
-            "hive:read".into(),
-            "hive:admin".into(),
-            "syslog:read".into(),
-            "syslog:admin".into(),
-        ])
+        .static_token_scopes(hive_auth_scopes())
         .disable_static_token_with_oauth(auth.disable_static_token_with_oauth)
         .enable_dynamic_registration(true)
         .build_from_sources(vars)
@@ -589,6 +580,10 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
     Ok(AuthPolicy::Mounted {
         auth_state: Some(Arc::new(auth_state)),
     })
+}
+
+fn hive_auth_scopes() -> Vec<String> {
+    HIVE_AUTH_SCOPES.iter().map(ToString::to_string).collect()
 }
 
 fn push_var(vars: &mut Vec<(String, String)>, key: &str, value: &str) {

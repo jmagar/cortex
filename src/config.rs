@@ -840,15 +840,7 @@ fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    *target = match v.to_ascii_lowercase().as_str() {
-        "true" | "1" | "yes" | "y" | "on" => true,
-        "false" | "0" | "no" | "n" | "off" => false,
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Invalid value for {key}={v}: expected true/false/1/0/yes/no/on/off"
-            ));
-        }
-    };
+    *target = parse_bool_env_value(key, &v)?;
     Ok(())
 }
 
@@ -857,7 +849,12 @@ fn env_override_bool_alias(primary: &str, legacy: &str, target: &mut bool) -> an
         return Ok(());
     };
 
-    *target = match value.to_ascii_lowercase().as_str() {
+    *target = parse_bool_env_value(key, &value)?;
+    Ok(())
+}
+
+fn parse_bool_env_value(key: &str, value: &str) -> anyhow::Result<bool> {
+    Ok(match value.to_ascii_lowercase().as_str() {
         "true" | "1" | "yes" | "y" | "on" => true,
         "false" | "0" | "no" | "n" | "off" => false,
         _ => {
@@ -865,8 +862,7 @@ fn env_override_bool_alias(primary: &str, legacy: &str, target: &mut bool) -> an
                 "Invalid value for {key}={value}: expected true/false/1/0/yes/no/on/off"
             ));
         }
-    };
-    Ok(())
+    })
 }
 
 fn env_alias_value<'a>(primary: &'a str, legacy: &'a str) -> Option<(&'a str, String)> {

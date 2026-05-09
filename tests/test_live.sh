@@ -544,6 +544,7 @@ phase_tools() {
 # ---------------------------------------------------------------------------
 # Docker mode — build, start, test, teardown
 # ---------------------------------------------------------------------------
+# shellcheck disable=SC2317 # Invoked by the trap registered in run_docker_mode.
 docker_cleanup() {
   if docker inspect "${CONTAINER_NAME}" &>/dev/null 2>&1; then
     log_info "Removing test container ${CONTAINER_NAME}..."

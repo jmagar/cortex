@@ -286,20 +286,21 @@ write_env() {
   batch_size="${batch_size:-100}"
   write_channel_capacity="${write_channel_capacity:-10000}"
 
+  local db_line config_line uid_line gid_line
   if [[ "${USE_DOCKER}" == "true" ]]; then
     # Docker compose reads these directly from .env. Pin UID/GID so the
     # container writes syslog.db with the host user's ownership — keeps the
     # same file readable by the systemd binary if you switch modes back.
-    local db_line="HIVE_MCP_DATA_VOLUME=${DATA_DIR}"
-    local config_line=""
-    local uid_line="SYSLOG_UID=$(id -u)"
-    local gid_line="SYSLOG_GID=$(id -g)"
+    db_line="HIVE_MCP_DATA_VOLUME=${DATA_DIR}"
+    config_line=""
+    uid_line="SYSLOG_UID=$(id -u)"
+    gid_line="SYSLOG_GID=$(id -g)"
   else
     # Systemd binary reads these as direct env vars
-    local db_line="HIVE_MCP_DB_PATH=${DATA_DIR}/syslog.db"
-    local config_line=""
-    local uid_line=""
-    local gid_line=""
+    db_line="HIVE_MCP_DB_PATH=${DATA_DIR}/syslog.db"
+    config_line=""
+    uid_line=""
+    gid_line=""
   fi
 
   local new_env
