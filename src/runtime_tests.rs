@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::{background_interval, build_auth_policy};
+use super::{background_interval, build_auth_policy, RuntimeCore};
 use crate::config::{AuthConfig, AuthMode, Config, McpConfig, StorageConfig};
 use crate::mcp::AuthPolicy;
 
@@ -121,6 +121,25 @@ async fn build_auth_policy_returns_mounted_when_oauth_configured() {
     assert!(
         tmp.path().join("auth-jwt.pem").exists(),
         "auth-jwt.pem missing"
+    );
+}
+
+#[tokio::test]
+async fn runtime_rejects_non_loopback_oauth_without_static_token_before_otlp_mount() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut mcp = oauth_mcp(tmp.path());
+    mcp.host = "0.0.0.0".into();
+    mcp.api_token = None;
+    let config = test_config(tmp.path(), mcp);
+
+    let err = match RuntimeCore::for_server(config).await {
+        Ok(_) => panic!("oauth-only non-loopback OTLP exposure must be rejected"),
+        Err(err) => err,
+    };
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("OTLP /v1/logs") && msg.contains("SYSLOG_MCP_TOKEN"),
+        "wrong error: {msg}"
     );
 }
 

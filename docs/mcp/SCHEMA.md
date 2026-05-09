@@ -11,6 +11,17 @@ syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument s
 - `correlate`
 - `stats`
 - `status`
+- `apps`
+- `source_ips`
+- `timeline`
+- `patterns`
+- `context`
+- `get`
+- `ingest_rate`
+- `silent_hosts`
+- `clock_skew`
+- `anomalies`
+- `compare`
 - `help`
 
 The schema is defined in `src/mcp/schemas.rs` as a `serde_json::json!()` object returned by `tool_definitions()`.
@@ -26,15 +37,72 @@ json!({
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["search", "tail", "errors", "hosts", "correlate", "stats", "status", "help"]
+                "enum": [
+                    "search",
+                    "tail",
+                    "errors",
+                    "hosts",
+                    "correlate",
+                    "stats",
+                    "status",
+                    "apps",
+                    "source_ips",
+                    "timeline",
+                    "patterns",
+                    "context",
+                    "get",
+                    "ingest_rate",
+                    "silent_hosts",
+                    "clock_skew",
+                    "anomalies",
+                    "compare",
+                    "help"
+                ]
             },
             "query": { "type": "string" },
             "hostname": { "type": "string" },
+            "source_ip": { "type": "string" },
             "severity": {
                 "type": "string",
                 "enum": ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"]
             },
-            "limit": { "type": "integer" }
+            "severity_min": {
+                "type": "string",
+                "enum": ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"]
+            },
+            "app_name": { "type": "string" },
+            "facility": { "type": "string" },
+            "process_id": { "type": "string" },
+            "from": { "type": "string" },
+            "to": { "type": "string" },
+            "limit": { "type": "integer" },
+            "n": { "type": "integer" },
+            "reference_time": { "type": "string" },
+            "window_minutes": { "type": "integer" },
+            "group_by": {
+                "type": "string",
+                "enum": ["app_name", "hostname", "host", "severity", "sev", "app"]
+            },
+            "bucket": {
+                "type": "string",
+                "enum": ["minute", "min", "m", "hour", "h", "day", "d"]
+            },
+            "scan_limit": { "type": "integer" },
+            "top_n": { "type": "integer" },
+            "log_id": { "type": "integer" },
+            "timestamp": { "type": "string" },
+            "before": { "type": "integer" },
+            "after": { "type": "integer" },
+            "id": { "type": "integer" },
+            "by_host": { "type": "boolean" },
+            "silent_minutes": { "type": "integer" },
+            "since": { "type": "string" },
+            "recent_minutes": { "type": "integer" },
+            "baseline_minutes": { "type": "integer" },
+            "a_from": { "type": "string" },
+            "a_to": { "type": "string" },
+            "b_from": { "type": "string" },
+            "b_to": { "type": "string" }
         },
         "required": ["action"]
     }
@@ -65,7 +133,7 @@ Input validation happens in the action handlers, not only at the schema level:
 - `action` is required and must be one of the supported actions
 - `limit` values are capped at their action-specific maximum
 - `severity` and `severity_min` are validated against known syslog levels
-- `reference_time`, `from`, and `to` timestamps are parsed as RFC 3339 and normalized to UTC
+- `reference_time`, `from`, `to`, `timestamp`, `since`, `a_from`, `a_to`, `b_from`, and `b_to` timestamps are parsed as RFC 3339 and normalized to UTC where required
 - Unknown parameters are ignored
 
 ## See Also

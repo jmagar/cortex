@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   like the other read-only actions, instead of falling through to the
   fail-closed unknown-action scope sentinel.
 
+- **OAuth-only OTLP exposure**: non-loopback OAuth deployments now refuse to
+  start without `SYSLOG_MCP_TOKEN`, because OTLP `/v1/logs` currently supports
+  only static Bearer-token auth.
+- **MCP OAuth scopes**: all current public read-only MCP actions now require
+  `syslog:read`, with exhaustive mounted-auth coverage to prevent action/scope
+  drift.
+- **Plugin deployment config**: setup writes the primary `SYSLOG_MCP_TOKEN`,
+  migrates legacy `SYSLOG_MCP_API_TOKEN`, exposes Docker host syslog port
+  mapping separately from the in-container bind port, and validates the current
+  plugin marketplace layout.
+- **Docker and docs drift**: Docker metadata and Compose privileged-port
+  guidance now match the actual `1514` container listener, and MCP docs list
+  the current action surface without stale `/sse` guidance.
+
 ## [0.17.4] - 2026-05-08
 
 ### Fixed

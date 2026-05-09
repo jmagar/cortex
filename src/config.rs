@@ -834,9 +834,7 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
         return Ok(());
     }
 
-    let bind_is_loopback = IpAddr::from_str(&config.mcp.host)
-        .map(|ip| ip.is_loopback())
-        .unwrap_or(false);
+    let bind_is_loopback = mcp_bind_is_loopback(config);
     if check_bind && !bind_is_loopback {
         let has_static_token = config
             .mcp
@@ -844,6 +842,16 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
             .as_deref()
             .is_some_and(|t| !t.trim().is_empty());
         let has_oauth = auth.mode == AuthMode::OAuth;
+        if has_oauth && !has_static_token {
+            return Err(anyhow::anyhow!(
+                "MCP host `{}` is not a loopback address and SYSLOG_MCP_AUTH_MODE=oauth is \
+                 configured without SYSLOG_MCP_TOKEN. OTLP /v1/logs only supports the static \
+                 Bearer token gate today, so this would expose unauthenticated OTLP writes. \
+                 Set SYSLOG_MCP_TOKEN, bind to 127.0.0.1 / ::1, or enable an upstream auth \
+                 gateway with SYSLOG_MCP_NO_AUTH=true.",
+                config.mcp.host
+            ));
+        }
         if !has_static_token && !has_oauth {
             return Err(anyhow::anyhow!(
                 "MCP host `{}` is not a loopback address but no authentication is configured — \
@@ -854,6 +862,12 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     }
 
     Ok(())
+}
+
+fn mcp_bind_is_loopback(config: &Config) -> bool {
+    IpAddr::from_str(&config.mcp.host)
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
 }
 
 fn option_is_blank(value: &Option<String>) -> bool {

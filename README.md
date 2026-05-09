@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/syslog-mcp)](https://crates.io/crates/syslog-mcp) [![ghcr.io](https://img.shields.io/badge/ghcr.io-jmagar%2Fsyslog--mcp-blue?logo=docker)](https://github.com/jmagar/syslog-mcp/pkgs/container/syslog-mcp)
 
-Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog over UDP and TCP, stores it in SQLite with FTS5 full-text indexing, and exposes search, tail, error summary, correlation, and stats tools to MCP clients.
+Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog over UDP and TCP, stores it in SQLite with FTS5 full-text indexing, and exposes action-based log search, inventory, correlation, status, and analysis tools to MCP clients.
 
 ## Overview
 
@@ -24,7 +24,29 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `correlate`, `stats`, `status`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, or `help`.
+
+| Action | Purpose |
+| --- | --- |
+| `search` | Full-text search with filters |
+| `tail` | Recent log entries |
+| `errors` | Error/warning summary by host and severity |
+| `hosts` | Host registry with first/last seen |
+| `correlate` | Cross-host event correlation in a time window |
+| `stats` | Database statistics and storage health |
+| `status` | Lightweight runtime and DB health |
+| `apps` | Distinct application names with log and host counts |
+| `source_ips` | Distinct source identifiers with hostname breakdown |
+| `timeline` | Bucketed counts over time |
+| `patterns` | Near-duplicate message template clusters |
+| `context` | Surrounding logs around a log id or timestamp |
+| `get` | One log entry by id, including raw frame |
+| `ingest_rate` | Recent ingest throughput and write-block state |
+| `silent_hosts` | Hosts whose last_seen is older than a threshold |
+| `clock_skew` | Per-host received_at minus timestamp distribution |
+| `anomalies` | Recent vs baseline volume/error comparison |
+| `compare` | Side-by-side comparison of two time ranges |
+| `help` | Markdown reference for all actions |
 
 ### `syslog search`
 
@@ -433,6 +455,7 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 |----------|----------|---------|-------------|
 | `SYSLOG_HOST` | no | `0.0.0.0` | Bind host for UDP + TCP syslog listeners |
 | `SYSLOG_PORT` | no | `1514` | Bind port for UDP + TCP syslog listeners |
+| `SYSLOG_HOST_PORT` | no | `1514` | Docker Compose host port published to container port `1514` |
 | `SYSLOG_MAX_MESSAGE_SIZE` | no | `8192` | Max bytes per UDP datagram or newline-delimited TCP frame. Oversized newline-delimited TCP frames are dropped and the connection stays open; oversized unterminated frames are dropped and the connection is closed. |
 | `SYSLOG_MAX_TCP_CONNECTIONS` | no | `1024` | Maximum simultaneous TCP syslog connections |
 | `SYSLOG_TCP_IDLE_TIMEOUT_SECS` | no | `300` | Idle timeout per TCP read before closing inactive connections |
@@ -661,7 +684,7 @@ sudo apt install iptables-persistent
 sudo netfilter-persistent save
 ```
 
-On Unraid, map container port `514:1514/udp` and `514:1514/tcp` directly in the Docker template.
+For Docker Compose, set `SYSLOG_HOST_PORT=514` to publish host port `514` while the container keeps binding unprivileged port `1514`. On Unraid, map host port `514` to container port `1514` for both UDP and TCP in the Docker template (`514:1514/udp` and `514:1514/tcp`).
 
 ### Firewall rules
 
