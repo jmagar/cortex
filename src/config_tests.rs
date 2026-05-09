@@ -81,6 +81,8 @@ fn defaults_are_applied_without_env_vars() {
         "SYSLOG_MCP_PORT",
         "SYSLOG_MCP_ALLOWED_HOSTS",
         "SYSLOG_MCP_ALLOWED_ORIGINS",
+        "NO_AUTH",
+        "SYSLOG_MCP_NO_AUTH",
         "SYSLOG_MCP_DB_PATH",
         "SYSLOG_MCP_POOL_SIZE",
         "SYSLOG_MCP_RETENTION_DAYS",
@@ -103,6 +105,9 @@ fn defaults_are_applied_without_env_vars() {
         "SYSLOG_MCP_PUBLIC_URL",
         "SYSLOG_MCP_GOOGLE_CLIENT_ID",
         "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
+        "SYSLOG_MCP_AUTH_ADMIN_EMAIL",
+        "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+        "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
     ] {
         std::env::remove_var(key);
     }
@@ -118,6 +123,7 @@ fn defaults_are_applied_without_env_vars() {
     assert_eq!(cfg.syslog.write_channel_capacity, 10_000);
     assert_eq!(cfg.mcp.host, "127.0.0.1");
     assert_eq!(cfg.mcp.port, 3100);
+    assert!(!cfg.mcp.no_auth);
     assert_eq!(cfg.mcp.bind_addr(), "127.0.0.1:3100");
     assert!(cfg.mcp.allowed_hosts.is_empty());
     assert!(cfg.mcp.allowed_origins.is_empty());
@@ -655,14 +661,7 @@ fn syslog_mcp_auth_mode_env_flips_to_oauth() {
     std::env::set_var("SYSLOG_MCP_PUBLIC_URL", "https://syslog.example.com");
     std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_ID", "client-id");
     std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_SECRET", "client-secret");
-    let raw = r#"
-        [mcp.auth]
-        allowed_emails = ["admin@example.com"]
-    "#;
-    // Inject via TOML directly because Config::load reads ./config.toml only;
-    // we emulate the auth.allowed_emails field by deserializing here and
-    // confirming the env layer flips the mode.
-    let _: Config = toml::from_str(raw).unwrap();
+    std::env::set_var("SYSLOG_MCP_AUTH_ADMIN_EMAIL", "admin@example.com");
     let result = Config::load();
     for k in [
         "SYSLOG_MCP_HOST",
@@ -670,17 +669,14 @@ fn syslog_mcp_auth_mode_env_flips_to_oauth() {
         "SYSLOG_MCP_PUBLIC_URL",
         "SYSLOG_MCP_GOOGLE_CLIENT_ID",
         "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
+        "SYSLOG_MCP_AUTH_ADMIN_EMAIL",
     ] {
         std::env::remove_var(k);
     }
-    // Without an allowlist on disk, validation rejects the oauth combo. The
-    // mode-toggle wiring is exercised via the in-memory validate_auth_config
-    // tests below; here we just assert the env reaches the field.
-    let err = result.expect_err("oauth without allowlist must bail at startup");
-    assert!(
-        err.to_string().contains("allowed_emails"),
-        "wrong error: {err}"
-    );
+
+    let cfg = result.expect("oauth env overrides should satisfy startup validation");
+    assert_eq!(cfg.mcp.auth.mode, AuthMode::OAuth);
+    assert_eq!(cfg.mcp.auth.admin_email, "admin@example.com");
 }
 
 #[test]
@@ -703,6 +699,12 @@ fn auth_env_overrides_propagate_to_config() {
     std::env::set_var("SYSLOG_MCP_PUBLIC_URL", "https://syslog.example.com");
     std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_ID", "id-from-env");
     std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_SECRET", "secret-from-env");
+    std::env::set_var("SYSLOG_MCP_AUTH_ADMIN_EMAIL", "admin-from-env@example.com");
+    std::env::set_var(
+        "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+        "https://callback.example.com/callback,https://claude.ai/api/mcp/auth_callback",
+    );
+    std::env::set_var("SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH", "false");
     // Stay in bearer mode so validation doesn't require an allowlist.
     std::env::remove_var("SYSLOG_MCP_AUTH_MODE");
     let result = Config::load();
@@ -711,6 +713,9 @@ fn auth_env_overrides_propagate_to_config() {
         "SYSLOG_MCP_PUBLIC_URL",
         "SYSLOG_MCP_GOOGLE_CLIENT_ID",
         "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
+        "SYSLOG_MCP_AUTH_ADMIN_EMAIL",
+        "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+        "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
     ] {
         std::env::remove_var(k);
     }
@@ -728,6 +733,15 @@ fn auth_env_overrides_propagate_to_config() {
         cfg.mcp.auth.google_client_secret.as_deref(),
         Some("secret-from-env")
     );
+    assert_eq!(cfg.mcp.auth.admin_email, "admin-from-env@example.com");
+    assert_eq!(
+        cfg.mcp.auth.allowed_client_redirect_uris,
+        vec![
+            "https://callback.example.com/callback".to_string(),
+            "https://claude.ai/api/mcp/auth_callback".to_string(),
+        ]
+    );
+    assert!(!cfg.mcp.auth.disable_static_token_with_oauth);
 }
 
 #[test]
@@ -829,6 +843,15 @@ fn loopback_bind_with_no_auth_is_permitted() {
     cfg.mcp.host = "127.0.0.1".into();
     cfg.mcp.api_token = None;
     validate_auth_config(&cfg, true).expect("loopback dev mode");
+}
+
+#[test]
+fn explicit_no_auth_allows_non_loopback_bind_without_token() {
+    let mut cfg = Config::default();
+    cfg.mcp.host = "0.0.0.0".into();
+    cfg.mcp.api_token = None;
+    cfg.mcp.no_auth = true;
+    validate_auth_config(&cfg, true).expect("gateway-protected no-auth mode");
 }
 
 #[test]

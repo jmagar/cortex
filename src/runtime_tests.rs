@@ -34,11 +34,25 @@ fn loopback_mcp() -> McpConfig {
         host: "127.0.0.1".into(),
         port: 3100,
         server_name: "syslog-mcp".into(),
+        no_auth: false,
         api_token: None,
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
         auth: AuthConfig::default(),
     }
+}
+
+#[tokio::test]
+async fn build_auth_policy_returns_loopback_dev_when_explicit_no_auth_non_loopback() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut mcp = loopback_mcp();
+    mcp.host = "0.0.0.0".into();
+    mcp.no_auth = true;
+    let config = test_config(tmp.path(), mcp);
+    let policy = build_auth_policy(&config, false)
+        .await
+        .expect("build policy");
+    assert!(matches!(policy, AuthPolicy::LoopbackDev));
 }
 
 fn oauth_mcp(tmp: &std::path::Path) -> McpConfig {

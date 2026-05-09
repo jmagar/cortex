@@ -1,5 +1,6 @@
 {
   "name": "syslog",
+  "version": "0.17.3",
   "description": "Syslog management via MCP",
   "author": { "name": "jmagar" },
   "repository": "https://github.com/jmagar/syslog-mcp",
@@ -40,7 +41,52 @@
       "title": "API token",
       "description": "Bearer token for MCP HTTP authentication, sent on every request as `Authorization: Bearer <token>`. Server mode: pick any value — that becomes the secret the server enforces (generate one with `openssl rand -hex 32`, or use `just gen-token`). Client mode: paste the token your server admin configured. The same token must match on both sides; mismatched tokens return 401.",
       "sensitive": true,
-      "required": true
+      "required": false
+    },
+    "no_auth": {
+      "type": "boolean",
+      "title": "Disable service auth",
+      "description": "Run syslog-mcp without service-local MCP auth. Use this only when an upstream gateway or reverse proxy enforces auth before traffic reaches syslog-mcp. Server mode only.",
+      "required": true,
+      "default": false
+    },
+    "auth_mode": {
+      "type": "string",
+      "title": "Auth mode",
+      "description": "Server auth mode. bearer keeps the static API token only. oauth enables Google OAuth/JWT for clients like Codex while the generated API token remains accepted for this Claude Code plugin connection. OAuth mode requires public_url, google_client_id, google_client_secret, and auth_admin_email.",
+      "required": true,
+      "default": "bearer"
+    },
+    "public_url": {
+      "type": "string",
+      "title": "Public URL",
+      "description": "Public base URL for OAuth issuer/resource metadata, e.g. https://syslog.example.com. If auth_mode=oauth and this is empty, setup derives it from an https server_url by stripping a trailing /mcp if present. Server mode only.",
+      "default": ""
+    },
+    "google_client_id": {
+      "type": "string",
+      "title": "Google OAuth client ID",
+      "description": "Google OAuth client ID used when auth_mode=oauth. Create a Web application OAuth client in Google Cloud Console. Server mode only.",
+      "default": ""
+    },
+    "google_client_secret": {
+      "type": "string",
+      "title": "Google OAuth client secret",
+      "description": "Google OAuth client secret used when auth_mode=oauth. Stored in the generated plugin env file with mode 600. Server mode only.",
+      "sensitive": true,
+      "default": ""
+    },
+    "auth_admin_email": {
+      "type": "string",
+      "title": "OAuth admin email",
+      "description": "Bootstrap allowed Google account for OAuth mode. The server refuses to start OAuth without an allowlisted account. Server mode only.",
+      "default": ""
+    },
+    "auth_allowed_redirect_uris": {
+      "type": "string",
+      "title": "OAuth redirect URIs",
+      "description": "Optional extra non-loopback OAuth client redirect URIs. Setup automatically adds Claude's MCP callback URLs and, when present, the current Codex mcp_oauth_callback_url from ~/.codex/config.toml. Server mode only.",
+      "default": ""
     },
     "syslog_host": {
       "type": "string",

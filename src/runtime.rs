@@ -361,12 +361,21 @@ impl RuntimeCore {
 /// | `Bearer`    | set         | any          | `Mounted { auth_state: None }` (bearer-only)   |
 /// | `Bearer`    | unset       | loopback     | `LoopbackDev` (dev mode; no auth enforced)     |
 /// | `Bearer`    | unset       | non-loopback | rejected by `validate_auth_config` at startup  |
+/// | any          | any         | any          | `LoopbackDev` when `mcp.no_auth` is true       |
 ///
 /// Bearer-only (`static_token` set, no OAuth) produces `Mounted { auth_state: None }` so
 /// that scope checks in tool dispatch (S5) know middleware is enforcing auth.
 /// `lab_auth::AuthState::new` is only called for the OAuth row — it requires
 /// mode == OAuth and initialises Google OIDC + SQLite session storage.
 async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy> {
+    if config.mcp.no_auth {
+        tracing::warn!(
+            mcp_bind = %config.mcp.bind_addr(),
+            "syslog-mcp auth policy: LoopbackDev (NO_AUTH=true — upstream gateway must enforce access)"
+        );
+        return Ok(AuthPolicy::LoopbackDev);
+    }
+
     if is_stdio {
         if config.mcp.auth.mode == AuthMode::OAuth {
             tracing::warn!(

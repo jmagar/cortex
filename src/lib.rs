@@ -122,6 +122,7 @@ pub mod testing {
             host: "127.0.0.1".into(),
             port: 3100,
             server_name: "syslog-mcp".into(),
+            no_auth: false,
             api_token: token,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),

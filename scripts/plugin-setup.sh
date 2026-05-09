@@ -9,10 +9,28 @@ set -euo pipefail
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
 : "${CLAUDE_PLUGIN_DATA:=${HOME}/.claude/plugins/data/syslog-jmagar-lab}"
 
+existing_env_value() {
+  local key="$1"
+  local file
+  for file in "${CLAUDE_PLUGIN_DATA}/.env" "${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"; do
+    [[ -f "${file}" ]] || continue
+    awk -F= -v key="${key}" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "${file}"
+    return 0
+  done
+}
+
 # Seed the token from the existing env file when the plugin option isn't set,
 # so /syslog:redeploy doesn't fail just because the env var wasn't injected.
-if [[ -z "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}" && -f "${CLAUDE_PLUGIN_DATA}/syslog-mcp.env" ]]; then
-  _tok=$(grep -m1 '^SYSLOG_MCP_API_TOKEN=' "${CLAUDE_PLUGIN_DATA}/syslog-mcp.env" | cut -d= -f2- || true)
+NO_AUTH="${CLAUDE_PLUGIN_OPTION_NO_AUTH:-$(existing_env_value NO_AUTH)}"
+NO_AUTH="${NO_AUTH:-false}"
+NO_AUTH="$(printf '%s' "${NO_AUTH}" | tr '[:upper:]' '[:lower:]')"
+AUTH_MODE="${CLAUDE_PLUGIN_OPTION_AUTH_MODE:-$(existing_env_value SYSLOG_MCP_AUTH_MODE)}"
+AUTH_MODE="${AUTH_MODE:-bearer}"
+AUTH_MODE="$(printf '%s' "${AUTH_MODE}" | tr '[:upper:]' '[:lower:]')"
+
+if [[ "${NO_AUTH}" != "true" && "${AUTH_MODE}" != "oauth" && -z "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}" ]]; then
+  _tok="$(existing_env_value SYSLOG_MCP_TOKEN)"
+  [[ -n "${_tok}" ]] || _tok="$(existing_env_value SYSLOG_MCP_API_TOKEN)"
   [[ -n "${_tok}" ]] && CLAUDE_PLUGIN_OPTION_API_TOKEN="${_tok}"
   unset _tok
 fi
@@ -20,7 +38,11 @@ fi
 # ── Config from userConfig ────────────────────────────────────────────────────
 IS_SERVER="${CLAUDE_PLUGIN_OPTION_IS_SERVER:-true}"
 USE_DOCKER="${CLAUDE_PLUGIN_OPTION_USE_DOCKER:-false}"
-API_TOKEN="${CLAUDE_PLUGIN_OPTION_API_TOKEN:?API token is required}"
+API_TOKEN="${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}"
+if [[ "${NO_AUTH}" != "true" && "${AUTH_MODE}" != "oauth" && -z "${API_TOKEN}" ]]; then
+  echo "ERROR: API token is required unless no_auth is true or auth_mode is oauth" >&2
+  exit 1
+fi
 SERVER_URL="${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}"
 SYSLOG_HOST="${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST:-0.0.0.0}"
 SYSLOG_PORT="${CLAUDE_PLUGIN_OPTION_SYSLOG_PORT:-1514}"
@@ -31,14 +53,119 @@ MAX_DB_SIZE_MB="${CLAUDE_PLUGIN_OPTION_MAX_DB_SIZE_MB:-8192}"
 RETENTION_DAYS="${CLAUDE_PLUGIN_OPTION_RETENTION_DAYS:-90}"
 DOCKER_INGEST="${CLAUDE_PLUGIN_OPTION_DOCKER_INGEST_ENABLED:-false}"
 FLEET_HOSTS="${CLAUDE_PLUGIN_OPTION_FLEET_HOSTS:-}"
+PUBLIC_URL="${CLAUDE_PLUGIN_OPTION_PUBLIC_URL:-$(existing_env_value SYSLOG_MCP_PUBLIC_URL)}"
+GOOGLE_CLIENT_ID="${CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_ID:-$(existing_env_value SYSLOG_MCP_GOOGLE_CLIENT_ID)}"
+GOOGLE_CLIENT_SECRET="${CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_SECRET:-$(existing_env_value SYSLOG_MCP_GOOGLE_CLIENT_SECRET)}"
+AUTH_ADMIN_EMAIL="${CLAUDE_PLUGIN_OPTION_AUTH_ADMIN_EMAIL:-$(existing_env_value SYSLOG_MCP_AUTH_ADMIN_EMAIL)}"
+AUTH_ALLOWED_REDIRECT_URIS="${CLAUDE_PLUGIN_OPTION_AUTH_ALLOWED_REDIRECT_URIS:-$(existing_env_value SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS)}"
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-ENV_FILE="${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"
+ENV_FILE="${CLAUDE_PLUGIN_DATA}/.env"
+LEGACY_ENV_FILE="${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"
 UNIT_FILE="${HOME}/.config/systemd/user/syslog-mcp.service"
 COMPOSE_DIR="${CLAUDE_PLUGIN_DATA}"
 COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.yml"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+strip_trailing_mcp_path() {
+  local url="${1%/}"
+  if [[ "${url}" == */mcp ]]; then
+    url="${url%/mcp}"
+  fi
+  printf '%s\n' "${url}"
+}
+
+derive_public_url() {
+  if [[ -n "${PUBLIC_URL}" ]]; then
+    strip_trailing_mcp_path "${PUBLIC_URL}"
+    return
+  fi
+  if [[ "${SERVER_URL}" == https://* ]]; then
+    strip_trailing_mcp_path "${SERVER_URL}"
+  fi
+}
+
+codex_oauth_callback_url() {
+  local config="${HOME}/.codex/config.toml"
+  [[ -f "${config}" ]] || return 0
+  awk -F= '
+    $1 ~ /^[[:space:]]*mcp_oauth_callback_url[[:space:]]*$/ {
+      value = $2
+      sub(/^[[:space:]]*"/, "", value)
+      sub(/"[[:space:]]*$/, "", value)
+      print value
+      exit
+    }
+  ' "${config}"
+}
+
+append_csv_unique() {
+  local csv="$1"
+  local value="$2"
+  [[ -n "${value}" ]] || { printf '%s\n' "${csv}"; return; }
+
+  local existing
+  IFS=',' read -r -a existing <<< "${csv}"
+  for item in "${existing[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    if [[ "${item}" == "${value}" ]]; then
+      printf '%s\n' "${csv}"
+      return
+    fi
+  done
+
+  if [[ -n "${csv}" ]]; then
+    printf '%s,%s\n' "${csv}" "${value}"
+  else
+    printf '%s\n' "${value}"
+  fi
+}
+
+oauth_env_block() {
+  if [[ "${NO_AUTH}" == "true" ]]; then
+    return 0
+  fi
+  if [[ "${AUTH_MODE}" != "bearer" && "${AUTH_MODE}" != "oauth" ]]; then
+    echo "ERROR: auth_mode must be bearer or oauth" >&2
+    return 1
+  fi
+  if [[ "${AUTH_MODE}" != "oauth" ]]; then
+    return 0
+  fi
+
+  local public_url
+  public_url="$(derive_public_url)"
+  if [[ -z "${public_url}" ]]; then
+    echo "ERROR: OAuth mode requires public_url or an https server_url" >&2
+    return 1
+  fi
+  if [[ -z "${GOOGLE_CLIENT_ID}" || -z "${GOOGLE_CLIENT_SECRET}" || -z "${AUTH_ADMIN_EMAIL}" ]]; then
+    echo "ERROR: OAuth mode requires google_client_id, google_client_secret, and auth_admin_email" >&2
+    return 1
+  fi
+
+  local redirects="${AUTH_ALLOWED_REDIRECT_URIS}"
+  redirects="$(append_csv_unique "${redirects}" "https://claude.ai/api/mcp/auth_callback")"
+  redirects="$(append_csv_unique "${redirects}" "https://claudeai.ai/api/mcp/auth_callback")"
+
+  local codex_callback
+  codex_callback="$(codex_oauth_callback_url)"
+  if [[ -n "${codex_callback}" ]]; then
+    redirects="$(append_csv_unique "${redirects}" "${codex_callback}")"
+  fi
+
+  cat << EOF
+SYSLOG_MCP_AUTH_MODE=oauth
+SYSLOG_MCP_PUBLIC_URL=${public_url}
+SYSLOG_MCP_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+SYSLOG_MCP_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+SYSLOG_MCP_AUTH_ADMIN_EMAIL=${AUTH_ADMIN_EMAIL}
+SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS=${redirects}
+SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false
+EOF
+}
 
 # Returns 0 if env file was written/changed, 1 if unchanged
 write_env() {
@@ -75,7 +202,7 @@ SYSLOG_HOST=${SYSLOG_HOST}
 SYSLOG_PORT=${SYSLOG_PORT}
 SYSLOG_MCP_HOST=${MCP_HOST}
 SYSLOG_MCP_PORT=${MCP_PORT}
-SYSLOG_MCP_API_TOKEN=${API_TOKEN}
+NO_AUTH=${NO_AUTH}
 ${db_line}
 SYSLOG_MCP_MAX_DB_SIZE_MB=${MAX_DB_SIZE_MB}
 SYSLOG_MCP_RETENTION_DAYS=${RETENTION_DAYS}
@@ -84,6 +211,19 @@ SYSLOG_WRITE_CHANNEL_CAPACITY=${write_channel_capacity}
 SYSLOG_DOCKER_INGEST_ENABLED=${DOCKER_INGEST}
 EOF
 )
+
+  if [[ "${NO_AUTH}" != "true" && -n "${API_TOKEN}" ]]; then
+    new_env="${new_env}
+SYSLOG_MCP_TOKEN=${API_TOKEN}"
+  fi
+
+  local auth_block
+  if ! auth_block="$(oauth_env_block)"; then
+    return 2
+  fi
+  [[ -n "${auth_block}" ]] && new_env="${new_env}
+${auth_block}"
+
   [[ -n "${uid_line}" ]] && new_env="${new_env}
 ${uid_line}
 ${gid_line}"
@@ -98,11 +238,26 @@ SYSLOG_DOCKER_HOSTS=${FLEET_HOSTS}"
   fi
 
   if [[ -f "${ENV_FILE}" ]] && diff -q <(echo "${new_env}") "${ENV_FILE}" >/dev/null 2>&1; then
+    rm -f "${LEGACY_ENV_FILE}"
     return 1  # unchanged
   fi
 
   echo "${new_env}" > "${ENV_FILE}"
+  chmod 600 "${ENV_FILE}"
+  rm -f "${LEGACY_ENV_FILE}"
   return 0  # changed
+}
+
+ensure_env_written() {
+  local rc
+  if write_env; then
+    return 0
+  fi
+  rc=$?
+  if [[ "${rc}" -eq 0 || "${rc}" -eq 1 ]]; then
+    return 0
+  fi
+  return "${rc}"
 }
 
 
@@ -125,7 +280,7 @@ setup_systemd() {
     service_running=true
   fi
   if [[ "${service_running}" == "false" ]]; then
-    for port_proto in "1514/udp" "1514/tcp" "3100/tcp"; do
+    for port_proto in "${SYSLOG_PORT}/udp" "${SYSLOG_PORT}/tcp" "${MCP_PORT}/tcp"; do
       local port="${port_proto%%/*}" proto="${port_proto##*/}"
       if ss -"${proto:0:1}"lnp "sport = :${port}" 2>/dev/null | awk 'NR>1 && NF>0' | grep -q .; then
         echo "ERROR: port ${port}/${proto} is already in use — cannot start syslog-mcp" >&2
@@ -183,7 +338,7 @@ EOF
     unit_changed=true
   fi
 
-  write_env || true
+  ensure_env_written
 
   if [[ "${unit_changed}" == "true" ]]; then
     systemctl --user daemon-reload
@@ -209,12 +364,16 @@ setup_docker() {
   # 2. Port conflict check — only when the container is not already running
   #    (if it is running, it owns the ports and force-recreate will handle it).
   local container_running=false
+  local external_named_container=false
   if [[ -f "${COMPOSE_FILE}" ]] && \
      docker compose -f "${COMPOSE_FILE}" ps --quiet syslog-mcp 2>/dev/null | grep -q .; then
     container_running=true
+  elif docker ps --filter 'name=^/syslog-mcp$' --quiet 2>/dev/null | grep -q .; then
+    container_running=true
+    external_named_container=true
   fi
   if [[ "${container_running}" == "false" ]]; then
-    for port_proto in "1514/udp" "1514/tcp" "3100/tcp"; do
+    for port_proto in "${SYSLOG_PORT}/udp" "${SYSLOG_PORT}/tcp" "${MCP_PORT}/tcp"; do
       local port="${port_proto%%/*}" proto="${port_proto##*/}"
       if ss -"${proto:0:1}"lnp "sport = :${port}" 2>/dev/null | awk 'NR>1 && NF>0' | grep -q .; then
         echo "ERROR: port ${port}/${proto} is already in use — cannot start syslog-mcp" >&2
@@ -264,9 +423,7 @@ setup_docker() {
     cp "${CLAUDE_PLUGIN_ROOT}/docker-compose.yml" "${COMPOSE_FILE}"
   fi
 
-  write_env || true
-  # Docker compose reads .env from its working directory.
-  cp "${ENV_FILE}" "${COMPOSE_DIR}/.env"
+  ensure_env_written
 
   cd "${COMPOSE_DIR}"
 
@@ -283,12 +440,19 @@ setup_docker() {
     docker network create "${network_name}"
   fi
 
-  # Pull the published image. If the registry is unreachable or the tag
-  # doesn't exist, fall through to `up` which will use a cached image or
-  # (if --build is added) build from source — neither is expected in the
-  # plugin path, but this keeps the hook resilient in dev workflows.
-  docker compose pull --quiet syslog-mcp 2>&1 || \
-    echo "syslog-mcp: pull failed; will try cached image" >&2
+  # Source checkouts can build the image directly. Installed plugins normally
+  # do not include the Rust source tree, so they pull the published image.
+  if [[ -f "${CLAUDE_PLUGIN_ROOT}/Cargo.toml" && -f "${CLAUDE_PLUGIN_ROOT}/config/Dockerfile" ]]; then
+    (cd "${CLAUDE_PLUGIN_ROOT}" && docker compose build --no-cache syslog-mcp)
+  else
+    docker compose pull --quiet syslog-mcp 2>&1 || \
+      echo "syslog-mcp: pull failed; will try cached image" >&2
+  fi
+
+  if [[ "${external_named_container}" == "true" ]]; then
+    echo "syslog-mcp: removing existing container before docker compose cutover"
+    docker rm -f syslog-mcp >/dev/null
+  fi
 
   if docker compose ps --quiet syslog-mcp 2>/dev/null | grep -q .; then
     docker compose up -d --force-recreate --no-build

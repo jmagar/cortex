@@ -58,7 +58,7 @@ NOT mounted in any mode:
 
 ## Configuration
 
-### Environment variables (the 4 OAuth env vars)
+### Environment variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -66,6 +66,9 @@ NOT mounted in any mode:
 | `SYSLOG_MCP_PUBLIC_URL` | yes | Base URL (e.g. `https://syslog.example.com`). Sets issuer + audience. |
 | `SYSLOG_MCP_GOOGLE_CLIENT_ID` | yes | From Google Console |
 | `SYSLOG_MCP_GOOGLE_CLIENT_SECRET` | yes | From Google Console |
+| `SYSLOG_MCP_AUTH_ADMIN_EMAIL` | yes | Bootstrap allowed Google account |
+| `SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS` | no | Comma-separated non-loopback OAuth client callbacks, such as a Codex callback URL |
+| `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH` | no | Defaults to `true`; set `false` to keep `SYSLOG_MCP_TOKEN` working while OAuth is active |
 
 ### config.toml `[mcp.auth]` fields
 
@@ -102,7 +105,7 @@ disable_static_token_with_oauth = true   # default: true
 
 - **Refresh token TTL is 8h**, not lab-auth's default of 30d. This suits the read-only homelab profile. Adjust via `[mcp.auth].refresh_token_ttl_secs`.
 - **Allowlist is required**. Without `admin_email` or `allowed_emails`, startup fails with a config error — any Google account would gain access otherwise.
-- **`disable_static_token_with_oauth` defaults to `true`**. When OAuth is active, `SYSLOG_MCP_TOKEN` is rejected by default. Set `disable_static_token_with_oauth = false` in config.toml for break-glass bearer access.
+- **`disable_static_token_with_oauth` defaults to `true`**. When OAuth is active, `SYSLOG_MCP_TOKEN` is rejected by default. Set `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in config.toml for break-glass bearer access.
 - **Stdio mode always uses LoopbackDev**. `cargo run -- mcp` ignores the auth config entirely — no credentials are needed or enforced.
 - **Docker bind-mount ownership**. `auth.db` and `auth-jwt.pem` are written by the container UID. Host-side backup scripts may need `sudo` or a sidecar copy step.
 - **`/register` and `/auth/login` are never mounted**. syslog-mcp uses the headless (`bearer_only_router`) subset of lab-auth's OAuth routes — no browser login page, no dynamic client registration.
