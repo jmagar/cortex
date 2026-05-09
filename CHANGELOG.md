@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.5] - 2026-05-08
+
+### Fixed
+
+- **MCP status scope mapping**: `syslog status` now requires `syslog:read`
+  like the other read-only actions, instead of falling through to the
+  fail-closed unknown-action scope sentinel.
+
 ## [0.17.4] - 2026-05-08
 
 ### Fixed

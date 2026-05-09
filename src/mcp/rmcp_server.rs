@@ -344,7 +344,9 @@ fn required_scope_for(action: &str) -> Option<&'static str> {
         // Informational — AuthContext required when Mounted, but no scope gate.
         "help" => None,
         // All current read actions require syslog:read.
-        "search" | "tail" | "errors" | "hosts" | "correlate" | "stats" => Some("syslog:read"),
+        "search" | "tail" | "errors" | "hosts" | "correlate" | "stats" | "status" => {
+            Some("syslog:read")
+        }
         // Future write/admin actions would map to syslog:admin here.
         // Default: unknown actions use an ungrantable sentinel scope so they
         // are denied at the auth layer rather than falling through to dispatch.

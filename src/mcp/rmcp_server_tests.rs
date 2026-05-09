@@ -577,7 +577,7 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
     let auth = auth_ctx_with_scopes(vec!["syslog:read"]);
     let router = rmcp_router_with_auth(state, auth);
 
-    for action in &["stats", "tail", "errors", "hosts", "help"] {
+    for action in &["stats", "status", "tail", "errors", "hosts", "help"] {
         let (status, response) = post_rmcp(
             router.clone(),
             jsonrpc_request(
@@ -658,7 +658,15 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
     let auth = auth_ctx_with_scopes(vec![]);
     let router = rmcp_router_with_auth(state, auth);
 
-    for action in &["search", "tail", "errors", "hosts", "correlate", "stats"] {
+    for action in &[
+        "search",
+        "tail",
+        "errors",
+        "hosts",
+        "correlate",
+        "stats",
+        "status",
+    ] {
         let (status, response) = post_rmcp(
             router.clone(),
             jsonrpc_request(
