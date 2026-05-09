@@ -1,11 +1,11 @@
 ---
 name: syslog-logs
-description: Tail or follow syslog-mcp service logs from Docker Compose or systemd journal depending on the current deployment mode. Use when the user asks for syslog-mcp service logs, startup logs, crash logs, plugin deployment logs, journal output, Docker logs, or follow mode. This is for the service's stdout/stderr, not client syslog entries.
+description: Tail or follow Hive service logs from Docker Compose or systemd journal depending on the current deployment mode. Use when the user asks for Hive service logs, startup logs, crash logs, plugin deployment logs, journal output, Docker logs, or follow mode. This is for the service's stdout/stderr, not client syslog entries.
 ---
 
 # Syslog Service Logs
 
-Show recent syslog-mcp service logs. These are the binary's stdout/stderr, not syslog entries received from clients. Use the `syslog` MCP tool with `action=tail` for received log entries.
+Show recent Hive service logs. These are the binary's stdout/stderr, not syslog entries received from clients. Use the `hive` MCP tool with `action=tail` for received log entries.
 
 ## Workflow
 
@@ -36,7 +36,7 @@ Show recent syslog-mcp service logs. These are the binary's stdout/stderr, not s
    Docker mode:
 
    ```bash
-   docker compose -f "${CLAUDE_PLUGIN_DATA}/docker-compose.yml" --project-directory "${CLAUDE_PLUGIN_DATA}" logs syslog-mcp --tail <N> --no-color
+   docker compose -f "${CLAUDE_PLUGIN_DATA}/docker-compose.yml" --project-directory "${CLAUDE_PLUGIN_DATA}" logs hive-mcp --tail <N> --no-color
    ```
 
    For follow mode, add `-f` and omit `--no-color`.
@@ -48,13 +48,13 @@ Show recent syslog-mcp service logs. These are the binary's stdout/stderr, not s
    Systemd mode:
 
    ```bash
-   journalctl --user -u syslog-mcp.service -n <N> --no-pager
+   journalctl --user -u hive-mcp.service -n <N> --no-pager
    ```
 
    For follow mode:
 
    ```bash
-   journalctl --user -u syslog-mcp.service -n <N> -f
+   journalctl --user -u hive-mcp.service -n <N> -f
    ```
 
 ## Output

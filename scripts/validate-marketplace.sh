@@ -106,6 +106,10 @@ check "hooks config exists" "test -f '${HOOKS_JSON}'"
 check "hooks config is valid JSON" "jq empty '${HOOKS_JSON}'"
 check "SessionStart runs plugin setup" "jq -er '.hooks.SessionStart[]?.hooks[]?.command == \"\${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh\"' '${HOOKS_JSON}'"
 check "ConfigChange runs plugin setup" "jq -er '.hooks.ConfigChange[]? | select(.matcher == \"user_settings\") | .hooks[]?.command == \"\${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh\"' '${HOOKS_JSON}'"
+check "plugin setup migrates legacy syslog env file" "grep -F 'syslog-mcp.env' 'scripts/plugin-setup.sh'"
+check "plugin setup uses plugin-root hive binary in systemd" "grep -F 'ExecStart=\${CLAUDE_PLUGIN_ROOT}/bin/hive serve mcp' 'scripts/plugin-setup.sh'"
+check "plugin setup treats compose validation failure as fatal" "grep -F 'docker compose config validation failed; refusing to continue cutover' 'scripts/plugin-setup.sh'"
+check "plugin setup treats image pull failure as fatal by default" "grep -F 'failed to pull hive-mcp image' 'scripts/plugin-setup.sh'"
 
 check "skills directory exists" "test -d '${SKILLS_DIR}'"
 
@@ -117,6 +121,7 @@ if [[ -d "${SKILLS_DIR}" ]]; then
     check "skill ${skill_dir} has front matter name" "awk 'BEGIN {found=0} /^name:[[:space:]]*${skill_dir}[[:space:]]*$/ {found=1} END {exit found ? 0 : 1}' '${skill_file}'"
     check "skill ${skill_dir} has description" "awk 'BEGIN {found=0} /^description:[[:space:]]*[^[:space:]]/ {found=1} END {exit found ? 0 : 1}' '${skill_file}'"
   done < <(find "${SKILLS_DIR}" -mindepth 2 -maxdepth 2 -name SKILL.md | sort)
+  check "skills use Hive runtime service names" "! grep -R -E 'docker compose logs syslog-mcp|systemctl --user (is-active|status|stop|restart) syslog-mcp|journalctl --user -u syslog-mcp|mcp__syslog__syslog' '${SKILLS_DIR}'"
 fi
 
 CHECKS=$((CHECKS + 1))

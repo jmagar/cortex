@@ -812,14 +812,15 @@ fn env_override_list_alias(primary: &str, legacy: &str, target: &mut Vec<String>
     env_override_list(primary, target);
 }
 
-fn env_override_auth_mode(key: &str, target: &mut AuthMode) -> anyhow::Result<()> {
-    let Ok(v) = std::env::var(key) else {
+fn env_override_auth_mode_alias(
+    primary: &str,
+    legacy: &str,
+    target: &mut AuthMode,
+) -> anyhow::Result<()> {
+    let Some((key, value)) = env_alias_value(primary, legacy) else {
         return Ok(());
     };
-    if v.is_empty() {
-        return Ok(());
-    }
-    *target = match v.trim().to_ascii_lowercase().as_str() {
+    *target = match value.trim().to_ascii_lowercase().as_str() {
         "bearer" => AuthMode::Bearer,
         "oauth" => AuthMode::OAuth,
         other => {
@@ -829,15 +830,6 @@ fn env_override_auth_mode(key: &str, target: &mut AuthMode) -> anyhow::Result<()
         }
     };
     Ok(())
-}
-
-fn env_override_auth_mode_alias(
-    primary: &str,
-    legacy: &str,
-    target: &mut AuthMode,
-) -> anyhow::Result<()> {
-    env_override_auth_mode(legacy, target)?;
-    env_override_auth_mode(primary, target)
 }
 
 fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
@@ -861,8 +853,20 @@ fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
 }
 
 fn env_override_bool_alias(primary: &str, legacy: &str, target: &mut bool) -> anyhow::Result<()> {
-    env_override_bool(legacy, target)?;
-    env_override_bool(primary, target)
+    let Some((key, value)) = env_alias_value(primary, legacy) else {
+        return Ok(());
+    };
+
+    *target = match value.to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "y" | "on" => true,
+        "false" | "0" | "no" | "n" | "off" => false,
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Invalid value for {key}={value}: expected true/false/1/0/yes/no/on/off"
+            ));
+        }
+    };
+    Ok(())
 }
 
 fn env_alias_value<'a>(primary: &'a str, legacy: &'a str) -> Option<(&'a str, String)> {
@@ -1087,8 +1091,12 @@ fn env_override_parse_alias<T: std::str::FromStr>(
 where
     T::Err: std::fmt::Display,
 {
-    env_override_parse(legacy, target)?;
-    env_override_parse(primary, target)
+    if let Some((key, value)) = env_alias_value(primary, legacy) {
+        *target = value
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Invalid value for {key}={value}: {e}"))?;
+    }
+    Ok(())
 }
 
 fn validate_host(host: &str) -> anyhow::Result<()> {

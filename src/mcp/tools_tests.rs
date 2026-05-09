@@ -144,7 +144,7 @@ async fn public_action_references_cover_schema_registry() {
     let help = help["help"].as_str().unwrap().to_ascii_lowercase();
     for action in SYSLOG_ACTIONS {
         assert!(
-            help.contains(&format!("## syslog {action}")),
+            help.contains(&format!("## hive {action}")),
             "help text missing action section: {action}"
         );
     }

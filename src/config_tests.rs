@@ -96,6 +96,21 @@ fn hive_mcp_env_takes_precedence_over_legacy_mcp_env() {
 
 #[test]
 #[serial]
+fn valid_hive_mcp_port_ignores_invalid_legacy_mcp_port() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_MCP_PORT", "not-a-port");
+    std::env::set_var("HIVE_MCP_PORT", "3300");
+    let result = Config::load();
+    std::env::remove_var("SYSLOG_MCP_HOST");
+    std::env::remove_var("SYSLOG_MCP_PORT");
+    std::env::remove_var("HIVE_MCP_PORT");
+
+    let cfg = result.expect("primary Hive port should override stale invalid legacy port");
+    assert_eq!(cfg.mcp.port, 3300);
+}
+
+#[test]
+#[serial]
 fn env_var_overrides_syslog_port() {
     std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_PORT", "2514");
@@ -690,6 +705,64 @@ fn empty_hive_docker_hosts_falls_back_to_legacy_docker_hosts() {
 
 #[test]
 #[serial]
+fn hive_api_env_takes_precedence_over_legacy_api_env() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_API_ENABLED", "not-bool");
+    std::env::set_var("SYSLOG_API_TOKEN", "legacy-api-token");
+    std::env::set_var("HIVE_API_ENABLED", "true");
+    std::env::set_var("HIVE_API_TOKEN", "hive-api-token");
+    let result = Config::load();
+    for key in [
+        "SYSLOG_MCP_HOST",
+        "SYSLOG_API_ENABLED",
+        "SYSLOG_API_TOKEN",
+        "HIVE_API_ENABLED",
+        "HIVE_API_TOKEN",
+    ] {
+        std::env::remove_var(key);
+    }
+
+    let config = result.expect("primary Hive API env should override stale legacy API env");
+    assert!(config.api.enabled);
+    assert_eq!(config.api.api_token.as_deref(), Some("hive-api-token"));
+}
+
+#[test]
+#[serial]
+fn hive_docker_settings_override_invalid_legacy_docker_settings() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "not-bool");
+    std::env::set_var("SYSLOG_DOCKER_RECONNECT_INITIAL_MS", "not-number");
+    std::env::set_var("SYSLOG_DOCKER_RECONNECT_MAX_MS", "also-not-number");
+    std::env::set_var("SYSLOG_DOCKER_HOSTS", "legacy-host");
+    std::env::set_var("HIVE_DOCKER_INGEST_ENABLED", "true");
+    std::env::set_var("HIVE_DOCKER_RECONNECT_INITIAL_MS", "2000");
+    std::env::set_var("HIVE_DOCKER_RECONNECT_MAX_MS", "4000");
+    std::env::set_var("HIVE_DOCKER_HOSTS", "hive-host");
+    let result = Config::load();
+    for key in [
+        "SYSLOG_MCP_HOST",
+        "SYSLOG_DOCKER_INGEST_ENABLED",
+        "SYSLOG_DOCKER_RECONNECT_INITIAL_MS",
+        "SYSLOG_DOCKER_RECONNECT_MAX_MS",
+        "SYSLOG_DOCKER_HOSTS",
+        "HIVE_DOCKER_INGEST_ENABLED",
+        "HIVE_DOCKER_RECONNECT_INITIAL_MS",
+        "HIVE_DOCKER_RECONNECT_MAX_MS",
+        "HIVE_DOCKER_HOSTS",
+    ] {
+        std::env::remove_var(key);
+    }
+
+    let config = result.expect("primary Hive Docker env should override stale legacy env");
+    assert!(config.docker_ingest.enabled);
+    assert_eq!(config.docker_ingest.reconnect_initial_ms, 2000);
+    assert_eq!(config.docker_ingest.reconnect_max_ms, 4000);
+    assert_eq!(config.docker_ingest.hosts[0].name, "hive-host");
+}
+
+#[test]
+#[serial]
 fn docker_ingest_ignores_hosts_file_when_disabled() {
     std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "false");
@@ -835,6 +908,33 @@ fn hive_mcp_auth_mode_env_flips_to_oauth() {
         Some("https://hive.example.com")
     );
     assert_eq!(cfg.mcp.auth.admin_email, "admin@example.com");
+}
+
+#[test]
+#[serial]
+fn valid_hive_auth_mode_ignores_invalid_legacy_auth_mode() {
+    std::env::set_var("HIVE_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_MCP_AUTH_MODE", "magic");
+    std::env::set_var("HIVE_MCP_AUTH_MODE", "oauth");
+    std::env::set_var("HIVE_MCP_PUBLIC_URL", "https://hive.example.com");
+    std::env::set_var("HIVE_MCP_GOOGLE_CLIENT_ID", "client-id");
+    std::env::set_var("HIVE_MCP_GOOGLE_CLIENT_SECRET", "client-secret");
+    std::env::set_var("HIVE_MCP_AUTH_ADMIN_EMAIL", "admin@example.com");
+    let result = Config::load();
+    for key in [
+        "HIVE_MCP_HOST",
+        "SYSLOG_MCP_AUTH_MODE",
+        "HIVE_MCP_AUTH_MODE",
+        "HIVE_MCP_PUBLIC_URL",
+        "HIVE_MCP_GOOGLE_CLIENT_ID",
+        "HIVE_MCP_GOOGLE_CLIENT_SECRET",
+        "HIVE_MCP_AUTH_ADMIN_EMAIL",
+    ] {
+        std::env::remove_var(key);
+    }
+
+    let cfg = result.expect("primary Hive auth mode should override stale invalid legacy mode");
+    assert_eq!(cfg.mcp.auth.mode, AuthMode::OAuth);
 }
 
 #[test]
@@ -1081,7 +1181,12 @@ fn loopback_oauth_without_static_token_keeps_dev_mode_allowed() {
 fn auth_mode_parses_lowercase_only() {
     let mut mode = AuthMode::Bearer;
     std::env::set_var("__TEST_AUTH_MODE_PARSE", "OAUTH");
-    env_override_auth_mode("__TEST_AUTH_MODE_PARSE", &mut mode).unwrap();
+    env_override_auth_mode_alias(
+        "__TEST_AUTH_MODE_PARSE",
+        "__TEST_AUTH_MODE_PARSE_LEGACY",
+        &mut mode,
+    )
+    .unwrap();
     std::env::remove_var("__TEST_AUTH_MODE_PARSE");
     assert_eq!(mode, AuthMode::OAuth, "case-insensitive");
 }

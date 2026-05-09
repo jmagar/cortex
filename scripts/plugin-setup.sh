@@ -13,7 +13,11 @@ existing_env_value() {
   local key="$1"
   local file
   local value
-  for file in "${CLAUDE_PLUGIN_DATA}/.env" "${CLAUDE_PLUGIN_DATA}/hive-mcp.env"; do
+  for file in \
+    "${CLAUDE_PLUGIN_DATA}/.env" \
+    "${CLAUDE_PLUGIN_DATA}/hive-mcp.env" \
+    "${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"
+  do
     [[ -f "${file}" ]] || continue
     value="$(awk -F= -v key="${key}" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "${file}")"
     if [[ -n "${value}" ]]; then
@@ -66,10 +70,24 @@ stop_disable_remove_systemd_unit() {
 
   if systemctl --user is-active --quiet "${unit}" 2>/dev/null; then
     echo "hive-mcp: stopping existing ${unit} before cutover"
-    systemctl --user stop "${unit}" || true
+    systemctl --user stop "${unit}" || {
+      echo "ERROR: failed to stop ${unit}; refusing to continue cutover" >&2
+      return 1
+    }
+    if systemctl --user is-active --quiet "${unit}" 2>/dev/null; then
+      echo "ERROR: ${unit} is still active after stop; refusing to continue cutover" >&2
+      return 1
+    fi
   fi
   if systemctl --user is-enabled --quiet "${unit}" 2>/dev/null; then
-    systemctl --user disable "${unit}" >/dev/null 2>&1 || true
+    systemctl --user disable "${unit}" >/dev/null 2>&1 || {
+      echo "ERROR: failed to disable ${unit}; refusing to continue cutover" >&2
+      return 1
+    }
+    if systemctl --user is-enabled --quiet "${unit}" 2>/dev/null; then
+      echo "ERROR: ${unit} is still enabled after disable; refusing to continue cutover" >&2
+      return 1
+    fi
   fi
   if [[ -f "${unit_path}" ]]; then
     rm -f "${unit_path}"
@@ -149,7 +167,7 @@ fi
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 ENV_FILE="${CLAUDE_PLUGIN_DATA}/.env"
-LEGACY_ENV_FILE="${CLAUDE_PLUGIN_DATA}/hive-mcp.env"
+LEGACY_ENV_FILE="${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"
 UNIT_FILE="${HOME}/.config/systemd/user/hive-mcp.service"
 COMPOSE_DIR="${CLAUDE_PLUGIN_DATA}"
 COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.yml"
@@ -327,13 +345,13 @@ HIVE_DOCKER_HOSTS=${FLEET_HOSTS}"
   fi
 
   if [[ -f "${ENV_FILE}" ]] && diff -q <(echo "${new_env}") "${ENV_FILE}" >/dev/null 2>&1; then
-    rm -f "${LEGACY_ENV_FILE}"
+    rm -f "${LEGACY_ENV_FILE}" "${CLAUDE_PLUGIN_DATA}/hive-mcp.env"
     return 1  # unchanged
   fi
 
   echo "${new_env}" > "${ENV_FILE}"
   chmod 600 "${ENV_FILE}"
-  rm -f "${LEGACY_ENV_FILE}"
+  rm -f "${LEGACY_ENV_FILE}" "${CLAUDE_PLUGIN_DATA}/hive-mcp.env"
   return 0  # changed
 }
 
@@ -535,7 +553,8 @@ setup_docker() {
 
   # 5. Validate compose config before touching the running container.
   if ! docker compose config --quiet 2>/dev/null; then
-    echo "WARNING: docker compose config validation failed — proceeding anyway" >&2
+    echo "ERROR: docker compose config validation failed; refusing to continue cutover" >&2
+    return 1
   fi
 
   # Ensure the external docker network exists — compose will fail without it.
@@ -551,8 +570,14 @@ setup_docker() {
   if [[ "${CLAUDE_PLUGIN_OPTION_BUILD_LOCAL:-false}" == "true" && -f "${CLAUDE_PLUGIN_ROOT}/Cargo.toml" && -f "${CLAUDE_PLUGIN_ROOT}/config/Dockerfile" ]]; then
     (cd "${CLAUDE_PLUGIN_ROOT}" && docker compose build --no-cache hive-mcp)
   else
-    docker compose pull --quiet hive-mcp 2>&1 || \
-      echo "hive-mcp: pull failed; will try cached image" >&2
+    if ! docker compose pull --quiet hive-mcp; then
+      if [[ "${HIVE_MCP_ALLOW_CACHED_IMAGE:-false}" == "true" ]]; then
+        echo "hive-mcp: pull failed; using cached image because HIVE_MCP_ALLOW_CACHED_IMAGE=true" >&2
+      else
+        echo "ERROR: failed to pull hive-mcp image; set HIVE_MCP_ALLOW_CACHED_IMAGE=true to use a cached image intentionally" >&2
+        return 1
+      fi
+    fi
   fi
 
   if [[ "${external_named_container}" == "true" ]]; then
@@ -579,7 +604,13 @@ validate_client() {
   if curl -sf "${SERVER_URL}/health" >/dev/null 2>&1; then
     echo "hive-mcp: connected to ${SERVER_URL}"
   else
-    echo "WARNING: hive-mcp server at ${SERVER_URL} is not reachable" >&2
+    if [[ "${HIVE_MCP_ALLOW_UNREACHABLE_CLIENT:-false}" == "true" ]]; then
+      echo "WARNING: hive-mcp server at ${SERVER_URL} is not reachable" >&2
+    else
+      echo "ERROR: hive-mcp server at ${SERVER_URL} is not reachable" >&2
+      echo "       Set HIVE_MCP_ALLOW_UNREACHABLE_CLIENT=true only when intentionally configuring an offline client." >&2
+      return 1
+    fi
   fi
 }
 

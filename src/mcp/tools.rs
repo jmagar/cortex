@@ -342,19 +342,19 @@ fn bool_arg(args: &Value, name: &str) -> Option<bool> {
 }
 
 async fn tool_syslog_help() -> anyhow::Result<Value> {
-    let help = r#"# syslog-mcp Tool Reference
+    let help = r#"# Hive MCP Tool Reference
 
-The MCP server exposes one tool, `syslog`. Set the required `action` argument
+The MCP server exposes one primary tool, `hive`. The legacy `syslog` tool name remains accepted as a compatibility alias. Set the required `action` argument
 to select the operation.
 
-## syslog search
+## hive search
 Full-text search across all syslog messages with optional filters.
 Uses SQLite FTS5 with porter stemming. Supports FTS5 query syntax: AND, OR, NOT,
 phrase matching with quotes, prefix matching with *.
 
 **Parameters:**
 - `query` (string) — FTS5 search query, e.g. `'kernel panic'`, `'OOM AND killer'`, `'"connection refused"'`, `'error*'`
-- `hostname` (string, optional) — filter by hostname (exact match); use `syslog hosts` to enumerate
+- `hostname` (string, optional) — filter by hostname (exact match); use `hive hosts` to enumerate
 - `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; Docker ingest uses `docker://host/container/stream`.
 - `severity` (string, optional) — one of: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`
 - `app_name` (string, optional) — filter by application name, e.g. `sshd`, `dockerd`, `kernel`
@@ -366,7 +366,7 @@ phrase matching with quotes, prefix matching with *.
 
 ---
 
-## syslog tail
+## hive tail
 Get the N most recent log entries, optionally filtered by host, application, and/or severity floor.
 Equivalent to `tail -f` across all hosts.
 
@@ -379,7 +379,7 @@ Equivalent to `tail -f` across all hosts.
 
 ---
 
-## syslog errors
+## hive errors
 Get a summary of errors and warnings across all hosts in a time window.
 Groups by hostname and severity level (and optionally app_name), showing counts.
 
@@ -390,23 +390,23 @@ Groups by hostname and severity level (and optionally app_name), showing counts.
 
 ---
 
-## syslog hosts
+## hive hosts
 List all hosts that have sent syslog messages, with first/last seen timestamps and total log counts.
 
 **Parameters:** none
 
 ---
 
-## syslog apps
+## hive apps
 List distinct application names with log counts, host counts, and first/last seen timestamps.
-Mirror of `syslog hosts` for the `app_name` dimension.
+Mirror of `hive hosts` for the `app_name` dimension.
 
 **Parameters:**
 - `hostname` (string, optional) — restrict to apps seen on this host
 
 ---
 
-## syslog source_ips
+## hive source_ips
 List distinct source identifiers (network sender IP:port for syslog input,
 `docker://host/container/stream` for Docker ingest) with log counts, the number
 of distinct hostnames each sender claims, and up to 10 top hostnames per sender.
@@ -417,7 +417,7 @@ on hostname-spoofable formats (e.g. UniFi CEF).
 
 ---
 
-## syslog correlate
+## hive correlate
 Search for related events across multiple hosts within a time window.
 Useful for debugging cascading failures — finds events on all hosts within ±N minutes
 of a reference timestamp. Results are grouped by host and ordered by time.
@@ -433,7 +433,7 @@ of a reference timestamp. Results are grouped by host and ordered by time.
 
 ---
 
-## syslog timeline
+## hive timeline
 Bucketed log counts over a time range. Use to answer "when did errors start"
 or "is the incident still active". Each point reports `{bucket, group?, count}`.
 
@@ -448,7 +448,7 @@ or "is the incident still active". Each point reports `{bucket, group?, count}`.
 
 ---
 
-## syslog patterns
+## hive patterns
 Cluster near-duplicate messages by template. Variable runs (numbers, IPv4
 addresses, UUIDs, long hex strings) are normalised to placeholders so similar
 messages aggregate. Returns top templates with counts, sample message, and
@@ -463,7 +463,7 @@ host distribution.
 
 ---
 
-## syslog context
+## hive context
 Surrounding logs around a single point of interest, on the same host. Pass
 either `log_id` (preferred — uses (timestamp, id) for stable ordering) or both
 `hostname` + `timestamp` to anchor on a synthetic reference.
@@ -477,7 +477,7 @@ either `log_id` (preferred — uses (timestamp, id) for stable ordering) or both
 
 ---
 
-## syslog get
+## hive get
 Fetch one log entry by `id`, including the unparsed `raw` syslog frame.
 
 **Parameters:**
@@ -485,7 +485,7 @@ Fetch one log entry by `id`, including the unparsed `raw` syslog frame.
 
 ---
 
-## syslog ingest_rate
+## hive ingest_rate
 Recent ingest throughput: counts and per-second rates over the last 1m / 5m /
 15m windows (using `received_at`, not message timestamp). Includes the current
 write-block flag for live ingest health.
@@ -495,7 +495,7 @@ write-block flag for live ingest health.
 
 ---
 
-## syslog silent_hosts
+## hive silent_hosts
 Hosts whose `last_seen` is older than `silent_minutes` ago. Reports their
 typical inter-arrival interval so you can spot devices that should be chatty.
 
@@ -504,7 +504,7 @@ typical inter-arrival interval so you can spot devices that should be chatty.
 
 ---
 
-## syslog clock_skew
+## hive clock_skew
 Per-host distribution of `received_at - timestamp` (seconds), sorted by
 absolute mean. Surfaces devices with a broken or drifting clock.
 
@@ -513,7 +513,7 @@ absolute mean. Surfaces devices with a broken or drifting clock.
 
 ---
 
-## syslog anomalies
+## hive anomalies
 Per-host comparison of recent volume against a baseline window. Reports
 `recent_per_min`, `baseline_per_min`, ratio, and a Poisson-style z-score so an
 agent can rank hosts whose log rate or error count is unusual.
@@ -524,7 +524,7 @@ agent can rank hosts whose log rate or error count is unusual.
 
 ---
 
-## syslog compare
+## hive compare
 Side-by-side summary of two time ranges (volume, error count, severity mix,
 top hosts, top apps) plus deltas. Answers "what changed since yesterday".
 
@@ -534,7 +534,7 @@ top hosts, top apps) plus deltas. Answers "what changed since yesterday".
 
 ---
 
-## syslog stats
+## hive stats
 Get database statistics plus runtime ingest observability: listener counters, queue depth,
 writer flush/failure/drop counters, last activity timestamps, and OTLP receiver counters.
 
@@ -542,7 +542,7 @@ writer flush/failure/drop counters, last activity timestamps, and OTLP receiver 
 
 ---
 
-## syslog status
+## hive status
 Get lightweight runtime status without full DB statistics. Use this for dashboards and
 doctor checks that need queue/backpressure/writer state quickly.
 
@@ -550,7 +550,7 @@ doctor checks that need queue/backpressure/writer state quickly.
 
 ---
 
-## syslog help
+## hive help
 Returns this markdown documentation.
 
 **Parameters:** none

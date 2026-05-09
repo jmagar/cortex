@@ -539,10 +539,20 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
     let auth_config = lab_auth::config::AuthConfigBuilder::new()
         .env_prefix("SYSLOG_MCP")
         .session_cookie_name("syslog_mcp_session")
-        .scopes_supported(vec!["syslog:read".into(), "syslog:admin".into()])
-        .default_scope("syslog:read")
+        .scopes_supported(vec![
+            "hive:read".into(),
+            "hive:admin".into(),
+            "syslog:read".into(),
+            "syslog:admin".into(),
+        ])
+        .default_scope("hive:read")
         .resource_path("/mcp")
-        .static_token_scopes(vec!["syslog:read".into(), "syslog:admin".into()])
+        .static_token_scopes(vec![
+            "hive:read".into(),
+            "hive:admin".into(),
+            "syslog:read".into(),
+            "syslog:admin".into(),
+        ])
         .disable_static_token_with_oauth(auth.disable_static_token_with_oauth)
         .enable_dynamic_registration(true)
         .build_from_sources(vars)

@@ -10,12 +10,12 @@ use tempfile::TempDir;
 use tokio::{io::AsyncReadExt, process::Command};
 
 async fn stdio_client(
+    binary: &str,
     db_path: &std::path::Path,
 ) -> anyhow::Result<(
     rmcp::service::RunningService<rmcp::RoleClient, ()>,
     Option<tokio::process::ChildStderr>,
 )> {
-    let binary = env!("CARGO_BIN_EXE_syslog");
     let (transport, stderr) = TokioChildProcess::builder(Command::new(binary).configure(|cmd| {
         cmd.arg("mcp")
             .env("HIVE_MCP_DB_PATH", db_path)
@@ -44,10 +44,12 @@ fn text_content_json(result: &rmcp::model::CallToolResult) -> serde_json::Value 
 }
 
 #[tokio::test]
-async fn stdio_child_process_lists_tools_and_calls_queries() {
+async fn hive_stdio_child_process_lists_tools_and_calls_queries() {
     let temp = TempDir::new().unwrap();
     let db_path = temp.path().join("stdio-mcp.db");
-    let (service, stderr) = stdio_client(&db_path).await.unwrap();
+    let (service, stderr) = stdio_client(env!("CARGO_BIN_EXE_hive"), &db_path)
+        .await
+        .unwrap();
 
     let tools = service.list_tools(Default::default()).await.unwrap();
     let names: Vec<&str> = tools.tools.iter().map(|tool| tool.name.as_ref()).collect();
@@ -96,4 +98,33 @@ async fn stdio_child_process_lists_tools_and_calls_queries() {
             "stdio mode must not start network services; stderr was: {logs}"
         );
     }
+}
+
+#[tokio::test]
+async fn legacy_syslog_stdio_child_process_still_works() {
+    let temp = TempDir::new().unwrap();
+    let db_path = temp.path().join("legacy-stdio-mcp.db");
+    let (service, _stderr) = stdio_client(env!("CARGO_BIN_EXE_syslog"), &db_path)
+        .await
+        .unwrap();
+
+    let tools = service.list_tools(Default::default()).await.unwrap();
+    let names: Vec<&str> = tools.tools.iter().map(|tool| tool.name.as_ref()).collect();
+    assert_eq!(names, vec!["hive"]);
+
+    service.cancel().await.unwrap();
+}
+
+#[test]
+fn hive_binary_reports_hive_version() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_hive"))
+        .arg("--version")
+        .output()
+        .expect("hive --version should run");
+    assert!(output.status.success(), "hive --version failed: {output:?}");
+    let stdout = String::from_utf8(output.stdout).expect("version output should be UTF-8");
+    assert!(
+        stdout.contains("Hive "),
+        "version output should use Hive branding; got: {stdout}"
+    );
 }

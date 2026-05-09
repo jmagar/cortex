@@ -178,7 +178,7 @@ impl ServerHandler for SyslogRmcpServer {
         })?;
         Ok(ReadResourceResult::new(vec![ResourceContents::text(
             text,
-            HIVE_SCHEMA_RESOURCE_URI,
+            request.uri,
         )
         .with_mime_type("application/json")]))
     }

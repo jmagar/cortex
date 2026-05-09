@@ -968,6 +968,11 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["result"]["contents"][0]["uri"],
+        super::HIVE_SCHEMA_RESOURCE_URI,
+        "primary resources/read should return contents under requested URI; response: {response}"
+    );
     assert!(
         response["result"]["contents"][0]["text"]
             .as_str()
@@ -985,6 +990,11 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["result"]["contents"][0]["uri"],
+        super::LEGACY_SYSLOG_SCHEMA_RESOURCE_URI,
+        "legacy resources/read should return contents under requested URI; response: {response}"
+    );
     assert!(
         response["result"]["contents"][0]["text"]
             .as_str()

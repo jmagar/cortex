@@ -365,7 +365,7 @@ phase_auth() {
 phase_protocol() {
   section "Phase 3 — Protocol"
 
-  local expected_tools=("syslog")
+  local expected_tools=("hive")
 
   # initialize
   local init_resp
@@ -410,16 +410,16 @@ phase_tools() {
   # --- syslog help ---
   section "  syslog help"
   local help_result
-  help_result="$(call_tool syslog '{"action":"help"}')" || help_result=""
+  help_result="$(call_tool hive '{"action":"help"}')" || help_result=""
 
   assert_jq "syslog help — help field present"          "${help_result}" '.help'
   assert_jq "syslog help — help text is non-empty"      "${help_result}" '.help | length > 0'
-  assert_jq "syslog help — help text contains 'syslog'" "${help_result}" '.help | ascii_downcase | contains("syslog")'
+  assert_jq "syslog help — help text contains 'hive'" "${help_result}" '.help | ascii_downcase | contains("hive")'
 
   # --- syslog status ---
   section "  syslog status"
   local status_result
-  status_result="$(call_tool syslog '{"action":"status"}')" || status_result=""
+  status_result="$(call_tool hive '{"action":"status"}')" || status_result=""
 
   assert_jq "syslog status — status is ok"                    "${status_result}" '.status' "ok"
   assert_jq "syslog status — db_ok field present"             "${status_result}" '.db_ok != null'
@@ -429,7 +429,7 @@ phase_tools() {
   # --- syslog stats ---
   section "  syslog stats"
   local stats_result
-  stats_result="$(call_tool syslog '{"action":"stats"}')" || stats_result=""
+  stats_result="$(call_tool hive '{"action":"stats"}')" || stats_result=""
 
   assert_jq "syslog stats — total_logs field present"         "${stats_result}" '.total_logs != null'
   assert_jq "syslog stats — total_hosts field present"        "${stats_result}" '.total_hosts != null'
@@ -442,7 +442,7 @@ phase_tools() {
   # --- syslog hosts ---
   section "  syslog hosts"
   local hosts_result
-  hosts_result="$(call_tool syslog '{"action":"hosts"}')" || hosts_result=""
+  hosts_result="$(call_tool hive '{"action":"hosts"}')" || hosts_result=""
 
   assert_jq "syslog hosts — hosts field is an array"       "${hosts_result}" '.hosts | type' "array"
 
@@ -462,7 +462,7 @@ phase_tools() {
   # --- syslog search ---
   section "  syslog search"
   local search_result
-  search_result="$(call_tool syslog '{"action":"search","query":"error","limit":10}')" || search_result=""
+  search_result="$(call_tool hive '{"action":"search","query":"error","limit":10}')" || search_result=""
 
   assert_jq "syslog search — count field present"   "${search_result}" '.count != null'
   assert_jq "syslog search — logs field is array"   "${search_result}" '.logs | type' "array"
@@ -481,14 +481,14 @@ phase_tools() {
 
   # syslog search with no query (list recent)
   local search_noq
-  search_noq="$(call_tool syslog '{"action":"search","limit":5}')" || search_noq=""
+  search_noq="$(call_tool hive '{"action":"search","limit":5}')" || search_noq=""
   assert_jq "syslog search (no query) — count field present" "${search_noq}" '.count != null'
   assert_jq "syslog search (no query) — logs field is array" "${search_noq}" '.logs | type' "array"
 
   # --- syslog errors ---
   section "  syslog errors"
   local errors_result
-  errors_result="$(call_tool syslog '{"action":"errors"}')" || errors_result=""
+  errors_result="$(call_tool hive '{"action":"errors"}')" || errors_result=""
 
   assert_jq "syslog errors — summary field is array" "${errors_result}" '.summary | type' "array"
 
@@ -505,7 +505,7 @@ phase_tools() {
   # --- syslog tail ---
   section "  syslog tail"
   local tail_result
-  tail_result="$(call_tool syslog '{"action":"tail","n":10}')" || tail_result=""
+  tail_result="$(call_tool hive '{"action":"tail","n":10}')" || tail_result=""
 
   assert_jq "syslog tail — count field present"   "${tail_result}" '.count != null'
   assert_jq "syslog tail — logs field is array"   "${tail_result}" '.logs | type' "array"
@@ -528,7 +528,7 @@ phase_tools() {
   ref_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   local correlate_result
-  correlate_result="$(call_tool syslog \
+  correlate_result="$(call_tool hive \
     "$(jq -nc --arg t "${ref_time}" '{"action":"correlate","reference_time":$t,"window_minutes":5,"severity_min":"debug","limit":50}')")" \
     || correlate_result=""
 

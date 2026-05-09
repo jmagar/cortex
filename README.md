@@ -265,7 +265,7 @@ Return database statistics including total logs, total hosts, time range covered
 
 ---
 
-### `syslog status`
+### `hive status`
 
 Return lightweight runtime status without the heavier DB statistics query. Use this for dashboards and doctor checks that need current queue depth, backpressure, writer failure/drop state, listener counters, and last activity timestamps.
 
@@ -273,7 +273,7 @@ Return lightweight runtime status without the heavier DB statistics query. Use t
 
 ---
 
-### `syslog help`
+### `hive help`
 
 Return markdown documentation for all tools in this toolset.
 
@@ -283,7 +283,7 @@ Return markdown documentation for all tools in this toolset.
 
 ## FTS5 Query Syntax
 
-The `syslog search` and `syslog correlate` actions use SQLite FTS5 with porter stemming (`tokenize='porter unicode61'`). Valid query forms:
+The `hive search` and `hive correlate` actions use SQLite FTS5 with porter stemming (`tokenize='porter unicode61'`). The legacy `syslog` CLI alias accepts the same actions during migration. Valid query forms:
 
 | Syntax | Example | Matches |
 |--------|---------|---------|
@@ -451,8 +451,8 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYSLOG_API_ENABLED` | no | `false` | Enable the non-MCP JSON API |
-| `SYSLOG_API_TOKEN` | yes, when enabled | — | Bearer token for `/api/*` routes |
+| `HIVE_API_ENABLED` | no | `false` | Enable the non-MCP JSON API. Legacy alias: `SYSLOG_API_ENABLED` |
+| `HIVE_API_TOKEN` | yes, when enabled | — | Bearer token for `/api/*` routes. Legacy alias: `SYSLOG_API_TOKEN` |
 
 #### Syslog listener
 
@@ -474,11 +474,11 @@ Optional pull-based Docker log ingestion keeps each remote host on its normal Do
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYSLOG_DOCKER_INGEST_ENABLED` | no | `false` | Enable remote Docker log ingestion |
-| `SYSLOG_DOCKER_HOSTS` | one of the two | — | Comma-separated hostnames; each becomes `http://<name>:2375` with `allow_insecure_http = true`. Takes priority over `SYSLOG_DOCKER_HOSTS_FILE`. |
-| `SYSLOG_DOCKER_HOSTS_FILE` | one of the two | — | Path to a TOML file with a `[[hosts]]` array (use when you need per-host `base_url` or TLS). If the file does not exist, a warning is logged and no hosts are loaded — the container will not crash. Mount the file via `HIVE_MCP_CONFIG_VOLUME`. |
-| `SYSLOG_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | Initial reconnect delay after host stream failure |
-| `SYSLOG_DOCKER_RECONNECT_MAX_MS` | no | `30000` | Maximum reconnect delay after repeated failures |
+| `HIVE_DOCKER_INGEST_ENABLED` | no | `false` | Enable remote Docker log ingestion. Legacy alias: `SYSLOG_DOCKER_INGEST_ENABLED` |
+| `HIVE_DOCKER_HOSTS` | one of the two | — | Comma-separated hostnames; each becomes `http://<name>:2375` with `allow_insecure_http = true`. Takes priority over `HIVE_DOCKER_HOSTS_FILE`. Legacy alias: `SYSLOG_DOCKER_HOSTS` |
+| `HIVE_DOCKER_HOSTS_FILE` | one of the two | — | Path to a TOML file with a `[[hosts]]` array (use when you need per-host `base_url` or TLS). If the file does not exist, a warning is logged and no hosts are loaded — the container will not crash. Mount the file via `HIVE_MCP_CONFIG_VOLUME`. Legacy alias: `SYSLOG_DOCKER_HOSTS_FILE` |
+| `HIVE_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | Initial reconnect delay after host stream failure. Legacy alias: `SYSLOG_DOCKER_RECONNECT_INITIAL_MS` |
+| `HIVE_DOCKER_RECONNECT_MAX_MS` | no | `30000` | Maximum reconnect delay after repeated failures. Legacy alias: `SYSLOG_DOCKER_RECONNECT_MAX_MS` |
 
 The hosts file uses this shape:
 
@@ -494,7 +494,7 @@ base_url = "http://app-host-b:2375"
 allow_insecure_http = true
 ```
 
-The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to syslog-mcp, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
+The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to hive-mcp, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
 
 Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run Hive with `HIVE_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `hive search` or `mcporter call ... action=search`. The expected stored `source_ip` shape is `docker://<host>/<container>/<stream>`.
 
@@ -654,7 +654,7 @@ Enable systemd in `/etc/wsl.conf`:
 systemd=true
 ```
 
-Install rsyslog and use the rsyslog config above. Use the Tailscale IP of the syslog-mcp host — WSL has its own network namespace and cannot reach the Docker host IP directly.
+Install rsyslog and use the rsyslog config above. Use the Tailscale IP of the Hive host — WSL has its own network namespace and cannot reach the Docker host IP directly.
 
 ### UniFi Cloud Gateway
 
@@ -789,10 +789,10 @@ All timestamps are stored in UTC. `hive correlate` uses the `timestamp` field fr
 Add a SWAG proxy conf to expose the MCP API over TLS:
 
 ```nginx
-# /config/nginx/proxy-confs/syslog-mcp.subdomain.conf
+# /config/nginx/proxy-confs/hive-mcp.subdomain.conf
 server {
     listen 443 ssl;
-    server_name syslog-mcp.*;
+    server_name hive-mcp.*;
 
     include /config/nginx/ssl.conf;
 
@@ -804,7 +804,7 @@ server {
         # Clients use POST /mcp; GET/DELETE /mcp are not supported.
         proxy_http_version 1.1;
 
-        set $upstream_app syslog-mcp;
+        set $upstream_app hive-mcp;
         set $upstream_port 3100;
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
@@ -865,7 +865,7 @@ curl -s -X POST http://localhost:3100/mcp \
     "id": 1,
       "method": "tools/call",
       "params": {
-      "name": "syslog",
+      "name": "hive",
       "arguments": {"action": "tail", "n": 10}
     }
   }' | jq .
@@ -879,7 +879,7 @@ curl -s -X POST http://localhost:3100/mcp \
     "jsonrpc": "2.0",
     "id": 2,
     "method": "tools/call",
-    "params": {"name": "syslog", "arguments": {"action": "stats"}}
+    "params": {"name": "hive", "arguments": {"action": "stats"}}
   }' | jq .result.content[0].text | jq -r . | jq .
 ```
 

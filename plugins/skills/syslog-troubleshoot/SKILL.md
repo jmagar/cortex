@@ -41,11 +41,11 @@ Most common cause: empty / wrong `$CLAUDE_PLUGIN_OPTION_SERVER_URL`, mismatched 
    Run `echo "$CLAUDE_PLUGIN_OPTION_USE_DOCKER"` — `true` means Docker, `false` means systemd.
 2. **Get current state**:
    - Docker: `docker ps --filter name=syslog-mcp --format '{{.Status}}'`
-   - Systemd: `systemctl --user status syslog-mcp.service`
+   - Systemd: `systemctl --user status hive-mcp.service`
 3. **If recently restarted / crashing — get the actual error**: use `syslog-logs` for the last 100 lines, or run the mode-specific journal/docker command manually. Look for: panic messages, port-bind errors (`address already in use`), DB lock errors, OOM kills.
 4. **Common service-failure causes (ranked by frequency in this plugin's history)**:
    1. Port `$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT` or `$CLAUDE_PLUGIN_OPTION_MCP_PORT` held by another process. Resolve with `sudo fuser -k <port>/tcp` or kill the offender.
-   2. Mode cutover left both running — `docker compose down` and `systemctl --user stop syslog-mcp` both, then use `syslog-redeploy`.
+   2. Mode cutover left both running — `docker compose down` and `systemctl --user stop hive-mcp` both, then use `syslog-redeploy`.
    3. Database lock (another `syslog mcp` stdio process holds it). `pgrep -af "syslog mcp"` and kill stragglers.
    4. Docker image missing/stale: `docker compose pull` to refresh.
 5. **If healthcheck failing but `/health` works manually**: Container is unhealthy because the healthcheck command inside the image is wrong/can't run. Compare image version to what you expect — `docker inspect syslog-mcp | jq '.[0].Config.Image'`.

@@ -1,11 +1,11 @@
 ---
 name: syslog-dr
-description: Run a comprehensive syslog-mcp health check covering environment, config quality, storage, ports, service status, HTTP health, MCP actions, listener reachability, Docker ingest, and fleet rsyslog forwarding. Use when the user asks for syslog doctor, deployment diagnostics, first-run preflight, health check, sanity check, or broad deployment verification.
+description: Run a comprehensive Hive health check covering environment, config quality, storage, ports, service status, HTTP health, MCP actions, listener reachability, Docker ingest, and fleet rsyslog forwarding. Use when the user asks for Hive or syslog doctor, deployment diagnostics, first-run preflight, health check, sanity check, or broad deployment verification.
 ---
 
 # Syslog Doctor
 
-Run a full PASS / WARN / FAIL diagnostic for syslog-mcp. Use this when the user needs broad deployment confidence rather than a narrow log query.
+Run a full PASS / WARN / FAIL diagnostic for Hive. Use this when the user needs broad deployment confidence rather than a narrow log query.
 
 ## Workflow
 
@@ -31,7 +31,7 @@ Run a full PASS / WARN / FAIL diagnostic for syslog-mcp. Use this when the user 
    - free space is at least `max_db_size_mb * 1.2`, or at least 2048 MB when max DB size is disabled
 
 5. Check the binary symlink:
-   - `${HOME}/.local/bin/syslog` exists
+   - `${HOME}/.local/bin/hive` exists
    - it is a symlink
    - `readlink -f` resolves inside `${CLAUDE_PLUGIN_ROOT}`
    - `${HOME}/.local/bin` is on `$PATH`
@@ -45,11 +45,11 @@ Run a full PASS / WARN / FAIL diagnostic for syslog-mcp. Use this when the user 
 7. Check ports:
    - syslog TCP and UDP port
    - MCP TCP port
-   - PASS only when the port is free or held by the expected syslog-mcp process/container
+   - PASS only when the port is free or held by the expected hive-mcp process/container
 
 8. Check service state:
-   - Docker: inspect compose state and health, and include `docker compose logs syslog-mcp --tail 30 --no-color` when not running.
-   - Systemd: inspect `systemctl --user is-active syslog-mcp` and `is-failed`, and include `journalctl --user -u syslog-mcp -n 30 --no-pager` when inactive or failed.
+   - Docker: inspect compose state and health, and include `docker compose logs hive-mcp --tail 30 --no-color` when not running.
+   - Systemd: inspect `systemctl --user is-active hive-mcp` and `is-failed`, and include `journalctl --user -u hive-mcp -n 30 --no-pager` when inactive or failed.
 
 9. Check HTTP and MCP:
    - `curl -sS -m 3 "$CLAUDE_PLUGIN_OPTION_SERVER_URL/health"`; expect status ok.

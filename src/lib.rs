@@ -173,8 +173,13 @@ pub mod testing {
         let auth_config = lab_auth::config::AuthConfigBuilder::new()
             .env_prefix("SYSLOG_MCP")
             .session_cookie_name("syslog_mcp_session")
-            .scopes_supported(vec!["syslog:read".into(), "syslog:admin".into()])
-            .default_scope("syslog:read")
+            .scopes_supported(vec![
+                "hive:read".into(),
+                "hive:admin".into(),
+                "syslog:read".into(),
+                "syslog:admin".into(),
+            ])
+            .default_scope("hive:read")
             .resource_path("/mcp")
             .build_from_sources(vars)
             .expect("test auth config should build");

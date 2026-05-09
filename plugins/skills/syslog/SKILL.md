@@ -9,7 +9,7 @@ Rust-based syslog receiver and MCP server for homelab log intelligence. Receives
 
 ## Tool
 
-A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argument:
+A single MCP tool, `mcp__hive__hive`, dispatches on a required `action` argument:
 
 | action | purpose |
 |--------|---------|
@@ -61,14 +61,14 @@ FTS5 search across all syslog messages with porter stemming.
 **Examples** (illustrative — invoke via the MCP tool, not as code):
 
 ```
-mcp__syslog__syslog(action="search", query="kernel panic")
-mcp__syslog__syslog(action="search", query="OOM AND killer", limit=50)
-mcp__syslog__syslog(action="search", query='"authentication failure"')
-mcp__syslog__syslog(action="search", query="error", hostname="unraid", severity="err")
-mcp__syslog__syslog(action="search", facility="auth", process_id="1234", limit=20)
-mcp__syslog__syslog(action="search", query="connection refused",
+mcp__hive__hive(action="search", query="kernel panic")
+mcp__hive__hive(action="search", query="OOM AND killer", limit=50)
+mcp__hive__hive(action="search", query='"authentication failure"')
+mcp__hive__hive(action="search", query="error", hostname="unraid", severity="err")
+mcp__hive__hive(action="search", facility="auth", process_id="1234", limit=20)
+mcp__hive__hive(action="search", query="connection refused",
                     from="2025-01-15T00:00:00Z", to="2025-01-15T23:59:59Z")
-mcp__syslog__syslog(action="search", query="docker*")
+mcp__hive__hive(action="search", query="docker*")
 ```
 
 **FTS5 syntax:**
@@ -93,10 +93,10 @@ Most recent N log entries across all hosts, like `tail -f` but multi-host.
 | `n` | integer | Number of entries (default 50, max 500) |
 
 ```
-mcp__syslog__syslog(action="tail", n=20)
-mcp__syslog__syslog(action="tail", hostname="unraid", n=50)
-mcp__syslog__syslog(action="tail", app_name="dockerd", n=30)
-mcp__syslog__syslog(action="tail", severity_min="warning", n=50)
+mcp__hive__hive(action="tail", n=20)
+mcp__hive__hive(action="tail", hostname="unraid", n=50)
+mcp__hive__hive(action="tail", app_name="dockerd", n=30)
+mcp__hive__hive(action="tail", severity_min="warning", n=50)
 ```
 
 ---
@@ -112,9 +112,9 @@ Errors and warnings grouped by hostname and severity with counts. Best for quick
 | `group_by` | string | Optional secondary grouping. Currently supports `app_name`. |
 
 ```
-mcp__syslog__syslog(action="errors")
-mcp__syslog__syslog(action="errors", from="2025-01-15T13:00:00Z", to="2025-01-15T14:00:00Z")
-mcp__syslog__syslog(action="errors", group_by="app_name")
+mcp__hive__hive(action="errors")
+mcp__hive__hive(action="errors", from="2025-01-15T13:00:00Z", to="2025-01-15T14:00:00Z")
+mcp__hive__hive(action="errors", group_by="app_name")
 ```
 
 **Response shape:**
@@ -134,7 +134,7 @@ mcp__syslog__syslog(action="errors", group_by="app_name")
 List every host that has sent syslog messages, with first/last seen and total log count.
 
 ```
-mcp__syslog__syslog(action="hosts")
+mcp__hive__hive(action="hosts")
 ```
 
 **Response shape:**
@@ -168,10 +168,10 @@ Find related events across all hosts within a time window. Ideal for debugging c
 | `limit` | integer | Max total events (default 500, max 999) |
 
 ```
-mcp__syslog__syslog(action="correlate", reference_time="2025-01-15T14:30:00Z", window_minutes=10)
-mcp__syslog__syslog(action="correlate", reference_time="2025-01-15T14:30:00Z",
+mcp__hive__hive(action="correlate", reference_time="2025-01-15T14:30:00Z", window_minutes=10)
+mcp__hive__hive(action="correlate", reference_time="2025-01-15T14:30:00Z",
                     window_minutes=30, severity_min="crit")
-mcp__syslog__syslog(action="correlate", reference_time="2025-01-15T14:30:00Z",
+mcp__hive__hive(action="correlate", reference_time="2025-01-15T14:30:00Z",
                     hostname="unraid", query="OOM")
 ```
 
@@ -196,7 +196,7 @@ mcp__syslog__syslog(action="correlate", reference_time="2025-01-15T14:30:00Z",
 ### `action="stats"` — Database statistics
 
 ```
-mcp__syslog__syslog(action="stats")
+mcp__hive__hive(action="stats")
 ```
 
 **Response fields:** `total_logs`, `total_hosts`, `oldest_log`, `newest_log`, `logical_db_size_mb`, `physical_db_size_mb`, `free_disk_mb`, `write_blocked`, plus configured threshold values.
@@ -210,7 +210,7 @@ backpressure, writer failure/drop state, listener counters, and OTLP receiver
 counters without the heavier DB statistics query.
 
 ```
-mcp__syslog__syslog(action="status")
+mcp__hive__hive(action="status")
 ```
 
 **Response fields:** `status`, `db_ok`, `runtime_observability`, and `otlp`.
@@ -226,8 +226,8 @@ Distinct non-empty `app_name` values with log count, host count, and first/last 
 | `hostname` | string | Optional host filter |
 
 ```
-mcp__syslog__syslog(action="apps")
-mcp__syslog__syslog(action="apps", hostname="unraid")
+mcp__hive__hive(action="apps")
+mcp__hive__hive(action="apps", hostname="unraid")
 ```
 
 ---
@@ -237,7 +237,7 @@ mcp__syslog__syslog(action="apps", hostname="unraid")
 Network sender identifiers with counts and the top hostnames each source claimed.
 
 ```
-mcp__syslog__syslog(action="source_ips")
+mcp__hive__hive(action="source_ips")
 ```
 
 Use `source_ip` as the trusted sender identity when a syslog hostname can be spoofed.
@@ -259,8 +259,8 @@ Counts logs into minute, hour, or day buckets, optionally grouped by host, sever
 | `severity_min` | string | Minimum severity to include |
 
 ```
-mcp__syslog__syslog(action="timeline", bucket="hour", group_by="severity")
-mcp__syslog__syslog(action="timeline", bucket="minute", severity_min="warning")
+mcp__hive__hive(action="timeline", bucket="hour", group_by="severity")
+mcp__hive__hive(action="timeline", bucket="minute", severity_min="warning")
 ```
 
 ---
@@ -280,7 +280,7 @@ Clusters near-duplicate messages after normalizing variable values such as numbe
 | `top_n` | integer | Max returned templates (default 20, max 200) |
 
 ```
-mcp__syslog__syslog(action="patterns", severity_min="warning", top_n=10)
+mcp__hive__hive(action="patterns", severity_min="warning", top_n=10)
 ```
 
 ---
@@ -298,7 +298,7 @@ Returns logs before and after a reference event. Anchor by `log_id` when availab
 | `after` | integer | Entries after the reference (default 10, max 500) |
 
 ```
-mcp__syslog__syslog(action="context", log_id=123, before=20, after=20)
+mcp__hive__hive(action="context", log_id=123, before=20, after=20)
 ```
 
 ---
@@ -312,7 +312,7 @@ Returns a single log entry including its raw frame.
 | `id` | integer | Required log row id |
 
 ```
-mcp__syslog__syslog(action="get", id=123)
+mcp__hive__hive(action="get", id=123)
 ```
 
 ---
@@ -326,8 +326,8 @@ Returns last 1m/5m/15m ingest counts and per-second rates, plus write-block stat
 | `by_host` | boolean | Include per-host bucket counts |
 
 ```
-mcp__syslog__syslog(action="ingest_rate")
-mcp__syslog__syslog(action="ingest_rate", by_host=true)
+mcp__hive__hive(action="ingest_rate")
+mcp__hive__hive(action="ingest_rate", by_host=true)
 ```
 
 ---
@@ -341,7 +341,7 @@ Lists hosts whose `last_seen` is older than the configured threshold.
 | `silent_minutes` | integer | Silence threshold (default 30, max 10080) |
 
 ```
-mcp__syslog__syslog(action="silent_hosts", silent_minutes=60)
+mcp__hive__hive(action="silent_hosts", silent_minutes=60)
 ```
 
 ---
@@ -355,7 +355,7 @@ Compares each host's syslog timestamp with server receive time.
 | `since` | string | Start time for samples. Defaults to the last 24 hours. |
 
 ```
-mcp__syslog__syslog(action="clock_skew")
+mcp__hive__hive(action="clock_skew")
 ```
 
 ---
@@ -370,7 +370,7 @@ Compares recent per-host volume and error counts against a preceding baseline wi
 | `baseline_minutes` | integer | Baseline window before recent window (default 360, max 10080) |
 
 ```
-mcp__syslog__syslog(action="anomalies", recent_minutes=30, baseline_minutes=720)
+mcp__hive__hive(action="anomalies", recent_minutes=30, baseline_minutes=720)
 ```
 
 ---
@@ -387,7 +387,7 @@ Compares total logs, total errors, severity distribution, top hosts, and top app
 | `b_to` | string | Required end of range B |
 
 ```
-mcp__syslog__syslog(action="compare",
+mcp__hive__hive(action="compare",
                     a_from="2025-01-15T00:00:00Z",
                     a_to="2025-01-15T12:00:00Z",
                     b_from="2025-01-15T12:00:00Z",
@@ -401,7 +401,7 @@ mcp__syslog__syslog(action="compare",
 Returns the authoritative in-tree action documentation. Use this as ground truth if the rest of this skill appears stale.
 
 ```
-mcp__syslog__syslog(action="help")
+mcp__hive__hive(action="help")
 ```
 
 ---
@@ -473,38 +473,38 @@ curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
 ### Quick homelab health check
 
 ```
-mcp__syslog__syslog(action="errors")
-mcp__syslog__syslog(action="tail", hostname="unraid", n=50)
-mcp__syslog__syslog(action="search", query='OOM OR "out of memory"', hostname="unraid")
+mcp__hive__hive(action="errors")
+mcp__hive__hive(action="tail", hostname="unraid", n=50)
+mcp__hive__hive(action="search", query='OOM OR "out of memory"', hostname="unraid")
 ```
 
 ### Incident investigation
 
 ```
 # 1. Find the incident
-mcp__syslog__syslog(action="search", query='panic OR crash OR "segmentation fault"', limit=10)
+mcp__hive__hive(action="search", query='panic OR crash OR "segmentation fault"', limit=10)
 
 # 2. Correlate across hosts at that timestamp
-mcp__syslog__syslog(action="correlate",
+mcp__hive__hive(action="correlate",
                     reference_time="<timestamp from step 1>",
                     window_minutes=15,
                     severity_min="warning")
 
 # 3. Confirm which hosts were active
-mcp__syslog__syslog(action="hosts")
+mcp__hive__hive(action="hosts")
 ```
 
 ### Trace a specific Docker container's logs
 
 ```
 # Docker ingest sets source_ip to docker://host/container/stream
-mcp__syslog__syslog(action="search", source_ip="docker://squirts/postgres/stdout", limit=50)
+mcp__hive__hive(action="search", source_ip="docker://squirts/postgres/stdout", limit=50)
 ```
 
 ### Storage health
 
 ```
-mcp__syslog__syslog(action="stats")
+mcp__hive__hive(action="stats")
 # Check: write_blocked, logical_db_size_mb vs threshold, free_disk_mb vs threshold
 ```
 

@@ -82,7 +82,7 @@ fn stats_call() -> serde_json::Value {
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-/// Valid JWT with `syslog:read` → `tools/call action=stats` succeeds (200).
+/// Valid JWT with `hive:read` → `tools/call action=stats` succeeds (200).
 #[tokio::test]
 async fn valid_jwt_with_read_scope_allows_stats() {
     let dir = TempDir::new().unwrap();
@@ -96,7 +96,7 @@ async fn valid_jwt_with_read_scope_allows_stats() {
     assert_eq!(
         status,
         StatusCode::OK,
-        "valid JWT with syslog:read should succeed"
+        "valid JWT with hive:read should succeed"
     );
     assert!(
         value["result"]["content"][0]["text"]
@@ -107,7 +107,7 @@ async fn valid_jwt_with_read_scope_allows_stats() {
     );
 }
 
-/// `syslog:admin` implicitly satisfies `syslog:read` — stats must succeed.
+/// `hive:admin` implicitly satisfies `hive:read` — stats must succeed.
 #[tokio::test]
 async fn valid_jwt_with_admin_scope_satisfies_read() {
     let dir = TempDir::new().unwrap();
