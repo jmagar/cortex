@@ -109,6 +109,48 @@ SYSLOG_DOCKER_HOSTS=${FLEET_HOSTS}"
 setup_systemd() {
   mkdir -p "${HOME}/.config/systemd/user"
 
+  # ── Pre-flight checks ─────────────────────────────────────────────────────
+
+  # 1. Binary must exist — stale symlink after a plugin cache purge is a
+  #    common failure mode that would produce a cryptic systemd start error.
+  if [[ ! -x "${CLAUDE_PLUGIN_ROOT}/bin/syslog" ]]; then
+    echo "ERROR: syslog binary not found at ${CLAUDE_PLUGIN_ROOT}/bin/syslog" >&2
+    return 1
+  fi
+
+  # 2. Port conflict check — skip when the service is already running (it owns
+  #    the ports; systemctl restart will handle the swap atomically).
+  local service_running=false
+  if systemctl --user is-active --quiet syslog-mcp.service 2>/dev/null; then
+    service_running=true
+  fi
+  if [[ "${service_running}" == "false" ]]; then
+    for port_proto in "1514/udp" "1514/tcp" "3100/tcp"; do
+      local port="${port_proto%%/*}" proto="${port_proto##*/}"
+      if ss -"${proto:0:1}"lnp "sport = :${port}" 2>/dev/null | awk 'NR>1 && NF>0' | grep -q .; then
+        echo "ERROR: port ${port}/${proto} is already in use — cannot start syslog-mcp" >&2
+        return 1
+      fi
+    done
+  fi
+
+  # 3. Data dir must be writable by the service user.
+  mkdir -p "${DATA_DIR}"
+  if ! touch "${DATA_DIR}/.write_test" 2>/dev/null; then
+    echo "ERROR: data dir ${DATA_DIR} is not writable by UID $(id -u)" >&2
+    return 1
+  fi
+  rm -f "${DATA_DIR}/.write_test"
+
+  # 4. Warn if the data volume is low on disk.
+  local free_mb
+  free_mb="$(df -k "${DATA_DIR}" | awk 'NR==2{printf "%d", $4/1024}')"
+  if (( free_mb < 512 )); then
+    echo "WARNING: only ${free_mb}MB free on ${DATA_DIR} — server may fail to start or write logs" >&2
+  fi
+
+  # ── Docker cleanup ────────────────────────────────────────────────────────
+
   # If a previous run deployed via docker, stop the container first so the
   # systemd binary can bind the same ports. Idempotent.
   if [[ -f "${COMPOSE_FILE}" ]] && command -v docker >/dev/null 2>&1; then
