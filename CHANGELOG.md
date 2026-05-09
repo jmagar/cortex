@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.4] - 2026-05-08
+
+### Fixed
+
+- **Plugin Docker deploy source detection**: installed plugin caches may include
+  source files, so Docker setup now pulls the published GHCR image by default
+  and only builds locally when `CLAUDE_PLUGIN_OPTION_BUILD_LOCAL=true` is set.
+
 ## [0.17.3] - 2026-05-08
 
 ### Fixed
@@ -823,7 +831,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.17.3...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.17.4...HEAD
+[0.17.4]: https://github.com/jmagar/syslog-mcp/compare/v0.17.3...v0.17.4
 [0.17.3]: https://github.com/jmagar/syslog-mcp/compare/v0.17.2...v0.17.3
 [0.17.2]: https://github.com/jmagar/syslog-mcp/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/jmagar/syslog-mcp/compare/v0.17.0...v0.17.1

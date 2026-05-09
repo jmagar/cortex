@@ -442,7 +442,7 @@ setup_docker() {
 
   # Source checkouts can build the image directly. Installed plugins normally
   # do not include the Rust source tree, so they pull the published image.
-  if [[ -f "${CLAUDE_PLUGIN_ROOT}/Cargo.toml" && -f "${CLAUDE_PLUGIN_ROOT}/config/Dockerfile" ]]; then
+  if [[ "${CLAUDE_PLUGIN_OPTION_BUILD_LOCAL:-false}" == "true" && -f "${CLAUDE_PLUGIN_ROOT}/Cargo.toml" && -f "${CLAUDE_PLUGIN_ROOT}/config/Dockerfile" ]]; then
     (cd "${CLAUDE_PLUGIN_ROOT}" && docker compose build --no-cache syslog-mcp)
   else
     docker compose pull --quiet syslog-mcp 2>&1 || \
