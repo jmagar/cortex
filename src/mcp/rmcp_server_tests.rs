@@ -15,10 +15,13 @@ use crate::{
     app::SyslogService,
     config::{McpConfig, StorageConfig},
     db::{self, DbPool, LogBatchEntry},
-    mcp::{streamable_http_config, streamable_http_service, AppState, AuthPolicy},
+    mcp::{
+        schemas::SYSLOG_ACTIONS, streamable_http_config, streamable_http_service, AppState,
+        AuthPolicy,
+    },
 };
 
-use super::{allowed_hosts, allowed_origins, is_validation_error};
+use super::{allowed_hosts, allowed_origins, is_validation_error, required_scope_for};
 
 fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -116,6 +119,36 @@ fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> Lo
         raw: msg.to_string(),
         source_ip: source_ip.to_string(),
         docker_checkpoint: None,
+    }
+}
+
+fn seed_auth_action_log(pool: &DbPool) {
+    db::insert_logs_batch(
+        pool,
+        &[entry(
+            "2026-01-01T00:00:00Z",
+            "auth-test-host",
+            "err",
+            "mounted auth coverage",
+            "127.0.0.1:514",
+        )],
+    )
+    .unwrap();
+}
+
+fn minimal_args_for_action(action: &str) -> Value {
+    match action {
+        "correlate" => json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"}),
+        "context" => json!({"action": action, "log_id": 1}),
+        "get" => json!({"action": action, "id": 1}),
+        "compare" => json!({
+            "action": action,
+            "a_from": "2026-01-01T00:00:00Z",
+            "a_to": "2026-01-01T00:01:00Z",
+            "b_from": "2026-01-01T00:01:00Z",
+            "b_to": "2026-01-01T00:02:00Z",
+        }),
+        _ => json!({"action": action}),
     }
 }
 
@@ -555,6 +588,17 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
         "response: {response}"
     );
 
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(12, "resources/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["resources"].is_array(),
+        "resources/list should succeed under LoopbackDev; response: {response}"
+    );
+
     // tools/call should succeed without AuthContext under LoopbackDev.
     let (status, response) = post_rmcp(
         router,
@@ -573,17 +617,22 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
 /// actions permitted.
 #[tokio::test]
 async fn mounted_policy_with_read_scope_permits_read_actions() {
-    let (state, _pool, _dir) = mounted_state();
+    let (state, pool, _dir) = mounted_state();
+    seed_auth_action_log(&pool);
     let auth = auth_ctx_with_scopes(vec!["syslog:read"]);
     let router = rmcp_router_with_auth(state, auth);
 
-    for action in &["stats", "status", "tail", "errors", "hosts", "help"] {
+    for action in SYSLOG_ACTIONS
+        .iter()
+        .copied()
+        .filter(|action| *action != "help")
+    {
         let (status, response) = post_rmcp(
             router.clone(),
             jsonrpc_request(
                 20,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": {"action": action}})),
+                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
             ),
         )
         .await;
@@ -598,6 +647,26 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
             "action={action} got forbidden; response: {response}"
         );
     }
+}
+
+#[test]
+fn public_read_actions_require_syslog_read_scope() {
+    for action in SYSLOG_ACTIONS
+        .iter()
+        .copied()
+        .filter(|action| *action != "help")
+    {
+        assert_eq!(
+            required_scope_for(action),
+            Some("syslog:read"),
+            "action={action} must require syslog:read"
+        );
+    }
+    assert_eq!(required_scope_for("help"), None);
+    assert_eq!(
+        required_scope_for("not_a_real_action"),
+        Some("syslog:__deny__")
+    );
 }
 
 /// `AuthPolicy::Mounted` + AuthContext with `syslog:admin` (superset) → read
@@ -658,21 +727,17 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
     let auth = auth_ctx_with_scopes(vec![]);
     let router = rmcp_router_with_auth(state, auth);
 
-    for action in &[
-        "search",
-        "tail",
-        "errors",
-        "hosts",
-        "correlate",
-        "stats",
-        "status",
-    ] {
+    for action in SYSLOG_ACTIONS
+        .iter()
+        .copied()
+        .filter(|action| *action != "help")
+    {
         let (status, response) = post_rmcp(
             router.clone(),
             jsonrpc_request(
                 50,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": {"action": action}})),
+                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
             ),
         )
         .await;
@@ -735,6 +800,32 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
         "tools/list with missing AuthContext should be forbidden; response: {response}"
     );
 
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(73, "resources/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "resources/list with missing AuthContext should be forbidden; response: {response}"
+    );
+
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(
+            74,
+            "resources/read",
+            Some(json!({"uri": super::SCHEMA_RESOURCE_URI})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "resources/read with missing AuthContext should be forbidden; response: {response}"
+    );
+
     // help must also be denied.
     let (status, response) = post_rmcp(
         router.clone(),
@@ -783,6 +874,43 @@ async fn mounted_policy_with_auth_context_permits_tools_list() {
     assert_eq!(
         tools[0]["name"], "syslog",
         "tools/list should return syslog tool; response: {response}"
+    );
+}
+
+#[tokio::test]
+async fn mounted_policy_with_auth_context_permits_schema_resources() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec![]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(81, "resources/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let resources = response["result"]["resources"].as_array().unwrap();
+    assert_eq!(
+        resources[0]["uri"],
+        super::SCHEMA_RESOURCE_URI,
+        "resources/list should expose schema resource; response: {response}"
+    );
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            82,
+            "resources/read",
+            Some(json!({"uri": super::SCHEMA_RESOURCE_URI})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["contents"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("\"name\": \"syslog\"")),
+        "resources/read should return schema JSON; response: {response}"
     );
 }
 

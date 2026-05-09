@@ -1,6 +1,4 @@
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -9,7 +7,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::app::SyslogService;
-use crate::config::{AuthMode, Config};
+use crate::config::{mcp_bind_is_loopback, AuthMode, Config};
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::ingest::IngestTx;
 use crate::mcp::AuthPolicy;
@@ -88,6 +86,7 @@ impl RuntimeCore {
         enforce_initial_storage_budget: bool,
         is_stdio: bool,
     ) -> Result<Self> {
+        reject_unsafe_otlp_oauth_only_exposure(&config, is_stdio)?;
         let pool = Arc::new(db::init_pool(&config.storage)?);
         let storage_state = Arc::new(Mutex::new(None));
         if enforce_initial_storage_budget
@@ -350,6 +349,33 @@ impl RuntimeCore {
     }
 }
 
+/// Defense-in-depth duplicate of `validate_auth_config` for callers that use
+/// `RuntimeCore::for_server(config)` without going through `Config::load()`.
+fn reject_unsafe_otlp_oauth_only_exposure(config: &Config, is_stdio: bool) -> Result<()> {
+    if is_stdio || config.mcp.no_auth || config.mcp.auth.mode != AuthMode::OAuth {
+        return Ok(());
+    }
+
+    if !mcp_bind_is_loopback(config) && !mcp_static_token_active(config) {
+        anyhow::bail!(
+            "refusing to mount OTLP /v1/logs on non-loopback OAuth-only deployment: \
+             OTLP only supports SYSLOG_MCP_TOKEN Bearer auth today; set SYSLOG_MCP_TOKEN, \
+             bind to loopback, or set SYSLOG_MCP_NO_AUTH=true when an upstream gateway \
+             protects all mounted routes"
+        );
+    }
+
+    Ok(())
+}
+
+fn mcp_static_token_active(config: &Config) -> bool {
+    config
+        .mcp
+        .api_token
+        .as_deref()
+        .is_some_and(|t| !t.trim().is_empty())
+}
+
 /// Decide which [`AuthPolicy`] to install on [`mcp::AppState`] given the
 /// fully-loaded [`Config`].
 ///
@@ -392,11 +418,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
 
     let auth = &config.mcp.auth;
     let oauth_active = auth.mode == AuthMode::OAuth;
-    let static_token_active = config
-        .mcp
-        .api_token
-        .as_deref()
-        .is_some_and(|t| !t.trim().is_empty());
+    let static_token_active = mcp_static_token_active(config);
 
     if !oauth_active {
         if static_token_active {
@@ -414,10 +436,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
         // but double-checked here so LoopbackDev can never slip past on a non-loopback bind).
         // The early return above guarantees `is_stdio` is false here, so the bind
         // check always applies.
-        let bind_is_loopback = IpAddr::from_str(&config.mcp.host)
-            .map(|ip| ip.is_loopback())
-            .unwrap_or(false);
-        if !bind_is_loopback {
+        if !mcp_bind_is_loopback(config) {
             anyhow::bail!(
                 "internal invariant violated: no auth wired but bind `{}` is non-loopback",
                 config.mcp.host

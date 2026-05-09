@@ -12,11 +12,31 @@ set -euo pipefail
 existing_env_value() {
   local key="$1"
   local file
+  local value
   for file in "${CLAUDE_PLUGIN_DATA}/.env" "${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"; do
     [[ -f "${file}" ]] || continue
-    awk -F= -v key="${key}" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "${file}"
-    return 0
+    value="$(awk -F= -v key="${key}" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "${file}")"
+    if [[ -n "${value}" ]]; then
+      printf '%s\n' "${value}"
+      return 0
+    fi
   done
+  return 0
+}
+
+validate_port_value() {
+  local name="$1" value="$2"
+  if ! [[ "${value}" =~ ^[0-9]+$ ]] || (( value < 1 || value > 65535 )); then
+    echo "ERROR: ${name} must be a TCP/UDP port number (1-65535), got: ${value}" >&2
+    exit 1
+  fi
+}
+
+mcp_host_is_loopback() {
+  case "$1" in
+    127.*|::1) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # Seed the token from the existing env file when the plugin option isn't set,
@@ -28,7 +48,7 @@ AUTH_MODE="${CLAUDE_PLUGIN_OPTION_AUTH_MODE:-$(existing_env_value SYSLOG_MCP_AUT
 AUTH_MODE="${AUTH_MODE:-bearer}"
 AUTH_MODE="$(printf '%s' "${AUTH_MODE}" | tr '[:upper:]' '[:lower:]')"
 
-if [[ "${NO_AUTH}" != "true" && "${AUTH_MODE}" != "oauth" && -z "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}" ]]; then
+if [[ "${NO_AUTH}" != "true" && -z "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}" ]]; then
   _tok="$(existing_env_value SYSLOG_MCP_TOKEN)"
   [[ -n "${_tok}" ]] || _tok="$(existing_env_value SYSLOG_MCP_API_TOKEN)"
   [[ -n "${_tok}" ]] && CLAUDE_PLUGIN_OPTION_API_TOKEN="${_tok}"
@@ -39,15 +59,16 @@ fi
 IS_SERVER="${CLAUDE_PLUGIN_OPTION_IS_SERVER:-true}"
 USE_DOCKER="${CLAUDE_PLUGIN_OPTION_USE_DOCKER:-false}"
 API_TOKEN="${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}"
-if [[ "${NO_AUTH}" != "true" && "${AUTH_MODE}" != "oauth" && -z "${API_TOKEN}" ]]; then
-  echo "ERROR: API token is required unless no_auth is true or auth_mode is oauth" >&2
-  exit 1
-fi
 SERVER_URL="${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}"
 SYSLOG_HOST="${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST:-0.0.0.0}"
 SYSLOG_PORT="${CLAUDE_PLUGIN_OPTION_SYSLOG_PORT:-1514}"
+SYSLOG_HOST_PORT="${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT:-$(existing_env_value SYSLOG_HOST_PORT)}"
+SYSLOG_HOST_PORT="${SYSLOG_HOST_PORT:-1514}"
 MCP_HOST="${CLAUDE_PLUGIN_OPTION_MCP_HOST:-0.0.0.0}"
 MCP_PORT="${CLAUDE_PLUGIN_OPTION_MCP_PORT:-3100}"
+validate_port_value SYSLOG_PORT "${SYSLOG_PORT}"
+validate_port_value SYSLOG_HOST_PORT "${SYSLOG_HOST_PORT}"
+validate_port_value SYSLOG_MCP_PORT "${MCP_PORT}"
 DATA_DIR="${CLAUDE_PLUGIN_OPTION_DATA_DIR:-${CLAUDE_PLUGIN_DATA}}"
 MAX_DB_SIZE_MB="${CLAUDE_PLUGIN_OPTION_MAX_DB_SIZE_MB:-8192}"
 RETENTION_DAYS="${CLAUDE_PLUGIN_OPTION_RETENTION_DAYS:-90}"
@@ -58,6 +79,14 @@ GOOGLE_CLIENT_ID="${CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_ID:-$(existing_env_value 
 GOOGLE_CLIENT_SECRET="${CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_SECRET:-$(existing_env_value SYSLOG_MCP_GOOGLE_CLIENT_SECRET)}"
 AUTH_ADMIN_EMAIL="${CLAUDE_PLUGIN_OPTION_AUTH_ADMIN_EMAIL:-$(existing_env_value SYSLOG_MCP_AUTH_ADMIN_EMAIL)}"
 AUTH_ALLOWED_REDIRECT_URIS="${CLAUDE_PLUGIN_OPTION_AUTH_ALLOWED_REDIRECT_URIS:-$(existing_env_value SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS)}"
+
+if [[ "${NO_AUTH}" != "true" && -z "${API_TOKEN}" ]]; then
+  if ! [[ "${AUTH_MODE}" == "oauth" && "${IS_SERVER}" == "true" ]] || ! mcp_host_is_loopback "${MCP_HOST}"; then
+    echo "ERROR: API token is required unless no_auth is true or OAuth server mode binds MCP to loopback" >&2
+    echo "       OAuth mode still needs SYSLOG_MCP_TOKEN when OTLP /v1/logs is exposed on a non-loopback listener." >&2
+    exit 1
+  fi
+fi
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 ENV_FILE="${CLAUDE_PLUGIN_DATA}/.env"
@@ -200,6 +229,7 @@ write_env() {
   new_env=$(cat << EOF
 SYSLOG_HOST=${SYSLOG_HOST}
 SYSLOG_PORT=${SYSLOG_PORT}
+SYSLOG_HOST_PORT=${SYSLOG_HOST_PORT}
 SYSLOG_MCP_HOST=${MCP_HOST}
 SYSLOG_MCP_PORT=${MCP_PORT}
 NO_AUTH=${NO_AUTH}
@@ -373,7 +403,7 @@ setup_docker() {
     external_named_container=true
   fi
   if [[ "${container_running}" == "false" ]]; then
-    for port_proto in "${SYSLOG_PORT}/udp" "${SYSLOG_PORT}/tcp" "${MCP_PORT}/tcp"; do
+    for port_proto in "${SYSLOG_HOST_PORT}/udp" "${SYSLOG_HOST_PORT}/tcp" "${MCP_PORT}/tcp"; do
       local port="${port_proto%%/*}" proto="${port_proto##*/}"
       if ss -"${proto:0:1}"lnp "sport = :${port}" 2>/dev/null | awk 'NR>1 && NF>0' | grep -q .; then
         echo "ERROR: port ${port}/${proto} is already in use — cannot start syslog-mcp" >&2
