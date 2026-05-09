@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Hive log intelligence via MCP",
   "author": { "name": "jmagar" },
-  "repository": "https://github.com/jmagar/hive",
+  "repository": "https://github.com/jmagar/syslog-mcp",
   "license": "MIT",
   "keywords": [
     "hive",
@@ -48,7 +48,7 @@
     "no_auth": {
       "type": "boolean",
       "title": "Disable service auth",
-      "description": "Run Hive without service-local MCP auth. Use this only when an upstream gateway or reverse proxy enforces auth before traffic reaches hive-mcp. Server mode only.",
+      "description": "Run Hive without service-local MCP auth. Use this only when an upstream gateway or reverse proxy enforces auth before traffic reaches Hive. Server mode only.",
       "required": true,
       "default": false
     },

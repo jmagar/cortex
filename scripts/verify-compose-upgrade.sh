@@ -34,6 +34,11 @@ SYSLOG_PORT=1514
 DOCKER_NETWORK=hive-upgrade-check
 EOF
 
+if ! command -v docker >/dev/null 2>&1; then
+  echo "SKIP: docker not available; compose upgrade validation requires Docker CLI"
+  exit 0
+fi
+
 rendered="$(render_config)"
 require_rendered_line "source: syslog-mcp-data"
 require_rendered_line "target: /data"
@@ -54,11 +59,6 @@ EOF
 rendered="$(render_config)"
 require_rendered_line "source: ${sentinel_dir}"
 require_rendered_line "target: /data"
-
-if ! command -v docker >/dev/null 2>&1; then
-  echo "SKIP: docker not available; rendered compose data path preserved"
-  exit 0
-fi
 
 if ! docker info >/dev/null 2>&1; then
   echo "SKIP: docker daemon unavailable; rendered compose data path preserved"

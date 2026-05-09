@@ -1,6 +1,6 @@
 # Hive
 
-[![crates.io](https://img.shields.io/crates/v/hive-mcp)](https://crates.io/crates/hive-mcp) [![ghcr.io](https://img.shields.io/badge/ghcr.io-jmagar%2Fhive--mcp-blue?logo=docker)](https://github.com/jmagar/hive/pkgs/container/hive-mcp)
+[![crates.io](https://img.shields.io/crates/v/hive-mcp)](https://crates.io/crates/hive-mcp) [![ghcr.io](https://img.shields.io/badge/ghcr.io-jmagar%2Fhive--mcp-blue?logo=docker)](https://github.com/jmagar/syslog-mcp/pkgs/container/hive-mcp)
 
 Hive is a Rust log intelligence service with syslog, Docker, OTLP, SQLite/FTS5, and MCP query surfaces. Ingests syslog over UDP and TCP, stores it in SQLite with FTS5 full-text indexing, and exposes action-based log search, inventory, correlation, status, and analysis tools to MCP clients.
 
@@ -387,8 +387,8 @@ The plugin includes the `hive` binary and a legacy `syslog` alias in `bin/`; it 
 ### Docker
 
 ```bash
-git clone https://github.com/jmagar/hive
-cd hive
+git clone https://github.com/jmagar/syslog-mcp
+cd syslog-mcp
 cp .env.example .env
 # Edit .env — set HIVE_MCP_TOKEN at minimum
 docker compose up -d

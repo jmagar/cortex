@@ -57,7 +57,7 @@ for file in "${VERSION_FILES[@]}"; do
     [ -f "$file" ] || { echo "  skip (not found): $file"; continue; }
     sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW}\"/" "$file"
     sed -i "s/^version = \"${CURRENT}\"/version = \"${NEW}\"/" "$file"
-    sed -i "s/:${CURRENT}\"/:${NEW}\"/" "$file"
+    sed -i "s#\"identifier\": \"ghcr.io/jmagar/hive-mcp:${CURRENT}\"#\"identifier\": \"ghcr.io/jmagar/hive-mcp:${NEW}\"#" "$file"
     echo "  updated: ${file#"${REPO_ROOT}/"}"
 done
 

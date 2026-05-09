@@ -1,9 +1,9 @@
-use anyhow::{anyhow, bail, Result};
-use hive_mcp::app::{
+use crate::app::{
     CorrelateEventsRequest, CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse,
     ListHostsResponse, LogEntry, SearchLogsRequest, SearchLogsResponse, SyslogService,
     TailLogsRequest,
 };
+use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

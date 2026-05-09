@@ -7,8 +7,8 @@ MODE="auto"
 PULL="false"
 UNIT="hive-mcp.service"
 SERVICE="hive-mcp"
-COMPOSE_DIR="${SYSLOG_MCP_COMPOSE_DIR:-${HOME}/.claude/plugins/data/syslog-jmagar-lab}"
-EXPECTED_BINARY="${SYSLOG_MCP_EXPECTED_BINARY:-}"
+COMPOSE_DIR="${HIVE_MCP_COMPOSE_DIR:-${SYSLOG_MCP_COMPOSE_DIR:-${HOME}/.claude/plugins/data/syslog-jmagar-lab}}"
+EXPECTED_BINARY="${HIVE_MCP_EXPECTED_BINARY:-${SYSLOG_MCP_EXPECTED_BINARY:-}}"
 
 usage() {
   cat <<'EOF'

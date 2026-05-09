@@ -4,7 +4,7 @@
   "title": "Hive",
   "description": "Hive log intelligence with syslog, Docker, OTLP, SQLite/FTS5, and MCP query surfaces.",
   "repository": {
-    "url": "https://github.com/jmagar/hive",
+    "url": "https://github.com/jmagar/syslog-mcp",
     "source": "github"
   },
   "version": "1.0.0",
