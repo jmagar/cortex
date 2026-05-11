@@ -19,7 +19,11 @@
 //! volume.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::LazyLock;
+use std::sync::Mutex;
+use std::{fs, path::PathBuf};
 
 use regex::Regex;
 use serde::Deserialize;
@@ -52,6 +56,9 @@ static AUTHELIA_LEVEL: LazyLock<Regex> =
 /// Capture the file="..." metadata from rsyslog imfile records.
 static IMFILE_PATH: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("file=\"([^\"]+\\.(?:jsonl|json))\"").expect("static regex"));
+
+static CLAUDE_PROJECT_INDEX_CACHE: LazyLock<Mutex<HashMap<PathBuf, Option<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Patterns scrubbed from AI-source message bodies. Each matches the entire
 /// secret token; the matched text is replaced with `[REDACTED]`.
@@ -110,6 +117,22 @@ struct AdGuardResult {
     is_filtered: bool,
     #[serde(default)]
     reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeSessionsIndex {
+    #[serde(default)]
+    original_path: Option<String>,
+    #[serde(default)]
+    entries: Vec<ClaudeSessionsIndexEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeSessionsIndexEntry {
+    #[serde(default)]
+    project_path: Option<String>,
 }
 
 /// Apply enrichment to one entry. Pure function — never panics, never logs at
@@ -249,6 +272,9 @@ fn session_id_from_path(path: &str) -> Option<String> {
 }
 
 fn project_from_transcript_path(path: &str) -> Option<String> {
+    if let Some(project) = project_from_sessions_index(path) {
+        return Some(project);
+    }
     if let Some(project_part) = path.split("/.claude/projects/").nth(1) {
         let encoded = project_part.split('/').next()?;
         return decode_claude_project(encoded);
@@ -270,6 +296,29 @@ fn decode_claude_project(encoded: &str) -> Option<String> {
         return None;
     }
     Some(format!("/{}", stripped.replace('-', "/")))
+}
+
+fn project_from_sessions_index(path: &str) -> Option<String> {
+    let index_path = Path::new(path).parent()?.join("sessions-index.json");
+    let mut cache = CLAUDE_PROJECT_INDEX_CACHE.lock().ok()?;
+    if let Some(project) = cache.get(&index_path) {
+        return project.clone();
+    }
+
+    let project = fs::read_to_string(&index_path)
+        .ok()
+        .and_then(|body| serde_json::from_str::<ClaudeSessionsIndex>(&body).ok())
+        .and_then(|index| {
+            index.original_path.or_else(|| {
+                index
+                    .entries
+                    .into_iter()
+                    .find_map(|entry| entry.project_path)
+            })
+        });
+
+    cache.insert(index_path, project.clone());
+    project
 }
 
 fn fill_ai_metadata_from_json(entry: &mut LogBatchEntry, value: &serde_json::Value) {

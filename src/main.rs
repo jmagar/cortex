@@ -1,9 +1,9 @@
 use anyhow::Result;
 use axum::Router;
-use rmcp::{ServiceExt, transport::stdio};
+use rmcp::{transport::stdio, ServiceExt};
 use syslog_mcp::{api, mcp, runtime::RuntimeCore};
 use tracing::info;
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::{fmt, EnvFilter};
 
 mod cli;
 
@@ -168,6 +168,7 @@ fn print_usage() {
   syslog tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
   syslog errors [--from TIME] [--to TIME] [--json]
   syslog hosts [--json]
+  syslog sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
   syslog stats [--json]
 

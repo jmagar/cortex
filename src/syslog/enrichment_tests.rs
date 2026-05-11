@@ -1,5 +1,7 @@
 //! Tests for the enrichment pipeline.
 
+use std::fs;
+
 use super::*;
 
 fn entry(app: &str, msg: &str, source_ip: &str, severity: &str) -> LogBatchEntry {
@@ -333,5 +335,29 @@ fn enriches_claude_project_from_transcript_path_in_raw() {
         Some(
             "/home/jmagar/.claude/projects/-home-jmagar-workspace-syslog-mcp/3a8bdaf9-721c-4e0b-8a6b-cffe2740c8d5.jsonl"
         )
+    );
+}
+
+#[test]
+fn project_from_transcript_path_prefers_sessions_index_original_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("syslog-mcp");
+    fs::create_dir_all(&project).unwrap();
+
+    let transcript_dir = tmp.path().join(".claude/projects/-tmp-syslog-mcp");
+    fs::create_dir_all(&transcript_dir).unwrap();
+    fs::write(
+        transcript_dir.join("sessions-index.json"),
+        format!(
+            "{{\"version\":1,\"entries\":[],\"originalPath\":\"{}\"}}",
+            project.display()
+        ),
+    )
+    .unwrap();
+
+    let transcript = transcript_dir.join("session-123.jsonl");
+    assert_eq!(
+        project_from_transcript_path(transcript.to_str().unwrap()).as_deref(),
+        Some(project.to_str().unwrap())
     );
 }
