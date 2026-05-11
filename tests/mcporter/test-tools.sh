@@ -478,6 +478,18 @@ suite_sessions() {
   printf '\n%b== syslog sessions ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
   run_test "syslog sessions: returns sessions array"     syslog sessions '{"limit":10}' "sessions"
   run_test "syslog sessions: count field present"         syslog sessions '{"limit":5}' "count"
+  run_test "syslog search_sessions: returns sessions array" \
+    syslog search_sessions '{"query":"error","limit":10}' "sessions"
+  run_test "syslog search_sessions: total_candidates present" \
+    syslog search_sessions '{"query":"error","limit":10}' "total_candidates"
+  run_test "syslog usage_blocks: returns blocks array" \
+    syslog usage_blocks '{}' "blocks"
+  run_test "syslog project_context: returns project field" \
+    syslog project_context '{"project":"/tmp","limit":5}' "project"
+  run_test "syslog list_ai_tools: returns tools array" \
+    syslog list_ai_tools '{}' "tools"
+  run_test "syslog list_ai_projects: returns projects array" \
+    syslog list_ai_projects '{}' "projects"
 }
 
 suite_tail() {

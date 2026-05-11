@@ -27,7 +27,9 @@ access, not HTTP access.
 ## Output
 
 All commands print compact human-readable output by default. Add `--json` to
-print the exact serialized service response shape used by MCP and the REST API.
+print the exact serialized `SyslogService` response shape. MCP uses the same
+shape for matching actions; REST parity applies only to commands that also have
+REST endpoints.
 
 ```bash
 syslog stats --json

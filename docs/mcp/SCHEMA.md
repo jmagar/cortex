@@ -8,6 +8,12 @@ syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument s
 - `tail`
 - `errors`
 - `hosts`
+- `sessions`
+- `search_sessions`
+- `usage_blocks`
+- `project_context`
+- `list_ai_tools`
+- `list_ai_projects`
 - `correlate`
 - `stats`
 - `status`
@@ -42,6 +48,12 @@ json!({
                     "tail",
                     "errors",
                     "hosts",
+                    "sessions",
+                    "search_sessions",
+                    "usage_blocks",
+                    "project_context",
+                    "list_ai_tools",
+                    "list_ai_projects",
                     "correlate",
                     "stats",
                     "status",
@@ -62,6 +74,14 @@ json!({
             "query": { "type": "string" },
             "hostname": { "type": "string" },
             "source_ip": { "type": "string" },
+            "project": {
+                "type": "string",
+                "description": "AI project/workspace path for session actions."
+            },
+            "tool": {
+                "type": "string",
+                "description": "AI tool name, such as claude, codex, or gemini."
+            },
             "severity": {
                 "type": "string",
                 "enum": ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"]

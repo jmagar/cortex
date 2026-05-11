@@ -279,6 +279,61 @@ print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "sessions: response structure valid" "$SESSIONS_VALID" "ok"
 
+echo ""
+echo "Action: AI session analytics"
+SEARCH_SESSIONS=$(mcp_call search_sessions "query=authentication" "limit=10" 2>&1)
+assert_no_error "search_sessions: no error" "$SEARCH_SESSIONS"
+SEARCH_SESSIONS_VALID=$(echo "$SEARCH_SESSIONS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert 'total_candidates' in d, 'total_candidates missing'
+assert isinstance(d.get('sessions'), list), 'sessions not a list'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "search_sessions: response structure valid" "$SEARCH_SESSIONS_VALID" "ok"
+
+USAGE_BLOCKS=$(mcp_call usage_blocks 2>&1)
+assert_no_error "usage_blocks: no error" "$USAGE_BLOCKS"
+USAGE_BLOCKS_VALID=$(echo "$USAGE_BLOCKS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert isinstance(d.get('blocks'), list), 'blocks not a list'
+assert 'truncated' in d, 'truncated missing'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "usage_blocks: response structure valid" "$USAGE_BLOCKS_VALID" "ok"
+
+PROJECT_CONTEXT=$(mcp_call project_context "project=/tmp" "limit=5" 2>&1)
+assert_no_error "project_context: no error" "$PROJECT_CONTEXT"
+PROJECT_CONTEXT_VALID=$(echo "$PROJECT_CONTEXT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('project') == '/tmp', 'project mismatch'
+assert isinstance(d.get('recent_entries'), list), 'recent_entries not a list'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "project_context: response structure valid" "$PROJECT_CONTEXT_VALID" "ok"
+
+AI_TOOLS=$(mcp_call list_ai_tools 2>&1)
+assert_no_error "list_ai_tools: no error" "$AI_TOOLS"
+AI_TOOLS_VALID=$(echo "$AI_TOOLS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert isinstance(d.get('tools'), list), 'tools not a list'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "list_ai_tools: response structure valid" "$AI_TOOLS_VALID" "ok"
+
+AI_PROJECTS=$(mcp_call list_ai_projects 2>&1)
+assert_no_error "list_ai_projects: no error" "$AI_PROJECTS"
+AI_PROJECTS_VALID=$(echo "$AI_PROJECTS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert isinstance(d.get('projects'), list), 'projects not a list'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "list_ai_projects: response structure valid" "$AI_PROJECTS_VALID" "ok"
+
 # ── tail ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "Action: tail"

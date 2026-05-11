@@ -343,7 +343,7 @@ pub fn search_ai_sessions(
     }
     sql.push_str(&format!(
         " ORDER BY score, l.timestamp DESC
-           LIMIT {CANDIDATE_CAP}
+           LIMIT {}
          ),
          grouped AS (
             SELECT ai_project,
@@ -352,7 +352,6 @@ pub fn search_ai_sessions(
                    hostname,
                    MIN(timestamp) AS first_seen,
                    MAX(timestamp) AS last_seen,
-                   COUNT(*) AS event_count,
                    COUNT(*) AS match_count,
                    MIN(score) AS best_score,
                    (
@@ -369,17 +368,32 @@ pub fn search_ai_sessions(
             GROUP BY ai_project, ai_tool, ai_session_id, hostname
          )
          SELECT ai_project, ai_tool, ai_session_id, hostname,
-                first_seen, last_seen, event_count, match_count, best_snippet,
-                COUNT(*) OVER() AS total_candidates
+                first_seen,
+                last_seen,
+                (
+                    SELECT COUNT(*)
+                    FROM logs total
+                    WHERE total.ai_project = grouped.ai_project
+                      AND total.ai_tool = grouped.ai_tool
+                      AND total.ai_session_id = grouped.ai_session_id
+                      AND total.hostname = grouped.hostname
+                ) AS event_count,
+                match_count,
+                best_snippet,
+                COUNT(*) OVER() AS total_candidates,
+                (SELECT COUNT(*) FROM candidates) AS raw_candidate_count
          FROM grouped
          ORDER BY best_score, last_seen DESC
-         LIMIT {limit}"
+         LIMIT {limit}",
+        CANDIDATE_CAP + 1
     ));
 
     let mut stmt = conn.prepare(&sql)?;
     let mut total_candidates = 0usize;
+    let mut raw_candidate_count = 0usize;
     let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
         total_candidates = row.get::<_, i64>(9)? as usize;
+        raw_candidate_count = row.get::<_, i64>(10)? as usize;
         Ok(SearchedAiSessionEntry {
             ai_project: row.get(0)?,
             ai_tool: row.get(1)?,
@@ -396,7 +410,7 @@ pub fn search_ai_sessions(
 
     Ok(SearchAiSessionsResult {
         total_candidates,
-        truncated: total_candidates > sessions.len(),
+        truncated: total_candidates > sessions.len() || raw_candidate_count > CANDIDATE_CAP,
         sessions,
     })
 }

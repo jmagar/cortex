@@ -3,10 +3,12 @@ use std::path::Path;
 use anyhow::Result;
 use serde_json::Value;
 
+use super::{record_key_from_line, ParsedTranscriptRecord};
+
 pub fn parse_line(
     line: &str,
     path: &Path,
-    line_no: usize,
+    _line_no: usize,
 ) -> Result<Option<ParsedTranscriptRecord>> {
     let value: Value = serde_json::from_str(line)?;
     let message = extract_message(&value);
@@ -21,21 +23,15 @@ pub fn parse_line(
         .map(ToString::to_string)
         .or_else(|| Some(path.to_string_lossy().to_string()));
     Ok(Some(ParsedTranscriptRecord {
-        record_key: format!("{line_no}"),
+        record_key: record_key_from_line(&value, line),
         timestamp: value
             .get("timestamp")
             .and_then(Value::as_str)
             .map(ToString::to_string),
         message,
         session_id,
+        ai_project: None,
     }))
-}
-
-pub struct ParsedTranscriptRecord {
-    pub record_key: String,
-    pub timestamp: Option<String>,
-    pub message: String,
-    pub session_id: Option<String>,
 }
 
 fn extract_message(value: &Value) -> String {

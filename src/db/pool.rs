@@ -70,8 +70,6 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         CREATE INDEX IF NOT EXISTS idx_logs_received_at ON logs(received_at);
         CREATE INDEX IF NOT EXISTS idx_logs_hostname_received_at ON logs(hostname, received_at);
         CREATE INDEX IF NOT EXISTS idx_logs_source_ip_timestamp ON logs(source_ip, timestamp);
-        CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time ON logs(ai_project, timestamp);
-        CREATE INDEX IF NOT EXISTS idx_logs_ai_session ON logs(ai_tool, ai_project, ai_session_id);
         DROP INDEX IF EXISTS idx_logs_source_ip;
 
         -- FTS5 virtual table for full-text search on messages
@@ -245,6 +243,10 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         )?;
         tracing::info!("Migration 4: added AI transcript metadata columns and indexes");
     }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time ON logs(ai_project, timestamp);
+         CREATE INDEX IF NOT EXISTS idx_logs_ai_session ON logs(ai_tool, ai_project, ai_session_id);",
+    )?;
 
     let migration_5_applied: bool = conn
         .query_row(

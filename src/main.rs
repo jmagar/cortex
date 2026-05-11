@@ -86,7 +86,7 @@ async fn serve_mcp() -> Result<()> {
         info!("Non-MCP API mounted under /api");
     }
     app = app.merge(runtime.otlp_router());
-    info!("OTLP receiver mounted at /v1/logs (and /v1/metrics → 200, /v1/traces → 404)");
+    info!("OTLP receiver mounted at /v1/logs (and /v1/metrics, /v1/traces → 404)");
     if runtime.config.mcp.api_token.is_none() && !runtime.config.mcp.host.starts_with("127.") {
         tracing::warn!(
             bind = %runtime.config.mcp.bind_addr(),

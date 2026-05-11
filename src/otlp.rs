@@ -1,6 +1,6 @@
 //! OTLP/HTTP receiver — accepts OpenTelemetry log records over HTTP and feeds
 //! them into the existing syslog-mcp ingest pipeline. Logs only — `/v1/traces`
-//! returns 404 (deferred) and `/v1/metrics` returns 200 + discards.
+//! returns 404 (deferred) and `/v1/metrics` returns 404 (deferred).
 //!
 //! Mounted on the same axum server as MCP. Body limit: 4 MiB. Optional Bearer
 //! auth via the same `SYSLOG_MCP_TOKEN` as MCP (`SYSLOG_MCP_API_TOKEN` is
@@ -66,7 +66,7 @@ impl OtlpState {
 }
 
 /// Build the OTLP router. Mounts `/v1/logs` (functional ingest),
-/// `/v1/metrics` (200 + discard), `/v1/traces` (404 — deferred) on the same
+/// `/v1/metrics` (404 — deferred), `/v1/traces` (404 — deferred) on the same
 /// axum server as MCP.
 pub fn router(state: OtlpState) -> Router {
     Router::new()
@@ -201,12 +201,23 @@ async fn logs_handler(
 async fn metrics_handler(
     State(state): State<OtlpState>,
     headers: HeaderMap,
-    _body: Bytes,
+    body: Bytes,
 ) -> axum::response::Response {
     if !is_authorized(&state, &headers) {
         return unauthorized();
     }
-    StatusCode::OK.into_response()
+    tracing::warn!(
+        bytes = body.len(),
+        "OTLP metrics received but metrics ingestion is not supported"
+    );
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({
+            "error": "metrics_not_supported",
+            "message": "OTLP metrics deferred. Use /v1/logs only."
+        })),
+    )
+        .into_response()
 }
 
 async fn traces_handler() -> axum::response::Response {

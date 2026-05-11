@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use rusqlite::{params, Error as SqliteError, ErrorCode};
+use rusqlite::{params, Error as SqliteError, ErrorCode, Transaction};
 
 use super::models::LogBatchEntry;
 use super::pool::DbPool;
@@ -34,7 +34,19 @@ pub fn insert_logs_batch(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<usi
 fn insert_logs_batch_once(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<usize> {
     let mut conn = pool.get()?;
     let tx = conn.transaction()?;
+    insert_logs_batch_in_tx(&tx, entries)?;
+    tx.commit()?;
+    tracing::debug!(
+        entry_count = entries.len(),
+        "Committed batch insert transaction"
+    );
+    Ok(entries.len())
+}
 
+pub(crate) fn insert_logs_batch_in_tx(
+    tx: &Transaction<'_>,
+    entries: &[LogBatchEntry],
+) -> Result<()> {
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO logs (
@@ -102,13 +114,7 @@ fn insert_logs_batch_once(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<us
             "Prepared batch insert transaction"
         );
     }
-
-    tx.commit()?;
-    tracing::debug!(
-        entry_count = entries.len(),
-        "Committed batch insert transaction"
-    );
-    Ok(entries.len())
+    Ok(())
 }
 
 fn is_transient_sqlite_lock(err: &anyhow::Error) -> bool {

@@ -95,6 +95,7 @@ const AI_SOURCES: &[&str] = &[
     "gemini-transcript",
     "claude-code",
     "codex",
+    "ai-transcript",
 ];
 
 /// Minimal AdGuard query log row. AdGuard emits PascalCase JSON keys; the
@@ -270,7 +271,7 @@ fn session_id_from_path(path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn project_from_transcript_path(path: &str) -> Option<String> {
+pub(crate) fn project_from_transcript_path(path: &str) -> Option<String> {
     if let Some(project) = project_from_sessions_index(path) {
         return Some(project);
     }
@@ -356,7 +357,7 @@ fn fill_ai_metadata_from_json(entry: &mut LogBatchEntry, value: &serde_json::Val
 ///
 /// Common case (no match) returns `Cow::Borrowed` and allocates nothing —
 /// hot-path optimization for AI bursts where most messages have no secrets.
-fn scrub_secrets(message: &str, api_token: Option<&str>) -> String {
+pub(crate) fn scrub_ai_message(message: &str, api_token: Option<&str>) -> String {
     let mut out: Cow<str> = Cow::Borrowed(message);
     for re in SECRET_PATTERNS.iter() {
         if let Cow::Owned(replaced) = re.replace_all(&out, "[REDACTED]") {
@@ -369,6 +370,10 @@ fn scrub_secrets(message: &str, api_token: Option<&str>) -> String {
         }
     }
     out.into_owned()
+}
+
+fn scrub_secrets(message: &str, api_token: Option<&str>) -> String {
+    scrub_ai_message(message, api_token)
 }
 
 #[cfg(test)]

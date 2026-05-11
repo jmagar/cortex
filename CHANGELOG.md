@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-05-11
+
+### Fixed
+
+- **AI transcript indexing safety**: Scrub manually indexed transcript content
+  before FTS storage, parse Codex JSONL records with a Codex-aware parser, and
+  derive Claude project paths from `sessions-index.json` during scanner imports.
+- **Transcript checkpointing**: Use stable event/content checkpoint keys and
+  commit transcript log rows plus checkpoint records in one transaction.
+- **Scanner reporting**: Report per-file indexing errors with paths and make CLI
+  indexing fail when any file could not be indexed.
+- **AI session search counts**: Report total session event counts separately from
+  FTS match counts.
+- **OTLP metrics endpoint**: Return an unsupported response for `/v1/metrics`
+  instead of acknowledging and discarding metrics.
+
+### Changed
+
+- Removed remaining `mod.rs` module files in favor of modern Rust module files.
+- Updated MCP/CLI documentation and live smoke coverage for the AI action
+  surface.
+
 ## [0.19.0] - 2026-05-11
 
 ### Added

@@ -325,6 +325,14 @@ fn search_ai_sessions_groups_results() {
                 "sess-1",
                 "authentication tests passing",
             ),
+            make_ai_entry(
+                "2026-01-01T00:02:00Z",
+                "host-a",
+                "claude",
+                "/tmp/project",
+                "sess-1",
+                "unmatched context",
+            ),
         ],
     )
     .unwrap();
@@ -340,6 +348,7 @@ fn search_ai_sessions_groups_results() {
     .unwrap();
     assert_eq!(result.sessions.len(), 1);
     assert_eq!(result.sessions[0].match_count, 2);
+    assert_eq!(result.sessions[0].event_count, 3);
 }
 
 #[test]

@@ -282,10 +282,12 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
             AiCommand::Index(args) => {
                 let response = service.index_ai_roots(args.path).await?;
                 print_index_response(&response, args.json)?;
+                ensure_index_success(&response)?;
             }
             AiCommand::Add(args) => {
                 let response = service.add_ai_file(args.file).await?;
                 print_index_response(&response, args.json)?;
+                ensure_index_success(&response)?;
             }
         },
         CliCommand::Correlate(args) => {
@@ -927,14 +929,29 @@ fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
         return print_json(response);
     }
     println!(
-        "files={} ingested={} duplicates={} parse_errors={} skipped={}",
+        "files={} ingested={} duplicates={} parse_errors={} skipped={} file_errors={}",
         response.discovered_files,
         response.ingested,
         response.skipped_dupes,
         response.parse_errors,
-        response.skipped_files
+        response.skipped_files,
+        response.file_errors.len()
     );
+    for error in &response.file_errors {
+        eprintln!("index error: {}: {}", error.path, error.error);
+    }
     Ok(())
+}
+
+fn ensure_index_success(response: &IndexResult) -> Result<()> {
+    if response.file_errors.is_empty() {
+        Ok(())
+    } else {
+        bail!(
+            "{} transcript file(s) failed to index",
+            response.file_errors.len()
+        )
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {

@@ -468,6 +468,29 @@ phase_tools() {
   assert_jq "syslog sessions — count field present" "${sessions_result}" '.count != null'
   assert_jq "syslog sessions — sessions field is array" "${sessions_result}" '.sessions | type' "array"
 
+  local search_sessions_result
+  search_sessions_result="$(call_tool syslog '{"action":"search_sessions","query":"error","limit":10}')" || search_sessions_result=""
+  assert_jq "syslog search_sessions — total_candidates present" "${search_sessions_result}" '.total_candidates != null'
+  assert_jq "syslog search_sessions — sessions field is array" "${search_sessions_result}" '.sessions | type' "array"
+
+  local usage_blocks_result
+  usage_blocks_result="$(call_tool syslog '{"action":"usage_blocks"}')" || usage_blocks_result=""
+  assert_jq "syslog usage_blocks — blocks field is array" "${usage_blocks_result}" '.blocks | type' "array"
+  assert_jq "syslog usage_blocks — truncated field present" "${usage_blocks_result}" '.truncated != null'
+
+  local project_context_result
+  project_context_result="$(call_tool syslog '{"action":"project_context","project":"/tmp","limit":5}')" || project_context_result=""
+  assert_jq "syslog project_context — project field present" "${project_context_result}" '.project' "/tmp"
+  assert_jq "syslog project_context — recent_entries field is array" "${project_context_result}" '.recent_entries | type' "array"
+
+  local ai_tools_result
+  ai_tools_result="$(call_tool syslog '{"action":"list_ai_tools"}')" || ai_tools_result=""
+  assert_jq "syslog list_ai_tools — tools field is array" "${ai_tools_result}" '.tools | type' "array"
+
+  local ai_projects_result
+  ai_projects_result="$(call_tool syslog '{"action":"list_ai_projects"}')" || ai_projects_result=""
+  assert_jq "syslog list_ai_projects — projects field is array" "${ai_projects_result}" '.projects | type' "array"
+
   # --- syslog search ---
   section "  syslog search"
   local search_result

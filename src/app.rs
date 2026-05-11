@@ -24,5 +24,5 @@ pub use service::SyslogService;
 pub use time::parse_optional_timestamp;
 
 #[cfg(test)]
-#[path = "mod_tests.rs"]
+#[path = "app/mod_tests.rs"]
 mod tests;

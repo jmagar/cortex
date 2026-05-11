@@ -132,7 +132,7 @@ ATT residential gateway has no useful remote syslog. UCG-Max behind it is doing 
 **Scope:**
 - ✅ logs (`/v1/logs`) — translate `LogRecord` → existing log shape
 - ✅ traces (`/v1/traces`) — flatten spans into rows tagged with `trace_id` + `span_id`
-- ❌ metrics (`/v1/metrics`) — accept and discard with 200 OK; metrics belong in Prom/VictoriaMetrics, not FTS5
+- ❌ metrics (`/v1/metrics`) — return 404/unsupported; metrics belong in Prom/VictoriaMetrics, not FTS5
 - ❌ gRPC — HTTP only unless something specifically needs it
 
 **When to introduce a real collector:** once fanout to multiple backends (Prom + syslog-mcp + Loki) becomes necessary. YAGNI until then.
@@ -191,7 +191,7 @@ prost = "*"
 **Routes:**
 - `POST /v1/logs` — `ExportLogsServiceRequest` → flatten → existing FTS5 ingest
 - `POST /v1/traces` — `ExportTraceServiceRequest` → flatten spans → log rows tagged with `trace_id`/`span_id`
-- `POST /v1/metrics` — accept body, return 200, discard
+- `POST /v1/metrics` — return 404/unsupported; do not false-ack dropped metrics
 
 **LogRecord field mapping:**
 | OTLP field | syslog-mcp column |
@@ -427,7 +427,7 @@ Do **not** land this all at once. Each step should run for a day or two before a
 2. **Point Unraid Settings → Syslog Server** on tootie + shart at the new endpoint
 3. **Deploy `10-imjournal.conf`** to dookie, squirts, steamy-wsl, vivobook-wsl. Validate volume baseline.
 4. **Verify ZED + smartd already arriving** by tag query
-5. **Build OTLP HTTP receiver** in syslog-mcp (`/v1/logs`, `/v1/traces`, discard `/v1/metrics`)
+5. **Build OTLP HTTP receiver** in syslog-mcp (`/v1/logs`, `/v1/traces`; reject `/v1/metrics`)
 6. **Configure claude code OTel** on dookie first, then steamy-wsl, then vivobook-wsl
 7. **Configure codex OTel** same order
 8. **Deploy `40-ai-transcripts.conf`** to capture jsonls (axon already has them; this is for cross-correlation in syslog-mcp)

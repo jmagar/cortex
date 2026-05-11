@@ -408,6 +408,17 @@ fn auth_rejects_non_bearer_scheme() {
     assert!(!is_authorized(&state, &headers));
 }
 
+#[tokio::test]
+async fn metrics_handler_returns_not_supported() {
+    let response = metrics_handler(
+        State(state_with_token(None)),
+        HeaderMap::new(),
+        Bytes::from_static(b"metrics"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
 // ---- counters ----
 
 #[test]

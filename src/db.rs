@@ -15,6 +15,7 @@ pub use analytics::{
     SilentHostEntry, SourceIpEntry, SourceIpHostBreakdown, TimelineGroupBy, TimelinePoint,
 };
 pub use ingest::insert_logs_batch;
+pub(crate) use ingest::insert_logs_batch_in_tx;
 pub use maintenance::{
     enforce_storage_budget, get_storage_metrics, purge_by_tag_window, purge_old_logs,
     DiskSpaceProbe,
