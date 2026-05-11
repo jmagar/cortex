@@ -26,6 +26,6 @@ pub use models::{
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
 pub use pool::{init_pool, DbPool};
 pub use queries::{
-    get_error_summary, get_stats, list_hosts, search_logs, severity_to_num, tail_logs,
-    validate_fts_query, SEVERITY_LEVELS,
+    get_error_summary, get_stats, list_ai_sessions, list_hosts, search_logs, severity_to_num,
+    tail_logs, validate_fts_query, SEVERITY_LEVELS,
 };

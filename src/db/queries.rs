@@ -4,7 +4,10 @@ use rusqlite::params;
 use crate::config::StorageConfig;
 
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
-use super::models::{DbStats, ErrorSummaryEntry, HostEntry, LogEntry, SearchParams};
+use super::models::{
+    AiSessionEntry, DbStats, ErrorSummaryEntry, HostEntry, ListAiSessionsParams, LogEntry,
+    SearchParams,
+};
 use super::pool::DbPool;
 
 /// Validate a user-supplied FTS5 query before execution.
@@ -39,7 +42,8 @@ pub fn search_logs(pool: &DbPool, params: &SearchParams) -> Result<Vec<LogEntry>
 
         let mut sql = String::from(
             "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
-                    l.app_name, l.process_id, l.message, l.received_at, l.source_ip
+                    l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
+                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path
              FROM logs l
              JOIN logs_fts ON logs_fts.rowid = l.id
              WHERE logs_fts MATCH ?1",
@@ -65,7 +69,8 @@ pub fn search_logs(pool: &DbPool, params: &SearchParams) -> Result<Vec<LogEntry>
     } else {
         let mut sql = String::from(
             "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
-                    l.app_name, l.process_id, l.message, l.received_at, l.source_ip
+                    l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
+                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path
              FROM logs l WHERE 1=1",
         );
         let mut bindings: Vec<rusqlite::types::Value> = vec![];
@@ -94,7 +99,8 @@ pub fn tail_logs(
 
     let mut sql = String::from(
         "SELECT id, timestamp, hostname, facility, severity,
-                app_name, process_id, message, received_at, source_ip
+                app_name, process_id, message, received_at, source_ip,
+                ai_tool, ai_project, ai_session_id, ai_transcript_path
          FROM logs WHERE 1=1",
     );
     let mut bindings: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
@@ -214,6 +220,78 @@ pub fn list_hosts(pool: &DbPool) -> Result<Vec<HostEntry>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+#[allow(dead_code)]
+pub fn list_ai_sessions(
+    pool: &DbPool,
+    params: &ListAiSessionsParams,
+) -> Result<Vec<AiSessionEntry>> {
+    let conn = pool.get()?;
+    let limit = params.limit.unwrap_or(100).min(1000);
+    let mut sql = String::from(
+        "SELECT ai_project, ai_tool, ai_session_id,
+                MIN(ai_transcript_path) AS ai_transcript_path,
+                hostname,
+                MIN(timestamp) AS first_seen,
+                MAX(timestamp) AS last_seen,
+                COUNT(*) AS event_count
+         FROM logs
+         WHERE ai_project IS NOT NULL
+           AND ai_project != ''
+           AND ai_tool IS NOT NULL
+           AND ai_tool != ''
+           AND ai_session_id IS NOT NULL
+           AND ai_session_id != ''",
+    );
+    let mut bindings: Vec<rusqlite::types::Value> = vec![];
+    let mut idx = 1;
+
+    if let Some(project) = &params.ai_project {
+        sql.push_str(&format!(" AND ai_project = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(project.clone()));
+        idx += 1;
+    }
+    if let Some(tool) = &params.ai_tool {
+        sql.push_str(&format!(" AND ai_tool = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(tool.clone()));
+        idx += 1;
+    }
+    if let Some(hostname) = &params.hostname {
+        sql.push_str(&format!(" AND hostname = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(hostname.clone()));
+        idx += 1;
+    }
+    if let Some(from) = &params.from {
+        sql.push_str(&format!(" AND timestamp >= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(from.clone()));
+        idx += 1;
+    }
+    if let Some(to) = &params.to {
+        sql.push_str(&format!(" AND timestamp <= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(to.clone()));
+    }
+
+    sql.push_str(&format!(
+        " GROUP BY ai_project, ai_tool, ai_session_id, hostname
+          ORDER BY last_seen DESC
+          LIMIT {limit}"
+    ));
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+        Ok(AiSessionEntry {
+            ai_project: row.get(0)?,
+            ai_tool: row.get(1)?,
+            ai_session_id: row.get(2)?,
+            ai_transcript_path: row.get(3)?,
+            hostname: row.get(4)?,
+            first_seen: row.get(5)?,
+            last_seen: row.get(6)?,
+            event_count: row.get(7)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// Get database stats
 pub fn get_stats(pool: &DbPool, config: &StorageConfig) -> Result<DbStats> {
     let metrics = get_storage_metrics(pool, config)?;
@@ -330,6 +408,21 @@ fn append_filters(
         bindings.push(rusqlite::types::Value::Text(to.clone()));
         *idx += 1;
     }
+    if let Some(ref tool) = params.ai_tool {
+        sql.push_str(&format!(" AND l.ai_tool = ?{}", *idx));
+        bindings.push(rusqlite::types::Value::Text(tool.clone()));
+        *idx += 1;
+    }
+    if let Some(ref project) = params.ai_project {
+        sql.push_str(&format!(" AND l.ai_project = ?{}", *idx));
+        bindings.push(rusqlite::types::Value::Text(project.clone()));
+        *idx += 1;
+    }
+    if let Some(ref session_id) = params.ai_session_id {
+        sql.push_str(&format!(" AND l.ai_session_id = ?{}", *idx));
+        bindings.push(rusqlite::types::Value::Text(session_id.clone()));
+        *idx += 1;
+    }
 }
 
 pub(super) fn map_row(row: &rusqlite::Row) -> rusqlite::Result<LogEntry> {
@@ -344,10 +437,10 @@ pub(super) fn map_row(row: &rusqlite::Row) -> rusqlite::Result<LogEntry> {
         message: row.get(7)?,
         received_at: row.get(8)?,
         source_ip: row.get(9)?,
-        ai_tool: None,
-        ai_project: None,
-        ai_session_id: None,
-        ai_transcript_path: None,
+        ai_tool: row.get(10)?,
+        ai_project: row.get(11)?,
+        ai_session_id: row.get(12)?,
+        ai_transcript_path: row.get(13)?,
     })
 }
 
@@ -367,10 +460,10 @@ pub(super) fn map_row_with_raw(
         raw: row.get(8)?,
         received_at: row.get(9)?,
         source_ip: row.get(10)?,
-        ai_tool: None,
-        ai_project: None,
-        ai_session_id: None,
-        ai_transcript_path: None,
+        ai_tool: row.get(11)?,
+        ai_project: row.get(12)?,
+        ai_session_id: row.get(13)?,
+        ai_transcript_path: row.get(14)?,
     })
 }
 

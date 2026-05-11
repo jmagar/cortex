@@ -276,3 +276,67 @@ fn search_logs_ignores_deleted_fts_phantom_rows() {
     let results = search_logs(&pool, &params).unwrap();
     assert!(results.is_empty(), "FTS-only phantom rows must not leak");
 }
+
+#[test]
+fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            LogBatchEntry {
+                timestamp: "2026-05-11T00:00:00Z".into(),
+                hostname: "dookie".into(),
+                facility: Some("local7".into()),
+                severity: "info".into(),
+                app_name: Some("codex-transcript".into()),
+                process_id: None,
+                message: "{}".into(),
+                raw: "{}".into(),
+                source_ip: "10.0.0.1:514".into(),
+                docker_checkpoint: None,
+                ai_tool: Some("codex".into()),
+                ai_project: Some("/home/jmagar/workspace/syslog-mcp".into()),
+                ai_session_id: Some("abc".into()),
+                ai_transcript_path: Some(
+                    "/home/jmagar/.codex/sessions/2026/05/11/rollout-abc.jsonl".into(),
+                ),
+            },
+            LogBatchEntry {
+                timestamp: "2026-05-11T00:01:00Z".into(),
+                hostname: "dookie".into(),
+                facility: Some("local7".into()),
+                severity: "info".into(),
+                app_name: Some("codex-transcript".into()),
+                process_id: None,
+                message: "{}".into(),
+                raw: "{}".into(),
+                source_ip: "10.0.0.1:514".into(),
+                docker_checkpoint: None,
+                ai_tool: Some("codex".into()),
+                ai_project: Some("/home/jmagar/workspace/syslog-mcp".into()),
+                ai_session_id: Some("abc".into()),
+                ai_transcript_path: Some(
+                    "/home/jmagar/.codex/sessions/2026/05/11/rollout-abc.jsonl".into(),
+                ),
+            },
+        ],
+    )
+    .unwrap();
+
+    let rows = list_ai_sessions(
+        &pool,
+        &ListAiSessionsParams {
+            ai_project: Some("/home/jmagar/workspace/syslog-mcp".into()),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].ai_tool, "codex");
+    assert_eq!(rows[0].ai_session_id, "abc");
+    assert_eq!(rows[0].event_count, 2);
+    assert_eq!(rows[0].first_seen, "2026-05-11T00:00:00Z");
+    assert_eq!(rows[0].last_seen, "2026-05-11T00:01:00Z");
+}

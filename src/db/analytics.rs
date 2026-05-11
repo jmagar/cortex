@@ -572,7 +572,8 @@ pub fn fetch_log_by_id(pool: &DbPool, id: i64) -> Result<Option<LogEntryWithRaw>
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
         "SELECT id, timestamp, hostname, facility, severity,
-                app_name, process_id, message, raw, received_at, source_ip
+                app_name, process_id, message, raw, received_at, source_ip,
+                ai_tool, ai_project, ai_session_id, ai_transcript_path
          FROM logs WHERE id = ?1",
     )?;
     let mut rows = stmt.query(params![id])?;
