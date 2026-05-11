@@ -85,6 +85,9 @@ impl SyslogService {
             from: parse_optional_timestamp(req.from.as_deref(), "from")?,
             to: parse_optional_timestamp(req.to.as_deref(), "to")?,
             limit: req.limit,
+            ai_tool: None,
+            ai_project: None,
+            ai_session_id: None,
         };
         let logs = self
             .run_db(move |pool| db::search_logs(pool, &params))
@@ -129,7 +132,7 @@ impl SyslogService {
             Some(other) => {
                 return Err(ServiceError::InvalidInput(format!(
                     "Invalid group_by '{other}'. Supported: app_name"
-                )))
+                )));
             }
         };
         let rows = self
@@ -174,6 +177,9 @@ impl SyslogService {
             from: Some(from.clone()),
             to: Some(to.clone()),
             limit: Some(limit + 1),
+            ai_tool: None,
+            ai_project: None,
+            ai_session_id: None,
         };
         let mut rows = self
             .run_db(move |pool| db::search_logs(pool, &params))
@@ -330,6 +336,10 @@ impl SyslogService {
                             message: row.message.clone(),
                             received_at: row.received_at.clone(),
                             source_ip: row.source_ip.clone(),
+                            ai_tool: row.ai_tool.clone(),
+                            ai_project: row.ai_project.clone(),
+                            ai_session_id: row.ai_session_id.clone(),
+                            ai_transcript_path: row.ai_transcript_path.clone(),
                         };
                         (entry, row.hostname, row.timestamp, Some(row.id))
                     } else {
@@ -354,6 +364,10 @@ impl SyslogService {
                             message: "<reference timestamp>".into(),
                             received_at: timestamp.clone(),
                             source_ip: String::new(),
+                            ai_tool: None,
+                            ai_project: None,
+                            ai_session_id: None,
+                            ai_transcript_path: None,
                         };
                         (synthetic, hostname, timestamp, None)
                     };

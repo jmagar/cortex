@@ -14,6 +14,10 @@ fn entry(app: &str, msg: &str, source_ip: &str, severity: &str) -> LogBatchEntry
         raw: String::new(),
         source_ip: source_ip.to_string(),
         docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 

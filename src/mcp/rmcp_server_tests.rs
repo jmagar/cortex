@@ -119,6 +119,10 @@ fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> Lo
         raw: msg.to_string(),
         source_ip: source_ip.to_string(),
         docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 

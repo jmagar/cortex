@@ -115,6 +115,10 @@ async fn schema_actions_are_dispatchable() {
             raw: "<11>schema dispatch test".to_string(),
             source_ip: "127.0.0.1:514".to_string(),
             docker_checkpoint: None,
+            ai_tool: None,
+            ai_project: None,
+            ai_session_id: None,
+            ai_transcript_path: None,
         }],
     )
     .unwrap();

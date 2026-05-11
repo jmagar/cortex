@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// independent of the hostname claimed in the syslog message body. Docker ingest uses
 /// a configured `docker://host/container/stream` source identifier instead.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct LogBatchEntry {
     pub timestamp: String,
     pub hostname: String,
@@ -22,6 +23,10 @@ pub struct LogBatchEntry {
     /// (IP:port); Docker ingest uses docker://host/container/stream.
     pub source_ip: String,
     pub docker_checkpoint: Option<DockerCheckpoint>,
+    pub ai_tool: Option<String>,
+    pub ai_project: Option<String>,
+    pub ai_session_id: Option<String>,
+    pub ai_transcript_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +34,30 @@ pub struct DockerCheckpoint {
     pub host_name: String,
     pub container_id: String,
     pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct ListAiSessionsParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub hostname: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
+pub struct AiSessionEntry {
+    pub ai_project: String,
+    pub ai_tool: String,
+    pub ai_session_id: String,
+    pub ai_transcript_path: Option<String>,
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub event_count: i64,
 }
 
 /// Error/warning summary entry (one row per hostname+severity, plus optional app_name)
@@ -115,10 +144,15 @@ pub struct LogEntry {
     /// (IP:port); Docker ingest entries use docker://host/container/stream.
     /// Empty string for legacy rows inserted before this column was added.
     pub source_ip: String,
+    pub ai_tool: Option<String>,
+    pub ai_project: Option<String>,
+    pub ai_session_id: Option<String>,
+    pub ai_transcript_path: Option<String>,
 }
 
 /// Parameters for searching logs
 #[derive(Debug, Clone, Default, Deserialize)]
+#[allow(dead_code)]
 pub struct SearchParams {
     /// Full-text search query (FTS5 syntax)
     pub query: Option<String>,
@@ -143,6 +177,9 @@ pub struct SearchParams {
     pub to: Option<String>,
     /// Max results to return
     pub limit: Option<u32>,
+    pub ai_tool: Option<String>,
+    pub ai_project: Option<String>,
+    pub ai_session_id: Option<String>,
 }
 
 #[cfg(test)]

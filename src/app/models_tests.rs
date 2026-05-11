@@ -15,6 +15,10 @@ fn log_entry_conversion_preserves_network_sender_identity() {
         message: "message".into(),
         received_at: "2026-01-01T00:00:01Z".into(),
         source_ip: "192.0.2.10:514".into(),
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     });
 
     assert_eq!(entry.hostname, "claimed-host");

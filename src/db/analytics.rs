@@ -687,6 +687,10 @@ pub struct LogEntryWithRaw {
     pub raw: String,
     pub received_at: String,
     pub source_ip: String,
+    pub ai_tool: Option<String>,
+    pub ai_project: Option<String>,
+    pub ai_session_id: Option<String>,
+    pub ai_transcript_path: Option<String>,
 }
 
 // -----------------------------------------------------------------------------

@@ -344,6 +344,10 @@ pub(super) fn map_row(row: &rusqlite::Row) -> rusqlite::Result<LogEntry> {
         message: row.get(7)?,
         received_at: row.get(8)?,
         source_ip: row.get(9)?,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     })
 }
 
@@ -363,6 +367,10 @@ pub(super) fn map_row_with_raw(
         raw: row.get(8)?,
         received_at: row.get(9)?,
         source_ip: row.get(10)?,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     })
 }
 

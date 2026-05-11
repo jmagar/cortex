@@ -14,6 +14,10 @@ pub struct LogEntry {
     pub message: String,
     pub received_at: String,
     pub source_ip: String,
+    pub ai_tool: Option<String>,
+    pub ai_project: Option<String>,
+    pub ai_session_id: Option<String>,
+    pub ai_transcript_path: Option<String>,
 }
 
 impl From<db::LogEntry> for LogEntry {
@@ -29,6 +33,57 @@ impl From<db::LogEntry> for LogEntry {
             message: value.message,
             received_at: value.received_at,
             source_ip: value.source_ip,
+            ai_tool: value.ai_tool,
+            ai_project: value.ai_project,
+            ai_session_id: value.ai_session_id,
+            ai_transcript_path: value.ai_transcript_path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct ListSessionsRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub hostname: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct ListSessionsResponse {
+    pub count: usize,
+    pub sessions: Vec<AiSessionEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct AiSessionEntry {
+    pub project: String,
+    pub tool: String,
+    pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript_path: Option<String>,
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub event_count: i64,
+}
+
+impl From<db::AiSessionEntry> for AiSessionEntry {
+    fn from(value: db::AiSessionEntry) -> Self {
+        Self {
+            project: value.ai_project,
+            tool: value.ai_tool,
+            session_id: value.ai_session_id,
+            transcript_path: value.ai_transcript_path,
+            hostname: value.hostname,
+            first_seen: value.first_seen,
+            last_seen: value.last_seen,
+            event_count: value.event_count,
         }
     }
 }
@@ -381,6 +436,10 @@ pub struct LogEntryWithRaw {
     pub raw: String,
     pub received_at: String,
     pub source_ip: String,
+    pub ai_tool: Option<String>,
+    pub ai_project: Option<String>,
+    pub ai_session_id: Option<String>,
+    pub ai_transcript_path: Option<String>,
 }
 
 impl From<db::LogEntryWithRaw> for LogEntryWithRaw {
@@ -397,6 +456,10 @@ impl From<db::LogEntryWithRaw> for LogEntryWithRaw {
             raw: value.raw,
             received_at: value.received_at,
             source_ip: value.source_ip,
+            ai_tool: value.ai_tool,
+            ai_project: value.ai_project,
+            ai_session_id: value.ai_session_id,
+            ai_transcript_path: value.ai_transcript_path,
         }
     }
 }

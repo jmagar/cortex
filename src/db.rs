@@ -20,7 +20,8 @@ pub use maintenance::{
     DiskSpaceProbe,
 };
 pub use models::{
-    DbStats, DockerCheckpoint, ErrorSummaryEntry, HostEntry, LogBatchEntry, LogEntry, SearchParams,
+    AiSessionEntry, DbStats, DockerCheckpoint, ErrorSummaryEntry, HostEntry, ListAiSessionsParams,
+    LogBatchEntry, LogEntry, SearchParams,
 };
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
 pub use pool::{init_pool, DbPool};

@@ -273,6 +273,10 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     raw,
                     source_ip: source_ip.clone(),
                     docker_checkpoint: None,
+                    ai_tool: None,
+                    ai_project: None,
+                    ai_session_id: None,
+                    ai_transcript_path: None,
                 });
             }
         }

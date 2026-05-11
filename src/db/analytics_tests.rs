@@ -32,6 +32,10 @@ fn entry_with_source_ip(
         raw: format!("<14>{ts} {host} {}: {msg}", app.unwrap_or("test")),
         source_ip: source_ip.to_string(),
         docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 

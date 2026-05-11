@@ -27,6 +27,10 @@ fn make_entry(ts: &str, host: &str, severity: &str, msg: &str) -> LogBatchEntry 
         raw: msg.to_string(),
         source_ip: "127.0.0.1:514".to_string(),
         docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 
@@ -51,16 +55,7 @@ fn test_search_fts() {
 
     let params = SearchParams {
         query: Some("disk".to_string()),
-        hostname: None,
-        source_ip: None,
-        severity: None,
-        severity_in: None,
-        app_name: None,
-        facility: None,
-        process_id: None,
-        from: None,
-        to: None,
-        limit: None,
+        ..Default::default()
     };
     let results = search_logs(&pool, &params).unwrap();
     assert_eq!(results.len(), 1);
@@ -73,16 +68,7 @@ fn test_search_invalid_fts_returns_error() {
     // FTS5 treats bare parentheses as a syntax error
     let params = SearchParams {
         query: Some("(invalid fts syntax".to_string()),
-        hostname: None,
-        source_ip: None,
-        severity: None,
-        severity_in: None,
-        app_name: None,
-        facility: None,
-        process_id: None,
-        from: None,
-        to: None,
-        limit: None,
+        ..Default::default()
     };
     let result = search_logs(&pool, &params);
     assert!(result.is_err(), "invalid FTS5 query should return Err");
@@ -169,51 +155,25 @@ fn test_search_timestamp_range_filtering() {
 
     // from only
     let params = SearchParams {
-        query: None,
-        hostname: None,
-        source_ip: None,
-        severity: None,
-        severity_in: None,
-        app_name: None,
-        facility: None,
-        process_id: None,
         from: Some("2026-06-01T00:00:00Z".into()),
-        to: None,
-        limit: None,
+        ..Default::default()
     };
     let results = search_logs(&pool, &params).unwrap();
     assert_eq!(results.len(), 2, "from filter should return mid + late");
 
     // to only
     let params = SearchParams {
-        query: None,
-        hostname: None,
-        source_ip: None,
-        severity: None,
-        severity_in: None,
-        app_name: None,
-        facility: None,
-        process_id: None,
-        from: None,
         to: Some("2026-06-30T00:00:00Z".into()),
-        limit: None,
+        ..Default::default()
     };
     let results = search_logs(&pool, &params).unwrap();
     assert_eq!(results.len(), 2, "to filter should return early + mid");
 
     // from + to (narrow window)
     let params = SearchParams {
-        query: None,
-        hostname: None,
-        source_ip: None,
-        severity: None,
-        severity_in: None,
-        app_name: None,
-        facility: None,
-        process_id: None,
         from: Some("2026-06-01T00:00:00Z".into()),
         to: Some("2026-06-30T00:00:00Z".into()),
-        limit: None,
+        ..Default::default()
     };
     let results = search_logs(&pool, &params).unwrap();
     assert_eq!(results.len(), 1, "from+to filter should return only mid");
@@ -273,17 +233,8 @@ fn test_search_severity_in_filter() {
     insert_logs_batch(&pool, &entries).unwrap();
 
     let params = SearchParams {
-        query: None,
-        hostname: None,
-        source_ip: None,
-        severity: None,
         severity_in: Some(vec!["emerg".into(), "err".into(), "warning".into()]),
-        app_name: None,
-        facility: None,
-        process_id: None,
-        from: None,
-        to: None,
-        limit: None,
+        ..Default::default()
     };
     let results = search_logs(&pool, &params).unwrap();
     assert_eq!(results.len(), 3, "severity_in should match exactly 3");
@@ -320,16 +271,7 @@ fn search_logs_ignores_deleted_fts_phantom_rows() {
 
     let params = SearchParams {
         query: Some("\"phantom-token\"".to_string()),
-        hostname: None,
-        source_ip: None,
-        severity: None,
-        severity_in: None,
-        app_name: None,
-        facility: None,
-        process_id: None,
-        from: None,
-        to: None,
-        limit: None,
+        ..Default::default()
     };
     let results = search_logs(&pool, &params).unwrap();
     assert!(results.is_empty(), "FTS-only phantom rows must not leak");
