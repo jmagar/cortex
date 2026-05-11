@@ -8,21 +8,21 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use axum::{
-    Router,
     extract::{ConnectInfo, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header::RETRY_AFTER},
-    middleware::{Next, from_fn},
+    http::{header::RETRY_AFTER, HeaderMap, HeaderValue, StatusCode},
+    middleware::{from_fn, Next},
     response::{IntoResponse, Json},
     routing::post,
+    Router,
 };
 use bytes::Bytes;
 use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest,
-    common::v1::{AnyValue, any_value::Value as AnyValueKind},
+    common::v1::{any_value::Value as AnyValueKind, AnyValue},
 };
 use prost::Message;
 use serde_json::json;

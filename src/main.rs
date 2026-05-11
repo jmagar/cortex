@@ -1,9 +1,9 @@
 use anyhow::Result;
 use axum::Router;
-use rmcp::{transport::stdio, ServiceExt};
+use rmcp::{ServiceExt, transport::stdio};
 use syslog_mcp::{api, mcp, runtime::RuntimeCore};
 use tracing::info;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 mod cli;
 
@@ -132,7 +132,7 @@ impl Mode {
             [command, rest @ ..]
                 if matches!(
                     command.as_str(),
-                    "search" | "tail" | "errors" | "hosts" | "correlate" | "stats"
+                    "search" | "tail" | "errors" | "hosts" | "sessions" | "correlate" | "stats"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);

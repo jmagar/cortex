@@ -49,8 +49,9 @@ pub struct EnrichmentConfig {
 static AUTHELIA_LEVEL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\blevel=([A-Za-z]+)").expect("static regex"));
 
+/// Capture the file="..." metadata from rsyslog imfile records.
 static IMFILE_PATH: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"file="([^"]+\.(?:jsonl|json))""#).expect("static regex"));
+    LazyLock::new(|| Regex::new("file=\"([^\"]+\\.(?:jsonl|json))\"").expect("static regex"));
 
 /// Patterns scrubbed from AI-source message bodies. Each matches the entire
 /// secret token; the matched text is replaced with `[REDACTED]`.
@@ -85,6 +86,7 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 const AI_SOURCES: &[&str] = &[
     "claude-transcript",
     "codex-transcript",
+    "gemini-transcript",
     "claude-code",
     "codex",
 ];
@@ -254,6 +256,14 @@ fn project_from_transcript_path(path: &str) -> Option<String> {
     None
 }
 
+/// Decode a Claude project directory name back to a path.
+///
+/// Claude encodes project paths by replacing `/` with `-` and prefixing with `-`.
+/// Example: `/home/user/code` -> `-home-user-code`.
+///
+/// This decoder is best-effort and lossy: it cannot distinguish between an
+/// encoded `/` and a literal `-` in a directory name (e.g. `syslog-mcp` vs
+/// `syslog/mcp`).
 fn decode_claude_project(encoded: &str) -> Option<String> {
     let stripped = encoded.strip_prefix('-').unwrap_or(encoded);
     if stripped.is_empty() {

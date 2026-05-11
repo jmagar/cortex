@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use serde::Serialize;
 use syslog_mcp::app::{
     CorrelateEventsRequest, CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse,
@@ -12,12 +12,24 @@ pub(crate) enum CliCommand {
     Tail(TailArgs),
     Errors(TimeRangeArgs),
     Hosts(OutputArgs),
+    Sessions(SessionsArgs),
     Correlate(CorrelateArgs),
     Stats(OutputArgs),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OutputArgs {
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsArgs {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub hostname: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
     pub json: bool,
 }
 
@@ -72,6 +84,7 @@ impl CliCommand {
             "tail" => parse_tail(rest),
             "errors" => parse_errors(rest),
             "hosts" => parse_hosts(rest),
+            "sessions" => parse_sessions(rest),
             "correlate" => parse_correlate(rest),
             "stats" => parse_stats(rest),
             _ => bail!("unknown CLI command: {command}"),
@@ -126,6 +139,20 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
         CliCommand::Hosts(args) => {
             let response = service.list_hosts().await?;
             print_hosts_response(&response, args.json)?;
+        }
+        CliCommand::Sessions(args) => {
+            let json = args.json;
+            let response = service
+                .list_sessions(syslog_mcp::app::ListSessionsRequest {
+                    project: args.project,
+                    tool: args.tool,
+                    hostname: args.hostname,
+                    from: args.from,
+                    to: args.to,
+                    limit: args.limit,
+                })
+                .await?;
+            print_sessions_response(&response, json)?;
         }
         CliCommand::Correlate(args) => {
             let json = args.json;
@@ -244,6 +271,44 @@ fn parse_errors(args: &[String]) -> Result<CliCommand> {
 
 fn parse_hosts(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Hosts(parse_output_args("hosts", args)?))
+}
+
+fn parse_sessions(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--project=") => {
+                parsed.project = Some(value_after_equals(arg, "--project")?)
+            }
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown sessions option: {arg}"),
+            _ => bail!("unexpected sessions argument: {arg}"),
+        }
+    }
+    Ok(CliCommand::Sessions(parsed))
 }
 
 fn parse_stats(args: &[String]) -> Result<CliCommand> {
@@ -411,6 +476,39 @@ fn print_hosts_response(response: &ListHostsResponse, json: bool) -> Result<()> 
         );
     }
     Ok(())
+}
+
+fn print_sessions_response(
+    response: &syslog_mcp::app::ListSessionsResponse,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("{} session(s)", response.count);
+    println!(
+        "{:<40} {:<10} {:<36} {:<15} COUNT",
+        "PROJECT", "TOOL", "SESSION ID", "HOST"
+    );
+    for s in &response.sessions {
+        println!(
+            "{:<40} {:<10} {:<36} {:<15} {}",
+            truncate(&s.project, 39),
+            s.tool,
+            s.session_id,
+            s.hostname,
+            s.event_count
+        );
+    }
+    Ok(())
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() > max {
+        format!("{}…", &s[..max - 1])
+    } else {
+        s.to_string()
+    }
 }
 
 fn print_correlate_response(response: &CorrelateEventsResponse, json: bool) -> Result<()> {
