@@ -59,3 +59,31 @@ fn test_init_pool_applies_busy_timeout_to_each_pooled_connection() {
     assert_eq!(busy_timeout_1, 5000);
     assert_eq!(busy_timeout_2, 5000);
 }
+
+#[test]
+fn init_db_adds_ai_session_metadata_columns() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = crate::config::StorageConfig {
+        db_path,
+        ..Default::default()
+    };
+
+    let _pool = init_pool(&config).unwrap();
+    let conn = rusqlite::Connection::open(&config.db_path).unwrap();
+    for column in [
+        "ai_tool",
+        "ai_project",
+        "ai_session_id",
+        "ai_transcript_path",
+    ] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('logs') WHERE name = ?1",
+                [column],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1, "missing column {column}");
+    }
+}

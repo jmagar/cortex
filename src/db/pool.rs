@@ -54,7 +54,11 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
             message     TEXT NOT NULL,
             raw         TEXT NOT NULL,
             received_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            source_ip   TEXT NOT NULL DEFAULT ''
+            source_ip   TEXT NOT NULL DEFAULT '',
+            ai_tool            TEXT,
+            ai_project         TEXT,
+            ai_session_id      TEXT,
+            ai_transcript_path TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
@@ -66,6 +70,8 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         CREATE INDEX IF NOT EXISTS idx_logs_received_at ON logs(received_at);
         CREATE INDEX IF NOT EXISTS idx_logs_hostname_received_at ON logs(hostname, received_at);
         CREATE INDEX IF NOT EXISTS idx_logs_source_ip_timestamp ON logs(source_ip, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time ON logs(ai_project, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_logs_ai_session ON logs(ai_tool, ai_project, ai_session_id);
         DROP INDEX IF EXISTS idx_logs_source_ip;
 
         -- FTS5 virtual table for full-text search on messages
@@ -202,6 +208,42 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
             elapsed_ms = started.elapsed().as_millis(),
             "Migration 3: composite index (app_name, received_at) created"
         );
+    }
+
+    // Migration 4: add AI transcript metadata columns and indexes.
+    let migration_4_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 4",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_4_applied {
+        for (column, sql_type) in [
+            ("ai_tool", "TEXT"),
+            ("ai_project", "TEXT"),
+            ("ai_session_id", "TEXT"),
+            ("ai_transcript_path", "TEXT"),
+        ] {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('logs') WHERE name = ?1",
+                    [column],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+            if !exists {
+                conn.execute_batch(&format!("ALTER TABLE logs ADD COLUMN {column} {sql_type}"))?;
+            }
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time ON logs(ai_project, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_session ON logs(ai_tool, ai_project, ai_session_id);
+             INSERT INTO schema_migrations (version) VALUES (4);",
+        )?;
+        tracing::info!("Migration 4: added AI transcript metadata columns and indexes");
     }
 
     tracing::info!(path = %config.db_path.display(), "Database initialized");

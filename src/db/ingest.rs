@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use rusqlite::{params, Error as SqliteError, ErrorCode};
+use rusqlite::{Error as SqliteError, ErrorCode, params};
 
 use super::models::LogBatchEntry;
 use super::pool::DbPool;
@@ -37,8 +37,10 @@ fn insert_logs_batch_once(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<us
 
     {
         let mut stmt = tx.prepare_cached(
-            "INSERT INTO logs (timestamp, hostname, facility, severity, app_name, process_id, message, raw, source_ip)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO logs (
+                timestamp, hostname, facility, severity, app_name, process_id,
+                message, raw, source_ip, ai_tool, ai_project, ai_session_id, ai_transcript_path
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )?;
 
         for entry in entries {
@@ -51,7 +53,11 @@ fn insert_logs_batch_once(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<us
                 entry.process_id,
                 entry.message,
                 entry.raw,
-                entry.source_ip
+                entry.source_ip,
+                entry.ai_tool,
+                entry.ai_project,
+                entry.ai_session_id,
+                entry.ai_transcript_path
             ])?;
         }
 
