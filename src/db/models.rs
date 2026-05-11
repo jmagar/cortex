@@ -22,6 +22,10 @@ pub struct LogBatchEntry {
     /// (IP:port); Docker ingest uses docker://host/container/stream.
     pub source_ip: String,
     pub docker_checkpoint: Option<DockerCheckpoint>,
+    pub ai_tool: Option<String>,
+    pub ai_project: Option<String>,
+    pub ai_session_id: Option<String>,
+    pub ai_transcript_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +33,38 @@ pub struct DockerCheckpoint {
     pub host_name: String,
     pub container_id: String,
     pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ListAiSessionsParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub hostname: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AiSessionEntry {
+    pub ai_project: String,
+    pub ai_tool: String,
+    pub ai_session_id: String,
+    pub ai_transcript_path: Option<String>,
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub event_count: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SearchAiSessionsParams {
+    pub query: String,
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
 }
 
 /// Error/warning summary entry (one row per hostname+severity, plus optional app_name)
@@ -70,6 +106,112 @@ pub struct DbStats {
     /// Accumulate between merge cycles; non-zero value is normal and cleaned up by
     /// periodic fts_incremental_merge. High values indicate merge is falling behind.
     pub phantom_fts_rows: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchedAiSessionEntry {
+    pub ai_project: String,
+    pub ai_tool: String,
+    pub ai_session_id: String,
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub event_count: i64,
+    pub match_count: i64,
+    pub best_snippet: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchAiSessionsResult {
+    pub total_candidates: usize,
+    pub truncated: bool,
+    pub sessions: Vec<SearchedAiSessionEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiUsageBlocksParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiUsageBlock {
+    pub bucket_start: String,
+    pub bucket_end: String,
+    pub project: String,
+    pub tool: String,
+    pub session_count: i64,
+    pub event_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiUsageBlocksResult {
+    pub truncated: bool,
+    pub blocks: Vec<AiUsageBlock>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiProjectContextParams {
+    pub project: String,
+    pub ai_tool: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiProjectContext {
+    pub project: String,
+    pub tools: Vec<String>,
+    pub sessions: Vec<String>,
+    pub hostnames: Vec<String>,
+    pub first_seen: Option<String>,
+    pub last_seen: Option<String>,
+    pub event_count: i64,
+    pub recent_entries: Vec<LogEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListAiToolsParams {
+    pub ai_project: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiToolInventoryEntry {
+    pub tool: String,
+    pub event_count: i64,
+    pub session_count: i64,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListAiToolsResult {
+    pub tools: Vec<AiToolInventoryEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListAiProjectsParams {
+    pub ai_tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiProjectInventoryEntry {
+    pub project: String,
+    pub tools: Vec<String>,
+    pub event_count: i64,
+    pub session_count: i64,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListAiProjectsResult {
+    pub projects: Vec<AiProjectInventoryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +257,10 @@ pub struct LogEntry {
     /// (IP:port); Docker ingest entries use docker://host/container/stream.
     /// Empty string for legacy rows inserted before this column was added.
     pub source_ip: String,
+    pub ai_tool: Option<String>,
+    pub ai_project: Option<String>,
+    pub ai_session_id: Option<String>,
+    pub ai_transcript_path: Option<String>,
 }
 
 /// Parameters for searching logs
@@ -143,6 +289,9 @@ pub struct SearchParams {
     pub to: Option<String>,
     /// Max results to return
     pub limit: Option<u32>,
+    pub ai_tool: Option<String>,
+    pub ai_project: Option<String>,
+    pub ai_session_id: Option<String>,
 }
 
 #[cfg(test)]

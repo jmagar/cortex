@@ -215,6 +215,140 @@ fn build_entries_handles_multiple_resource_logs() {
     assert_eq!(entries[1].severity, "err");
 }
 
+#[test]
+fn build_entries_extracts_ai_metadata_from_attributes() {
+    let peer = "127.0.0.1:1".parse().unwrap();
+    let req = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: vec![
+                    kv("host.name", av_string("tootie")),
+                    kv("service.name", av_string("claude-code")),
+                    kv("session.id", av_string("res-session-123")),
+                ],
+                dropped_attributes_count: 0,
+                entity_refs: vec![],
+            }),
+            scope_logs: vec![ScopeLogs {
+                scope: None,
+                log_records: vec![LogRecord {
+                    time_unix_nano: 0,
+                    observed_time_unix_nano: 0,
+                    severity_number: 9,
+                    severity_text: String::new(),
+                    body: Some(av_string("msg with log-level attributes")),
+                    attributes: vec![
+                        kv("session.id", av_string("log-session-456")), // overrides resource
+                        kv("project.path", av_string("/work/syslog-mcp")),
+                    ],
+                    dropped_attributes_count: 0,
+                    flags: 0,
+                    trace_id: vec![],
+                    span_id: vec![],
+                    event_name: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    };
+
+    let entries = build_entries(&req, peer);
+    assert_eq!(entries.len(), 1);
+    let e = &entries[0];
+    assert_eq!(e.hostname, "tootie");
+    assert_eq!(e.app_name.as_deref(), Some("claude-code"));
+    assert_eq!(e.ai_tool, None);
+    assert_eq!(e.ai_session_id.as_deref(), Some("log-session-456"));
+    assert_eq!(e.ai_project.as_deref(), Some("/work/syslog-mcp"));
+}
+
+#[test]
+fn build_entries_extracts_ai_tool_from_explicit_attribute() {
+    let peer = "127.0.0.1:1".parse().unwrap();
+    let req = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: vec![kv("host.name", av_string("tootie"))],
+                dropped_attributes_count: 0,
+                entity_refs: vec![],
+            }),
+            scope_logs: vec![ScopeLogs {
+                scope: None,
+                log_records: vec![LogRecord {
+                    time_unix_nano: 0,
+                    observed_time_unix_nano: 0,
+                    severity_number: 9,
+                    severity_text: String::new(),
+                    body: Some(av_string("msg")),
+                    attributes: vec![kv("ai.tool", av_string("claude"))],
+                    dropped_attributes_count: 0,
+                    flags: 0,
+                    trace_id: vec![],
+                    span_id: vec![],
+                    event_name: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    };
+
+    let entries = build_entries(&req, peer);
+    assert_eq!(entries[0].ai_tool.as_deref(), Some("claude"));
+}
+
+#[test]
+fn build_entries_ignores_unknown_or_oversized_ai_tool() {
+    let peer = "127.0.0.1:1".parse().unwrap();
+    let req = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: vec![kv("host.name", av_string("tootie"))],
+                dropped_attributes_count: 0,
+                entity_refs: vec![],
+            }),
+            scope_logs: vec![ScopeLogs {
+                scope: None,
+                log_records: vec![
+                    LogRecord {
+                        time_unix_nano: 0,
+                        observed_time_unix_nano: 0,
+                        severity_number: 9,
+                        severity_text: String::new(),
+                        body: Some(av_string("msg")),
+                        attributes: vec![kv("ai.tool", av_string("unknown"))],
+                        dropped_attributes_count: 0,
+                        flags: 0,
+                        trace_id: vec![],
+                        span_id: vec![],
+                        event_name: String::new(),
+                    },
+                    LogRecord {
+                        time_unix_nano: 0,
+                        observed_time_unix_nano: 0,
+                        severity_number: 9,
+                        severity_text: String::new(),
+                        body: Some(av_string("msg")),
+                        attributes: vec![kv("ai.tool", av_string(&"x".repeat(65)))],
+                        dropped_attributes_count: 0,
+                        flags: 0,
+                        trace_id: vec![],
+                        span_id: vec![],
+                        event_name: String::new(),
+                    },
+                ],
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    };
+
+    let entries = build_entries(&req, peer);
+    assert_eq!(entries[0].ai_tool, None);
+    assert_eq!(entries[1].ai_tool, None);
+}
+
 // ---- auth gate ----
 
 fn state_with_token(token: Option<&str>) -> OtlpState {
@@ -272,6 +406,17 @@ fn auth_rejects_non_bearer_scheme() {
         HeaderValue::from_static("Basic secret"),
     );
     assert!(!is_authorized(&state, &headers));
+}
+
+#[tokio::test]
+async fn metrics_handler_returns_not_supported() {
+    let response = metrics_handler(
+        State(state_with_token(None)),
+        HeaderMap::new(),
+        Bytes::from_static(b"metrics"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 // ---- counters ----

@@ -86,7 +86,7 @@ async fn serve_mcp() -> Result<()> {
         info!("Non-MCP API mounted under /api");
     }
     app = app.merge(runtime.otlp_router());
-    info!("OTLP receiver mounted at /v1/logs (and /v1/metrics → 200, /v1/traces → 404)");
+    info!("OTLP receiver mounted at /v1/logs (and /v1/metrics, /v1/traces → 404)");
     if runtime.config.mcp.api_token.is_none() && !runtime.config.mcp.host.starts_with("127.") {
         tracing::warn!(
             bind = %runtime.config.mcp.bind_addr(),
@@ -132,7 +132,14 @@ impl Mode {
             [command, rest @ ..]
                 if matches!(
                     command.as_str(),
-                    "search" | "tail" | "errors" | "hosts" | "correlate" | "stats"
+                    "search"
+                        | "tail"
+                        | "errors"
+                        | "hosts"
+                        | "sessions"
+                        | "ai"
+                        | "correlate"
+                        | "stats"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
@@ -168,6 +175,14 @@ fn print_usage() {
   syslog tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
   syslog errors [--from TIME] [--to TIME] [--json]
   syslog hosts [--json]
+  syslog sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
+  syslog ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]
+  syslog ai blocks [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--json]
+  syslog ai context --project PATH [--tool TOOL] [--limit N] [--json]
+  syslog ai tools [--project PATH] [--from TIME] [--to TIME] [--json]
+  syslog ai projects [--tool TOOL] [--from TIME] [--to TIME] [--json]
+  syslog ai index [--path PATH] [--json]
+  syslog ai add --file FILE [--json]
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
   syslog stats [--json]
 

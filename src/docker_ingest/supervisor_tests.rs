@@ -24,6 +24,10 @@ fn docker_entry(timestamp: &str) -> LogBatchEntry {
             container_id: "abcdef123456".into(),
             timestamp: timestamp.into(),
         }),
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 

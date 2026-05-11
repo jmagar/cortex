@@ -17,6 +17,12 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `tail` | Most recent entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | List all known hosts with first/last seen |
+| `sessions` | AI transcript sessions by project |
+| `search_sessions` | Ranked grouped session search |
+| `usage_blocks` | AI activity in 5-hour windows |
+| `project_context` | Summary for one AI project path |
+| `list_ai_tools` | Distinct AI tools with counts |
+| `list_ai_projects` | Distinct AI projects with counts |
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics |
 | `status` | Lightweight runtime and DB health |
@@ -146,6 +152,45 @@ mcp__syslog__syslog(action="hosts")
       "log_count": 145230,
       "first_seen": "2024-10-01T00:00:00Z",
       "last_seen": "2025-01-15T14:30:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### `action="sessions"` — AI transcript sessions
+
+List AI sessions grouped by project path and tool.
+
+| param | type | description |
+|-------|------|-------------|
+| `project` | string | Exact project path filter |
+| `tool` | string | AI tool filter: `claude`, `codex`, or `gemini` |
+| `hostname` | string | Filter by hostname |
+| `from` | string | Start time (ISO 8601) |
+| `to` | string | End time (ISO 8601) |
+| `limit` | integer | Max sessions (default 100, max 1000) |
+
+```
+mcp__syslog__syslog(action="sessions")
+mcp__syslog__syslog(action="sessions", project="/home/jmagar/workspace/syslog-mcp")
+mcp__syslog__syslog(action="sessions", tool="codex", limit=20)
+```
+
+**Response shape:**
+```json
+{
+  "count": 1,
+  "sessions": [
+    {
+      "project": "/home/jmagar/workspace/syslog-mcp",
+      "tool": "codex",
+      "session_id": "019e1506-dc81-7881-9926-4d6d4efda1ac",
+      "hostname": "dookie",
+      "first_seen": "2026-05-11T03:13:51.745Z",
+      "last_seen": "2026-05-11T04:10:00.000Z",
+      "event_count": 42
     }
   ]
 }

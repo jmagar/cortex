@@ -27,7 +27,9 @@ access, not HTTP access.
 ## Output
 
 All commands print compact human-readable output by default. Add `--json` to
-print the exact serialized service response shape used by MCP and the REST API.
+print the exact serialized `SyslogService` response shape. MCP uses the same
+shape for matching actions; REST parity applies only to commands that also have
+REST endpoints.
 
 ```bash
 syslog stats --json
@@ -105,6 +107,83 @@ syslog hosts
 syslog hosts --json
 ```
 
+### `syslog sessions`
+
+List AI transcript sessions grouped by project.
+
+```bash
+syslog sessions --project /home/jmagar/workspace/syslog-mcp --limit 20
+```
+
+Flags:
+
+| Flag | Description |
+| --- | --- |
+| `--project PATH` | Exact project path filter |
+| `--tool TOOL` | AI tool filter: `claude`, `codex`, or `gemini` |
+| `--hostname HOST` | Filter by host |
+| `--from TIME` | RFC3339 start timestamp |
+| `--to TIME` | RFC3339 end timestamp |
+| `--limit N` | Maximum returned rows |
+| `--json` | Print JSON response |
+
+### `syslog ai search`
+
+Ranked grouped session search across AI transcript rows.
+
+```bash
+syslog ai search authentication --tool claude --limit 10
+```
+
+### `syslog ai blocks`
+
+Bucket AI activity into 5-hour UTC windows.
+
+```bash
+syslog ai blocks --project /home/jmagar/workspace/syslog-mcp
+```
+
+### `syslog ai context`
+
+Summarize one AI project path.
+
+```bash
+syslog ai context --project /home/jmagar/workspace/syslog-mcp --limit 5
+```
+
+### `syslog ai tools`
+
+List distinct AI tools with counts.
+
+```bash
+syslog ai tools --json
+```
+
+### `syslog ai projects`
+
+List distinct AI projects with counts.
+
+```bash
+syslog ai projects --tool claude
+```
+
+### `syslog ai index`
+
+Explicitly scan local transcript roots (`~/.claude/projects`, `~/.codex/sessions`) or one `--path`.
+
+```bash
+syslog ai index
+syslog ai index --path ~/.claude/projects
+```
+
+### `syslog ai add`
+
+Ingest one explicit transcript file.
+
+```bash
+syslog ai add --file ~/.claude/projects/example/session.jsonl
+```
+
 ### `syslog correlate`
 
 Find related events around a reference timestamp. Results are grouped by host.
@@ -147,6 +226,12 @@ The direct CLI and MCP tool share the same business layer:
 | `syslog tail` | `syslog` with `action="tail"` |
 | `syslog errors` | `syslog` with `action="errors"` |
 | `syslog hosts` | `syslog` with `action="hosts"` |
+| `syslog sessions` | `syslog` with `action="sessions"` |
+| `syslog ai search` | `syslog` with `action="search_sessions"` |
+| `syslog ai blocks` | `syslog` with `action="usage_blocks"` |
+| `syslog ai context` | `syslog` with `action="project_context"` |
+| `syslog ai tools` | `syslog` with `action="list_ai_tools"` |
+| `syslog ai projects` | `syslog` with `action="list_ai_projects"` |
 | `syslog correlate` | `syslog` with `action="correlate"` |
 | `syslog stats` | `syslog` with `action="stats"` |
 

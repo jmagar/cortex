@@ -40,6 +40,10 @@ pub(super) fn log_output_to_entry(
             container_id: container.id.clone(),
             timestamp: checkpoint_timestamp,
         }),
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }))
 }
 

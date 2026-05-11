@@ -119,6 +119,10 @@ fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> Lo
         raw: msg.to_string(),
         source_ip: source_ip.to_string(),
         docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 
@@ -139,6 +143,8 @@ fn seed_auth_action_log(pool: &DbPool) {
 fn minimal_args_for_action(action: &str) -> Value {
     match action {
         "correlate" => json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"}),
+        "search_sessions" => json!({"action": action, "query": "mounted"}),
+        "project_context" => json!({"action": action, "project": "/tmp/project"}),
         "context" => json!({"action": action, "log_id": 1}),
         "get" => json!({"action": action, "id": 1}),
         "compare" => json!({
@@ -667,6 +673,11 @@ fn public_read_actions_require_syslog_read_scope() {
         required_scope_for("not_a_real_action"),
         Some("syslog:__deny__")
     );
+}
+
+#[test]
+fn sessions_action_requires_read_scope() {
+    assert_eq!(required_scope_for("sessions"), Some("syslog:read"));
 }
 
 /// `AuthPolicy::Mounted` + AuthContext with `syslog:admin` (superset) → read

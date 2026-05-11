@@ -30,6 +30,10 @@ fn make_entry(ts: &str, host: &str, severity: &str, msg: &str) -> LogBatchEntry 
         raw: msg.to_string(),
         source_ip: "127.0.0.1:514".to_string(),
         docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 
@@ -246,6 +250,10 @@ fn make_tagged(ts: &str, host: &str, severity: &str, app: &str, msg: &str) -> Lo
         raw: msg.to_string(),
         source_ip: "127.0.0.1:514".to_string(),
         docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 

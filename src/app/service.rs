@@ -6,18 +6,22 @@ use tokio::sync::Semaphore;
 
 use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
-    AnomaliesRequest, AnomaliesResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest,
-    CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
+    AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest, ClockSkewResponse,
+    CompareRequest, CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
     CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
-    GetLogResponse, IngestRateRequest, IngestRateResponse, ListAppsRequest, ListAppsResponse,
-    ListHostsResponse, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
-    SearchLogsRequest, SearchLogsResponse, SilentHostsRequest, SilentHostsResponse,
-    TailLogsRequest, TimelineRequest, TimelineResponse,
+    GetLogResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
+    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
+    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse, ProjectContextRequest,
+    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
+    SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse, TailLogsRequest,
+    TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
 use crate::config::StorageConfig;
 use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy};
+use crate::scanner;
 
 const DB_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -85,6 +89,9 @@ impl SyslogService {
             from: parse_optional_timestamp(req.from.as_deref(), "from")?,
             to: parse_optional_timestamp(req.to.as_deref(), "to")?,
             limit: req.limit,
+            ai_tool: None,
+            ai_project: None,
+            ai_session_id: None,
         };
         let logs = self
             .run_db(move |pool| db::search_logs(pool, &params))
@@ -129,7 +136,7 @@ impl SyslogService {
             Some(other) => {
                 return Err(ServiceError::InvalidInput(format!(
                     "Invalid group_by '{other}'. Supported: app_name"
-                )))
+                )));
             }
         };
         let rows = self
@@ -147,6 +154,117 @@ impl SyslogService {
         Ok(ListHostsResponse {
             hosts: rows.into_iter().map(Into::into).collect(),
         })
+    }
+
+    pub async fn list_sessions(
+        &self,
+        req: ListSessionsRequest,
+    ) -> ServiceResult<ListSessionsResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::ListAiSessionsParams {
+            ai_project: req.project,
+            ai_tool: req.tool,
+            hostname: req.hostname,
+            from,
+            to,
+            limit: req.limit,
+        };
+        let rows = self
+            .run_db(move |pool| db::list_ai_sessions(pool, &params))
+            .await?;
+        let sessions: Vec<AiSessionEntry> = rows.into_iter().map(Into::into).collect();
+        Ok(ListSessionsResponse {
+            count: sessions.len(),
+            sessions,
+        })
+    }
+
+    pub async fn search_sessions(
+        &self,
+        req: SearchSessionsRequest,
+    ) -> ServiceResult<SearchSessionsResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::SearchAiSessionsParams {
+            query: req.query,
+            ai_project: req.project,
+            ai_tool: req.tool,
+            from,
+            to,
+            limit: req.limit,
+        };
+        let result = self
+            .run_db(move |pool| db::search_ai_sessions(pool, &params))
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn usage_blocks(
+        &self,
+        req: UsageBlocksRequest,
+    ) -> ServiceResult<UsageBlocksResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::AiUsageBlocksParams {
+            ai_project: req.project,
+            ai_tool: req.tool,
+            from,
+            to,
+        };
+        let result = self
+            .run_db(move |pool| db::get_ai_usage_blocks(pool, &params))
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn project_context(
+        &self,
+        req: ProjectContextRequest,
+    ) -> ServiceResult<ProjectContextResponse> {
+        let params = db::AiProjectContextParams {
+            project: req.project,
+            ai_tool: req.tool,
+            limit: req.limit,
+        };
+        let result = self
+            .run_db(move |pool| db::get_ai_project_context(pool, &params))
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn list_ai_tools(
+        &self,
+        req: ListAiToolsRequest,
+    ) -> ServiceResult<ListAiToolsResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::ListAiToolsParams {
+            ai_project: req.project,
+            from,
+            to,
+        };
+        let result = self
+            .run_db(move |pool| db::list_ai_tools(pool, &params))
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn list_ai_projects(
+        &self,
+        req: ListAiProjectsRequest,
+    ) -> ServiceResult<ListAiProjectsResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::ListAiProjectsParams {
+            ai_tool: req.tool,
+            from,
+            to,
+        };
+        let result = self
+            .run_db(move |pool| db::list_ai_projects(pool, &params))
+            .await?;
+        Ok(result.into())
     }
 
     pub async fn correlate_events(
@@ -174,6 +292,9 @@ impl SyslogService {
             from: Some(from.clone()),
             to: Some(to.clone()),
             limit: Some(limit + 1),
+            ai_tool: None,
+            ai_project: None,
+            ai_session_id: None,
         };
         let mut rows = self
             .run_db(move |pool| db::search_logs(pool, &params))
@@ -204,6 +325,31 @@ impl SyslogService {
             .await?
             .into();
         Ok(stats)
+    }
+
+    pub async fn index_ai_roots(
+        &self,
+        path: Option<String>,
+    ) -> ServiceResult<scanner::IndexResult> {
+        self.run_db(move |pool| {
+            scanner::index_roots(pool, path.as_deref().map(std::path::Path::new))
+        })
+        .await
+        .map_err(|error| match error {
+            ServiceError::Internal(err) => ServiceError::InvalidInput(err.to_string()),
+            other => other,
+        })
+    }
+
+    pub async fn add_ai_file(&self, file: String) -> ServiceResult<scanner::IndexResult> {
+        self.run_db(move |pool| {
+            scanner::index_file(pool, std::path::Path::new(&file), "explicit_file")
+        })
+        .await
+        .map_err(|error| match error {
+            ServiceError::Internal(err) => ServiceError::InvalidInput(err.to_string()),
+            other => other,
+        })
     }
 
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {
@@ -330,6 +476,10 @@ impl SyslogService {
                             message: row.message.clone(),
                             received_at: row.received_at.clone(),
                             source_ip: row.source_ip.clone(),
+                            ai_tool: row.ai_tool.clone(),
+                            ai_project: row.ai_project.clone(),
+                            ai_session_id: row.ai_session_id.clone(),
+                            ai_transcript_path: row.ai_transcript_path.clone(),
                         };
                         (entry, row.hostname, row.timestamp, Some(row.id))
                     } else {
@@ -354,6 +504,10 @@ impl SyslogService {
                             message: "<reference timestamp>".into(),
                             received_at: timestamp.clone(),
                             source_ip: String::new(),
+                            ai_tool: None,
+                            ai_project: None,
+                            ai_session_id: None,
+                            ai_transcript_path: None,
                         };
                         (synthetic, hostname, timestamp, None)
                     };

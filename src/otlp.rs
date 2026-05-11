@@ -1,6 +1,6 @@
 //! OTLP/HTTP receiver — accepts OpenTelemetry log records over HTTP and feeds
 //! them into the existing syslog-mcp ingest pipeline. Logs only — `/v1/traces`
-//! returns 404 (deferred) and `/v1/metrics` returns 200 + discards.
+//! returns 404 (deferred) and `/v1/metrics` returns 404 (deferred).
 //!
 //! Mounted on the same axum server as MCP. Body limit: 4 MiB. Optional Bearer
 //! auth via the same `SYSLOG_MCP_TOKEN` as MCP (`SYSLOG_MCP_API_TOKEN` is
@@ -66,7 +66,7 @@ impl OtlpState {
 }
 
 /// Build the OTLP router. Mounts `/v1/logs` (functional ingest),
-/// `/v1/metrics` (200 + discard), `/v1/traces` (404 — deferred) on the same
+/// `/v1/metrics` (404 — deferred), `/v1/traces` (404 — deferred) on the same
 /// axum server as MCP.
 pub fn router(state: OtlpState) -> Router {
     Router::new()
@@ -201,12 +201,23 @@ async fn logs_handler(
 async fn metrics_handler(
     State(state): State<OtlpState>,
     headers: HeaderMap,
-    _body: Bytes,
+    body: Bytes,
 ) -> axum::response::Response {
     if !is_authorized(&state, &headers) {
         return unauthorized();
     }
-    StatusCode::OK.into_response()
+    tracing::warn!(
+        bytes = body.len(),
+        "OTLP metrics received but metrics ingestion is not supported"
+    );
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({
+            "error": "metrics_not_supported",
+            "message": "OTLP metrics deferred. Use /v1/logs only."
+        })),
+    )
+        .into_response()
 }
 
 async fn traces_handler() -> axum::response::Response {
@@ -252,6 +263,30 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
 
         for scope_logs in &resource_logs.scope_logs {
             for log in &scope_logs.log_records {
+                let log_attrs: HashMap<&str, &AnyValue> = log
+                    .attributes
+                    .iter()
+                    .filter_map(|kv| kv.value.as_ref().map(|v| (kv.key.as_str(), v)))
+                    .collect();
+
+                let ai_session_id = log_attrs
+                    .get("session.id")
+                    .or_else(|| log_attrs.get("session_id"))
+                    .or_else(|| resource_attrs.get("session.id"))
+                    .or_else(|| resource_attrs.get("session_id"))
+                    .and_then(|v| any_value_to_string(v))
+                    .filter(|value| value.len() <= 128);
+
+                let ai_project = log_attrs
+                    .get("project.path")
+                    .or_else(|| log_attrs.get("codebase.root_path"))
+                    .or_else(|| log_attrs.get("session.cwd"))
+                    .or_else(|| resource_attrs.get("project.path"))
+                    .or_else(|| resource_attrs.get("codebase.root_path"))
+                    .or_else(|| resource_attrs.get("session.cwd"))
+                    .and_then(|v| any_value_to_string(v))
+                    .filter(|value| value.len() <= 512);
+
                 let timestamp = format_otlp_timestamp(log.time_unix_nano)
                     .unwrap_or_else(|| received_iso.clone());
                 let severity = severity_from_number(log.severity_number).to_string();
@@ -273,11 +308,34 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     raw,
                     source_ip: source_ip.clone(),
                     docker_checkpoint: None,
+                    ai_tool: extract_ai_tool(&log_attrs, &resource_attrs),
+                    ai_project,
+                    ai_session_id,
+                    ai_transcript_path: None,
                 });
             }
         }
     }
     out
+}
+
+fn extract_ai_tool(
+    log_attrs: &HashMap<&str, &AnyValue>,
+    resource_attrs: &HashMap<&str, &AnyValue>,
+) -> Option<String> {
+    let raw = log_attrs
+        .get("ai.tool")
+        .or_else(|| log_attrs.get("ai_tool"))
+        .or_else(|| resource_attrs.get("ai.tool"))
+        .or_else(|| resource_attrs.get("ai_tool"))
+        .and_then(|v| any_value_to_string(v))?;
+    if raw.len() > 64 {
+        return None;
+    }
+    match raw.to_ascii_lowercase().as_str() {
+        "claude" | "codex" | "gemini" => Some(raw.to_ascii_lowercase()),
+        _ => None,
+    }
 }
 
 fn format_otlp_timestamp(time_unix_nano: u64) -> Option<String> {
