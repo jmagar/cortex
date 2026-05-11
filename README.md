@@ -24,7 +24,7 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md).
 
@@ -34,6 +34,7 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `tail` | Recent log entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
+| `sessions` | AI transcript sessions by project |
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics and storage health |
 | `status` | Lightweight runtime and DB health |
@@ -165,6 +166,42 @@ List all hosts that have sent syslog messages, with first/last seen timestamps a
       "first_seen": "2025-01-01T00:00:00.000Z",
       "last_seen":  "2025-01-15T14:30:00.000Z",
       "log_count":  18432
+    }
+  ]
+}
+```
+
+---
+
+### `syslog sessions`
+
+List AI transcript sessions grouped by project, tool, session, and host.
+
+**Parameters**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `project` | string | no | — | Exact project path, e.g. `/home/jmagar/workspace/syslog-mcp` |
+| `tool` | string | no | — | AI tool filter: `claude`, `codex`, or `gemini` |
+| `hostname` | string | no | — | Restrict to one host |
+| `from` | string | no | — | Start of time range (ISO 8601) |
+| `to` | string | no | — | End of time range (ISO 8601) |
+| `limit` | integer | no | 100 | Max sessions (hard cap: 1000) |
+
+**Response**
+
+```json
+{
+  "count": 1,
+  "sessions": [
+    {
+      "project": "/home/jmagar/workspace/syslog-mcp",
+      "tool": "codex",
+      "session_id": "019e1506-dc81-7881-9926-4d6d4efda1ac",
+      "hostname": "dookie",
+      "first_seen": "2026-05-11T03:13:51.745Z",
+      "last_seen": "2026-05-11T04:10:00.000Z",
+      "event_count": 42
     }
   ]
 }
@@ -315,6 +352,10 @@ Each stored log entry has these fields:
 | `message` | text | Log message body (FTS5-indexed) |
 | `received_at` | text | Server-side receipt timestamp (RFC 3339, UTC). Used for retention. |
 | `source_ip` | text | Source identifier. Syslog entries use the exact network sender address (`IP:port`) captured from the packet/connection peer. Docker ingest entries use `docker://host/container/stream` from configured Docker ingest metadata. |
+| `ai_tool` | text\|null | AI tool name (e.g. `claude`, `codex`) |
+| `ai_project` | text\|null | AI project path |
+| `ai_session_id` | text\|null | AI session unique identifier |
+| `ai_transcript_path` | text\|null | Full path to the source transcript file |
 
 **Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker ingest entries, `source_ip` identifies the configured Docker ingest host/container/stream and should be trusted only as far as the configured docker-socket-proxy endpoint and network path are trusted. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
 

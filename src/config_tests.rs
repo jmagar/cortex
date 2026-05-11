@@ -330,10 +330,12 @@ fn api_enabled_rejects_invalid_bool_values() {
     std::env::remove_var("SYSLOG_API_ENABLED");
 
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("SYSLOG_API_ENABLED"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("SYSLOG_API_ENABLED")
+    );
 }
 
 #[test]
@@ -511,9 +513,10 @@ fn docker_ingest_requires_hosts_when_enabled() {
     config.hosts.clear();
 
     let err = validate_docker_ingest_config(&config).unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("docker_ingest.hosts must not be empty"));
+    assert!(
+        err.to_string()
+            .contains("docker_ingest.hosts must not be empty")
+    );
 }
 
 #[test]
@@ -536,9 +539,10 @@ fn docker_ingest_rejects_duplicate_host_names() {
     };
 
     let err = validate_docker_ingest_config(&config).unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("duplicate docker_ingest host name"));
+    assert!(
+        err.to_string()
+            .contains("duplicate docker_ingest host name")
+    );
 }
 
 #[test]
@@ -560,6 +564,8 @@ fn docker_ingest_loads_hosts_file_from_env() {
     std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "true");
     std::env::set_var("SYSLOG_DOCKER_HOSTS_FILE", &path);
+    // Ensure the host list env var doesn't override the file path under test
+    std::env::remove_var("SYSLOG_DOCKER_HOSTS");
     let result = Config::load();
     std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_DOCKER_INGEST_ENABLED");

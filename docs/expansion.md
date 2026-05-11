@@ -237,9 +237,9 @@ async fn otlp_logs_handler(
 
 Most-bang-for-buck items to do at ingest, not query time:
 
-- **Authelia severity parsing** — extract `level=` from structured body, override severity column
-- **AdGuard tag classification** — parse JSON line, set `tag` to `adguard-blocked` / `adguard-allowed` / `adguard-rewrite` so retention rules can differentiate
-- **claude/codex transcript metadata** — pull `project` from `imfile` source filename (`addMetadata="on"`) into a dedicated column
+- **Authelia severity parsing** — implemented; extract `level=` from structured body, override severity column
+- **AdGuard tag classification** — implemented; parse JSON line, set `tag` to `adguard-blocked` / `adguard-allowed` / `adguard-rewrite`
+- **claude/codex transcript metadata** — implemented; pull `project` and `tool` from `imfile` source filename or JSON body into dedicated columns; query via `syslog sessions`
 - **Multi-line glomming** — fail2ban + authelia panics need `startmsg.regex` discipline (already in drop-ins below)
 
 ### 5.3 retention

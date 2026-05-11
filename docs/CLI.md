@@ -105,6 +105,26 @@ syslog hosts
 syslog hosts --json
 ```
 
+### `syslog sessions`
+
+List AI transcript sessions grouped by project.
+
+```bash
+syslog sessions --project /home/jmagar/workspace/syslog-mcp --limit 20
+```
+
+Flags:
+
+| Flag | Description |
+| --- | --- |
+| `--project PATH` | Exact project path filter |
+| `--tool TOOL` | AI tool filter: `claude`, `codex`, or `gemini` |
+| `--hostname HOST` | Filter by host |
+| `--from TIME` | RFC3339 start timestamp |
+| `--to TIME` | RFC3339 end timestamp |
+| `--limit N` | Maximum returned rows |
+| `--json` | Print JSON response |
+
 ### `syslog correlate`
 
 Find related events around a reference timestamp. Results are grouped by host.
@@ -147,6 +167,7 @@ The direct CLI and MCP tool share the same business layer:
 | `syslog tail` | `syslog` with `action="tail"` |
 | `syslog errors` | `syslog` with `action="errors"` |
 | `syslog hosts` | `syslog` with `action="hosts"` |
+| `syslog sessions` | `syslog` with `action="sessions"` |
 | `syslog correlate` | `syslog` with `action="correlate"` |
 | `syslog stats` | `syslog` with `action="stats"` |
 
