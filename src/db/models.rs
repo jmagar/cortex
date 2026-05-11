@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 /// independent of the hostname claimed in the syslog message body. Docker ingest uses
 /// a configured `docker://host/container/stream` source identifier instead.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct LogBatchEntry {
     pub timestamp: String,
     pub hostname: String,
@@ -37,7 +36,6 @@ pub struct DockerCheckpoint {
 }
 
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
 pub struct ListAiSessionsParams {
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
@@ -48,7 +46,6 @@ pub struct ListAiSessionsParams {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)]
 pub struct AiSessionEntry {
     pub ai_project: String,
     pub ai_tool: String,
@@ -152,7 +149,6 @@ pub struct LogEntry {
 
 /// Parameters for searching logs
 #[derive(Debug, Clone, Default, Deserialize)]
-#[allow(dead_code)]
 pub struct SearchParams {
     /// Full-text search query (FTS5 syntax)
     pub query: Option<String>,

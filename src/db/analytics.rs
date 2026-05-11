@@ -11,9 +11,9 @@ use rusqlite::params;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
+use super::LogEntry;
 use super::pool::DbPool;
 use super::queries::map_row_with_raw;
-use super::LogEntry;
 
 // -----------------------------------------------------------------------------
 // apps: distinct app_names with stats
@@ -600,7 +600,8 @@ pub fn context_around(
             // we know exactly which row at `timestamp` is the reference.
             let mut before_stmt = conn.prepare(
                 "SELECT id, timestamp, hostname, facility, severity,
-                        app_name, process_id, message, received_at, source_ip
+                        app_name, process_id, message, received_at, source_ip,
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path
                  FROM logs
                  WHERE hostname = ?1
                    AND (timestamp < ?2 OR (timestamp = ?2 AND id < ?3))
@@ -616,7 +617,8 @@ pub fn context_around(
 
             let mut after_stmt = conn.prepare(
                 "SELECT id, timestamp, hostname, facility, severity,
-                        app_name, process_id, message, received_at, source_ip
+                        app_name, process_id, message, received_at, source_ip,
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path
                  FROM logs
                  WHERE hostname = ?1
                    AND (timestamp > ?2 OR (timestamp = ?2 AND id > ?3))
@@ -638,7 +640,8 @@ pub fn context_around(
             // symmetry over completeness.
             let mut before_stmt = conn.prepare(
                 "SELECT id, timestamp, hostname, facility, severity,
-                        app_name, process_id, message, received_at, source_ip
+                        app_name, process_id, message, received_at, source_ip,
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path
                  FROM logs
                  WHERE hostname = ?1 AND timestamp < ?2
                  ORDER BY timestamp DESC, id DESC
@@ -653,7 +656,8 @@ pub fn context_around(
 
             let mut after_stmt = conn.prepare(
                 "SELECT id, timestamp, hostname, facility, severity,
-                        app_name, process_id, message, received_at, source_ip
+                        app_name, process_id, message, received_at, source_ip,
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path
                  FROM logs
                  WHERE hostname = ?1 AND timestamp > ?2
                  ORDER BY timestamp ASC, id ASC

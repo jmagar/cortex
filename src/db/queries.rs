@@ -220,7 +220,6 @@ pub fn list_hosts(pool: &DbPool) -> Result<Vec<HostEntry>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-#[allow(dead_code)]
 pub fn list_ai_sessions(
     pool: &DbPool,
     params: &ListAiSessionsParams,

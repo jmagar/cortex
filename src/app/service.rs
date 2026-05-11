@@ -6,13 +6,13 @@ use tokio::sync::Semaphore;
 
 use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
-    AnomaliesRequest, AnomaliesResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest,
-    CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
+    AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest, ClockSkewResponse,
+    CompareRequest, CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
     CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
     GetLogResponse, IngestRateRequest, IngestRateResponse, ListAppsRequest, ListAppsResponse,
-    ListHostsResponse, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
-    SearchLogsRequest, SearchLogsResponse, SilentHostsRequest, SilentHostsResponse,
-    TailLogsRequest, TimelineRequest, TimelineResponse,
+    ListHostsResponse, ListSessionsRequest, ListSessionsResponse, ListSourceIpsResponse, LogEntry,
+    PatternsRequest, PatternsResponse, SearchLogsRequest, SearchLogsResponse, SilentHostsRequest,
+    SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
@@ -149,6 +149,30 @@ impl SyslogService {
         let rows = self.run_db(db::list_hosts).await?;
         Ok(ListHostsResponse {
             hosts: rows.into_iter().map(Into::into).collect(),
+        })
+    }
+
+    pub async fn list_sessions(
+        &self,
+        req: ListSessionsRequest,
+    ) -> ServiceResult<ListSessionsResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::ListAiSessionsParams {
+            ai_project: req.project,
+            ai_tool: req.tool,
+            hostname: req.hostname,
+            from,
+            to,
+            limit: req.limit,
+        };
+        let rows = self
+            .run_db(move |pool| db::list_ai_sessions(pool, &params))
+            .await?;
+        let sessions: Vec<AiSessionEntry> = rows.into_iter().map(Into::into).collect();
+        Ok(ListSessionsResponse {
+            count: sessions.len(),
+            sessions,
         })
     }
 

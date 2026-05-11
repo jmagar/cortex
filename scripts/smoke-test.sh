@@ -11,8 +11,9 @@
 #
 # Action inventory reference (not every action is exercised by this smoke test):
 #   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
-#   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
-#   mcp_call source_ips, mcp_call timeline, mcp_call patterns, mcp_call context,
+#   mcp_call sessions, mcp_call correlate, mcp_call stats, mcp_call status,
+#   mcp_call apps, mcp_call source_ips, mcp_call timeline, mcp_call patterns,
+ mcp_call context,
 #   mcp_call get, mcp_call ingest_rate, mcp_call silent_hosts,
 #   mcp_call clock_skew, mcp_call anomalies, mcp_call compare, mcp_call help
 
@@ -252,6 +253,29 @@ print('ok' if '${SEED_HOST}' in hosts else f'missing: {hosts}')
 " 2>/dev/null || echo "error")
     assert_eq "hosts: seeded host '$SEED_HOST' appears in list" "$SEED_HOST_FOUND" "ok"
 fi
+
+# ── sessions ──────────────────────────────────────────────────────────────────
+echo ""
+echo "Action: sessions"
+SESSIONS=$(mcp_call sessions "limit=10" 2>&1)
+assert_no_error "sessions: no error" "$SESSIONS"
+
+SESSIONS_VALID=$(echo "$SESSIONS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert 'count' in d, 'count missing'
+assert isinstance(d['sessions'], list), 'sessions not a list'
+for s in d['sessions']:
+    assert s.get('project'), 'project missing'
+    assert s.get('tool'), 'tool missing'
+    assert s.get('session_id'), 'session_id missing'
+    assert s.get('hostname'), 'hostname missing'
+    assert 'first_seen' in s, 'first_seen missing'
+    assert 'last_seen' in s, 'last_seen missing'
+    assert s.get('event_count', 0) >= 1, 'event_count < 1'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "sessions: response structure valid" "$SESSIONS_VALID" "ok"
 
 # ── tail ──────────────────────────────────────────────────────────────────────
 echo ""
@@ -499,7 +523,7 @@ d = json.load(sys.stdin)
 assert 'help' in d, 'help key missing'
 text = d['help']
 assert len(text) > 100, 'help text suspiciously short'
-for section in ('search', 'tail', 'errors', 'hosts', 'correlate', 'stats', 'status'):
+for section in ('search', 'tail', 'errors', 'hosts', 'sessions', 'correlate', 'stats', 'status'):
     assert section in text.lower(), f'help text missing section: {section}'
 print('ok')
 " 2>/dev/null || echo "error")

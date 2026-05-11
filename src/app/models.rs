@@ -42,7 +42,6 @@ impl From<db::LogEntry> for LogEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct ListSessionsRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -53,14 +52,12 @@ pub struct ListSessionsRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct ListSessionsResponse {
     pub count: usize,
     pub sessions: Vec<AiSessionEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct AiSessionEntry {
     pub project: String,
     pub tool: String,

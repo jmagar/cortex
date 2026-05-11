@@ -18,10 +18,10 @@
 #   PORT                   Override server port (default: 3100)
 #
 # Action inventory reference (not every action is exercised by this live test):
-#   syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate,
-#   syslog stats, syslog status, syslog apps, syslog source_ips,
-#   syslog timeline, syslog patterns, syslog context, syslog get,
-#   syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
+#   syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions,
+#   syslog correlate, syslog stats, syslog status, syslog apps,
+#   syslog source_ips, syslog timeline, syslog patterns, syslog context,
+#   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
 #   syslog anomalies, syslog compare, syslog help
 #
 # Exit codes:
@@ -458,6 +458,14 @@ phase_tools() {
   else
     _skip "syslog hosts — entry field validation" "no hosts in DB (no syslog data ingested)"
   fi
+
+  # --- syslog sessions ---
+  section "  syslog sessions"
+  local sessions_result
+  sessions_result="$(call_tool syslog '{"action":"sessions","limit":10}')" || sessions_result=""
+
+  assert_jq "syslog sessions — count field present" "${sessions_result}" '.count != null'
+  assert_jq "syslog sessions — sessions field is array" "${sessions_result}" '.sessions | type' "array"
 
   # --- syslog search ---
   section "  syslog search"

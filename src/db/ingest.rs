@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use rusqlite::{Error as SqliteError, ErrorCode, params};
+use rusqlite::{params, Error as SqliteError, ErrorCode};
 
 use super::models::LogBatchEntry;
 use super::pool::DbPool;

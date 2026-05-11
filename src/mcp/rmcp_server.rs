@@ -2,6 +2,7 @@ use std::{borrow::Cow, net::Ipv6Addr, sync::Arc, time::Instant};
 
 use lab_auth::AuthContext;
 use rmcp::{
+    ErrorData, RoleServer, ServerHandler,
     model::{
         CallToolRequestParams, CallToolResult, Content, Implementation, ListResourcesResult,
         ListToolsResult, PaginatedRequestParams, RawResource, ReadResourceRequestParams,
@@ -9,16 +10,15 @@ use rmcp::{
     },
     service::RequestContext,
     transport::streamable_http_server::{
-        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
     },
-    ErrorData, RoleServer, ServerHandler,
 };
 use serde_json::{Map, Value};
 
 use crate::app::ServiceError;
 use crate::config::McpConfig;
 
-use super::{schemas::tool_definitions, tools::execute_tool, AppState, AuthPolicy};
+use super::{AppState, AuthPolicy, schemas::tool_definitions, tools::execute_tool};
 
 #[derive(Clone)]
 pub struct SyslogRmcpServer {
@@ -39,6 +39,7 @@ const READ_ONLY_ACTIONS: &[&str] = &[
     "stats",
     "status",
     "apps",
+    "sessions",
     "source_ips",
     "timeline",
     "patterns",
@@ -173,11 +174,9 @@ impl ServerHandler for SyslogRmcpServer {
         let text = serde_json::to_string_pretty(&schema).map_err(|error| {
             ErrorData::internal_error(format!("serialization error: {error}"), None)
         })?;
-        Ok(ReadResourceResult::new(vec![ResourceContents::text(
-            text,
-            SCHEMA_RESOURCE_URI,
-        )
-        .with_mime_type("application/json")]))
+        Ok(ReadResourceResult::new(vec![
+            ResourceContents::text(text, SCHEMA_RESOURCE_URI).with_mime_type("application/json"),
+        ]))
     }
 
     fn get_info(&self) -> ServerInfo {

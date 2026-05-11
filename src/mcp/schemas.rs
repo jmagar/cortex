@@ -1,15 +1,16 @@
 use crate::db::SEVERITY_LEVELS;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub(super) const SYSLOG_ACTIONS: &[&str] = &[
     "search",
     "tail",
     "errors",
     "hosts",
+    "apps",
+    "sessions",
     "correlate",
     "stats",
     "status",
-    "apps",
     "source_ips",
     "timeline",
     "patterns",
@@ -27,7 +28,7 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
 pub(super) fn tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "syslog",
-        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, and syslog help.",
+        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, and syslog help.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -42,7 +43,16 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "hostname": {
                     "type": "string",
-                    "description": "For action=search, tail, correlate, apps, timeline, patterns, or context: exact hostname filter. Use action=hosts to enumerate."
+                    "description": "For action=search, tail, correlate, apps, sessions, timeline, patterns, or context: exact hostname filter. Use action=hosts to enumerate."
+                },
+                "project": {
+                    "type": "string",
+                    "description": "For action=sessions: exact project path, e.g. /home/jmagar/workspace/syslog-mcp."
+                },
+                "tool": {
+                    "type": "string",
+                    "enum": ["claude", "codex", "gemini"],
+                    "description": "For action=sessions: AI tool filter."
                 },
                 "source_ip": {
                     "type": "string",
@@ -72,15 +82,15 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "from": {
                     "type": "string",
-                    "description": "For action=search, errors, timeline, or patterns: start of time range as ISO 8601/RFC3339."
+                    "description": "For action=search, sessions, errors, timeline, or patterns: start of time range as ISO 8601/RFC3339."
                 },
                 "to": {
                     "type": "string",
-                    "description": "For action=search, errors, timeline, or patterns: end of time range as ISO 8601/RFC3339."
+                    "description": "For action=search, sessions, errors, timeline, or patterns: end of time range as ISO 8601/RFC3339."
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search: max results, default 100, max 1000. For action=correlate: max total events, default 500, max 999."
+                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=correlate: max total events, default 500, max 999."
                 },
                 "n": {
                     "type": "integer",

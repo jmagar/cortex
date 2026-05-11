@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use axum::{
-    body::{to_bytes, Body},
-    extract::Request as AxumRequest,
-    http::{header, Request, StatusCode},
-    middleware::{self, Next},
     Router,
+    body::{Body, to_bytes},
+    extract::Request as AxumRequest,
+    http::{Request, StatusCode, header},
+    middleware::{self, Next},
 };
 use lab_auth::AuthContext;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 use crate::{
@@ -16,8 +16,8 @@ use crate::{
     config::{McpConfig, StorageConfig},
     db::{self, DbPool, LogBatchEntry},
     mcp::{
-        schemas::SYSLOG_ACTIONS, streamable_http_config, streamable_http_service, AppState,
-        AuthPolicy,
+        AppState, AuthPolicy, schemas::SYSLOG_ACTIONS, streamable_http_config,
+        streamable_http_service,
     },
 };
 
@@ -671,6 +671,11 @@ fn public_read_actions_require_syslog_read_scope() {
         required_scope_for("not_a_real_action"),
         Some("syslog:__deny__")
     );
+}
+
+#[test]
+fn sessions_action_requires_read_scope() {
+    assert_eq!(required_scope_for("sessions"), Some("syslog:read"));
 }
 
 /// `AuthPolicy::Mounted` + AuthContext with `syslog:admin` (superset) → read

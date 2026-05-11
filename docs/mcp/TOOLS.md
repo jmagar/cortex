@@ -11,6 +11,7 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `tail` | Recent log entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
+| `sessions` | AI transcript sessions by project |
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics and storage health |
 | `status` | Lightweight runtime and DB health |
@@ -58,6 +59,14 @@ Optional arguments: `from`, `to`, `group_by`.
 List all hosts that have sent syslog messages.
 
 Required argument: `action = "hosts"`
+
+## syslog sessions
+
+List AI transcript sessions grouped by project, tool, session, and host.
+
+Required argument: `action = "sessions"`
+
+Optional arguments: `project`, `tool`, `hostname`, `from`, `to`, `limit`.
 
 ## syslog correlate
 

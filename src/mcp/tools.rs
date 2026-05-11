@@ -1,13 +1,13 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
-    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAppsRequest, PatternsRequest,
-    SearchLogsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
+    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAppsRequest, ListSessionsRequest,
+    PatternsRequest, SearchLogsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
 };
 
-use super::schemas::SYSLOG_ACTIONS;
 use super::AppState;
+use super::schemas::SYSLOG_ACTIONS;
 
 /// Execute a tool by name
 pub(super) async fn execute_tool(
@@ -33,6 +33,7 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "stats" => tool_get_stats(state, args).await,
         "status" => tool_get_status(state, args).await,
         "apps" => tool_list_apps(state, args).await,
+        "sessions" => tool_list_sessions(state, args).await,
         "source_ips" => tool_list_source_ips(state, args).await,
         "timeline" => tool_timeline(state, args).await,
         "patterns" => tool_patterns(state, args).await,
@@ -110,6 +111,22 @@ async fn tool_list_apps(state: &AppState, args: Value) -> anyhow::Result<Value> 
         })
         .await?;
     tracing::debug!(app_count = response.apps.len(), "list_apps completed");
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_list_sessions(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let response = state
+        .service
+        .list_sessions(ListSessionsRequest {
+            project: string_arg(&args, "project"),
+            tool: string_arg(&args, "tool"),
+            hostname: string_arg(&args, "hostname"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
+        })
+        .await?;
+    tracing::debug!(session_count = response.count, "list_sessions completed");
     Ok(serde_json::to_value(response)?)
 }
 
@@ -403,6 +420,18 @@ Mirror of `syslog hosts` for the `app_name` dimension.
 
 **Parameters:**
 - `hostname` (string, optional) — restrict to apps seen on this host
+
+---
+
+## syslog sessions
+Lists AI transcript sessions grouped by project/tool/session/host.
+
+**Parameters:**
+- `project` (string, optional) — exact project path, e.g. `/home/jmagar/workspace/syslog-mcp`
+- `tool` (string, optional) — AI tool filter: `claude`, `codex`, or `gemini`
+- `hostname` (string, optional) — restrict to one host
+- `from`, `to` (string, optional) — time range (ISO 8601)
+- `limit` (integer, optional) — max sessions (default 100, max 1000)
 
 ---
 
