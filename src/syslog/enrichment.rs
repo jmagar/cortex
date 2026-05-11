@@ -49,6 +49,9 @@ pub struct EnrichmentConfig {
 static AUTHELIA_LEVEL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\blevel=([A-Za-z]+)").expect("static regex"));
 
+static IMFILE_PATH: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"file="([^"]+\.(?:jsonl|json))""#).expect("static regex"));
+
 /// Patterns scrubbed from AI-source message bodies. Each matches the entire
 /// secret token; the matched text is replaced with `[REDACTED]`.
 static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -110,6 +113,8 @@ struct AdGuardResult {
 /// Apply enrichment to one entry. Pure function — never panics, never logs at
 /// `error`. Parse failures fall through, leaving the entry unchanged.
 pub(crate) fn enrich_entry(mut entry: LogBatchEntry, config: &EnrichmentConfig) -> LogBatchEntry {
+    enrich_ai_metadata(&mut entry);
+
     if matches_app(&entry, "authelia")
         && source_ip_matches(&entry, config.authelia_source_ip.as_deref())
     {
@@ -192,6 +197,99 @@ fn classify_adguard(message: &str) -> Option<&'static str> {
 
 fn is_ai_source(app_name: &str) -> bool {
     AI_SOURCES.contains(&app_name)
+}
+
+fn enrich_ai_metadata(entry: &mut LogBatchEntry) {
+    let Some(app_name) = entry.app_name.as_deref() else {
+        return;
+    };
+    let Some(tool) = ai_tool_from_app(app_name) else {
+        return;
+    };
+    entry.ai_tool = Some(tool.to_string());
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&entry.message) {
+        fill_ai_metadata_from_json(entry, &value);
+    }
+
+    if let Some(path) = extract_imfile_path(&entry.raw) {
+        entry.ai_transcript_path = Some(path.clone());
+        if entry.ai_project.is_none() {
+            entry.ai_project = project_from_transcript_path(&path);
+        }
+        if entry.ai_session_id.is_none() {
+            entry.ai_session_id = session_id_from_path(&path);
+        }
+    }
+}
+
+fn ai_tool_from_app(app_name: &str) -> Option<&'static str> {
+    match app_name {
+        "claude-transcript" | "claude-code" => Some("claude"),
+        "codex-transcript" | "codex" => Some("codex"),
+        "gemini-transcript" => Some("gemini"),
+        _ => None,
+    }
+}
+
+fn extract_imfile_path(raw: &str) -> Option<String> {
+    IMFILE_PATH
+        .captures(raw)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+fn session_id_from_path(path: &str) -> Option<String> {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(str::to_string)
+}
+
+fn project_from_transcript_path(path: &str) -> Option<String> {
+    if let Some(project_part) = path.split("/.claude/projects/").nth(1) {
+        let encoded = project_part.split('/').next()?;
+        return decode_claude_project(encoded);
+    }
+    None
+}
+
+fn decode_claude_project(encoded: &str) -> Option<String> {
+    let stripped = encoded.strip_prefix('-').unwrap_or(encoded);
+    if stripped.is_empty() {
+        return None;
+    }
+    Some(format!("/{}", stripped.replace('-', "/")))
+}
+
+fn fill_ai_metadata_from_json(entry: &mut LogBatchEntry, value: &serde_json::Value) {
+    let payload = value.get("payload").unwrap_or(value);
+    if entry.ai_session_id.is_none() {
+        entry.ai_session_id = payload
+            .get("id")
+            .or_else(|| value.get("sessionId"))
+            .or_else(|| value.get("session_id"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+    }
+    if entry.ai_project.is_none() {
+        entry.ai_project = payload
+            .get("cwd")
+            .or_else(|| value.get("cwd"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+    }
+    if entry.ai_project.is_none() {
+        entry.ai_project = payload
+            .get("arguments")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|args| serde_json::from_str::<serde_json::Value>(args).ok())
+            .and_then(|args| {
+                args.get("workdir")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            });
+    }
 }
 
 /// Replace any token matching the secret pattern set with `[REDACTED]`. The
