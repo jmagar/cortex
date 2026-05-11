@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-05-11
+
+### Fixed
+
+- **Scanner error resilience**: Replace hard-fail error propagation with graceful
+  per-path error accumulation so a single unreadable directory or file no longer
+  aborts the entire scan; errors are collected into `IndexResult` and reported
+  at the end.
+- **Config db_path default**: Changed default `db_path` from `/data/syslog.db`
+  to the relative `data/syslog.db` so local dev builds work out of the box.
+
+### Changed
+
+- Renamed `supported_file` → `supported_discovered_file` for clarity.
+- Extended test coverage for scanner path validation and config defaults.
+
 ## [0.19.1] - 2026-05-11
 
 ### Fixed

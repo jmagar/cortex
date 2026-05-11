@@ -71,7 +71,7 @@ pub fn index_roots(pool: &DbPool, root_override: Option<&Path>) -> Result<IndexR
         if !root.exists() {
             continue;
         }
-        collect_supported_files(&root, &mut files)?;
+        collect_supported_files(&root, &mut files, &mut result);
     }
     files.sort();
     files.dedup();
@@ -177,37 +177,58 @@ pub fn index_file(pool: &DbPool, path: &Path, source_kind: &str) -> Result<Index
     Ok(result)
 }
 
-fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    validate_path(path)?;
+fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut IndexResult) {
+    if let Err(error) = validate_path(path) {
+        result.skipped_files += 1;
+        result.file_errors.push(IndexFileError {
+            path: path.display().to_string(),
+            error: error.to_string(),
+        });
+        return;
+    }
     if path.is_file() {
-        if supported_file(path) {
+        if supported_discovered_file(path) {
             files.push(path.to_path_buf());
         }
-        return Ok(());
+        return;
     }
 
     let mut entries = Vec::new();
-    for entry in fs::read_dir(path)? {
-        let entry =
-            entry.with_context(|| format!("failed to read entry under {}", path.display()))?;
-        entries.push(entry.path());
+    let read_dir = match fs::read_dir(path) {
+        Ok(read_dir) => read_dir,
+        Err(error) => {
+            result.skipped_files += 1;
+            result.file_errors.push(IndexFileError {
+                path: path.display().to_string(),
+                error: error.to_string(),
+            });
+            return;
+        }
+    };
+    for entry in read_dir {
+        match entry.with_context(|| format!("failed to read entry under {}", path.display())) {
+            Ok(entry) => entries.push(entry.path()),
+            Err(error) => {
+                result.skipped_files += 1;
+                result.file_errors.push(IndexFileError {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                });
+            }
+        }
     }
     entries.sort();
     for entry in entries {
         if entry.is_dir() {
-            collect_supported_files(&entry, files)?;
-        } else if supported_file(&entry) {
+            collect_supported_files(&entry, files, result);
+        } else if supported_discovered_file(&entry) {
             files.push(entry);
         }
     }
-    Ok(())
 }
 
-fn supported_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|ext| ext.to_str()),
-        Some("jsonl") | Some("json")
-    )
+fn supported_discovered_file(path: &Path) -> bool {
+    matches!(path.extension().and_then(|ext| ext.to_str()), Some("jsonl"))
 }
 
 fn detect_source_kind(path: &Path) -> SourceKind {

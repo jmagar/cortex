@@ -974,3 +974,14 @@ fn auth_toml_section_parses() {
         vec!["https://claude.ai/api/mcp/auth_callback".to_string()]
     );
 }
+
+#[test]
+fn repo_local_config_uses_repo_local_db_path() {
+    let cfg: Config = toml::from_str(include_str!("../config.toml"))
+        .expect("repo config.toml should parse");
+    assert_eq!(
+        cfg.storage.db_path,
+        std::path::PathBuf::from("data/syslog.db"),
+        "repo config.toml should use a writable repo-local DB path for local dev"
+    );
+}

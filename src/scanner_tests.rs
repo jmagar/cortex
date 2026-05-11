@@ -157,6 +157,28 @@ fn index_file_uses_claude_sessions_index_project_path() {
 }
 
 #[test]
+fn index_roots_ignores_claude_sessions_index_metadata() {
+    let (pool, dir) = test_pool();
+    let project_dir = dir.path().join(".claude/projects/-tmp-project");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    std::fs::write(
+        project_dir.join("sessions-index.json"),
+        "{\n  \"version\": 1,\n  \"entries\": []\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project_dir.join("session.jsonl"),
+        "{\"sessionId\":\"claude-1\",\"content\":\"real transcript line\"}\n",
+    )
+    .unwrap();
+
+    let result = index_roots(&pool, Some(dir.path())).unwrap();
+    assert_eq!(result.ingested, 1);
+    assert_eq!(result.parse_errors, 0);
+    assert_eq!(result.skipped_files, 0);
+}
+
+#[test]
 fn index_roots_reports_file_errors_with_paths() {
     let (pool, dir) = test_pool();
     let target = dir.path().join("target.jsonl");
@@ -169,4 +191,31 @@ fn index_roots_reports_file_errors_with_paths() {
     assert_eq!(result.file_errors.len(), 1);
     assert!(result.file_errors[0].path.contains("bad.jsonl"));
     assert!(result.file_errors[0].error.contains("symlinks"));
+}
+
+#[test]
+fn index_roots_skips_unreadable_directories_and_continues() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (pool, dir) = test_pool();
+    let good = dir.path().join("good.jsonl");
+    let blocked = dir.path().join("blocked");
+    std::fs::write(&good, "{\"sessionId\":\"sess-1\",\"content\":\"rust mention\"}\n").unwrap();
+    std::fs::create_dir(&blocked).unwrap();
+    std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let result = index_roots(&pool, Some(dir.path()));
+
+    std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    let result = result.expect("unreadable directories should be reported, not abort indexing");
+    assert_eq!(result.ingested, 1);
+    assert_eq!(result.skipped_files, 1);
+    assert_eq!(result.file_errors.len(), 1);
+    assert!(result.file_errors[0].path.contains("blocked"));
+    assert!(
+        result.file_errors[0].error.contains("Permission denied"),
+        "wrong error: {}",
+        result.file_errors[0].error
+    );
 }

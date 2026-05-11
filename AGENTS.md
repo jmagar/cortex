@@ -108,7 +108,7 @@ SYSLOG_MCP_ALLOWED_HOSTS=myhost.local   # optional; comma-separated extra Host a
 SYSLOG_MCP_ALLOWED_ORIGINS=https://app  # optional; comma-separated extra Origin allowlist
 
 # Storage
-SYSLOG_MCP_DB_PATH=/data/syslog.db
+SYSLOG_MCP_DB_PATH=data/syslog.db
 SYSLOG_MCP_POOL_SIZE=4
 SYSLOG_MCP_RETENTION_DAYS=90     # 0 = keep forever
 SYSLOG_MCP_MAX_DB_SIZE_MB=1024        # 0 = disable logical DB size guard

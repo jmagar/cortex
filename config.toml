@@ -12,7 +12,8 @@ flush_interval = 500
 write_channel_capacity = 10000
 
 [storage]
-db_path = "/data/syslog.db"
+# Local dev uses the repo's writable data/ directory. Docker uses env/defaults.
+db_path = "data/syslog.db"
 pool_size = 4
 retention_days = 90         # 0 = keep forever
 wal_mode = true

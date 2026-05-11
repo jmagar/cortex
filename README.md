@@ -580,7 +580,7 @@ max_tcp_connections = 512
 tcp_idle_timeout_secs = 300
 
 [storage]
-db_path = "/data/syslog.db"
+db_path = "data/syslog.db"
 pool_size = 4
 retention_days = 90   # 0 = keep forever
 wal_mode = true
