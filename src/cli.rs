@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 use syslog_mcp::app::{
     CorrelateEventsRequest, CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse,

@@ -7,7 +7,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::app::SyslogService;
-use crate::config::{AuthMode, Config, mcp_bind_is_loopback};
+use crate::config::{mcp_bind_is_loopback, AuthMode, Config};
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::ingest::IngestTx;
 use crate::mcp::AuthPolicy;
