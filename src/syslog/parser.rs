@@ -120,7 +120,7 @@ pub(super) fn extract_cef_fields(text: &str) -> CefFields {
                 hostname: None,
                 app_name: None,
                 message: None,
-            }
+            };
         }
     };
 
@@ -203,7 +203,10 @@ pub(super) fn parse_syslog(raw: &str, source_ip: String) -> db::LogBatchEntry {
         let cef = extract_cef_fields(&full_text);
         if cef.hostname.is_none() && cef.app_name.is_none() && cef.message.is_none() {
             let preview = &full_text[..full_text.len().min(200)];
-            warn!(msg = preview, "CEF heuristic triggered but all fields are None — malformed CEF body, using raw fallback");
+            warn!(
+                msg = preview,
+                "CEF heuristic triggered but all fields are None — malformed CEF body, using raw fallback"
+            );
         }
         if let Some(ref cef_host) = cef.hostname {
             if !raw_hostname.is_empty() && cef_host != &raw_hostname {
@@ -243,6 +246,10 @@ pub(super) fn parse_syslog(raw: &str, source_ip: String) -> db::LogBatchEntry {
         raw: raw.to_string(),
         source_ip,
         docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 

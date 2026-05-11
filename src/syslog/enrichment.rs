@@ -19,7 +19,10 @@
 //! volume.
 
 use std::borrow::Cow;
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::{LazyLock, Mutex};
+use std::{fs, path::PathBuf};
 
 use regex::Regex;
 use serde::Deserialize;
@@ -48,6 +51,13 @@ pub struct EnrichmentConfig {
 /// Captures `level=...` from Authelia structured log lines.
 static AUTHELIA_LEVEL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\blevel=([A-Za-z]+)").expect("static regex"));
+
+/// Capture the file="..." metadata from rsyslog imfile records.
+static IMFILE_PATH: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new("file=\"([^\"]+\\.(?:jsonl|json))\"").expect("static regex"));
+
+static CLAUDE_PROJECT_INDEX_CACHE: LazyLock<Mutex<HashMap<PathBuf, Option<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Patterns scrubbed from AI-source message bodies. Each matches the entire
 /// secret token; the matched text is replaced with `[REDACTED]`.
@@ -82,8 +92,10 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 const AI_SOURCES: &[&str] = &[
     "claude-transcript",
     "codex-transcript",
+    "gemini-transcript",
     "claude-code",
     "codex",
+    "ai-transcript",
 ];
 
 /// Minimal AdGuard query log row. AdGuard emits PascalCase JSON keys; the
@@ -107,9 +119,27 @@ struct AdGuardResult {
     reason: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeSessionsIndex {
+    #[serde(default)]
+    original_path: Option<String>,
+    #[serde(default)]
+    entries: Vec<ClaudeSessionsIndexEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeSessionsIndexEntry {
+    #[serde(default)]
+    project_path: Option<String>,
+}
+
 /// Apply enrichment to one entry. Pure function — never panics, never logs at
 /// `error`. Parse failures fall through, leaving the entry unchanged.
 pub(crate) fn enrich_entry(mut entry: LogBatchEntry, config: &EnrichmentConfig) -> LogBatchEntry {
+    enrich_ai_metadata(&mut entry);
+
     if matches_app(&entry, "authelia")
         && source_ip_matches(&entry, config.authelia_source_ip.as_deref())
     {
@@ -194,13 +224,140 @@ fn is_ai_source(app_name: &str) -> bool {
     AI_SOURCES.contains(&app_name)
 }
 
+fn enrich_ai_metadata(entry: &mut LogBatchEntry) {
+    let Some(app_name) = entry.app_name.as_deref() else {
+        return;
+    };
+    let Some(tool) = ai_tool_from_app(app_name) else {
+        return;
+    };
+    entry.ai_tool = Some(tool.to_string());
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&entry.message) {
+        fill_ai_metadata_from_json(entry, &value);
+    }
+
+    if let Some(path) = extract_imfile_path(&entry.raw) {
+        entry.ai_transcript_path = Some(path.clone());
+        if entry.ai_project.is_none() {
+            entry.ai_project = project_from_transcript_path(&path);
+        }
+        if entry.ai_session_id.is_none() {
+            entry.ai_session_id = session_id_from_path(&path);
+        }
+    }
+}
+
+fn ai_tool_from_app(app_name: &str) -> Option<&'static str> {
+    match app_name {
+        "claude-transcript" | "claude-code" => Some("claude"),
+        "codex-transcript" | "codex" => Some("codex"),
+        "gemini-transcript" => Some("gemini"),
+        _ => None,
+    }
+}
+
+fn extract_imfile_path(raw: &str) -> Option<String> {
+    IMFILE_PATH
+        .captures(raw)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+fn session_id_from_path(path: &str) -> Option<String> {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(str::to_string)
+}
+
+pub(crate) fn project_from_transcript_path(path: &str) -> Option<String> {
+    if let Some(project) = project_from_sessions_index(path) {
+        return Some(project);
+    }
+    if let Some(project_part) = path.split("/.claude/projects/").nth(1) {
+        let encoded = project_part.split('/').next()?;
+        return decode_claude_project(encoded);
+    }
+    None
+}
+
+/// Decode a Claude project directory name back to a path.
+///
+/// Claude encodes project paths by replacing `/` with `-` and prefixing with `-`.
+/// Example: `/home/user/code` -> `-home-user-code`.
+///
+/// This decoder is best-effort and lossy: it cannot distinguish between an
+/// encoded `/` and a literal `-` in a directory name (e.g. `syslog-mcp` vs
+/// `syslog/mcp`).
+fn decode_claude_project(encoded: &str) -> Option<String> {
+    let stripped = encoded.strip_prefix('-').unwrap_or(encoded);
+    if stripped.is_empty() {
+        return None;
+    }
+    Some(format!("/{}", stripped.replace('-', "/")))
+}
+
+fn project_from_sessions_index(path: &str) -> Option<String> {
+    let index_path = Path::new(path).parent()?.join("sessions-index.json");
+    let mut cache = CLAUDE_PROJECT_INDEX_CACHE.lock().ok()?;
+    if let Some(project) = cache.get(&index_path) {
+        return project.clone();
+    }
+
+    let project = fs::read_to_string(&index_path)
+        .ok()
+        .and_then(|body| serde_json::from_str::<ClaudeSessionsIndex>(&body).ok())
+        .and_then(|index| {
+            index.original_path.or_else(|| {
+                index
+                    .entries
+                    .into_iter()
+                    .find_map(|entry| entry.project_path)
+            })
+        });
+
+    cache.insert(index_path, project.clone());
+    project
+}
+
+fn fill_ai_metadata_from_json(entry: &mut LogBatchEntry, value: &serde_json::Value) {
+    let payload = value.get("payload").unwrap_or(value);
+    if entry.ai_session_id.is_none() {
+        entry.ai_session_id = payload
+            .get("id")
+            .or_else(|| value.get("sessionId"))
+            .or_else(|| value.get("session_id"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+    }
+    if entry.ai_project.is_none() {
+        entry.ai_project = payload
+            .get("cwd")
+            .or_else(|| value.get("cwd"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+    }
+    if entry.ai_project.is_none() {
+        entry.ai_project = payload
+            .get("arguments")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|args| serde_json::from_str::<serde_json::Value>(args).ok())
+            .and_then(|args| {
+                args.get("workdir")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            });
+    }
+}
+
 /// Replace any token matching the secret pattern set with `[REDACTED]`. The
 /// raw API token (if configured) is appended as a literal pattern so a leaked
 /// copy in tool output is scrubbed before storage.
 ///
 /// Common case (no match) returns `Cow::Borrowed` and allocates nothing —
 /// hot-path optimization for AI bursts where most messages have no secrets.
-fn scrub_secrets(message: &str, api_token: Option<&str>) -> String {
+pub(crate) fn scrub_ai_message(message: &str, api_token: Option<&str>) -> String {
     let mut out: Cow<str> = Cow::Borrowed(message);
     for re in SECRET_PATTERNS.iter() {
         if let Cow::Owned(replaced) = re.replace_all(&out, "[REDACTED]") {
@@ -213,6 +370,10 @@ fn scrub_secrets(message: &str, api_token: Option<&str>) -> String {
         }
     }
     out.into_owned()
+}
+
+fn scrub_secrets(message: &str, api_token: Option<&str>) -> String {
+    scrub_ai_message(message, api_token)
 }
 
 #[cfg(test)]

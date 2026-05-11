@@ -115,6 +115,10 @@ async fn schema_actions_are_dispatchable() {
             raw: "<11>schema dispatch test".to_string(),
             source_ip: "127.0.0.1:514".to_string(),
             docker_checkpoint: None,
+            ai_tool: None,
+            ai_project: None,
+            ai_session_id: None,
+            ai_transcript_path: None,
         }],
     )
     .unwrap();
@@ -123,6 +127,8 @@ async fn schema_actions_are_dispatchable() {
             "correlate" => {
                 json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"})
             }
+            "search_sessions" => json!({"action": action, "query": "schema"}),
+            "project_context" => json!({"action": action, "project": "/tmp/project"}),
             "context" => {
                 json!({"action": action, "hostname": "schema-test-host", "timestamp": "2026-01-01T00:00:00Z"})
             }

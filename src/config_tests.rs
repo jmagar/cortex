@@ -560,6 +560,8 @@ fn docker_ingest_loads_hosts_file_from_env() {
     std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "true");
     std::env::set_var("SYSLOG_DOCKER_HOSTS_FILE", &path);
+    // Ensure the host list env var doesn't override the file path under test
+    std::env::remove_var("SYSLOG_DOCKER_HOSTS");
     let result = Config::load();
     std::env::remove_var("SYSLOG_MCP_HOST");
     std::env::remove_var("SYSLOG_DOCKER_INGEST_ENABLED");
@@ -970,5 +972,16 @@ fn auth_toml_section_parses() {
     assert_eq!(
         auth.allowed_client_redirect_uris,
         vec!["https://claude.ai/api/mcp/auth_callback".to_string()]
+    );
+}
+
+#[test]
+fn repo_local_config_uses_repo_local_db_path() {
+    let cfg: Config =
+        toml::from_str(include_str!("../config.toml")).expect("repo config.toml should parse");
+    assert_eq!(
+        cfg.storage.db_path,
+        std::path::PathBuf::from("data/syslog.db"),
+        "repo config.toml should use a writable repo-local DB path for local dev"
     );
 }

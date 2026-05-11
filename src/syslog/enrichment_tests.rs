@@ -1,5 +1,7 @@
 //! Tests for the enrichment pipeline.
 
+use std::fs;
+
 use super::*;
 
 fn entry(app: &str, msg: &str, source_ip: &str, severity: &str) -> LogBatchEntry {
@@ -14,6 +16,10 @@ fn entry(app: &str, msg: &str, source_ip: &str, severity: &str) -> LogBatchEntry
         raw: String::new(),
         source_ip: source_ip.to_string(),
         docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 
@@ -262,4 +268,96 @@ fn scrub_skips_non_ai_source() {
     let out = enrich_entry(e, &cfg);
     // nginx is not in AI_SOURCES, scrubber doesn't touch it
     assert!(out.message.contains("AKIAIOSFODNN7EXAMPLE"));
+}
+
+// ---- AI transcript enrichment ----
+
+#[test]
+fn enriches_codex_session_meta_with_project_and_session() {
+    let cfg = EnrichmentConfig::default();
+    let e = entry(
+        "codex-transcript",
+        r#"{"timestamp":"2026-05-11T03:16:18.603Z","type":"session_meta","payload":{"id":"019e1506-dc81-7881-9926-4d6d4efda1ac","cwd":"/home/jmagar/workspace/mem0"}}"#,
+        "10.0.0.1:1",
+        "info",
+    );
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.ai_tool.as_deref(), Some("codex"));
+    assert_eq!(
+        out.ai_project.as_deref(),
+        Some("/home/jmagar/workspace/mem0")
+    );
+    assert_eq!(
+        out.ai_session_id.as_deref(),
+        Some("019e1506-dc81-7881-9926-4d6d4efda1ac")
+    );
+}
+
+#[test]
+fn enriches_codex_function_call_workdir_when_session_meta_absent() {
+    let cfg = EnrichmentConfig::default();
+    let e = entry(
+        "codex-transcript",
+        r#"{"type":"response_item","payload":{"type":"function_call","arguments":"{\"cmd\":\"cargo test\",\"workdir\":\"/home/jmagar/code/swag-mcp\"}"}}"#,
+        "10.0.0.1:1",
+        "info",
+    );
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.ai_tool.as_deref(), Some("codex"));
+    assert_eq!(
+        out.ai_project.as_deref(),
+        Some("/home/jmagar/code/swag-mcp")
+    );
+}
+
+#[test]
+fn enriches_claude_project_from_transcript_path_in_raw() {
+    let cfg = EnrichmentConfig::default();
+    let mut e = entry(
+        "claude-transcript",
+        r#"{"sessionId":"3a8bdaf9-721c-4e0b-8a6b-cffe2740c8d5","cwd":"/home/jmagar/workspace/syslog-mcp"}"#,
+        "10.0.0.1:1",
+        "info",
+    );
+    e.raw = r#"<165>1 2026-05-11T00:00:00Z dookie claude-transcript - - [origin file="/home/jmagar/.claude/projects/-home-jmagar-workspace-syslog-mcp/3a8bdaf9-721c-4e0b-8a6b-cffe2740c8d5.jsonl"] {"sessionId":"3a8bdaf9-721c-4e0b-8a6b-cffe2740c8d5"}"#.to_string();
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.ai_tool.as_deref(), Some("claude"));
+    assert_eq!(
+        out.ai_project.as_deref(),
+        Some("/home/jmagar/workspace/syslog-mcp")
+    );
+    assert_eq!(
+        out.ai_session_id.as_deref(),
+        Some("3a8bdaf9-721c-4e0b-8a6b-cffe2740c8d5")
+    );
+    assert_eq!(
+        out.ai_transcript_path.as_deref(),
+        Some(
+            "/home/jmagar/.claude/projects/-home-jmagar-workspace-syslog-mcp/3a8bdaf9-721c-4e0b-8a6b-cffe2740c8d5.jsonl"
+        )
+    );
+}
+
+#[test]
+fn project_from_transcript_path_prefers_sessions_index_original_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("syslog-mcp");
+    fs::create_dir_all(&project).unwrap();
+
+    let transcript_dir = tmp.path().join(".claude/projects/-tmp-syslog-mcp");
+    fs::create_dir_all(&transcript_dir).unwrap();
+    fs::write(
+        transcript_dir.join("sessions-index.json"),
+        format!(
+            "{{\"version\":1,\"entries\":[],\"originalPath\":\"{}\"}}",
+            project.display()
+        ),
+    )
+    .unwrap();
+
+    let transcript = transcript_dir.join("session-123.jsonl");
+    assert_eq!(
+        project_from_transcript_path(transcript.to_str().unwrap()).as_deref(),
+        Some(project.to_str().unwrap())
+    );
 }

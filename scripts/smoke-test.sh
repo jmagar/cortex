@@ -11,9 +11,12 @@
 #
 # Action inventory reference (not every action is exercised by this smoke test):
 #   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
+#   mcp_call sessions, mcp_call search_sessions, mcp_call usage_blocks,
+#   mcp_call project_context, mcp_call list_ai_tools, mcp_call list_ai_projects,
 #   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
 #   mcp_call source_ips, mcp_call timeline, mcp_call patterns, mcp_call context,
 #   mcp_call get, mcp_call ingest_rate, mcp_call silent_hosts,
+
 #   mcp_call clock_skew, mcp_call anomalies, mcp_call compare, mcp_call help
 
 set -euo pipefail
@@ -252,6 +255,84 @@ print('ok' if '${SEED_HOST}' in hosts else f'missing: {hosts}')
 " 2>/dev/null || echo "error")
     assert_eq "hosts: seeded host '$SEED_HOST' appears in list" "$SEED_HOST_FOUND" "ok"
 fi
+
+# ── sessions ──────────────────────────────────────────────────────────────────
+echo ""
+echo "Action: sessions"
+SESSIONS=$(mcp_call sessions "limit=10" 2>&1)
+assert_no_error "sessions: no error" "$SESSIONS"
+
+SESSIONS_VALID=$(echo "$SESSIONS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert 'count' in d, 'count missing'
+assert isinstance(d['sessions'], list), 'sessions not a list'
+for s in d['sessions']:
+    assert s.get('project'), 'project missing'
+    assert s.get('tool'), 'tool missing'
+    assert s.get('session_id'), 'session_id missing'
+    assert s.get('hostname'), 'hostname missing'
+    assert 'first_seen' in s, 'first_seen missing'
+    assert 'last_seen' in s, 'last_seen missing'
+    assert s.get('event_count', 0) >= 1, 'event_count < 1'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "sessions: response structure valid" "$SESSIONS_VALID" "ok"
+
+echo ""
+echo "Action: AI session analytics"
+SEARCH_SESSIONS=$(mcp_call search_sessions "query=authentication" "limit=10" 2>&1)
+assert_no_error "search_sessions: no error" "$SEARCH_SESSIONS"
+SEARCH_SESSIONS_VALID=$(echo "$SEARCH_SESSIONS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert 'total_candidates' in d, 'total_candidates missing'
+assert isinstance(d.get('sessions'), list), 'sessions not a list'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "search_sessions: response structure valid" "$SEARCH_SESSIONS_VALID" "ok"
+
+USAGE_BLOCKS=$(mcp_call usage_blocks 2>&1)
+assert_no_error "usage_blocks: no error" "$USAGE_BLOCKS"
+USAGE_BLOCKS_VALID=$(echo "$USAGE_BLOCKS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert isinstance(d.get('blocks'), list), 'blocks not a list'
+assert 'truncated' in d, 'truncated missing'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "usage_blocks: response structure valid" "$USAGE_BLOCKS_VALID" "ok"
+
+PROJECT_CONTEXT=$(mcp_call project_context "project=/tmp" "limit=5" 2>&1)
+assert_no_error "project_context: no error" "$PROJECT_CONTEXT"
+PROJECT_CONTEXT_VALID=$(echo "$PROJECT_CONTEXT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('project') == '/tmp', 'project mismatch'
+assert isinstance(d.get('recent_entries'), list), 'recent_entries not a list'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "project_context: response structure valid" "$PROJECT_CONTEXT_VALID" "ok"
+
+AI_TOOLS=$(mcp_call list_ai_tools 2>&1)
+assert_no_error "list_ai_tools: no error" "$AI_TOOLS"
+AI_TOOLS_VALID=$(echo "$AI_TOOLS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert isinstance(d.get('tools'), list), 'tools not a list'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "list_ai_tools: response structure valid" "$AI_TOOLS_VALID" "ok"
+
+AI_PROJECTS=$(mcp_call list_ai_projects 2>&1)
+assert_no_error "list_ai_projects: no error" "$AI_PROJECTS"
+AI_PROJECTS_VALID=$(echo "$AI_PROJECTS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert isinstance(d.get('projects'), list), 'projects not a list'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "list_ai_projects: response structure valid" "$AI_PROJECTS_VALID" "ok"
 
 # ── tail ──────────────────────────────────────────────────────────────────────
 echo ""
@@ -499,7 +580,7 @@ d = json.load(sys.stdin)
 assert 'help' in d, 'help key missing'
 text = d['help']
 assert len(text) > 100, 'help text suspiciously short'
-for section in ('search', 'tail', 'errors', 'hosts', 'correlate', 'stats', 'status'):
+for section in ('search', 'tail', 'errors', 'hosts', 'sessions', 'correlate', 'stats', 'status'):
     assert section in text.lower(), f'help text missing section: {section}'
 print('ok')
 " 2>/dev/null || echo "error")

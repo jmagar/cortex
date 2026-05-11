@@ -54,7 +54,11 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
             message     TEXT NOT NULL,
             raw         TEXT NOT NULL,
             received_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            source_ip   TEXT NOT NULL DEFAULT ''
+            source_ip   TEXT NOT NULL DEFAULT '',
+            ai_tool            TEXT,
+            ai_project         TEXT,
+            ai_session_id      TEXT,
+            ai_transcript_path TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
@@ -202,6 +206,96 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
             elapsed_ms = started.elapsed().as_millis(),
             "Migration 3: composite index (app_name, received_at) created"
         );
+    }
+
+    // Migration 4: add AI transcript metadata columns and indexes.
+    let migration_4_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 4",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_4_applied {
+        for (column, sql_type) in [
+            ("ai_tool", "TEXT"),
+            ("ai_project", "TEXT"),
+            ("ai_session_id", "TEXT"),
+            ("ai_transcript_path", "TEXT"),
+        ] {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('logs') WHERE name = ?1",
+                    [column],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+            if !exists {
+                conn.execute_batch(&format!("ALTER TABLE logs ADD COLUMN {column} {sql_type}"))?;
+            }
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time ON logs(ai_project, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_session ON logs(ai_tool, ai_project, ai_session_id);
+             INSERT INTO schema_migrations (version) VALUES (4);",
+        )?;
+        tracing::info!("Migration 4: added AI transcript metadata columns and indexes");
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time ON logs(ai_project, timestamp);
+         CREATE INDEX IF NOT EXISTS idx_logs_ai_session ON logs(ai_tool, ai_project, ai_session_id);",
+    )?;
+
+    let migration_5_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 5",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_5_applied {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS transcript_sources (
+                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                 canonical_path  TEXT NOT NULL UNIQUE,
+                 source_kind     TEXT NOT NULL,
+                 file_size       INTEGER,
+                 file_mtime      INTEGER,
+                 content_hash    TEXT,
+                 last_offset     INTEGER NOT NULL DEFAULT 0,
+                 last_indexed_at TEXT,
+                 last_error      TEXT
+             );
+             INSERT INTO schema_migrations (version) VALUES (5);",
+        )?;
+        tracing::info!("Migration 5: created transcript_sources table");
+    }
+
+    let migration_6_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 6",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_6_applied {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS transcript_import_records (
+                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                 source_id   INTEGER NOT NULL REFERENCES transcript_sources(id),
+                 record_key  TEXT NOT NULL,
+                 imported_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(source_id, record_key)
+             );
+             CREATE INDEX IF NOT EXISTS idx_transcript_import_records_source_id
+                 ON transcript_import_records(source_id);
+             INSERT INTO schema_migrations (version) VALUES (6);",
+        )?;
+        tracing::info!("Migration 6: created transcript_import_records table");
     }
 
     tracing::info!(path = %config.db_path.display(), "Database initialized");

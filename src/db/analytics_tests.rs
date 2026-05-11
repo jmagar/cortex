@@ -32,6 +32,10 @@ fn entry_with_source_ip(
         raw: format!("<14>{ts} {host} {}: {msg}", app.unwrap_or("test")),
         source_ip: source_ip.to_string(),
         docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }
 
@@ -232,6 +236,107 @@ fn context_timestamp_only_anchor_splits_symmetrically() {
     assert!(after
         .iter()
         .all(|r| r.timestamp.as_str() > "2026-01-01T00:00:05Z"));
+}
+
+fn ai_entry(ts: &str, tool: &str, project: &str, session_id: &str, message: &str) -> LogBatchEntry {
+    LogBatchEntry {
+        timestamp: ts.to_string(),
+        hostname: "host-a".to_string(),
+        facility: Some("local0".to_string()),
+        severity: "info".to_string(),
+        app_name: Some("ai-transcript".to_string()),
+        process_id: None,
+        message: message.to_string(),
+        raw: message.to_string(),
+        source_ip: "127.0.0.1:514".to_string(),
+        docker_checkpoint: None,
+        ai_tool: Some(tool.to_string()),
+        ai_project: Some(project.to_string()),
+        ai_session_id: Some(session_id.to_string()),
+        ai_transcript_path: Some(format!("{project}/{session_id}.jsonl")),
+    }
+}
+
+#[test]
+fn usage_blocks_group_into_five_hour_windows() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            ai_entry(
+                "2026-01-01T00:00:00Z",
+                "claude",
+                "/tmp/project",
+                "sess-1",
+                "one",
+            ),
+            ai_entry(
+                "2026-01-01T04:59:59Z",
+                "claude",
+                "/tmp/project",
+                "sess-1",
+                "two",
+            ),
+            ai_entry(
+                "2026-01-01T05:00:00Z",
+                "claude",
+                "/tmp/project",
+                "sess-2",
+                "three",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let result = get_ai_usage_blocks(
+        &pool,
+        &AiUsageBlocksParams {
+            from: Some("2026-01-01T00:00:00Z".into()),
+            to: Some("2026-01-01T06:00:00Z".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(result.blocks.len(), 2);
+    assert_eq!(result.blocks[0].event_count, 1);
+    assert_eq!(result.blocks[1].event_count, 2);
+}
+
+#[test]
+fn project_context_returns_recent_entries() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            ai_entry(
+                "2026-01-01T00:00:00Z",
+                "claude",
+                "/tmp/project",
+                "sess-1",
+                "one",
+            ),
+            ai_entry(
+                "2026-01-01T00:01:00Z",
+                "claude",
+                "/tmp/project",
+                "sess-2",
+                "two",
+            ),
+        ],
+    )
+    .unwrap();
+    let result = get_ai_project_context(
+        &pool,
+        &AiProjectContextParams {
+            project: "/tmp/project".into(),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(result.project, "/tmp/project");
+    assert_eq!(result.event_count, 2);
+    assert_eq!(result.recent_entries.len(), 1);
 }
 
 #[test]

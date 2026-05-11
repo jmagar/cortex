@@ -4,10 +4,11 @@
 #
 # Exercises broad non-destructive checks for the action-based syslog MCP tool.
 # Action inventory reference (not every action is exercised below):
-#   syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate,
-#   syslog stats, syslog status, syslog apps, syslog source_ips,
-#   syslog timeline, syslog patterns, syslog context, syslog get,
-#   syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
+#   syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions,
+#   syslog search_sessions, syslog usage_blocks, syslog project_context,
+#   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
+#   syslog source_ips, syslog timeline, syslog patterns, syslog context,
+#   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
 #   syslog anomalies, syslog compare, syslog help
 #
 # The server runs as a Docker container over HTTP. No stdio launch needed.
@@ -473,6 +474,24 @@ suite_hosts() {
   run_test "syslog hosts: hosts have last_seen"    syslog hosts '{}' "hosts.0.last_seen"
 }
 
+suite_sessions() {
+  printf '\n%b== syslog sessions ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
+  run_test "syslog sessions: returns sessions array"     syslog sessions '{"limit":10}' "sessions"
+  run_test "syslog sessions: count field present"         syslog sessions '{"limit":5}' "count"
+  run_test "syslog search_sessions: returns sessions array" \
+    syslog search_sessions '{"query":"error","limit":10}' "sessions"
+  run_test "syslog search_sessions: total_candidates present" \
+    syslog search_sessions '{"query":"error","limit":10}' "total_candidates"
+  run_test "syslog usage_blocks: returns blocks array" \
+    syslog usage_blocks '{}' "blocks"
+  run_test "syslog project_context: returns project field" \
+    syslog project_context '{"project":"/tmp","limit":5}' "project"
+  run_test "syslog list_ai_tools: returns tools array" \
+    syslog list_ai_tools '{}' "tools"
+  run_test "syslog list_ai_projects: returns projects array" \
+    syslog list_ai_projects '{}' "projects"
+}
+
 suite_tail() {
   printf '\n%b== syslog tail ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
   run_test "syslog tail: default (50 entries)"  syslog tail '{}' "logs"
@@ -715,6 +734,7 @@ run_parallel() {
   local suites=(
     suite_meta
     suite_hosts
+    suite_sessions
     suite_tail
     suite_search
     suite_errors
@@ -765,6 +785,7 @@ run_sequential() {
   suite_auth
   suite_meta
   suite_hosts
+  suite_sessions
   suite_tail
   suite_search
   suite_errors

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use rusqlite::{params, Error as SqliteError, ErrorCode};
+use rusqlite::{params, Error as SqliteError, ErrorCode, Transaction};
 
 use super::models::LogBatchEntry;
 use super::pool::DbPool;
@@ -34,11 +34,25 @@ pub fn insert_logs_batch(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<usi
 fn insert_logs_batch_once(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<usize> {
     let mut conn = pool.get()?;
     let tx = conn.transaction()?;
+    insert_logs_batch_in_tx(&tx, entries)?;
+    tx.commit()?;
+    tracing::debug!(
+        entry_count = entries.len(),
+        "Committed batch insert transaction"
+    );
+    Ok(entries.len())
+}
 
+pub(crate) fn insert_logs_batch_in_tx(
+    tx: &Transaction<'_>,
+    entries: &[LogBatchEntry],
+) -> Result<()> {
     {
         let mut stmt = tx.prepare_cached(
-            "INSERT INTO logs (timestamp, hostname, facility, severity, app_name, process_id, message, raw, source_ip)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO logs (
+                timestamp, hostname, facility, severity, app_name, process_id,
+                message, raw, source_ip, ai_tool, ai_project, ai_session_id, ai_transcript_path
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )?;
 
         for entry in entries {
@@ -51,7 +65,11 @@ fn insert_logs_batch_once(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<us
                 entry.process_id,
                 entry.message,
                 entry.raw,
-                entry.source_ip
+                entry.source_ip,
+                entry.ai_tool,
+                entry.ai_project,
+                entry.ai_session_id,
+                entry.ai_transcript_path
             ])?;
         }
 
@@ -96,13 +114,7 @@ fn insert_logs_batch_once(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<us
             "Prepared batch insert transaction"
         );
     }
-
-    tx.commit()?;
-    tracing::debug!(
-        entry_count = entries.len(),
-        "Committed batch insert transaction"
-    );
-    Ok(entries.len())
+    Ok(())
 }
 
 fn is_transient_sqlite_lock(err: &anyhow::Error) -> bool {

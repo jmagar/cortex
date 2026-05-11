@@ -42,9 +42,10 @@ just test-live
 The smoke test (`scripts/smoke-test.sh`) exercises all `syslog` actions via mcporter.
 
 Action registry covered by live/script references: `search`, `tail`, `errors`,
-`hosts`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`,
-`patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`,
-`anomalies`, `compare`, `help`.
+`hosts`, `sessions`, `search_sessions`, `usage_blocks`, `project_context`,
+`list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`,
+`source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`,
+`silent_hosts`, `clock_skew`, `anomalies`, `compare`, `help`.
 
 ### mcporter-based testing
 
@@ -58,6 +59,7 @@ mcporter call --config config/mcporter.json syslog.syslog action=status
 mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
 mcporter call --config config/mcporter.json syslog.syslog action=search query=error limit=5
 mcporter call --config config/mcporter.json syslog.syslog action=hosts
+mcporter call --config config/mcporter.json syslog.syslog action=sessions
 mcporter call --config config/mcporter.json syslog.syslog action=apps
 mcporter call --config config/mcporter.json syslog.syslog action=source_ips
 mcporter call --config config/mcporter.json syslog.syslog action=timeline
@@ -104,7 +106,8 @@ curl -s -X POST http://localhost:3100/mcp \
 
 ## Testing checklist
 
-- [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog help
+- [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions, syslog correlate, syslog stats, syslog status, syslog help
+- [ ] **AI session analytics return expected shape** -- syslog search_sessions, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects
 - [ ] **Auth: valid token** -- 200 with correct Bearer token
 - [ ] **Auth: invalid token** -- 401 Unauthorized
 - [ ] **Auth: no token when required** -- 401 Unauthorized

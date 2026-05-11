@@ -12,6 +12,7 @@ set -euo pipefail
 REPO_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 VERSION_FILES=(
+    "${REPO_ROOT}/Cargo.toml"
     "${REPO_ROOT}/pyproject.toml"
     "${REPO_ROOT}/.claude-plugin/plugin.json"
     "${REPO_ROOT}/.codex-plugin/plugin.json"

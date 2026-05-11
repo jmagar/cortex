@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-05-11
+
+### Fixed
+
+- **Scanner error resilience**: Replace hard-fail error propagation with graceful
+  per-path error accumulation so a single unreadable directory or file no longer
+  aborts the entire scan; errors are collected into `IndexResult` and reported
+  at the end.
+- **Config db_path default**: Changed default `db_path` from `/data/syslog.db`
+  to the relative `data/syslog.db` so local dev builds work out of the box.
+
+### Changed
+
+- Renamed `supported_file` → `supported_discovered_file` for clarity.
+- Extended test coverage for scanner path validation and config defaults.
+
+## [0.19.1] - 2026-05-11
+
+### Fixed
+
+- **AI transcript indexing safety**: Scrub manually indexed transcript content
+  before FTS storage, parse Codex JSONL records with a Codex-aware parser, and
+  derive Claude project paths from `sessions-index.json` during scanner imports.
+- **Transcript checkpointing**: Use stable event/content checkpoint keys and
+  commit transcript log rows plus checkpoint records in one transaction.
+- **Scanner reporting**: Report per-file indexing errors with paths and make CLI
+  indexing fail when any file could not be indexed.
+- **AI session search counts**: Report total session event counts separately from
+  FTS match counts.
+- **OTLP metrics endpoint**: Return an unsupported response for `/v1/metrics`
+  instead of acknowledging and discarding metrics.
+
+### Changed
+
+- Removed remaining `mod.rs` module files in favor of modern Rust module files.
+- Updated MCP/CLI documentation and live smoke coverage for the AI action
+  surface.
+
+## [0.19.0] - 2026-05-11
+
+### Added
+
+- **AI session analytics**: Added ranked `search_sessions`, 5-hour `usage_blocks`,
+  `project_context`, `list_ai_tools`, and `list_ai_projects` across the existing
+  `logs` AI metadata columns.
+- **CLI AI namespace**: Added `syslog ai search|blocks|context|tools|projects|index|add`
+  for explicit AI-session querying and transcript indexing from the terminal.
+- **Transcript indexing**: Added local transcript scanning with checkpoint tables,
+  duplicate prevention, and explicit `syslog ai index` / `syslog ai add` flows.
+
+### Changed
+
+- **OTLP AI metadata mapping**: OTLP ingestion now accepts trusted explicit
+  `ai.tool` attributes for known tools and enforces length caps on AI metadata fields.
+- **MCP action surface**: The single `syslog` MCP tool now exposes the new AI
+  analytics actions while preserving existing `sessions` compatibility.
+
+## [0.18.0] - 2026-05-11
+
+### Added
+
+- **AI Session Tracking**: Added dedicated columns (`ai_tool`, `ai_project`,
+  `ai_session_id`, `ai_transcript_path`) and aggregation logic to track AI
+  sessions by project across transcripts and OTel telemetry.
+- **Sessions MCP Action**: New `sessions` action for the `syslog` tool to list
+  and filter AI sessions grouped by project, tool, and host.
+- **OTel AI Metadata Extraction**: Automatic extraction of session and project
+  metadata from OpenTelemetry log and resource attributes.
+
+### Fixed
+
+- **Config testing**: Fixed a flaky Docker ingest config test by ensuring
+  environment variable isolation during test runs.
+
 ## [0.17.7] - 2026-05-09
 
 ### Fixed

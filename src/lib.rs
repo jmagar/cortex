@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 pub mod api;
 pub mod app;
 pub mod config;
@@ -5,6 +7,7 @@ pub mod mcp;
 pub mod observability;
 pub mod otlp;
 pub mod runtime;
+pub mod scanner;
 pub mod syslog;
 
 pub(crate) mod db;

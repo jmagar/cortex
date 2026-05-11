@@ -65,5 +65,9 @@ fn entry_with_checkpoint(host_name: &str, container_id: &str, timestamp: &str) -
             container_id: container_id.into(),
             timestamp: timestamp.into(),
         }),
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
     }
 }

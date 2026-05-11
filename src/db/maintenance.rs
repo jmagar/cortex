@@ -94,42 +94,45 @@ pub fn enforce_storage_budget_with_probe(
         });
     }
 
-    while exceeds_trigger(&metrics, config) || !within_recovery(&metrics, &recovery, config) {
-        tracing::warn!(
-            logical_db_size_bytes = metrics.logical_db_size_bytes,
-            physical_db_size_bytes = metrics.physical_db_size_bytes,
-            free_disk_bytes = ?metrics.free_disk_bytes,
-            deleted_rows,
-            "Storage budget exceeded recovery target — deleting oldest logs chunk"
-        );
-        let deleted = delete_oldest_logs_chunk(pool, config.cleanup_chunk_size)?;
-        if deleted.deleted_rows == 0 {
-            metrics = get_storage_metrics_with_probe(pool, config, probe)?;
-            let write_blocked = exceeds_trigger(&metrics, config);
+    // Only enter the cleanup loop if we have actually exceeded a trigger.
+    if exceeds_trigger(&metrics, config) {
+        while !within_recovery(&metrics, &recovery, config) {
             tracing::warn!(
                 logical_db_size_bytes = metrics.logical_db_size_bytes,
+                physical_db_size_bytes = metrics.physical_db_size_bytes,
                 free_disk_bytes = ?metrics.free_disk_bytes,
                 deleted_rows,
-                write_blocked,
-                "Storage budget enforcement could not delete more rows"
+                "Storage budget exceeded trigger — deleting oldest logs chunk"
             );
-            return Ok(StorageEnforcementOutcome {
-                metrics,
-                recovery,
-                deleted_rows,
-                write_blocked,
-            });
-        }
+            let deleted = delete_oldest_logs_chunk(pool, config.cleanup_chunk_size)?;
+            if deleted.deleted_rows == 0 {
+                metrics = get_storage_metrics_with_probe(pool, config, probe)?;
+                let write_blocked = exceeds_trigger(&metrics, config);
+                tracing::warn!(
+                    logical_db_size_bytes = metrics.logical_db_size_bytes,
+                    free_disk_bytes = ?metrics.free_disk_bytes,
+                    deleted_rows,
+                    write_blocked,
+                    "Storage budget enforcement could not delete more rows"
+                );
+                return Ok(StorageEnforcementOutcome {
+                    metrics,
+                    recovery,
+                    deleted_rows,
+                    write_blocked,
+                });
+            }
 
-        deleted_rows += deleted.deleted_rows;
-        tracing::info!(
-            deleted_rows = deleted.deleted_rows,
-            total_deleted_rows = deleted_rows,
-            affected_hosts = deleted.hostnames.len(),
-            "Deleted oldest log chunk for storage recovery"
-        );
-        all_hosts.extend(deleted.hostnames);
-        metrics = get_storage_metrics_with_probe(pool, config, probe)?;
+            deleted_rows += deleted.deleted_rows;
+            tracing::info!(
+                deleted_rows = deleted.deleted_rows,
+                total_deleted_rows = deleted_rows,
+                affected_hosts = deleted.hostnames.len(),
+                "Deleted oldest log chunk for storage recovery"
+            );
+            all_hosts.extend(deleted.hostnames);
+            metrics = get_storage_metrics_with_probe(pool, config, probe)?;
+        }
     }
 
     if deleted_rows > 0 {
@@ -205,8 +208,16 @@ fn fts_incremental_merge(pool: &DbPool, deleted_rows: usize, merge_pages: u32) {
                             error = %e,
                             iteration = i + 1,
                             consecutive_failures,
-                            "FTS incremental merge failed"
+                            "FTS incremental merge failed; attempting optimize as fallback"
                         );
+
+                        // Best-effort fallback to optimize if merge is rejected by SQLite
+                        if let Ok(optimize_conn) = pool.get() {
+                            let _ = optimize_conn.execute_batch(
+                                "INSERT INTO logs_fts(logs_fts) VALUES('optimize');",
+                            );
+                        }
+
                         if consecutive_failures >= 3 {
                             // Escalate to full rebuild — last-resort recovery for a
                             // corrupt or severely fragmented FTS index.
