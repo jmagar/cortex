@@ -200,7 +200,11 @@ fn index_roots_skips_unreadable_directories_and_continues() {
     let (pool, dir) = test_pool();
     let good = dir.path().join("good.jsonl");
     let blocked = dir.path().join("blocked");
-    std::fs::write(&good, "{\"sessionId\":\"sess-1\",\"content\":\"rust mention\"}\n").unwrap();
+    std::fs::write(
+        &good,
+        "{\"sessionId\":\"sess-1\",\"content\":\"rust mention\"}\n",
+    )
+    .unwrap();
     std::fs::create_dir(&blocked).unwrap();
     std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000)).unwrap();
 

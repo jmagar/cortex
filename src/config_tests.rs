@@ -977,8 +977,8 @@ fn auth_toml_section_parses() {
 
 #[test]
 fn repo_local_config_uses_repo_local_db_path() {
-    let cfg: Config = toml::from_str(include_str!("../config.toml"))
-        .expect("repo config.toml should parse");
+    let cfg: Config =
+        toml::from_str(include_str!("../config.toml")).expect("repo config.toml should parse");
     assert_eq!(
         cfg.storage.db_path,
         std::path::PathBuf::from("data/syslog.db"),
