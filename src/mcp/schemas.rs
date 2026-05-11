@@ -1,5 +1,5 @@
 use crate::db::SEVERITY_LEVELS;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub(super) const SYSLOG_ACTIONS: &[&str] = &[
     "search",

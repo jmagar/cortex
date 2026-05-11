@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
@@ -6,8 +6,8 @@ use crate::app::{
     PatternsRequest, SearchLogsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
 };
 
-use super::AppState;
 use super::schemas::SYSLOG_ACTIONS;
+use super::AppState;
 
 /// Execute a tool by name
 pub(super) async fn execute_tool(

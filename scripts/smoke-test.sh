@@ -13,7 +13,7 @@
 #   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
 #   mcp_call sessions, mcp_call correlate, mcp_call stats, mcp_call status,
 #   mcp_call apps, mcp_call source_ips, mcp_call timeline, mcp_call patterns,
- mcp_call context,
+#   mcp_call context,
 #   mcp_call get, mcp_call ingest_rate, mcp_call silent_hosts,
 #   mcp_call clock_skew, mcp_call anomalies, mcp_call compare, mcp_call help
 

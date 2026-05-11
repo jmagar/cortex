@@ -11,9 +11,9 @@ use rusqlite::params;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
-use super::LogEntry;
 use super::pool::DbPool;
 use super::queries::map_row_with_raw;
+use super::LogEntry;
 
 // -----------------------------------------------------------------------------
 // apps: distinct app_names with stats

@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use axum::{
-    Router,
-    body::{Body, to_bytes},
+    body::{to_bytes, Body},
     extract::Request as AxumRequest,
-    http::{Request, StatusCode, header},
+    http::{header, Request, StatusCode},
     middleware::{self, Next},
+    Router,
 };
 use lab_auth::AuthContext;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tower::util::ServiceExt;
 
 use crate::{
@@ -16,8 +16,8 @@ use crate::{
     config::{McpConfig, StorageConfig},
     db::{self, DbPool, LogBatchEntry},
     mcp::{
-        AppState, AuthPolicy, schemas::SYSLOG_ACTIONS, streamable_http_config,
-        streamable_http_service,
+        schemas::SYSLOG_ACTIONS, streamable_http_config, streamable_http_service, AppState,
+        AuthPolicy,
     },
 };
 
