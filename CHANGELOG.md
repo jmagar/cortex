@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-05-11
+
+### Added
+
+- **AI Session Tracking**: Added dedicated columns (`ai_tool`, `ai_project`,
+  `ai_session_id`, `ai_transcript_path`) and aggregation logic to track AI
+  sessions by project across transcripts and OTel telemetry.
+- **Sessions MCP Action**: New `sessions` action for the `syslog` tool to list
+  and filter AI sessions grouped by project, tool, and host.
+- **OTel AI Metadata Extraction**: Automatic extraction of session and project
+  metadata from OpenTelemetry log and resource attributes.
+
+### Fixed
+
+- **Config testing**: Fixed a flaky Docker ingest config test by ensuring
+  environment variable isolation during test runs.
+
 ## [0.17.7] - 2026-05-09
 
 ### Fixed
