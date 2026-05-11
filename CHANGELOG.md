@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-05-11
+
+### Added
+
+- **AI session analytics**: Added ranked `search_sessions`, 5-hour `usage_blocks`,
+  `project_context`, `list_ai_tools`, and `list_ai_projects` across the existing
+  `logs` AI metadata columns.
+- **CLI AI namespace**: Added `syslog ai search|blocks|context|tools|projects|index|add`
+  for explicit AI-session querying and transcript indexing from the terminal.
+- **Transcript indexing**: Added local transcript scanning with checkpoint tables,
+  duplicate prevention, and explicit `syslog ai index` / `syslog ai add` flows.
+
+### Changed
+
+- **OTLP AI metadata mapping**: OTLP ingestion now accepts trusted explicit
+  `ai.tool` attributes for known tools and enforces length caps on AI metadata fields.
+- **MCP action surface**: The single `syslog` MCP tool now exposes the new AI
+  analytics actions while preserving existing `sessions` compatibility.
+
 ## [0.18.0] - 2026-05-11
 
 ### Added

@@ -277,6 +277,119 @@ fn search_logs_ignores_deleted_fts_phantom_rows() {
     assert!(results.is_empty(), "FTS-only phantom rows must not leak");
 }
 
+fn make_ai_entry(
+    ts: &str,
+    host: &str,
+    tool: &str,
+    project: &str,
+    session_id: &str,
+    message: &str,
+) -> LogBatchEntry {
+    LogBatchEntry {
+        timestamp: ts.to_string(),
+        hostname: host.to_string(),
+        facility: Some("local0".to_string()),
+        severity: "info".to_string(),
+        app_name: Some("ai-transcript".to_string()),
+        process_id: None,
+        message: message.to_string(),
+        raw: message.to_string(),
+        source_ip: "127.0.0.1:514".to_string(),
+        docker_checkpoint: None,
+        ai_tool: Some(tool.to_string()),
+        ai_project: Some(project.to_string()),
+        ai_session_id: Some(session_id.to_string()),
+        ai_transcript_path: Some(format!("{project}/{session_id}.jsonl")),
+    }
+}
+
+#[test]
+fn search_ai_sessions_groups_results() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_ai_entry(
+                "2026-01-01T00:00:00Z",
+                "host-a",
+                "claude",
+                "/tmp/project",
+                "sess-1",
+                "authentication bug fixed",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:01:00Z",
+                "host-a",
+                "claude",
+                "/tmp/project",
+                "sess-1",
+                "authentication tests passing",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let result = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "authentication".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(result.sessions.len(), 1);
+    assert_eq!(result.sessions[0].match_count, 2);
+}
+
+#[test]
+fn list_ai_tool_and_project_inventory() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_ai_entry(
+                "2026-01-01T00:00:00Z",
+                "host-a",
+                "claude",
+                "/tmp/a",
+                "s1",
+                "one",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:01:00Z",
+                "host-a",
+                "codex",
+                "/tmp/b",
+                "s2",
+                "two",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:02:00Z",
+                "host-a",
+                "claude",
+                "/tmp/a",
+                "s1",
+                "three",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let tools = list_ai_tools(&pool, &ListAiToolsParams::default()).unwrap();
+    assert_eq!(tools.tools.len(), 2);
+    let projects = list_ai_projects(
+        &pool,
+        &ListAiProjectsParams {
+            ai_tool: Some("claude".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(projects.projects.len(), 1);
+    assert_eq!(projects.projects[0].project, "/tmp/a");
+}
+
 #[test]
 fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
     let (pool, _dir) = test_pool();

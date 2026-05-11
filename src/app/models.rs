@@ -86,6 +86,227 @@ impl From<db::AiSessionEntry> for AiSessionEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SearchSessionsRequest {
+    pub query: String,
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchedSessionEntry {
+    pub project: String,
+    pub tool: String,
+    pub session_id: String,
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub event_count: i64,
+    pub match_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub best_snippet: Option<String>,
+}
+
+impl From<db::SearchedAiSessionEntry> for SearchedSessionEntry {
+    fn from(value: db::SearchedAiSessionEntry) -> Self {
+        Self {
+            project: value.ai_project,
+            tool: value.ai_tool,
+            session_id: value.ai_session_id,
+            hostname: value.hostname,
+            first_seen: value.first_seen,
+            last_seen: value.last_seen,
+            event_count: value.event_count,
+            match_count: value.match_count,
+            best_snippet: value.best_snippet,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchSessionsResponse {
+    pub total_candidates: usize,
+    pub truncated: bool,
+    pub sessions: Vec<SearchedSessionEntry>,
+}
+
+impl From<db::SearchAiSessionsResult> for SearchSessionsResponse {
+    fn from(value: db::SearchAiSessionsResult) -> Self {
+        Self {
+            total_candidates: value.total_candidates,
+            truncated: value.truncated,
+            sessions: value.sessions.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UsageBlocksRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageBlock {
+    pub bucket_start: String,
+    pub bucket_end: String,
+    pub project: String,
+    pub tool: String,
+    pub session_count: i64,
+    pub event_count: i64,
+}
+
+impl From<db::AiUsageBlock> for UsageBlock {
+    fn from(value: db::AiUsageBlock) -> Self {
+        Self {
+            bucket_start: value.bucket_start,
+            bucket_end: value.bucket_end,
+            project: value.project,
+            tool: value.tool,
+            session_count: value.session_count,
+            event_count: value.event_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageBlocksResponse {
+    pub truncated: bool,
+    pub blocks: Vec<UsageBlock>,
+}
+
+impl From<db::AiUsageBlocksResult> for UsageBlocksResponse {
+    fn from(value: db::AiUsageBlocksResult) -> Self {
+        Self {
+            truncated: value.truncated,
+            blocks: value.blocks.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProjectContextRequest {
+    pub project: String,
+    pub tool: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectContextResponse {
+    pub project: String,
+    pub tools: Vec<String>,
+    pub sessions: Vec<String>,
+    pub hostnames: Vec<String>,
+    pub first_seen: Option<String>,
+    pub last_seen: Option<String>,
+    pub event_count: i64,
+    pub recent_entries: Vec<LogEntry>,
+}
+
+impl From<db::AiProjectContext> for ProjectContextResponse {
+    fn from(value: db::AiProjectContext) -> Self {
+        Self {
+            project: value.project,
+            tools: value.tools,
+            sessions: value.sessions,
+            hostnames: value.hostnames,
+            first_seen: value.first_seen,
+            last_seen: value.last_seen,
+            event_count: value.event_count,
+            recent_entries: value.recent_entries.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListAiToolsRequest {
+    pub project: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiToolEntry {
+    pub tool: String,
+    pub event_count: i64,
+    pub session_count: i64,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+impl From<db::AiToolInventoryEntry> for AiToolEntry {
+    fn from(value: db::AiToolInventoryEntry) -> Self {
+        Self {
+            tool: value.tool,
+            event_count: value.event_count,
+            session_count: value.session_count,
+            first_seen: value.first_seen,
+            last_seen: value.last_seen,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListAiToolsResponse {
+    pub tools: Vec<AiToolEntry>,
+}
+
+impl From<db::ListAiToolsResult> for ListAiToolsResponse {
+    fn from(value: db::ListAiToolsResult) -> Self {
+        Self {
+            tools: value.tools.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListAiProjectsRequest {
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiProjectEntry {
+    pub project: String,
+    pub tools: Vec<String>,
+    pub event_count: i64,
+    pub session_count: i64,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+impl From<db::AiProjectInventoryEntry> for AiProjectEntry {
+    fn from(value: db::AiProjectInventoryEntry) -> Self {
+        Self {
+            project: value.project,
+            tools: value.tools,
+            event_count: value.event_count,
+            session_count: value.session_count,
+            first_seen: value.first_seen,
+            last_seen: value.last_seen,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListAiProjectsResponse {
+    pub projects: Vec<AiProjectEntry>,
+}
+
+impl From<db::ListAiProjectsResult> for ListAiProjectsResponse {
+    fn from(value: db::ListAiProjectsResult) -> Self {
+        Self {
+            projects: value.projects.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SearchLogsRequest {
     pub query: Option<String>,
     pub hostname: Option<String>,

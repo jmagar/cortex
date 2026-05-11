@@ -12,6 +12,11 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
 | `sessions` | AI transcript sessions by project |
+| `search_sessions` | Ranked grouped session search |
+| `usage_blocks` | AI activity in deterministic 5-hour windows |
+| `project_context` | Summary for one AI project path |
+| `list_ai_tools` | Distinct AI tools with counts |
+| `list_ai_projects` | Distinct AI projects with counts |
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics and storage health |
 | `status` | Lightweight runtime and DB health |
@@ -68,6 +73,46 @@ Required argument: `action = "sessions"`
 
 Optional arguments: `project`, `tool`, `hostname`, `from`, `to`, `limit`.
 
+## syslog search_sessions
+
+Search AI transcript rows with FTS5 and return grouped session results ranked by relevance.
+
+Required arguments: `action = "search_sessions"`, `query`
+
+Optional arguments: `project`, `tool`, `from`, `to`, `limit`.
+
+## syslog usage_blocks
+
+Bucket AI activity into deterministic 5-hour UTC windows.
+
+Required argument: `action = "usage_blocks"`
+
+Optional arguments: `project`, `tool`, `from`, `to`.
+
+## syslog project_context
+
+Summarize one AI project path with tools, sessions, hosts, counts, and recent representative entries.
+
+Required arguments: `action = "project_context"`, `project`
+
+Optional arguments: `tool`, `limit`.
+
+## syslog list_ai_tools
+
+List distinct AI tools with counts and first/last seen timestamps.
+
+Required argument: `action = "list_ai_tools"`
+
+Optional arguments: `project`, `from`, `to`.
+
+## syslog list_ai_projects
+
+List distinct AI projects with counts, tools used, and first/last seen timestamps.
+
+Required argument: `action = "list_ai_projects"`
+
+Optional arguments: `tool`, `from`, `to`.
+
 ## syslog correlate
 
 Search for related events across multiple hosts within a time window.
@@ -112,6 +157,10 @@ JSON-RPC level errors use standard codes:
 - `-32602`: Missing or invalid parameter, such as an unknown action or missing `reference_time`
 - `-32601`: Unknown method
 - `-32001`: Unauthorized, missing, or invalid bearer token
+
+## Transcript Visibility Policy
+
+AI transcript rows imported through `syslog ai index` or `syslog ai add` are stored in the main `logs` table. They are therefore visible through raw log actions such as `search`, `tail`, `context`, and `get`. The `ai_transcript_path` field can expose local filesystem paths; no redaction is applied automatically.
 
 ## See Also
 

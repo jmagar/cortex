@@ -13,7 +13,10 @@ use std::collections::BTreeMap;
 
 use super::pool::DbPool;
 use super::queries::map_row_with_raw;
-use super::LogEntry;
+use super::{
+    AiProjectContext, AiProjectContextParams, AiUsageBlock, AiUsageBlocksParams,
+    AiUsageBlocksResult, LogEntry,
+};
 
 // -----------------------------------------------------------------------------
 // apps: distinct app_names with stats
@@ -146,6 +149,150 @@ pub fn list_source_ips(pool: &DbPool) -> Result<Vec<SourceIpEntry>> {
     let mut out: Vec<SourceIpEntry> = by_ip.into_values().collect();
     out.sort_by_key(|entry| Reverse(entry.log_count));
     Ok(out)
+}
+
+pub fn get_ai_usage_blocks(
+    pool: &DbPool,
+    params: &AiUsageBlocksParams,
+) -> Result<AiUsageBlocksResult> {
+    let conn = pool.get()?;
+    const LIMIT: usize = 1_000;
+    const BUCKET_SECS: i64 = 18_000;
+    let mut sql = format!(
+        "SELECT datetime((CAST(strftime('%s', timestamp) AS INTEGER) / {BUCKET_SECS}) * {BUCKET_SECS}, 'unixepoch') AS bucket_start,
+                datetime(((CAST(strftime('%s', timestamp) AS INTEGER) / {BUCKET_SECS}) * {BUCKET_SECS}) + {BUCKET_SECS}, 'unixepoch') AS bucket_end,
+                ai_project,
+                ai_tool,
+                COUNT(DISTINCT ai_session_id) AS session_count,
+                COUNT(*) AS event_count
+         FROM logs
+         WHERE ai_project IS NOT NULL AND ai_project != ''
+           AND ai_tool IS NOT NULL AND ai_tool != ''
+           AND ai_session_id IS NOT NULL AND ai_session_id != ''"
+    );
+    let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
+    let mut idx = 1usize;
+    if let Some(project) = &params.ai_project {
+        sql.push_str(&format!(" AND ai_project = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(project.clone()));
+        idx += 1;
+    }
+    if let Some(tool) = &params.ai_tool {
+        sql.push_str(&format!(" AND ai_tool = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(tool.clone()));
+        idx += 1;
+    }
+    if let Some(from) = &params.from {
+        sql.push_str(&format!(" AND timestamp >= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(from.clone()));
+        idx += 1;
+    }
+    if let Some(to) = &params.to {
+        sql.push_str(&format!(" AND timestamp <= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(to.clone()));
+    }
+    sql.push_str(&format!(
+        " GROUP BY bucket_start, bucket_end, ai_project, ai_tool
+          ORDER BY bucket_start ASC, ai_project ASC, ai_tool ASC
+          LIMIT {LIMIT}"
+    ));
+
+    let mut stmt = conn.prepare(&sql)?;
+    let blocks = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+            Ok(AiUsageBlock {
+                bucket_start: row.get(0)?,
+                bucket_end: row.get(1)?,
+                project: row.get(2)?,
+                tool: row.get(3)?,
+                session_count: row.get(4)?,
+                event_count: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(AiUsageBlocksResult {
+        truncated: blocks.len() == LIMIT,
+        blocks,
+    })
+}
+
+pub fn get_ai_project_context(
+    pool: &DbPool,
+    params: &AiProjectContextParams,
+) -> Result<AiProjectContext> {
+    type ProjectAggregateRow = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+    );
+    let conn = pool.get()?;
+    let mut aggregate_sql = String::from(
+        "SELECT GROUP_CONCAT(DISTINCT ai_tool),
+                GROUP_CONCAT(DISTINCT ai_session_id),
+                GROUP_CONCAT(DISTINCT hostname),
+                MIN(timestamp),
+                MAX(timestamp),
+                COUNT(*)
+         FROM logs
+         WHERE ai_project = ?1",
+    );
+    let mut aggregate_bindings = vec![rusqlite::types::Value::Text(params.project.clone())];
+    if let Some(tool) = &params.ai_tool {
+        aggregate_sql.push_str(" AND ai_tool = ?2");
+        aggregate_bindings.push(rusqlite::types::Value::Text(tool.clone()));
+    }
+
+    let (tools, sessions, hostnames, first_seen, last_seen, event_count): ProjectAggregateRow =
+        conn.query_row(
+            &aggregate_sql,
+            rusqlite::params_from_iter(aggregate_bindings.iter()),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )?;
+
+    let limit = params.limit.unwrap_or(5).min(20);
+    let mut recent_sql = String::from(
+        "SELECT id, timestamp, hostname, facility, severity,
+                app_name, process_id, message, received_at, source_ip,
+                ai_tool, ai_project, ai_session_id, ai_transcript_path
+         FROM logs
+         WHERE ai_project = ?1",
+    );
+    let mut recent_bindings = vec![rusqlite::types::Value::Text(params.project.clone())];
+    if let Some(tool) = &params.ai_tool {
+        recent_sql.push_str(" AND ai_tool = ?2");
+        recent_bindings.push(rusqlite::types::Value::Text(tool.clone()));
+    }
+    recent_sql.push_str(&format!(" ORDER BY timestamp DESC, id DESC LIMIT {limit}"));
+    let mut stmt = conn.prepare(&recent_sql)?;
+    let recent_entries = stmt
+        .query_map(
+            rusqlite::params_from_iter(recent_bindings.iter()),
+            super::queries::map_row,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(AiProjectContext {
+        project: params.project.clone(),
+        tools: split_csv(tools),
+        sessions: split_csv(sessions),
+        hostnames: split_csv(hostnames),
+        first_seen,
+        last_seen,
+        event_count,
+        recent_entries,
+    })
 }
 
 // -----------------------------------------------------------------------------
@@ -385,6 +532,15 @@ pub(super) fn normalize_template(msg: &str) -> String {
         i += 1;
     }
     out
+}
+
+fn split_csv(value: Option<String>) -> Vec<String> {
+    value
+        .unwrap_or_default()
+        .split(',')
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
 
 fn is_hex(b: u8) -> bool {

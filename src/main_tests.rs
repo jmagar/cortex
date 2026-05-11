@@ -30,3 +30,11 @@ fn mode_parse_keeps_runtime_status_mcp_only() {
     let err = Mode::parse(vec!["status".into()]).unwrap_err();
     assert!(err.to_string().contains("unknown command"));
 }
+
+#[test]
+fn mode_parse_accepts_ai_namespace() {
+    assert!(matches!(
+        Mode::parse(vec!["ai".into(), "tools".into(), "--json".into()]).unwrap(),
+        Mode::Cli(_)
+    ));
+}

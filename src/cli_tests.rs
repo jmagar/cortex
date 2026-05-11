@@ -99,6 +99,44 @@ fn parse_unknown_option_errors() {
 }
 
 #[test]
+fn parse_ai_search_collects_filters() {
+    let parsed = CliCommand::parse(strings(&[
+        "ai",
+        "search",
+        "auth failure",
+        "--tool",
+        "claude",
+        "--project=/tmp/project",
+        "--limit",
+        "5",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::Search(AiSearchArgs {
+            query: "auth failure".into(),
+            project: Some("/tmp/project".into()),
+            tool: Some("claude".into()),
+            limit: Some(5),
+            ..Default::default()
+        }))
+    );
+}
+
+#[test]
+fn parse_ai_context_requires_project() {
+    let err = CliCommand::parse(strings(&["ai", "context"])).unwrap_err();
+    assert!(err.to_string().contains("requires --project"));
+}
+
+#[test]
+fn parse_ai_add_requires_file() {
+    let err = CliCommand::parse(strings(&["ai", "add"])).unwrap_err();
+    assert!(err.to_string().contains("--file"));
+}
+
+#[test]
 fn parse_search_help_points_to_top_level_usage() {
     let err = CliCommand::parse(strings(&["search", "--help"])).unwrap_err();
 

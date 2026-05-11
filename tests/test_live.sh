@@ -19,7 +19,8 @@
 #
 # Action inventory reference (not every action is exercised by this live test):
 #   syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions,
-#   syslog correlate, syslog stats, syslog status, syslog apps,
+#   syslog search_sessions, syslog usage_blocks, syslog project_context,
+#   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,
 #   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
 #   syslog anomalies, syslog compare, syslog help

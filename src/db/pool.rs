@@ -246,6 +246,56 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 4: added AI transcript metadata columns and indexes");
     }
 
+    let migration_5_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 5",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_5_applied {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS transcript_sources (
+                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                 canonical_path  TEXT NOT NULL UNIQUE,
+                 source_kind     TEXT NOT NULL,
+                 file_size       INTEGER,
+                 file_mtime      INTEGER,
+                 content_hash    TEXT,
+                 last_offset     INTEGER NOT NULL DEFAULT 0,
+                 last_indexed_at TEXT,
+                 last_error      TEXT
+             );
+             INSERT INTO schema_migrations (version) VALUES (5);",
+        )?;
+        tracing::info!("Migration 5: created transcript_sources table");
+    }
+
+    let migration_6_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 6",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_6_applied {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS transcript_import_records (
+                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                 source_id   INTEGER NOT NULL REFERENCES transcript_sources(id),
+                 record_key  TEXT NOT NULL,
+                 imported_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(source_id, record_key)
+             );
+             CREATE INDEX IF NOT EXISTS idx_transcript_import_records_source_id
+                 ON transcript_import_records(source_id);
+             INSERT INTO schema_migrations (version) VALUES (6);",
+        )?;
+        tracing::info!("Migration 6: created transcript_import_records table");
+    }
+
     tracing::info!(path = %config.db_path.display(), "Database initialized");
     Ok(pool)
 }

@@ -11,9 +11,10 @@
 #
 # Action inventory reference (not every action is exercised by this smoke test):
 #   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
-#   mcp_call sessions, mcp_call correlate, mcp_call stats, mcp_call status,
-#   mcp_call apps, mcp_call source_ips, mcp_call timeline, mcp_call patterns,
-#   mcp_call context,
+#   mcp_call sessions, mcp_call search_sessions, mcp_call usage_blocks,
+#   mcp_call project_context, mcp_call list_ai_tools, mcp_call list_ai_projects,
+#   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
+#   mcp_call source_ips, mcp_call timeline, mcp_call patterns, mcp_call context,
 #   mcp_call get, mcp_call ingest_rate, mcp_call silent_hosts,
 
 #   mcp_call clock_skew, mcp_call anomalies, mcp_call compare, mcp_call help

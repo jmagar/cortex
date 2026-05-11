@@ -21,8 +21,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::LazyLock;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::{fs, path::PathBuf};
 
 use regex::Regex;

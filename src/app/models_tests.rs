@@ -66,3 +66,29 @@ fn db_stats_conversion_preserves_guardrail_fields() {
     assert!(stats.write_blocked);
     assert_eq!(stats.phantom_fts_rows, 3);
 }
+
+#[test]
+fn ai_inventory_conversions_preserve_counts() {
+    let tools = ListAiToolsResponse::from(db::ListAiToolsResult {
+        tools: vec![db::AiToolInventoryEntry {
+            tool: "claude".into(),
+            event_count: 4,
+            session_count: 2,
+            first_seen: "2026-01-01T00:00:00Z".into(),
+            last_seen: "2026-01-01T01:00:00Z".into(),
+        }],
+    });
+    let projects = ListAiProjectsResponse::from(db::ListAiProjectsResult {
+        projects: vec![db::AiProjectInventoryEntry {
+            project: "/tmp/project".into(),
+            tools: vec!["claude".into()],
+            event_count: 4,
+            session_count: 2,
+            first_seen: "2026-01-01T00:00:00Z".into(),
+            last_seen: "2026-01-01T01:00:00Z".into(),
+        }],
+    });
+
+    assert_eq!(tools.tools[0].tool, "claude");
+    assert_eq!(projects.projects[0].project, "/tmp/project");
+}

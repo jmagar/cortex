@@ -263,7 +263,8 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     .or_else(|| log_attrs.get("session_id"))
                     .or_else(|| resource_attrs.get("session.id"))
                     .or_else(|| resource_attrs.get("session_id"))
-                    .and_then(|v| any_value_to_string(v));
+                    .and_then(|v| any_value_to_string(v))
+                    .filter(|value| value.len() <= 128);
 
                 let ai_project = log_attrs
                     .get("project.path")
@@ -272,7 +273,8 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     .or_else(|| resource_attrs.get("project.path"))
                     .or_else(|| resource_attrs.get("codebase.root_path"))
                     .or_else(|| resource_attrs.get("session.cwd"))
-                    .and_then(|v| any_value_to_string(v));
+                    .and_then(|v| any_value_to_string(v))
+                    .filter(|value| value.len() <= 512);
 
                 let timestamp = format_otlp_timestamp(log.time_unix_nano)
                     .unwrap_or_else(|| received_iso.clone());
@@ -295,7 +297,7 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     raw,
                     source_ip: source_ip.clone(),
                     docker_checkpoint: None,
-                    ai_tool: None,
+                    ai_tool: extract_ai_tool(&log_attrs, &resource_attrs),
                     ai_project,
                     ai_session_id,
                     ai_transcript_path: None,
@@ -304,6 +306,25 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
         }
     }
     out
+}
+
+fn extract_ai_tool(
+    log_attrs: &HashMap<&str, &AnyValue>,
+    resource_attrs: &HashMap<&str, &AnyValue>,
+) -> Option<String> {
+    let raw = log_attrs
+        .get("ai.tool")
+        .or_else(|| log_attrs.get("ai_tool"))
+        .or_else(|| resource_attrs.get("ai.tool"))
+        .or_else(|| resource_attrs.get("ai_tool"))
+        .and_then(|v| any_value_to_string(v))?;
+    if raw.len() > 64 {
+        return None;
+    }
+    match raw.to_ascii_lowercase().as_str() {
+        "claude" | "codex" | "gemini" => Some(raw.to_ascii_lowercase()),
+        _ => None,
+    }
 }
 
 fn format_otlp_timestamp(time_unix_nano: u64) -> Option<String> {

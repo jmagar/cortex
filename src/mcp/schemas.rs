@@ -8,6 +8,11 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
     "hosts",
     "apps",
     "sessions",
+    "search_sessions",
+    "usage_blocks",
+    "project_context",
+    "list_ai_tools",
+    "list_ai_projects",
     "correlate",
     "stats",
     "status",
@@ -28,7 +33,7 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
 pub(super) fn tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "syslog",
-        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, and syslog help.",
+        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog search_sessions, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, and syslog help.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -47,12 +52,12 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "project": {
                     "type": "string",
-                    "description": "For action=sessions: exact project path, e.g. /home/jmagar/workspace/syslog-mcp."
+                    "description": "For action=sessions, search_sessions, usage_blocks, project_context, or list_ai_tools: exact project path, e.g. /home/jmagar/workspace/syslog-mcp."
                 },
                 "tool": {
                     "type": "string",
                     "enum": ["claude", "codex", "gemini"],
-                    "description": "For action=sessions: AI tool filter."
+                    "description": "For action=sessions, search_sessions, usage_blocks, project_context, or list_ai_projects: AI tool filter."
                 },
                 "source_ip": {
                     "type": "string",
@@ -82,15 +87,15 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "from": {
                     "type": "string",
-                    "description": "For action=search, sessions, errors, timeline, or patterns: start of time range as ISO 8601/RFC3339."
+                    "description": "For action=search, sessions, search_sessions, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, or patterns: start of time range as ISO 8601/RFC3339."
                 },
                 "to": {
                     "type": "string",
-                    "description": "For action=search, sessions, errors, timeline, or patterns: end of time range as ISO 8601/RFC3339."
+                    "description": "For action=search, sessions, search_sessions, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, or patterns: end of time range as ISO 8601/RFC3339."
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=correlate: max total events, default 500, max 999."
+                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100. For action=project_context: recent representative entries, default 5, max 20. For action=correlate: max total events, default 500, max 999."
                 },
                 "n": {
                     "type": "integer",

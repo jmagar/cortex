@@ -18,6 +18,11 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | List all known hosts with first/last seen |
 | `sessions` | AI transcript sessions by project |
+| `search_sessions` | Ranked grouped session search |
+| `usage_blocks` | AI activity in 5-hour windows |
+| `project_context` | Summary for one AI project path |
+| `list_ai_tools` | Distinct AI tools with counts |
+| `list_ai_projects` | Distinct AI projects with counts |
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics |
 | `status` | Lightweight runtime and DB health |

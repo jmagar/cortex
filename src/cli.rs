@@ -2,9 +2,12 @@ use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 use syslog_mcp::app::{
     CorrelateEventsRequest, CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse,
-    ListHostsResponse, LogEntry, SearchLogsRequest, SearchLogsResponse, SyslogService,
-    TailLogsRequest,
+    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
+    ListHostsResponse, LogEntry, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SyslogService,
+    TailLogsRequest, UsageBlocksRequest, UsageBlocksResponse,
 };
+use syslog_mcp::scanner::IndexResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliCommand {
@@ -13,8 +16,20 @@ pub(crate) enum CliCommand {
     Errors(TimeRangeArgs),
     Hosts(OutputArgs),
     Sessions(SessionsArgs),
+    Ai(AiCommand),
     Correlate(CorrelateArgs),
     Stats(OutputArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AiCommand {
+    Search(AiSearchArgs),
+    Blocks(AiBlocksArgs),
+    Context(AiContextArgs),
+    Tools(AiListArgs),
+    Projects(AiListArgs),
+    Index(AiIndexArgs),
+    Add(AiAddArgs),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -74,6 +89,55 @@ pub(crate) struct CorrelateArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiSearchArgs {
+    pub query: String,
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiBlocksArgs {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiContextArgs {
+    pub project: String,
+    pub tool: Option<String>,
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiListArgs {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiIndexArgs {
+    pub path: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiAddArgs {
+    pub file: String,
+    pub json: bool,
+}
+
 impl CliCommand {
     pub(crate) fn parse(args: Vec<String>) -> Result<Self> {
         let (command, rest) = args
@@ -85,6 +149,7 @@ impl CliCommand {
             "errors" => parse_errors(rest),
             "hosts" => parse_hosts(rest),
             "sessions" => parse_sessions(rest),
+            "ai" => parse_ai(rest),
             "correlate" => parse_correlate(rest),
             "stats" => parse_stats(rest),
             _ => bail!("unknown CLI command: {command}"),
@@ -154,6 +219,75 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                 .await?;
             print_sessions_response(&response, json)?;
         }
+        CliCommand::Ai(args) => match args {
+            AiCommand::Search(args) => {
+                let json = args.json;
+                let response = service
+                    .search_sessions(SearchSessionsRequest {
+                        query: args.query,
+                        project: args.project,
+                        tool: args.tool,
+                        from: args.from,
+                        to: args.to,
+                        limit: args.limit,
+                    })
+                    .await?;
+                print_search_sessions_response(&response, json)?;
+            }
+            AiCommand::Blocks(args) => {
+                let json = args.json;
+                let response = service
+                    .usage_blocks(UsageBlocksRequest {
+                        project: args.project,
+                        tool: args.tool,
+                        from: args.from,
+                        to: args.to,
+                    })
+                    .await?;
+                print_usage_blocks_response(&response, json)?;
+            }
+            AiCommand::Context(args) => {
+                let json = args.json;
+                let response = service
+                    .project_context(ProjectContextRequest {
+                        project: args.project,
+                        tool: args.tool,
+                        limit: args.limit,
+                    })
+                    .await?;
+                print_project_context_response(&response, json)?;
+            }
+            AiCommand::Tools(args) => {
+                let json = args.json;
+                let response = service
+                    .list_ai_tools(ListAiToolsRequest {
+                        project: args.project,
+                        from: args.from,
+                        to: args.to,
+                    })
+                    .await?;
+                print_ai_tools_response(&response, json)?;
+            }
+            AiCommand::Projects(args) => {
+                let json = args.json;
+                let response = service
+                    .list_ai_projects(ListAiProjectsRequest {
+                        tool: args.tool,
+                        from: args.from,
+                        to: args.to,
+                    })
+                    .await?;
+                print_ai_projects_response(&response, json)?;
+            }
+            AiCommand::Index(args) => {
+                let response = service.index_ai_roots(args.path).await?;
+                print_index_response(&response, args.json)?;
+            }
+            AiCommand::Add(args) => {
+                let response = service.add_ai_file(args.file).await?;
+                print_index_response(&response, args.json)?;
+            }
+        },
         CliCommand::Correlate(args) => {
             let json = args.json;
             let response = service
@@ -309,6 +443,196 @@ fn parse_sessions(args: &[String]) -> Result<CliCommand> {
         }
     }
     Ok(CliCommand::Sessions(parsed))
+}
+
+fn parse_ai(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("ai requires a subcommand"))?;
+    match subcommand.as_str() {
+        "search" => parse_ai_search(rest),
+        "blocks" => parse_ai_blocks(rest),
+        "context" => parse_ai_context(rest),
+        "tools" => parse_ai_tools(rest),
+        "projects" => parse_ai_projects(rest),
+        "index" => parse_ai_index(rest),
+        "add" => parse_ai_add(rest),
+        _ => bail!("unknown ai subcommand: {subcommand}"),
+    }
+}
+
+fn parse_ai_search(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiSearchArgs::default();
+    let mut query = Vec::new();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--project=") => {
+                parsed.project = Some(value_after_equals(arg, "--project")?)
+            }
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai search option: {arg}"),
+            _ => query.push(arg),
+        }
+    }
+    parsed.query = query.join(" ");
+    if parsed.query.is_empty() {
+        bail!("ai search requires a query");
+    }
+    Ok(CliCommand::Ai(AiCommand::Search(parsed)))
+}
+
+fn parse_ai_blocks(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiBlocksArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            _ if arg.starts_with("--project=") => {
+                parsed.project = Some(value_after_equals(arg, "--project")?)
+            }
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ => bail!("unknown ai blocks option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Blocks(parsed)))
+}
+
+fn parse_ai_context(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiContextArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--project" => parsed.project = flags.value("--project")?,
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--project=") => {
+                parsed.project = value_after_equals(arg, "--project")?
+            }
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai context option: {arg}"),
+            _ if parsed.project.is_empty() => parsed.project = arg,
+            _ => bail!("unexpected ai context argument: {arg}"),
+        }
+    }
+    if parsed.project.is_empty() {
+        bail!("ai context requires --project <PATH>");
+    }
+    Ok(CliCommand::Ai(AiCommand::Context(parsed)))
+}
+
+fn parse_ai_tools(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiListArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            _ if arg.starts_with("--project=") => {
+                parsed.project = Some(value_after_equals(arg, "--project")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ => bail!("unknown ai tools option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Tools(parsed)))
+}
+
+fn parse_ai_projects(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiListArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ => bail!("unknown ai projects option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Projects(parsed)))
+}
+
+fn parse_ai_index(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiIndexArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--path" => parsed.path = Some(flags.value("--path")?),
+            _ if arg.starts_with("--path=") => {
+                parsed.path = Some(value_after_equals(arg, "--path")?)
+            }
+            _ => bail!("unknown ai index option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Index(parsed)))
+}
+
+fn parse_ai_add(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiAddArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--file" => parsed.file = flags.value("--file")?,
+            _ if arg.starts_with("--file=") => parsed.file = value_after_equals(arg, "--file")?,
+            _ => bail!("unknown ai add option: {arg}"),
+        }
+    }
+    if parsed.file.is_empty() {
+        bail!("ai add requires --file <PATH>");
+    }
+    Ok(CliCommand::Ai(AiCommand::Add(parsed)))
 }
 
 fn parse_stats(args: &[String]) -> Result<CliCommand> {
@@ -500,6 +824,116 @@ fn print_sessions_response(
             s.event_count
         );
     }
+    Ok(())
+}
+
+fn print_search_sessions_response(response: &SearchSessionsResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "{} grouped session(s){}",
+        response.sessions.len(),
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    println!(
+        "{:<10} {:<30} {:<20} {:<6} MATCH",
+        "TOOL", "PROJECT", "SESSION ID", "EVENTS"
+    );
+    for session in &response.sessions {
+        println!(
+            "{:<10} {:<30} {:<20} {:<6} {}",
+            session.tool,
+            truncate(&session.project, 29),
+            truncate(&session.session_id, 19),
+            session.event_count,
+            session.match_count
+        );
+    }
+    Ok(())
+}
+
+fn print_usage_blocks_response(response: &UsageBlocksResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("{} usage block(s)", response.blocks.len());
+    for block in &response.blocks {
+        println!(
+            "{} {} {} {} events={} sessions={}",
+            block.bucket_start,
+            block.bucket_end,
+            block.tool,
+            truncate(&block.project, 30),
+            block.event_count,
+            block.session_count
+        );
+    }
+    Ok(())
+}
+
+fn print_project_context_response(response: &ProjectContextResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("project: {}", response.project);
+    println!("event_count: {}", response.event_count);
+    println!("tools: {}", response.tools.join(", "));
+    println!("sessions: {}", response.sessions.len());
+    println!("hosts: {}", response.hostnames.join(", "));
+    for entry in &response.recent_entries {
+        print_log(entry);
+    }
+    Ok(())
+}
+
+fn print_ai_tools_response(response: &ListAiToolsResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("TOOL       EVENTS SESSIONS LAST SEEN");
+    for tool in &response.tools {
+        println!(
+            "{:<10} {:<6} {:<8} {}",
+            tool.tool, tool.event_count, tool.session_count, tool.last_seen
+        );
+    }
+    Ok(())
+}
+
+fn print_ai_projects_response(response: &ListAiProjectsResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("PROJECT                          EVENTS SESSIONS TOOLS");
+    for project in &response.projects {
+        println!(
+            "{:<32} {:<6} {:<8} {}",
+            truncate(&project.project, 32),
+            project.event_count,
+            project.session_count,
+            project.tools.join(",")
+        );
+    }
+    Ok(())
+}
+
+fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "files={} ingested={} duplicates={} parse_errors={} skipped={}",
+        response.discovered_files,
+        response.ingested,
+        response.skipped_dupes,
+        response.parse_errors,
+        response.skipped_files
+    );
     Ok(())
 }
 

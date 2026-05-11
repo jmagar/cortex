@@ -143,6 +143,8 @@ fn seed_auth_action_log(pool: &DbPool) {
 fn minimal_args_for_action(action: &str) -> Value {
     match action {
         "correlate" => json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"}),
+        "search_sessions" => json!({"action": action, "query": "mounted"}),
+        "project_context" => json!({"action": action, "project": "/tmp/project"}),
         "context" => json!({"action": action, "log_id": 1}),
         "get" => json!({"action": action, "id": 1}),
         "compare" => json!({

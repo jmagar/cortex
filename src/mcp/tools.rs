@@ -2,8 +2,10 @@ use serde_json::{json, Value};
 
 use crate::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
-    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAppsRequest, ListSessionsRequest,
-    PatternsRequest, SearchLogsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
+    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, PatternsRequest, ProjectContextRequest,
+    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
+    UsageBlocksRequest,
 };
 
 use super::schemas::SYSLOG_ACTIONS;
@@ -34,6 +36,11 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "status" => tool_get_status(state, args).await,
         "apps" => tool_list_apps(state, args).await,
         "sessions" => tool_list_sessions(state, args).await,
+        "search_sessions" => tool_search_sessions(state, args).await,
+        "usage_blocks" => tool_usage_blocks(state, args).await,
+        "project_context" => tool_project_context(state, args).await,
+        "list_ai_tools" => tool_list_ai_tools(state, args).await,
+        "list_ai_projects" => tool_list_ai_projects(state, args).await,
         "source_ips" => tool_list_source_ips(state, args).await,
         "timeline" => tool_timeline(state, args).await,
         "patterns" => tool_patterns(state, args).await,
@@ -127,6 +134,73 @@ async fn tool_list_sessions(state: &AppState, args: Value) -> anyhow::Result<Val
         })
         .await?;
     tracing::debug!(session_count = response.count, "list_sessions completed");
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_search_sessions(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let query = string_arg(&args, "query").ok_or_else(|| anyhow::anyhow!("query is required"))?;
+    let response = state
+        .service
+        .search_sessions(SearchSessionsRequest {
+            query,
+            project: string_arg(&args, "project"),
+            tool: string_arg(&args, "tool"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
+        })
+        .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_usage_blocks(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let response = state
+        .service
+        .usage_blocks(UsageBlocksRequest {
+            project: string_arg(&args, "project"),
+            tool: string_arg(&args, "tool"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+        })
+        .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_project_context(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let project =
+        string_arg(&args, "project").ok_or_else(|| anyhow::anyhow!("project is required"))?;
+    let response = state
+        .service
+        .project_context(ProjectContextRequest {
+            project,
+            tool: string_arg(&args, "tool"),
+            limit: u32_arg(&args, "limit")?,
+        })
+        .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_list_ai_tools(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let response = state
+        .service
+        .list_ai_tools(ListAiToolsRequest {
+            project: string_arg(&args, "project"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+        })
+        .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_list_ai_projects(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let response = state
+        .service
+        .list_ai_projects(ListAiProjectsRequest {
+            tool: string_arg(&args, "tool"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+        })
+        .await?;
     Ok(serde_json::to_value(response)?)
 }
 
@@ -432,6 +506,56 @@ Lists AI transcript sessions grouped by project/tool/session/host.
 - `hostname` (string, optional) — restrict to one host
 - `from`, `to` (string, optional) — time range (ISO 8601)
 - `limit` (integer, optional) — max sessions (default 100, max 1000)
+
+---
+
+## syslog search_sessions
+Session-ranked full-text search across AI transcript rows. Returns grouped sessions rather than flat log rows.
+
+**Parameters:**
+- `query` (string, **required**) — FTS5 search query
+- `project` (string, optional) — exact project path filter
+- `tool` (string, optional) — AI tool filter: `claude`, `codex`, or `gemini`
+- `from`, `to` (string, optional) — time range (ISO 8601)
+- `limit` (integer, optional) — max grouped sessions (default 20, max 100)
+
+---
+
+## syslog usage_blocks
+AI activity bucketed into deterministic 5-hour UTC windows.
+
+**Parameters:**
+- `project` (string, optional) — exact project path filter
+- `tool` (string, optional) — AI tool filter
+- `from`, `to` (string, optional) — time range (ISO 8601)
+
+---
+
+## syslog project_context
+Summary of one project path including tools, sessions, hosts, counts, and recent representative entries.
+
+**Parameters:**
+- `project` (string, **required**) — exact project path
+- `tool` (string, optional) — AI tool filter
+- `limit` (integer, optional) — recent representative entry limit (default 5, max 20)
+
+---
+
+## syslog list_ai_tools
+Distinct AI tools with counts and first/last seen timestamps.
+
+**Parameters:**
+- `project` (string, optional) — exact project path filter
+- `from`, `to` (string, optional) — time range (ISO 8601)
+
+---
+
+## syslog list_ai_projects
+Distinct AI projects with counts, tools used, and first/last seen timestamps.
+
+**Parameters:**
+- `tool` (string, optional) — AI tool filter
+- `from`, `to` (string, optional) — time range (ISO 8601)
 
 ---
 

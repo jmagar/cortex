@@ -24,7 +24,7 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md).
 
@@ -35,6 +35,11 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
 | `sessions` | AI transcript sessions by project |
+| `search_sessions` | Ranked grouped session search |
+| `usage_blocks` | AI activity in 5-hour UTC windows |
+| `project_context` | Summary for one AI project path |
+| `list_ai_tools` | Distinct AI tools with counts |
+| `list_ai_projects` | Distinct AI projects with counts |
 | `correlate` | Cross-host event correlation in a time window |
 | `stats` | Database statistics and storage health |
 | `status` | Lightweight runtime and DB health |

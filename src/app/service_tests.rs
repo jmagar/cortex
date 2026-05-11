@@ -138,3 +138,43 @@ async fn health_check_runs_simple_database_query() {
 
     service.health_check().await.unwrap();
 }
+
+#[tokio::test]
+async fn ai_service_methods_return_seeded_data() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[LogBatchEntry {
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            hostname: "host-a".into(),
+            facility: Some("local0".into()),
+            severity: "info".into(),
+            app_name: Some("claude".into()),
+            process_id: None,
+            message: "authentication bug fixed".into(),
+            raw: "authentication bug fixed".into(),
+            source_ip: "127.0.0.1:514".into(),
+            docker_checkpoint: None,
+            ai_tool: Some("claude".into()),
+            ai_project: Some("/tmp/project".into()),
+            ai_session_id: Some("sess-1".into()),
+            ai_transcript_path: Some("/tmp/project/session.jsonl".into()),
+        }],
+    )
+    .unwrap();
+
+    let search = service
+        .search_sessions(SearchSessionsRequest {
+            query: "authentication".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(search.sessions.len(), 1);
+
+    let tools = service
+        .list_ai_tools(ListAiToolsRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(tools.tools[0].tool, "claude");
+}

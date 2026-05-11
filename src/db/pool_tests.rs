@@ -87,3 +87,56 @@ fn init_db_adds_ai_session_metadata_columns() {
         assert_eq!(exists, 1, "missing column {column}");
     }
 }
+
+#[test]
+fn init_db_adds_transcript_checkpoint_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = crate::config::StorageConfig {
+        db_path,
+        ..Default::default()
+    };
+
+    let _pool = init_pool(&config).unwrap();
+    let conn = rusqlite::Connection::open(&config.db_path).unwrap();
+    for table in ["transcript_sources", "transcript_import_records"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1, "missing table {table}");
+    }
+}
+
+#[test]
+fn transcript_import_identity_enforces_uniqueness() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = crate::config::StorageConfig {
+        db_path: dir.path().join("test.db"),
+        ..Default::default()
+    };
+
+    let _pool = init_pool(&config).unwrap();
+    let conn = rusqlite::Connection::open(&config.db_path).unwrap();
+    conn.execute(
+        "INSERT INTO transcript_sources (canonical_path, source_kind) VALUES (?1, ?2)",
+        rusqlite::params!["/tmp/session.jsonl", "explicit_file"],
+    )
+    .unwrap();
+    let source_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO transcript_import_records (source_id, record_key) VALUES (?1, ?2)",
+        rusqlite::params![source_id, "record-1"],
+    )
+    .unwrap();
+    let err = conn
+        .execute(
+            "INSERT INTO transcript_import_records (source_id, record_key) VALUES (?1, ?2)",
+            rusqlite::params![source_id, "record-1"],
+        )
+        .unwrap_err();
+    assert!(matches!(err, rusqlite::Error::SqliteFailure(_, _)));
+}

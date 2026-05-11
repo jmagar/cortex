@@ -9,15 +9,19 @@ use super::models::{
     AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest, ClockSkewResponse,
     CompareRequest, CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
     CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
-    GetLogResponse, IngestRateRequest, IngestRateResponse, ListAppsRequest, ListAppsResponse,
-    ListHostsResponse, ListSessionsRequest, ListSessionsResponse, ListSourceIpsResponse, LogEntry,
-    PatternsRequest, PatternsResponse, SearchLogsRequest, SearchLogsResponse, SilentHostsRequest,
-    SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
+    GetLogResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
+    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
+    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse, ProjectContextRequest,
+    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
+    SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse, TailLogsRequest,
+    TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
 use crate::config::StorageConfig;
 use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy};
+use crate::scanner;
 
 const DB_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -176,6 +180,93 @@ impl SyslogService {
         })
     }
 
+    pub async fn search_sessions(
+        &self,
+        req: SearchSessionsRequest,
+    ) -> ServiceResult<SearchSessionsResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::SearchAiSessionsParams {
+            query: req.query,
+            ai_project: req.project,
+            ai_tool: req.tool,
+            from,
+            to,
+            limit: req.limit,
+        };
+        let result = self
+            .run_db(move |pool| db::search_ai_sessions(pool, &params))
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn usage_blocks(
+        &self,
+        req: UsageBlocksRequest,
+    ) -> ServiceResult<UsageBlocksResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::AiUsageBlocksParams {
+            ai_project: req.project,
+            ai_tool: req.tool,
+            from,
+            to,
+        };
+        let result = self
+            .run_db(move |pool| db::get_ai_usage_blocks(pool, &params))
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn project_context(
+        &self,
+        req: ProjectContextRequest,
+    ) -> ServiceResult<ProjectContextResponse> {
+        let params = db::AiProjectContextParams {
+            project: req.project,
+            ai_tool: req.tool,
+            limit: req.limit,
+        };
+        let result = self
+            .run_db(move |pool| db::get_ai_project_context(pool, &params))
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn list_ai_tools(
+        &self,
+        req: ListAiToolsRequest,
+    ) -> ServiceResult<ListAiToolsResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::ListAiToolsParams {
+            ai_project: req.project,
+            from,
+            to,
+        };
+        let result = self
+            .run_db(move |pool| db::list_ai_tools(pool, &params))
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn list_ai_projects(
+        &self,
+        req: ListAiProjectsRequest,
+    ) -> ServiceResult<ListAiProjectsResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::ListAiProjectsParams {
+            ai_tool: req.tool,
+            from,
+            to,
+        };
+        let result = self
+            .run_db(move |pool| db::list_ai_projects(pool, &params))
+            .await?;
+        Ok(result.into())
+    }
+
     pub async fn correlate_events(
         &self,
         req: CorrelateEventsRequest,
@@ -234,6 +325,31 @@ impl SyslogService {
             .await?
             .into();
         Ok(stats)
+    }
+
+    pub async fn index_ai_roots(
+        &self,
+        path: Option<String>,
+    ) -> ServiceResult<scanner::IndexResult> {
+        self.run_db(move |pool| {
+            scanner::index_roots(pool, path.as_deref().map(std::path::Path::new))
+        })
+        .await
+        .map_err(|error| match error {
+            ServiceError::Internal(err) => ServiceError::InvalidInput(err.to_string()),
+            other => other,
+        })
+    }
+
+    pub async fn add_ai_file(&self, file: String) -> ServiceResult<scanner::IndexResult> {
+        self.run_db(move |pool| {
+            scanner::index_file(pool, std::path::Path::new(&file), "explicit_file")
+        })
+        .await
+        .map_err(|error| match error {
+            ServiceError::Internal(err) => ServiceError::InvalidInput(err.to_string()),
+            other => other,
+        })
     }
 
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {
