@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 
 use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest,
-    common::v1::{any_value::Value as AnyValueKind, AnyValue, KeyValue},
+    common::v1::{AnyValue, KeyValue, any_value::Value as AnyValueKind},
     logs::v1::{LogRecord, ResourceLogs, ScopeLogs},
     resource::v1::Resource,
 };
@@ -213,6 +213,53 @@ fn build_entries_handles_multiple_resource_logs() {
     assert_eq!(entries[0].hostname, "dookie");
     assert_eq!(entries[1].hostname, "squirts");
     assert_eq!(entries[1].severity, "err");
+}
+
+#[test]
+fn build_entries_extracts_ai_metadata_from_attributes() {
+    let peer = "127.0.0.1:1".parse().unwrap();
+    let req = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: vec![
+                    kv("host.name", av_string("tootie")),
+                    kv("service.name", av_string("claude-code")),
+                    kv("session.id", av_string("res-session-123")),
+                ],
+                dropped_attributes_count: 0,
+                entity_refs: vec![],
+            }),
+            scope_logs: vec![ScopeLogs {
+                scope: None,
+                log_records: vec![LogRecord {
+                    time_unix_nano: 0,
+                    observed_time_unix_nano: 0,
+                    severity_number: 9,
+                    severity_text: String::new(),
+                    body: Some(av_string("msg with log-level attributes")),
+                    attributes: vec![
+                        kv("session.id", av_string("log-session-456")), // overrides resource
+                        kv("project.path", av_string("/work/syslog-mcp")),
+                    ],
+                    dropped_attributes_count: 0,
+                    flags: 0,
+                    trace_id: vec![],
+                    span_id: vec![],
+                    event_name: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    };
+
+    let entries = build_entries(&req, peer);
+    assert_eq!(entries.len(), 1);
+    let e = &entries[0];
+    assert_eq!(e.hostname, "tootie");
+    assert_eq!(e.app_name.as_deref(), Some("claude-code"));
+    assert_eq!(e.ai_session_id.as_deref(), Some("log-session-456"));
+    assert_eq!(e.ai_project.as_deref(), Some("/work/syslog-mcp"));
 }
 
 // ---- auth gate ----

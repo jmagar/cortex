@@ -8,21 +8,21 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::{
+    Router,
     extract::{ConnectInfo, State},
-    http::{header::RETRY_AFTER, HeaderMap, HeaderValue, StatusCode},
-    middleware::{from_fn, Next},
+    http::{HeaderMap, HeaderValue, StatusCode, header::RETRY_AFTER},
+    middleware::{Next, from_fn},
     response::{IntoResponse, Json},
     routing::post,
-    Router,
 };
 use bytes::Bytes;
 use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest,
-    common::v1::{any_value::Value as AnyValueKind, AnyValue},
+    common::v1::{AnyValue, any_value::Value as AnyValueKind},
 };
 use prost::Message;
 use serde_json::json;
@@ -252,6 +252,28 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
 
         for scope_logs in &resource_logs.scope_logs {
             for log in &scope_logs.log_records {
+                let log_attrs: HashMap<&str, &AnyValue> = log
+                    .attributes
+                    .iter()
+                    .filter_map(|kv| kv.value.as_ref().map(|v| (kv.key.as_str(), v)))
+                    .collect();
+
+                let ai_session_id = log_attrs
+                    .get("session.id")
+                    .or_else(|| log_attrs.get("session_id"))
+                    .or_else(|| resource_attrs.get("session.id"))
+                    .or_else(|| resource_attrs.get("session_id"))
+                    .and_then(|v| any_value_to_string(v));
+
+                let ai_project = log_attrs
+                    .get("project.path")
+                    .or_else(|| log_attrs.get("codebase.root_path"))
+                    .or_else(|| log_attrs.get("session.cwd"))
+                    .or_else(|| resource_attrs.get("project.path"))
+                    .or_else(|| resource_attrs.get("codebase.root_path"))
+                    .or_else(|| resource_attrs.get("session.cwd"))
+                    .and_then(|v| any_value_to_string(v));
+
                 let timestamp = format_otlp_timestamp(log.time_unix_nano)
                     .unwrap_or_else(|| received_iso.clone());
                 let severity = severity_from_number(log.severity_number).to_string();
@@ -274,8 +296,8 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     source_ip: source_ip.clone(),
                     docker_checkpoint: None,
                     ai_tool: None,
-                    ai_project: None,
-                    ai_session_id: None,
+                    ai_project,
+                    ai_session_id,
                     ai_transcript_path: None,
                 });
             }
