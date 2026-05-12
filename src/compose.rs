@@ -1,9 +1,15 @@
 use std::collections::BTreeMap;
+use std::error::Error;
+use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use serde::Serialize;
+
+const DIAG_DOCKER_UNAVAILABLE: &str = "docker_unavailable";
+const DIAG_TARGET_UNRESOLVED: &str = "target_unresolved";
+const DIAG_SYSTEMD_CHECK_FAILED: &str = "systemd_check_failed";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposeDefaults {
@@ -254,7 +260,7 @@ impl<I, R> ComposeService<I, R> {
         }
     }
 
-    pub fn compose_invocation(
+    fn compose_invocation(
         &self,
         target: &ResolvedComposeTarget,
         mutation: ComposeMutation,
@@ -304,7 +310,7 @@ impl<I, R> ComposeService<I, R> {
         }
     }
 
-    pub fn logs_invocation(&self, target: &ResolvedComposeTarget, tail: u32) -> ComposeInvocation {
+    fn logs_invocation(&self, target: &ResolvedComposeTarget, tail: u32) -> ComposeInvocation {
         let mut invocation = self.compose_invocation(target, ComposeMutation::Pull);
         invocation
             .args
@@ -528,8 +534,22 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                 return Ok(status);
             }
         };
-        let systemd = self.inspector.systemd_status("syslog-mcp.service")?;
+        let mut systemd_error = None;
+        let systemd = match self.inspector.systemd_status("syslog-mcp.service") {
+            Ok(systemd) => systemd,
+            Err(error) => {
+                systemd_error = Some(error.to_string());
+                None
+            }
+        };
         let mut status = status_from_target(target, info, systemd);
+        if let Some(error) = systemd_error {
+            status.diagnostics.push(ComposeDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: DIAG_SYSTEMD_CHECK_FAILED.into(),
+                message: format!("could not verify syslog-mcp.service state: {error}"),
+            });
+        }
         if status.systemd.as_ref().is_some_and(|s| s.active) {
             let code = if status.compose_project.is_some() {
                 "owner_mismatch"
@@ -606,12 +626,23 @@ fn unresolved_status(
 }
 
 fn unresolved_code(error: &anyhow::Error) -> &'static str {
-    if error.to_string().contains("docker unavailable") {
-        "docker_unavailable"
+    if error.downcast_ref::<DockerUnavailableError>().is_some() {
+        DIAG_DOCKER_UNAVAILABLE
     } else {
-        "target_unresolved"
+        DIAG_TARGET_UNRESOLVED
     }
 }
+
+#[derive(Debug)]
+struct DockerUnavailableError(String);
+
+impl fmt::Display for DockerUnavailableError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "docker unavailable: {}", self.0)
+    }
+}
+
+impl Error for DockerUnavailableError {}
 
 fn status_from_target(
     target: ResolvedComposeTarget,
@@ -847,14 +878,16 @@ impl DockerInspect for CliDockerInspect {
             "docker",
             &["inspect", name, "--format", "{{json .}}"],
             Duration::from_secs(10),
-        )?;
+        )
+        .map_err(|e| DockerUnavailableError(format!("docker inspect failed: {e}")))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
             if !stderr.contains("no such object") && !stderr.contains("no such container") {
-                return Err(anyhow!(
-                    "docker unavailable: docker inspect failed: {}",
+                return Err(DockerUnavailableError(format!(
+                    "docker inspect failed: {}",
                     String::from_utf8_lossy(&output.stderr).trim()
-                ));
+                ))
+                .into());
             }
             return Ok(None);
         }
@@ -868,12 +901,14 @@ impl DockerInspect for CliDockerInspect {
             "docker",
             &["ps", "-a", "--filter", &filter, "--format", "{{.Names}}"],
             Duration::from_secs(10),
-        )?;
+        )
+        .map_err(|e| DockerUnavailableError(format!("docker ps failed: {e}")))?;
         if !output.status.success() {
-            return Err(anyhow!(
-                "docker unavailable: docker ps failed: {}",
+            return Err(DockerUnavailableError(format!(
+                "docker ps failed: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
-            ));
+            ))
+            .into());
         }
         let names = String::from_utf8_lossy(&output.stdout);
         let mut found = Vec::new();
@@ -892,14 +927,11 @@ impl DockerInspect for CliDockerInspect {
             "systemctl",
             &["--user", "is-active", unit],
             Duration::from_secs(3),
-        );
-        match output {
-            Ok(output) => Ok(Some(SystemdStatus {
-                unit: unit.into(),
-                active: output.status.success(),
-            })),
-            Err(_) => Ok(None),
-        }
+        )?;
+        Ok(Some(SystemdStatus {
+            unit: unit.into(),
+            active: output.status.success(),
+        }))
     }
 
     fn listeners(&self, ports: &[u16]) -> Result<Vec<ListenerInfo>> {
@@ -910,15 +942,19 @@ impl DockerInspect for CliDockerInspect {
                 "ss",
                 &["-ltnup", "sport", "=", &port_arg],
                 Duration::from_secs(3),
-            );
-            if let Ok(output) = output {
-                if output.status.success() && !output.stdout.is_empty() {
-                    listeners.push(ListenerInfo {
-                        port: *port,
-                        process: Some(String::from_utf8_lossy(&output.stdout).to_string()),
-                        belongs_to_target: false,
-                    });
-                }
+            )?;
+            if !output.status.success() {
+                return Err(anyhow!(
+                    "ss listener check failed for port {port}: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            if !output.stdout.is_empty() {
+                listeners.push(ListenerInfo {
+                    port: *port,
+                    process: Some(String::from_utf8_lossy(&output.stdout).to_string()),
+                    belongs_to_target: false,
+                });
             }
         }
         Ok(listeners)

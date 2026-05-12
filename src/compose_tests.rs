@@ -210,6 +210,33 @@ fn matching_requested_selectors_are_accepted() {
 }
 
 #[test]
+fn docker_unavailable_code_uses_typed_error() {
+    let err: anyhow::Error = DockerUnavailableError("daemon is down".into()).into();
+    assert_eq!(unresolved_code(&err), DIAG_DOCKER_UNAVAILABLE);
+
+    let plain_err = anyhow::anyhow!("docker unavailable: text only");
+    assert_eq!(unresolved_code(&plain_err), DIAG_TARGET_UNRESOLVED);
+}
+
+#[test]
+fn status_reports_systemd_check_failures_as_diagnostics() {
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(labelled_container()),
+            systemd_error: Some("systemctl unavailable".into()),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+
+    let status = service.status(&ComposeTarget::default()).unwrap();
+
+    assert_eq!(status.diagnostics[0].code, DIAG_SYSTEMD_CHECK_FAILED);
+    assert_eq!(status.diagnostics[0].severity, DiagnosticSeverity::Error);
+}
+
+#[test]
 fn containers_without_required_compose_labels_are_unsafe_for_mutation() {
     let service = ComposeService::new(
         FakeInspector {
