@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use serde::Serialize;
@@ -460,36 +461,48 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             ));
         }
 
-        let published_ports = if target.source == TargetSource::LiveContainerLabels {
-            self.inspector
-                .inspect_container(&target.target.container_name)?
-                .map(|info| {
-                    info.ports
-                        .into_iter()
-                        .filter_map(|port| port.public_port)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        let systemd = self
-            .inspector
-            .systemd_status("syslog-mcp.service")
-            .map_err(|error| {
-                anyhow!("refusing mutation: could not verify systemd ownership: {error}")
+        let ownership = if mutation_requires_ownership_probe(mutation) {
+            let published_ports = if target.source == TargetSource::LiveContainerLabels {
+                self.inspector
+                    .inspect_container(&target.target.container_name)?
+                    .map(|info| {
+                        info.ports
+                            .into_iter()
+                            .filter_map(|port| port.public_port)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let systemd = self
+                .inspector
+                .systemd_status("syslog-mcp.service")
+                .map_err(|error| {
+                    anyhow!("refusing mutation: could not verify systemd ownership: {error}")
+                })?;
+            let listeners = self.inspector.listeners(&[1514, 3100]).map_err(|error| {
+                anyhow!("refusing mutation: could not verify port listeners: {error}")
             })?;
-        let listeners = self.inspector.listeners(&[1514, 3100]).map_err(|error| {
-            anyhow!("refusing mutation: could not verify port listeners: {error}")
-        })?;
-        let systemd_active = systemd.as_ref().is_some_and(|s| s.active);
-        let non_target_listener = listeners.iter().any(|listener| {
-            !listener_belongs_to_target(listener, &target.target.container_name, &published_ports)
-        });
+            Some((
+                systemd.as_ref().is_some_and(|s| s.active),
+                listeners.iter().any(|listener| {
+                    !listener_belongs_to_target(
+                        listener,
+                        &target.target.container_name,
+                        &published_ports,
+                    )
+                }),
+            ))
+        } else {
+            None
+        };
 
         match mutation {
             ComposeMutation::Up | ComposeMutation::Restart
-                if systemd_active || non_target_listener =>
+                if ownership.is_some_and(|(systemd_active, non_target_listener)| {
+                    systemd_active || non_target_listener
+                }) =>
             {
                 return Err(anyhow!(
                     "refusing mutation: systemd or non-target listener owns syslog ports"
@@ -755,16 +768,27 @@ fn target_from_container(
     }
 }
 
+fn mutation_requires_ownership_probe(mutation: ComposeMutation) -> bool {
+    matches!(
+        mutation,
+        ComposeMutation::Up | ComposeMutation::Restart | ComposeMutation::Down
+    )
+}
+
 fn listener_belongs_to_target(
     listener: &ListenerInfo,
     _container_name: &str,
     published_ports: &[u16],
 ) -> bool {
+    if listener.belongs_to_target {
+        return true;
+    }
     let published_by_target = published_ports.contains(&listener.port);
-    listener.belongs_to_target
-        || listener.process.as_deref().is_some_and(|process| {
-            published_by_target && (!process.contains("users:") || process.contains("docker-proxy"))
-        })
+    published_by_target
+        && listener
+            .process
+            .as_deref()
+            .is_some_and(|process| process.contains("users:") && process.contains("docker-proxy"))
 }
 
 fn validate_requested_selectors(
@@ -1005,7 +1029,13 @@ fn run_inspector_command(
     std::process::Command::new("timeout")
         .args(timeout_args)
         .output()
-        .map_err(|e| anyhow!("failed to run {program} inspector command: {e}"))
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                anyhow!("'timeout' binary not found; please install GNU coreutils or add timeout to PATH before running compose diagnostics")
+            } else {
+                anyhow!("failed to run {program} inspector command: {e}")
+            }
+        })
 }
 
 fn container_info_from_inspect(value: serde_json::Value) -> Result<ContainerInfo> {
@@ -1181,37 +1211,41 @@ impl CommandRunner for ProcessRunner {
         let mut timeout_cleanup = None;
         let status = loop {
             if let Some(status) = child.try_wait()? {
-                break status;
+                break Some(status);
             }
             if started.elapsed() >= invocation.timeout {
                 timed_out = true;
                 let terminate_sent = terminate_child(&mut child);
                 thread::sleep(Duration::from_millis(500));
                 let mut kill_sent = false;
-                let status = if let Some(status) = child.try_wait()? {
-                    status
+                let (status, reaped) = if let Some(status) = child.try_wait()? {
+                    (Some(status), true)
                 } else {
                     kill_sent = force_kill_child(&mut child);
-                    child.wait()?
+                    let status = wait_for_child_after_kill(&mut child, Duration::from_secs(2))?;
+                    let reaped = status.is_some();
+                    (status, reaped)
                 };
                 timeout_cleanup = Some(TimeoutCleanupStatus {
                     terminate_sent,
                     kill_sent,
-                    reaped: true,
+                    reaped,
                 });
                 break status;
             }
             thread::sleep(Duration::from_millis(25));
         };
 
-        let _ = out_handle.join();
-        let _ = err_handle.join();
+        if timeout_cleanup.as_ref().map(|c| c.reaped).unwrap_or(true) {
+            let _ = out_handle.join();
+            let _ = err_handle.join();
+        }
 
         let (stdout, stdout_truncated) = take_buffer(stdout_buf)?;
         let (stderr, stderr_truncated) = take_buffer(stderr_buf)?;
 
         Ok(CommandOutput {
-            exit_status: status.code(),
+            exit_status: status.and_then(|status| status.code()),
             stdout: redact_sensitive(&String::from_utf8_lossy(&stdout)),
             stderr: redact_sensitive(&String::from_utf8_lossy(&stderr)),
             stdout_truncated,
@@ -1219,6 +1253,22 @@ impl CommandRunner for ProcessRunner {
             timed_out,
             timeout_cleanup,
         })
+    }
+}
+
+fn wait_for_child_after_kill(
+    child: &mut std::process::Child,
+    cap: Duration,
+) -> Result<Option<std::process::ExitStatus>> {
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if started.elapsed() >= cap {
+            return Ok(None);
+        }
+        thread::sleep(Duration::from_millis(25));
     }
 }
 

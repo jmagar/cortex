@@ -60,7 +60,7 @@ impl CommandRunner for FakeRunner {
 }
 
 fn labelled_container() -> ContainerInfo {
-    let compose_file = std::env::current_dir().unwrap().join("docker-compose.yml");
+    let compose_file = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docker-compose.yml");
     let project_dir = compose_file.parent().unwrap().to_path_buf();
     let mut labels = BTreeMap::new();
     labels.insert(
@@ -432,6 +432,24 @@ fn mutation_refuses_unverified_systemd_or_listener_state() {
 }
 
 #[test]
+fn pull_does_not_require_systemd_or_listener_probes() {
+    let service = ComposeService::new(
+        FakeInspector {
+            systemd_error: Some("systemctl unavailable".into()),
+            listeners_error: Some("ss unavailable".into()),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = target_from_container(&labelled_container(), &ComposeDefaults::default());
+
+    service
+        .preflight_mutation(ComposeMutation::Pull, &target, &MutationOptions::default())
+        .unwrap();
+}
+
+#[test]
 fn down_requires_yes_and_stops_only_target_service() {
     let service = ComposeService::new(
         FakeInspector::default(),
@@ -542,6 +560,28 @@ fn live_target_refuses_foreign_listener_even_on_published_port() {
             listeners: vec![ListenerInfo {
                 port: 3100,
                 process: Some("users:((\"other\",pid=123,fd=7))".into()),
+                belongs_to_target: false,
+            }],
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = target_from_container(&labelled_container(), &ComposeDefaults::default());
+    let err = service
+        .preflight_mutation(ComposeMutation::Up, &target, &MutationOptions::default())
+        .unwrap_err();
+    assert!(err.to_string().contains("non-target listener"));
+}
+
+#[test]
+fn live_target_refuses_published_listener_with_unknown_owner() {
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(labelled_container()),
+            listeners: vec![ListenerInfo {
+                port: 3100,
+                process: Some("LISTEN 0 4096 0.0.0.0:3100 0.0.0.0:*".into()),
                 belongs_to_target: false,
             }],
             ..Default::default()
