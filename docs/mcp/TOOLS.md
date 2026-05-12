@@ -32,7 +32,7 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `anomalies` | Recent vs baseline volume/error comparison |
 | `compare` | Side-by-side comparison of two time ranges |
 | `compose_status` | Redacted read-only Compose deployment diagnostics |
-| `compose_doctor` | Alias for Compose deployment health diagnostics |
+| `compose_doctor` | Strict Compose deployment health diagnostics |
 | `help` | Markdown reference for all actions |
 
 ## syslog search
@@ -145,7 +145,7 @@ Target override arguments such as `project_dir`, `compose_file`, `project_name`,
 
 ## syslog compose_doctor
 
-Alias of `compose_status` for deployment health checks. Compose lifecycle mutations are CLI-only.
+Run strict deployment-health checks for the canonical syslog-mcp Compose deployment. It returns the same redacted diagnostic shape as `compose_status` when healthy, and returns a tool error when Docker/Compose ownership or runtime checks are not ready for lifecycle work. Compose lifecycle mutations are CLI-only.
 
 Required argument: `action = "compose_doctor"`
 

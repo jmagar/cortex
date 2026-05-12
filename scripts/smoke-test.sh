@@ -53,6 +53,7 @@ done
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 PASS=0
 FAIL=0
+SKIP=0
 ERRORS=()
 
 COLOR_GREEN='\033[0;32m'
@@ -62,6 +63,7 @@ COLOR_BOLD='\033[1m'
 
 pass() { echo -e "${COLOR_GREEN}PASS${COLOR_RESET}  $1"; (( PASS++ )) || true; }
 fail() { echo -e "${COLOR_RED}FAIL${COLOR_RESET}  $1"; ERRORS+=("$1"); (( FAIL++ )) || true; }
+skip() { echo "SKIP  $1"; (( SKIP++ )) || true; }
 
 mcp_call() {
     local action="$1"; shift
@@ -585,19 +587,28 @@ assert 'image_id' not in text, 'image id leaked'
 print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "compose_status: redacted safe response valid" "$COMPOSE_STATUS_VALID" "ok"
+COMPOSE_STATUS_DOCTORABLE=$(echo "$COMPOSE_STATUS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('yes' if d.get('runtime_state') != 'docker_unavailable' and d.get('ownership') == 'compose_owned' else 'no')
+" 2>/dev/null || echo "no")
 
 echo ""
 echo "Action: compose_doctor"
-COMPOSE_DOCTOR=$(mcp_call compose_doctor 2>&1)
-assert_no_error "compose_doctor: no error" "$COMPOSE_DOCTOR"
-COMPOSE_DOCTOR_VALID=$(echo "$COMPOSE_DOCTOR" | python3 -c "
+if [[ "$COMPOSE_STATUS_DOCTORABLE" == "yes" ]]; then
+    COMPOSE_DOCTOR=$(mcp_call compose_doctor 2>&1)
+    assert_no_error "compose_doctor: no error" "$COMPOSE_DOCTOR"
+    COMPOSE_DOCTOR_VALID=$(echo "$COMPOSE_DOCTOR" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 for key in ('container_name', 'ownership', 'runtime_state'):
     assert key in d, f'{key} missing'
 print('ok')
 " 2>/dev/null || echo "error")
-assert_eq "compose_doctor: safe response valid" "$COMPOSE_DOCTOR_VALID" "ok"
+    assert_eq "compose_doctor: safe response valid" "$COMPOSE_DOCTOR_VALID" "ok"
+else
+    skip "compose_doctor: deployment is not doctorable from compose_status"
+fi
 
 # ── help ──────────────────────────────────────────────────────────────────────
 echo ""
@@ -650,6 +661,7 @@ echo "────────────────────────�
 TOTAL=$((PASS + FAIL))
 echo -e "  Passed:  ${COLOR_GREEN}${PASS}${COLOR_RESET} / ${TOTAL}"
 echo -e "  Failed:  ${COLOR_RED}${FAIL}${COLOR_RESET} / ${TOTAL}"
+echo "  Skipped: ${SKIP}"
 
 if [[ ${#ERRORS[@]} -gt 0 ]]; then
     echo ""
