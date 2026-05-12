@@ -31,6 +31,8 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `clock_skew` | Per-host received_at minus timestamp distribution |
 | `anomalies` | Recent vs baseline volume/error comparison |
 | `compare` | Side-by-side comparison of two time ranges |
+| `compose_status` | Redacted read-only Compose deployment diagnostics |
+| `compose_doctor` | Strict Compose deployment health diagnostics |
 | `help` | Markdown reference for all actions |
 
 ## syslog search
@@ -132,6 +134,20 @@ Required argument: `action = "stats"`
 Get lightweight runtime status without the full DB statistics query.
 
 Required argument: `action = "status"`
+
+## syslog compose_status
+
+Get redacted read-only Docker Compose diagnostics for the canonical syslog-mcp deployment. MCP output omits host paths, mount sources, image ids, and raw command output.
+
+Required argument: `action = "compose_status"`
+
+Target override arguments such as `project_dir`, `compose_file`, `project_name`, `container`, and `container_name` are rejected.
+
+## syslog compose_doctor
+
+Run strict deployment-health checks for the canonical syslog-mcp Compose deployment. It returns the same redacted diagnostic shape as `compose_status` when healthy, and returns a tool error when Docker/Compose ownership or runtime checks are not ready for lifecycle work. Compose lifecycle mutations are CLI-only.
+
+Required argument: `action = "compose_doctor"`
 
 ## syslog help
 

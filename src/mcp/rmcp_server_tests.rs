@@ -680,6 +680,12 @@ fn sessions_action_requires_read_scope() {
     assert_eq!(required_scope_for("sessions"), Some("syslog:read"));
 }
 
+#[test]
+fn compose_actions_require_read_scope() {
+    assert_eq!(required_scope_for("compose_status"), Some("syslog:read"));
+    assert_eq!(required_scope_for("compose_doctor"), Some("syslog:read"));
+}
+
 /// `AuthPolicy::Mounted` + AuthContext with `syslog:admin` (superset) → read
 /// actions permitted because `syslog:admin` implies `syslog:read`.
 #[tokio::test]

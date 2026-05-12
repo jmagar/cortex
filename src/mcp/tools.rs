@@ -51,6 +51,8 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "clock_skew" => tool_clock_skew(state, args).await,
         "anomalies" => tool_anomalies(state, args).await,
         "compare" => tool_compare(state, args).await,
+        "compose_status" => tool_compose_status(args).await,
+        "compose_doctor" => tool_compose_doctor(args).await,
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
             "unknown syslog action: {action}; expected one of {}",
@@ -211,6 +213,62 @@ async fn tool_list_source_ips(state: &AppState, _args: Value) -> anyhow::Result<
         "list_source_ips completed"
     );
     Ok(serde_json::to_value(response)?)
+}
+
+fn reject_compose_target_overrides(args: &Value) -> anyhow::Result<()> {
+    for key in [
+        "container",
+        "container_name",
+        "project_dir",
+        "compose_file",
+        "project_name",
+        "service",
+    ] {
+        if args.get(key).is_some() {
+            anyhow::bail!("compose MCP actions do not accept target override: {key}");
+        }
+    }
+    Ok(())
+}
+
+async fn tool_compose_status(args: Value) -> anyhow::Result<Value> {
+    reject_compose_target_overrides(&args)?;
+    let status = compose_status().await?;
+    Ok(serde_json::to_value(crate::compose::mcp_projection(
+        &status,
+    ))?)
+}
+
+async fn tool_compose_doctor(args: Value) -> anyhow::Result<Value> {
+    reject_compose_target_overrides(&args)?;
+    let status = compose_status().await?;
+    crate::compose::ensure_doctor_ready(&status)?;
+    Ok(serde_json::to_value(crate::compose::mcp_projection(
+        &status,
+    ))?)
+}
+
+async fn compose_status() -> anyhow::Result<crate::compose::ComposeStatus> {
+    static COMPOSE_DIAGNOSTICS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    let permit = COMPOSE_DIAGNOSTICS
+        .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)))
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|e| anyhow::anyhow!("compose diagnostics limiter closed: {e}"))?;
+    let service = crate::compose::ComposeService::new(
+        crate::compose::CliDockerInspect,
+        crate::compose::ProcessRunner,
+        crate::compose::ComposeDefaults::default(),
+    );
+    let status = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        service.status(&crate::compose::ComposeTarget::default())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("compose status task failed: {e}"))??;
+    Ok(status)
 }
 
 async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {
@@ -700,6 +758,25 @@ Get lightweight runtime status without full DB statistics. Use this for dashboar
 doctor checks that need queue/backpressure/writer state quickly.
 
 **Parameters:** none
+
+---
+
+## syslog compose_status
+Read-only Docker Compose diagnostics for the canonical syslog-mcp deployment.
+The response is MCP-safe: host paths, image ids, mount sources, and raw command
+output are omitted.
+
+**Parameters:** none. Target override fields are rejected.
+
+---
+
+## syslog compose_doctor
+Strict deployment-health check for the canonical syslog-mcp Compose deployment.
+Returns the same redacted diagnostic shape as `compose_status` when healthy, and
+returns a tool error when Docker/Compose ownership or runtime checks are not
+ready for lifecycle work. Lifecycle mutations remain CLI-only.
+
+**Parameters:** none. Target override fields are rejected.
 
 ---
 

@@ -1,6 +1,6 @@
 [package]
 name = "syslog-mcp"
-version = "0.19.2"
+version = "0.20.0"
 edition = "2021"
 rust-version = "1.86"
 description = "Syslog receiver + MCP server for homelab log intelligence"
@@ -62,6 +62,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Utils
 anyhow = "1"
+libc = "0.2"
 rustix = { version = "0.38", features = ["fs"] }
 regex = "1"
 sha2 = "0.10"

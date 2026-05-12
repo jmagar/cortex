@@ -7,6 +7,10 @@ use syslog_mcp::app::{
     SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SyslogService,
     TailLogsRequest, UsageBlocksRequest, UsageBlocksResponse,
 };
+use syslog_mcp::compose::{
+    CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
+    ComposeService, ComposeStatus, ComposeTarget, MutationOptions, ProcessRunner,
+};
 use syslog_mcp::scanner::IndexResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +23,7 @@ pub(crate) enum CliCommand {
     Ai(AiCommand),
     Correlate(CorrelateArgs),
     Stats(OutputArgs),
+    Compose(ComposeCommand),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,8 +37,39 @@ pub(crate) enum AiCommand {
     Add(AiAddArgs),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ComposeCommand {
+    Status(ComposeArgs),
+    Doctor(ComposeArgs),
+    Up(ComposeMutationArgs),
+    Down(ComposeMutationArgs),
+    Restart(ComposeMutationArgs),
+    Pull(ComposeMutationArgs),
+    Logs(ComposeLogsArgs),
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OutputArgs {
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ComposeArgs {
+    pub target: ComposeTarget,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ComposeMutationArgs {
+    pub target: ComposeTarget,
+    pub options: MutationOptions,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ComposeLogsArgs {
+    pub target: ComposeTarget,
+    pub tail: Option<u32>,
     pub json: bool,
 }
 
@@ -152,6 +188,7 @@ impl CliCommand {
             "ai" => parse_ai(rest),
             "correlate" => parse_correlate(rest),
             "stats" => parse_stats(rest),
+            "compose" => parse_compose(rest),
             _ => bail!("unknown CLI command: {command}"),
         }
     }
@@ -309,8 +346,55 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
             let response = service.get_stats().await?;
             print_stats_response(&response, args.json)?;
         }
+        CliCommand::Compose(_) => {
+            bail!("compose commands must run through run_compose");
+        }
     }
     Ok(())
+}
+
+pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
+    let CliCommand::Compose(command) = command else {
+        bail!("run_compose called with non-compose command");
+    };
+    let service = ComposeService::new(CliDockerInspect, ProcessRunner, ComposeDefaults::default());
+    match command {
+        ComposeCommand::Status(args) => {
+            let status = service.status(&args.target)?;
+            print_compose_status_response(&status, args.json)
+        }
+        ComposeCommand::Doctor(args) => {
+            let status = service.status(&args.target)?;
+            print_compose_status_response(&status, args.json)?;
+            syslog_mcp::compose::ensure_doctor_ready(&status)
+        }
+        ComposeCommand::Up(args) => print_compose_command_response(
+            &service.run_mutation(ComposeMutation::Up, &args.target, &args.options)?,
+            args.json,
+        ),
+        ComposeCommand::Down(args) => print_compose_command_response(
+            &service.run_mutation(ComposeMutation::Down, &args.target, &args.options)?,
+            args.json,
+        ),
+        ComposeCommand::Restart(args) => print_compose_command_response(
+            &service.run_mutation(ComposeMutation::Restart, &args.target, &args.options)?,
+            args.json,
+        ),
+        ComposeCommand::Pull(args) => print_compose_command_response(
+            &service.run_mutation(ComposeMutation::Pull, &args.target, &args.options)?,
+            args.json,
+        ),
+        ComposeCommand::Logs(args) => {
+            let output = service.logs(&args.target, args.tail)?;
+            if args.json {
+                print_json(&output)?;
+            } else {
+                print!("{}", output.stdout);
+                eprint!("{}", output.stderr);
+            }
+            ensure_command_success(&output)
+        }
+    }
 }
 
 fn parse_search(args: &[String]) -> Result<CliCommand> {
@@ -639,6 +723,174 @@ fn parse_ai_add(args: &[String]) -> Result<CliCommand> {
 
 fn parse_stats(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Stats(parse_output_args("stats", args)?))
+}
+
+fn parse_compose(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("compose requires a subcommand"))?;
+    match subcommand.as_str() {
+        "status" => Ok(CliCommand::Compose(ComposeCommand::Status(
+            parse_compose_args(rest)?,
+        ))),
+        "doctor" => Ok(CliCommand::Compose(ComposeCommand::Doctor(
+            parse_compose_args(rest)?,
+        ))),
+        "up" => Ok(CliCommand::Compose(ComposeCommand::Up(
+            parse_compose_mutation(rest, false)?,
+        ))),
+        "down" => Ok(CliCommand::Compose(ComposeCommand::Down(
+            parse_compose_mutation(rest, true)?,
+        ))),
+        "restart" => Ok(CliCommand::Compose(ComposeCommand::Restart(
+            parse_compose_mutation(rest, false)?,
+        ))),
+        "pull" => Ok(CliCommand::Compose(ComposeCommand::Pull(
+            parse_compose_mutation(rest, false)?,
+        ))),
+        "logs" => Ok(CliCommand::Compose(ComposeCommand::Logs(
+            parse_compose_logs(rest)?,
+        ))),
+        "config" => bail!("syslog compose config is deferred from the first pass"),
+        "upgrade" => bail!(
+            "syslog compose upgrade is deferred; run `syslog compose pull` then `syslog compose up`"
+        ),
+        other => bail!("unknown compose subcommand: {other}"),
+    }
+}
+
+fn parse_compose_args(args: &[String]) -> Result<ComposeArgs> {
+    let mut parsed = ComposeArgs::default();
+    parse_compose_common(args, &mut parsed.target, &mut parsed.json)?;
+    reject_unknown_compose_args("compose", args, &[])?;
+    Ok(parsed)
+}
+
+fn parse_compose_mutation(args: &[String], destructive: bool) -> Result<ComposeMutationArgs> {
+    let mut parsed = ComposeMutationArgs::default();
+    parse_compose_common(args, &mut parsed.target, &mut parsed.json)?;
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--dry-run" => parsed.options.dry_run = true,
+            "--allow-cwd-target" => parsed.options.allow_cwd_target = true,
+            "--yes" => parsed.options.yes = true,
+            _ if is_compose_common_arg(&arg) => {
+                consume_compose_common_value(&mut flags, &arg)?;
+            }
+            _ if arg.starts_with("--") => bail!("unknown compose option: {arg}"),
+            _ => bail!("unexpected compose argument: {arg}"),
+        }
+    }
+    parsed.options.non_interactive = destructive;
+    Ok(parsed)
+}
+
+fn parse_compose_logs(args: &[String]) -> Result<ComposeLogsArgs> {
+    let mut parsed = ComposeLogsArgs::default();
+    parse_compose_common(args, &mut parsed.target, &mut parsed.json)?;
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--tail" => parsed.tail = Some(parse_u32_flag("--tail", flags.value("--tail")?)?),
+            _ if arg.starts_with("--tail=") => {
+                parsed.tail = Some(parse_u32_flag(
+                    "--tail",
+                    value_after_equals(arg, "--tail")?,
+                )?)
+            }
+            "--follow" => bail!("syslog compose logs --follow is deferred"),
+            _ if is_compose_common_arg(&arg) => {
+                consume_compose_common_value(&mut flags, &arg)?;
+            }
+            _ if arg.starts_with("--") => bail!("unknown compose logs option: {arg}"),
+            _ => bail!("unexpected compose logs argument: {arg}"),
+        }
+    }
+    Ok(parsed)
+}
+
+fn parse_compose_common(
+    args: &[String],
+    target: &mut ComposeTarget,
+    json: &mut bool,
+) -> Result<()> {
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => *json = true,
+            "--compose-file" => target.compose_file = Some(flags.value("--compose-file")?.into()),
+            "--project-dir" => target.project_dir = Some(flags.value("--project-dir")?.into()),
+            "--project-name" => target.project_name = Some(flags.value("--project-name")?),
+            "--service" => target.service = Some(flags.value("--service")?),
+            "--container" => target.container_name = Some(flags.value("--container")?),
+            _ if arg.starts_with("--compose-file=") => {
+                target.compose_file = Some(value_after_equals(arg, "--compose-file")?.into())
+            }
+            _ if arg.starts_with("--project-dir=") => {
+                target.project_dir = Some(value_after_equals(arg, "--project-dir")?.into())
+            }
+            _ if arg.starts_with("--project-name=") => {
+                target.project_name = Some(value_after_equals(arg, "--project-name")?)
+            }
+            _ if arg.starts_with("--service=") => {
+                target.service = Some(value_after_equals(arg, "--service")?)
+            }
+            _ if arg.starts_with("--container=") => {
+                target.container_name = Some(value_after_equals(arg, "--container")?)
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn reject_unknown_compose_args(command: &str, args: &[String], extra: &[&str]) -> Result<()> {
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        if extra.contains(&arg.as_str()) {
+            continue;
+        }
+        if is_compose_common_arg(&arg) {
+            consume_compose_common_value(&mut flags, &arg)?;
+            continue;
+        }
+        if arg.starts_with("--") {
+            bail!("unknown {command} option: {arg}");
+        }
+        bail!("unexpected {command} argument: {arg}");
+    }
+    Ok(())
+}
+
+fn is_compose_common_arg(arg: &str) -> bool {
+    matches!(
+        arg,
+        "--json"
+            | "--compose-file"
+            | "--project-dir"
+            | "--project-name"
+            | "--service"
+            | "--container"
+    ) || arg.starts_with("--compose-file=")
+        || arg.starts_with("--project-dir=")
+        || arg.starts_with("--project-name=")
+        || arg.starts_with("--service=")
+        || arg.starts_with("--container=")
+}
+
+fn needs_value(arg: &str) -> bool {
+    matches!(
+        arg,
+        "--compose-file" | "--project-dir" | "--project-name" | "--service" | "--container"
+    )
+}
+
+fn consume_compose_common_value(flags: &mut FlagCursor<'_>, arg: &str) -> Result<()> {
+    if !arg.contains('=') && needs_value(arg) {
+        let _ = flags.value(arg)?;
+    }
+    Ok(())
 }
 
 fn parse_correlate(args: &[String]) -> Result<CliCommand> {
@@ -1008,6 +1260,66 @@ fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
     println!("write_blocked: {}", stats.write_blocked);
     println!("phantom_fts_rows: {}", stats.phantom_fts_rows);
     Ok(())
+}
+
+fn print_compose_status_response(status: &ComposeStatus, json: bool) -> Result<()> {
+    if json {
+        return print_json(status);
+    }
+    println!("Container: {}", status.container_name);
+    if let Some(value) = &status.status {
+        println!("Status: {value}");
+    }
+    if let Some(value) = &status.health {
+        println!("Docker health: {value}");
+    }
+    if let Some(value) = &status.image {
+        println!("Image: {value}");
+    }
+    if let Some(value) = &status.compose_project {
+        println!("Compose project: {value}");
+    }
+    if let Some(value) = &status.compose_working_dir {
+        println!("Compose working dir: {}", value.display());
+    }
+    for diag in &status.diagnostics {
+        println!("{:?}: {} - {}", diag.severity, diag.code, diag.message);
+    }
+    Ok(())
+}
+
+fn print_compose_command_response(result: &ComposeCommandResult, json: bool) -> Result<()> {
+    match result {
+        ComposeCommandResult::Executed(output) => {
+            if json {
+                print_json(output)?;
+            } else {
+                print!("{}", output.stdout);
+                eprint!("{}", output.stderr);
+            }
+            ensure_command_success(output)
+        }
+        ComposeCommandResult::DryRun(dry_run) => {
+            if json {
+                print_json(dry_run)?;
+            } else {
+                println!("Dry run passed: {}", dry_run.command.join(" "));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn ensure_command_success(output: &CommandOutput) -> Result<()> {
+    if output.exit_status == Some(0) && !output.timed_out {
+        return Ok(());
+    }
+    bail!(
+        "compose command failed: status={:?} timed_out={} stderr={}",
+        output.exit_status,
+        output.timed_out,
+        output.stderr
+    )
 }
 
 #[cfg(test)]

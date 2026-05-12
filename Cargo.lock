@@ -3032,7 +3032,7 @@ dependencies = [
 
 [[package]]
 name = "syslog-mcp"
-version = "0.19.2"
+version = "0.20.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -3043,6 +3043,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "lab-auth",
+ "libc",
  "opentelemetry-proto",
  "prost",
  "r2d2",
