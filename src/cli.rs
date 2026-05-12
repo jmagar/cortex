@@ -769,7 +769,6 @@ fn parse_compose_mutation(args: &[String], destructive: bool) -> Result<ComposeM
         match arg.as_str() {
             "--dry-run" => parsed.options.dry_run = true,
             "--allow-cwd-target" => parsed.options.allow_cwd_target = true,
-            "--allow-foreign-project" => parsed.options.allow_foreign_project = true,
             "--yes" => parsed.options.yes = true,
             _ if is_compose_common_arg(&arg) => {
                 if !arg.contains('=') && needs_value(&arg) {

@@ -232,12 +232,21 @@ fn reject_compose_target_overrides(args: &Value) -> anyhow::Result<()> {
 
 async fn tool_compose_status(args: Value) -> anyhow::Result<Value> {
     reject_compose_target_overrides(&args)?;
+    static COMPOSE_DIAGNOSTICS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    let permit = COMPOSE_DIAGNOSTICS
+        .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)))
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|e| anyhow::anyhow!("compose diagnostics limiter closed: {e}"))?;
     let service = crate::compose::ComposeService::new(
         crate::compose::CliDockerInspect,
         crate::compose::ProcessRunner,
         crate::compose::ComposeDefaults::default(),
     );
     let status = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         service.status(&crate::compose::ComposeTarget::default())
     })
     .await

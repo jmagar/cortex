@@ -82,6 +82,13 @@ fn labelled_container() -> ContainerInfo {
     }
 }
 
+fn unlabelled_container() -> ContainerInfo {
+    ContainerInfo {
+        labels: BTreeMap::new(),
+        ..labelled_container()
+    }
+}
+
 #[test]
 fn redacts_sensitive_lines() {
     let input = "ok=true\nSYSLOG_MCP_TOKEN=abc\nclient_secret = \"secret\"\nport=3100";
@@ -148,6 +155,52 @@ fn resolves_live_container_labels() {
 }
 
 #[test]
+fn containers_without_required_compose_labels_are_unsafe_for_mutation() {
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(unlabelled_container()),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = service.resolve_target(&ComposeTarget::default()).unwrap();
+    assert_eq!(target.source, TargetSource::LiveContainerLabels);
+    assert_eq!(target.confidence, TargetConfidence::Unsafe);
+    assert_eq!(target.diagnostics[0].code, "incomplete_compose_labels");
+    let err = service
+        .preflight_mutation(ComposeMutation::Down, &target, &MutationOptions::default())
+        .unwrap_err();
+    assert!(err.to_string().contains("required compose labels"));
+}
+
+#[test]
+fn partial_compose_labels_are_unsafe_for_mutation() {
+    let mut container = labelled_container();
+    container
+        .labels
+        .remove("com.docker.compose.project.config_files");
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(container),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = service.resolve_target(&ComposeTarget::default()).unwrap();
+    assert_eq!(target.confidence, TargetConfidence::Unsafe);
+    let err = service
+        .preflight_mutation(
+            ComposeMutation::Restart,
+            &target,
+            &MutationOptions::default(),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("required compose labels"));
+}
+
+#[test]
 fn project_name_alone_is_rejected_for_mutation() {
     let service = ComposeService::new(
         FakeInspector::default(),
@@ -181,7 +234,7 @@ fn up_refuses_non_target_listener() {
         FakeInspector {
             listeners: vec![ListenerInfo {
                 port: 3100,
-                process: Some("other".into()),
+                process: Some("users:((\"other\",pid=123,fd=7))".into()),
                 belongs_to_target: false,
             }],
             ..Default::default()
@@ -204,7 +257,7 @@ fn live_target_allows_listener_on_published_target_port() {
             container: Some(labelled_container()),
             listeners: vec![ListenerInfo {
                 port: 3100,
-                process: Some("docker-proxy".into()),
+                process: Some("users:((\"docker-proxy\",pid=123,fd=7))".into()),
                 belongs_to_target: false,
             }],
             ..Default::default()
@@ -226,6 +279,28 @@ fn live_target_refuses_listener_on_unpublished_target_port() {
             listeners: vec![ListenerInfo {
                 port: 1514,
                 process: Some("other".into()),
+                belongs_to_target: false,
+            }],
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = target_from_container(&labelled_container(), &ComposeDefaults::default());
+    let err = service
+        .preflight_mutation(ComposeMutation::Up, &target, &MutationOptions::default())
+        .unwrap_err();
+    assert!(err.to_string().contains("non-target listener"));
+}
+
+#[test]
+fn live_target_refuses_foreign_listener_even_on_published_port() {
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(labelled_container()),
+            listeners: vec![ListenerInfo {
+                port: 3100,
+                process: Some("users:((\"other\",pid=123,fd=7))".into()),
                 belongs_to_target: false,
             }],
             ..Default::default()
@@ -361,4 +436,26 @@ fn process_runner_times_out_and_reports_cleanup() {
     let output = runner.run(&invocation).unwrap();
     assert!(output.timed_out);
     assert!(output.timeout_cleanup.as_ref().is_some_and(|c| c.reaped));
+}
+
+#[cfg(unix)]
+#[test]
+fn process_runner_kills_term_ignoring_process_group() {
+    let runner = ProcessRunner;
+    let invocation = ComposeInvocation {
+        program: "sh".into(),
+        args: vec![
+            "-c".into(),
+            "trap '' TERM; sh -c 'trap \"\" TERM; while true; do sleep 1; done' & wait".into(),
+        ],
+        current_dir: None,
+        timeout: Duration::from_millis(100),
+        output_limit_bytes: 1024,
+    };
+    let output = runner.run(&invocation).unwrap();
+    assert!(output.timed_out);
+    let cleanup = output.timeout_cleanup.unwrap();
+    assert!(cleanup.terminate_sent);
+    assert!(cleanup.kill_sent);
+    assert!(cleanup.reaped);
 }
