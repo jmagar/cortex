@@ -52,7 +52,7 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "anomalies" => tool_anomalies(state, args).await,
         "compare" => tool_compare(state, args).await,
         "compose_status" => tool_compose_status(args).await,
-        "compose_doctor" => tool_compose_status(args).await,
+        "compose_doctor" => tool_compose_doctor(args).await,
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
             "unknown syslog action: {action}; expected one of {}",
@@ -233,6 +233,22 @@ fn reject_compose_target_overrides(args: &Value) -> anyhow::Result<()> {
 
 async fn tool_compose_status(args: Value) -> anyhow::Result<Value> {
     reject_compose_target_overrides(&args)?;
+    let status = compose_status().await?;
+    Ok(serde_json::to_value(crate::compose::mcp_projection(
+        &status,
+    ))?)
+}
+
+async fn tool_compose_doctor(args: Value) -> anyhow::Result<Value> {
+    reject_compose_target_overrides(&args)?;
+    let status = compose_status().await?;
+    crate::compose::ensure_doctor_ready(&status)?;
+    Ok(serde_json::to_value(crate::compose::mcp_projection(
+        &status,
+    ))?)
+}
+
+async fn compose_status() -> anyhow::Result<crate::compose::ComposeStatus> {
     static COMPOSE_DIAGNOSTICS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
         std::sync::OnceLock::new();
     let permit = COMPOSE_DIAGNOSTICS
@@ -252,9 +268,7 @@ async fn tool_compose_status(args: Value) -> anyhow::Result<Value> {
     })
     .await
     .map_err(|e| anyhow::anyhow!("compose status task failed: {e}"))??;
-    Ok(serde_json::to_value(crate::compose::mcp_projection(
-        &status,
-    ))?)
+    Ok(status)
 }
 
 async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {

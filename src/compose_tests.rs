@@ -4,9 +4,15 @@ use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 #[cfg(unix)]
 use std::process::Output;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use super::*;
+
+fn cwd_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+}
 
 #[derive(Default)]
 struct FakeInspector {
@@ -16,6 +22,7 @@ struct FakeInspector {
     listeners: Vec<ListenerInfo>,
     systemd_error: Option<String>,
     listeners_error: Option<String>,
+    published_port_owners: BTreeMap<u16, String>,
 }
 
 impl DockerInspect for FakeInspector {
@@ -39,6 +46,10 @@ impl DockerInspect for FakeInspector {
             anyhow::bail!("{error}");
         }
         Ok(self.listeners.clone())
+    }
+
+    fn published_port_owner(&self, port: u16) -> Result<Option<String>> {
+        Ok(self.published_port_owners.get(&port).cloned())
     }
 }
 
@@ -175,6 +186,49 @@ fn mcp_projection_treats_lowercase_docker_exited_as_stopped() {
 }
 
 #[test]
+fn mcp_projection_degrades_hard_diagnostics() {
+    let mut status = ComposeStatus {
+        container_name: "syslog-mcp".into(),
+        container_id: Some("container-id".into()),
+        status: Some("running".into()),
+        health: Some("healthy".into()),
+        image: Some("ghcr.io/jmagar/syslog-mcp:latest".into()),
+        image_id: None,
+        compose_project: Some("syslog-jmagar-lab".into()),
+        compose_working_dir: None,
+        compose_files: Vec::new(),
+        service: Some("syslog-mcp".into()),
+        data_mounts: Vec::new(),
+        ports: Vec::new(),
+        systemd: None,
+        diagnostics: vec![ComposeDiagnostic {
+            severity: DiagnosticSeverity::Unsafe,
+            code: "incomplete_compose_labels".into(),
+            message: "missing labels".into(),
+        }],
+    };
+
+    let projected = mcp_projection(&status);
+    assert_eq!(projected.ownership, ComposeOwnershipState::Unknown);
+    assert_eq!(projected.runtime_state, ComposeRuntimeState::Degraded);
+    assert!(ensure_doctor_ready(&status).is_err());
+
+    status.diagnostics.clear();
+    assert!(ensure_doctor_ready(&status).is_ok());
+}
+
+#[test]
+fn ss_header_only_output_is_not_listener() {
+    assert!(!ss_output_has_listener(
+        b"Netid State Recv-Q Send-Q Local Address:Port Peer Address:Port Process\n"
+    ));
+    assert!(!ss_output_has_listener(b"\n"));
+    assert!(ss_output_has_listener(
+        b"tcp LISTEN 0 4096 0.0.0.0:3100 0.0.0.0:* users:((\"docker-proxy\",pid=123,fd=4))\n"
+    ));
+}
+
+#[test]
 fn resolves_live_container_labels() {
     let service = ComposeService::new(
         FakeInspector {
@@ -188,6 +242,82 @@ fn resolves_live_container_labels() {
     assert_eq!(target.source, TargetSource::LiveContainerLabels);
     assert_eq!(target.confidence, TargetConfidence::Confirmed);
     assert_eq!(target.compose_project.as_deref(), Some("syslog-jmagar-lab"));
+}
+
+#[test]
+fn inspect_json_extracts_compose_fields_ports_and_mounts() {
+    let info = container_info_from_inspect(serde_json::json!({
+        "Id": "abcdef123456",
+        "Name": "/syslog-mcp",
+        "Image": "sha256:image-id",
+        "State": {
+            "Status": "running",
+            "Health": {"Status": "healthy"}
+        },
+        "Config": {
+            "Image": "ghcr.io/jmagar/syslog-mcp:latest",
+            "Labels": {
+                "com.docker.compose.project": "syslog-jmagar-lab",
+                "com.docker.compose.service": "syslog-mcp",
+                "com.docker.compose.project.working_dir": "/srv/syslog",
+                "com.docker.compose.project.config_files": "/srv/syslog/docker-compose.yml"
+            }
+        },
+        "Mounts": [
+            {"Type": "bind", "Source": "/srv/syslog/data", "Destination": "/data"}
+        ],
+        "NetworkSettings": {
+            "Ports": {
+                "3100/tcp": [{"HostIp": "0.0.0.0", "HostPort": "3100"}],
+                "1514/udp": null
+            }
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(info.id, "abcdef123456");
+    assert_eq!(info.name, "syslog-mcp");
+    assert_eq!(info.status.as_deref(), Some("running"));
+    assert_eq!(info.health.as_deref(), Some("healthy"));
+    assert_eq!(
+        info.image.as_deref(),
+        Some("ghcr.io/jmagar/syslog-mcp:latest")
+    );
+    assert_eq!(info.image_id.as_deref(), Some("sha256:image-id"));
+    assert_eq!(info.mounts[0].target, "/data");
+    assert_eq!(info.ports.len(), 2);
+    assert!(info
+        .ports
+        .iter()
+        .any(|port| port.private_port == 3100 && port.public_port == Some(3100)));
+    assert!(info
+        .ports
+        .iter()
+        .any(|port| port.private_port == 1514 && port.public_port.is_none()));
+}
+
+#[test]
+fn cwd_fallback_is_unsafe_and_refused_for_mutation() {
+    let _guard = cwd_lock();
+    let old_cwd = std::env::current_dir().unwrap();
+    let tempdir = tempfile::tempdir().unwrap();
+    std::fs::write(tempdir.path().join("docker-compose.yml"), "services: {}\n").unwrap();
+    std::env::set_current_dir(tempdir.path()).unwrap();
+
+    let service = ComposeService::new(
+        FakeInspector::default(),
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = service.resolve_target(&ComposeTarget::default()).unwrap();
+    assert_eq!(target.source, TargetSource::CurrentWorkingDirectory);
+    assert_eq!(target.confidence, TargetConfidence::Unsafe);
+    let err = service
+        .preflight_mutation(ComposeMutation::Pull, &target, &MutationOptions::default())
+        .unwrap_err();
+    assert!(err.to_string().contains("cwd target"));
+
+    std::env::set_current_dir(old_cwd).unwrap();
 }
 
 #[test]
@@ -511,6 +641,8 @@ fn up_refuses_non_target_listener() {
 
 #[test]
 fn live_target_allows_listener_on_published_target_port() {
+    let mut owners = BTreeMap::new();
+    owners.insert(3100, "abc".into());
     let service = ComposeService::new(
         FakeInspector {
             container: Some(labelled_container()),
@@ -519,6 +651,7 @@ fn live_target_allows_listener_on_published_target_port() {
                 process: Some("users:((\"docker-proxy\",pid=123,fd=7))".into()),
                 belongs_to_target: false,
             }],
+            published_port_owners: owners,
             ..Default::default()
         },
         FakeRunner,
@@ -528,6 +661,31 @@ fn live_target_allows_listener_on_published_target_port() {
     service
         .preflight_mutation(ComposeMutation::Up, &target, &MutationOptions::default())
         .unwrap();
+}
+
+#[test]
+fn live_target_refuses_foreign_docker_proxy_on_published_port() {
+    let mut owners = BTreeMap::new();
+    owners.insert(3100, "foreign-container".into());
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(labelled_container()),
+            listeners: vec![ListenerInfo {
+                port: 3100,
+                process: Some("users:((\"docker-proxy\",pid=123,fd=7))".into()),
+                belongs_to_target: false,
+            }],
+            published_port_owners: owners,
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = target_from_container(&labelled_container(), &ComposeDefaults::default());
+    let err = service
+        .preflight_mutation(ComposeMutation::Up, &target, &MutationOptions::default())
+        .unwrap_err();
+    assert!(err.to_string().contains("non-target listener"));
 }
 
 #[test]
@@ -678,7 +836,7 @@ fn dry_run_does_not_invoke_runner() {
         FakeRunner,
         ComposeDefaults::default(),
     );
-    let output = service
+    let result = service
         .run_mutation(
             ComposeMutation::Pull,
             &ComposeTarget::default(),
@@ -688,7 +846,14 @@ fn dry_run_does_not_invoke_runner() {
             },
         )
         .unwrap();
-    assert!(output.is_none());
+    let ComposeCommandResult::DryRun(dry_run) = result else {
+        panic!("expected dry-run result");
+    };
+    assert!(dry_run.dry_run);
+    assert!(dry_run
+        .command
+        .ends_with(&["pull".into(), "syslog-mcp".into()]));
+    assert_eq!(dry_run.preflight, "passed");
 }
 
 #[test]
@@ -709,6 +874,23 @@ fn logs_invocation_is_bounded_tail() {
 }
 
 #[test]
+fn logs_refuses_unsafe_target() {
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(unlabelled_container()),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let err = service
+        .logs(&ComposeTarget::default(), Some(20))
+        .unwrap_err();
+    assert!(err.to_string().contains("target is not confirmed"));
+}
+
+#[cfg(unix)]
+#[test]
 fn process_runner_truncates_and_redacts_output() {
     let runner = ProcessRunner;
     let invocation = ComposeInvocation {
@@ -728,6 +910,7 @@ fn process_runner_truncates_and_redacts_output() {
     assert!(output.stdout_truncated);
 }
 
+#[cfg(unix)]
 #[test]
 fn process_runner_times_out_and_reports_cleanup() {
     let runner = ProcessRunner;
