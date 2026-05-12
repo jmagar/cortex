@@ -138,9 +138,18 @@ async fn schema_actions_are_dispatchable() {
             }
             _ => json!({"action": action}),
         };
-        execute_tool(&h.state, "syslog", args)
-            .await
-            .unwrap_or_else(|error| panic!("schema action {action} did not dispatch: {error}"));
+        let result = execute_tool(&h.state, "syslog", args).await;
+        if *action == "compose_doctor" {
+            if let Err(error) = result {
+                assert!(
+                    error.to_string().contains("compose doctor failed"),
+                    "compose_doctor failed before dispatching: {error}"
+                );
+            }
+        } else {
+            result
+                .unwrap_or_else(|error| panic!("schema action {action} did not dispatch: {error}"));
+        }
     }
 }
 
@@ -209,6 +218,31 @@ async fn syslog_tool_requires_known_action() {
         .await
         .unwrap_err();
     assert!(unknown.to_string().contains("unknown syslog action"));
+}
+
+#[tokio::test]
+async fn compose_action_rejects_target_override() {
+    let h = TestHarness::new();
+    for action in ["compose_status", "compose_doctor"] {
+        for key in [
+            "container",
+            "container_name",
+            "project_dir",
+            "compose_file",
+            "project_name",
+            "service",
+        ] {
+            let mut args = json!({"action": action});
+            args.as_object_mut()
+                .unwrap()
+                .insert(key.into(), json!("override-value"));
+            let err = execute_tool(&h.state, "syslog", args).await.unwrap_err();
+            assert!(
+                err.to_string().contains("target override"),
+                "expected target override rejection for {action}.{key}, got: {err}"
+            );
+        }
+    }
 }
 
 #[test]

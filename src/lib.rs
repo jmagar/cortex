@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod app;
+pub mod compose;
 pub mod config;
 pub mod mcp;
 pub mod observability;

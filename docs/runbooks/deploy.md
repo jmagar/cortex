@@ -6,37 +6,38 @@
 # 1. Pull latest code
 git pull origin main
 
-# 2. Build new image
-docker compose build
+# 2. Diagnose the current owner before mutation
+syslog compose doctor
 
 # 3. Run smoke test against current running instance (optional)
 bash scripts/smoke-test.sh
 
-# 4. Rolling restart — new container replaces old
-docker compose up -d
+# 4. Pull/build as needed, then start the resolved Compose service
+syslog compose pull
+syslog compose up
 
 # 5. Wait for health check to pass (30s interval, 3 retries)
-docker compose ps   # should show "healthy"
+syslog compose status   # should show healthy Compose ownership
 # or:
 curl -sf http://localhost:3100/health
 
 # 6. Verify logs are flowing
-docker compose logs -f --tail=20 syslog-mcp
+syslog compose logs --tail 20
 ```
 
 ## Rollback
 
 ```bash
 # Option 1: Revert to previous image (if tagged)
-docker compose down
+syslog compose down --yes
 git checkout <previous-tag>
-docker compose build
-docker compose up -d
+syslog compose pull
+syslog compose up
 
 # Option 2: Revert to previous commit
 git log --oneline -5   # find the good commit
 git revert HEAD         # or git reset --hard <sha>
-docker compose build && docker compose up -d
+syslog compose pull && syslog compose up
 ```
 
 ## Health Check

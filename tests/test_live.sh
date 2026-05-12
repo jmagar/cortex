@@ -23,7 +23,8 @@
 #   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,
 #   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
-#   syslog anomalies, syslog compare, syslog help
+#   syslog anomalies, syslog compare, syslog compose_status,
+#   syslog compose_doctor, syslog help
 #
 # Exit codes:
 #   0 — all tests passed (SKIPs do not count as failures)
@@ -439,6 +440,30 @@ phase_tools() {
   assert_jq "syslog stats — write_blocked field present"      "${stats_result}" '.write_blocked != null'
   assert_jq "syslog stats — total_logs is a number >= 0"      "${stats_result}" '.total_logs >= 0'
   assert_jq "syslog stats — total_hosts is a number >= 0"     "${stats_result}" '.total_hosts >= 0'
+
+  # --- compose diagnostics ---
+  section "  syslog compose diagnostics"
+  local compose_status_result
+  compose_status_result="$(call_tool syslog '{"action":"compose_status"}')" || compose_status_result=""
+  assert_jq "syslog compose_status — runtime_state present" "${compose_status_result}" '.runtime_state'
+  assert_jq "syslog compose_status — no host working dir leaks" "${compose_status_result}" 'has("compose_working_dir") | not'
+  assert_jq "syslog compose_status — no image id leaks" "${compose_status_result}" 'has("image_id") | not'
+  local compose_runtime compose_ownership
+  compose_runtime="$(printf '%s' "${compose_status_result}" | jq -r '.runtime_state // "unknown"' 2>/dev/null)" || compose_runtime="unknown"
+  compose_ownership="$(printf '%s' "${compose_status_result}" | jq -r '.ownership // "unknown"' 2>/dev/null)" || compose_ownership="unknown"
+  if [[ "${compose_runtime}" != "docker_unavailable" && "${compose_ownership}" == "compose_owned" ]]; then
+    assert_jq "syslog compose_status — ownership known" "${compose_status_result}" '.ownership != "unknown"'
+    assert_jq "syslog compose_status — no unsafe diagnostics" "${compose_status_result}" '[.diagnostics[]?.severity] | all(. != "error" and . != "unsafe")'
+
+    local compose_doctor_result
+    compose_doctor_result="$(call_tool syslog '{"action":"compose_doctor"}')" || compose_doctor_result=""
+    assert_jq "syslog compose_doctor — ownership present" "${compose_doctor_result}" '.ownership'
+    assert_jq "syslog compose_doctor — runtime_state present" "${compose_doctor_result}" '.runtime_state'
+    assert_jq "syslog compose_doctor — no unsafe diagnostics" "${compose_doctor_result}" '[.diagnostics[]?.severity] | all(. != "error" and . != "unsafe")'
+  else
+    _skip "syslog compose_status strict diagnostics" "runtime=${compose_runtime}, ownership=${compose_ownership}"
+    _skip "syslog compose_doctor strict diagnostics" "runtime=${compose_runtime}, ownership=${compose_ownership}"
+  fi
 
   # --- syslog hosts ---
   section "  syslog hosts"

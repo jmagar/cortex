@@ -1,11 +1,13 @@
 # Direct CLI Reference -- syslog-mcp
 
-The `syslog` binary includes direct query commands for humans and shell scripts.
-These commands read the configured SQLite database and call the same shared
-`SyslogService` methods used by the MCP tool.
+The `syslog` binary includes direct query and deployment-lifecycle commands for
+humans and shell scripts. Query commands read the configured SQLite database and
+call the same shared `SyslogService` methods used by the MCP tool. Compose
+lifecycle commands inspect Docker/Compose directly and do not load the SQLite
+query runtime.
 
-Direct CLI mode does not start syslog listeners, the HTTP MCP server, the REST
-API, OTLP routes, retention purge, Docker ingest, or storage-budget cleanup
+Direct query CLI mode does not start syslog listeners, the HTTP MCP server, the
+REST API, OTLP routes, retention purge, Docker ingest, or storage-budget cleanup
 tasks. Keep `syslog serve mcp` running somewhere for ingestion.
 
 ## Configuration
@@ -216,6 +218,47 @@ syslog stats
 syslog stats --json
 ```
 
+### `syslog compose`
+
+Diagnose and manage the Docker Compose deployment without opening the SQLite
+database.
+
+```bash
+syslog compose doctor
+syslog compose status --json
+syslog compose pull
+syslog compose up
+syslog compose restart
+syslog compose logs --tail 20
+syslog compose down --yes
+```
+
+Common target flags:
+
+| Flag | Description |
+| --- | --- |
+| `--compose-file FILE` | Explicit Compose file |
+| `--project-dir DIR` | Explicit Compose project directory |
+| `--project-name NAME` | Compose project name, only safe with a file/dir or live labels |
+| `--service NAME` | Compose service name, default `syslog-mcp` |
+| `--container NAME` | Container name, default `syslog-mcp` |
+| `--json` | Print JSON response |
+
+Mutation flags:
+
+| Flag | Description |
+| --- | --- |
+| `--dry-run` | Resolve and preflight without running Docker |
+| `--allow-cwd-target` | Permit cwd `docker-compose.yml` fallback for mutation |
+| `--yes` | Required for non-interactive destructive `down` |
+
+`syslog compose` refuses ambiguous target discovery, mismatched requested
+project/service selectors, cwd fallback without confirmation,
+project-name-only mutations, missing Compose files, systemd owner conflicts,
+non-target listeners on syslog ports, and destructive service stop without
+`--yes`. `down` is intentionally service-scoped (`docker compose stop
+syslog-mcp`), not a project-wide `docker compose down`.
+
 ## Relationship to MCP
 
 The direct CLI and MCP tool share the same business layer:
@@ -234,10 +277,12 @@ The direct CLI and MCP tool share the same business layer:
 | `syslog ai projects` | `syslog` with `action="list_ai_projects"` |
 | `syslog correlate` | `syslog` with `action="correlate"` |
 | `syslog stats` | `syslog` with `action="stats"` |
+| `syslog compose status` | `syslog` with `action="compose_status"` (redacted read-only projection only) |
+| `syslog compose doctor` | `syslog` with `action="compose_doctor"` (redacted read-only projection only) |
 
 The MCP-only `status` and `help` actions are runtime/protocol helpers, not
-direct database queries. Use `syslog action=status` through MCP for live server
-queue/backpressure state, and use `syslog --help` for direct CLI usage.
+direct database queries. Compose mutations (`up`, `down`, `restart`, `pull`,
+`logs`) are CLI-only and are not exposed over MCP.
 
 Use direct CLI mode for terminal queries and scripts on a host that can read the
 SQLite database. Use MCP HTTP or `syslog mcp` when an MCP client needs tool

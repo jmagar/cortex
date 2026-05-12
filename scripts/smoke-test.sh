@@ -9,15 +9,15 @@
 #
 # Requirements: mcporter, nc, curl, python3
 #
-# Action inventory reference (not every action is exercised by this smoke test):
+# Action inventory reference:
 #   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
 #   mcp_call sessions, mcp_call search_sessions, mcp_call usage_blocks,
 #   mcp_call project_context, mcp_call list_ai_tools, mcp_call list_ai_projects,
 #   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
 #   mcp_call source_ips, mcp_call timeline, mcp_call patterns, mcp_call context,
 #   mcp_call get, mcp_call ingest_rate, mcp_call silent_hosts,
-
-#   mcp_call clock_skew, mcp_call anomalies, mcp_call compare, mcp_call help
+#   mcp_call clock_skew, mcp_call anomalies, mcp_call compare,
+#   mcp_call compose_status, mcp_call compose_doctor, mcp_call help
 
 set -euo pipefail
 
@@ -53,6 +53,7 @@ done
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 PASS=0
 FAIL=0
+SKIP=0
 ERRORS=()
 
 COLOR_GREEN='\033[0;32m'
@@ -62,6 +63,7 @@ COLOR_BOLD='\033[1m'
 
 pass() { echo -e "${COLOR_GREEN}PASS${COLOR_RESET}  $1"; (( PASS++ )) || true; }
 fail() { echo -e "${COLOR_RED}FAIL${COLOR_RESET}  $1"; ERRORS+=("$1"); (( FAIL++ )) || true; }
+skip() { echo "SKIP  $1"; (( SKIP++ )) || true; }
 
 mcp_call() {
     local action="$1"; shift
@@ -569,6 +571,45 @@ fi
 CORRELATE_NO_REF=$(mcp_call correlate 2>&1 || true)
 assert_is_error "correlate(missing reference_time): returns error" "$CORRELATE_NO_REF"
 
+# ── compose diagnostics ───────────────────────────────────────────────────────
+echo ""
+echo "Action: compose_status"
+COMPOSE_STATUS=$(mcp_call compose_status 2>&1)
+assert_no_error "compose_status: no error" "$COMPOSE_STATUS"
+COMPOSE_STATUS_VALID=$(echo "$COMPOSE_STATUS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for key in ('container_name', 'ownership', 'runtime_state', 'published_ports', 'diagnostics'):
+    assert key in d, f'{key} missing'
+text = json.dumps(d)
+assert 'compose_working_dir' not in text, 'host working dir leaked'
+assert 'image_id' not in text, 'image id leaked'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "compose_status: redacted safe response valid" "$COMPOSE_STATUS_VALID" "ok"
+COMPOSE_STATUS_DOCTORABLE=$(echo "$COMPOSE_STATUS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('yes' if d.get('runtime_state') != 'docker_unavailable' and d.get('ownership') == 'compose_owned' else 'no')
+" 2>/dev/null || echo "no")
+
+echo ""
+echo "Action: compose_doctor"
+if [[ "$COMPOSE_STATUS_DOCTORABLE" == "yes" ]]; then
+    COMPOSE_DOCTOR=$(mcp_call compose_doctor 2>&1)
+    assert_no_error "compose_doctor: no error" "$COMPOSE_DOCTOR"
+    COMPOSE_DOCTOR_VALID=$(echo "$COMPOSE_DOCTOR" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for key in ('container_name', 'ownership', 'runtime_state'):
+    assert key in d, f'{key} missing'
+print('ok')
+" 2>/dev/null || echo "error")
+    assert_eq "compose_doctor: safe response valid" "$COMPOSE_DOCTOR_VALID" "ok"
+else
+    skip "compose_doctor: deployment is not doctorable from compose_status"
+fi
+
 # ── help ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "Action: help"
@@ -620,6 +661,7 @@ echo "────────────────────────�
 TOTAL=$((PASS + FAIL))
 echo -e "  Passed:  ${COLOR_GREEN}${PASS}${COLOR_RESET} / ${TOTAL}"
 echo -e "  Failed:  ${COLOR_RED}${FAIL}${COLOR_RESET} / ${TOTAL}"
+echo "  Skipped: ${SKIP}"
 
 if [[ ${#ERRORS[@]} -gt 0 ]]; then
     echo ""

@@ -9,7 +9,8 @@
 #   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,
 #   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
-#   syslog anomalies, syslog compare, syslog help
+#   syslog anomalies, syslog compare, syslog compose_status,
+#   syslog compose_doctor, syslog help
 #
 # The server runs as a Docker container over HTTP. No stdio launch needed.
 # Credentials are sourced from ~/.claude-homelab/.env:
@@ -463,6 +464,19 @@ suite_meta() {
   run_test "syslog stats: returns database statistics" syslog stats   '{}' "total_logs"
   run_test "syslog stats: write_blocked field present" syslog stats   '{}' "write_blocked"
   run_test "syslog stats: free_disk_mb field present"  syslog stats   '{}' "free_disk_mb"
+  run_test "syslog compose_status: redacted diagnostics" syslog compose_status '{}' "runtime_state"
+
+  local compose_status compose_runtime compose_ownership
+  compose_status="$(mcporter_call syslog compose_status '{}')" || compose_status=""
+  compose_runtime="$(printf '%s' "${compose_status}" | jq -r '.runtime_state // "unknown"' 2>/dev/null)" || compose_runtime="unknown"
+  compose_ownership="$(printf '%s' "${compose_status}" | jq -r '.ownership // "unknown"' 2>/dev/null)" || compose_ownership="unknown"
+  if [[ "${compose_runtime}" != "docker_unavailable" && "${compose_ownership}" == "compose_owned" ]]; then
+    run_test "syslog compose_doctor: redacted diagnostics" syslog compose_doctor '{}' "ownership"
+    run_test "syslog compose_doctor: published ports present" syslog compose_doctor '{}' "published_ports"
+  else
+    skip_test "syslog compose_doctor: redacted diagnostics" "runtime=${compose_runtime}, ownership=${compose_ownership}"
+    skip_test "syslog compose_doctor: published ports present" "runtime=${compose_runtime}, ownership=${compose_ownership}"
+  fi
 }
 
 suite_hosts() {
