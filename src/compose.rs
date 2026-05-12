@@ -287,7 +287,8 @@ impl<I, R> ComposeService<I, R> {
                 args.push(target.target.service.clone());
             }
             ComposeMutation::Down => {
-                args.push("down".into());
+                args.push("stop".into());
+                args.push(target.target.service.clone());
             }
         }
         ComposeInvocation {
@@ -346,12 +347,16 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
         }
 
         if let Some(info) = self.inspector.inspect_container(&container_name)? {
-            return Ok(target_from_container(&info, &self.defaults));
+            let target = target_from_container(&info, &self.defaults);
+            validate_requested_selectors(requested, &target)?;
+            return Ok(target);
         }
 
         let candidates = self.inspector.find_candidates(&service, &container_name)?;
         if candidates.len() == 1 {
-            return Ok(target_from_container(&candidates[0], &self.defaults));
+            let target = target_from_container(&candidates[0], &self.defaults);
+            validate_requested_selectors(requested, &target)?;
+            return Ok(target);
         }
         if candidates.len() > 1 {
             return Ok(ResolvedComposeTarget {
@@ -457,8 +462,15 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
         } else {
             Vec::new()
         };
-        let systemd = self.inspector.systemd_status("syslog-mcp.service")?;
-        let listeners = self.inspector.listeners(&[1514, 3100])?;
+        let systemd = self
+            .inspector
+            .systemd_status("syslog-mcp.service")
+            .map_err(|error| {
+                anyhow!("refusing mutation: could not verify systemd ownership: {error}")
+            })?;
+        let listeners = self.inspector.listeners(&[1514, 3100]).map_err(|error| {
+            anyhow!("refusing mutation: could not verify port listeners: {error}")
+        })?;
         let systemd_active = systemd.as_ref().is_some_and(|s| s.active);
         let non_target_listener = listeners.iter().any(|listener| {
             !listener_belongs_to_target(listener, &target.target.container_name, &published_ports)
@@ -717,6 +729,29 @@ fn listener_belongs_to_target(
         || listener.process.as_deref().is_some_and(|process| {
             published_by_target && (!process.contains("users:") || process.contains("docker-proxy"))
         })
+}
+
+fn validate_requested_selectors(
+    requested: &ComposeTarget,
+    target: &ResolvedComposeTarget,
+) -> Result<()> {
+    if let Some(project_name) = &requested.project_name {
+        if target.target.project_name.as_ref() != Some(project_name) {
+            return Err(anyhow!(
+                "requested project_name {project_name:?} does not match resolved compose project {:?}",
+                target.target.project_name
+            ));
+        }
+    }
+    if let Some(service) = &requested.service {
+        if &target.target.service != service {
+            return Err(anyhow!(
+                "requested service {service:?} does not match resolved compose service {:?}",
+                target.target.service
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub fn redact_sensitive(input: &str) -> String {

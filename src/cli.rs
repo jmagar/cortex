@@ -359,9 +359,14 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
     };
     let service = ComposeService::new(CliDockerInspect, ProcessRunner, ComposeDefaults::default());
     match command {
-        ComposeCommand::Status(args) | ComposeCommand::Doctor(args) => {
+        ComposeCommand::Status(args) => {
             let status = service.status(&args.target)?;
             print_compose_status_response(&status, args.json)
+        }
+        ComposeCommand::Doctor(args) => {
+            let status = service.status(&args.target)?;
+            print_compose_status_response(&status, args.json)?;
+            ensure_compose_doctor_success(&status)
         }
         ComposeCommand::Up(args) => print_compose_command_response(
             &service.run_mutation(ComposeMutation::Up, &args.target, &args.options)?,
@@ -1283,20 +1288,52 @@ fn print_compose_status_response(status: &ComposeStatus, json: bool) -> Result<(
 }
 
 fn print_compose_command_response(output: &Option<CommandOutput>, json: bool) -> Result<()> {
-    if json {
-        return print_json(output);
-    }
     match output {
         Some(output) => {
-            print!("{}", output.stdout);
-            eprint!("{}", output.stderr);
+            if json {
+                print_json(output)?;
+            } else {
+                print!("{}", output.stdout);
+                eprint!("{}", output.stderr);
+            }
             ensure_command_success(output)
         }
         None => {
-            println!("Dry run passed");
+            if json {
+                print_json(output)?;
+            } else {
+                println!("Dry run passed");
+            }
             Ok(())
         }
     }
+}
+
+fn ensure_compose_doctor_success(status: &ComposeStatus) -> Result<()> {
+    let unsafe_diagnostics = status.diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.severity,
+            syslog_mcp::compose::DiagnosticSeverity::Error
+                | syslog_mcp::compose::DiagnosticSeverity::Unsafe
+        )
+    });
+    let projected = syslog_mcp::compose::mcp_projection(status);
+    if unsafe_diagnostics
+        || projected.ownership != syslog_mcp::compose::ComposeOwnershipState::ComposeOwned
+        || matches!(
+            projected.runtime_state,
+            syslog_mcp::compose::ComposeRuntimeState::DockerUnavailable
+                | syslog_mcp::compose::ComposeRuntimeState::Unknown
+        )
+    {
+        bail!(
+            "compose doctor failed: ownership={:?} runtime_state={:?} diagnostics={:?}",
+            projected.ownership,
+            projected.runtime_state,
+            status.diagnostics
+        );
+    }
+    Ok(())
 }
 
 fn ensure_command_success(output: &CommandOutput) -> Result<()> {

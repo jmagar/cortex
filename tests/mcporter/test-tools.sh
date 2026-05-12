@@ -466,6 +466,7 @@ suite_meta() {
   run_test "syslog stats: free_disk_mb field present"  syslog stats   '{}' "free_disk_mb"
   run_test "syslog compose_status: redacted diagnostics" syslog compose_status '{}' "runtime_state"
   run_test "syslog compose_doctor: redacted diagnostics" syslog compose_doctor '{}' "ownership"
+  run_test "syslog compose_doctor: published ports present" syslog compose_doctor '{}' "published_ports"
 }
 
 suite_hosts() {
