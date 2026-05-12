@@ -204,7 +204,6 @@ pub enum ComposeMutation {
 pub struct MutationOptions {
     pub dry_run: bool,
     pub allow_cwd_target: bool,
-    pub allow_foreign_project: bool,
     pub yes: bool,
     pub non_interactive: bool,
 }
@@ -437,6 +436,14 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             }
         }
 
+        if target.source == TargetSource::LiveContainerLabels
+            && target.confidence != TargetConfidence::Confirmed
+        {
+            return Err(anyhow!(
+                "refusing mutation: live container is missing required compose labels"
+            ));
+        }
+
         let published_ports = if target.source == TargetSource::LiveContainerLabels {
             self.inspector
                 .inspect_container(&target.target.container_name)?
@@ -453,9 +460,9 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
         let systemd = self.inspector.systemd_status("syslog-mcp.service")?;
         let listeners = self.inspector.listeners(&[1514, 3100])?;
         let systemd_active = systemd.as_ref().is_some_and(|s| s.active);
-        let non_target_listener = listeners
-            .iter()
-            .any(|l| !l.belongs_to_target && !published_ports.contains(&l.port));
+        let non_target_listener = listeners.iter().any(|listener| {
+            !listener_belongs_to_target(listener, &target.target.container_name, &published_ports)
+        });
 
         match mutation {
             ComposeMutation::Up | ComposeMutation::Restart
@@ -491,6 +498,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                 return Ok(unresolved_status(
                     requested,
                     &self.defaults,
+                    unresolved_code(&error),
                     format!("could not resolve syslog-mcp compose target: {error}"),
                 ));
             }
@@ -502,7 +510,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                 let mut status = status_from_target(target, None, None);
                 status.diagnostics.push(ComposeDiagnostic {
                     severity: DiagnosticSeverity::Error,
-                    code: "docker_inspect_failed".into(),
+                    code: unresolved_code(&error).into(),
                     message: error.to_string(),
                 });
                 return Ok(status);
@@ -552,6 +560,7 @@ impl<I: DockerInspect, R: CommandRunner> ComposeService<I, R> {
 fn unresolved_status(
     requested: &ComposeTarget,
     defaults: &ComposeDefaults,
+    code: &str,
     message: String,
 ) -> ComposeStatus {
     ComposeStatus {
@@ -578,9 +587,17 @@ fn unresolved_status(
         systemd: None,
         diagnostics: vec![ComposeDiagnostic {
             severity: DiagnosticSeverity::Error,
-            code: "target_unresolved".into(),
+            code: code.into(),
             message,
         }],
+    }
+}
+
+fn unresolved_code(error: &anyhow::Error) -> &'static str {
+    if error.to_string().contains("docker unavailable") {
+        "docker_unavailable"
+    } else {
+        "target_unresolved"
     }
 }
 
@@ -633,28 +650,73 @@ fn target_from_container(
     info: &ContainerInfo,
     defaults: &ComposeDefaults,
 ) -> ResolvedComposeTarget {
-    let service = label(info, "com.docker.compose.service")
-        .unwrap_or(defaults.service.as_str())
-        .to_string();
-    let container_name = info.name.trim_start_matches('/').to_string();
-    let compose_working_dir =
+    let project = label(info, "com.docker.compose.project").map(str::to_string);
+    let service_label = label(info, "com.docker.compose.service").map(str::to_string);
+    let working_dir_label =
         label(info, "com.docker.compose.project.working_dir").map(PathBuf::from);
-    let compose_files = split_compose_files(label(info, "com.docker.compose.project.config_files"));
+    let config_files_label = label(info, "com.docker.compose.project.config_files");
+    let compose_files = split_compose_files(config_files_label);
+
+    let mut missing = Vec::new();
+    if project.is_none() {
+        missing.push("com.docker.compose.project");
+    }
+    if service_label.is_none() {
+        missing.push("com.docker.compose.service");
+    }
+    if working_dir_label.is_none() {
+        missing.push("com.docker.compose.project.working_dir");
+    }
+    if compose_files.is_empty() {
+        missing.push("com.docker.compose.project.config_files");
+    }
+
+    let service = service_label.unwrap_or_else(|| defaults.service.clone());
+    let container_name = info.name.trim_start_matches('/').to_string();
+    let diagnostics = if missing.is_empty() {
+        Vec::new()
+    } else {
+        vec![ComposeDiagnostic {
+            severity: DiagnosticSeverity::Unsafe,
+            code: "incomplete_compose_labels".into(),
+            message: format!(
+                "container is missing required compose labels: {}",
+                missing.join(", ")
+            ),
+        }]
+    };
+    let confidence = if missing.is_empty() {
+        TargetConfidence::Confirmed
+    } else {
+        TargetConfidence::Unsafe
+    };
     ResolvedComposeTarget {
         target: ComposeTargetSummary {
-            project_dir: compose_working_dir.clone(),
+            project_dir: working_dir_label.clone(),
             compose_file: compose_files.first().cloned(),
-            project_name: label(info, "com.docker.compose.project").map(str::to_string),
+            project_name: project.clone(),
             service,
             container_name,
         },
         source: TargetSource::LiveContainerLabels,
-        confidence: TargetConfidence::Confirmed,
-        diagnostics: Vec::new(),
+        confidence,
+        diagnostics,
         compose_files,
-        compose_working_dir,
-        compose_project: label(info, "com.docker.compose.project").map(str::to_string),
+        compose_working_dir: working_dir_label,
+        compose_project: project,
     }
+}
+
+fn listener_belongs_to_target(
+    listener: &ListenerInfo,
+    _container_name: &str,
+    published_ports: &[u16],
+) -> bool {
+    let published_by_target = published_ports.contains(&listener.port);
+    listener.belongs_to_target
+        || listener.process.as_deref().is_some_and(|process| {
+            published_by_target && (!process.contains("users:") || process.contains("docker-proxy"))
+        })
 }
 
 pub fn redact_sensitive(input: &str) -> String {
@@ -708,7 +770,7 @@ pub fn mcp_projection(status: &ComposeStatus) -> ComposeMcpStatus {
         _ if status
             .diagnostics
             .iter()
-            .any(|d| d.code == "docker_inspect_failed" || d.code == "target_unresolved") =>
+            .any(|d| d.code == "docker_unavailable") =>
         {
             ComposeRuntimeState::DockerUnavailable
         }
@@ -746,11 +808,19 @@ pub struct CliDockerInspect;
 
 impl DockerInspect for CliDockerInspect {
     fn inspect_container(&self, name: &str) -> Result<Option<ContainerInfo>> {
-        let output = std::process::Command::new("docker")
-            .args(["inspect", name, "--format", "{{json .}}"])
-            .output()
-            .map_err(|e| anyhow!("failed to run docker inspect: {e}"))?;
+        let output = run_inspector_command(
+            "docker",
+            &["inspect", name, "--format", "{{json .}}"],
+            Duration::from_secs(10),
+        )?;
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+            if !stderr.contains("no such object") && !stderr.contains("no such container") {
+                return Err(anyhow!(
+                    "docker unavailable: docker inspect failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
             return Ok(None);
         }
         let value: serde_json::Value = serde_json::from_slice(&output.stdout)?;
@@ -759,12 +829,16 @@ impl DockerInspect for CliDockerInspect {
 
     fn find_candidates(&self, service: &str, container_name: &str) -> Result<Vec<ContainerInfo>> {
         let filter = format!("label=com.docker.compose.service={service}");
-        let output = std::process::Command::new("docker")
-            .args(["ps", "-a", "--filter", &filter, "--format", "{{.Names}}"])
-            .output()
-            .map_err(|e| anyhow!("failed to run docker ps: {e}"))?;
+        let output = run_inspector_command(
+            "docker",
+            &["ps", "-a", "--filter", &filter, "--format", "{{.Names}}"],
+            Duration::from_secs(10),
+        )?;
         if !output.status.success() {
-            return Ok(Vec::new());
+            return Err(anyhow!(
+                "docker unavailable: docker ps failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
         }
         let names = String::from_utf8_lossy(&output.stdout);
         let mut found = Vec::new();
@@ -779,9 +853,11 @@ impl DockerInspect for CliDockerInspect {
     }
 
     fn systemd_status(&self, unit: &str) -> Result<Option<SystemdStatus>> {
-        let output = std::process::Command::new("systemctl")
-            .args(["--user", "is-active", unit])
-            .output();
+        let output = run_inspector_command(
+            "systemctl",
+            &["--user", "is-active", unit],
+            Duration::from_secs(3),
+        );
         match output {
             Ok(output) => Ok(Some(SystemdStatus {
                 unit: unit.into(),
@@ -795,9 +871,11 @@ impl DockerInspect for CliDockerInspect {
         let mut listeners = Vec::new();
         for port in ports {
             let port_arg = format!(":{port}");
-            let output = std::process::Command::new("ss")
-                .args(["-ltnup", "sport", "=", &port_arg])
-                .output();
+            let output = run_inspector_command(
+                "ss",
+                &["-ltnup", "sport", "=", &port_arg],
+                Duration::from_secs(3),
+            );
             if let Ok(output) = output {
                 if output.status.success() && !output.stdout.is_empty() {
                     listeners.push(ListenerInfo {
@@ -810,6 +888,20 @@ impl DockerInspect for CliDockerInspect {
         }
         Ok(listeners)
     }
+}
+
+fn run_inspector_command(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<std::process::Output> {
+    let timeout_secs = timeout.as_secs().max(1).to_string();
+    let mut timeout_args = vec!["-k", "1s", &timeout_secs, program];
+    timeout_args.extend(args);
+    std::process::Command::new("timeout")
+        .args(timeout_args)
+        .output()
+        .map_err(|e| anyhow!("failed to run {program} inspector command: {e}"))
 }
 
 fn container_info_from_inspect(value: serde_json::Value) -> Result<ContainerInfo> {
@@ -995,7 +1087,7 @@ impl CommandRunner for ProcessRunner {
                 let status = if let Some(status) = child.try_wait()? {
                     status
                 } else {
-                    kill_sent = child.kill().is_ok();
+                    kill_sent = force_kill_child(&mut child);
                     child.wait()?
                 };
                 timeout_cleanup = Some(TimeoutCleanupStatus {
@@ -1067,8 +1159,19 @@ fn terminate_child(child: &mut std::process::Child) -> bool {
     unsafe { libc::kill(-pid, libc::SIGTERM) == 0 }
 }
 
+#[cfg(unix)]
+fn force_kill_child(child: &mut std::process::Child) -> bool {
+    let pid = child.id() as i32;
+    unsafe { libc::kill(-pid, libc::SIGKILL) == 0 }
+}
+
 #[cfg(not(unix))]
 fn terminate_child(child: &mut std::process::Child) -> bool {
+    child.kill().is_ok()
+}
+
+#[cfg(not(unix))]
+fn force_kill_child(child: &mut std::process::Child) -> bool {
     child.kill().is_ok()
 }
 

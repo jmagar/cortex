@@ -40,6 +40,8 @@ just test-live
 ```
 
 The smoke test (`scripts/smoke-test.sh`) exercises all `syslog` actions via mcporter.
+Compose diagnostics are non-mutating and are validated only for redacted shape,
+so the smoke test can pass on either Docker-backed or non-Docker deployments.
 
 Action registry covered by live/script references: `search`, `tail`, `errors`,
 `hosts`, `sessions`, `search_sessions`, `usage_blocks`, `project_context`,

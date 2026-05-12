@@ -9,7 +9,7 @@
 #
 # Requirements: mcporter, nc, curl, python3
 #
-# Action inventory reference (not every action is exercised by this smoke test):
+# Action inventory reference:
 #   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
 #   mcp_call sessions, mcp_call search_sessions, mcp_call usage_blocks,
 #   mcp_call project_context, mcp_call list_ai_tools, mcp_call list_ai_projects,
@@ -569,6 +569,36 @@ fi
 # Missing required arg must return an error
 CORRELATE_NO_REF=$(mcp_call correlate 2>&1 || true)
 assert_is_error "correlate(missing reference_time): returns error" "$CORRELATE_NO_REF"
+
+# ── compose diagnostics ───────────────────────────────────────────────────────
+echo ""
+echo "Action: compose_status"
+COMPOSE_STATUS=$(mcp_call compose_status 2>&1)
+assert_no_error "compose_status: no error" "$COMPOSE_STATUS"
+COMPOSE_STATUS_VALID=$(echo "$COMPOSE_STATUS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for key in ('container_name', 'ownership', 'runtime_state', 'published_ports', 'diagnostics'):
+    assert key in d, f'{key} missing'
+text = json.dumps(d)
+assert 'compose_working_dir' not in text, 'host working dir leaked'
+assert 'image_id' not in text, 'image id leaked'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "compose_status: redacted response structure valid" "$COMPOSE_STATUS_VALID" "ok"
+
+echo ""
+echo "Action: compose_doctor"
+COMPOSE_DOCTOR=$(mcp_call compose_doctor 2>&1)
+assert_no_error "compose_doctor: no error" "$COMPOSE_DOCTOR"
+COMPOSE_DOCTOR_VALID=$(echo "$COMPOSE_DOCTOR" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for key in ('container_name', 'ownership', 'runtime_state'):
+    assert key in d, f'{key} missing'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "compose_doctor: response structure valid" "$COMPOSE_DOCTOR_VALID" "ok"
 
 # ── help ──────────────────────────────────────────────────────────────────────
 echo ""

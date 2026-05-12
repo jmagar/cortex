@@ -464,6 +464,8 @@ suite_meta() {
   run_test "syslog stats: returns database statistics" syslog stats   '{}' "total_logs"
   run_test "syslog stats: write_blocked field present" syslog stats   '{}' "write_blocked"
   run_test "syslog stats: free_disk_mb field present"  syslog stats   '{}' "free_disk_mb"
+  run_test "syslog compose_status: redacted diagnostics" syslog compose_status '{}' "runtime_state"
+  run_test "syslog compose_doctor: redacted diagnostics" syslog compose_doctor '{}' "ownership"
 }
 
 suite_hosts() {
