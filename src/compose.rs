@@ -934,10 +934,7 @@ impl DockerInspect for CliDockerInspect {
             &["--user", "is-active", unit],
             Duration::from_secs(3),
         )?;
-        Ok(Some(SystemdStatus {
-            unit: unit.into(),
-            active: output.status.success(),
-        }))
+        systemd_status_from_output(unit, &output)
     }
 
     fn listeners(&self, ports: &[u16]) -> Result<Vec<ListenerInfo>> {
@@ -965,6 +962,36 @@ impl DockerInspect for CliDockerInspect {
         }
         Ok(listeners)
     }
+}
+
+fn systemd_status_from_output(
+    unit: &str,
+    output: &std::process::Output,
+) -> Result<Option<SystemdStatus>> {
+    if output.status.success() {
+        return Ok(Some(SystemdStatus {
+            unit: unit.into(),
+            active: true,
+        }));
+    }
+
+    let code = output.status.code();
+    let stdout = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    if matches!(code, Some(3) | Some(4))
+        || matches!(stdout.as_str(), "inactive" | "failed" | "unknown")
+    {
+        return Ok(Some(SystemdStatus {
+            unit: unit.into(),
+            active: false,
+        }));
+    }
+
+    Err(anyhow!(
+        "systemctl --user is-active {unit} failed (code={code:?}): {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
 }
 
 fn run_inspector_command(

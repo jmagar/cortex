@@ -1,5 +1,9 @@
 use std::collections::BTreeMap;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
+#[cfg(unix)]
+use std::process::Output;
 use std::time::Duration;
 
 use super::*;
@@ -231,6 +235,39 @@ fn matching_requested_selectors_are_accepted() {
         })
         .unwrap();
     assert_eq!(target.confidence, TargetConfidence::Confirmed);
+}
+
+#[cfg(unix)]
+fn output_with_status(code: i32, stdout: &str, stderr: &str) -> Output {
+    Output {
+        status: std::process::ExitStatus::from_raw(code << 8),
+        stdout: stdout.as_bytes().to_vec(),
+        stderr: stderr.as_bytes().to_vec(),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn systemd_status_distinguishes_inactive_from_probe_failure() {
+    let active = systemd_status_from_output("syslog-mcp.service", &output_with_status(0, "", ""))
+        .unwrap()
+        .unwrap();
+    assert!(active.active);
+
+    let inactive = systemd_status_from_output(
+        "syslog-mcp.service",
+        &output_with_status(3, "inactive\n", ""),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(!inactive.active);
+
+    let failed = systemd_status_from_output(
+        "syslog-mcp.service",
+        &output_with_status(1, "", "dbus unavailable"),
+    )
+    .unwrap_err();
+    assert!(failed.to_string().contains("probe failure") || failed.to_string().contains("failed"));
 }
 
 #[test]
