@@ -147,6 +147,30 @@ fn mcp_projection_omits_host_paths_and_image_ids() {
 }
 
 #[test]
+fn mcp_projection_treats_lowercase_docker_exited_as_stopped() {
+    let status = ComposeStatus {
+        container_name: "syslog-mcp".into(),
+        container_id: Some("container-id".into()),
+        status: Some("exited".into()),
+        health: None,
+        image: Some("ghcr.io/jmagar/syslog-mcp:latest".into()),
+        image_id: Some("sha256:secret-image-id".into()),
+        compose_project: Some("syslog-jmagar-lab".into()),
+        compose_working_dir: None,
+        compose_files: Vec::new(),
+        service: Some("syslog-mcp".into()),
+        data_mounts: Vec::new(),
+        ports: Vec::new(),
+        systemd: None,
+        diagnostics: vec![],
+    };
+
+    let projected = mcp_projection(&status);
+
+    assert_eq!(projected.runtime_state, ComposeRuntimeState::Stopped);
+}
+
+#[test]
 fn resolves_live_container_labels() {
     let service = ComposeService::new(
         FakeInspector {

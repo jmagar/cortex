@@ -831,11 +831,7 @@ pub fn mcp_projection(status: &ComposeStatus) -> ComposeMcpStatus {
     let runtime_state = match status.health.as_deref() {
         Some("healthy") => ComposeRuntimeState::Healthy,
         Some("unhealthy") => ComposeRuntimeState::Degraded,
-        _ if status
-            .status
-            .as_deref()
-            .is_some_and(|s| s.contains("Exited")) =>
-        {
+        _ if status.status.as_deref().is_some_and(is_stopped_status) => {
             ComposeRuntimeState::Stopped
         }
         _ if status
@@ -872,6 +868,11 @@ pub fn mcp_projection(status: &ComposeStatus) -> ComposeMcpStatus {
             })
             .collect(),
     }
+}
+
+fn is_stopped_status(status: &str) -> bool {
+    let status = status.to_ascii_lowercase();
+    status.contains("exited") || status == "stopped"
 }
 
 #[derive(Debug, Default, Clone, Copy)]
