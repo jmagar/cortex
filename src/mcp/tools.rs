@@ -222,6 +222,7 @@ fn reject_compose_target_overrides(args: &Value) -> anyhow::Result<()> {
         "project_dir",
         "compose_file",
         "project_name",
+        "service",
     ] {
         if args.get(key).is_some() {
             anyhow::bail!("compose MCP actions do not accept target override: {key}");

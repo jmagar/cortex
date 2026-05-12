@@ -265,62 +265,67 @@ impl<I, R> ComposeService<I, R> {
         target: &ResolvedComposeTarget,
         mutation: ComposeMutation,
     ) -> ComposeInvocation {
-        let mut args = Vec::new();
-        if let Some(project_dir) = &target.compose_working_dir {
-            args.push("--project-directory".into());
-            args.push(project_dir.display().to_string());
-        }
-        for file in &target.compose_files {
-            args.push("-f".into());
-            args.push(file.display().to_string());
-        }
-        if let Some(project_name) = &target.compose_project {
-            args.push("--project-name".into());
-            args.push(project_name.clone());
-        }
-        match mutation {
-            ComposeMutation::Up => {
-                args.push("up".into());
-                args.push("-d".into());
-                args.push(target.target.service.clone());
-            }
-            ComposeMutation::Restart => {
-                args.push("restart".into());
-                args.push(target.target.service.clone());
-            }
-            ComposeMutation::Pull => {
-                args.push("pull".into());
-                args.push(target.target.service.clone());
-            }
-            ComposeMutation::Down => {
-                args.push("stop".into());
-                args.push(target.target.service.clone());
-            }
-        }
+        let mut args = compose_base_args(target);
+        args.extend(compose_mutation_args(mutation, &target.target.service));
+        self.invocation(target, args)
+    }
+
+    fn logs_invocation(&self, target: &ResolvedComposeTarget, tail: u32) -> ComposeInvocation {
+        let mut args = compose_base_args(target);
+        args.push("logs".into());
+        args.push("--tail".into());
+        args.push(tail.to_string());
+        args.push(target.target.service.clone());
+        self.invocation(target, args)
+    }
+
+    fn invocation(&self, target: &ResolvedComposeTarget, args: Vec<String>) -> ComposeInvocation {
         ComposeInvocation {
             program: "docker".into(),
-            args: {
-                let mut all = vec!["compose".into()];
-                all.extend(args);
-                all
-            },
+            args,
             current_dir: target.compose_working_dir.clone(),
             timeout: self.defaults.timeout,
             output_limit_bytes: self.defaults.output_limit_bytes,
         }
     }
+}
 
-    fn logs_invocation(&self, target: &ResolvedComposeTarget, tail: u32) -> ComposeInvocation {
-        let mut invocation = self.compose_invocation(target, ComposeMutation::Pull);
-        invocation
-            .args
-            .truncate(invocation.args.len().saturating_sub(2));
-        invocation.args.push("logs".into());
-        invocation.args.push("--tail".into());
-        invocation.args.push(tail.to_string());
-        invocation.args.push(target.target.service.clone());
-        invocation
+fn compose_base_args(target: &ResolvedComposeTarget) -> Vec<String> {
+    let mut args = vec!["compose".into()];
+    if let Some(project_dir) = &target.compose_working_dir {
+        args.push("--project-directory".into());
+        args.push(project_dir.display().to_string());
     }
+    for file in &target.compose_files {
+        args.push("-f".into());
+        args.push(file.display().to_string());
+    }
+    if let Some(project_name) = &target.compose_project {
+        args.push("--project-name".into());
+        args.push(project_name.clone());
+    }
+    args
+}
+
+fn compose_mutation_args(mutation: ComposeMutation, service: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    match mutation {
+        ComposeMutation::Up => {
+            args.push("up".into());
+            args.push("-d".into());
+        }
+        ComposeMutation::Restart => {
+            args.push("restart".into());
+        }
+        ComposeMutation::Pull => {
+            args.push("pull".into());
+        }
+        ComposeMutation::Down => {
+            args.push("stop".into());
+        }
+    }
+    args.push(service.into());
+    args
 }
 
 impl<I: DockerInspect, R> ComposeService<I, R> {

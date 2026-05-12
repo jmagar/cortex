@@ -214,14 +214,19 @@ async fn syslog_tool_requires_known_action() {
 #[tokio::test]
 async fn compose_action_rejects_target_override() {
     let h = TestHarness::new();
-    let err = execute_tool(
-        &h.state,
-        "syslog",
-        json!({"action": "compose_status", "project_dir": "/home/jmagar"}),
-    )
-    .await
-    .unwrap_err();
-    assert!(err.to_string().contains("target override"));
+    for action in ["compose_status", "compose_doctor"] {
+        for key in ["project_dir", "service"] {
+            let mut args = json!({"action": action});
+            args.as_object_mut()
+                .unwrap()
+                .insert(key.into(), json!("override-value"));
+            let err = execute_tool(&h.state, "syslog", args).await.unwrap_err();
+            assert!(
+                err.to_string().contains("target override"),
+                "expected target override rejection for {action}.{key}, got: {err}"
+            );
+        }
+    }
 }
 
 #[test]

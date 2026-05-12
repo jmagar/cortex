@@ -16,7 +16,6 @@
 #   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
 #   mcp_call source_ips, mcp_call timeline, mcp_call patterns, mcp_call context,
 #   mcp_call get, mcp_call ingest_rate, mcp_call silent_hosts,
-
 #   mcp_call clock_skew, mcp_call anomalies, mcp_call compare,
 #   mcp_call compose_status, mcp_call compose_doctor, mcp_call help
 
