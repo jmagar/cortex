@@ -15,6 +15,12 @@ docker compose up -d             # production deployment
 docker compose down              # stop
 docker compose logs -f           # follow logs
 docker compose build             # rebuild image
+syslog compose doctor            # diagnose live Compose/systemd/listener ownership
+syslog compose status --json     # inspect canonical syslog-mcp container/project
+syslog compose pull              # pull image for resolved Compose project
+syslog compose up                # run docker compose up -d for resolved service
+syslog compose restart           # restart resolved service
+syslog compose logs --tail 20    # bounded compose logs
 ```
 
 ```bash
@@ -214,6 +220,8 @@ curl -s -X POST http://localhost:3100/mcp \
 # stdio mode (query-only, no ingest — useful for Claude Desktop)
 cargo run -- mcp
 ```
+
+`syslog compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, systemd/listener conflicts, and destructive `down` without `--yes`.
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:compact hash:f65d5d33 -->

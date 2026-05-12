@@ -78,6 +78,19 @@ just restart    # docker compose restart
 just logs       # docker compose logs -f
 ```
 
+The installed `syslog` binary also provides guarded lifecycle diagnostics and mutations:
+
+```bash
+syslog compose doctor
+syslog compose status --json
+syslog compose pull
+syslog compose up
+syslog compose restart
+syslog compose logs --tail 50
+```
+
+MCP exposes only redacted read-only Compose diagnostics (`compose_status`, `compose_doctor`). Lifecycle mutations remain CLI-only: ask the assistant to run `syslog compose ...` locally rather than invoking MCP actions.
+
 ### Container conventions
 
 | Concern | Pattern |

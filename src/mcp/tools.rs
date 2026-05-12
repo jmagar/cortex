@@ -51,6 +51,8 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "clock_skew" => tool_clock_skew(state, args).await,
         "anomalies" => tool_anomalies(state, args).await,
         "compare" => tool_compare(state, args).await,
+        "compose_status" => tool_compose_status(args).await,
+        "compose_doctor" => tool_compose_status(args).await,
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
             "unknown syslog action: {action}; expected one of {}",
@@ -211,6 +213,38 @@ async fn tool_list_source_ips(state: &AppState, _args: Value) -> anyhow::Result<
         "list_source_ips completed"
     );
     Ok(serde_json::to_value(response)?)
+}
+
+fn reject_compose_target_overrides(args: &Value) -> anyhow::Result<()> {
+    for key in [
+        "container",
+        "container_name",
+        "project_dir",
+        "compose_file",
+        "project_name",
+    ] {
+        if args.get(key).is_some() {
+            anyhow::bail!("compose MCP actions do not accept target override: {key}");
+        }
+    }
+    Ok(())
+}
+
+async fn tool_compose_status(args: Value) -> anyhow::Result<Value> {
+    reject_compose_target_overrides(&args)?;
+    let service = crate::compose::ComposeService::new(
+        crate::compose::CliDockerInspect,
+        crate::compose::ProcessRunner,
+        crate::compose::ComposeDefaults::default(),
+    );
+    let status = tokio::task::spawn_blocking(move || {
+        service.status(&crate::compose::ComposeTarget::default())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("compose status task failed: {e}"))??;
+    Ok(serde_json::to_value(crate::compose::mcp_projection(
+        &status,
+    ))?)
 }
 
 async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {
@@ -700,6 +734,23 @@ Get lightweight runtime status without full DB statistics. Use this for dashboar
 doctor checks that need queue/backpressure/writer state quickly.
 
 **Parameters:** none
+
+---
+
+## syslog compose_status
+Read-only Docker Compose diagnostics for the canonical syslog-mcp deployment.
+The response is MCP-safe: host paths, image ids, mount sources, and raw command
+output are omitted.
+
+**Parameters:** none. Target override fields are rejected.
+
+---
+
+## syslog compose_doctor
+Alias of `compose_status` intended for deployment-health checks. Lifecycle
+mutations remain CLI-only.
+
+**Parameters:** none. Target override fields are rejected.
 
 ---
 

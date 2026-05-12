@@ -142,3 +142,52 @@ fn parse_search_help_points_to_top_level_usage() {
 
     assert!(err.to_string().contains("syslog --help"));
 }
+
+#[test]
+fn parse_compose_status_collects_target() {
+    let parsed = CliCommand::parse(strings(&[
+        "compose",
+        "status",
+        "--compose-file",
+        "/tmp/docker-compose.yml",
+        "--project-name=syslog",
+        "--json",
+    ]))
+    .unwrap();
+    match parsed {
+        CliCommand::Compose(ComposeCommand::Status(args)) => {
+            assert_eq!(
+                args.target.compose_file.unwrap(),
+                std::path::PathBuf::from("/tmp/docker-compose.yml")
+            );
+            assert_eq!(args.target.project_name.as_deref(), Some("syslog"));
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_compose_upgrade_is_deferred() {
+    let err = CliCommand::parse(strings(&["compose", "upgrade"])).unwrap_err();
+    assert!(err.to_string().contains("deferred"));
+}
+
+#[test]
+fn parse_compose_logs_follow_is_deferred() {
+    let err = CliCommand::parse(strings(&["compose", "logs", "--follow"])).unwrap_err();
+    assert!(err.to_string().contains("deferred"));
+}
+
+#[test]
+fn parse_compose_down_collects_yes_and_dry_run() {
+    let parsed = CliCommand::parse(strings(&["compose", "down", "--yes", "--dry-run"])).unwrap();
+    match parsed {
+        CliCommand::Compose(ComposeCommand::Down(args)) => {
+            assert!(args.options.yes);
+            assert!(args.options.dry_run);
+            assert!(args.options.non_interactive);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
