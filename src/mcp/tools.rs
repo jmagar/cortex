@@ -771,8 +771,10 @@ output are omitted.
 ---
 
 ## syslog compose_doctor
-Alias of `compose_status` intended for deployment-health checks. Lifecycle
-mutations remain CLI-only.
+Strict deployment-health check for the canonical syslog-mcp Compose deployment.
+Returns the same redacted diagnostic shape as `compose_status` when healthy, and
+returns a tool error when Docker/Compose ownership or runtime checks are not
+ready for lifecycle work. Lifecycle mutations remain CLI-only.
 
 **Parameters:** none. Target override fields are rejected.
 
