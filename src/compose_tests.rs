@@ -10,6 +10,8 @@ struct FakeInspector {
     candidates: Vec<ContainerInfo>,
     systemd: Option<SystemdStatus>,
     listeners: Vec<ListenerInfo>,
+    systemd_error: Option<String>,
+    listeners_error: Option<String>,
 }
 
 impl DockerInspect for FakeInspector {
@@ -22,10 +24,16 @@ impl DockerInspect for FakeInspector {
     }
 
     fn systemd_status(&self, _unit: &str) -> Result<Option<SystemdStatus>> {
+        if let Some(error) = &self.systemd_error {
+            anyhow::bail!("{error}");
+        }
         Ok(self.systemd.clone())
     }
 
     fn listeners(&self, _ports: &[u16]) -> Result<Vec<ListenerInfo>> {
+        if let Some(error) = &self.listeners_error {
+            anyhow::bail!("{error}");
+        }
         Ok(self.listeners.clone())
     }
 }
@@ -155,6 +163,53 @@ fn resolves_live_container_labels() {
 }
 
 #[test]
+fn requested_project_or_service_must_match_live_labels() {
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(labelled_container()),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let err = service
+        .resolve_target(&ComposeTarget {
+            project_name: Some("staging".into()),
+            ..Default::default()
+        })
+        .unwrap_err();
+    assert!(err.to_string().contains("project_name"));
+
+    let err = service
+        .resolve_target(&ComposeTarget {
+            service: Some("other".into()),
+            ..Default::default()
+        })
+        .unwrap_err();
+    assert!(err.to_string().contains("service"));
+}
+
+#[test]
+fn matching_requested_selectors_are_accepted() {
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(labelled_container()),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = service
+        .resolve_target(&ComposeTarget {
+            project_name: Some("syslog-jmagar-lab".into()),
+            service: Some("syslog-mcp".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(target.confidence, TargetConfidence::Confirmed);
+}
+
+#[test]
 fn containers_without_required_compose_labels_are_unsafe_for_mutation() {
     let service = ComposeService::new(
         FakeInspector {
@@ -226,6 +281,104 @@ fn project_name_alone_is_rejected_for_mutation() {
         .preflight_mutation(ComposeMutation::Up, &target, &MutationOptions::default())
         .unwrap_err();
     assert!(err.to_string().contains("--project-name alone"));
+}
+
+#[test]
+fn up_refuses_active_systemd_owner() {
+    let service = ComposeService::new(
+        FakeInspector {
+            systemd: Some(SystemdStatus {
+                unit: "syslog-mcp.service".into(),
+                active: true,
+            }),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = target_from_container(&labelled_container(), &ComposeDefaults::default());
+    let err = service
+        .preflight_mutation(ComposeMutation::Up, &target, &MutationOptions::default())
+        .unwrap_err();
+    assert!(err.to_string().contains("systemd"));
+}
+
+#[test]
+fn mutation_refuses_unverified_systemd_or_listener_state() {
+    let target = target_from_container(&labelled_container(), &ComposeDefaults::default());
+    let systemd_service = ComposeService::new(
+        FakeInspector {
+            systemd_error: Some("systemctl unavailable".into()),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let err = systemd_service
+        .preflight_mutation(
+            ComposeMutation::Restart,
+            &target,
+            &MutationOptions::default(),
+        )
+        .unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("could not verify systemd ownership"));
+
+    let listener_service = ComposeService::new(
+        FakeInspector {
+            listeners_error: Some("ss unavailable".into()),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let err = listener_service
+        .preflight_mutation(
+            ComposeMutation::Restart,
+            &target,
+            &MutationOptions::default(),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("could not verify port listeners"));
+}
+
+#[test]
+fn down_requires_yes_and_stops_only_target_service() {
+    let service = ComposeService::new(
+        FakeInspector::default(),
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = target_from_container(&labelled_container(), &ComposeDefaults::default());
+    let err = service
+        .preflight_mutation(
+            ComposeMutation::Down,
+            &target,
+            &MutationOptions {
+                non_interactive: true,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("--yes"));
+
+    service
+        .preflight_mutation(
+            ComposeMutation::Down,
+            &target,
+            &MutationOptions {
+                non_interactive: true,
+                yes: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let invocation = service.compose_invocation(&target, ComposeMutation::Down);
+    assert!(invocation
+        .args
+        .ends_with(&["stop".into(), "syslog-mcp".into()]));
+    assert!(!invocation.args.iter().any(|arg| arg == "down"));
 }
 
 #[test]
@@ -361,6 +514,30 @@ fn up_invocation_is_detached_and_uses_project_directory_and_all_files() {
             "syslog-mcp",
         ]
     );
+}
+
+#[test]
+fn mutation_invocations_scope_service_where_supported() {
+    let service = ComposeService::new(
+        FakeInspector::default(),
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = target_from_container(&labelled_container(), &ComposeDefaults::default());
+    for (mutation, expected) in [
+        (ComposeMutation::Pull, vec!["pull", "syslog-mcp"]),
+        (ComposeMutation::Restart, vec!["restart", "syslog-mcp"]),
+        (ComposeMutation::Down, vec!["stop", "syslog-mcp"]),
+    ] {
+        let invocation = service.compose_invocation(&target, mutation);
+        assert!(
+            invocation
+                .args
+                .ends_with(&expected.iter().map(|s| s.to_string()).collect::<Vec<_>>()),
+            "unexpected args for {mutation:?}: {:?}",
+            invocation.args
+        );
+    }
 }
 
 #[test]

@@ -441,6 +441,23 @@ phase_tools() {
   assert_jq "syslog stats — total_logs is a number >= 0"      "${stats_result}" '.total_logs >= 0'
   assert_jq "syslog stats — total_hosts is a number >= 0"     "${stats_result}" '.total_hosts >= 0'
 
+  # --- compose diagnostics ---
+  section "  syslog compose diagnostics"
+  local compose_status_result
+  compose_status_result="$(call_tool syslog '{"action":"compose_status"}')" || compose_status_result=""
+  assert_jq "syslog compose_status — runtime_state present" "${compose_status_result}" '.runtime_state'
+  assert_jq "syslog compose_status — no host working dir leaks" "${compose_status_result}" 'has("compose_working_dir") | not'
+  assert_jq "syslog compose_status — no image id leaks" "${compose_status_result}" 'has("image_id") | not'
+  assert_jq "syslog compose_status — docker is available" "${compose_status_result}" '.runtime_state != "docker_unavailable"'
+  assert_jq "syslog compose_status — ownership known" "${compose_status_result}" '.ownership != "unknown"'
+  assert_jq "syslog compose_status — no unsafe diagnostics" "${compose_status_result}" '[.diagnostics[]?.severity] | all(. != "error" and . != "unsafe")'
+
+  local compose_doctor_result
+  compose_doctor_result="$(call_tool syslog '{"action":"compose_doctor"}')" || compose_doctor_result=""
+  assert_jq "syslog compose_doctor — compose-owned" "${compose_doctor_result}" '.ownership' "compose_owned"
+  assert_jq "syslog compose_doctor — docker is available" "${compose_doctor_result}" '.runtime_state != "docker_unavailable"'
+  assert_jq "syslog compose_doctor — no unsafe diagnostics" "${compose_doctor_result}" '[.diagnostics[]?.severity] | all(. != "error" and . != "unsafe")'
+
   # --- syslog hosts ---
   section "  syslog hosts"
   local hosts_result
