@@ -38,3 +38,11 @@ fn mode_parse_accepts_ai_namespace() {
         Mode::Cli(_)
     ));
 }
+
+#[test]
+fn mode_parse_accepts_compose_namespace() {
+    assert!(matches!(
+        Mode::parse(vec!["compose".into(), "status".into(), "--json".into()]).unwrap(),
+        Mode::Cli(_)
+    ));
+}

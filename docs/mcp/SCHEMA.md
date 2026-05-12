@@ -28,6 +28,8 @@ syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument s
 - `clock_skew`
 - `anomalies`
 - `compare`
+- `compose_status`
+- `compose_doctor`
 - `help`
 
 The schema is defined in `src/mcp/schemas.rs` as a `serde_json::json!()` object returned by `tool_definitions()`.
@@ -68,6 +70,8 @@ json!({
                     "clock_skew",
                     "anomalies",
                     "compare",
+                    "compose_status",
+                    "compose_doctor",
                     "help"
                 ]
             },

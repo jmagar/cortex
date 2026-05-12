@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-05-12
+
+### Added
+
+- **Compose lifecycle CLI**: Added `syslog compose status`, `doctor`, `pull`,
+  `up`, `restart`, `down`, and `logs` commands with live Compose target
+  discovery, mutation preflight checks, bounded subprocess output, and JSON
+  output support.
+- **Compose MCP diagnostics**: Added read-only `compose_status` and
+  `compose_doctor` MCP actions with redacted deployment state, published port
+  summaries, and existing `syslog:read` scope enforcement.
+
+### Changed
+
+- Updated deployment, CLI, MCP schema, smoke-test, and plugin docs for the
+  compose lifecycle surface.
+
 ## [0.19.2] - 2026-05-11
 
 ### Fixed

@@ -1,0 +1,1077 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use anyhow::{anyhow, Result};
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposeDefaults {
+    pub service: String,
+    pub container_name: String,
+    pub timeout: Duration,
+    pub output_limit_bytes: usize,
+}
+
+impl Default for ComposeDefaults {
+    fn default() -> Self {
+        Self {
+            service: "syslog-mcp".into(),
+            container_name: "syslog-mcp".into(),
+            timeout: Duration::from_secs(120),
+            output_limit_bytes: 64 * 1024,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ComposeTarget {
+    pub project_dir: Option<PathBuf>,
+    pub compose_file: Option<PathBuf>,
+    pub project_name: Option<String>,
+    pub service: Option<String>,
+    pub container_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetSource {
+    Explicit,
+    LiveContainerLabels,
+    CurrentWorkingDirectory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetConfidence {
+    Confirmed,
+    Ambiguous,
+    Unsafe,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticSeverity {
+    Info,
+    Warning,
+    Unsafe,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ComposeDiagnostic {
+    pub severity: DiagnosticSeverity,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolvedComposeTarget {
+    pub target: ComposeTargetSummary,
+    pub source: TargetSource,
+    pub confidence: TargetConfidence,
+    pub diagnostics: Vec<ComposeDiagnostic>,
+    pub compose_files: Vec<PathBuf>,
+    pub compose_working_dir: Option<PathBuf>,
+    pub compose_project: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ComposeTargetSummary {
+    pub project_dir: Option<PathBuf>,
+    pub compose_file: Option<PathBuf>,
+    pub project_name: Option<String>,
+    pub service: String,
+    pub container_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MountInfo {
+    pub source: Option<PathBuf>,
+    pub target: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PortInfo {
+    pub private_port: u16,
+    pub public_port: Option<u16>,
+    pub protocol: String,
+    pub host_ip: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SystemdStatus {
+    pub unit: String,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ComposeStatus {
+    pub container_name: String,
+    pub container_id: Option<String>,
+    pub status: Option<String>,
+    pub health: Option<String>,
+    pub image: Option<String>,
+    pub image_id: Option<String>,
+    pub compose_project: Option<String>,
+    pub compose_working_dir: Option<PathBuf>,
+    pub compose_files: Vec<PathBuf>,
+    pub service: Option<String>,
+    pub data_mounts: Vec<MountInfo>,
+    pub ports: Vec<PortInfo>,
+    pub systemd: Option<SystemdStatus>,
+    pub diagnostics: Vec<ComposeDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PublicPortSummary {
+    pub port: u16,
+    pub protocol: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComposeOwnershipState {
+    ComposeOwned,
+    OwnerMismatch,
+    SystemdOwned,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComposeRuntimeState {
+    Healthy,
+    Degraded,
+    Stopped,
+    DockerUnavailable,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ComposeMcpDiagnostic {
+    pub severity: DiagnosticSeverity,
+    pub code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ComposeMcpStatus {
+    pub container_name: String,
+    pub ownership: ComposeOwnershipState,
+    pub runtime_state: ComposeRuntimeState,
+    pub health: Option<String>,
+    pub published_ports: Vec<PublicPortSummary>,
+    pub diagnostics: Vec<ComposeMcpDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContainerInfo {
+    pub id: String,
+    pub name: String,
+    pub status: Option<String>,
+    pub health: Option<String>,
+    pub image: Option<String>,
+    pub image_id: Option<String>,
+    pub labels: BTreeMap<String, String>,
+    pub mounts: Vec<MountInfo>,
+    pub ports: Vec<PortInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListenerInfo {
+    pub port: u16,
+    pub process: Option<String>,
+    pub belongs_to_target: bool,
+}
+
+pub trait DockerInspect {
+    fn inspect_container(&self, name: &str) -> Result<Option<ContainerInfo>>;
+    fn find_candidates(&self, service: &str, container_name: &str) -> Result<Vec<ContainerInfo>>;
+    fn systemd_status(&self, unit: &str) -> Result<Option<SystemdStatus>>;
+    fn listeners(&self, ports: &[u16]) -> Result<Vec<ListenerInfo>>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposeMutation {
+    Up,
+    Down,
+    Restart,
+    Pull,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MutationOptions {
+    pub dry_run: bool,
+    pub allow_cwd_target: bool,
+    pub allow_foreign_project: bool,
+    pub yes: bool,
+    pub non_interactive: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposeInvocation {
+    pub program: String,
+    pub args: Vec<String>,
+    pub current_dir: Option<PathBuf>,
+    pub timeout: Duration,
+    pub output_limit_bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TimeoutCleanupStatus {
+    pub terminate_sent: bool,
+    pub kill_sent: bool,
+    pub reaped: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CommandOutput {
+    pub exit_status: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+    pub timed_out: bool,
+    pub timeout_cleanup: Option<TimeoutCleanupStatus>,
+}
+
+pub trait CommandRunner {
+    fn run(&self, invocation: &ComposeInvocation) -> Result<CommandOutput>;
+}
+
+pub struct ComposeService<I, R> {
+    inspector: I,
+    runner: R,
+    defaults: ComposeDefaults,
+}
+
+impl<I, R> ComposeService<I, R> {
+    pub fn new(inspector: I, runner: R, defaults: ComposeDefaults) -> Self {
+        Self {
+            inspector,
+            runner,
+            defaults,
+        }
+    }
+
+    pub fn compose_invocation(
+        &self,
+        target: &ResolvedComposeTarget,
+        mutation: ComposeMutation,
+    ) -> ComposeInvocation {
+        let mut args = Vec::new();
+        if let Some(project_dir) = &target.compose_working_dir {
+            args.push("--project-directory".into());
+            args.push(project_dir.display().to_string());
+        }
+        for file in &target.compose_files {
+            args.push("-f".into());
+            args.push(file.display().to_string());
+        }
+        if let Some(project_name) = &target.compose_project {
+            args.push("--project-name".into());
+            args.push(project_name.clone());
+        }
+        match mutation {
+            ComposeMutation::Up => {
+                args.push("up".into());
+                args.push("-d".into());
+                args.push(target.target.service.clone());
+            }
+            ComposeMutation::Restart => {
+                args.push("restart".into());
+                args.push(target.target.service.clone());
+            }
+            ComposeMutation::Pull => {
+                args.push("pull".into());
+                args.push(target.target.service.clone());
+            }
+            ComposeMutation::Down => {
+                args.push("down".into());
+            }
+        }
+        ComposeInvocation {
+            program: "docker".into(),
+            args: {
+                let mut all = vec!["compose".into()];
+                all.extend(args);
+                all
+            },
+            current_dir: target.compose_working_dir.clone(),
+            timeout: self.defaults.timeout,
+            output_limit_bytes: self.defaults.output_limit_bytes,
+        }
+    }
+
+    pub fn logs_invocation(&self, target: &ResolvedComposeTarget, tail: u32) -> ComposeInvocation {
+        let mut invocation = self.compose_invocation(target, ComposeMutation::Pull);
+        invocation
+            .args
+            .truncate(invocation.args.len().saturating_sub(2));
+        invocation.args.push("logs".into());
+        invocation.args.push("--tail".into());
+        invocation.args.push(tail.to_string());
+        invocation.args.push(target.target.service.clone());
+        invocation
+    }
+}
+
+impl<I: DockerInspect, R> ComposeService<I, R> {
+    pub fn resolve_target(&self, requested: &ComposeTarget) -> Result<ResolvedComposeTarget> {
+        let service = requested
+            .service
+            .clone()
+            .unwrap_or_else(|| self.defaults.service.clone());
+        let container_name = requested
+            .container_name
+            .clone()
+            .unwrap_or_else(|| self.defaults.container_name.clone());
+
+        if requested.compose_file.is_some() || requested.project_dir.is_some() {
+            return Ok(ResolvedComposeTarget {
+                target: ComposeTargetSummary {
+                    project_dir: requested.project_dir.clone(),
+                    compose_file: requested.compose_file.clone(),
+                    project_name: requested.project_name.clone(),
+                    service,
+                    container_name,
+                },
+                source: TargetSource::Explicit,
+                confidence: TargetConfidence::Confirmed,
+                diagnostics: Vec::new(),
+                compose_files: requested.compose_file.clone().into_iter().collect(),
+                compose_working_dir: requested.project_dir.clone(),
+                compose_project: requested.project_name.clone(),
+            });
+        }
+
+        if let Some(info) = self.inspector.inspect_container(&container_name)? {
+            return Ok(target_from_container(&info, &self.defaults));
+        }
+
+        let candidates = self.inspector.find_candidates(&service, &container_name)?;
+        if candidates.len() == 1 {
+            return Ok(target_from_container(&candidates[0], &self.defaults));
+        }
+        if candidates.len() > 1 {
+            return Ok(ResolvedComposeTarget {
+                target: ComposeTargetSummary {
+                    project_dir: None,
+                    compose_file: None,
+                    project_name: requested.project_name.clone(),
+                    service,
+                    container_name,
+                },
+                source: TargetSource::LiveContainerLabels,
+                confidence: TargetConfidence::Ambiguous,
+                diagnostics: vec![ComposeDiagnostic {
+                    severity: DiagnosticSeverity::Unsafe,
+                    code: "multiple_compose_candidates".into(),
+                    message: format!("found {} candidate syslog-mcp containers", candidates.len()),
+                }],
+                compose_files: Vec::new(),
+                compose_working_dir: None,
+                compose_project: requested.project_name.clone(),
+            });
+        }
+
+        let cwd = std::env::current_dir()?;
+        let cwd_file = cwd.join("docker-compose.yml");
+        if cwd_file.exists() {
+            return Ok(ResolvedComposeTarget {
+                target: ComposeTargetSummary {
+                    project_dir: Some(cwd.clone()),
+                    compose_file: Some(cwd_file.clone()),
+                    project_name: requested.project_name.clone(),
+                    service,
+                    container_name,
+                },
+                source: TargetSource::CurrentWorkingDirectory,
+                confidence: TargetConfidence::Unsafe,
+                diagnostics: vec![ComposeDiagnostic {
+                    severity: DiagnosticSeverity::Unsafe,
+                    code: "cwd_fallback_requires_confirmation".into(),
+                    message:
+                        "cwd docker-compose.yml is not enough for mutation without --allow-cwd-target"
+                            .into(),
+                }],
+                compose_files: vec![cwd_file],
+                compose_working_dir: Some(cwd),
+                compose_project: requested.project_name.clone(),
+            });
+        }
+
+        Err(anyhow!("could not resolve syslog-mcp compose target"))
+    }
+
+    pub fn preflight_mutation(
+        &self,
+        mutation: ComposeMutation,
+        target: &ResolvedComposeTarget,
+        options: &MutationOptions,
+    ) -> Result<()> {
+        if target.confidence == TargetConfidence::Ambiguous {
+            return Err(anyhow!("refusing mutation: target is ambiguous"));
+        }
+        if target.source == TargetSource::CurrentWorkingDirectory && !options.allow_cwd_target {
+            return Err(anyhow!(
+                "refusing mutation: cwd target requires --allow-cwd-target"
+            ));
+        }
+        if target.target.project_name.is_some()
+            && target.target.project_dir.is_none()
+            && target.target.compose_file.is_none()
+            && target.source != TargetSource::LiveContainerLabels
+        {
+            return Err(anyhow!(
+                "refusing mutation: --project-name alone is not a safe target"
+            ));
+        }
+        for file in &target.compose_files {
+            if !file.exists() {
+                return Err(anyhow!(
+                    "refusing mutation: compose file does not exist: {}",
+                    file.display()
+                ));
+            }
+        }
+
+        let published_ports = if target.source == TargetSource::LiveContainerLabels {
+            self.inspector
+                .inspect_container(&target.target.container_name)?
+                .map(|info| {
+                    info.ports
+                        .into_iter()
+                        .filter_map(|port| port.public_port)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let systemd = self.inspector.systemd_status("syslog-mcp.service")?;
+        let listeners = self.inspector.listeners(&[1514, 3100])?;
+        let systemd_active = systemd.as_ref().is_some_and(|s| s.active);
+        let non_target_listener = listeners
+            .iter()
+            .any(|l| !l.belongs_to_target && !published_ports.contains(&l.port));
+
+        match mutation {
+            ComposeMutation::Up | ComposeMutation::Restart
+                if systemd_active || non_target_listener =>
+            {
+                return Err(anyhow!(
+                    "refusing mutation: systemd or non-target listener owns syslog ports"
+                ));
+            }
+            ComposeMutation::Down if target.source != TargetSource::LiveContainerLabels => {
+                return Err(anyhow!(
+                    "refusing down: target must be confirmed compose-owned"
+                ));
+            }
+            ComposeMutation::Down if options.non_interactive && !options.yes => {
+                return Err(anyhow!(
+                    "refusing down: --yes is required in non-interactive mode"
+                ));
+            }
+            ComposeMutation::Pull
+            | ComposeMutation::Up
+            | ComposeMutation::Restart
+            | ComposeMutation::Down => {}
+        }
+
+        Ok(())
+    }
+
+    pub fn status(&self, requested: &ComposeTarget) -> Result<ComposeStatus> {
+        let target = match self.resolve_target(requested) {
+            Ok(target) => target,
+            Err(error) => {
+                return Ok(unresolved_status(
+                    requested,
+                    &self.defaults,
+                    format!("could not resolve syslog-mcp compose target: {error}"),
+                ));
+            }
+        };
+        let container_name = target.target.container_name.clone();
+        let info = match self.inspector.inspect_container(&container_name) {
+            Ok(info) => info,
+            Err(error) => {
+                let mut status = status_from_target(target, None, None);
+                status.diagnostics.push(ComposeDiagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    code: "docker_inspect_failed".into(),
+                    message: error.to_string(),
+                });
+                return Ok(status);
+            }
+        };
+        let systemd = self.inspector.systemd_status("syslog-mcp.service")?;
+        let mut status = status_from_target(target, info, systemd);
+        if status.systemd.as_ref().is_some_and(|s| s.active) {
+            let code = if status.compose_project.is_some() {
+                "owner_mismatch"
+            } else {
+                "systemd_active"
+            };
+            status.diagnostics.push(ComposeDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                code: code.into(),
+                message: "syslog-mcp.service is active".into(),
+            });
+        }
+        Ok(status)
+    }
+}
+
+impl<I: DockerInspect, R: CommandRunner> ComposeService<I, R> {
+    pub fn run_mutation(
+        &self,
+        mutation: ComposeMutation,
+        requested: &ComposeTarget,
+        options: &MutationOptions,
+    ) -> Result<Option<CommandOutput>> {
+        let target = self.resolve_target(requested)?;
+        self.preflight_mutation(mutation, &target, options)?;
+        if options.dry_run {
+            return Ok(None);
+        }
+        let invocation = self.compose_invocation(&target, mutation);
+        self.runner.run(&invocation).map(Some)
+    }
+
+    pub fn logs(&self, requested: &ComposeTarget, tail: Option<u32>) -> Result<CommandOutput> {
+        let target = self.resolve_target(requested)?;
+        let invocation = self.logs_invocation(&target, tail.unwrap_or(100));
+        self.runner.run(&invocation)
+    }
+}
+
+fn unresolved_status(
+    requested: &ComposeTarget,
+    defaults: &ComposeDefaults,
+    message: String,
+) -> ComposeStatus {
+    ComposeStatus {
+        container_name: requested
+            .container_name
+            .clone()
+            .unwrap_or_else(|| defaults.container_name.clone()),
+        container_id: None,
+        status: None,
+        health: None,
+        image: None,
+        image_id: None,
+        compose_project: requested.project_name.clone(),
+        compose_working_dir: requested.project_dir.clone(),
+        compose_files: requested.compose_file.clone().into_iter().collect(),
+        service: Some(
+            requested
+                .service
+                .clone()
+                .unwrap_or_else(|| defaults.service.clone()),
+        ),
+        data_mounts: Vec::new(),
+        ports: Vec::new(),
+        systemd: None,
+        diagnostics: vec![ComposeDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: "target_unresolved".into(),
+            message,
+        }],
+    }
+}
+
+fn status_from_target(
+    target: ResolvedComposeTarget,
+    info: Option<ContainerInfo>,
+    systemd: Option<SystemdStatus>,
+) -> ComposeStatus {
+    let mut diagnostics = target.diagnostics.clone();
+    if target.source == TargetSource::CurrentWorkingDirectory {
+        diagnostics.push(ComposeDiagnostic {
+            severity: DiagnosticSeverity::Warning,
+            code: "cwd_target".into(),
+            message: "resolved from current working directory".into(),
+        });
+    }
+    ComposeStatus {
+        container_name: target.target.container_name,
+        container_id: info.as_ref().map(|i| i.id.clone()),
+        status: info.as_ref().and_then(|i| i.status.clone()),
+        health: info.as_ref().and_then(|i| i.health.clone()),
+        image: info.as_ref().and_then(|i| i.image.clone()),
+        image_id: info.as_ref().and_then(|i| i.image_id.clone()),
+        compose_project: target.compose_project,
+        compose_working_dir: target.compose_working_dir,
+        compose_files: target.compose_files,
+        service: Some(target.target.service),
+        data_mounts: info.as_ref().map(|i| i.mounts.clone()).unwrap_or_default(),
+        ports: info.as_ref().map(|i| i.ports.clone()).unwrap_or_default(),
+        systemd,
+        diagnostics,
+    }
+}
+
+fn label<'a>(info: &'a ContainerInfo, key: &str) -> Option<&'a str> {
+    info.labels.get(key).map(String::as_str)
+}
+
+fn split_compose_files(value: Option<&str>) -> Vec<PathBuf> {
+    value
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn target_from_container(
+    info: &ContainerInfo,
+    defaults: &ComposeDefaults,
+) -> ResolvedComposeTarget {
+    let service = label(info, "com.docker.compose.service")
+        .unwrap_or(defaults.service.as_str())
+        .to_string();
+    let container_name = info.name.trim_start_matches('/').to_string();
+    let compose_working_dir =
+        label(info, "com.docker.compose.project.working_dir").map(PathBuf::from);
+    let compose_files = split_compose_files(label(info, "com.docker.compose.project.config_files"));
+    ResolvedComposeTarget {
+        target: ComposeTargetSummary {
+            project_dir: compose_working_dir.clone(),
+            compose_file: compose_files.first().cloned(),
+            project_name: label(info, "com.docker.compose.project").map(str::to_string),
+            service,
+            container_name,
+        },
+        source: TargetSource::LiveContainerLabels,
+        confidence: TargetConfidence::Confirmed,
+        diagnostics: Vec::new(),
+        compose_files,
+        compose_working_dir,
+        compose_project: label(info, "com.docker.compose.project").map(str::to_string),
+    }
+}
+
+pub fn redact_sensitive(input: &str) -> String {
+    let sensitive = [
+        "token",
+        "secret",
+        "key",
+        "password",
+        "client_secret",
+        "authorization",
+    ];
+    input
+        .lines()
+        .map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if sensitive.iter().any(|term| lower.contains(term)) {
+                "[REDACTED]".to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn mcp_projection(status: &ComposeStatus) -> ComposeMcpStatus {
+    let ownership = if status
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "owner_mismatch")
+    {
+        ComposeOwnershipState::OwnerMismatch
+    } else if status.systemd.as_ref().is_some_and(|s| s.active) {
+        ComposeOwnershipState::SystemdOwned
+    } else if status.compose_project.is_some() {
+        ComposeOwnershipState::ComposeOwned
+    } else {
+        ComposeOwnershipState::Unknown
+    };
+
+    let runtime_state = match status.health.as_deref() {
+        Some("healthy") => ComposeRuntimeState::Healthy,
+        Some("unhealthy") => ComposeRuntimeState::Degraded,
+        _ if status
+            .status
+            .as_deref()
+            .is_some_and(|s| s.contains("Exited")) =>
+        {
+            ComposeRuntimeState::Stopped
+        }
+        _ if status
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "docker_inspect_failed" || d.code == "target_unresolved") =>
+        {
+            ComposeRuntimeState::DockerUnavailable
+        }
+        _ => ComposeRuntimeState::Unknown,
+    };
+
+    ComposeMcpStatus {
+        container_name: status.container_name.clone(),
+        ownership,
+        runtime_state,
+        health: status.health.clone(),
+        published_ports: status
+            .ports
+            .iter()
+            .filter_map(|port| {
+                port.public_port.map(|public| PublicPortSummary {
+                    port: public,
+                    protocol: port.protocol.clone(),
+                })
+            })
+            .collect(),
+        diagnostics: status
+            .diagnostics
+            .iter()
+            .map(|d| ComposeMcpDiagnostic {
+                severity: d.severity.clone(),
+                code: d.code.clone(),
+            })
+            .collect(),
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct CliDockerInspect;
+
+impl DockerInspect for CliDockerInspect {
+    fn inspect_container(&self, name: &str) -> Result<Option<ContainerInfo>> {
+        let output = std::process::Command::new("docker")
+            .args(["inspect", name, "--format", "{{json .}}"])
+            .output()
+            .map_err(|e| anyhow!("failed to run docker inspect: {e}"))?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        container_info_from_inspect(value).map(Some)
+    }
+
+    fn find_candidates(&self, service: &str, container_name: &str) -> Result<Vec<ContainerInfo>> {
+        let filter = format!("label=com.docker.compose.service={service}");
+        let output = std::process::Command::new("docker")
+            .args(["ps", "-a", "--filter", &filter, "--format", "{{.Names}}"])
+            .output()
+            .map_err(|e| anyhow!("failed to run docker ps: {e}"))?;
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+        let names = String::from_utf8_lossy(&output.stdout);
+        let mut found = Vec::new();
+        for name in names.lines().take(10) {
+            if name == container_name || name.contains(service) {
+                if let Some(info) = self.inspect_container(name)? {
+                    found.push(info);
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    fn systemd_status(&self, unit: &str) -> Result<Option<SystemdStatus>> {
+        let output = std::process::Command::new("systemctl")
+            .args(["--user", "is-active", unit])
+            .output();
+        match output {
+            Ok(output) => Ok(Some(SystemdStatus {
+                unit: unit.into(),
+                active: output.status.success(),
+            })),
+            Err(_) => Ok(None),
+        }
+    }
+
+    fn listeners(&self, ports: &[u16]) -> Result<Vec<ListenerInfo>> {
+        let mut listeners = Vec::new();
+        for port in ports {
+            let port_arg = format!(":{port}");
+            let output = std::process::Command::new("ss")
+                .args(["-ltnup", "sport", "=", &port_arg])
+                .output();
+            if let Ok(output) = output {
+                if output.status.success() && !output.stdout.is_empty() {
+                    listeners.push(ListenerInfo {
+                        port: *port,
+                        process: Some(String::from_utf8_lossy(&output.stdout).to_string()),
+                        belongs_to_target: false,
+                    });
+                }
+            }
+        }
+        Ok(listeners)
+    }
+}
+
+fn container_info_from_inspect(value: serde_json::Value) -> Result<ContainerInfo> {
+    let labels = value
+        .pointer("/Config/Labels")
+        .and_then(|v| v.as_object())
+        .map(|map| {
+            map.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let name = value
+        .get("Name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("syslog-mcp")
+        .trim_start_matches('/')
+        .to_string();
+    let mounts = value
+        .get("Mounts")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|m| MountInfo {
+                    source: m.get("Source").and_then(|v| v.as_str()).map(PathBuf::from),
+                    target: m
+                        .get("Destination")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    kind: m
+                        .get("Type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(ContainerInfo {
+        id: value
+            .get("Id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        name,
+        status: value
+            .pointer("/State/Status")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        health: value
+            .pointer("/State/Health/Status")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        image: value
+            .pointer("/Config/Image")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        image_id: value
+            .get("Image")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        labels,
+        mounts,
+        ports: ports_from_inspect(&value),
+    })
+}
+
+fn ports_from_inspect(value: &serde_json::Value) -> Vec<PortInfo> {
+    let Some(map) = value
+        .pointer("/NetworkSettings/Ports")
+        .and_then(|v| v.as_object())
+    else {
+        return Vec::new();
+    };
+    let mut ports = Vec::new();
+    for (private, bindings) in map {
+        let Some((port, protocol)) = private.split_once('/') else {
+            continue;
+        };
+        let Ok(private_port) = port.parse::<u16>() else {
+            continue;
+        };
+        match bindings {
+            serde_json::Value::Array(items) if !items.is_empty() => {
+                for item in items {
+                    ports.push(PortInfo {
+                        private_port,
+                        public_port: item
+                            .get("HostPort")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| s.parse::<u16>().ok()),
+                        protocol: protocol.to_string(),
+                        host_ip: item
+                            .get("HostIp")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string),
+                    });
+                }
+            }
+            _ => ports.push(PortInfo {
+                private_port,
+                public_port: None,
+                protocol: protocol.to_string(),
+                host_ip: None,
+            }),
+        }
+    }
+    ports
+}
+
+pub struct ProcessRunner;
+
+impl CommandRunner for ProcessRunner {
+    fn run(&self, invocation: &ComposeInvocation) -> Result<CommandOutput> {
+        #[cfg(unix)]
+        use std::os::unix::process::CommandExt;
+        use std::process::{Command, Stdio};
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::Instant;
+
+        let mut command = Command::new(&invocation.program);
+        command.args(&invocation.args);
+        if let Some(dir) = &invocation.current_dir {
+            command.current_dir(dir);
+        }
+        command.stdin(Stdio::null());
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+
+        #[cfg(unix)]
+        unsafe {
+            command.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+
+        let mut child = command.spawn().map_err(|e| {
+            anyhow!(
+                "failed to spawn {} {}: {e}",
+                invocation.program,
+                invocation.args.join(" ")
+            )
+        })?;
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("missing stdout pipe"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow!("missing stderr pipe"))?;
+        let stdout_buf = Arc::new(Mutex::new((Vec::new(), false)));
+        let stderr_buf = Arc::new(Mutex::new((Vec::new(), false)));
+
+        let out_handle = drain_pipe(
+            stdout,
+            Arc::clone(&stdout_buf),
+            invocation.output_limit_bytes,
+        );
+        let err_handle = drain_pipe(
+            stderr,
+            Arc::clone(&stderr_buf),
+            invocation.output_limit_bytes,
+        );
+
+        let started = Instant::now();
+        let mut timed_out = false;
+        let mut timeout_cleanup = None;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if started.elapsed() >= invocation.timeout {
+                timed_out = true;
+                let terminate_sent = terminate_child(&mut child);
+                thread::sleep(Duration::from_millis(500));
+                let mut kill_sent = false;
+                let status = if let Some(status) = child.try_wait()? {
+                    status
+                } else {
+                    kill_sent = child.kill().is_ok();
+                    child.wait()?
+                };
+                timeout_cleanup = Some(TimeoutCleanupStatus {
+                    terminate_sent,
+                    kill_sent,
+                    reaped: true,
+                });
+                break status;
+            }
+            thread::sleep(Duration::from_millis(25));
+        };
+
+        let _ = out_handle.join();
+        let _ = err_handle.join();
+
+        let (stdout, stdout_truncated) = take_buffer(stdout_buf)?;
+        let (stderr, stderr_truncated) = take_buffer(stderr_buf)?;
+
+        Ok(CommandOutput {
+            exit_status: status.code(),
+            stdout: redact_sensitive(&String::from_utf8_lossy(&stdout)),
+            stderr: redact_sensitive(&String::from_utf8_lossy(&stderr)),
+            stdout_truncated,
+            stderr_truncated,
+            timed_out,
+            timeout_cleanup,
+        })
+    }
+}
+
+fn drain_pipe<R: std::io::Read + Send + 'static>(
+    mut reader: R,
+    target: std::sync::Arc<std::sync::Mutex<(Vec<u8>, bool)>>,
+    limit: usize,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut chunk = [0u8; 8192];
+        while let Ok(n) = reader.read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            let mut guard = target.lock().expect("pipe buffer mutex poisoned");
+            let remaining = limit.saturating_sub(guard.0.len());
+            if remaining > 0 {
+                let keep = remaining.min(n);
+                guard.0.extend_from_slice(&chunk[..keep]);
+                if keep < n {
+                    guard.1 = true;
+                }
+            } else {
+                guard.1 = true;
+            }
+        }
+    })
+}
+
+fn take_buffer(
+    buffer: std::sync::Arc<std::sync::Mutex<(Vec<u8>, bool)>>,
+) -> Result<(Vec<u8>, bool)> {
+    let guard = buffer
+        .lock()
+        .map_err(|_| anyhow!("pipe buffer mutex poisoned"))?;
+    Ok((guard.0.clone(), guard.1))
+}
+
+#[cfg(unix)]
+fn terminate_child(child: &mut std::process::Child) -> bool {
+    let pid = child.id() as i32;
+    unsafe { libc::kill(-pid, libc::SIGTERM) == 0 }
+}
+
+#[cfg(not(unix))]
+fn terminate_child(child: &mut std::process::Child) -> bool {
+    child.kill().is_ok()
+}
+
+#[cfg(test)]
+#[path = "compose_tests.rs"]
+mod tests;

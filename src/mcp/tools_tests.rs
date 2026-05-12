@@ -211,6 +211,19 @@ async fn syslog_tool_requires_known_action() {
     assert!(unknown.to_string().contains("unknown syslog action"));
 }
 
+#[tokio::test]
+async fn compose_action_rejects_target_override() {
+    let h = TestHarness::new();
+    let err = execute_tool(
+        &h.state,
+        "syslog",
+        json!({"action": "compose_status", "project_dir": "/home/jmagar"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("target override"));
+}
+
 #[test]
 fn parse_optional_timestamp_normalizes_offsets_to_utc() {
     let parsed = crate::app::parse_optional_timestamp(Some("2026-01-01T01:00:00+01:00"), "from")

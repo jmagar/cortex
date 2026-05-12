@@ -23,7 +23,8 @@
 #   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,
 #   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
-#   syslog anomalies, syslog compare, syslog help
+#   syslog anomalies, syslog compare, syslog compose_status,
+#   syslog compose_doctor, syslog help
 #
 # Exit codes:
 #   0 — all tests passed (SKIPs do not count as failures)

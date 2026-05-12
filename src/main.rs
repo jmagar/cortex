@@ -47,6 +47,9 @@ async fn serve_stdio_mcp() -> Result<()> {
 }
 
 async fn run_cli(command: cli::CliCommand) -> Result<()> {
+    if matches!(command, cli::CliCommand::Compose(_)) {
+        return cli::run_compose(command);
+    }
     let runtime = RuntimeCore::load_query_only().await?;
     cli::run(runtime.service(), command).await
 }
@@ -140,6 +143,7 @@ impl Mode {
                         | "ai"
                         | "correlate"
                         | "stats"
+                        | "compose"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
@@ -183,6 +187,11 @@ fn print_usage() {
   syslog ai projects [--tool TOOL] [--from TIME] [--to TIME] [--json]
   syslog ai index [--path PATH] [--json]
   syslog ai add --file FILE [--json]
+  syslog compose doctor [--json]
+  syslog compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]
+  syslog compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]
+  syslog compose down --yes [--dry-run] [--allow-cwd-target] [--json]
+  syslog compose logs [--tail N] [--json]
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
   syslog stats [--json]
 

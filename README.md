@@ -24,7 +24,7 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md).
 
@@ -54,6 +54,8 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `clock_skew` | Per-host received_at minus timestamp distribution |
 | `anomalies` | Recent vs baseline volume/error comparison |
 | `compare` | Side-by-side comparison of two time ranges |
+| `compose_status` | Redacted read-only Compose deployment diagnostics |
+| `compose_doctor` | Alias for Compose deployment health diagnostics |
 | `help` | Markdown reference for all actions |
 
 ### `syslog search`
@@ -615,6 +617,8 @@ allow_insecure_http = true
 syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 syslog mcp        # query-only MCP stdio transport
 syslog stats      # query the SQLite DB directly from the CLI
+syslog compose doctor          # diagnose live Compose/systemd/listener ownership
+syslog compose status --json   # inspect canonical syslog-mcp container/project
 ```
 
 Both modes use the same config and environment variable loader. `syslog mcp` is for local child-process MCP clients that can read `SYSLOG_MCP_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs.
@@ -628,7 +632,13 @@ syslog errors --from 2026-01-01T00:00:00Z
 syslog hosts
 syslog correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
 syslog stats --json
+syslog compose pull            # pull image for resolved Compose project
+syslog compose up              # run docker compose up -d for resolved service
+syslog compose restart         # restart resolved service
+syslog compose logs --tail 20  # bounded compose logs
 ```
+
+`syslog compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, systemd/listener conflicts, and destructive `down` without `--yes`.
 
 See [docs/CLI.md](docs/CLI.md) for the full direct CLI reference, including flags, JSON output, and how CLI commands map to MCP actions.
 
@@ -876,6 +886,9 @@ just up        # docker compose up -d
 just logs      # docker compose logs -f
 just down      # docker compose down
 just restart   # docker compose restart
+syslog compose doctor
+syslog compose status --json
+syslog compose logs --tail 20
 ```
 
 Generate a bearer token:

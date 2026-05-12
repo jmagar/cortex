@@ -45,7 +45,8 @@ Action registry covered by live/script references: `search`, `tail`, `errors`,
 `hosts`, `sessions`, `search_sessions`, `usage_blocks`, `project_context`,
 `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`,
 `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`,
-`silent_hosts`, `clock_skew`, `anomalies`, `compare`, `help`.
+`silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`,
+`compose_doctor`, `help`.
 
 ### mcporter-based testing
 
@@ -71,6 +72,8 @@ mcporter call --config config/mcporter.json syslog.syslog action=silent_hosts
 mcporter call --config config/mcporter.json syslog.syslog action=clock_skew
 mcporter call --config config/mcporter.json syslog.syslog action=anomalies
 mcporter call --config config/mcporter.json syslog.syslog action=compare a_from=2026-01-01T00:00:00Z a_to=2026-01-01T01:00:00Z b_from=2026-01-01T01:00:00Z b_to=2026-01-01T02:00:00Z
+mcporter call --config config/mcporter.json syslog.syslog action=compose_status
+mcporter call --config config/mcporter.json syslog.syslog action=compose_doctor
 ```
 
 ### curl-based testing
