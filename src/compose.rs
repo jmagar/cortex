@@ -172,6 +172,21 @@ pub struct ComposeMcpStatus {
     pub diagnostics: Vec<ComposeMcpDiagnostic>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ComposeDryRun {
+    pub dry_run: bool,
+    pub command: Vec<String>,
+    pub target: ComposeTargetSummary,
+    pub preflight: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ComposeCommandResult {
+    Executed(CommandOutput),
+    DryRun(ComposeDryRun),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContainerInfo {
     pub id: String,
@@ -197,6 +212,9 @@ pub trait DockerInspect {
     fn find_candidates(&self, service: &str, container_name: &str) -> Result<Vec<ContainerInfo>>;
     fn systemd_status(&self, unit: &str) -> Result<Option<SystemdStatus>>;
     fn listeners(&self, ports: &[u16]) -> Result<Vec<ListenerInfo>>;
+    fn published_port_owner(&self, _port: u16) -> Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -462,19 +480,19 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
         }
 
         let ownership = if mutation_requires_ownership_probe(mutation) {
-            let published_ports = if target.source == TargetSource::LiveContainerLabels {
-                self.inspector
-                    .inspect_container(&target.target.container_name)?
-                    .map(|info| {
-                        info.ports
-                            .into_iter()
-                            .filter_map(|port| port.public_port)
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
+            let target_container = self
+                .inspector
+                .inspect_container(&target.target.container_name)?;
+            let target_container_id = target_container.as_ref().map(|info| info.id.as_str());
+            let published_ports = target_container
+                .as_ref()
+                .map(|info| {
+                    info.ports
+                        .iter()
+                        .filter_map(|port| port.public_port)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             let systemd = self
                 .inspector
                 .systemd_status("syslog-mcp.service")
@@ -484,15 +502,22 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             let listeners = self.inspector.listeners(&[1514, 3100]).map_err(|error| {
                 anyhow!("refusing mutation: could not verify port listeners: {error}")
             })?;
+            let mut non_target_listener = false;
+            for listener in &listeners {
+                if !listener_belongs_to_target(
+                    &self.inspector,
+                    listener,
+                    &target.target.container_name,
+                    target_container_id,
+                    &published_ports,
+                )? {
+                    non_target_listener = true;
+                    break;
+                }
+            }
             Some((
                 systemd.as_ref().is_some_and(|s| s.active),
-                listeners.iter().any(|listener| {
-                    !listener_belongs_to_target(
-                        listener,
-                        &target.target.container_name,
-                        &published_ports,
-                    )
-                }),
+                non_target_listener,
             ))
         } else {
             None
@@ -590,21 +615,64 @@ impl<I: DockerInspect, R: CommandRunner> ComposeService<I, R> {
         mutation: ComposeMutation,
         requested: &ComposeTarget,
         options: &MutationOptions,
-    ) -> Result<Option<CommandOutput>> {
+    ) -> Result<ComposeCommandResult> {
         let target = self.resolve_target(requested)?;
         self.preflight_mutation(mutation, &target, options)?;
-        if options.dry_run {
-            return Ok(None);
-        }
         let invocation = self.compose_invocation(&target, mutation);
-        self.runner.run(&invocation).map(Some)
+        if options.dry_run {
+            return Ok(ComposeCommandResult::DryRun(ComposeDryRun {
+                dry_run: true,
+                command: std::iter::once(invocation.program.clone())
+                    .chain(invocation.args.clone())
+                    .collect(),
+                target: target.target,
+                preflight: "passed".into(),
+            }));
+        }
+        self.runner
+            .run(&invocation)
+            .map(ComposeCommandResult::Executed)
     }
 
     pub fn logs(&self, requested: &ComposeTarget, tail: Option<u32>) -> Result<CommandOutput> {
         let target = self.resolve_target(requested)?;
+        if target.source == TargetSource::CurrentWorkingDirectory {
+            return Err(anyhow!(
+                "refusing logs: cwd target requires explicit compose target"
+            ));
+        }
+        if target.confidence != TargetConfidence::Confirmed {
+            return Err(anyhow!("refusing logs: target is not confirmed"));
+        }
         let invocation = self.logs_invocation(&target, tail.unwrap_or(100));
         self.runner.run(&invocation)
     }
+}
+
+fn listener_belongs_to_target<I: DockerInspect>(
+    inspector: &I,
+    listener: &ListenerInfo,
+    container_name: &str,
+    container_id: Option<&str>,
+    published_ports: &[u16],
+) -> Result<bool> {
+    if listener.belongs_to_target {
+        return Ok(true);
+    }
+    if !published_ports.contains(&listener.port) {
+        return Ok(false);
+    }
+    let Some(process) = listener.process.as_deref() else {
+        return Ok(false);
+    };
+    if !process.contains("users:") || !process.contains("docker-proxy") {
+        return Ok(false);
+    }
+    let Some(owner) = inspector.published_port_owner(listener.port)? else {
+        return Ok(false);
+    };
+    Ok(owner == container_name
+        || container_id.is_some_and(|id| id == owner || id.starts_with(&owner)))
 }
 
 fn unresolved_status(
@@ -775,22 +843,6 @@ fn mutation_requires_ownership_probe(mutation: ComposeMutation) -> bool {
     )
 }
 
-fn listener_belongs_to_target(
-    listener: &ListenerInfo,
-    _container_name: &str,
-    published_ports: &[u16],
-) -> bool {
-    if listener.belongs_to_target {
-        return true;
-    }
-    let published_by_target = published_ports.contains(&listener.port);
-    published_by_target
-        && listener
-            .process
-            .as_deref()
-            .is_some_and(|process| process.contains("users:") && process.contains("docker-proxy"))
-}
-
 fn validate_requested_selectors(
     requested: &ComposeTarget,
     target: &ResolvedComposeTarget,
@@ -838,6 +890,12 @@ pub fn redact_sensitive(input: &str) -> String {
 }
 
 pub fn mcp_projection(status: &ComposeStatus) -> ComposeMcpStatus {
+    let has_hard_diagnostic = status.diagnostics.iter().any(|d| {
+        matches!(
+            d.severity,
+            DiagnosticSeverity::Error | DiagnosticSeverity::Unsafe
+        )
+    });
     let ownership = if status
         .diagnostics
         .iter()
@@ -846,26 +904,31 @@ pub fn mcp_projection(status: &ComposeStatus) -> ComposeMcpStatus {
         ComposeOwnershipState::OwnerMismatch
     } else if status.systemd.as_ref().is_some_and(|s| s.active) {
         ComposeOwnershipState::SystemdOwned
+    } else if has_hard_diagnostic {
+        ComposeOwnershipState::Unknown
     } else if status.compose_project.is_some() {
         ComposeOwnershipState::ComposeOwned
     } else {
         ComposeOwnershipState::Unknown
     };
 
-    let runtime_state = match status.health.as_deref() {
-        Some("healthy") => ComposeRuntimeState::Healthy,
-        Some("unhealthy") => ComposeRuntimeState::Degraded,
-        _ if status.status.as_deref().is_some_and(is_stopped_status) => {
-            ComposeRuntimeState::Stopped
+    let runtime_state = if status
+        .diagnostics
+        .iter()
+        .any(|d| d.code == DIAG_DOCKER_UNAVAILABLE)
+    {
+        ComposeRuntimeState::DockerUnavailable
+    } else if has_hard_diagnostic {
+        ComposeRuntimeState::Degraded
+    } else {
+        match status.health.as_deref() {
+            Some("healthy") => ComposeRuntimeState::Healthy,
+            Some("unhealthy") => ComposeRuntimeState::Degraded,
+            _ if status.status.as_deref().is_some_and(is_stopped_status) => {
+                ComposeRuntimeState::Stopped
+            }
+            _ => ComposeRuntimeState::Unknown,
         }
-        _ if status
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "docker_unavailable") =>
-        {
-            ComposeRuntimeState::DockerUnavailable
-        }
-        _ => ComposeRuntimeState::Unknown,
     };
 
     ComposeMcpStatus {
@@ -892,6 +955,27 @@ pub fn mcp_projection(status: &ComposeStatus) -> ComposeMcpStatus {
             })
             .collect(),
     }
+}
+
+pub fn ensure_doctor_ready(status: &ComposeStatus) -> Result<()> {
+    let projected = mcp_projection(status);
+    if projected.ownership != ComposeOwnershipState::ComposeOwned
+        || projected.runtime_state != ComposeRuntimeState::Healthy
+        || status.diagnostics.iter().any(|d| {
+            matches!(
+                d.severity,
+                DiagnosticSeverity::Error | DiagnosticSeverity::Unsafe
+            )
+        })
+    {
+        return Err(anyhow!(
+            "compose doctor failed: ownership={:?} runtime_state={:?} diagnostics={:?}",
+            projected.ownership,
+            projected.runtime_state,
+            status.diagnostics
+        ));
+    }
+    Ok(())
 }
 
 fn is_stopped_status(status: &str) -> bool {
@@ -967,7 +1051,7 @@ impl DockerInspect for CliDockerInspect {
             let port_arg = format!(":{port}");
             let output = run_inspector_command(
                 "ss",
-                &["-ltnup", "sport", "=", &port_arg],
+                &["-H", "-ltnup", "sport", "=", &port_arg],
                 Duration::from_secs(3),
             )?;
             if !output.status.success() {
@@ -976,7 +1060,7 @@ impl DockerInspect for CliDockerInspect {
                     String::from_utf8_lossy(&output.stderr).trim()
                 ));
             }
-            if !output.stdout.is_empty() {
+            if ss_output_has_listener(&output.stdout) {
                 listeners.push(ListenerInfo {
                     port: *port,
                     process: Some(String::from_utf8_lossy(&output.stdout).to_string()),
@@ -986,6 +1070,53 @@ impl DockerInspect for CliDockerInspect {
         }
         Ok(listeners)
     }
+
+    fn published_port_owner(&self, port: u16) -> Result<Option<String>> {
+        let publish_filter = format!("publish={port}");
+        let output = run_inspector_command(
+            "docker",
+            &[
+                "ps",
+                "--filter",
+                &publish_filter,
+                "--format",
+                "{{.ID}}\t{{.Names}}",
+            ],
+            Duration::from_secs(10),
+        )
+        .map_err(|e| DockerUnavailableError(format!("docker ps failed: {e}")))?;
+        if !output.status.success() {
+            return Err(DockerUnavailableError(format!(
+                "docker ps failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
+            .into());
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut lines = stdout.lines();
+        let Some(first) = lines.next() else {
+            return Ok(None);
+        };
+        if lines.next().is_some() {
+            return Ok(None);
+        }
+        let mut fields = first.split('\t');
+        let id = fields.next().unwrap_or_default().trim();
+        let name = fields.next().unwrap_or_default().trim();
+        if !id.is_empty() {
+            Ok(Some(id.into()))
+        } else if !name.is_empty() {
+            Ok(Some(name.into()))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+fn ss_output_has_listener(stdout: &[u8]) -> bool {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .any(|line| !line.trim().is_empty() && !line.trim_start().starts_with("Netid "))
 }
 
 fn systemd_status_from_output(
@@ -1171,7 +1302,9 @@ impl CommandRunner for ProcessRunner {
         #[cfg(unix)]
         unsafe {
             command.pre_exec(|| {
-                libc::setsid();
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
                 Ok(())
             });
         }
@@ -1279,23 +1412,31 @@ fn drain_pipe<R: std::io::Read + Send + 'static>(
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut chunk = [0u8; 8192];
-        while let Ok(n) = reader.read(&mut chunk) {
-            if n == 0 {
-                break;
-            }
-            let mut guard = target.lock().expect("pipe buffer mutex poisoned");
-            let remaining = limit.saturating_sub(guard.0.len());
-            if remaining > 0 {
-                let keep = remaining.min(n);
-                guard.0.extend_from_slice(&chunk[..keep]);
-                if keep < n {
-                    guard.1 = true;
+        loop {
+            match reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let mut guard = target.lock().expect("pipe buffer mutex poisoned");
+                    append_pipe_chunk(&mut guard, &chunk, n, limit);
                 }
-            } else {
-                guard.1 = true;
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
             }
         }
     })
+}
+
+fn append_pipe_chunk(target: &mut (Vec<u8>, bool), chunk: &[u8], n: usize, limit: usize) {
+    let remaining = limit.saturating_sub(target.0.len());
+    if remaining > 0 {
+        let keep = remaining.min(n);
+        target.0.extend_from_slice(&chunk[..keep]);
+        if keep < n {
+            target.1 = true;
+        }
+    } else {
+        target.1 = true;
+    }
 }
 
 fn take_buffer(
