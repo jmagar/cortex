@@ -776,9 +776,7 @@ fn parse_compose_mutation(args: &[String], destructive: bool) -> Result<ComposeM
             "--allow-cwd-target" => parsed.options.allow_cwd_target = true,
             "--yes" => parsed.options.yes = true,
             _ if is_compose_common_arg(&arg) => {
-                if !arg.contains('=') && needs_value(&arg) {
-                    let _ = flags.value(&arg)?;
-                }
+                consume_compose_common_value(&mut flags, &arg)?;
             }
             _ if arg.starts_with("--") => bail!("unknown compose option: {arg}"),
             _ => bail!("unexpected compose argument: {arg}"),
@@ -803,9 +801,7 @@ fn parse_compose_logs(args: &[String]) -> Result<ComposeLogsArgs> {
             }
             "--follow" => bail!("syslog compose logs --follow is deferred"),
             _ if is_compose_common_arg(&arg) => {
-                if !arg.contains('=') && needs_value(&arg) {
-                    let _ = flags.value(&arg)?;
-                }
+                consume_compose_common_value(&mut flags, &arg)?;
             }
             _ if arg.starts_with("--") => bail!("unknown compose logs option: {arg}"),
             _ => bail!("unexpected compose logs argument: {arg}"),
@@ -856,9 +852,7 @@ fn reject_unknown_compose_args(command: &str, args: &[String], extra: &[&str]) -
             continue;
         }
         if is_compose_common_arg(&arg) {
-            if !arg.contains('=') && needs_value(&arg) {
-                let _ = flags.value(&arg)?;
-            }
+            consume_compose_common_value(&mut flags, &arg)?;
             continue;
         }
         if arg.starts_with("--") {
@@ -890,6 +884,13 @@ fn needs_value(arg: &str) -> bool {
         arg,
         "--compose-file" | "--project-dir" | "--project-name" | "--service" | "--container"
     )
+}
+
+fn consume_compose_common_value(flags: &mut FlagCursor<'_>, arg: &str) -> Result<()> {
+    if !arg.contains('=') && needs_value(arg) {
+        let _ = flags.value(arg)?;
+    }
+    Ok(())
 }
 
 fn parse_correlate(args: &[String]) -> Result<CliCommand> {
