@@ -1,4 +1,5 @@
 <!--
+SPDX-License-Identifier: MIT
 Author: jmagar
 License: MIT
 Description: Skill definitions and validation guidance for the syslog-mcp plugin.
