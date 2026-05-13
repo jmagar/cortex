@@ -1,4 +1,5 @@
 <!--
+SPDX-License-Identifier: MIT
 Author: jmagar
 License: MIT
 Description: Plugin surface documentation index for the syslog-mcp Claude Code plugin.

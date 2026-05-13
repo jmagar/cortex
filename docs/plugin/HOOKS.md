@@ -1,4 +1,5 @@
 <!--
+SPDX-License-Identifier: MIT
 Author: jmagar
 License: MIT
 Description: Hook configuration and lifecycle documentation for the syslog-mcp plugin.

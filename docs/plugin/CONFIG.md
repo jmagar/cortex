@@ -1,4 +1,5 @@
 <!--
+SPDX-License-Identifier: MIT
 Author: jmagar
 License: MIT
 Description: Plugin configuration and user-facing settings for Claude Code plugin deployment.
