@@ -91,3 +91,7 @@ pub fn record_imports_in_tx(
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "checkpoint_tests.rs"]
+mod tests;

@@ -109,3 +109,7 @@ fn join_content_items(items: &[Value]) -> String {
         .collect();
     parts.join(" ")
 }
+
+#[cfg(test)]
+#[path = "codex_tests.rs"]
+mod tests;
