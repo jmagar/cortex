@@ -52,3 +52,7 @@ fn extract_message(value: &Value) -> String {
     }
     String::new()
 }
+
+#[cfg(test)]
+#[path = "claude_tests.rs"]
+mod tests;
