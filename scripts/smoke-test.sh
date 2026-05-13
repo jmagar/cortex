@@ -163,14 +163,12 @@ seed_ai_fixture() {
     [[ -f "$AI_SMOKE_FIXTURE" ]] || return 1
 
     local db_path="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-data/syslog.db}}"
-    local output rc
-    output="$(run_syslog_ai_add "$db_path" "$AI_SMOKE_FIXTURE" 2>&1)"
-    rc=$?
-
-    if [[ "$rc" -eq 0 ]]; then
+    local output
+    if output="$(run_syslog_ai_add "$db_path" "$AI_SMOKE_FIXTURE" 2>&1)"; then
         AI_SEEDED=1
         echo "Seeded AI transcript fixture into ${db_path}: ${AI_SMOKE_FIXTURE}"
     else
+        local rc=$?
         echo "ERROR  AI transcript fixture seed failed: ${output}" >&2
         return "$rc"
     fi

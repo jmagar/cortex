@@ -56,7 +56,8 @@ append_csv_unique() {
   local csv="$1" value="$2" item
   local -a items
   [[ -n "${value}" ]] || { printf '%s\n' "${csv}"; return; }
-  IFS=',' read -r -a items <<< "${csv}"
+  local IFS=','
+  read -r -a items <<< "${csv}"
   for item in "${items[@]}"; do
     item="${item#"${item%%[![:space:]]*}"}"
     item="${item%"${item##*[![:space:]]}"}"

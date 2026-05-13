@@ -40,11 +40,11 @@ Most common cause: empty / wrong `$CLAUDE_PLUGIN_OPTION_SERVER_URL`, mismatched 
 1. **Get current state**:
    `docker ps --filter name=syslog-mcp --format '{{.Status}}'`
 2. **If recently restarted / crashing — get the actual error**: use `syslog-logs` for the last 100 lines, or run `docker compose logs` manually. Look for: panic messages, port-bind errors (`address already in use`), DB lock errors, OOM kills.
-4. **Common service-failure causes (ranked by frequency in this plugin's history)**:
+3. **Common service-failure causes (ranked by frequency in this plugin's history)**:
    1. Port `$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT` or `$CLAUDE_PLUGIN_OPTION_MCP_PORT` held by another process. Resolve with `sudo fuser -k <port>/tcp` or kill the offender.
    2. Database lock (another `syslog mcp` stdio process holds it). `pgrep -af "syslog mcp"` and kill stragglers.
    3. Docker image missing/stale: `docker compose pull` to refresh.
-5. **If healthcheck failing but `/health` works manually**: Container is unhealthy because the healthcheck command inside the image is wrong/can't run. Compare image version to what you expect — `docker inspect syslog-mcp | jq '.[0].Config.Image'`.
+4. **If healthcheck failing but `/health` works manually**: Container is unhealthy because the healthcheck command inside the image is wrong/can't run. Compare image version to what you expect — `docker inspect syslog-mcp | jq '.[0].Config.Image'`.
 
 ### Branch D — "Something's off" / vague / user doesn't know
 

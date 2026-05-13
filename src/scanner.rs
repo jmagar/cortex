@@ -65,7 +65,7 @@ impl SourceKind {
 pub fn validate_path(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
-        bail!("symlinks are not allowed: {}", path.display());
+        return Err(PathScanError::SymlinkNotAllowed(path.to_path_buf()).into());
     }
     if metadata.is_file() && metadata.len() > MAX_FILE_SIZE_BYTES {
         bail!("file exceeds max size: {}", path.display());
@@ -74,12 +74,11 @@ pub fn validate_path(path: &Path) -> Result<()> {
 }
 
 fn classify_path_error(error: &anyhow::Error, result: &mut IndexResult) {
-    let message = error.to_string();
-    if message.contains("symlinks are not allowed") {
-        result.skipped_symlinks += 1;
-    }
-    if message.contains("unsafe transcript scan path") {
-        result.skipped_unsafe_paths += 1;
+    if let Some(path_error) = error.downcast_ref::<PathScanError>() {
+        match path_error {
+            PathScanError::SymlinkNotAllowed(_) => result.skipped_symlinks += 1,
+            PathScanError::UnsafePath(_) => result.skipped_unsafe_paths += 1,
+        }
     }
 }
 
@@ -91,22 +90,39 @@ fn reject_broad_scan_path(path: &Path) -> Result<()> {
         || home.as_ref().is_some_and(|value| &canonical == value)
         || cwd.as_ref().is_some_and(|value| &canonical == value)
     {
-        bail!("unsafe transcript scan path: {}", canonical.display());
+        return Err(PathScanError::UnsafePath(canonical).into());
     }
     if canonical.is_dir() && !is_known_transcript_root(&canonical) && !test_temp_path(&canonical) {
-        bail!(
-            "unsafe transcript scan path: {}; pass a known transcript root or one .jsonl file",
-            canonical.display()
-        );
+        return Err(PathScanError::UnsafePath(canonical).into());
     }
     if canonical.is_file() && !supported_discovered_file(&canonical) {
-        bail!(
-            "unsafe transcript scan path: {}; pass a known transcript root or one .jsonl file",
-            canonical.display()
-        );
+        return Err(PathScanError::UnsafePath(canonical).into());
     }
     Ok(())
 }
+
+#[derive(Debug)]
+enum PathScanError {
+    SymlinkNotAllowed(PathBuf),
+    UnsafePath(PathBuf),
+}
+
+impl std::fmt::Display for PathScanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SymlinkNotAllowed(path) => {
+                write!(f, "symlinks are not allowed: {}", path.display())
+            }
+            Self::UnsafePath(path) => write!(
+                f,
+                "unsafe transcript scan path: {}; pass a known transcript root or one .jsonl file",
+                path.display()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PathScanError {}
 
 fn is_known_transcript_root(path: &Path) -> bool {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
@@ -265,8 +281,7 @@ pub fn index_file_with_storage(
                     "ai_transcript_path",
                     &mut result,
                 );
-                chunk_bytes = chunk_bytes.saturating_add(message.len());
-                batch.push(LogBatchEntry {
+                let entry = LogBatchEntry {
                     timestamp: normalize_timestamp(parsed.timestamp.as_deref())?,
                     hostname: "localhost".to_string(),
                     facility: Some("transcript".to_string()),
@@ -281,7 +296,9 @@ pub fn index_file_with_storage(
                     ai_project: project,
                     ai_session_id: session_id,
                     ai_transcript_path: transcript_path,
-                });
+                };
+                chunk_bytes = chunk_bytes.saturating_add(log_entry_string_bytes(&entry));
+                batch.push(entry);
                 imports.push(record_key);
                 if batch.len() >= MAX_INDEX_CHUNK_RECORDS || chunk_bytes >= MAX_INDEX_CHUNK_BYTES {
                     if !flush_chunk(
@@ -574,6 +591,31 @@ fn normalize_timestamp(timestamp: Option<&str>) -> Result<String> {
     }
 }
 
+fn log_entry_string_bytes(entry: &LogBatchEntry) -> usize {
+    entry
+        .timestamp
+        .len()
+        .saturating_add(entry.hostname.len())
+        .saturating_add(entry.facility.as_ref().map_or(0, String::len))
+        .saturating_add(entry.severity.len())
+        .saturating_add(entry.app_name.as_ref().map_or(0, String::len))
+        .saturating_add(entry.process_id.as_ref().map_or(0, String::len))
+        .saturating_add(entry.raw.len())
+        .saturating_add(entry.message.len())
+        .saturating_add(entry.source_ip.len())
+        .saturating_add(entry.docker_checkpoint.as_ref().map_or(0, |checkpoint| {
+            checkpoint
+                .host_name
+                .len()
+                .saturating_add(checkpoint.container_id.len())
+                .saturating_add(checkpoint.timestamp.len())
+        }))
+        .saturating_add(entry.ai_tool.as_ref().map_or(0, String::len))
+        .saturating_add(entry.ai_project.as_ref().map_or(0, String::len))
+        .saturating_add(entry.ai_session_id.as_ref().map_or(0, String::len))
+        .saturating_add(entry.ai_transcript_path.as_ref().map_or(0, String::len))
+}
+
 struct ReadLine {
     text: String,
     oversized: bool,
@@ -594,6 +636,8 @@ fn read_bounded_line<R: BufRead>(reader: &mut R, hasher: &mut Sha256) -> Result<
         let take_len = newline_pos.map_or(available.len(), |pos| pos + 1);
         hasher.update(&available[..take_len]);
         if !oversized {
+            // Copy one sentinel byte past the inclusive record limit so we can
+            // detect oversized records while still accepting exactly-limit rows.
             let remaining = MAX_RECORD_SIZE_BYTES
                 .saturating_add(1)
                 .saturating_sub(line.len());
