@@ -4,13 +4,15 @@ FROM rust:1.90-slim-bookworm AS builder
 
 WORKDIR /app
 ARG SYSLOG_BUILD_PROFILE=release
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN case "$SYSLOG_BUILD_PROFILE" in release|debug) ;; *) echo "invalid SYSLOG_BUILD_PROFILE=$SYSLOG_BUILD_PROFILE"; exit 1; esac
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
 # Cache deps
 COPY Cargo.toml Cargo.lock ./
 RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=syslog-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=syslog-cargo-target,target=/app/target,sharing=locked \
+    case "$SYSLOG_BUILD_PROFILE" in release|debug) ;; *) echo "invalid SYSLOG_BUILD_PROFILE=$SYSLOG_BUILD_PROFILE"; exit 1; esac && \
     mkdir src && echo "fn main() {}" > src/main.rs && \
     if [ "$SYSLOG_BUILD_PROFILE" = "release" ]; then cargo build --release --locked; else cargo build --locked; fi && \
     rm -rf src
@@ -22,6 +24,7 @@ COPY config/Dockerfile config/Dockerfile
 RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=syslog-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=syslog-cargo-target,target=/app/target,sharing=locked \
+    case "$SYSLOG_BUILD_PROFILE" in release|debug) ;; *) echo "invalid SYSLOG_BUILD_PROFILE=$SYSLOG_BUILD_PROFILE"; exit 1; esac && \
     touch src/main.rs && \
     if [ "$SYSLOG_BUILD_PROFILE" = "release" ]; then \
       cargo build --release --locked && cp target/release/syslog /usr/local/bin/syslog; \

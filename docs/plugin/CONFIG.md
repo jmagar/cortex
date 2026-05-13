@@ -1,3 +1,9 @@
+<!--
+Author: jmagar
+License: MIT
+Description: Plugin configuration and user-facing settings for Claude Code plugin deployment.
+-->
+
 # Plugin Settings -- syslog-mcp
 
 Plugin configuration and user-facing settings for Claude Code plugin deployment.
@@ -20,7 +26,7 @@ Connection credentials flow through two files:
 1. **`plugin.json`** -- declares `userConfig` fields that Claude Code prompts for at install time
 2. **`.mcp.json`** -- references those fields as `${userConfig.<key>}` in the URL and headers
 
-```
+```text
 plugin.json userConfig (user enters values)
   --> .mcp.json (${userConfig.*} interpolated by Claude Code)
     --> HTTP connection to running syslog-mcp server
@@ -29,7 +35,7 @@ plugin.json userConfig (user enters values)
 Server-mode plugin installs also run the same setup path as the one-line
 installer:
 
-```
+```text
 plugin userConfig
   --> scripts/plugin-setup.sh exports SYSLOG_* / SYSLOG_MCP_* overrides
     --> syslog setup repair

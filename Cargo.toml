@@ -66,6 +66,7 @@ libc = "0.2"
 rustix = { version = "0.38", features = ["fs"] }
 regex = "1"
 sha2 = "0.10"
+getrandom = "0.3"
 
 futures-util = "0.3"
 

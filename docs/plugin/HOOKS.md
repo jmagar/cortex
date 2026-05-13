@@ -1,3 +1,9 @@
+<!--
+Author: jmagar
+License: MIT
+Description: Hook configuration and lifecycle documentation for the syslog-mcp plugin.
+-->
+
 # Hook Configuration -- syslog-mcp
 
 Lifecycle hooks that run automatically during Claude Code sessions.

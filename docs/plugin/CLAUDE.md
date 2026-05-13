@@ -1,3 +1,9 @@
+<!--
+Author: jmagar
+License: MIT
+Description: Plugin surface documentation index for the syslog-mcp Claude Code plugin.
+-->
+
 # Plugin Surface Documentation -- syslog-mcp
 
 Index for the `plugin/` documentation subdirectory. These docs cover every Claude Code plugin surface area available to syslog-mcp.

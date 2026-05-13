@@ -1,5 +1,8 @@
 #!/usr/bin/env sh
 set -eu
+if (set -o pipefail) 2>/dev/null; then
+  set -o pipefail
+fi
 
 CRATE="${SYSLOG_INSTALL_CRATE:-syslog-mcp}"
 VERSION="${SYSLOG_VERSION:-latest}"

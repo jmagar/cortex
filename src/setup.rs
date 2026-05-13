@@ -1,12 +1,16 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::io::{self, ErrorKind, Read as _, Write as _};
+use std::io::{self, ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
 const COMPOSE_ASSET: &str = include_str!("../docker-compose.yml");
 const DOCKERFILE_ASSET: &str = include_str!("../config/Dockerfile");
+
+#[cfg(test)]
+#[path = "setup_tests.rs"]
+mod tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupMode {
@@ -382,12 +386,21 @@ fn write_compose_assets(compose_dir: &Path) -> io::Result<SetupPhase> {
 }
 
 fn installed_compose_asset() -> String {
-    COMPOSE_ASSET
+    let without_build = COMPOSE_ASSET
         .replace(
             "    # Default to the published image so plugin deploys can `docker compose pull`\n    # without source. Override with --build (or `docker compose build`) for local\n    # source development.\n    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}\n    build:\n      context: .\n      dockerfile: config/Dockerfile\n",
             "    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}\n",
-        )
-        .replace("      - path: .env\n", "      - path: ../.env\n")
+        );
+    assert_ne!(
+        without_build, COMPOSE_ASSET,
+        "installed compose asset transform failed: expected build stanza was not found"
+    );
+    let installed = without_build.replace("      - path: .env\n", "      - path: ../.env\n");
+    assert_ne!(
+        installed, without_build,
+        "installed compose asset transform failed: expected env_file path was not found"
+    );
+    installed
 }
 
 fn check_file_phase(name: &'static str, path: &Path, fix: &str) -> SetupPhase {
@@ -575,50 +588,10 @@ fn command_stdout<const N: usize>(program: &str, args: [&str; N]) -> Option<Stri
 
 fn generate_token() -> io::Result<String> {
     let mut bytes = [0u8; 32];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    getrandom::fill(&mut bytes).map_err(io::Error::other)?;
     let mut token = String::with_capacity(64);
     for byte in bytes {
         token.push_str(&format!("{byte:02x}"));
     }
     Ok(token)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ensure_env_file_preserves_existing_token_and_adds_compose_defaults() {
-        let dir = tempfile::tempdir().unwrap();
-        let env_path = dir.path().join(".env");
-        let data_dir = dir.path().join("data");
-        std::fs::write(&env_path, "SYSLOG_MCP_TOKEN=keep-me\n").unwrap();
-
-        let result = ensure_env_file(&env_path, &data_dir).unwrap();
-        let raw = std::fs::read_to_string(&env_path).unwrap();
-
-        assert_eq!(
-            result.values.get("SYSLOG_MCP_TOKEN").map(String::as_str),
-            Some("keep-me")
-        );
-        assert!(raw.contains("SYSLOG_MCP_TOKEN=keep-me"));
-        assert!(raw.contains("SYSLOG_MCP_DATA_VOLUME="));
-        assert!(raw.contains("SYSLOG_MCP_DB_PATH=/data/syslog.db"));
-    }
-
-    #[test]
-    fn parse_env_ignores_comments_and_blank_lines() {
-        let parsed = parse_env("\n# comment\nA=1\nB = two\n");
-        assert_eq!(parsed.get("A").map(String::as_str), Some("1"));
-        assert_eq!(parsed.get("B").map(String::as_str), Some("two"));
-    }
-
-    #[test]
-    fn installed_compose_asset_uses_published_image_only() {
-        let compose = installed_compose_asset();
-        assert!(compose.contains("image: ghcr.io/jmagar/syslog-mcp:"));
-        assert!(!compose.contains("\n    build:\n"));
-        assert!(!compose.contains("dockerfile: config/Dockerfile"));
-        assert!(compose.contains("      - path: ../.env\n"));
-    }
 }
