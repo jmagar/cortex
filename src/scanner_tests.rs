@@ -3,6 +3,7 @@ use crate::config::StorageConfig;
 use crate::db::{
     init_pool, search_ai_sessions, search_logs, tail_logs, SearchAiSessionsParams, SearchParams,
 };
+use serial_test::serial;
 
 fn test_pool() -> (crate::db::DbPool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -61,6 +62,44 @@ fn parse_errors_are_counted_without_panicking() {
     assert!(last_error
         .unwrap()
         .contains("1 transcript record(s) failed to parse"));
+}
+
+#[test]
+fn parse_error_retry_imports_only_fixed_rows_and_clears_checkpoint_error() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("repair.jsonl");
+    std::fs::write(
+        &file,
+        "{\"sessionId\":\"sess-1\",\"content\":\"first\"}\nnot-json\n{\"sessionId\":\"sess-1\",\"content\":\"third\"}\n",
+    )
+    .unwrap();
+
+    let first = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(first.ingested, 2);
+    assert_eq!(first.parse_errors, 1);
+
+    std::fs::write(
+        &file,
+        "{\"sessionId\":\"sess-1\",\"content\":\"first\"}\n{\"sessionId\":\"sess-1\",\"content\":\"second\"}\n{\"sessionId\":\"sess-1\",\"content\":\"third\"}\n",
+    )
+    .unwrap();
+    let second = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(second.ingested, 1);
+    assert_eq!(second.skipped_dupes, 2);
+    assert_eq!(second.parse_errors, 0);
+    assert_eq!(second.checkpoint_updates, 1);
+
+    let (last_error, last_indexed_at): (Option<String>, Option<String>) = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT last_error, last_indexed_at FROM transcript_sources WHERE canonical_path = ?1",
+            [file.canonicalize().unwrap().to_string_lossy().to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(last_error, None);
+    assert!(last_indexed_at.is_some());
 }
 
 #[test]
@@ -412,6 +451,70 @@ fn index_roots_counts_unsupported_files_without_parsing_them() {
     assert_eq!(result.ingested, 1);
     assert_eq!(result.unsupported_files, 1);
     assert_eq!(result.skipped_unsafe_paths, 0);
+}
+
+#[test]
+#[serial]
+fn index_roots_default_scans_claude_and_codex_roots() {
+    let (pool, dir) = test_pool();
+    let old_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", dir.path());
+
+    let claude_root = dir.path().join(".claude/projects/-tmp-default");
+    std::fs::create_dir_all(&claude_root).unwrap();
+    std::fs::write(
+        claude_root.join("sessions-index.json"),
+        "{\"originalPath\":\"/tmp/default-claude\"}",
+    )
+    .unwrap();
+    std::fs::write(
+        claude_root.join("session.jsonl"),
+        "{\"sessionId\":\"claude-default\",\"content\":\"default claude root\"}\n",
+    )
+    .unwrap();
+
+    let codex_root = dir.path().join(".codex/sessions/2026/05/13");
+    std::fs::create_dir_all(&codex_root).unwrap();
+    std::fs::write(
+        codex_root.join("rollout-codex-default.jsonl"),
+        concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-default\",\"cwd\":\"/tmp/default-codex\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"content\":[{\"text\":\"default codex root\"}]},\"timestamp\":\"2026-05-13T00:00:00Z\"}\n"
+        ),
+    )
+    .unwrap();
+
+    let result = index_roots(&pool, None).unwrap();
+    if let Some(home) = old_home {
+        std::env::set_var("HOME", home);
+    }
+
+    assert_eq!(result.discovered_files, 2);
+    assert_eq!(result.ingested, 2);
+    let claude = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "claude".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(claude.sessions[0].ai_tool, "claude");
+    assert_eq!(claude.sessions[0].ai_project, "/tmp/default-claude");
+
+    let codex = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "codex".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(codex.sessions[0].ai_tool, "codex");
+    assert_eq!(codex.sessions[0].ai_project, "/tmp/default-codex");
+    assert_eq!(codex.sessions[0].ai_session_id, "codex-default");
 }
 
 #[test]

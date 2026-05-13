@@ -352,6 +352,72 @@ fn search_ai_sessions_groups_results() {
 }
 
 #[test]
+fn ai_session_queries_respect_filters() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_ai_entry(
+                "2026-01-01T00:00:00Z",
+                "host-a",
+                "claude",
+                "/tmp/a",
+                "s1",
+                "auth needle",
+            ),
+            make_ai_entry(
+                "2026-01-01T01:00:00Z",
+                "host-b",
+                "codex",
+                "/tmp/b",
+                "s2",
+                "auth needle",
+            ),
+            make_ai_entry(
+                "2026-01-02T00:00:00Z",
+                "host-a",
+                "claude",
+                "/tmp/a",
+                "s3",
+                "auth needle",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let listed = list_ai_sessions(
+        &pool,
+        &ListAiSessionsParams {
+            ai_project: Some("/tmp/a".into()),
+            ai_tool: Some("claude".into()),
+            hostname: Some("host-a".into()),
+            from: Some("2026-01-01T00:00:00Z".into()),
+            to: Some("2026-01-01T23:59:59Z".into()),
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].ai_session_id, "s1");
+
+    let searched = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "needle".into(),
+            ai_project: Some("/tmp/b".into()),
+            ai_tool: Some("codex".into()),
+            from: Some("2026-01-01T00:30:00Z".into()),
+            to: Some("2026-01-01T01:30:00Z".into()),
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(searched.sessions.len(), 1);
+    assert_eq!(searched.sessions[0].ai_session_id, "s2");
+    assert_eq!(searched.sessions[0].hostname, "host-b");
+}
+
+#[test]
 fn list_ai_tool_and_project_inventory() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(

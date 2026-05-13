@@ -75,6 +75,26 @@ fn ai_cli_add_and_query_commands_emit_json() {
     serde_json::from_slice::<serde_json::Value>(&context.stdout).unwrap();
 }
 
+#[test]
+fn ai_cli_add_reports_parse_errors_and_exits_nonzero() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("cli-ai-bad.db");
+    let transcript = dir.path().join("bad.jsonl");
+    std::fs::write(
+        &transcript,
+        "{\"sessionId\":\"cli-1\",\"content\":\"good\"}\nnot-json\n",
+    )
+    .unwrap();
+
+    let output = run_ai_command(&db_path, ["ai", "add", "--file"], Some(&transcript));
+    assert!(!output.status.success(), "ai add unexpectedly passed");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["ingested"], 1);
+    assert_eq!(json["parse_errors"], 1);
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("transcript record(s) failed to parse"));
+}
+
 fn run_ai_command<const N: usize>(
     db_path: &std::path::Path,
     args: [&str; N],

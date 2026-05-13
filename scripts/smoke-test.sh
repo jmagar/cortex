@@ -166,7 +166,8 @@ seed_ai_fixture() {
         AI_SEEDED=1
         echo "Seeded AI transcript fixture into ${db_path}: ${AI_SMOKE_FIXTURE}"
     else
-        echo "WARN  AI transcript fixture seed skipped: ${output}" >&2
+        echo "ERROR  AI transcript fixture seed failed: ${output}" >&2
+        return "$rc"
     fi
 }
 
