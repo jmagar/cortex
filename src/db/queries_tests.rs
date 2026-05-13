@@ -248,6 +248,29 @@ fn test_search_severity_in_filter() {
 }
 
 #[test]
+fn tail_logs_filters_multiple_severities() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_entry("2026-01-01T00:00:00Z", "host-a", "err", "err msg"),
+            make_entry("2026-01-01T00:00:01Z", "host-a", "warning", "warn msg"),
+            make_entry("2026-01-01T00:00:02Z", "host-a", "info", "info msg"),
+        ],
+    )
+    .unwrap();
+
+    let severities = vec!["err".to_string(), "warning".to_string()];
+    let rows = tail_logs(&pool, Some("host-a"), None, None, Some(&severities), 10).unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| row.hostname == "host-a"));
+    assert!(rows
+        .iter()
+        .all(|row| ["err", "warning"].contains(&row.severity.as_str())));
+}
+
+#[test]
 fn search_logs_ignores_deleted_fts_phantom_rows() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(

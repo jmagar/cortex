@@ -5,9 +5,9 @@ fn help_lists_sessions_command() {
     let output = Command::new(env!("CARGO_BIN_EXE_syslog"))
         .arg("--help")
         .output()
-        .unwrap();
+        .expect("run syslog --help");
 
-    let stderr = String::from_utf8(output.stderr).unwrap();
+    let stderr = String::from_utf8(output.stderr).expect("help output should be valid UTF-8");
     assert!(
         stderr.contains("syslog sessions"),
         "help output should list the sessions command, got:\n{stderr}"
@@ -24,27 +24,27 @@ fn ai_cli_add_and_query_commands_emit_json() {
         "{\"sessionId\":\"cli-1\",\"content\":\"hello cli transcript\"}\n",
     )
     .unwrap();
+    let transcript_path = transcript
+        .to_str()
+        .expect("transcript path should be UTF-8");
 
-    let add = run_ai_command(&db_path, ["ai", "add", "--file"], Some(&transcript));
+    let add = run_command(
+        &db_path,
+        &["ai", "add", "--file", transcript_path, "--json"],
+    );
     assert!(add.status.success(), "ai add failed: {add:?}");
     let add_json: serde_json::Value = serde_json::from_slice(&add.stdout).unwrap();
     assert_eq!(add_json["ingested"], 1);
 
     let index = run_command(
         &db_path,
-        &[
-            "ai",
-            "index",
-            "--path",
-            transcript.to_str().unwrap(),
-            "--json",
-        ],
+        &["ai", "index", "--path", transcript_path, "--json"],
     );
     assert!(index.status.success(), "ai index failed: {index:?}");
     let index_json: serde_json::Value = serde_json::from_slice(&index.stdout).unwrap();
     assert_eq!(index_json["skipped_dupes"], 1);
 
-    let search = run_ai_command(&db_path, ["ai", "search", "hello", "--json"], None);
+    let search = run_command(&db_path, &["ai", "search", "hello", "--json"]);
     assert!(search.status.success(), "ai search failed: {search:?}");
     let search_json: serde_json::Value = serde_json::from_slice(&search.stdout).unwrap();
     assert_eq!(search_json["sessions"].as_array().unwrap().len(), 1);
@@ -85,8 +85,14 @@ fn ai_cli_add_reports_parse_errors_and_exits_nonzero() {
         "{\"sessionId\":\"cli-1\",\"content\":\"good\"}\nnot-json\n",
     )
     .unwrap();
+    let transcript_path = transcript
+        .to_str()
+        .expect("transcript path should be UTF-8");
 
-    let output = run_ai_command(&db_path, ["ai", "add", "--file"], Some(&transcript));
+    let output = run_command(
+        &db_path,
+        &["ai", "add", "--file", transcript_path, "--json"],
+    );
     assert!(!output.status.success(), "ai add unexpectedly passed");
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["ingested"], 1);
@@ -95,26 +101,9 @@ fn ai_cli_add_reports_parse_errors_and_exits_nonzero() {
     assert!(stderr.contains("transcript record(s) failed to parse"));
 }
 
-fn run_ai_command<const N: usize>(
-    db_path: &std::path::Path,
-    args: [&str; N],
-    trailing_path: Option<&std::path::Path>,
-) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_syslog"));
-    command.env("SYSLOG_MCP_DB_PATH", db_path);
-    for arg in args {
-        command.arg(arg);
-    }
-    if let Some(path) = trailing_path {
-        command.arg(path);
-        command.arg("--json");
-    }
-    command.output().unwrap()
-}
-
 fn run_command(db_path: &std::path::Path, args: &[&str]) -> std::process::Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_syslog"));
     command.env("SYSLOG_MCP_DB_PATH", db_path);
     command.args(args);
-    command.output().unwrap()
+    command.output().expect("run syslog command")
 }
