@@ -3,6 +3,7 @@
 FROM rust:1.90-slim-bookworm AS builder
 
 WORKDIR /app
+ARG SYSLOG_BUILD_PROFILE=release
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
 # Cache deps
@@ -10,14 +11,21 @@ COPY Cargo.toml Cargo.lock ./
 RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=syslog-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=syslog-cargo-target,target=/app/target,sharing=locked \
-    mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release --locked && rm -rf src
+    mkdir src && echo "fn main() {}" > src/main.rs && \
+    if [ "$SYSLOG_BUILD_PROFILE" = "release" ]; then cargo build --release --locked; else cargo build --locked; fi && \
+    rm -rf src
 
 # Build real binary
 COPY src/ src/
 RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=syslog-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=syslog-cargo-target,target=/app/target,sharing=locked \
-    touch src/main.rs && cargo build --release --locked && cp target/release/syslog /usr/local/bin/syslog
+    touch src/main.rs && \
+    if [ "$SYSLOG_BUILD_PROFILE" = "release" ]; then \
+      cargo build --release --locked && cp target/release/syslog /usr/local/bin/syslog; \
+    else \
+      cargo build --locked && cp target/debug/syslog /usr/local/bin/syslog; \
+    fi
 
 # Runtime
 FROM debian:bookworm-slim

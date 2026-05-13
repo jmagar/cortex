@@ -280,7 +280,7 @@ Mutation flags:
 
 `syslog compose` refuses ambiguous target discovery, mismatched requested
 project/service selectors, cwd fallback without confirmation,
-project-name-only mutations, missing Compose files, systemd owner conflicts,
+project-name-only mutations, missing Compose files, legacy service conflicts,
 non-target listeners on syslog ports, and destructive service stop without
 `--yes`. `down` is intentionally service-scoped (`docker compose stop
 syslog-mcp`), not a project-wide `docker compose down`.

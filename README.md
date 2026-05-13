@@ -415,7 +415,6 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 | Field | Required | Default | Notes |
 |-------|----------|---------|-------|
 | `is_server` | yes | `true` | Server mode hosts the receiver; client mode connects to a remote server |
-| `use_docker` | no | `false` | Server mode only — `true` deploys via `docker compose`, `false` via systemd user service |
 | `server_url` | no | `http://localhost:3100` | Server mode: leave default. Client mode: remote host URL (e.g. `http://shart:3100`) |
 | `api_token` | yes | — | Bearer token. Server mode: server requires this token. Client mode: token from the server admin. Stored in the system keychain. |
 | `syslog_host` / `syslog_port` | no | `0.0.0.0` / `1514` | Syslog listener bind (server mode) |
@@ -430,9 +429,9 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 
 **SessionStart hook automation** (in server mode):
 
-- Symlinks `bin/syslog` to `~/.local/bin/syslog` so the binary is on your PATH
-- Writes `${CLAUDE_PLUGIN_DATA}/syslog-mcp.env` with the resolved config
-- Generates and starts the systemd user unit (or runs `docker compose up -d`) and restarts only when config actually changed
+- Writes `${CLAUDE_PLUGIN_DATA}/.env` with the resolved Compose config
+- Runs `docker compose up -d` and restarts the container only when config actually changed
+- Removes stale user-level `syslog-mcp.service` units/drop-ins left by older plugin versions
 - All idempotent — safe to run on every session
 
 **Bundled skills**:
@@ -440,11 +439,10 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 - `syslog-dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
 - `syslog-deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
 - `syslog-redeploy` — re-run plugin setup after config or plugin changes
-- `syslog-logs` — mode-aware service log tailing from systemd or Docker
-- `syslog-cutover` — switch between systemd and Docker deployment modes with health verification
-- `syslog-version-check` — check whether the running systemd service or Docker container matches the installed binary or local image; add `--pull` in Docker mode to pull first, otherwise Docker checks only the local image cache
+- `syslog-logs` — Docker Compose service log tailing
+- `syslog-version-check` — check whether the running Docker container matches the local Compose image; add `--pull` to pull first, otherwise checks only the local image cache
 
-The plugin includes the `syslog` binary in `bin/` and is the simplest path. You can still deploy via Docker or build locally if you prefer to run the server outside the plugin.
+The plugin deploys the server with Docker Compose. You can still build and run the binary locally for development, but automated plugin deployment is Compose-only.
 
 ### Docker
 
@@ -634,7 +632,7 @@ allow_insecure_http = true
 syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 syslog mcp        # query-only MCP stdio transport
 syslog stats      # query the SQLite DB directly from the CLI
-syslog compose doctor          # diagnose live Compose/systemd/listener ownership
+syslog compose doctor          # diagnose live Compose/listener ownership
 syslog compose status --json   # inspect canonical syslog-mcp container/project
 ```
 
@@ -655,7 +653,7 @@ syslog compose restart         # restart resolved service
 syslog compose logs --tail 20  # bounded compose logs
 ```
 
-`syslog compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, systemd/listener conflicts, and destructive `down` without `--yes`.
+`syslog compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, listener conflicts, and destructive `down` without `--yes`.
 
 See [docs/CLI.md](docs/CLI.md) for the full direct CLI reference, including flags, JSON output, and how CLI commands map to MCP actions.
 

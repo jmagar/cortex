@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-05-13
+
+### Changed
+
+- **Compose-only plugin deployment**: Removed the systemd deployment mode,
+  deploy-mode cutover skill, and mode-aware setup paths. Server-mode plugin
+  installs now manage syslog-mcp only with Docker Compose while still removing
+  stale user units/drop-ins left by older versions.
+
+### Fixed
+
+- **Runtime freshness checks**: Narrowed the runtime-current checker and related
+  plugin skills to Docker Compose so stale systemd units or plugin-cache
+  binaries are no longer treated as valid deployment targets.
+
 ## [0.20.1] - 2026-05-13
 
 ### Fixed

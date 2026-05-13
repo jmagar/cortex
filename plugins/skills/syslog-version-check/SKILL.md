@@ -1,6 +1,6 @@
 ---
 name: syslog-version-check
-description: Check whether the running syslog-mcp systemd service or Docker container matches the installed artifact or compose image. Use when the user asks whether syslog-mcp is current, stale, deployed, updated, running the latest plugin image, or needs a restart/recreate after an upgrade. Supports an optional --pull mode for Docker image comparison.
+description: Check whether the running syslog-mcp Docker container matches the local Compose image. Use when the user asks whether syslog-mcp is current, stale, deployed, updated, running the latest plugin image, or needs a restart/recreate after an upgrade. Supports an optional --pull mode for Docker image comparison.
 ---
 
 # Syslog Version Check
@@ -23,7 +23,7 @@ Check whether the active syslog-mcp runtime is current before suggesting a resta
 2. Pass `--pull` only when the user asks to refresh Docker image metadata first. In Docker mode, `--pull` pulls the compose image before comparing the running container image ID to the local compose image ID. Without `--pull`, Docker mode only proves the running container matches the image already present in the local cache.
 
 3. Report these fields:
-   - Mode detected: `systemd` or `docker`
+   - Mode detected: `docker`
    - Running version or image ID
    - Installed binary hash or local compose image ID
    - Verdict: `CURRENT`, `STALE`, or `FAIL`
