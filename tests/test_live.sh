@@ -215,9 +215,9 @@ seed_ai_fixture_local() {
   [[ -f "${AI_SMOKE_FIXTURE}" ]] || return 1
   local db_path="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-data/syslog.db}}"
   if [[ -x "target/debug/syslog" ]]; then
-    SYSLOG_MCP_DB_PATH="${db_path}" target/debug/syslog ai add --file "${AI_SMOKE_FIXTURE}" --json >/dev/null
+    SYSLOG_MCP_DB_PATH="${db_path}" target/debug/syslog ai add --file "${AI_SMOKE_FIXTURE}" --json >/dev/null || return $?
   else
-    SYSLOG_MCP_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${AI_SMOKE_FIXTURE}" --json >/dev/null
+    SYSLOG_MCP_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${AI_SMOKE_FIXTURE}" --json >/dev/null || return $?
   fi
   AI_SEEDED=true
 }
@@ -225,8 +225,8 @@ seed_ai_fixture_local() {
 seed_ai_fixture_container() {
   local project_dir="$1"
   local container_fixture="/tmp/ai-session-smoke.jsonl"
-  docker cp "${project_dir}/${AI_SMOKE_FIXTURE}" "${CONTAINER_NAME}:${container_fixture}" >/dev/null
-  docker exec "${CONTAINER_NAME}" syslog ai add --file "${container_fixture}" --json >/dev/null
+  docker cp "${project_dir}/${AI_SMOKE_FIXTURE}" "${CONTAINER_NAME}:${container_fixture}" >/dev/null || return $?
+  docker exec "${CONTAINER_NAME}" syslog ai add --file "${container_fixture}" --json >/dev/null || return $?
   AI_SEEDED=true
 }
 

@@ -427,11 +427,7 @@ fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut I
     let read_dir = match fs::read_dir(path) {
         Ok(read_dir) => read_dir,
         Err(error) => {
-            result.skipped_files += 1;
-            result.file_errors.push(IndexFileError {
-                path: path.display().to_string(),
-                error: error.to_string(),
-            });
+            record_file_error(result, path, &error.into());
             return;
         }
     };
@@ -439,11 +435,7 @@ fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut I
         match entry.with_context(|| format!("failed to read entry under {}", path.display())) {
             Ok(entry) => entries.push(entry.path()),
             Err(error) => {
-                result.skipped_files += 1;
-                result.file_errors.push(IndexFileError {
-                    path: path.display().to_string(),
-                    error: error.to_string(),
-                });
+                record_file_error(result, path, &error);
             }
         }
     }
