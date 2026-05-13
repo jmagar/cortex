@@ -157,7 +157,7 @@ syslog ai context --project /home/jmagar/workspace/syslog-mcp --limit 5
 ```
 
 Recent representative entries are capped at 20 rows, and message snippets are
-bounded to 512 characters for predictable MCP/CLI payload size.
+bounded to 256 characters for predictable MCP/CLI payload size.
 
 ### `syslog ai tools`
 

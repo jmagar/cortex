@@ -446,11 +446,7 @@ pub fn list_ai_tools(pool: &DbPool, params: &ListAiToolsParams) -> Result<ListAi
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
     let grouped_sql = format!("{sql} GROUP BY ai_tool");
-    let total_tools: usize = conn.query_row(
-        &format!("SELECT COUNT(*) FROM ({grouped_sql})"),
-        rusqlite::params_from_iter(bindings.iter()),
-        |row| row.get::<_, i64>(0),
-    )? as usize;
+    let total_tools = count_grouped_rows(&conn, &grouped_sql, &bindings)?;
     sql = grouped_sql;
     sql.push_str(&format!(
         " ORDER BY event_count DESC, ai_tool ASC LIMIT {}",
@@ -469,8 +465,7 @@ pub fn list_ai_tools(pool: &DbPool, params: &ListAiToolsParams) -> Result<ListAi
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let truncated = tools.len() > LIMIT;
-    tools.truncate(LIMIT);
+    let truncated = truncate_to_limit(&mut tools, LIMIT);
     Ok(ListAiToolsResult {
         total_tools,
         truncated,
@@ -513,11 +508,7 @@ pub fn list_ai_projects(
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
     let grouped_sql = format!("{sql} GROUP BY ai_project");
-    let total_projects: usize = conn.query_row(
-        &format!("SELECT COUNT(*) FROM ({grouped_sql})"),
-        rusqlite::params_from_iter(bindings.iter()),
-        |row| row.get::<_, i64>(0),
-    )? as usize;
+    let total_projects = count_grouped_rows(&conn, &grouped_sql, &bindings)?;
     sql = grouped_sql;
     sql.push_str(&format!(
         " ORDER BY event_count DESC, ai_project ASC LIMIT {}",
@@ -544,13 +535,30 @@ pub fn list_ai_projects(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let truncated = projects.len() > LIMIT;
-    projects.truncate(LIMIT);
+    let truncated = truncate_to_limit(&mut projects, LIMIT);
     Ok(ListAiProjectsResult {
         total_projects,
         truncated,
         projects,
     })
+}
+
+fn count_grouped_rows(
+    conn: &rusqlite::Connection,
+    grouped_sql: &str,
+    bindings: &[rusqlite::types::Value],
+) -> Result<usize> {
+    Ok(conn.query_row(
+        &format!("SELECT COUNT(*) FROM ({grouped_sql})"),
+        rusqlite::params_from_iter(bindings.iter()),
+        |row| row.get::<_, i64>(0),
+    )? as usize)
+}
+
+fn truncate_to_limit<T>(values: &mut Vec<T>, limit: usize) -> bool {
+    let truncated = values.len() > limit;
+    values.truncate(limit);
+    truncated
 }
 
 /// Get database stats

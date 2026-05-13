@@ -30,6 +30,20 @@ fn ai_cli_add_and_query_commands_emit_json() {
     let add_json: serde_json::Value = serde_json::from_slice(&add.stdout).unwrap();
     assert_eq!(add_json["ingested"], 1);
 
+    let index = run_command(
+        &db_path,
+        &[
+            "ai",
+            "index",
+            "--path",
+            transcript.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(index.status.success(), "ai index failed: {index:?}");
+    let index_json: serde_json::Value = serde_json::from_slice(&index.stdout).unwrap();
+    assert_eq!(index_json["skipped_dupes"], 1);
+
     let search = run_ai_command(&db_path, ["ai", "search", "hello", "--json"], None);
     assert!(search.status.success(), "ai search failed: {search:?}");
     let search_json: serde_json::Value = serde_json::from_slice(&search.stdout).unwrap();

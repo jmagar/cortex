@@ -8,7 +8,7 @@ use super::{record_key_from_line, ParsedTranscriptRecord};
 pub fn parse_line(
     line: &str,
     _path: &Path,
-    _line_no: usize,
+    line_no: usize,
 ) -> Result<Option<ParsedTranscriptRecord>> {
     let value: Value = serde_json::from_str(line)?;
     let message = extract_message(&value);
@@ -19,7 +19,7 @@ pub fn parse_line(
     let session_id = session_id_from_value(&value);
     let ai_project = extract_project(&value);
     Ok(Some(ParsedTranscriptRecord {
-        record_key: record_key_from_line(&value, line),
+        record_key: record_key_from_line(&value, line, line_no),
         timestamp: value
             .get("timestamp")
             .or_else(|| payload.get("timestamp"))

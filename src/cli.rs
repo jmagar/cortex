@@ -1115,7 +1115,16 @@ fn print_usage_blocks_response(response: &UsageBlocksResponse, json: bool) -> Re
     if json {
         return print_json(response);
     }
-    println!("{} usage block(s)", response.blocks.len());
+    println!(
+        "{} usage block(s) shown of {}{}",
+        response.blocks.len(),
+        response.total_blocks,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
     for block in &response.blocks {
         println!(
             "{} {} {} {} events={} sessions={}",
@@ -1139,6 +1148,15 @@ fn print_project_context_response(response: &ProjectContextResponse, json: bool)
     println!("tools: {}", response.tools.join(", "));
     println!("sessions: {}", response.sessions.len());
     println!("hosts: {}", response.hostnames.join(", "));
+    println!(
+        "recent_entries: {}{}",
+        response.recent_entries.len(),
+        if response.recent_entries_truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
     for entry in &response.recent_entries {
         print_log(entry);
     }
@@ -1149,6 +1167,16 @@ fn print_ai_tools_response(response: &ListAiToolsResponse, json: bool) -> Result
     if json {
         return print_json(response);
     }
+    println!(
+        "{} tool(s) shown of {}{}",
+        response.tools.len(),
+        response.total_tools,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
     println!("TOOL       EVENTS SESSIONS LAST SEEN");
     for tool in &response.tools {
         println!(
@@ -1163,6 +1191,16 @@ fn print_ai_projects_response(response: &ListAiProjectsResponse, json: bool) -> 
     if json {
         return print_json(response);
     }
+    println!(
+        "{} project(s) shown of {}{}",
+        response.projects.len(),
+        response.total_projects,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
     println!("PROJECT                          EVENTS SESSIONS TOOLS");
     for project in &response.projects {
         println!(
@@ -1181,7 +1219,7 @@ fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
         return print_json(response);
     }
     println!(
-        "files={} ingested={} duplicates={} parse_errors={} skipped={} unsupported={} symlinks={} unsafe_paths={} storage_blocked_chunks={} checkpoint_updates={} file_errors={}",
+        "files={} ingested={} duplicates={} parse_errors={} skipped={} unsupported={} symlinks={} unsafe_paths={} storage_blocked_chunks={} dropped_metadata_fields={} checkpoint_updates={} file_errors={}",
         response.discovered_files,
         response.ingested,
         response.skipped_dupes,
@@ -1191,6 +1229,7 @@ fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
         response.skipped_symlinks,
         response.skipped_unsafe_paths,
         response.storage_blocked_chunks,
+        response.dropped_metadata_fields,
         response.checkpoint_updates,
         response.file_errors.len()
     );
@@ -1201,12 +1240,20 @@ fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
 }
 
 fn ensure_index_success(response: &IndexResult) -> Result<()> {
-    if response.file_errors.is_empty() && response.storage_blocked_chunks == 0 {
+    if response.file_errors.is_empty()
+        && response.storage_blocked_chunks == 0
+        && response.parse_errors == 0
+    {
         Ok(())
     } else if response.storage_blocked_chunks > 0 {
         bail!(
             "{} transcript chunk(s) blocked by storage guardrails",
             response.storage_blocked_chunks
+        )
+    } else if response.parse_errors > 0 {
+        bail!(
+            "{} transcript record(s) failed to parse",
+            response.parse_errors
         )
     } else {
         bail!(

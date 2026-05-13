@@ -728,11 +728,11 @@ run_docker_mode() {
   done
 
   section "Docker — Seed AI transcript fixture"
-  if seed_ai_fixture_container "${project_dir}"; then
-    log_info "Seeded AI transcript fixture"
-  else
-    log_warn "AI transcript fixture seed failed; AI analytics checks will validate response shape only"
-  fi
+  seed_ai_fixture_container "${project_dir}" || {
+    log_error "AI transcript fixture seed failed"
+    return 2
+  }
+  log_info "Seeded AI transcript fixture"
 
   # Run all test phases
   build_auth_args
@@ -748,11 +748,11 @@ run_docker_mode() {
 run_http_mode() {
   log_info "HTTP mode — testing against ${BASE_URL}"
   build_auth_args
-  if seed_ai_fixture_local; then
-    log_info "Seeded AI transcript fixture"
-  else
-    log_warn "AI transcript fixture seed skipped; AI analytics checks will validate response shape only"
-  fi
+  seed_ai_fixture_local || {
+    log_error "AI transcript fixture seed failed"
+    return 2
+  }
+  log_info "Seeded AI transcript fixture"
   run_test_phases
   print_summary
 }

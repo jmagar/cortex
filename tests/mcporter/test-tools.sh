@@ -857,11 +857,11 @@ main() {
     exit 2
   }
 
-  if seed_ai_fixture; then
-    log_info "Seeded AI transcript fixture"
-  else
-    log_warn "AI transcript fixture seed skipped; AI analytics checks will validate response shape only"
-  fi
+  seed_ai_fixture || {
+    log_error "AI transcript fixture seed failed"
+    exit 2
+  }
+  log_info "Seeded AI transcript fixture"
 
   if [[ "${USE_PARALLEL}" == true ]]; then
     run_parallel

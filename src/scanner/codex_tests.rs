@@ -30,7 +30,7 @@ fn parse_line_leaves_session_empty_when_session_metadata_is_missing() {
 
     assert_eq!(parsed.message, "standalone text");
     assert_eq!(parsed.session_id.as_deref(), None);
-    assert!(parsed.record_key.starts_with("hash:"));
+    assert!(parsed.record_key.starts_with("line:0:hash:"));
 }
 
 #[test]

@@ -13,7 +13,7 @@ fn parse_line_extracts_top_level_content_and_session_id() {
     assert_eq!(parsed.message, "hello");
     assert_eq!(parsed.session_id.as_deref(), Some("claude-1"));
     assert_eq!(parsed.timestamp.as_deref(), Some("2026-05-11T00:00:00Z"));
-    assert!(parsed.record_key.starts_with("hash:"));
+    assert!(parsed.record_key.starts_with("line:0:hash:"));
     assert!(parsed.ai_project.is_none());
 }
 
