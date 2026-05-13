@@ -11,7 +11,7 @@ fn parse_line_extracts_payload_content_items_and_project_from_arguments() {
         .expect("content should produce a transcript record");
 
     assert_eq!(parsed.message, "fixed parser added test");
-    assert_eq!(parsed.session_id.as_deref(), Some("item-1"));
+    assert_eq!(parsed.session_id.as_deref(), None);
     assert_eq!(parsed.timestamp.as_deref(), Some("2026-05-11T00:00:00Z"));
     assert_eq!(
         parsed.ai_project.as_deref(),
@@ -21,7 +21,7 @@ fn parse_line_extracts_payload_content_items_and_project_from_arguments() {
 }
 
 #[test]
-fn parse_line_uses_file_stem_when_session_id_is_missing() {
+fn parse_line_leaves_session_empty_when_session_metadata_is_missing() {
     let line = r#"{"timestamp":"2026-05-11T00:00:00Z","payload":{"text":"standalone text"}}"#;
 
     let parsed = parse_line(line, Path::new("/tmp/rollout-codex-123.jsonl"), 0)
@@ -29,8 +29,15 @@ fn parse_line_uses_file_stem_when_session_id_is_missing() {
         .expect("payload text should produce a transcript record");
 
     assert_eq!(parsed.message, "standalone text");
-    assert_eq!(parsed.session_id.as_deref(), Some("rollout-codex-123"));
+    assert_eq!(parsed.session_id.as_deref(), None);
     assert!(parsed.record_key.starts_with("hash:"));
+}
+
+#[test]
+fn session_id_from_line_reads_session_meta_payload_id() {
+    let line = r#"{"type":"session_meta","payload":{"id":"codex-1","cwd":"/tmp/project"}}"#;
+
+    assert_eq!(session_id_from_line(line).as_deref(), Some("codex-1"));
 }
 
 #[test]

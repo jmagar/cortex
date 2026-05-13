@@ -148,6 +148,7 @@ pub struct AiUsageBlock {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiUsageBlocksResult {
+    pub total_blocks: usize,
     pub truncated: bool,
     pub blocks: Vec<AiUsageBlock>,
 }
@@ -168,6 +169,7 @@ pub struct AiProjectContext {
     pub first_seen: Option<String>,
     pub last_seen: Option<String>,
     pub event_count: i64,
+    pub recent_entries_truncated: bool,
     pub recent_entries: Vec<LogEntry>,
 }
 
@@ -189,6 +191,8 @@ pub struct AiToolInventoryEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListAiToolsResult {
+    pub total_tools: usize,
+    pub truncated: bool,
     pub tools: Vec<AiToolInventoryEntry>,
 }
 
@@ -211,6 +215,8 @@ pub struct AiProjectInventoryEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListAiProjectsResult {
+    pub total_projects: usize,
+    pub truncated: bool,
     pub projects: Vec<AiProjectInventoryEntry>,
 }
 

@@ -1181,12 +1181,17 @@ fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
         return print_json(response);
     }
     println!(
-        "files={} ingested={} duplicates={} parse_errors={} skipped={} file_errors={}",
+        "files={} ingested={} duplicates={} parse_errors={} skipped={} unsupported={} symlinks={} unsafe_paths={} storage_blocked_chunks={} checkpoint_updates={} file_errors={}",
         response.discovered_files,
         response.ingested,
         response.skipped_dupes,
         response.parse_errors,
         response.skipped_files,
+        response.unsupported_files,
+        response.skipped_symlinks,
+        response.skipped_unsafe_paths,
+        response.storage_blocked_chunks,
+        response.checkpoint_updates,
         response.file_errors.len()
     );
     for error in &response.file_errors {
@@ -1207,8 +1212,12 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() > max {
-        format!("{}…", &s[..max - 1])
+    if max == 0 {
+        return String::new();
+    }
+    if s.chars().count() > max {
+        let prefix: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{prefix}…")
     } else {
         s.to_string()
     }

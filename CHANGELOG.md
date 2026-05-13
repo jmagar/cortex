@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-05-13
+
+### Fixed
+
+- **AI transcript indexing hardening**: Stream scanner reads line-by-line with
+  bounded chunked transactions, broad path rejection, symlink/unsupported-file
+  counters, storage-budget preflight checks, and checkpoint timestamps that only
+  advance after successful imports.
+- **Codex/Claude transcript parsing**: Preserve Codex file-level session
+  metadata instead of treating response item ids as session ids, and parse
+  Claude object-array content shapes.
+- **AI analytics bounds**: Add truncation metadata for tool/project inventories,
+  default usage blocks to a bounded lookback, and return bounded project-context
+  message snippets.
+
+### Changed
+
+- Updated CLI, MCP, README, and expansion docs to describe scanner path policy,
+  redaction behavior, storage blocking, and AI action result limits.
+
 ## [0.20.0] - 2026-05-12
 
 ### Added

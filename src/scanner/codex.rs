@@ -7,7 +7,7 @@ use super::{record_key_from_line, ParsedTranscriptRecord};
 
 pub fn parse_line(
     line: &str,
-    path: &Path,
+    _path: &Path,
     _line_no: usize,
 ) -> Result<Option<ParsedTranscriptRecord>> {
     let value: Value = serde_json::from_str(line)?;
@@ -16,18 +16,7 @@ pub fn parse_line(
         return Ok(None);
     }
     let payload = value.get("payload").unwrap_or(&value);
-    let session_id = payload
-        .get("id")
-        .or_else(|| value.get("sessionId"))
-        .or_else(|| value.get("session_id"))
-        .or_else(|| value.pointer("/session/id"))
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-        .or_else(|| {
-            path.file_stem()
-                .and_then(|stem| stem.to_str())
-                .map(ToString::to_string)
-        });
+    let session_id = session_id_from_value(&value);
     let ai_project = extract_project(&value);
     Ok(Some(ParsedTranscriptRecord {
         record_key: record_key_from_line(&value, line),
@@ -40,6 +29,35 @@ pub fn parse_line(
         session_id,
         ai_project,
     }))
+}
+
+pub fn session_id_from_line(line: &str) -> Option<String> {
+    serde_json::from_str::<Value>(line)
+        .ok()
+        .and_then(|value| session_id_from_value(&value))
+}
+
+fn session_id_from_value(value: &Value) -> Option<String> {
+    let payload = value.get("payload").unwrap_or(value);
+    value
+        .get("sessionId")
+        .or_else(|| value.get("session_id"))
+        .or_else(|| value.pointer("/session/id"))
+        .or_else(|| payload.get("sessionId"))
+        .or_else(|| payload.get("session_id"))
+        .or_else(|| payload.pointer("/session/id"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .or_else(|| {
+            if value.get("type").and_then(Value::as_str) == Some("session_meta") {
+                payload
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+            } else {
+                None
+            }
+        })
 }
 
 fn extract_project(value: &Value) -> Option<String> {
