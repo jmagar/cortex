@@ -234,43 +234,33 @@ pub fn index_file_with_storage(
             line_no += 1;
             continue;
         }
-        if source_kind == SourceKind::CodexSession {
-            fallback_project =
-                codex::project_from_line(line_text).or_else(|| fallback_project.clone());
-            fallback_session_id =
-                codex::session_id_from_line(line_text).or_else(|| fallback_session_id.clone());
-        }
+        update_codex_fallbacks(
+            source_kind,
+            line_text,
+            &mut fallback_project,
+            &mut fallback_session_id,
+        );
         match parse_line_for_source(source_kind, line_text, &canonical_path, line_no) {
             Ok(Some(parsed)) => {
                 let record_key = parsed.record_key;
                 let message = scrub_ai_message(&parsed.message, None);
-                let project = match parsed.ai_project.as_deref() {
-                    Some(value) => accept_metadata_field(
-                        value,
-                        MAX_AI_PROJECT_CHARS,
-                        "ai_project",
-                        &mut result,
-                    ),
-                    None => fallback_project.as_deref().and_then(|value| {
-                        accept_metadata_field(
-                            value,
-                            MAX_AI_PROJECT_CHARS,
-                            "ai_project",
-                            &mut result,
-                        )
-                    }),
-                };
-                let session_id_source = parsed.session_id.or_else(|| fallback_session_id.clone());
-                let session_id = session_id_source.as_deref().and_then(|value| {
-                    accept_metadata_field(
-                        value,
-                        MAX_AI_SESSION_ID_CHARS,
-                        "ai_session_id",
-                        &mut result,
-                    )
-                });
+                let project = accept_metadata_field(
+                    parsed.ai_project.as_deref().or(fallback_project.as_deref()),
+                    MAX_AI_PROJECT_CHARS,
+                    "ai_project",
+                    &mut result,
+                );
+                let session_id = accept_metadata_field(
+                    parsed
+                        .session_id
+                        .as_deref()
+                        .or(fallback_session_id.as_deref()),
+                    MAX_AI_SESSION_ID_CHARS,
+                    "ai_session_id",
+                    &mut result,
+                );
                 let transcript_path = accept_metadata_field(
-                    &canonical,
+                    Some(&canonical),
                     MAX_TRANSCRIPT_PATH_CHARS,
                     "ai_transcript_path",
                     &mut result,
@@ -507,6 +497,23 @@ fn project_for_file(source_kind: SourceKind, path: &Path) -> Option<String> {
     }
 }
 
+fn update_codex_fallbacks(
+    source_kind: SourceKind,
+    line: &str,
+    fallback_project: &mut Option<String>,
+    fallback_session_id: &mut Option<String>,
+) {
+    if source_kind != SourceKind::CodexSession {
+        return;
+    }
+    if let Some(project) = codex::project_from_line(line) {
+        *fallback_project = Some(project);
+    }
+    if let Some(session_id) = codex::session_id_from_line(line) {
+        *fallback_session_id = Some(session_id);
+    }
+}
+
 fn merge_result(total: &mut IndexResult, next: &IndexResult) {
     total.discovered_files += next.discovered_files;
     total.ingested += next.ingested;
@@ -531,11 +538,12 @@ fn record_file_error(result: &mut IndexResult, path: &Path, error: &anyhow::Erro
 }
 
 fn accept_metadata_field(
-    value: &str,
+    value: Option<&str>,
     max_chars: usize,
     field: &'static str,
     result: &mut IndexResult,
 ) -> Option<String> {
+    let value = value?;
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;

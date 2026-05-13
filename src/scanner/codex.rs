@@ -15,7 +15,7 @@ pub fn parse_line(
     if message.is_empty() {
         return Ok(None);
     }
-    let payload = value.get("payload").unwrap_or(&value);
+    let payload = payload(&value);
     let session_id = session_id_from_value(&value);
     let ai_project = extract_project(&value);
     Ok(Some(ParsedTranscriptRecord {
@@ -38,7 +38,7 @@ pub fn session_id_from_line(line: &str) -> Option<String> {
 }
 
 fn session_id_from_value(value: &Value) -> Option<String> {
-    let payload = value.get("payload").unwrap_or(value);
+    let payload = payload(value);
     value
         .get("sessionId")
         .or_else(|| value.get("session_id"))
@@ -61,7 +61,7 @@ fn session_id_from_value(value: &Value) -> Option<String> {
 }
 
 fn extract_project(value: &Value) -> Option<String> {
-    let payload = value.get("payload").unwrap_or(value);
+    let payload = payload(value);
     payload
         .get("cwd")
         .or_else(|| value.get("cwd"))
@@ -86,6 +86,10 @@ pub fn project_from_line(line: &str) -> Option<String> {
     serde_json::from_str::<Value>(line)
         .ok()
         .and_then(|value| extract_project(&value))
+}
+
+fn payload(value: &Value) -> &Value {
+    value.get("payload").unwrap_or(value)
 }
 
 fn extract_message(value: &Value) -> String {

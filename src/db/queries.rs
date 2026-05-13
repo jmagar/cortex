@@ -105,22 +105,22 @@ pub fn tail_logs(
                 ai_tool, ai_project, ai_session_id, ai_transcript_path
          FROM logs WHERE 1=1",
     );
-    let mut bindings: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+    let mut bindings: Vec<rusqlite::types::Value> = vec![];
     let mut idx = 1;
 
     if let Some(h) = hostname {
         sql.push_str(&format!(" AND hostname = ?{idx}"));
-        bindings.push(Box::new(h.to_string()));
+        bindings.push(rusqlite::types::Value::Text(h.to_string()));
         idx += 1;
     }
     if let Some(source_ip) = source_ip {
         sql.push_str(&format!(" AND source_ip = ?{idx}"));
-        bindings.push(Box::new(source_ip.to_string()));
+        bindings.push(rusqlite::types::Value::Text(source_ip.to_string()));
         idx += 1;
     }
     if let Some(a) = app_name {
         sql.push_str(&format!(" AND app_name = ?{idx}"));
-        bindings.push(Box::new(a.to_string()));
+        bindings.push(rusqlite::types::Value::Text(a.to_string()));
         idx += 1;
     }
     if let Some(levels) = severity_in {
@@ -129,13 +129,9 @@ pub fn tail_logs(
                 (0..levels.len()).map(|i| format!("?{}", idx + i)).collect();
             sql.push_str(&format!(" AND severity IN ({})", placeholders.join(", ")));
             for lvl in levels {
-                bindings.push(Box::new(lvl.clone()));
-                #[allow(unused_assignments)]
-                {
-                    idx += 1;
-                }
+                bindings.push(rusqlite::types::Value::Text(lvl.clone()));
+                idx += 1;
             }
-            idx += levels.len();
             debug_assert_eq!(bindings.len() + 1, idx);
         }
     }
@@ -143,10 +139,7 @@ pub fn tail_logs(
     sql.push_str(&format!(" ORDER BY timestamp DESC LIMIT {n}"));
 
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(
-        rusqlite::params_from_iter(bindings.iter().map(|b| b.as_ref())),
-        map_row,
-    )?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 

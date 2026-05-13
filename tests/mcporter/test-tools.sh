@@ -173,14 +173,20 @@ load_env() {
   fi
 }
 
+run_local_syslog_ai_add() {
+  local db_path="$1"
+  local fixture="$2"
+  if [[ -x "${PROJECT_DIR}/target/debug/syslog" ]]; then
+    SYSLOG_MCP_DB_PATH="${db_path}" "${PROJECT_DIR}/target/debug/syslog" ai add --file "${fixture}" --json
+  else
+    (cd "${PROJECT_DIR}" && SYSLOG_MCP_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${fixture}" --json)
+  fi
+}
+
 seed_ai_fixture() {
   [[ -f "${AI_SMOKE_FIXTURE}" ]] || return 1
   local db_path="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-${PROJECT_DIR}/data/syslog.db}}"
-  if [[ -x "${PROJECT_DIR}/target/debug/syslog" ]]; then
-    SYSLOG_MCP_DB_PATH="${db_path}" "${PROJECT_DIR}/target/debug/syslog" ai add --file "${AI_SMOKE_FIXTURE}" --json >/dev/null || return $?
-  else
-    (cd "${PROJECT_DIR}" && SYSLOG_MCP_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${AI_SMOKE_FIXTURE}" --json >/dev/null) || return $?
-  fi
+  run_local_syslog_ai_add "${db_path}" "${AI_SMOKE_FIXTURE}" >/dev/null || return $?
   AI_SEEDED=true
 }
 
