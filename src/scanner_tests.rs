@@ -47,6 +47,20 @@ fn parse_errors_are_counted_without_panicking() {
     let result = index_file(&pool, &file, "explicit_file").unwrap();
     assert_eq!(result.ingested, 2);
     assert_eq!(result.parse_errors, 1);
+    assert_eq!(result.checkpoint_updates, 0);
+
+    let last_error: Option<String> = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT last_error FROM transcript_sources WHERE canonical_path = ?1",
+            [file.canonicalize().unwrap().to_string_lossy().to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(last_error
+        .unwrap()
+        .contains("1 transcript record(s) failed to parse"));
 }
 
 #[test]
@@ -126,8 +140,9 @@ fn storage_write_block_returns_error_without_importing() {
         ..crate::config::StorageConfig::for_test(dir.path().join("test.db"))
     };
 
-    let err = index_file_with_storage(&pool, &file, "explicit_file", Some(&storage)).unwrap_err();
-    assert!(err.to_string().contains("storage budget write-blocked"));
+    let result = index_file_with_storage(&pool, &file, "explicit_file", Some(&storage)).unwrap();
+    assert_eq!(result.storage_blocked_chunks, 1);
+    assert_eq!(result.ingested, 0);
     let log_count: i64 = pool
         .get()
         .unwrap()
@@ -166,10 +181,76 @@ fn scanner_drops_oversized_metadata_fields() {
     )
     .unwrap();
 
-    index_file(&pool, &file, "explicit_file").unwrap();
+    let result = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(result.dropped_metadata_fields, 2);
     let row = tail_logs(&pool, None, None, None, None, 1).unwrap();
     assert_eq!(row[0].ai_project, None);
     assert_eq!(row[0].ai_session_id, None);
+}
+
+#[test]
+fn session_id_is_not_used_as_record_identity() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("shared-session.jsonl");
+    std::fs::write(
+        &file,
+        concat!(
+            "{\"session\":{\"id\":\"same-session\"},\"message\":{\"content\":\"first event\"}}\n",
+            "{\"session\":{\"id\":\"same-session\"},\"message\":{\"content\":\"second event\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    let result = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(result.ingested, 2);
+    assert_eq!(result.skipped_dupes, 0);
+
+    let rows = search_logs(
+        &pool,
+        &SearchParams {
+            query: Some("event".into()),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 2);
+}
+
+#[test]
+fn committed_chunk_can_be_retried_after_later_timestamp_failure() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("retry.jsonl");
+    let mut content = String::new();
+    for i in 0..MAX_INDEX_CHUNK_RECORDS {
+        content.push_str(&format!(
+            "{{\"sessionId\":\"sess-1\",\"content\":\"chunk {i}\"}}\n"
+        ));
+    }
+    content.push_str("{\"sessionId\":\"sess-1\",\"timestamp\":\"bad\",\"content\":\"bad\"}\n");
+    std::fs::write(&file, content).unwrap();
+
+    let err = index_file(&pool, &file, "explicit_file").unwrap_err();
+    assert!(err.to_string().contains("invalid transcript timestamp"));
+    let first_count: i64 = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(first_count, MAX_INDEX_CHUNK_RECORDS as i64);
+
+    let mut fixed = String::new();
+    for i in 0..MAX_INDEX_CHUNK_RECORDS {
+        fixed.push_str(&format!(
+            "{{\"sessionId\":\"sess-1\",\"content\":\"chunk {i}\"}}\n"
+        ));
+    }
+    fixed.push_str("{\"sessionId\":\"sess-1\",\"content\":\"fixed tail\"}\n");
+    std::fs::write(&file, fixed).unwrap();
+
+    let second = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(second.ingested, 1);
+    assert_eq!(second.skipped_dupes, MAX_INDEX_CHUNK_RECORDS);
 }
 
 #[test]

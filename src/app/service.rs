@@ -340,10 +340,7 @@ impl SyslogService {
             )
         })
         .await
-        .map_err(|error| match error {
-            ServiceError::Internal(err) => ServiceError::InvalidInput(err.to_string()),
-            other => other,
-        })
+        .map_err(classify_scanner_error)
     }
 
     pub async fn add_ai_file(&self, file: String) -> ServiceResult<scanner::IndexResult> {
@@ -357,10 +354,7 @@ impl SyslogService {
             )
         })
         .await
-        .map_err(|error| match error {
-            ServiceError::Internal(err) => ServiceError::InvalidInput(err.to_string()),
-            other => other,
-        })
+        .map_err(classify_scanner_error)
     }
 
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {
@@ -684,6 +678,25 @@ impl SyslogService {
             delta_total_errors,
         })
     }
+}
+
+fn classify_scanner_error(error: ServiceError) -> ServiceError {
+    match error {
+        ServiceError::Internal(err) if scanner_error_is_invalid_input(&err) => {
+            ServiceError::InvalidInput(err.to_string())
+        }
+        other => other,
+    }
+}
+
+fn scanner_error_is_invalid_input(error: &anyhow::Error) -> bool {
+    let message = error.to_string();
+    message.contains("unsafe transcript scan path")
+        || message.contains("symlinks are not allowed")
+        || message.contains("file exceeds max size")
+        || message.contains("expected a file path")
+        || message.contains("No such file or directory")
+        || message.contains("os error 2")
 }
 
 fn validate_optional_severity(severity: Option<String>) -> ServiceResult<Option<String>> {

@@ -34,6 +34,7 @@ pub struct IndexResult {
     pub skipped_symlinks: usize,
     pub skipped_unsafe_paths: usize,
     pub storage_blocked_chunks: usize,
+    pub dropped_metadata_fields: usize,
     pub checkpoint_updates: usize,
     pub file_errors: Vec<IndexFileError>,
 }
@@ -135,11 +136,7 @@ pub fn index_roots_with_storage(
             let mut result = IndexResult::default();
             if let Err(error) = validate_path(path).and_then(|_| reject_broad_scan_path(path)) {
                 classify_path_error(&error, &mut result);
-                result.skipped_files += 1;
-                result.file_errors.push(IndexFileError {
-                    path: path.display().to_string(),
-                    error: error.to_string(),
-                });
+                record_file_error(&mut result, path, &error);
                 return Ok(result);
             }
             vec![path.to_path_buf()]
@@ -163,11 +160,7 @@ pub fn index_roots_with_storage(
             Err(error) => {
                 classify_path_error(&error, &mut result);
                 tracing::warn!(path = %file.display(), error = %error, "Transcript file indexing failed");
-                result.skipped_files += 1;
-                result.file_errors.push(IndexFileError {
-                    path: file.display().to_string(),
-                    error: error.to_string(),
-                });
+                record_file_error(&mut result, &file, &error);
             }
         }
     }
@@ -191,7 +184,11 @@ pub fn index_file_with_storage(
     if let Some(storage) = storage {
         let outcome = enforce_storage_budget(pool, storage)?;
         if outcome.write_blocked {
-            bail!("storage budget write-blocked; transcript indexing is blocked");
+            return Ok(IndexResult {
+                discovered_files: 1,
+                storage_blocked_chunks: 1,
+                ..Default::default()
+            });
         }
     }
 
@@ -248,16 +245,36 @@ pub fn index_file_with_storage(
                 let record_key = parsed.record_key;
                 let message = scrub_ai_message(&parsed.message, None);
                 let project = match parsed.ai_project.as_deref() {
-                    Some(value) => accept_field(value, MAX_AI_PROJECT_CHARS),
-                    None => fallback_project
-                        .as_deref()
-                        .and_then(|value| accept_field(value, MAX_AI_PROJECT_CHARS)),
+                    Some(value) => accept_metadata_field(
+                        value,
+                        MAX_AI_PROJECT_CHARS,
+                        "ai_project",
+                        &mut result,
+                    ),
+                    None => fallback_project.as_deref().and_then(|value| {
+                        accept_metadata_field(
+                            value,
+                            MAX_AI_PROJECT_CHARS,
+                            "ai_project",
+                            &mut result,
+                        )
+                    }),
                 };
                 let session_id_source = parsed.session_id.or_else(|| fallback_session_id.clone());
-                let session_id = session_id_source
-                    .as_deref()
-                    .and_then(|value| accept_field(value, MAX_AI_SESSION_ID_CHARS));
-                let transcript_path = accept_field(&canonical, MAX_TRANSCRIPT_PATH_CHARS);
+                let session_id = session_id_source.as_deref().and_then(|value| {
+                    accept_metadata_field(
+                        value,
+                        MAX_AI_SESSION_ID_CHARS,
+                        "ai_session_id",
+                        &mut result,
+                    )
+                });
+                let transcript_path = accept_metadata_field(
+                    &canonical,
+                    MAX_TRANSCRIPT_PATH_CHARS,
+                    "ai_transcript_path",
+                    &mut result,
+                );
                 chunk_bytes = chunk_bytes.saturating_add(message.len());
                 batch.push(LogBatchEntry {
                     timestamp: normalize_timestamp(parsed.timestamp.as_deref())?,
@@ -277,7 +294,7 @@ pub fn index_file_with_storage(
                 });
                 imports.push(record_key);
                 if batch.len() >= MAX_INDEX_CHUNK_RECORDS || chunk_bytes >= MAX_INDEX_CHUNK_BYTES {
-                    flush_chunk(
+                    if !flush_chunk(
                         pool,
                         storage,
                         source_id,
@@ -285,7 +302,9 @@ pub fn index_file_with_storage(
                         &mut imports,
                         None,
                         &mut result,
-                    )?;
+                    )? {
+                        return Ok(result);
+                    }
                     chunk_bytes = 0;
                 }
             }
@@ -299,7 +318,26 @@ pub fn index_file_with_storage(
     }
 
     let file_metadata = FileMetadata::from_path_hash(&canonical_path, &hasher.finalize())?;
-    flush_chunk(
+    if result.parse_errors > 0 {
+        flush_chunk(
+            pool,
+            storage,
+            source_id,
+            &mut batch,
+            &mut imports,
+            None,
+            &mut result,
+        )?;
+        checkpoint_store.mark_error(
+            source_id,
+            &format!(
+                "{} transcript record(s) failed to parse",
+                result.parse_errors
+            ),
+        )?;
+        return Ok(result);
+    }
+    let _ = flush_chunk(
         pool,
         storage,
         source_id,
@@ -319,7 +357,7 @@ fn flush_chunk(
     imports: &mut Vec<String>,
     completion_metadata: Option<&FileMetadata>,
     result: &mut IndexResult,
-) -> Result<()> {
+) -> Result<bool> {
     if batch.is_empty() {
         if let Some(file_metadata) = completion_metadata {
             let mut conn = pool.get()?;
@@ -328,14 +366,16 @@ fn flush_chunk(
             tx.commit()?;
             result.checkpoint_updates += 1;
         }
-        return Ok(());
+        return Ok(true);
     }
 
     if let Some(storage) = storage {
         let outcome = enforce_storage_budget(pool, storage)?;
         if outcome.write_blocked {
             result.storage_blocked_chunks += 1;
-            bail!("storage budget write-blocked; transcript indexing is blocked");
+            batch.clear();
+            imports.clear();
+            return Ok(false);
         }
     }
 
@@ -365,17 +405,13 @@ fn flush_chunk(
     }
     batch.clear();
     imports.clear();
-    Ok(())
+    Ok(true)
 }
 
 fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut IndexResult) {
     if let Err(error) = validate_path(path) {
         classify_path_error(&error, result);
-        result.skipped_files += 1;
-        result.file_errors.push(IndexFileError {
-            path: path.display().to_string(),
-            error: error.to_string(),
-        });
+        record_file_error(result, path, &error);
         return;
     }
     if path.is_file() {
@@ -489,16 +525,37 @@ fn merge_result(total: &mut IndexResult, next: &IndexResult) {
     total.skipped_symlinks += next.skipped_symlinks;
     total.skipped_unsafe_paths += next.skipped_unsafe_paths;
     total.storage_blocked_chunks += next.storage_blocked_chunks;
+    total.dropped_metadata_fields += next.dropped_metadata_fields;
     total.checkpoint_updates += next.checkpoint_updates;
     total.file_errors.extend(next.file_errors.iter().cloned());
 }
 
-fn accept_field(value: &str, max_chars: usize) -> Option<String> {
+fn record_file_error(result: &mut IndexResult, path: &Path, error: &anyhow::Error) {
+    result.skipped_files += 1;
+    result.file_errors.push(IndexFileError {
+        path: path.display().to_string(),
+        error: error.to_string(),
+    });
+}
+
+fn accept_metadata_field(
+    value: &str,
+    max_chars: usize,
+    field: &'static str,
+    result: &mut IndexResult,
+) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;
     }
     if trimmed.chars().count() > max_chars {
+        result.dropped_metadata_fields += 1;
+        tracing::debug!(
+            field,
+            max_chars,
+            actual_chars = trimmed.chars().count(),
+            "Dropping oversized AI transcript metadata field"
+        );
         return None;
     }
     Some(trimmed.to_string())
@@ -612,15 +669,18 @@ fn hex_digest(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-pub(crate) fn record_key_from_line(value: &serde_json::Value, line: &str) -> String {
+pub(crate) fn record_key_from_line(
+    value: &serde_json::Value,
+    line: &str,
+    line_no: usize,
+) -> String {
     value
         .get("uuid")
         .or_else(|| value.get("id"))
         .or_else(|| value.pointer("/payload/id"))
-        .or_else(|| value.pointer("/session/id"))
         .and_then(serde_json::Value::as_str)
         .map(|id| format!("id:{id}"))
-        .unwrap_or_else(|| format!("hash:{}", hash_text(line)))
+        .unwrap_or_else(|| format!("line:{line_no}:hash:{}", hash_text(line)))
 }
 
 pub(crate) fn hash_text(text: &str) -> String {

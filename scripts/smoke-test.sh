@@ -196,7 +196,10 @@ if [[ "$SKIP_SEED" -eq 0 ]]; then
     printf '<2>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     printf '<12>%s %s dockerd[99]: smoke-test: warning container restart\n'  "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     send_tcp_seed "<14>$(date '+%b %e %H:%M:%S') ${SEED_HOST} tcpsmoke[77]: smoke-test tcp seed ${TCP_MARKER} bounded frame ok"
-    seed_ai_fixture || echo "WARN  AI transcript fixture seed unavailable"
+    if ! seed_ai_fixture; then
+        echo -e "${COLOR_RED}ABORT${COLOR_RESET}  AI transcript fixture seed failed"
+        exit 1
+    fi
     sleep 2
     echo "Seeded 5 messages (4 UDP, 1 TCP) from $SEED_HOST; TCP marker=$TCP_MARKER"
 else

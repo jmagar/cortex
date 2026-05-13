@@ -8,7 +8,7 @@ use super::{record_key_from_line, ParsedTranscriptRecord};
 pub fn parse_line(
     line: &str,
     path: &Path,
-    _line_no: usize,
+    line_no: usize,
 ) -> Result<Option<ParsedTranscriptRecord>> {
     let value: Value = serde_json::from_str(line)?;
     let message = extract_message(&value);
@@ -23,7 +23,7 @@ pub fn parse_line(
         .map(ToString::to_string)
         .or_else(|| Some(path.to_string_lossy().to_string()));
     Ok(Some(ParsedTranscriptRecord {
-        record_key: record_key_from_line(&value, line),
+        record_key: record_key_from_line(&value, line, line_no),
         timestamp: value
             .get("timestamp")
             .and_then(Value::as_str)
@@ -57,32 +57,28 @@ fn extract_message(value: &Value) -> String {
         return text.to_string();
     }
     if let Some(items) = value.get("content").and_then(Value::as_array) {
-        let parts: Vec<&str> = items
-            .iter()
-            .filter_map(|item| {
-                item.as_str()
-                    .or_else(|| item.get("text").and_then(Value::as_str))
-                    .or_else(|| item.get("content").and_then(Value::as_str))
-            })
-            .collect();
-        if !parts.is_empty() {
-            return parts.join(" ");
+        if let Some(content) = join_content_items(items) {
+            return content;
         }
     }
     if let Some(items) = value.pointer("/message/content").and_then(Value::as_array) {
-        let parts: Vec<&str> = items
-            .iter()
-            .filter_map(|item| {
-                item.as_str()
-                    .or_else(|| item.get("text").and_then(Value::as_str))
-                    .or_else(|| item.get("content").and_then(Value::as_str))
-            })
-            .collect();
-        if !parts.is_empty() {
-            return parts.join(" ");
+        if let Some(content) = join_content_items(items) {
+            return content;
         }
     }
     String::new()
+}
+
+fn join_content_items(items: &[Value]) -> Option<String> {
+    let parts: Vec<&str> = items
+        .iter()
+        .filter_map(|item| {
+            item.as_str()
+                .or_else(|| item.get("text").and_then(Value::as_str))
+                .or_else(|| item.get("content").and_then(Value::as_str))
+        })
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" "))
 }
 
 #[cfg(test)]
