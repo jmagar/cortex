@@ -53,7 +53,7 @@ CONTAINER_NAME="syslog-mcp-test-$$"
 IMAGE_NAME="syslog-mcp-test"
 AI_SMOKE_FIXTURE="tests/fixtures/ai-session-smoke.jsonl"
 AI_SMOKE_PROJECT="/tmp/syslog-mcp-ai-smoke"
-AI_SMOKE_QUERY="ai-smoke-authentication"
+AI_SMOKE_QUERY='"ai-smoke-authentication"'
 AI_SEEDED=false
 
 # ---------------------------------------------------------------------------
