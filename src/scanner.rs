@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -20,8 +19,9 @@ const MAX_FILE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_RECORD_SIZE_BYTES: usize = 64 * 1024;
 const MAX_INDEX_CHUNK_RECORDS: usize = 500;
 const MAX_INDEX_CHUNK_BYTES: usize = 4 * 1024 * 1024;
-const MAX_AI_FIELD_CHARS: usize = 512;
-const MAX_TRANSCRIPT_PATH_CHARS: usize = 2048;
+const MAX_AI_PROJECT_CHARS: usize = 512;
+const MAX_AI_SESSION_ID_CHARS: usize = 128;
+const MAX_TRANSCRIPT_PATH_CHARS: usize = 1024;
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct IndexResult {
@@ -92,7 +92,33 @@ fn reject_broad_scan_path(path: &Path) -> Result<()> {
     {
         bail!("unsafe transcript scan path: {}", canonical.display());
     }
+    if canonical.is_dir() && !is_known_transcript_root(&canonical) && !test_temp_path(&canonical) {
+        bail!(
+            "unsafe transcript scan path: {}; pass a known transcript root or one .jsonl file",
+            canonical.display()
+        );
+    }
+    if canonical.is_file() && !supported_discovered_file(&canonical) {
+        bail!(
+            "unsafe transcript scan path: {}; pass a known transcript root or one .jsonl file",
+            canonical.display()
+        );
+    }
     Ok(())
+}
+
+fn is_known_transcript_root(path: &Path) -> bool {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return false;
+    };
+    let allowed = [home.join(".claude/projects"), home.join(".codex/sessions")];
+    allowed
+        .iter()
+        .any(|root| path == root || path.starts_with(root))
+}
+
+fn test_temp_path(path: &Path) -> bool {
+    cfg!(test) && path.starts_with(std::env::temp_dir())
 }
 
 pub fn index_roots(pool: &DbPool, root_override: Option<&Path>) -> Result<IndexResult> {
@@ -162,6 +188,12 @@ pub fn index_file_with_storage(
     if !path.is_file() {
         bail!("expected a file path: {}", path.display());
     }
+    if let Some(storage) = storage {
+        let outcome = enforce_storage_budget(pool, storage)?;
+        if outcome.write_blocked {
+            bail!("storage budget write-blocked; transcript indexing is blocked");
+        }
+    }
 
     let canonical_path = path.canonicalize()?;
     let canonical = canonical_path.to_string_lossy().to_string();
@@ -178,15 +210,12 @@ pub fn index_file_with_storage(
     };
     let checkpoint_store = checkpoint::CheckpointStore::new(pool);
     let source_id = checkpoint_store.ensure_source(&canonical, source_kind.as_str())?;
-    let existing_keys = checkpoint_store.record_keys(source_id)?;
-    let mut seen_keys = HashSet::new();
     let mut imports = Vec::new();
     let mut batch = Vec::new();
     let mut chunk_bytes = 0usize;
     let file = fs::File::open(&canonical_path)?;
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
-    let mut line = String::new();
     let mut line_no = 0usize;
     let mut result = IndexResult {
         discovered_files: 1,
@@ -194,20 +223,17 @@ pub fn index_file_with_storage(
     };
 
     loop {
-        line.clear();
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
+        let Some(read_line) = read_bounded_line(&mut reader, &mut hasher)? else {
             break;
-        }
-        hasher.update(line.as_bytes());
-        let line_text = line.trim_end_matches(['\r', '\n']);
-        if line_text.trim().is_empty() {
+        };
+        if read_line.oversized {
+            result.parse_errors += 1;
+            checkpoint_store.mark_error(source_id, "transcript record exceeds max size")?;
             line_no += 1;
             continue;
         }
-        if line_text.len() > MAX_RECORD_SIZE_BYTES {
-            result.parse_errors += 1;
-            checkpoint_store.mark_error(source_id, "transcript record exceeds max size")?;
+        let line_text = read_line.text.trim_end_matches(['\r', '\n']);
+        if line_text.trim().is_empty() {
             line_no += 1;
             continue;
         }
@@ -220,28 +246,21 @@ pub fn index_file_with_storage(
         match parse_line_for_source(source_kind, line_text, &canonical_path, line_no) {
             Ok(Some(parsed)) => {
                 let record_key = parsed.record_key;
-                if existing_keys.contains(&record_key) || !seen_keys.insert(record_key.clone()) {
-                    result.skipped_dupes += 1;
-                    continue;
-                }
                 let message = scrub_ai_message(&parsed.message, None);
-                let project = parsed
-                    .ai_project
-                    .as_deref()
-                    .and_then(|value| cap_field(value, MAX_AI_FIELD_CHARS))
-                    .or_else(|| fallback_project.clone());
+                let project = match parsed.ai_project.as_deref() {
+                    Some(value) => accept_field(value, MAX_AI_PROJECT_CHARS),
+                    None => fallback_project
+                        .as_deref()
+                        .and_then(|value| accept_field(value, MAX_AI_PROJECT_CHARS)),
+                };
                 let session_id_source = parsed.session_id.or_else(|| fallback_session_id.clone());
                 let session_id = session_id_source
                     .as_deref()
-                    .and_then(|value| cap_field(value, MAX_AI_FIELD_CHARS));
-                let transcript_path = cap_field(&canonical, MAX_TRANSCRIPT_PATH_CHARS);
+                    .and_then(|value| accept_field(value, MAX_AI_SESSION_ID_CHARS));
+                let transcript_path = accept_field(&canonical, MAX_TRANSCRIPT_PATH_CHARS);
                 chunk_bytes = chunk_bytes.saturating_add(message.len());
                 batch.push(LogBatchEntry {
-                    timestamp: parsed.timestamp.unwrap_or_else(|| {
-                        chrono::Utc::now()
-                            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                            .to_string()
-                    }),
+                    timestamp: normalize_timestamp(parsed.timestamp.as_deref())?,
                     hostname: "localhost".to_string(),
                     facility: Some("transcript".to_string()),
                     severity: "info".to_string(),
@@ -264,7 +283,7 @@ pub fn index_file_with_storage(
                         source_id,
                         &mut batch,
                         &mut imports,
-                        &FileMetadata::partial(&canonical_path)?,
+                        None,
                         &mut result,
                     )?;
                     chunk_bytes = 0;
@@ -286,7 +305,7 @@ pub fn index_file_with_storage(
         source_id,
         &mut batch,
         &mut imports,
-        &file_metadata,
+        Some(&file_metadata),
         &mut result,
     )?;
     Ok(result)
@@ -298,10 +317,17 @@ fn flush_chunk(
     source_id: i64,
     batch: &mut Vec<LogBatchEntry>,
     imports: &mut Vec<String>,
-    file_metadata: &FileMetadata,
+    completion_metadata: Option<&FileMetadata>,
     result: &mut IndexResult,
 ) -> Result<()> {
     if batch.is_empty() {
+        if let Some(file_metadata) = completion_metadata {
+            let mut conn = pool.get()?;
+            let tx = conn.transaction()?;
+            checkpoint::update_source_metadata_in_tx(&tx, source_id, file_metadata)?;
+            tx.commit()?;
+            result.checkpoint_updates += 1;
+        }
         return Ok(());
     }
 
@@ -309,19 +335,34 @@ fn flush_chunk(
         let outcome = enforce_storage_budget(pool, storage)?;
         if outcome.write_blocked {
             result.storage_blocked_chunks += 1;
-            batch.clear();
-            imports.clear();
-            return Ok(());
+            bail!("storage budget write-blocked; transcript indexing is blocked");
         }
     }
 
     let mut conn = pool.get()?;
     let tx = conn.transaction()?;
-    insert_logs_batch_in_tx(&tx, batch)?;
-    checkpoint::record_imports_in_tx(&tx, source_id, imports, file_metadata)?;
+    let claimed = checkpoint::claim_imports_in_tx(&tx, source_id, imports)?;
+    let mut claimed_batch = Vec::with_capacity(batch.len());
+    let mut skipped_dupes = 0usize;
+    for (entry, claimed) in batch.iter().cloned().zip(claimed) {
+        if claimed {
+            claimed_batch.push(entry);
+        } else {
+            skipped_dupes += 1;
+        }
+    }
+    if !claimed_batch.is_empty() {
+        insert_logs_batch_in_tx(&tx, &claimed_batch)?;
+    }
+    if let Some(file_metadata) = completion_metadata {
+        checkpoint::update_source_metadata_in_tx(&tx, source_id, file_metadata)?;
+    }
     tx.commit()?;
-    result.ingested += batch.len();
-    result.checkpoint_updates += 1;
+    result.ingested += claimed_batch.len();
+    result.skipped_dupes += skipped_dupes;
+    if completion_metadata.is_some() {
+        result.checkpoint_updates += 1;
+    }
     batch.clear();
     imports.clear();
     Ok(())
@@ -452,16 +493,76 @@ fn merge_result(total: &mut IndexResult, next: &IndexResult) {
     total.file_errors.extend(next.file_errors.iter().cloned());
 }
 
-fn cap_field(value: &str, max_chars: usize) -> Option<String> {
+fn accept_field(value: &str, max_chars: usize) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;
     }
-    let mut out = String::new();
-    for ch in trimmed.chars().take(max_chars) {
-        out.push(ch);
+    if trimmed.chars().count() > max_chars {
+        return None;
     }
-    Some(out)
+    Some(trimmed.to_string())
+}
+
+fn normalize_timestamp(timestamp: Option<&str>) -> Result<String> {
+    match timestamp {
+        Some(value) => Ok(chrono::DateTime::parse_from_rfc3339(value)
+            .with_context(|| format!("invalid transcript timestamp: {value}"))?
+            .with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string()),
+        None => Ok(chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string()),
+    }
+}
+
+struct ReadLine {
+    text: String,
+    oversized: bool,
+}
+
+fn read_bounded_line<R: BufRead>(reader: &mut R, hasher: &mut Sha256) -> Result<Option<ReadLine>> {
+    let mut line = Vec::new();
+    let mut oversized = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            if line.is_empty() && !oversized {
+                return Ok(None);
+            }
+            break;
+        }
+        let newline_pos = available.iter().position(|byte| *byte == b'\n');
+        let take_len = newline_pos.map_or(available.len(), |pos| pos + 1);
+        hasher.update(&available[..take_len]);
+        if !oversized {
+            let remaining = MAX_RECORD_SIZE_BYTES
+                .saturating_add(1)
+                .saturating_sub(line.len());
+            let copy_len = take_len.min(remaining);
+            line.extend_from_slice(&available[..copy_len]);
+            if line.len() > MAX_RECORD_SIZE_BYTES {
+                oversized = true;
+                line.clear();
+            }
+        }
+        reader.consume(take_len);
+        if newline_pos.is_some() {
+            break;
+        }
+    }
+    if oversized {
+        return Ok(Some(ReadLine {
+            text: String::new(),
+            oversized: true,
+        }));
+    }
+    let text = String::from_utf8(line).context("transcript record is not valid UTF-8")?;
+    Ok(Some(ReadLine {
+        text,
+        oversized: false,
+    }))
 }
 
 fn default_roots() -> Vec<PathBuf> {
@@ -492,10 +593,6 @@ pub(crate) struct FileMetadata {
 }
 
 impl FileMetadata {
-    fn partial(path: &Path) -> Result<Self> {
-        Self::from_path_hash(path, &Sha256::new().finalize())
-    }
-
     fn from_path_hash(path: &Path, hash: &[u8]) -> Result<Self> {
         let metadata = fs::metadata(path)?;
         let mtime = metadata

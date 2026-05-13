@@ -1,6 +1,5 @@
-use std::collections::HashSet;
-
 use rusqlite::params;
+use std::collections::HashSet;
 
 use super::*;
 use crate::config::StorageConfig;
@@ -86,7 +85,15 @@ fn record_keys_returns_imported_record_keys() {
         tx.commit().unwrap();
     }
 
-    let keys = store.record_keys(source_id).unwrap();
+    let conn = pool.get().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT record_key FROM transcript_import_records WHERE source_id = ?1")
+        .unwrap();
+    let keys = stmt
+        .query_map([source_id], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<std::collections::HashSet<_>>>()
+        .unwrap();
 
     assert_eq!(
         keys,

@@ -69,6 +69,9 @@ The smoke test validates:
 - `syslog stats` returns numeric fields (total_logs, total_hosts, etc.)
 - `syslog status` returns DB health and runtime/OTLP observability fields
 - `syslog help` returns non-empty markdown text
+- When `tests/fixtures/ai-session-smoke.jsonl` can be seeded into the same
+  SQLite database as the server, AI analytics also prove non-empty
+  `sessions`, `search_sessions`, and `project_context` results for the fixture.
 
 ## Failure output
 

@@ -42,6 +42,18 @@ fn parse_line_joins_string_content_arrays() {
 }
 
 #[test]
+fn parse_line_extracts_project_and_object_array_content() {
+    let line = r#"{"session_id":"claude-array","cwd":"/work/project","content":[{"type":"text","text":"first"},{"type":"text","text":"second"}]}"#;
+
+    let parsed = parse_line(line, Path::new("/tmp/session.jsonl"), 0)
+        .unwrap()
+        .expect("object array content should produce a transcript record");
+
+    assert_eq!(parsed.message, "first second");
+    assert_eq!(parsed.ai_project.as_deref(), Some("/work/project"));
+}
+
+#[test]
 fn parse_line_falls_back_to_path_as_session_id() {
     let path = Path::new("/tmp/no-session.jsonl");
     let line = r#"{"content":"hello without session"}"#;

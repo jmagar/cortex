@@ -349,6 +349,46 @@ fn build_entries_ignores_unknown_or_oversized_ai_tool() {
     assert_eq!(entries[1].ai_tool, None);
 }
 
+#[test]
+fn build_entries_ignores_oversized_ai_project_and_session_id() {
+    let peer = "127.0.0.1:1".parse().unwrap();
+    let req = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: vec![
+                    kv("host.name", av_string("tootie")),
+                    kv("project.path", av_string(&"p".repeat(513))),
+                    kv("session.id", av_string(&"s".repeat(129))),
+                ],
+                dropped_attributes_count: 0,
+                entity_refs: vec![],
+            }),
+            scope_logs: vec![ScopeLogs {
+                scope: None,
+                log_records: vec![LogRecord {
+                    time_unix_nano: 0,
+                    observed_time_unix_nano: 0,
+                    severity_number: 9,
+                    severity_text: String::new(),
+                    body: Some(av_string("msg")),
+                    attributes: vec![],
+                    dropped_attributes_count: 0,
+                    flags: 0,
+                    trace_id: vec![],
+                    span_id: vec![],
+                    event_name: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    };
+
+    let entries = build_entries(&req, peer);
+    assert_eq!(entries[0].ai_project, None);
+    assert_eq!(entries[0].ai_session_id, None);
+}
+
 // ---- auth gate ----
 
 fn state_with_token(token: Option<&str>) -> OtlpState {

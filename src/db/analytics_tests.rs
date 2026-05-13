@@ -303,6 +303,36 @@ fn usage_blocks_group_into_five_hour_windows() {
 }
 
 #[test]
+fn usage_blocks_total_blocks_counts_all_groups_when_limited() {
+    let (pool, _d) = test_pool();
+    let mut entries = Vec::new();
+    for i in 0..1002 {
+        entries.push(ai_entry(
+            "2026-01-01T00:00:00Z",
+            "claude",
+            &format!("/tmp/project-{i}"),
+            &format!("sess-{i}"),
+            "usage block",
+        ));
+    }
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let result = get_ai_usage_blocks(
+        &pool,
+        &AiUsageBlocksParams {
+            from: Some("2026-01-01T00:00:00Z".into()),
+            to: Some("2026-07-31T00:00:00Z".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.blocks.len(), 1000);
+    assert_eq!(result.total_blocks, 1002);
+    assert!(result.truncated);
+}
+
+#[test]
 fn project_context_returns_recent_entries() {
     let (pool, _d) = test_pool();
     insert_logs_batch(
@@ -337,6 +367,35 @@ fn project_context_returns_recent_entries() {
     assert_eq!(result.project, "/tmp/project");
     assert_eq!(result.event_count, 2);
     assert_eq!(result.recent_entries.len(), 1);
+}
+
+#[test]
+fn project_context_snippets_are_bounded_to_256_chars() {
+    let (pool, _d) = test_pool();
+    let long_message = "a".repeat(300);
+    insert_logs_batch(
+        &pool,
+        &[ai_entry(
+            "2026-01-01T00:00:00Z",
+            "claude",
+            "/tmp/project",
+            "sess-1",
+            &long_message,
+        )],
+    )
+    .unwrap();
+
+    let result = get_ai_project_context(
+        &pool,
+        &AiProjectContextParams {
+            project: "/tmp/project".into(),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.recent_entries[0].message.chars().count(), 256);
 }
 
 #[test]

@@ -193,12 +193,18 @@ pub fn get_ai_usage_blocks(
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     } else if params.from.is_none() {
         sql.push_str(&format!(
-            " AND timestamp >= datetime('now', '-{DEFAULT_LOOKBACK_DAYS} days')"
+            " AND timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-{DEFAULT_LOOKBACK_DAYS} days')"
         ));
     }
+    let grouped_sql = format!("{sql} GROUP BY bucket_start, bucket_end, ai_project, ai_tool");
+    let total_blocks: usize = conn.query_row(
+        &format!("SELECT COUNT(*) FROM ({grouped_sql})"),
+        rusqlite::params_from_iter(bindings.iter()),
+        |row| row.get::<_, i64>(0),
+    )? as usize;
+    sql = grouped_sql;
     sql.push_str(&format!(
-        " GROUP BY bucket_start, bucket_end, ai_project, ai_tool
-          ORDER BY bucket_start ASC, ai_project ASC, ai_tool ASC
+        " ORDER BY bucket_start ASC, ai_project ASC, ai_tool ASC
           LIMIT {}",
         LIMIT + 1
     ));
@@ -216,7 +222,6 @@ pub fn get_ai_usage_blocks(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let total_blocks = blocks.len();
     let mut blocks = blocks;
     let truncated = blocks.len() > LIMIT;
     blocks.truncate(LIMIT);
@@ -299,7 +304,7 @@ pub fn get_ai_project_context(
     let recent_entries_truncated = recent_entries.len() > limit as usize;
     recent_entries.truncate(limit as usize);
     for entry in &mut recent_entries {
-        entry.message = truncate_chars(&entry.message, 512);
+        entry.message = truncate_chars(&entry.message, 256);
     }
 
     Ok(AiProjectContext {
