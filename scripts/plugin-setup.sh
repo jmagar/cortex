@@ -1,99 +1,48 @@
 #!/usr/bin/env bash
-# SessionStart hook — deploys or connects syslog-mcp based on userConfig
+# Claude Code hook. Server-mode setup delegates to the shared host installer
+# path: ~/.local/bin/syslog + `syslog setup repair` + ~/.syslog-mcp.
 set -euo pipefail
 
-# When invoked directly (e.g. /syslog:redeploy), the plugin runtime vars are
-# absent. Derive CLAUDE_PLUGIN_ROOT from the script's own location and default
-# CLAUDE_PLUGIN_DATA to the well-known plugin data directory so the hook works
-# both from the plugin system and from manual invocation.
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
-: "${CLAUDE_PLUGIN_DATA:=${HOME}/.claude/plugins/data/syslog-jmagar-lab}"
+INSTALL_URL="${SYSLOG_INSTALL_URL:-https://raw.githubusercontent.com/jmagar/syslog-mcp/main/install.sh}"
 
-existing_env_value() {
-  local key="$1"
-  local file
-  local value
-  for file in "${CLAUDE_PLUGIN_DATA}/.env" "${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"; do
-    [[ -f "${file}" ]] || continue
-    value="$(awk -F= -v key="${key}" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "${file}")"
-    if [[ -n "${value}" ]]; then
-      printf '%s\n' "${value}"
-      return 0
-    fi
-  done
-  return 0
-}
-
-validate_port_value() {
-  local name="$1" value="$2"
-  if ! [[ "${value}" =~ ^[0-9]+$ ]] || (( value < 1 || value > 65535 )); then
-    echo "ERROR: ${name} must be a TCP/UDP port number (1-65535), got: ${value}" >&2
-    exit 1
+reject_unsafe_value() {
+  local name="$1" value="${2:-}"
+  if [[ "${value}" == *$'\n'* || "${value}" == *$'\r'* ]]; then
+    printf 'syslog plugin setup: %s must not contain newlines\n' "${name}" >&2
+    exit 2
   fi
 }
 
-mcp_host_is_loopback() {
-  case "$1" in
-    127.*|::1) return 0 ;;
-    *) return 1 ;;
-  esac
+export_if_set() {
+  local env_name="$1" option_name="$2" value
+  value="$(printenv "${option_name}" || true)"
+  reject_unsafe_value "${option_name}" "${value}"
+  [[ -n "${value}" ]] || return 0
+  export "${env_name}=${value}"
 }
 
-# Seed the token from the existing env file when the plugin option isn't set,
-# so /syslog:redeploy doesn't fail just because the env var wasn't injected.
-NO_AUTH="${CLAUDE_PLUGIN_OPTION_NO_AUTH:-$(existing_env_value NO_AUTH)}"
-NO_AUTH="${NO_AUTH:-false}"
-NO_AUTH="$(printf '%s' "${NO_AUTH}" | tr '[:upper:]' '[:lower:]')"
-AUTH_MODE="${CLAUDE_PLUGIN_OPTION_AUTH_MODE:-$(existing_env_value SYSLOG_MCP_AUTH_MODE)}"
-AUTH_MODE="${AUTH_MODE:-bearer}"
-AUTH_MODE="$(printf '%s' "${AUTH_MODE}" | tr '[:upper:]' '[:lower:]')"
-
-if [[ "${NO_AUTH}" != "true" && -z "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}" ]]; then
-  _tok="$(existing_env_value SYSLOG_MCP_TOKEN)"
-  [[ -n "${_tok}" ]] || _tok="$(existing_env_value SYSLOG_MCP_API_TOKEN)"
-  [[ -n "${_tok}" ]] && CLAUDE_PLUGIN_OPTION_API_TOKEN="${_tok}"
-  unset _tok
-fi
-
-# ── Config from userConfig ────────────────────────────────────────────────────
-IS_SERVER="${CLAUDE_PLUGIN_OPTION_IS_SERVER:-true}"
-API_TOKEN="${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}"
-SERVER_URL="${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}"
-SYSLOG_HOST="${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST:-0.0.0.0}"
-SYSLOG_PORT="${CLAUDE_PLUGIN_OPTION_SYSLOG_PORT:-1514}"
-SYSLOG_HOST_PORT="${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT:-$(existing_env_value SYSLOG_HOST_PORT)}"
-SYSLOG_HOST_PORT="${SYSLOG_HOST_PORT:-1514}"
-MCP_HOST="${CLAUDE_PLUGIN_OPTION_MCP_HOST:-0.0.0.0}"
-MCP_PORT="${CLAUDE_PLUGIN_OPTION_MCP_PORT:-3100}"
-validate_port_value SYSLOG_PORT "${SYSLOG_PORT}"
-validate_port_value SYSLOG_HOST_PORT "${SYSLOG_HOST_PORT}"
-validate_port_value SYSLOG_MCP_PORT "${MCP_PORT}"
-DATA_DIR="${CLAUDE_PLUGIN_OPTION_DATA_DIR:-${CLAUDE_PLUGIN_DATA}}"
-MAX_DB_SIZE_MB="${CLAUDE_PLUGIN_OPTION_MAX_DB_SIZE_MB:-8192}"
-RETENTION_DAYS="${CLAUDE_PLUGIN_OPTION_RETENTION_DAYS:-90}"
-DOCKER_INGEST="${CLAUDE_PLUGIN_OPTION_DOCKER_INGEST_ENABLED:-false}"
-FLEET_HOSTS="${CLAUDE_PLUGIN_OPTION_FLEET_HOSTS:-}"
-PUBLIC_URL="${CLAUDE_PLUGIN_OPTION_PUBLIC_URL:-$(existing_env_value SYSLOG_MCP_PUBLIC_URL)}"
-GOOGLE_CLIENT_ID="${CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_ID:-$(existing_env_value SYSLOG_MCP_GOOGLE_CLIENT_ID)}"
-GOOGLE_CLIENT_SECRET="${CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_SECRET:-$(existing_env_value SYSLOG_MCP_GOOGLE_CLIENT_SECRET)}"
-AUTH_ADMIN_EMAIL="${CLAUDE_PLUGIN_OPTION_AUTH_ADMIN_EMAIL:-$(existing_env_value SYSLOG_MCP_AUTH_ADMIN_EMAIL)}"
-AUTH_ALLOWED_REDIRECT_URIS="${CLAUDE_PLUGIN_OPTION_AUTH_ALLOWED_REDIRECT_URIS:-$(existing_env_value SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS)}"
-
-if [[ "${NO_AUTH}" != "true" && -z "${API_TOKEN}" ]]; then
-  if ! [[ "${AUTH_MODE}" == "oauth" && "${IS_SERVER}" == "true" ]] || ! mcp_host_is_loopback "${MCP_HOST}"; then
-    echo "ERROR: API token is required unless no_auth is true or OAuth server mode binds MCP to loopback" >&2
-    echo "       OAuth mode still needs SYSLOG_MCP_TOKEN when OTLP /v1/logs is exposed on a non-loopback listener." >&2
-    exit 1
+ensure_syslog_binary() {
+  if command -v syslog >/dev/null 2>&1; then
+    return 0
   fi
-fi
+  printf 'syslog plugin setup: syslog not found; running installer %s\n' "${INSTALL_URL}" >&2
+  curl -fsSL "${INSTALL_URL}" | sh
+  export PATH="${HOME}/.local/bin:${PATH}"
+  command -v syslog >/dev/null 2>&1 || {
+    printf 'syslog plugin setup: installer completed but syslog is still not on PATH\n' >&2
+    exit 1
+  }
+}
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-ENV_FILE="${CLAUDE_PLUGIN_DATA}/.env"
-LEGACY_ENV_FILE="${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"
-COMPOSE_DIR="${CLAUDE_PLUGIN_DATA}"
-COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.yml"
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
+validate_client() {
+  local server_url="${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}"
+  if curl -sf "${server_url%/}/health" >/dev/null 2>&1; then
+    echo "syslog-mcp: connected to ${server_url%/}"
+  else
+    echo "WARNING: syslog-mcp server at ${server_url%/} is not reachable" >&2
+  fi
+}
 
 strip_trailing_mcp_path() {
   local url="${1%/}"
@@ -103,13 +52,20 @@ strip_trailing_mcp_path() {
   printf '%s\n' "${url}"
 }
 
-derive_public_url() {
-  if [[ -n "${PUBLIC_URL}" ]]; then
-    strip_trailing_mcp_path "${PUBLIC_URL}"
-    return
-  fi
-  if [[ "${SERVER_URL}" == https://* ]]; then
-    strip_trailing_mcp_path "${SERVER_URL}"
+append_csv_unique() {
+  local csv="$1" value="$2" item
+  local -a items
+  [[ -n "${value}" ]] || { printf '%s\n' "${csv}"; return; }
+  IFS=',' read -r -a items <<< "${csv}"
+  for item in "${items[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [[ "${item}" != "${value}" ]] || { printf '%s\n' "${csv}"; return; }
+  done
+  if [[ -n "${csv}" ]]; then
+    printf '%s,%s\n' "${csv}" "${value}"
+  else
+    printf '%s\n' "${value}"
   fi
 }
 
@@ -127,276 +83,61 @@ codex_oauth_callback_url() {
   ' "${config}"
 }
 
-append_csv_unique() {
-  local csv="$1"
-  local value="$2"
-  [[ -n "${value}" ]] || { printf '%s\n' "${csv}"; return; }
+prepare_oauth_env() {
+  local auth_mode="${SYSLOG_MCP_AUTH_MODE:-bearer}"
+  local server_url="${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}"
+  local redirects="${SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS:-}"
+  local codex_callback
 
-  local existing
-  IFS=',' read -r -a existing <<< "${csv}"
-  for item in "${existing[@]}"; do
-    item="${item#"${item%%[![:space:]]*}"}"
-    item="${item%"${item##*[![:space:]]}"}"
-    if [[ "${item}" == "${value}" ]]; then
-      printf '%s\n' "${csv}"
-      return
-    fi
-  done
-
-  if [[ -n "${csv}" ]]; then
-    printf '%s,%s\n' "${csv}" "${value}"
-  else
-    printf '%s\n' "${value}"
-  fi
-}
-
-oauth_env_block() {
-  if [[ "${NO_AUTH}" == "true" ]]; then
-    return 0
-  fi
-  if [[ "${AUTH_MODE}" != "bearer" && "${AUTH_MODE}" != "oauth" ]]; then
-    echo "ERROR: auth_mode must be bearer or oauth" >&2
-    return 1
-  fi
-  if [[ "${AUTH_MODE}" != "oauth" ]]; then
-    return 0
+  [[ "${auth_mode}" == "oauth" ]] || return 0
+  if [[ -z "${SYSLOG_MCP_PUBLIC_URL:-}" && "${server_url}" == https://* ]]; then
+    export SYSLOG_MCP_PUBLIC_URL
+    SYSLOG_MCP_PUBLIC_URL="$(strip_trailing_mcp_path "${server_url}")"
   fi
 
-  local public_url
-  public_url="$(derive_public_url)"
-  if [[ -z "${public_url}" ]]; then
-    echo "ERROR: OAuth mode requires public_url or an https server_url" >&2
-    return 1
-  fi
-  if [[ -z "${GOOGLE_CLIENT_ID}" || -z "${GOOGLE_CLIENT_SECRET}" || -z "${AUTH_ADMIN_EMAIL}" ]]; then
-    echo "ERROR: OAuth mode requires google_client_id, google_client_secret, and auth_admin_email" >&2
-    return 1
-  fi
-
-  local redirects="${AUTH_ALLOWED_REDIRECT_URIS}"
   redirects="$(append_csv_unique "${redirects}" "https://claude.ai/api/mcp/auth_callback")"
   redirects="$(append_csv_unique "${redirects}" "https://claudeai.ai/api/mcp/auth_callback")"
-
-  local codex_callback
   codex_callback="$(codex_oauth_callback_url)"
   if [[ -n "${codex_callback}" ]]; then
     redirects="$(append_csv_unique "${redirects}" "${codex_callback}")"
   fi
-
-  cat << EOF
-SYSLOG_MCP_AUTH_MODE=oauth
-SYSLOG_MCP_PUBLIC_URL=${public_url}
-SYSLOG_MCP_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-SYSLOG_MCP_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-SYSLOG_MCP_AUTH_ADMIN_EMAIL=${AUTH_ADMIN_EMAIL}
-SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS=${redirects}
-SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false
-EOF
+  export SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS="${redirects}"
+  export SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH="${SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH:-false}"
 }
 
-# Returns 0 if env file was written/changed, 1 if unchanged
-write_env() {
-  mkdir -p "${CLAUDE_PLUGIN_DATA}"
+main() {
+  local is_server="${CLAUDE_PLUGIN_OPTION_IS_SERVER:-true}"
 
-  local batch_size="${CLAUDE_PLUGIN_OPTION_BATCH_SIZE:-}"
-  local write_channel_capacity="${CLAUDE_PLUGIN_OPTION_WRITE_CHANNEL_CAPACITY:-}"
-  if [[ -f "${ENV_FILE}" ]]; then
-    [[ -n "${batch_size}" ]] || batch_size="$(awk -F= '$1 == "SYSLOG_BATCH_SIZE" {print substr($0, index($0, "=") + 1); exit}' "${ENV_FILE}")"
-    [[ -n "${write_channel_capacity}" ]] || write_channel_capacity="$(awk -F= '$1 == "SYSLOG_WRITE_CHANNEL_CAPACITY" {print substr($0, index($0, "=") + 1); exit}' "${ENV_FILE}")"
-  fi
-  batch_size="${batch_size:-100}"
-  write_channel_capacity="${write_channel_capacity:-10000}"
+  reject_unsafe_value "CLAUDE_PLUGIN_OPTION_API_TOKEN" "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}"
+  export_if_set SYSLOG_MCP_TOKEN CLAUDE_PLUGIN_OPTION_API_TOKEN
+  export_if_set SYSLOG_HOST CLAUDE_PLUGIN_OPTION_SYSLOG_HOST
+  export_if_set SYSLOG_PORT CLAUDE_PLUGIN_OPTION_SYSLOG_PORT
+  export_if_set SYSLOG_HOST_PORT CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT
+  export_if_set SYSLOG_MCP_HOST CLAUDE_PLUGIN_OPTION_MCP_HOST
+  export_if_set SYSLOG_MCP_PORT CLAUDE_PLUGIN_OPTION_MCP_PORT
+  export_if_set SYSLOG_MCP_MAX_DB_SIZE_MB CLAUDE_PLUGIN_OPTION_MAX_DB_SIZE_MB
+  export_if_set SYSLOG_MCP_DATA_VOLUME CLAUDE_PLUGIN_OPTION_DATA_DIR
+  export_if_set SYSLOG_MCP_RETENTION_DAYS CLAUDE_PLUGIN_OPTION_RETENTION_DAYS
+  export_if_set SYSLOG_BATCH_SIZE CLAUDE_PLUGIN_OPTION_BATCH_SIZE
+  export_if_set SYSLOG_WRITE_CHANNEL_CAPACITY CLAUDE_PLUGIN_OPTION_WRITE_CHANNEL_CAPACITY
+  export_if_set SYSLOG_DOCKER_INGEST_ENABLED CLAUDE_PLUGIN_OPTION_DOCKER_INGEST_ENABLED
+  export_if_set SYSLOG_DOCKER_HOSTS CLAUDE_PLUGIN_OPTION_FLEET_HOSTS
+  export_if_set NO_AUTH CLAUDE_PLUGIN_OPTION_NO_AUTH
+  export_if_set SYSLOG_MCP_AUTH_MODE CLAUDE_PLUGIN_OPTION_AUTH_MODE
+  export_if_set SYSLOG_MCP_PUBLIC_URL CLAUDE_PLUGIN_OPTION_PUBLIC_URL
+  export_if_set SYSLOG_MCP_GOOGLE_CLIENT_ID CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_ID
+  export_if_set SYSLOG_MCP_GOOGLE_CLIENT_SECRET CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_SECRET
+  export_if_set SYSLOG_MCP_AUTH_ADMIN_EMAIL CLAUDE_PLUGIN_OPTION_AUTH_ADMIN_EMAIL
+  export_if_set SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS CLAUDE_PLUGIN_OPTION_AUTH_ALLOWED_REDIRECT_URIS
+  prepare_oauth_env
 
-  # Docker Compose reads these directly from .env. Pin UID/GID so the
-  # container writes syslog.db with the host user's ownership.
-  local db_line="SYSLOG_MCP_DATA_VOLUME=${DATA_DIR}"
-  local config_line=""
-  local uid_line="SYSLOG_UID=$(id -u)"
-  local gid_line="SYSLOG_GID=$(id -g)"
-
-  local new_env
-  new_env=$(cat << EOF
-SYSLOG_HOST=${SYSLOG_HOST}
-SYSLOG_PORT=${SYSLOG_PORT}
-SYSLOG_HOST_PORT=${SYSLOG_HOST_PORT}
-SYSLOG_MCP_HOST=${MCP_HOST}
-SYSLOG_MCP_PORT=${MCP_PORT}
-NO_AUTH=${NO_AUTH}
-${db_line}
-SYSLOG_MCP_MAX_DB_SIZE_MB=${MAX_DB_SIZE_MB}
-SYSLOG_MCP_RETENTION_DAYS=${RETENTION_DAYS}
-SYSLOG_BATCH_SIZE=${batch_size}
-SYSLOG_WRITE_CHANNEL_CAPACITY=${write_channel_capacity}
-SYSLOG_DOCKER_INGEST_ENABLED=${DOCKER_INGEST}
-EOF
-)
-
-  if [[ "${NO_AUTH}" != "true" && -n "${API_TOKEN}" ]]; then
-    new_env="${new_env}
-SYSLOG_MCP_TOKEN=${API_TOKEN}"
-  fi
-
-  local auth_block
-  if ! auth_block="$(oauth_env_block)"; then
-    return 2
-  fi
-  [[ -n "${auth_block}" ]] && new_env="${new_env}
-${auth_block}"
-
-  [[ -n "${uid_line}" ]] && new_env="${new_env}
-${uid_line}
-${gid_line}"
-
-  [[ -n "${config_line}" ]] && new_env="${new_env}
-${config_line}"
-
-  # Fleet hosts feed Docker ingest only when ingest is enabled
-  if [[ "${DOCKER_INGEST}" == "true" && -n "${FLEET_HOSTS}" ]]; then
-    new_env="${new_env}
-SYSLOG_DOCKER_HOSTS=${FLEET_HOSTS}"
-  fi
-
-  if [[ -f "${ENV_FILE}" ]] && diff -q <(echo "${new_env}") "${ENV_FILE}" >/dev/null 2>&1; then
-    rm -f "${LEGACY_ENV_FILE}"
-    return 1  # unchanged
-  fi
-
-  echo "${new_env}" > "${ENV_FILE}"
-  chmod 600 "${ENV_FILE}"
-  rm -f "${LEGACY_ENV_FILE}"
-  return 0  # changed
-}
-
-ensure_env_written() {
-  local rc
-  if write_env; then
+  if [[ "${is_server}" != "true" ]]; then
+    validate_client
     return 0
   fi
-  rc=$?
-  if [[ "${rc}" -eq 0 || "${rc}" -eq 1 ]]; then
-    return 0
-  fi
-  return "${rc}"
+
+  ensure_syslog_binary
+  syslog setup repair
 }
 
-
-setup_docker() {
-  mkdir -p "${COMPOSE_DIR}"
-
-  # ── Pre-flight checks ─────────────────────────────────────────────────────
-
-  # 1. Docker daemon must be reachable before we attempt anything else.
-  if ! docker info >/dev/null 2>&1; then
-    echo "ERROR: docker daemon is not reachable — is dockerd running?" >&2
-    return 1
-  fi
-
-  # 2. Port conflict check — only when the container is not already running
-  #    (if it is running, it owns the ports and force-recreate will handle it).
-  local container_running=false
-  local external_named_container=false
-  if [[ -f "${COMPOSE_FILE}" ]] && \
-     docker compose -f "${COMPOSE_FILE}" ps --quiet syslog-mcp 2>/dev/null | grep -q .; then
-    container_running=true
-  elif docker ps --filter 'name=^/syslog-mcp$' --quiet 2>/dev/null | grep -q .; then
-    container_running=true
-    external_named_container=true
-  fi
-  if [[ "${container_running}" == "false" ]]; then
-    for port_proto in "${SYSLOG_HOST_PORT}/udp" "${SYSLOG_HOST_PORT}/tcp" "${MCP_PORT}/tcp"; do
-      local port="${port_proto%%/*}" proto="${port_proto##*/}"
-      if ss -"${proto:0:1}"lnp "sport = :${port}" 2>/dev/null | awk 'NR>1 && NF>0' | grep -q .; then
-        echo "ERROR: port ${port}/${proto} is already in use — cannot start syslog-mcp" >&2
-        return 1
-      fi
-    done
-  fi
-
-  # 3. Data dir must be writable by the container UID.
-  mkdir -p "${DATA_DIR}"
-  if ! touch "${DATA_DIR}/.write_test" 2>/dev/null; then
-    echo "ERROR: data dir ${DATA_DIR} is not writable by UID $(id -u)" >&2
-    return 1
-  fi
-  rm -f "${DATA_DIR}/.write_test"
-
-  # 4. Warn if the data volume is low on disk (server has its own guardrail but
-  #    can't help if it can't open the DB at startup).
-  local free_mb
-  free_mb="$(df -k "${DATA_DIR}" | awk 'NR==2{printf "%d", $4/1024}')"
-  if (( free_mb < 512 )); then
-    echo "WARNING: only ${free_mb}MB free on ${DATA_DIR} — server may fail to start or write logs" >&2
-  fi
-
-  # ── Legacy systemd cleanup ───────────────────────────────────────────────
-
-  # Older plugin versions could create a user unit. Docker Compose is now the
-  # only automated server deployment, so remove the unit/drop-ins defensively.
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl --user disable --now syslog-mcp.service >/dev/null 2>&1 || true
-    rm -f "${HOME}/.config/systemd/user/syslog-mcp.service"
-    rm -rf "${HOME}/.config/systemd/user/syslog-mcp.service.d"
-    systemctl --user daemon-reload >/dev/null 2>&1 || true
-  fi
-
-  # ── Compose setup ─────────────────────────────────────────────────────────
-
-  # Refresh compose file if plugin updated.
-  if ! diff -q "${CLAUDE_PLUGIN_ROOT}/docker-compose.yml" "${COMPOSE_FILE}" >/dev/null 2>&1; then
-    cp "${CLAUDE_PLUGIN_ROOT}/docker-compose.yml" "${COMPOSE_FILE}"
-  fi
-
-  ensure_env_written
-
-  cd "${COMPOSE_DIR}"
-
-  # 5. Validate compose config before touching the running container.
-  if ! docker compose config --quiet 2>/dev/null; then
-    echo "WARNING: docker compose config validation failed — proceeding anyway" >&2
-  fi
-
-  # Ensure the external docker network exists — compose will fail without it.
-  # Honour the DOCKER_NETWORK env var (same default the compose file uses).
-  local network_name="${DOCKER_NETWORK:-syslog-mcp}"
-  if ! docker network inspect "${network_name}" >/dev/null 2>&1; then
-    echo "syslog-mcp: creating docker network ${network_name}"
-    docker network create "${network_name}"
-  fi
-
-  # Source checkouts can build the image directly. Installed plugins normally
-  # do not include the Rust source tree, so they pull the published image.
-  if [[ "${CLAUDE_PLUGIN_OPTION_BUILD_LOCAL:-false}" == "true" && -f "${CLAUDE_PLUGIN_ROOT}/Cargo.toml" && -f "${CLAUDE_PLUGIN_ROOT}/config/Dockerfile" ]]; then
-    (cd "${CLAUDE_PLUGIN_ROOT}" && docker compose build --no-cache syslog-mcp)
-  else
-    docker compose pull --quiet syslog-mcp 2>&1 || \
-      echo "syslog-mcp: pull failed; will try cached image" >&2
-  fi
-
-  if [[ "${external_named_container}" == "true" ]]; then
-    echo "syslog-mcp: removing existing container before docker compose cutover"
-    docker rm -f syslog-mcp >/dev/null
-  fi
-
-  if docker compose ps --quiet syslog-mcp 2>/dev/null | grep -q .; then
-    docker compose up -d --force-recreate --no-build
-  else
-    docker compose up -d --no-build
-  fi
-
-  echo "syslog-mcp: docker container running on ${MCP_HOST}:${MCP_PORT}"
-}
-
-validate_client() {
-  if curl -sf "${SERVER_URL}/health" >/dev/null 2>&1; then
-    echo "syslog-mcp: connected to ${SERVER_URL}"
-  else
-    echo "WARNING: syslog-mcp server at ${SERVER_URL} is not reachable" >&2
-  fi
-}
-
-# ── Main ──────────────────────────────────────────────────────────────────────
-if [[ "${IS_SERVER}" == "true" ]]; then
-  setup_docker
-else
-  validate_client
-fi
+main "$@"

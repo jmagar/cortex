@@ -27,6 +27,33 @@ The binary reads `config.toml` from the current directory and accepts env var ov
 
 The installed binary is `syslog`. Use `syslog mcp` for local MCP clients that require stdio. That mode is query-only: it reads `SYSLOG_MCP_DB_PATH`, exposes the MCP tools over stdin/stdout, and does not start syslog listeners, HTTP routes, retention purge, or storage-budget cleanup. Keep `syslog serve mcp` running somewhere for ingestion.
 
+## One-line installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jmagar/syslog-mcp/main/install.sh | sh
+```
+
+The installer installs the `syslog` binary to `~/.local/bin/syslog`, then runs
+`syslog setup`. Setup owns the shared Docker-only runtime layout:
+
+| Path | Purpose |
+| --- | --- |
+| `~/.syslog-mcp/.env` | Runtime environment and generated token |
+| `~/.syslog-mcp/compose/docker-compose.yml` | Installed Compose bundle using the published image |
+| `~/.syslog-mcp/data/` | Default SQLite data bind mount |
+
+Useful setup commands:
+
+```bash
+syslog setup          # first run or normal repair
+syslog setup check    # inspect prerequisites and files only
+syslog setup repair   # rewrite managed assets and restart Compose
+```
+
+`syslog setup` also disables and removes stale user-level
+`syslog-mcp.service` units/drop-ins from older releases. The supported
+automated deployment path is Docker Compose only.
+
 ## Docker
 
 The Docker image is daemon-focused: it runs `syslog serve mcp` for syslog ingest and HTTP MCP. Direct stdio is intended for host-installed binaries where the MCP client can launch `syslog mcp` and read the SQLite DB path directly.

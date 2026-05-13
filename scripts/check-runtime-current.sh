@@ -6,7 +6,7 @@ set -euo pipefail
 MODE="auto"
 PULL="false"
 SERVICE="syslog-mcp"
-COMPOSE_DIR="${SYSLOG_MCP_COMPOSE_DIR:-${HOME}/.claude/plugins/data/syslog-jmagar-lab}"
+COMPOSE_DIR="${SYSLOG_MCP_COMPOSE_DIR:-${SYSLOG_MCP_HOME:-${HOME}/.syslog-mcp}/compose}"
 
 usage() {
   cat <<'EOF'
@@ -19,7 +19,7 @@ Options:
   --pull                  Docker only: pull compose image before comparing.
                           Without this, Docker mode only proves the container
                           matches the image already present in the local cache.
-  --compose-dir DIR       Docker compose project dir (default: plugin data dir)
+  --compose-dir DIR       Docker compose project dir (default: ~/.syslog-mcp/compose)
 EOF
 }
 

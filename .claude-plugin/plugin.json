@@ -1,6 +1,6 @@
 {
   "name": "syslog",
-  "version": "0.20.2",
+  "version": "0.21.0",
   "description": "Syslog management via MCP",
   "author": { "name": "jmagar" },
   "repository": "https://github.com/jmagar/syslog-mcp",
@@ -121,8 +121,7 @@
     "data_dir": {
       "type": "directory",
       "title": "Data directory",
-      "description": "Directory holding the SQLite database file (syslog.db plus its WAL/SHM sidecars in WAL mode). Defaults to the plugin's persistent data directory ($CLAUDE_PLUGIN_DATA), which survives plugin upgrades. Override only if you need the DB on a different volume — e.g. a larger or faster disk. The directory must exist and be writable by the user running the service. Server mode only.",
-      "default": "${CLAUDE_PLUGIN_DATA}"
+      "description": "Optional override for the SQLite database directory. Leave empty to use the shared setup default at ~/.syslog-mcp/data. Set only if you need the DB on a different volume — e.g. a larger or faster disk. Server mode only."
     },
     "retention_days": {
       "type": "number",

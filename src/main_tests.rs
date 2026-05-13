@@ -46,3 +46,11 @@ fn mode_parse_accepts_compose_namespace() {
         Mode::Cli(_)
     ));
 }
+
+#[test]
+fn mode_parse_accepts_setup_namespace() {
+    assert!(matches!(
+        Mode::parse(vec!["setup".into(), "check".into(), "--json".into()]).unwrap(),
+        Mode::Setup(_)
+    ));
+}
