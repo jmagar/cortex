@@ -26,7 +26,8 @@ Show recent syslog-mcp service logs. These are the binary's stdout/stderr, not s
 3. Run Docker Compose logs:
 
    ```bash
-   docker compose -f "${CLAUDE_PLUGIN_DATA}/docker-compose.yml" --project-directory "${CLAUDE_PLUGIN_DATA}" logs syslog-mcp --tail <N> --no-color
+   SYSLOG_MCP_HOME="${SYSLOG_MCP_HOME:-$HOME/.syslog-mcp}"
+   docker compose --env-file "${SYSLOG_MCP_HOME}/.env" -f "${SYSLOG_MCP_HOME}/compose/docker-compose.yml" logs syslog-mcp --tail <N> --no-color
    ```
 
    For follow mode, add `-f` and omit `--no-color`.

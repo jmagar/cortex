@@ -34,6 +34,7 @@ async fn main() -> Result<()> {
         Mode::ServeMcp => serve_mcp().await,
         Mode::StdioMcp => serve_stdio_mcp().await,
         Mode::Cli(command) => run_cli(command).await,
+        Mode::Setup(command) => run_setup(command).await,
         Mode::Help => unreachable!("handled before logging initialization"),
         Mode::Version => unreachable!("handled before logging initialization"),
     }
@@ -52,6 +53,31 @@ async fn run_cli(command: cli::CliCommand) -> Result<()> {
     }
     let runtime = RuntimeCore::load_query_only().await?;
     cli::run(runtime.service(), command).await
+}
+
+async fn run_setup(command: SetupCommand) -> Result<()> {
+    let report = syslog_mcp::setup::run_setup(command.mode).await?;
+    if command.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("syslog setup mode: {}", report.mode);
+        println!("home: {}", report.home.display());
+        println!("env: {}", report.env_path.display());
+        println!("compose: {}", report.compose_dir.display());
+        println!("data: {}", report.data_dir.display());
+        println!("health: {}", report.health_url);
+        println!("mcp: {}", report.mcp_url);
+        for phase in &report.phases {
+            println!(
+                "{:?}\t{}\t{}ms\t{}",
+                phase.status, phase.name, phase.elapsed_ms, phase.detail
+            );
+        }
+    }
+    if report.has_errors {
+        anyhow::bail!("syslog setup completed with failed phases");
+    }
+    Ok(())
 }
 
 async fn serve_mcp() -> Result<()> {
@@ -120,8 +146,15 @@ enum Mode {
     ServeMcp,
     StdioMcp,
     Cli(cli::CliCommand),
+    Setup(SetupCommand),
     Help,
     Version,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SetupCommand {
+    mode: syslog_mcp::setup::SetupMode,
+    json: bool,
 }
 
 impl Mode {
@@ -132,6 +165,9 @@ impl Mode {
             [flag] if flag == "--version" || flag == "-V" || flag == "version" => Ok(Self::Version),
             [command] if command == "mcp" => Ok(Self::StdioMcp),
             [serve, service] if serve == "serve" && service == "mcp" => Ok(Self::ServeMcp),
+            [command, rest @ ..] if command == "setup" => {
+                Ok(Self::Setup(parse_setup_command(rest)?))
+            }
             [command, rest @ ..]
                 if matches!(
                     command.as_str(),
@@ -163,16 +199,36 @@ impl Mode {
             Self::ServeMcp => "info",
             Self::StdioMcp => "warn",
             Self::Cli(_) => "warn",
+            Self::Setup(_) => "warn",
             Self::Help => "info",
             Self::Version => "info",
         }
     }
 }
 
+fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
+    let mut mode = syslog_mcp::setup::SetupMode::FirstRun;
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "check" => mode = syslog_mcp::setup::SetupMode::Check,
+            "repair" => mode = syslog_mcp::setup::SetupMode::Repair,
+            "--json" => json = true,
+            "--help" | "-h" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            other => anyhow::bail!("unknown setup argument: {other}"),
+        }
+    }
+    Ok(SetupCommand { mode, json })
+}
+
 fn print_usage() {
     eprintln!(
         "Usage:
   syslog --version     Print version
+  syslog setup [check|repair] [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
   syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]

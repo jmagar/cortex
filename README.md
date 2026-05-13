@@ -406,6 +406,36 @@ Ordered from most to least severe:
 
 ## Installation
 
+### One-line installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jmagar/syslog-mcp/main/install.sh | sh
+```
+
+The installer puts the host `syslog` binary in `~/.local/bin` and then runs
+`syslog setup`. Setup is idempotent and owns the shared host layout:
+
+- `~/.syslog-mcp/.env` — secrets, ports, Compose interpolation, runtime values
+- `~/.syslog-mcp/compose/docker-compose.yml` — Docker Compose deployment assets
+- `~/.syslog-mcp/data/syslog.db` — SQLite database and WAL/SHM sidecars
+
+Useful installer controls:
+
+```bash
+SYSLOG_INSTALL_DRY_RUN=1 ./install.sh
+SYSLOG_INSTALL_PREFIX=/opt/syslog-mcp ./install.sh
+SYSLOG_VERSION=0.21.0 ./install.sh
+SYSLOG_INSTALL_SKIP_SETUP=1 ./install.sh
+```
+
+Useful setup commands:
+
+```bash
+syslog setup          # first-run or normal repair
+syslog setup check    # inspect only; does not mutate files or start services
+syslog setup repair   # repair env/assets and restart the Docker stack
+```
+
 ### Claude Code plugin (recommended)
 
 Install as a Claude Code plugin. The plugin handles deployment automatically — you choose between server mode (this machine hosts the syslog receiver + MCP server) and client mode (connect to a remote server).
@@ -419,7 +449,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 | `api_token` | yes | — | Bearer token. Server mode: server requires this token. Client mode: token from the server admin. Stored in the system keychain. |
 | `syslog_host` / `syslog_port` | no | `0.0.0.0` / `1514` | Syslog listener bind (server mode) |
 | `mcp_host` / `mcp_port` | no | `0.0.0.0` / `3100` | MCP HTTP server bind (server mode) |
-| `data_dir` | no | `${CLAUDE_PLUGIN_DATA}` | SQLite directory (persists across plugin updates) |
+| `data_dir` | no | `~/.syslog-mcp/data` | Optional SQLite directory override; default shared setup data persists outside plugin cache |
 | `max_db_size_mb` | no | `8192` | DB size cap; oldest logs deleted when exceeded |
 | `retention_days` | no | `90` | `0` = keep forever |
 | `batch_size` | no | `100` | Number of parsed messages per SQLite batch |
@@ -429,9 +459,10 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 
 **SessionStart hook automation** (in server mode):
 
-- Writes `${CLAUDE_PLUGIN_DATA}/.env` with the resolved Compose config
-- Runs `docker compose up -d` and restarts the container only when config actually changed
-- Removes stale user-level `syslog-mcp.service` units/drop-ins left by older plugin versions
+- Ensures the host `syslog` binary exists in `~/.local/bin`
+- Exports plugin userConfig as `SYSLOG_*` / `SYSLOG_MCP_*` environment values
+- Runs `syslog setup repair`, the same setup path used by the one-line installer
+- Repairs shared assets under `~/.syslog-mcp` and removes stale user-level `syslog-mcp.service` units/drop-ins left by older plugin versions
 - All idempotent — safe to run on every session
 
 **Bundled skills**:
@@ -442,7 +473,9 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 - `syslog-logs` — Docker Compose service log tailing
 - `syslog-version-check` — check whether the running Docker container matches the local Compose image; add `--pull` to pull first, otherwise checks only the local image cache
 
-The plugin deploys the server with Docker Compose. You can still build and run the binary locally for development, but automated plugin deployment is Compose-only.
+The plugin deploys the server with Docker Compose through the same `syslog setup`
+path as the one-line installer. You can still build and run the binary locally
+for development, but automated deployment is Compose-only.
 
 ### Docker
 
@@ -631,6 +664,7 @@ allow_insecure_http = true
 ```bash
 syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 syslog mcp        # query-only MCP stdio transport
+syslog setup      # install/repair shared ~/.syslog-mcp Docker Compose setup
 syslog stats      # query the SQLite DB directly from the CLI
 syslog compose doctor          # diagnose live Compose/listener ownership
 syslog compose status --json   # inspect canonical syslog-mcp container/project

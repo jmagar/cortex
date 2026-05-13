@@ -3032,7 +3032,7 @@ dependencies = [
 
 [[package]]
 name = "syslog-mcp"
-version = "0.20.2"
+version = "0.21.0"
 dependencies = [
  "anyhow",
  "axum",

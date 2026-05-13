@@ -1,13 +1,20 @@
 # Configuration Reference -- syslog-mcp
 
-Complete configuration reference. syslog-mcp uses a three-layer config system: compiled defaults, `config.toml` overlay, environment variable overrides.
+Complete configuration reference. syslog-mcp uses compiled defaults, optional
+TOML config, the shared setup env file, and process environment overrides.
 
 ## Configuration precedence
 
 Precedence (highest to lowest):
 1. Environment variables (always win)
-2. `config.toml` in the working directory (partial configs supported -- missing fields keep defaults)
-3. Compiled defaults in `src/config.rs`
+2. `~/.syslog-mcp/.env` (or `$SYSLOG_MCP_HOME/.env`) when present
+3. `config.toml` in the working directory (partial configs supported -- missing fields keep defaults)
+4. Compiled defaults in `src/config.rs`
+
+The setup env file is created and repaired by `syslog setup`. It is loaded
+automatically by installed CLI commands so `syslog stats`, `syslog mcp`, and
+`syslog serve mcp` see the same database path and runtime settings as the
+Docker Compose container. Explicit process environment variables still win.
 
 ## config.toml
 

@@ -9,7 +9,7 @@ Run the plugin setup hook directly, then verify the selected deployment mode is 
 
 ## Before Running
 
-Explain that the hook will re-render the plugin env file from current userConfig, pull or build the configured image, recreate the Docker Compose container when needed, and remove stale user-level `syslog-mcp.service` units/drop-ins left by older plugin versions. Recreating the container causes a brief `/health` gap.
+Explain that the hook exports current userConfig into environment variables, then delegates to `syslog setup repair`. The shared setup path repairs `~/.syslog-mcp/.env`, writes Compose assets under `~/.syslog-mcp/compose`, recreates the Docker Compose container when needed, and removes stale user-level `syslog-mcp.service` units/drop-ins left by older plugin versions. Recreating the container causes a brief `/health` gap.
 
 If the user asked for a dry run only, stop after describing what would happen.
 

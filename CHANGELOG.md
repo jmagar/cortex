@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-05-13
+
+### Added
+
+- **Shared setup command**: Added `syslog setup`, `syslog setup check`, and
+  `syslog setup repair` so the one-line installer and Claude Code plugin use
+  the same canonical host layout under `~/.syslog-mcp`.
+- **One-line installer**: Added `install.sh` to install the `syslog` binary and
+  optionally run Docker Compose setup from the installed binary.
+
+### Changed
+
+- **Plugin setup convergence**: Reworked the plugin hook into a thin
+  userConfig-to-env bridge that ensures the binary exists and delegates all
+  host repair to `syslog setup repair`.
+- **Installed CLI config loading**: Installed commands now load
+  `$SYSLOG_MCP_HOME/.env` or `~/.syslog-mcp/.env` automatically, while explicit
+  process environment variables still win.
+
 ## [0.20.2] - 2026-05-13
 
 ### Changed
