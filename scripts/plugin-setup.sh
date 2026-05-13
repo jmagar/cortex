@@ -57,7 +57,6 @@ fi
 
 # ── Config from userConfig ────────────────────────────────────────────────────
 IS_SERVER="${CLAUDE_PLUGIN_OPTION_IS_SERVER:-true}"
-USE_DOCKER="${CLAUDE_PLUGIN_OPTION_USE_DOCKER:-false}"
 API_TOKEN="${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}"
 SERVER_URL="${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}"
 SYSLOG_HOST="${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST:-0.0.0.0}"
@@ -91,7 +90,6 @@ fi
 # ── Paths ─────────────────────────────────────────────────────────────────────
 ENV_FILE="${CLAUDE_PLUGIN_DATA}/.env"
 LEGACY_ENV_FILE="${CLAUDE_PLUGIN_DATA}/syslog-mcp.env"
-UNIT_FILE="${HOME}/.config/systemd/user/syslog-mcp.service"
 COMPOSE_DIR="${CLAUDE_PLUGIN_DATA}"
 COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.yml"
 
@@ -209,21 +207,12 @@ write_env() {
   batch_size="${batch_size:-100}"
   write_channel_capacity="${write_channel_capacity:-10000}"
 
-  if [[ "${USE_DOCKER}" == "true" ]]; then
-    # Docker compose reads these directly from .env. Pin UID/GID so the
-    # container writes syslog.db with the host user's ownership — keeps the
-    # same file readable by the systemd binary if you switch modes back.
-    local db_line="SYSLOG_MCP_DATA_VOLUME=${DATA_DIR}"
-    local config_line=""
-    local uid_line="SYSLOG_UID=$(id -u)"
-    local gid_line="SYSLOG_GID=$(id -g)"
-  else
-    # Systemd binary reads these as direct env vars
-    local db_line="SYSLOG_MCP_DB_PATH=${DATA_DIR}/syslog.db"
-    local config_line=""
-    local uid_line=""
-    local gid_line=""
-  fi
+  # Docker Compose reads these directly from .env. Pin UID/GID so the
+  # container writes syslog.db with the host user's ownership.
+  local db_line="SYSLOG_MCP_DATA_VOLUME=${DATA_DIR}"
+  local config_line=""
+  local uid_line="SYSLOG_UID=$(id -u)"
+  local gid_line="SYSLOG_GID=$(id -g)"
 
   local new_env
   new_env=$(cat << EOF
@@ -291,95 +280,6 @@ ensure_env_written() {
 }
 
 
-setup_systemd() {
-  mkdir -p "${HOME}/.config/systemd/user"
-
-  # ── Pre-flight checks ─────────────────────────────────────────────────────
-
-  # 1. Binary must exist — stale symlink after a plugin cache purge is a
-  #    common failure mode that would produce a cryptic systemd start error.
-  if [[ ! -x "${CLAUDE_PLUGIN_ROOT}/bin/syslog" ]]; then
-    echo "ERROR: syslog binary not found at ${CLAUDE_PLUGIN_ROOT}/bin/syslog" >&2
-    return 1
-  fi
-
-  # 2. Port conflict check — skip when the service is already running (it owns
-  #    the ports; systemctl restart will handle the swap atomically).
-  local service_running=false
-  if systemctl --user is-active --quiet syslog-mcp.service 2>/dev/null; then
-    service_running=true
-  fi
-  if [[ "${service_running}" == "false" ]]; then
-    for port_proto in "${SYSLOG_PORT}/udp" "${SYSLOG_PORT}/tcp" "${MCP_PORT}/tcp"; do
-      local port="${port_proto%%/*}" proto="${port_proto##*/}"
-      if ss -"${proto:0:1}"lnp "sport = :${port}" 2>/dev/null | awk 'NR>1 && NF>0' | grep -q .; then
-        echo "ERROR: port ${port}/${proto} is already in use — cannot start syslog-mcp" >&2
-        return 1
-      fi
-    done
-  fi
-
-  # 3. Data dir must be writable by the service user.
-  mkdir -p "${DATA_DIR}"
-  if ! touch "${DATA_DIR}/.write_test" 2>/dev/null; then
-    echo "ERROR: data dir ${DATA_DIR} is not writable by UID $(id -u)" >&2
-    return 1
-  fi
-  rm -f "${DATA_DIR}/.write_test"
-
-  # 4. Warn if the data volume is low on disk.
-  local free_mb
-  free_mb="$(df -k "${DATA_DIR}" | awk 'NR==2{printf "%d", $4/1024}')"
-  if (( free_mb < 512 )); then
-    echo "WARNING: only ${free_mb}MB free on ${DATA_DIR} — server may fail to start or write logs" >&2
-  fi
-
-  # ── Docker cleanup ────────────────────────────────────────────────────────
-
-  # If a previous run deployed via docker, stop the container first so the
-  # systemd binary can bind the same ports. Idempotent.
-  if [[ -f "${COMPOSE_FILE}" ]] && command -v docker >/dev/null 2>&1; then
-    if (cd "${COMPOSE_DIR}" && docker compose ps --quiet syslog-mcp 2>/dev/null | grep -q .); then
-      echo "syslog-mcp: stopping existing docker container before systemd cutover"
-      (cd "${COMPOSE_DIR}" && docker compose down)
-    fi
-  fi
-
-  local new_unit
-  new_unit=$(cat << EOF
-[Unit]
-Description=syslog-mcp server
-After=network.target
-
-[Service]
-ExecStart=${CLAUDE_PLUGIN_ROOT}/bin/syslog serve mcp
-EnvironmentFile=${ENV_FILE}
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
-)
-
-  local unit_changed=false
-  if ! diff -q <(echo "${new_unit}") "${UNIT_FILE}" >/dev/null 2>&1; then
-    echo "${new_unit}" > "${UNIT_FILE}"
-    unit_changed=true
-  fi
-
-  ensure_env_written
-
-  if [[ "${unit_changed}" == "true" ]]; then
-    systemctl --user daemon-reload
-    systemctl --user enable --now syslog-mcp
-  else
-    systemctl --user restart syslog-mcp
-  fi
-
-  echo "syslog-mcp: systemd service running on ${MCP_HOST}:${MCP_PORT}"
-}
-
 setup_docker() {
   mkdir -p "${COMPOSE_DIR}"
 
@@ -428,22 +328,15 @@ setup_docker() {
     echo "WARNING: only ${free_mb}MB free on ${DATA_DIR} — server may fail to start or write logs" >&2
   fi
 
-  # ── Systemd cleanup ───────────────────────────────────────────────────────
+  # ── Legacy systemd cleanup ───────────────────────────────────────────────
 
-  # Fully remove the systemd unit so it can't start on boot — docker compose
-  # handles restarts via restart: unless-stopped; systemd is not involved.
-  if systemctl --user list-unit-files syslog-mcp.service >/dev/null 2>&1; then
-    if systemctl --user is-active --quiet syslog-mcp.service; then
-      echo "syslog-mcp: stopping existing systemd unit before docker cutover"
-      systemctl --user stop syslog-mcp.service
-    fi
-    if systemctl --user is-enabled --quiet syslog-mcp.service 2>/dev/null; then
-      systemctl --user disable syslog-mcp.service >/dev/null 2>&1 || true
-    fi
-    if [[ -f "${UNIT_FILE}" ]]; then
-      rm -f "${UNIT_FILE}"
-      systemctl --user daemon-reload
-    fi
+  # Older plugin versions could create a user unit. Docker Compose is now the
+  # only automated server deployment, so remove the unit/drop-ins defensively.
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user disable --now syslog-mcp.service >/dev/null 2>&1 || true
+    rm -f "${HOME}/.config/systemd/user/syslog-mcp.service"
+    rm -rf "${HOME}/.config/systemd/user/syslog-mcp.service.d"
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
   fi
 
   # ── Compose setup ─────────────────────────────────────────────────────────
@@ -501,22 +394,9 @@ validate_client() {
   fi
 }
 
-link_binary() {
-  # Symlink the bundled binary into the user's PATH. ${CLAUDE_PLUGIN_ROOT}
-  # changes on plugin update, so we re-link every SessionStart.
-  mkdir -p "${HOME}/.local/bin"
-  ln -sf "${CLAUDE_PLUGIN_ROOT}/bin/syslog" "${HOME}/.local/bin/syslog"
-}
-
 # ── Main ──────────────────────────────────────────────────────────────────────
-link_binary
-
 if [[ "${IS_SERVER}" == "true" ]]; then
-  if [[ "${USE_DOCKER}" == "true" ]]; then
-    setup_docker
-  else
-    setup_systemd
-  fi
+  setup_docker
 else
   validate_client
 fi

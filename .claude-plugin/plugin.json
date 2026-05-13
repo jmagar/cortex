@@ -1,6 +1,6 @@
 {
   "name": "syslog",
-  "version": "0.20.1",
+  "version": "0.20.2",
   "description": "Syslog management via MCP",
   "author": { "name": "jmagar" },
   "repository": "https://github.com/jmagar/syslog-mcp",
@@ -21,13 +21,6 @@
       "description": "True on the ONE machine in your fleet that should ingest and store logs — it runs the syslog receiver (UDP+TCP), the SQLite store, and the MCP HTTP server. False on every other machine that just needs to query logs from Claude Code; those instances skip all local server setup and act as MCP clients only.",
       "required": true,
       "default": true
-    },
-    "use_docker": {
-      "type": "boolean",
-      "title": "Deploy with Docker",
-      "description": "Server-mode deployment method. True: run via the bundled docker compose stack (containerized, easier to upgrade/move, exposes ports 1514 and 3100, mounts data_dir as a volume). False: run the bundled binary as a systemd user service (lighter weight, no Docker dependency, logs go to journald). Both produce identical syslog-mcp behavior — pick based on your host's conventions. Ignored in client mode.",
-      "required": true,
-      "default": false
     },
     "server_url": {
       "type": "string",

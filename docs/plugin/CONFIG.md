@@ -13,7 +13,7 @@ The binary also includes direct local CLI commands such as `syslog search`,
 `syslog tail`, and `syslog stats`. These are useful for host-local scripts and
 manual diagnostics, but they are not plugin connection modes.
 
-The published Claude Code plugin remains HTTP-first because plugin installs commonly target a running Docker, systemd, or reverse-proxy deployment.
+The published Claude Code plugin remains HTTP-first because plugin installs commonly target a running Docker Compose or reverse-proxy deployment.
 
 Credentials flow through two files:
 
@@ -26,7 +26,7 @@ plugin.json userConfig (user enters values)
     --> HTTP connection to running syslog-mcp server
 ```
 
-The syslog-mcp server must be running separately (Docker Compose or systemd). The plugin only connects to it.
+The syslog-mcp server must be running separately. Server-mode plugin installs manage it with Docker Compose; client-mode installs only connect to an existing server.
 
 ## userConfig fields
 

@@ -1,6 +1,6 @@
 ---
 name: syslog-logs
-description: Tail or follow syslog-mcp service logs from Docker Compose or systemd journal depending on the current deployment mode. Use when the user asks for syslog-mcp service logs, startup logs, crash logs, plugin deployment logs, journal output, Docker logs, or follow mode. This is for the service's stdout/stderr, not client syslog entries.
+description: Tail or follow syslog-mcp service logs from Docker Compose. Use when the user asks for syslog-mcp service logs, startup logs, crash logs, plugin deployment logs, Docker logs, or follow mode. This is for the service's stdout/stderr, not client syslog entries.
 ---
 
 # Syslog Service Logs
@@ -9,15 +9,7 @@ Show recent syslog-mcp service logs. These are the binary's stdout/stderr, not s
 
 ## Workflow
 
-1. Determine deploy mode:
-
-   ```bash
-   echo "$CLAUDE_PLUGIN_OPTION_USE_DOCKER"
-   ```
-
-   `true` = Docker mode, `false` = systemd mode.
-
-2. Check server mode:
+1. Check server mode:
 
    ```bash
    echo "$CLAUDE_PLUGIN_OPTION_IS_SERVER"
@@ -25,15 +17,13 @@ Show recent syslog-mcp service logs. These are the binary's stdout/stderr, not s
 
    If `false`, explain that the local plugin is in client mode and has no local service logs to tail.
 
-3. Parse user arguments:
+2. Parse user arguments:
    - empty: last 50 lines, no follow
    - bare integer such as `100`: that many lines, no follow
    - `--follow` or `-f`: last 50 lines, then stream
    - integer plus follow flag: that many lines, then stream
 
-4. Run the mode-specific command.
-
-   Docker mode:
+3. Run Docker Compose logs:
 
    ```bash
    docker compose -f "${CLAUDE_PLUGIN_DATA}/docker-compose.yml" --project-directory "${CLAUDE_PLUGIN_DATA}" logs syslog-mcp --tail <N> --no-color
@@ -44,18 +34,6 @@ Show recent syslog-mcp service logs. These are the binary's stdout/stderr, not s
    If the plugin compose project has no container, report that Docker mode is
    configured but no plugin-managed container is running. Do not guess a source
    checkout path.
-
-   Systemd mode:
-
-   ```bash
-   journalctl --user -u syslog-mcp.service -n <N> --no-pager
-   ```
-
-   For follow mode:
-
-   ```bash
-   journalctl --user -u syslog-mcp.service -n <N> -f
-   ```
 
 ## Output
 
