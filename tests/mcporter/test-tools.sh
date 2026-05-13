@@ -45,7 +45,7 @@ readonly LOG_FILE="${TMPDIR:-/tmp}/${SCRIPT_NAME%.sh}.$(date +%Y%m%d-%H%M%S).log
 readonly ENV_FILE="${HOME}/.claude-homelab/.env"
 readonly AI_SMOKE_FIXTURE="${PROJECT_DIR}/tests/fixtures/ai-session-smoke.jsonl"
 readonly AI_SMOKE_PROJECT="/tmp/syslog-mcp-ai-smoke"
-readonly AI_SMOKE_QUERY="ai-smoke-authentication"
+readonly AI_SMOKE_QUERY='"ai-smoke-authentication"'
 
 # Colours (disabled automatically when stdout is not a terminal)
 if [[ -t 1 ]]; then
