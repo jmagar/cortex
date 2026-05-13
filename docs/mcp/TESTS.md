@@ -42,6 +42,10 @@ just test-live
 The smoke test (`scripts/smoke-test.sh`) exercises all `syslog` actions via mcporter.
 Compose diagnostics are non-mutating and are validated only for redacted shape,
 so the smoke test can pass on either Docker-backed or non-Docker deployments.
+When seeding is enabled, the smoke scripts import
+`tests/fixtures/ai-session-smoke.jsonl` and assert that `sessions`,
+`search_sessions`, and `project_context` can retrieve real AI transcript rows,
+not just empty response envelopes.
 
 Action registry covered by live/script references: `search`, `tail`, `errors`,
 `hosts`, `sessions`, `search_sessions`, `usage_blocks`, `project_context`,
@@ -112,7 +116,7 @@ curl -s -X POST http://localhost:3100/mcp \
 ## Testing checklist
 
 - [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions, syslog correlate, syslog stats, syslog status, syslog help
-- [ ] **AI session analytics return expected shape** -- syslog search_sessions, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects
+- [ ] **AI session analytics return expected shape and seeded rows** -- syslog search_sessions, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects
 - [ ] **Auth: valid token** -- 200 with correct Bearer token
 - [ ] **Auth: invalid token** -- 401 Unauthorized
 - [ ] **Auth: no token when required** -- 401 Unauthorized

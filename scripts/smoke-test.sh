@@ -33,6 +33,10 @@ SEED_HOST="smoke-test-host"
 GHOST_HOST="nonexistent-host-xyz-404"
 RUN_ID="${SYSLOG_SMOKE_RUN_ID:-$(date -u +%Y%m%d%H%M%S)}"
 TCP_MARKER="smoketcp${RUN_ID}"
+AI_SMOKE_FIXTURE="${SYSLOG_SMOKE_AI_FIXTURE:-tests/fixtures/ai-session-smoke.jsonl}"
+AI_SMOKE_PROJECT="/tmp/syslog-mcp-ai-smoke"
+AI_SMOKE_QUERY="ai-smoke-authentication"
+AI_SEEDED=0
 
 trap '[[ -n "$_MCPORTER_CONFIG_TMPFILE" ]] && rm -f "$_MCPORTER_CONFIG_TMPFILE"' EXIT
 
@@ -145,6 +149,27 @@ send_tcp_seed() {
     printf '%s\n' "$message" | nc -w2 "$SYSLOG_HOST" "$SYSLOG_PORT" >/dev/null
 }
 
+seed_ai_fixture() {
+    [[ -f "$AI_SMOKE_FIXTURE" ]] || return 1
+
+    local db_path="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-data/syslog.db}}"
+    local output rc
+    if [[ -x "target/debug/syslog" ]]; then
+        output="$(SYSLOG_MCP_DB_PATH="$db_path" target/debug/syslog ai add --file "$AI_SMOKE_FIXTURE" --json 2>&1)"
+        rc=$?
+    else
+        output="$(SYSLOG_MCP_DB_PATH="$db_path" cargo run --quiet -- ai add --file "$AI_SMOKE_FIXTURE" --json 2>&1)"
+        rc=$?
+    fi
+
+    if [[ "$rc" -eq 0 ]]; then
+        AI_SEEDED=1
+        echo "Seeded AI transcript fixture into ${db_path}: ${AI_SMOKE_FIXTURE}"
+    else
+        echo "WARN  AI transcript fixture seed skipped: ${output}" >&2
+    fi
+}
+
 # ─── Phase 1: Pre-flight ─────────────────────────────────────────────────────
 echo ""
 echo -e "${COLOR_BOLD}=== syslog-mcp smoke test ===${COLOR_RESET}"
@@ -171,6 +196,7 @@ if [[ "$SKIP_SEED" -eq 0 ]]; then
     printf '<2>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     printf '<12>%s %s dockerd[99]: smoke-test: warning container restart\n'  "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     send_tcp_seed "<14>$(date '+%b %e %H:%M:%S') ${SEED_HOST} tcpsmoke[77]: smoke-test tcp seed ${TCP_MARKER} bounded frame ok"
+    seed_ai_fixture || echo "WARN  AI transcript fixture seed unavailable"
     sleep 2
     echo "Seeded 5 messages (4 UDP, 1 TCP) from $SEED_HOST; TCP marker=$TCP_MARKER"
 else
@@ -281,9 +307,18 @@ print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "sessions: response structure valid" "$SESSIONS_VALID" "ok"
 
+if [[ "$AI_SEEDED" -eq 1 ]]; then
+    AI_SESSION_FOUND=$(echo "$SESSIONS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('ok' if any(s.get('project') == '${AI_SMOKE_PROJECT}' for s in d.get('sessions', [])) else 'missing')
+" 2>/dev/null || echo "error")
+    assert_eq "sessions: seeded AI project appears" "$AI_SESSION_FOUND" "ok"
+fi
+
 echo ""
 echo "Action: AI session analytics"
-SEARCH_SESSIONS=$(mcp_call search_sessions "query=authentication" "limit=10" 2>&1)
+SEARCH_SESSIONS=$(mcp_call search_sessions "query=${AI_SMOKE_QUERY}" "limit=10" 2>&1)
 assert_no_error "search_sessions: no error" "$SEARCH_SESSIONS"
 SEARCH_SESSIONS_VALID=$(echo "$SEARCH_SESSIONS" | python3 -c "
 import sys, json
@@ -293,6 +328,14 @@ assert isinstance(d.get('sessions'), list), 'sessions not a list'
 print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "search_sessions: response structure valid" "$SEARCH_SESSIONS_VALID" "ok"
+if [[ "$AI_SEEDED" -eq 1 ]]; then
+    SEARCH_SESSIONS_FOUND=$(echo "$SEARCH_SESSIONS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('ok' if d.get('total_candidates', 0) >= 1 else 'missing')
+" 2>/dev/null || echo "error")
+    assert_eq "search_sessions: seeded fixture is searchable" "$SEARCH_SESSIONS_FOUND" "ok"
+fi
 
 USAGE_BLOCKS=$(mcp_call usage_blocks 2>&1)
 assert_no_error "usage_blocks: no error" "$USAGE_BLOCKS"
@@ -305,16 +348,24 @@ print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "usage_blocks: response structure valid" "$USAGE_BLOCKS_VALID" "ok"
 
-PROJECT_CONTEXT=$(mcp_call project_context "project=/tmp" "limit=5" 2>&1)
+PROJECT_CONTEXT=$(mcp_call project_context "project=${AI_SMOKE_PROJECT}" "limit=5" 2>&1)
 assert_no_error "project_context: no error" "$PROJECT_CONTEXT"
 PROJECT_CONTEXT_VALID=$(echo "$PROJECT_CONTEXT" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-assert d.get('project') == '/tmp', 'project mismatch'
+assert d.get('project') == '${AI_SMOKE_PROJECT}', 'project mismatch'
 assert isinstance(d.get('recent_entries'), list), 'recent_entries not a list'
 print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "project_context: response structure valid" "$PROJECT_CONTEXT_VALID" "ok"
+if [[ "$AI_SEEDED" -eq 1 ]]; then
+    PROJECT_CONTEXT_FOUND=$(echo "$PROJECT_CONTEXT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('ok' if len(d.get('recent_entries', [])) >= 1 else 'missing')
+" 2>/dev/null || echo "error")
+    assert_eq "project_context: seeded fixture has entries" "$PROJECT_CONTEXT_FOUND" "ok"
+fi
 
 AI_TOOLS=$(mcp_call list_ai_tools 2>&1)
 assert_no_error "list_ai_tools: no error" "$AI_TOOLS"

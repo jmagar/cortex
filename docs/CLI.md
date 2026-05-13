@@ -190,12 +190,14 @@ syslog ai index
 syslog ai index --path ~/.claude/projects
 ```
 
-Path policy is intentionally narrow. `--path /`, `--path $HOME`, and the repo
-root are rejected before recursive scanning; symlinks are skipped. Directories
-are scanned only for `.jsonl` transcript files, unsupported files are counted
-but not parsed, and each file is streamed line-by-line with chunked SQLite
-transactions. If storage guardrails cannot recover enough space, indexing stops
-committing new chunks and reports `storage_blocked_chunks`.
+Path policy is intentionally narrow. Recursive `--path` scans are accepted only
+for known transcript roots (`~/.claude/projects`, `~/.codex/sessions`) or their
+children; one explicit `.jsonl` file can be imported outside those roots.
+`--path /`, `--path $HOME`, and the repo root are rejected before walking, and
+symlinks are skipped. Directories are scanned only for `.jsonl` transcript
+files, unsupported files are counted but not parsed, and each file is streamed
+line-by-line with chunked SQLite transactions. If storage guardrails cannot
+recover enough space, indexing fails before committing additional chunks.
 
 ### `syslog ai add`
 

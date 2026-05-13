@@ -43,6 +43,9 @@ readonly SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 readonly TS_START="$(date +%s%N)"
 readonly LOG_FILE="${TMPDIR:-/tmp}/${SCRIPT_NAME%.sh}.$(date +%Y%m%d-%H%M%S).log"
 readonly ENV_FILE="${HOME}/.claude-homelab/.env"
+readonly AI_SMOKE_FIXTURE="${PROJECT_DIR}/tests/fixtures/ai-session-smoke.jsonl"
+readonly AI_SMOKE_PROJECT="/tmp/syslog-mcp-ai-smoke"
+readonly AI_SMOKE_QUERY="ai-smoke-authentication"
 
 # Colours (disabled automatically when stdout is not a terminal)
 if [[ -t 1 ]]; then
@@ -75,6 +78,7 @@ declare -a FAIL_NAMES=()
 # Runtime globals — populated after ENV load
 MCP_URL=''
 MCPORTER_HEADER_ARGS=()
+AI_SEEDED=false
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -167,6 +171,17 @@ load_env() {
   else
     log_info "Auth: none (SYSLOG_MCP_TOKEN unset)"
   fi
+}
+
+seed_ai_fixture() {
+  [[ -f "${AI_SMOKE_FIXTURE}" ]] || return 1
+  local db_path="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-${PROJECT_DIR}/data/syslog.db}}"
+  if [[ -x "${PROJECT_DIR}/target/debug/syslog" ]]; then
+    SYSLOG_MCP_DB_PATH="${db_path}" "${PROJECT_DIR}/target/debug/syslog" ai add --file "${AI_SMOKE_FIXTURE}" --json >/dev/null
+  else
+    (cd "${PROJECT_DIR}" && SYSLOG_MCP_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${AI_SMOKE_FIXTURE}" --json >/dev/null)
+  fi
+  AI_SEEDED=true
 }
 
 # ---------------------------------------------------------------------------
@@ -493,17 +508,23 @@ suite_sessions() {
   run_test "syslog sessions: returns sessions array"     syslog sessions '{"limit":10}' "sessions"
   run_test "syslog sessions: count field present"         syslog sessions '{"limit":5}' "count"
   run_test "syslog search_sessions: returns sessions array" \
-    syslog search_sessions '{"query":"error","limit":10}' "sessions"
+    syslog search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "sessions"
   run_test "syslog search_sessions: total_candidates present" \
-    syslog search_sessions '{"query":"error","limit":10}' "total_candidates"
+    syslog search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "total_candidates"
   run_test "syslog usage_blocks: returns blocks array" \
     syslog usage_blocks '{}' "blocks"
   run_test "syslog project_context: returns project field" \
-    syslog project_context '{"project":"/tmp","limit":5}' "project"
+    syslog project_context "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":5}')" "project"
   run_test "syslog list_ai_tools: returns tools array" \
     syslog list_ai_tools '{}' "tools"
   run_test "syslog list_ai_projects: returns projects array" \
     syslog list_ai_projects '{}' "projects"
+  if [[ "${AI_SEEDED}" == true ]]; then
+    run_test "syslog search_sessions: seeded fixture searchable" \
+      syslog search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "sessions.0.project"
+    run_test "syslog project_context: seeded fixture entries" \
+      syslog project_context "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":5}')" "recent_entries.0.message"
+  fi
 }
 
 suite_tail() {
@@ -835,6 +856,12 @@ main() {
     log_error "    -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}'"
     exit 2
   }
+
+  if seed_ai_fixture; then
+    log_info "Seeded AI transcript fixture"
+  else
+    log_warn "AI transcript fixture seed skipped; AI analytics checks will validate response shape only"
+  fi
 
   if [[ "${USE_PARALLEL}" == true ]]; then
     run_parallel

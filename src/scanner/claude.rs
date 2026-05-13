@@ -30,8 +30,20 @@ pub fn parse_line(
             .map(ToString::to_string),
         message,
         session_id,
-        ai_project: None,
+        ai_project: extract_project(&value),
     }))
+}
+
+fn extract_project(value: &Value) -> Option<String> {
+    value
+        .get("cwd")
+        .or_else(|| value.get("projectPath"))
+        .or_else(|| value.get("project_path"))
+        .or_else(|| value.pointer("/message/cwd"))
+        .or_else(|| value.pointer("/message/projectPath"))
+        .or_else(|| value.pointer("/message/project_path"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
 }
 
 fn extract_message(value: &Value) -> String {

@@ -50,6 +50,93 @@ fn parse_errors_are_counted_without_panicking() {
 }
 
 #[test]
+fn oversized_records_are_counted_without_importing() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("oversized.jsonl");
+    let oversized = "x".repeat(MAX_RECORD_SIZE_BYTES + 10);
+    std::fs::write(
+        &file,
+        format!("{{\"sessionId\":\"sess-1\",\"content\":\"{oversized}\"}}\n"),
+    )
+    .unwrap();
+
+    let result = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(result.ingested, 0);
+    assert_eq!(result.parse_errors, 1);
+}
+
+#[test]
+fn invalid_timestamp_does_not_record_import_identity() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("bad-time.jsonl");
+    std::fs::write(
+        &file,
+        "{\"sessionId\":\"sess-1\",\"timestamp\":\"not-a-time\",\"content\":\"bad time\"}\n",
+    )
+    .unwrap();
+
+    let err = index_file(&pool, &file, "explicit_file").unwrap_err();
+    assert!(err.to_string().contains("invalid transcript timestamp"));
+
+    let conn = pool.get().unwrap();
+    let import_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM transcript_import_records",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let log_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(import_count, 0);
+    assert_eq!(log_count, 0);
+}
+
+#[test]
+fn index_file_commits_multiple_chunks_but_marks_completion_once() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("multi.jsonl");
+    let mut content = String::new();
+    for i in 0..(MAX_INDEX_CHUNK_RECORDS + 1) {
+        content.push_str(&format!(
+            "{{\"sessionId\":\"sess-1\",\"content\":\"chunk {i}\"}}\n"
+        ));
+    }
+    std::fs::write(&file, content).unwrap();
+
+    let result = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(result.ingested, MAX_INDEX_CHUNK_RECORDS + 1);
+    assert_eq!(result.checkpoint_updates, 1);
+}
+
+#[test]
+fn storage_write_block_returns_error_without_importing() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("blocked.jsonl");
+    std::fs::write(
+        &file,
+        "{\"sessionId\":\"sess-1\",\"content\":\"blocked\"}\n",
+    )
+    .unwrap();
+    let storage = crate::config::StorageConfig {
+        db_path: dir.path().join("test.db"),
+        min_free_disk_mb: u64::MAX / 1_048_576,
+        recovery_free_disk_mb: u64::MAX / 1_048_576,
+        ..crate::config::StorageConfig::for_test(dir.path().join("test.db"))
+    };
+
+    let err = index_file_with_storage(&pool, &file, "explicit_file", Some(&storage)).unwrap_err();
+    assert!(err.to_string().contains("storage budget write-blocked"));
+    let log_count: i64 = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(log_count, 0);
+}
+
+#[test]
 fn index_file_reimports_rewritten_line_with_different_content() {
     let (pool, dir) = test_pool();
     let file = dir.path().join("session.jsonl");
@@ -63,6 +150,26 @@ fn index_file_reimports_rewritten_line_with_different_content() {
     let second = index_file(&pool, &file, "explicit_file").unwrap();
     assert_eq!(second.ingested, 1);
     assert_eq!(second.skipped_dupes, 0);
+}
+
+#[test]
+fn scanner_drops_oversized_metadata_fields() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("metadata.jsonl");
+    let long_project = "p".repeat(MAX_AI_PROJECT_CHARS + 1);
+    let long_session = "s".repeat(MAX_AI_SESSION_ID_CHARS + 1);
+    std::fs::write(
+        &file,
+        format!(
+            "{{\"sessionId\":\"{long_session}\",\"cwd\":\"{long_project}\",\"content\":\"metadata kept\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    index_file(&pool, &file, "explicit_file").unwrap();
+    let row = tail_logs(&pool, None, None, None, None, 1).unwrap();
+    assert_eq!(row[0].ai_project, None);
+    assert_eq!(row[0].ai_session_id, None);
 }
 
 #[test]

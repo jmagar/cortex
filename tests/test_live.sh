@@ -51,6 +51,10 @@ VERBOSE=false
 PORT="${PORT:-3100}"
 CONTAINER_NAME="syslog-mcp-test-$$"
 IMAGE_NAME="syslog-mcp-test"
+AI_SMOKE_FIXTURE="tests/fixtures/ai-session-smoke.jsonl"
+AI_SMOKE_PROJECT="/tmp/syslog-mcp-ai-smoke"
+AI_SMOKE_QUERY="ai-smoke-authentication"
+AI_SEEDED=false
 
 # ---------------------------------------------------------------------------
 # Counters
@@ -205,6 +209,25 @@ build_auth_args() {
   if [[ -n "${TOKEN}" ]]; then
     AUTH_ARGS=(-H "Authorization: Bearer ${TOKEN}")
   fi
+}
+
+seed_ai_fixture_local() {
+  [[ -f "${AI_SMOKE_FIXTURE}" ]] || return 1
+  local db_path="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-data/syslog.db}}"
+  if [[ -x "target/debug/syslog" ]]; then
+    SYSLOG_MCP_DB_PATH="${db_path}" target/debug/syslog ai add --file "${AI_SMOKE_FIXTURE}" --json >/dev/null
+  else
+    SYSLOG_MCP_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${AI_SMOKE_FIXTURE}" --json >/dev/null
+  fi
+  AI_SEEDED=true
+}
+
+seed_ai_fixture_container() {
+  local project_dir="$1"
+  local container_fixture="/tmp/ai-session-smoke.jsonl"
+  docker cp "${project_dir}/${AI_SMOKE_FIXTURE}" "${CONTAINER_NAME}:${container_fixture}" >/dev/null
+  docker exec "${CONTAINER_NAME}" syslog ai add --file "${container_fixture}" --json >/dev/null
+  AI_SEEDED=true
 }
 
 # ---------------------------------------------------------------------------
@@ -492,11 +515,18 @@ phase_tools() {
 
   assert_jq "syslog sessions — count field present" "${sessions_result}" '.count != null'
   assert_jq "syslog sessions — sessions field is array" "${sessions_result}" '.sessions | type' "array"
+  if [[ "${AI_SEEDED}" == true ]]; then
+    assert_jq "syslog sessions — seeded AI project appears" "${sessions_result}" \
+      "any(.sessions[]?; .project == \"${AI_SMOKE_PROJECT}\")" "true"
+  fi
 
   local search_sessions_result
-  search_sessions_result="$(call_tool syslog '{"action":"search_sessions","query":"error","limit":10}')" || search_sessions_result=""
+  search_sessions_result="$(call_tool syslog "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"action":"search_sessions","query":$q,"limit":10}')")" || search_sessions_result=""
   assert_jq "syslog search_sessions — total_candidates present" "${search_sessions_result}" '.total_candidates != null'
   assert_jq "syslog search_sessions — sessions field is array" "${search_sessions_result}" '.sessions | type' "array"
+  if [[ "${AI_SEEDED}" == true ]]; then
+    assert_jq "syslog search_sessions — seeded fixture is searchable" "${search_sessions_result}" '.total_candidates >= 1' "true"
+  fi
 
   local usage_blocks_result
   usage_blocks_result="$(call_tool syslog '{"action":"usage_blocks"}')" || usage_blocks_result=""
@@ -504,9 +534,12 @@ phase_tools() {
   assert_jq "syslog usage_blocks — truncated field present" "${usage_blocks_result}" '.truncated != null'
 
   local project_context_result
-  project_context_result="$(call_tool syslog '{"action":"project_context","project":"/tmp","limit":5}')" || project_context_result=""
-  assert_jq "syslog project_context — project field present" "${project_context_result}" '.project' "/tmp"
+  project_context_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"project_context","project":$project,"limit":5}')")" || project_context_result=""
+  assert_jq "syslog project_context — project field present" "${project_context_result}" '.project' "${AI_SMOKE_PROJECT}"
   assert_jq "syslog project_context — recent_entries field is array" "${project_context_result}" '.recent_entries | type' "array"
+  if [[ "${AI_SEEDED}" == true ]]; then
+    assert_jq "syslog project_context — seeded fixture has entries" "${project_context_result}" '.recent_entries | length >= 1' "true"
+  fi
 
   local ai_tools_result
   ai_tools_result="$(call_tool syslog '{"action":"list_ai_tools"}')" || ai_tools_result=""
@@ -694,6 +727,13 @@ run_docker_mode() {
     sleep 1
   done
 
+  section "Docker — Seed AI transcript fixture"
+  if seed_ai_fixture_container "${project_dir}"; then
+    log_info "Seeded AI transcript fixture"
+  else
+    log_warn "AI transcript fixture seed failed; AI analytics checks will validate response shape only"
+  fi
+
   # Run all test phases
   build_auth_args
   run_test_phases
@@ -708,6 +748,11 @@ run_docker_mode() {
 run_http_mode() {
   log_info "HTTP mode — testing against ${BASE_URL}"
   build_auth_args
+  if seed_ai_fixture_local; then
+    log_info "Seeded AI transcript fixture"
+  else
+    log_warn "AI transcript fixture seed skipped; AI analytics checks will validate response shape only"
+  fi
   run_test_phases
   print_summary
 }

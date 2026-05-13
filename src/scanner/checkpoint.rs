@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension, Transaction};
 
@@ -35,15 +33,6 @@ impl<'a> CheckpointStore<'a> {
         Ok(conn.last_insert_rowid())
     }
 
-    pub fn record_keys(&self, source_id: i64) -> Result<HashSet<String>> {
-        let conn = self.pool.get()?;
-        let mut stmt = conn.prepare_cached(
-            "SELECT record_key FROM transcript_import_records WHERE source_id = ?1",
-        )?;
-        let rows = stmt.query_map([source_id], |row| row.get::<_, String>(0))?;
-        Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
-    }
-
     pub fn mark_error(&self, source_id: i64, error: &str) -> Result<()> {
         let conn = self.pool.get()?;
         conn.execute(
@@ -56,21 +45,30 @@ impl<'a> CheckpointStore<'a> {
     }
 }
 
-pub fn record_imports_in_tx(
+pub fn claim_imports_in_tx(
     tx: &Transaction<'_>,
     source_id: i64,
     record_keys: &[String],
+) -> Result<Vec<bool>> {
+    let mut claimed = Vec::with_capacity(record_keys.len());
+    if record_keys.is_empty() {
+        return Ok(claimed);
+    }
+    let mut stmt = tx.prepare_cached(
+        "INSERT OR IGNORE INTO transcript_import_records (source_id, record_key)
+         VALUES (?1, ?2)",
+    )?;
+    for record_key in record_keys {
+        claimed.push(stmt.execute(params![source_id, record_key])? == 1);
+    }
+    Ok(claimed)
+}
+
+pub fn update_source_metadata_in_tx(
+    tx: &Transaction<'_>,
+    source_id: i64,
     file_metadata: &FileMetadata,
 ) -> Result<()> {
-    if !record_keys.is_empty() {
-        let mut stmt = tx.prepare_cached(
-            "INSERT OR IGNORE INTO transcript_import_records (source_id, record_key)
-             VALUES (?1, ?2)",
-        )?;
-        for record_key in record_keys {
-            stmt.execute(params![source_id, record_key])?;
-        }
-    }
     tx.execute(
         "UPDATE transcript_sources
          SET file_size = ?2,
@@ -88,6 +86,27 @@ pub fn record_imports_in_tx(
             file_metadata.size as i64,
         ],
     )?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub fn record_imports_in_tx(
+    tx: &Transaction<'_>,
+    source_id: i64,
+    record_keys: &[String],
+    file_metadata: &FileMetadata,
+) -> Result<()> {
+    let claimed = claim_imports_in_tx(tx, source_id, record_keys)?;
+    if claimed.iter().any(|value| *value) || record_keys.is_empty() {
+        update_source_metadata_in_tx(tx, source_id, file_metadata)?;
+    } else {
+        tx.execute(
+            "UPDATE transcript_sources
+             SET last_error = NULL
+             WHERE id = ?1",
+            params![source_id],
+        )?;
+    }
     Ok(())
 }
 
