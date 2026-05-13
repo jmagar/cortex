@@ -364,6 +364,23 @@ Each stored log entry has these fields:
 | `ai_session_id` | text\|null | AI session unique identifier |
 | `ai_transcript_path` | text\|null | Full path to the source transcript file |
 
+### AI transcript indexing
+
+`syslog ai index` scans the default local transcript roots
+`~/.claude/projects` and `~/.codex/sessions`; `syslog ai index --path PATH`
+can scan a specific transcript directory or `.jsonl` file, and
+`syslog ai add --file FILE` imports one file. Recursive scans reject broad roots
+such as `/`, `$HOME`, and the current repo root before walking, skip symlinks,
+count unsupported non-`.jsonl` files without parsing them, and stream transcript
+files line-by-line in bounded SQLite chunks.
+
+Imported AI transcript messages are scrubbed for known credential/token patterns
+before storage and FTS indexing. The rows still live in the main `logs` table, so
+raw actions such as `search`, `tail`, `context`, and `get` can return scrubbed
+transcript text and local `ai_transcript_path` values. If storage guardrails
+cannot recover enough space, scanner chunks are not committed and index results
+report `storage_blocked_chunks`.
+
 **Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker ingest entries, `source_ip` identifies the configured Docker ingest host/container/stream and should be trusted only as far as the configured docker-socket-proxy endpoint and network path are trusted. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
 
 ### Severity levels

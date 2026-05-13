@@ -145,6 +145,9 @@ Bucket AI activity into 5-hour UTC windows.
 syslog ai blocks --project /home/jmagar/workspace/syslog-mcp
 ```
 
+When `--from` is omitted, usage blocks default to the last 30 days. Returned
+JSON includes `total_blocks` and `truncated`; at most 1000 buckets are returned.
+
 ### `syslog ai context`
 
 Summarize one AI project path.
@@ -152,6 +155,9 @@ Summarize one AI project path.
 ```bash
 syslog ai context --project /home/jmagar/workspace/syslog-mcp --limit 5
 ```
+
+Recent representative entries are capped at 20 rows, and message snippets are
+bounded to 512 characters for predictable MCP/CLI payload size.
 
 ### `syslog ai tools`
 
@@ -161,6 +167,9 @@ List distinct AI tools with counts.
 syslog ai tools --json
 ```
 
+Returned JSON includes `total_tools` and `truncated`; at most 100 tools are
+returned.
+
 ### `syslog ai projects`
 
 List distinct AI projects with counts.
@@ -168,6 +177,9 @@ List distinct AI projects with counts.
 ```bash
 syslog ai projects --tool claude
 ```
+
+Returned JSON includes `total_projects` and `truncated`; at most 200 projects
+are returned.
 
 ### `syslog ai index`
 
@@ -178,6 +190,13 @@ syslog ai index
 syslog ai index --path ~/.claude/projects
 ```
 
+Path policy is intentionally narrow. `--path /`, `--path $HOME`, and the repo
+root are rejected before recursive scanning; symlinks are skipped. Directories
+are scanned only for `.jsonl` transcript files, unsupported files are counted
+but not parsed, and each file is streamed line-by-line with chunked SQLite
+transactions. If storage guardrails cannot recover enough space, indexing stops
+committing new chunks and reports `storage_blocked_chunks`.
+
 ### `syslog ai add`
 
 Ingest one explicit transcript file.
@@ -185,6 +204,11 @@ Ingest one explicit transcript file.
 ```bash
 syslog ai add --file ~/.claude/projects/example/session.jsonl
 ```
+
+Imported transcript messages are scrubbed for known credential/token patterns
+before storage and FTS indexing. Raw log actions can still expose scrubbed AI
+messages and local `ai_transcript_path` values, so do not expose the database or
+MCP endpoint to untrusted clients.
 
 ### `syslog correlate`
 

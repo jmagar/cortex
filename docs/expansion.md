@@ -57,7 +57,7 @@
 | auditd | killed via `audit=0` on dookie (kernel cmdline) | ✅ noise eliminated |
 | claude code OTel | none | ❌ missing |
 | codex OTel | none | ❌ missing |
-| claude/codex `.jsonl` transcripts | none | ❌ missing |
+| claude/codex `.jsonl` transcripts | `syslog ai index` / `syslog ai add` scanner | ✅ implemented; local scanner only |
 | libvirt (dookie) on tootie | none | ❌ TBD (Unraid API vs imfile) |
 
 **Why dockersocketproxy and not the syslog log driver:** if the syslog server is unreachable at container start, the syslog log driver will refuse to start the container. Pulling logs from the docker socket (read-only proxy) decouples container lifecycle from syslog-mcp availability. Trade-off: claude needs the proxy reachable to ingest, but containers run regardless.
@@ -239,7 +239,7 @@ Most-bang-for-buck items to do at ingest, not query time:
 
 - **Authelia severity parsing** — implemented; extract `level=` from structured body, override severity column
 - **AdGuard tag classification** — implemented; parse JSON line, set `tag` to `adguard-blocked` / `adguard-allowed` / `adguard-rewrite`
-- **claude/codex transcript metadata** — implemented; pull `project` and `tool` from `imfile` source filename, JSON body, or OTel attributes (e.g. `session.id`, `project.path`) into dedicated columns; query via `syslog sessions`
+- **claude/codex transcript metadata** — implemented; scanner imports local `.jsonl` transcripts into dedicated AI columns, scrubs known token patterns before storage, and queries via `syslog sessions` / `syslog ai *`. OTLP attributes still remain producer-supplied metadata and should not be treated as verified identity.
 - **Multi-line glomming** — fail2ban + authelia panics need `startmsg.regex` discipline (already in drop-ins below)
 
 ### 5.3 retention

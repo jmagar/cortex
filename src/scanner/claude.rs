@@ -45,7 +45,27 @@ fn extract_message(value: &Value) -> String {
         return text.to_string();
     }
     if let Some(items) = value.get("content").and_then(Value::as_array) {
-        let parts: Vec<&str> = items.iter().filter_map(Value::as_str).collect();
+        let parts: Vec<&str> = items
+            .iter()
+            .filter_map(|item| {
+                item.as_str()
+                    .or_else(|| item.get("text").and_then(Value::as_str))
+                    .or_else(|| item.get("content").and_then(Value::as_str))
+            })
+            .collect();
+        if !parts.is_empty() {
+            return parts.join(" ");
+        }
+    }
+    if let Some(items) = value.pointer("/message/content").and_then(Value::as_array) {
+        let parts: Vec<&str> = items
+            .iter()
+            .filter_map(|item| {
+                item.as_str()
+                    .or_else(|| item.get("text").and_then(Value::as_str))
+                    .or_else(|| item.get("content").and_then(Value::as_str))
+            })
+            .collect();
         if !parts.is_empty() {
             return parts.join(" ");
         }

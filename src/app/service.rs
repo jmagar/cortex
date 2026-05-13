@@ -331,8 +331,13 @@ impl SyslogService {
         &self,
         path: Option<String>,
     ) -> ServiceResult<scanner::IndexResult> {
+        let storage = self.storage.clone();
         self.run_db(move |pool| {
-            scanner::index_roots(pool, path.as_deref().map(std::path::Path::new))
+            scanner::index_roots_with_storage(
+                pool,
+                path.as_deref().map(std::path::Path::new),
+                Some(&storage),
+            )
         })
         .await
         .map_err(|error| match error {
@@ -342,8 +347,14 @@ impl SyslogService {
     }
 
     pub async fn add_ai_file(&self, file: String) -> ServiceResult<scanner::IndexResult> {
+        let storage = self.storage.clone();
         self.run_db(move |pool| {
-            scanner::index_file(pool, std::path::Path::new(&file), "explicit_file")
+            scanner::index_file_with_storage(
+                pool,
+                std::path::Path::new(&file),
+                "explicit_file",
+                Some(&storage),
+            )
         })
         .await
         .map_err(|error| match error {

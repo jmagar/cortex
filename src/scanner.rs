@@ -1,10 +1,13 @@
 use std::collections::HashSet;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use sha2::{Digest, Sha256};
 
-use crate::db::{insert_logs_batch_in_tx, DbPool, LogBatchEntry};
+use crate::config::StorageConfig;
+use crate::db::{enforce_storage_budget, insert_logs_batch_in_tx, DbPool, LogBatchEntry};
 use crate::syslog::enrichment::{project_from_transcript_path, scrub_ai_message};
 
 mod checkpoint;
@@ -14,6 +17,11 @@ mod codex;
 pub use checkpoint::CheckpointStore;
 
 const MAX_FILE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
+const MAX_RECORD_SIZE_BYTES: usize = 64 * 1024;
+const MAX_INDEX_CHUNK_RECORDS: usize = 500;
+const MAX_INDEX_CHUNK_BYTES: usize = 4 * 1024 * 1024;
+const MAX_AI_FIELD_CHARS: usize = 512;
+const MAX_TRANSCRIPT_PATH_CHARS: usize = 2048;
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct IndexResult {
@@ -22,6 +30,11 @@ pub struct IndexResult {
     pub skipped_dupes: usize,
     pub parse_errors: usize,
     pub skipped_files: usize,
+    pub unsupported_files: usize,
+    pub skipped_symlinks: usize,
+    pub skipped_unsafe_paths: usize,
+    pub storage_blocked_chunks: usize,
+    pub checkpoint_updates: usize,
     pub file_errors: Vec<IndexFileError>,
 }
 
@@ -59,9 +72,52 @@ pub fn validate_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn classify_path_error(error: &anyhow::Error, result: &mut IndexResult) {
+    let message = error.to_string();
+    if message.contains("symlinks are not allowed") {
+        result.skipped_symlinks += 1;
+    }
+    if message.contains("unsafe transcript scan path") {
+        result.skipped_unsafe_paths += 1;
+    }
+}
+
+fn reject_broad_scan_path(path: &Path) -> Result<()> {
+    let canonical = path.canonicalize()?;
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let cwd = std::env::current_dir().ok();
+    if canonical == Path::new("/")
+        || home.as_ref().is_some_and(|value| &canonical == value)
+        || cwd.as_ref().is_some_and(|value| &canonical == value)
+    {
+        bail!("unsafe transcript scan path: {}", canonical.display());
+    }
+    Ok(())
+}
+
 pub fn index_roots(pool: &DbPool, root_override: Option<&Path>) -> Result<IndexResult> {
+    index_roots_with_storage(pool, root_override, None)
+}
+
+pub fn index_roots_with_storage(
+    pool: &DbPool,
+    root_override: Option<&Path>,
+    storage: Option<&StorageConfig>,
+) -> Result<IndexResult> {
     let roots = match root_override {
-        Some(path) => vec![path.to_path_buf()],
+        Some(path) => {
+            let mut result = IndexResult::default();
+            if let Err(error) = validate_path(path).and_then(|_| reject_broad_scan_path(path)) {
+                classify_path_error(&error, &mut result);
+                result.skipped_files += 1;
+                result.file_errors.push(IndexFileError {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                });
+                return Ok(result);
+            }
+            vec![path.to_path_buf()]
+        }
         None => default_roots(),
     };
 
@@ -76,9 +132,10 @@ pub fn index_roots(pool: &DbPool, root_override: Option<&Path>) -> Result<IndexR
     files.sort();
     files.dedup();
     for file in files {
-        match index_file(pool, &file, detect_source_kind(&file).as_str()) {
+        match index_file_with_storage(pool, &file, detect_source_kind(&file).as_str(), storage) {
             Ok(file_result) => merge_result(&mut result, &file_result),
             Err(error) => {
+                classify_path_error(&error, &mut result);
                 tracing::warn!(path = %file.display(), error = %error, "Transcript file indexing failed");
                 result.skipped_files += 1;
                 result.file_errors.push(IndexFileError {
@@ -92,6 +149,15 @@ pub fn index_roots(pool: &DbPool, root_override: Option<&Path>) -> Result<IndexR
 }
 
 pub fn index_file(pool: &DbPool, path: &Path, source_kind: &str) -> Result<IndexResult> {
+    index_file_with_storage(pool, path, source_kind, None)
+}
+
+pub fn index_file_with_storage(
+    pool: &DbPool,
+    path: &Path,
+    source_kind: &str,
+    storage: Option<&StorageConfig>,
+) -> Result<IndexResult> {
     validate_path(path)?;
     if !path.is_file() {
         bail!("expected a file path: {}", path.display());
@@ -102,27 +168,56 @@ pub fn index_file(pool: &DbPool, path: &Path, source_kind: &str) -> Result<Index
     let source_kind = SourceKind::from_str(source_kind, &canonical_path);
     let tool = source_kind.tool_name();
     let mut fallback_project = project_for_file(source_kind, &canonical_path);
+    let mut fallback_session_id = if source_kind == SourceKind::CodexSession {
+        canonical_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(ToString::to_string)
+    } else {
+        None
+    };
     let checkpoint_store = checkpoint::CheckpointStore::new(pool);
     let source_id = checkpoint_store.ensure_source(&canonical, source_kind.as_str())?;
     let existing_keys = checkpoint_store.record_keys(source_id)?;
-    let content = fs::read_to_string(&canonical_path)?;
-    let file_metadata = FileMetadata::from_path(&canonical_path, &content)?;
     let mut seen_keys = HashSet::new();
     let mut imports = Vec::new();
     let mut batch = Vec::new();
+    let mut chunk_bytes = 0usize;
+    let file = fs::File::open(&canonical_path)?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut line = String::new();
+    let mut line_no = 0usize;
     let mut result = IndexResult {
         discovered_files: 1,
         ..Default::default()
     };
 
-    for (line_no, line) in content.lines().enumerate() {
-        if line.trim().is_empty() {
+    loop {
+        line.clear();
+        let bytes_read = reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(line.as_bytes());
+        let line_text = line.trim_end_matches(['\r', '\n']);
+        if line_text.trim().is_empty() {
+            line_no += 1;
+            continue;
+        }
+        if line_text.len() > MAX_RECORD_SIZE_BYTES {
+            result.parse_errors += 1;
+            checkpoint_store.mark_error(source_id, "transcript record exceeds max size")?;
+            line_no += 1;
             continue;
         }
         if source_kind == SourceKind::CodexSession {
-            fallback_project = codex::project_from_line(line).or_else(|| fallback_project.clone());
+            fallback_project =
+                codex::project_from_line(line_text).or_else(|| fallback_project.clone());
+            fallback_session_id =
+                codex::session_id_from_line(line_text).or_else(|| fallback_session_id.clone());
         }
-        match parse_line_for_source(source_kind, line, &canonical_path, line_no) {
+        match parse_line_for_source(source_kind, line_text, &canonical_path, line_no) {
             Ok(Some(parsed)) => {
                 let record_key = parsed.record_key;
                 if existing_keys.contains(&record_key) || !seen_keys.insert(record_key.clone()) {
@@ -132,8 +227,15 @@ pub fn index_file(pool: &DbPool, path: &Path, source_kind: &str) -> Result<Index
                 let message = scrub_ai_message(&parsed.message, None);
                 let project = parsed
                     .ai_project
-                    .clone()
+                    .as_deref()
+                    .and_then(|value| cap_field(value, MAX_AI_FIELD_CHARS))
                     .or_else(|| fallback_project.clone());
+                let session_id_source = parsed.session_id.or_else(|| fallback_session_id.clone());
+                let session_id = session_id_source
+                    .as_deref()
+                    .and_then(|value| cap_field(value, MAX_AI_FIELD_CHARS));
+                let transcript_path = cap_field(&canonical, MAX_TRANSCRIPT_PATH_CHARS);
+                chunk_bytes = chunk_bytes.saturating_add(message.len());
                 batch.push(LogBatchEntry {
                     timestamp: parsed.timestamp.unwrap_or_else(|| {
                         chrono::Utc::now()
@@ -151,10 +253,22 @@ pub fn index_file(pool: &DbPool, path: &Path, source_kind: &str) -> Result<Index
                     docker_checkpoint: None,
                     ai_tool: Some(tool.to_string()),
                     ai_project: project,
-                    ai_session_id: parsed.session_id,
-                    ai_transcript_path: Some(canonical.clone()),
+                    ai_session_id: session_id,
+                    ai_transcript_path: transcript_path,
                 });
                 imports.push(record_key);
+                if batch.len() >= MAX_INDEX_CHUNK_RECORDS || chunk_bytes >= MAX_INDEX_CHUNK_BYTES {
+                    flush_chunk(
+                        pool,
+                        storage,
+                        source_id,
+                        &mut batch,
+                        &mut imports,
+                        &FileMetadata::partial(&canonical_path)?,
+                        &mut result,
+                    )?;
+                    chunk_bytes = 0;
+                }
             }
             Ok(None) => {}
             Err(error) => {
@@ -162,23 +276,60 @@ pub fn index_file(pool: &DbPool, path: &Path, source_kind: &str) -> Result<Index
                 checkpoint_store.mark_error(source_id, &error.to_string())?;
             }
         }
+        line_no += 1;
     }
 
+    let file_metadata = FileMetadata::from_path_hash(&canonical_path, &hasher.finalize())?;
+    flush_chunk(
+        pool,
+        storage,
+        source_id,
+        &mut batch,
+        &mut imports,
+        &file_metadata,
+        &mut result,
+    )?;
+    Ok(result)
+}
+
+fn flush_chunk(
+    pool: &DbPool,
+    storage: Option<&StorageConfig>,
+    source_id: i64,
+    batch: &mut Vec<LogBatchEntry>,
+    imports: &mut Vec<String>,
+    file_metadata: &FileMetadata,
+    result: &mut IndexResult,
+) -> Result<()> {
     if batch.is_empty() {
-        return Ok(result);
+        return Ok(());
+    }
+
+    if let Some(storage) = storage {
+        let outcome = enforce_storage_budget(pool, storage)?;
+        if outcome.write_blocked {
+            result.storage_blocked_chunks += 1;
+            batch.clear();
+            imports.clear();
+            return Ok(());
+        }
     }
 
     let mut conn = pool.get()?;
     let tx = conn.transaction()?;
-    insert_logs_batch_in_tx(&tx, &batch)?;
-    checkpoint::record_imports_in_tx(&tx, source_id, &imports, &file_metadata)?;
+    insert_logs_batch_in_tx(&tx, batch)?;
+    checkpoint::record_imports_in_tx(&tx, source_id, imports, file_metadata)?;
     tx.commit()?;
-    result.ingested = batch.len();
-    Ok(result)
+    result.ingested += batch.len();
+    result.checkpoint_updates += 1;
+    batch.clear();
+    imports.clear();
+    Ok(())
 }
 
 fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut IndexResult) {
     if let Err(error) = validate_path(path) {
+        classify_path_error(&error, result);
         result.skipped_files += 1;
         result.file_errors.push(IndexFileError {
             path: path.display().to_string(),
@@ -189,6 +340,8 @@ fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut I
     if path.is_file() {
         if supported_discovered_file(path) {
             files.push(path.to_path_buf());
+        } else {
+            result.unsupported_files += 1;
         }
         return;
     }
@@ -223,6 +376,8 @@ fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut I
             collect_supported_files(&entry, files, result);
         } else if supported_discovered_file(&entry) {
             files.push(entry);
+        } else {
+            result.unsupported_files += 1;
         }
     }
 }
@@ -289,7 +444,24 @@ fn merge_result(total: &mut IndexResult, next: &IndexResult) {
     total.skipped_dupes += next.skipped_dupes;
     total.parse_errors += next.parse_errors;
     total.skipped_files += next.skipped_files;
+    total.unsupported_files += next.unsupported_files;
+    total.skipped_symlinks += next.skipped_symlinks;
+    total.skipped_unsafe_paths += next.skipped_unsafe_paths;
+    total.storage_blocked_chunks += next.storage_blocked_chunks;
+    total.checkpoint_updates += next.checkpoint_updates;
     total.file_errors.extend(next.file_errors.iter().cloned());
+}
+
+fn cap_field(value: &str, max_chars: usize) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    for ch in trimmed.chars().take(max_chars) {
+        out.push(ch);
+    }
+    Some(out)
 }
 
 fn default_roots() -> Vec<PathBuf> {
@@ -320,7 +492,11 @@ pub(crate) struct FileMetadata {
 }
 
 impl FileMetadata {
-    fn from_path(path: &Path, content: &str) -> Result<Self> {
+    fn partial(path: &Path) -> Result<Self> {
+        Self::from_path_hash(path, &Sha256::new().finalize())
+    }
+
+    fn from_path_hash(path: &Path, hash: &[u8]) -> Result<Self> {
         let metadata = fs::metadata(path)?;
         let mtime = metadata
             .modified()
@@ -330,9 +506,13 @@ impl FileMetadata {
         Ok(Self {
             size: metadata.len(),
             mtime,
-            content_hash: hash_text(content),
+            content_hash: hex_digest(hash),
         })
     }
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 pub(crate) fn record_key_from_line(value: &serde_json::Value, line: &str) -> String {

@@ -28,8 +28,8 @@ impl<'a> CheckpointStore<'a> {
             return Ok(id);
         }
         conn.execute(
-            "INSERT INTO transcript_sources (canonical_path, source_kind, last_indexed_at)
-             VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "INSERT INTO transcript_sources (canonical_path, source_kind)
+             VALUES (?1, ?2)",
             params![canonical_path, source_kind],
         )?;
         Ok(conn.last_insert_rowid())
@@ -48,8 +48,7 @@ impl<'a> CheckpointStore<'a> {
         let conn = self.pool.get()?;
         conn.execute(
             "UPDATE transcript_sources
-             SET last_error = ?2,
-                 last_indexed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             SET last_error = ?2
              WHERE id = ?1",
             params![source_id, error],
         )?;

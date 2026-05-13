@@ -175,6 +175,7 @@ impl From<db::AiUsageBlock> for UsageBlock {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageBlocksResponse {
+    pub total_blocks: usize,
     pub truncated: bool,
     pub blocks: Vec<UsageBlock>,
 }
@@ -182,6 +183,7 @@ pub struct UsageBlocksResponse {
 impl From<db::AiUsageBlocksResult> for UsageBlocksResponse {
     fn from(value: db::AiUsageBlocksResult) -> Self {
         Self {
+            total_blocks: value.total_blocks,
             truncated: value.truncated,
             blocks: value.blocks.into_iter().map(Into::into).collect(),
         }
@@ -204,6 +206,7 @@ pub struct ProjectContextResponse {
     pub first_seen: Option<String>,
     pub last_seen: Option<String>,
     pub event_count: i64,
+    pub recent_entries_truncated: bool,
     pub recent_entries: Vec<LogEntry>,
 }
 
@@ -217,6 +220,7 @@ impl From<db::AiProjectContext> for ProjectContextResponse {
             first_seen: value.first_seen,
             last_seen: value.last_seen,
             event_count: value.event_count,
+            recent_entries_truncated: value.recent_entries_truncated,
             recent_entries: value.recent_entries.into_iter().map(Into::into).collect(),
         }
     }
@@ -252,12 +256,16 @@ impl From<db::AiToolInventoryEntry> for AiToolEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListAiToolsResponse {
+    pub total_tools: usize,
+    pub truncated: bool,
     pub tools: Vec<AiToolEntry>,
 }
 
 impl From<db::ListAiToolsResult> for ListAiToolsResponse {
     fn from(value: db::ListAiToolsResult) -> Self {
         Self {
+            total_tools: value.total_tools,
+            truncated: value.truncated,
             tools: value.tools.into_iter().map(Into::into).collect(),
         }
     }
@@ -295,12 +303,16 @@ impl From<db::AiProjectInventoryEntry> for AiProjectEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListAiProjectsResponse {
+    pub total_projects: usize,
+    pub truncated: bool,
     pub projects: Vec<AiProjectEntry>,
 }
 
 impl From<db::ListAiProjectsResult> for ListAiProjectsResponse {
     fn from(value: db::ListAiProjectsResult) -> Self {
         Self {
+            total_projects: value.total_projects,
+            truncated: value.truncated,
             projects: value.projects.into_iter().map(Into::into).collect(),
         }
     }

@@ -137,6 +137,13 @@ fn parse_ai_add_requires_file() {
 }
 
 #[test]
+fn truncate_is_utf8_safe_for_non_ascii_project_names() {
+    let value = truncate("项目路径-alpha", 6);
+    assert!(value.ends_with('…'));
+    assert!(value.is_char_boundary(value.len()));
+}
+
+#[test]
 fn parse_search_help_points_to_top_level_usage() {
     let err = CliCommand::parse(strings(&["search", "--help"])).unwrap_err();
 

@@ -46,7 +46,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "query": {
                     "type": "string",
-                    "description": "For action=search or action=correlate: FTS5 query. Examples: 'kernel panic', 'OOM AND killer', '\"connection refused\"', 'error*'."
+                    "description": "For action=search, search_sessions, or correlate: FTS5 query. Examples: 'kernel panic', 'OOM AND killer', '\"connection refused\"', 'error*'."
                 },
                 "hostname": {
                     "type": "string",
@@ -97,7 +97,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100. For action=project_context: recent representative entries, default 5, max 20. For action=correlate: max total events, default 500, max 999."
+                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100. For action=project_context: recent representative entries, default 5, max 20 with 512-char message snippets. For action=correlate: max total events, default 500, max 999."
                 },
                 "n": {
                     "type": "integer",

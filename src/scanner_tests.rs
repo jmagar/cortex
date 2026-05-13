@@ -179,6 +179,82 @@ fn index_roots_ignores_claude_sessions_index_metadata() {
 }
 
 #[test]
+fn index_roots_rejects_broad_home_root_and_repo_paths() {
+    let (pool, _dir) = test_pool();
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    let repo = std::env::current_dir().unwrap();
+
+    for path in [std::path::Path::new("/"), home.as_path(), repo.as_path()] {
+        let result = index_roots(&pool, Some(path)).unwrap();
+        assert_eq!(
+            result.ingested,
+            0,
+            "unsafe path ingested rows: {}",
+            path.display()
+        );
+        assert_eq!(
+            result.skipped_unsafe_paths,
+            1,
+            "unsafe path not counted: {}",
+            path.display()
+        );
+        assert_eq!(
+            result.discovered_files,
+            0,
+            "unsafe path was scanned: {}",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn index_roots_counts_unsupported_files_without_parsing_them() {
+    let (pool, dir) = test_pool();
+    let transcripts = dir.path().join("transcripts");
+    std::fs::create_dir(&transcripts).unwrap();
+    std::fs::write(transcripts.join("notes.txt"), "not a transcript").unwrap();
+    std::fs::write(
+        transcripts.join("session.jsonl"),
+        "{\"sessionId\":\"safe\",\"content\":\"indexed\"}\n",
+    )
+    .unwrap();
+
+    let result = index_roots(&pool, Some(&transcripts)).unwrap();
+
+    assert_eq!(result.ingested, 1);
+    assert_eq!(result.unsupported_files, 1);
+    assert_eq!(result.skipped_unsafe_paths, 0);
+}
+
+#[test]
+fn index_file_uses_session_meta_for_codex_response_items() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("rollout-session.jsonl");
+    std::fs::write(
+        &file,
+        concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-session\",\"cwd\":\"/work/project\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"id\":\"response-item-1\",\"content\":[{\"type\":\"output_text\",\"text\":\"session context preserved\"}]},\"timestamp\":\"2026-05-11T00:00:00Z\"}\n"
+        ),
+    )
+    .unwrap();
+
+    let result = index_file(&pool, &file, "codex_session").unwrap();
+    assert_eq!(result.ingested, 1);
+    let search = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "preserved".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(search.sessions[0].ai_session_id, "codex-session");
+    assert_eq!(search.sessions[0].ai_project, "/work/project");
+}
+
+#[test]
 fn index_roots_reports_file_errors_with_paths() {
     let (pool, dir) = test_pool();
     let target = dir.path().join("target.jsonl");
@@ -188,6 +264,7 @@ fn index_roots_reports_file_errors_with_paths() {
 
     let result = index_roots(&pool, Some(dir.path())).unwrap();
     assert_eq!(result.skipped_files, 1);
+    assert_eq!(result.skipped_symlinks, 1);
     assert_eq!(result.file_errors.len(), 1);
     assert!(result.file_errors[0].path.contains("bad.jsonl"));
     assert!(result.file_errors[0].error.contains("symlinks"));

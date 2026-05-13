@@ -29,6 +29,38 @@ fn ensure_source_reuses_existing_source_id() {
 }
 
 #[test]
+fn source_creation_and_parse_errors_do_not_advance_last_indexed_at() {
+    let (pool, _dir) = test_pool();
+    let store = CheckpointStore::new(&pool);
+    let source_id = store
+        .ensure_source("/tmp/session.jsonl", "explicit_file")
+        .unwrap();
+
+    let initial: Option<String> = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT last_indexed_at FROM transcript_sources WHERE id = ?1",
+            [source_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(initial, None);
+
+    store.mark_error(source_id, "bad json").unwrap();
+    let after_error: Option<String> = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT last_indexed_at FROM transcript_sources WHERE id = ?1",
+            [source_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(after_error, None);
+}
+
+#[test]
 fn record_keys_returns_imported_record_keys() {
     let (pool, _dir) = test_pool();
     let store = CheckpointStore::new(&pool);
