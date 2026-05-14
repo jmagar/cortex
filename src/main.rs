@@ -1,6 +1,7 @@
 use anyhow::Result;
 use axum::Router;
 use rmcp::{transport::stdio, ServiceExt};
+use serde::Serialize;
 use syslog_mcp::{api, mcp, runtime::RuntimeCore};
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -35,6 +36,7 @@ async fn main() -> Result<()> {
         Mode::StdioMcp => serve_stdio_mcp().await,
         Mode::Cli(command) => run_cli(command).await,
         Mode::Setup(command) => run_setup(command).await,
+        Mode::DoctorBinary(command) => run_binary_doctor(command).await,
         Mode::Help => unreachable!("handled before logging initialization"),
         Mode::Version => unreachable!("handled before logging initialization"),
     }
@@ -56,7 +58,12 @@ async fn run_cli(command: cli::CliCommand) -> Result<()> {
 }
 
 async fn run_setup(command: SetupCommand) -> Result<()> {
-    let report = syslog_mcp::setup::run_setup(command.mode).await?;
+    let report = match command.kind {
+        SetupCommandKind::Main(mode) => syslog_mcp::setup::run_setup(mode).await?,
+        SetupCommandKind::AiIndexTimer(action) => {
+            syslog_mcp::setup::run_ai_index_timer_setup(action).await?
+        }
+    };
     if command.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -76,6 +83,38 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
     }
     if report.has_errors {
         anyhow::bail!("syslog setup completed with failed phases");
+    }
+    Ok(())
+}
+
+async fn run_binary_doctor(command: DoctorBinaryCommand) -> Result<()> {
+    let report = BinaryDoctorReport::collect();
+    if command.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("current_exe: {}", report.current_exe);
+        println!(
+            "path_syslog: {}",
+            report.path_syslog.as_deref().unwrap_or("-")
+        );
+        println!("repo_version: {}", report.repo_version);
+        println!(
+            "container_version: {}",
+            report.container_version.as_deref().unwrap_or("-")
+        );
+        println!(
+            "runtime_current: {}",
+            report
+                .runtime_current
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        );
+        if let Some(error) = &report.runtime_current_error {
+            println!("runtime_current_error: {}", error);
+        }
+    }
+    if report.runtime_current == Some(false) {
+        anyhow::bail!("running syslog container is not current");
     }
     Ok(())
 }
@@ -147,13 +186,25 @@ enum Mode {
     StdioMcp,
     Cli(cli::CliCommand),
     Setup(SetupCommand),
+    DoctorBinary(DoctorBinaryCommand),
     Help,
     Version,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SetupCommand {
-    mode: syslog_mcp::setup::SetupMode,
+    kind: SetupCommandKind,
+    json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SetupCommandKind {
+    Main(syslog_mcp::setup::SetupMode),
+    AiIndexTimer(syslog_mcp::setup::AiIndexTimerAction),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DoctorBinaryCommand {
     json: bool,
 }
 
@@ -167,6 +218,9 @@ impl Mode {
             [serve, service] if serve == "serve" && service == "mcp" => Ok(Self::ServeMcp),
             [command, rest @ ..] if command == "setup" => {
                 Ok(Self::Setup(parse_setup_command(rest)?))
+            }
+            [command, rest @ ..] if command == "doctor" => {
+                Ok(Self::DoctorBinary(parse_doctor_command(rest)?))
             }
             [command, rest @ ..]
                 if matches!(
@@ -200,6 +254,7 @@ impl Mode {
             Self::StdioMcp => "warn",
             Self::Cli(_) => "warn",
             Self::Setup(_) => "warn",
+            Self::DoctorBinary(_) => "warn",
             Self::Help => "info",
             Self::Version => "info",
         }
@@ -209,6 +264,31 @@ impl Mode {
 fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     let mut mode = syslog_mcp::setup::SetupMode::FirstRun;
     let mut json = false;
+    let mut iter = args.iter();
+    if matches!(
+        iter.clone().next().map(String::as_str),
+        Some("ai-index-timer")
+    ) {
+        let _ = iter.next();
+        let mut action = syslog_mcp::setup::AiIndexTimerAction::Check;
+        for arg in iter {
+            match arg.as_str() {
+                "install" => action = syslog_mcp::setup::AiIndexTimerAction::Install,
+                "remove" => action = syslog_mcp::setup::AiIndexTimerAction::Remove,
+                "check" => action = syslog_mcp::setup::AiIndexTimerAction::Check,
+                "--json" => json = true,
+                "--help" | "-h" => {
+                    print_usage();
+                    std::process::exit(0);
+                }
+                other => anyhow::bail!("unknown ai-index-timer argument: {other}"),
+            }
+        }
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::AiIndexTimer(action),
+            json,
+        });
+    }
     for arg in args {
         match arg.as_str() {
             "check" => mode = syslog_mcp::setup::SetupMode::Check,
@@ -221,7 +301,92 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
             other => anyhow::bail!("unknown setup argument: {other}"),
         }
     }
-    Ok(SetupCommand { mode, json })
+    Ok(SetupCommand {
+        kind: SetupCommandKind::Main(mode),
+        json,
+    })
+}
+
+fn parse_doctor_command(args: &[String]) -> Result<DoctorBinaryCommand> {
+    let mut json = false;
+    let mut saw_binary = false;
+    for arg in args {
+        match arg.as_str() {
+            "binary" => saw_binary = true,
+            "--json" => json = true,
+            "--help" | "-h" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            other => anyhow::bail!("unknown doctor argument: {other}"),
+        }
+    }
+    if !saw_binary {
+        anyhow::bail!("doctor requires `binary`");
+    }
+    Ok(DoctorBinaryCommand { json })
+}
+
+#[derive(Debug, Serialize)]
+struct BinaryDoctorReport {
+    current_exe: String,
+    path_syslog: Option<String>,
+    repo_version: String,
+    container_version: Option<String>,
+    runtime_current: Option<bool>,
+    runtime_current_error: Option<String>,
+}
+
+impl BinaryDoctorReport {
+    fn collect() -> Self {
+        let current_exe = std::env::current_exe()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|error| format!("unknown: {error}"));
+        let path_syslog = command_stdout("sh", &["-c", "command -v syslog"]);
+        let container_version =
+            command_stdout("docker", &["exec", "syslog-mcp", "syslog", "--version"]);
+        let (runtime_current, runtime_current_error) = runtime_current_status();
+        Self {
+            current_exe,
+            path_syslog,
+            repo_version: env!("CARGO_PKG_VERSION").to_string(),
+            container_version,
+            runtime_current,
+            runtime_current_error,
+        }
+    }
+}
+
+fn runtime_current_status() -> (Option<bool>, Option<String>) {
+    let script = std::path::Path::new("scripts/check-runtime-current.sh");
+    if !script.exists() {
+        return (
+            None,
+            Some("scripts/check-runtime-current.sh not found".into()),
+        );
+    }
+    match std::process::Command::new("bash").arg(script).output() {
+        Ok(output) if output.status.success() => (Some(true), None),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            (
+                Some(false),
+                Some(format!("{stdout}{stderr}").trim().to_string()),
+            )
+        }
+        Err(error) => (None, Some(error.to_string())),
+    }
+}
+
+fn command_stdout(command: &str, args: &[&str]) -> Option<String> {
+    std::process::Command::new(command)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn print_usage() {
@@ -229,6 +394,8 @@ fn print_usage() {
         "Usage:
   syslog --version     Print version
   syslog setup [check|repair] [--json]
+  syslog setup ai-index-timer install|remove|check [--json]
+  syslog doctor binary [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
   syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]
@@ -243,7 +410,10 @@ fn print_usage() {
   syslog ai projects [--tool TOOL] [--from TIME] [--to TIME] [--json]
   syslog ai index [--path PATH] [--since TIME] [--force] [--json]
   syslog ai add --file FILE [--force] [--json]
-  syslog ai checkpoints [--errors] [--limit N] [--json]
+  syslog ai checkpoints [--errors] [--missing] [--limit N] [--json]
+  syslog ai errors [--limit N] [--json]
+  syslog ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]
+  syslog ai doctor [--json]
   syslog compose doctor [--json]
   syslog compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]
   syslog compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]

@@ -2,7 +2,12 @@ use anyhow::Result;
 use rusqlite::{params, OptionalExtension, Transaction};
 
 use crate::db::DbPool;
-use crate::scanner::{CheckpointEntry, CheckpointListOptions, FileMetadata};
+use std::path::Path;
+
+use crate::scanner::{
+    AiDoctorReport, CheckpointEntry, CheckpointListOptions, FileMetadata, ParseErrorEntry,
+    ParseErrorListOptions, PruneCheckpointsOptions, PruneCheckpointsResult, TranscriptRootStatus,
+};
 
 pub struct CheckpointStore<'a> {
     pool: &'a DbPool,
@@ -40,6 +45,23 @@ impl<'a> CheckpointStore<'a> {
              SET last_error = ?2
              WHERE id = ?1",
             params![source_id, error],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_parse_error(
+        &self,
+        source_id: i64,
+        line_no: i64,
+        error: &str,
+        record_preview: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.pool.get()?;
+        conn.execute(
+            "INSERT OR IGNORE INTO transcript_parse_errors
+                 (source_id, line_no, error, record_preview)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![source_id, line_no, error, record_preview],
         )?;
         Ok(())
     }
@@ -83,6 +105,10 @@ impl<'a> CheckpointStore<'a> {
             [source_id],
         )?;
         tx.execute(
+            "DELETE FROM transcript_parse_errors WHERE source_id = ?1",
+            [source_id],
+        )?;
+        tx.execute(
             "DELETE FROM logs WHERE ai_transcript_path = ?1",
             [canonical_path],
         )?;
@@ -115,6 +141,7 @@ impl<'a> CheckpointStore<'a> {
     ) -> Result<Vec<CheckpointEntry>> {
         let conn = self.pool.get()?;
         let limit = options.limit.unwrap_or(50).min(500);
+        let query_limit = if options.missing_only { 5000 } else { limit };
         let mut sql = String::from(
             "SELECT s.canonical_path,
                     s.source_kind,
@@ -124,9 +151,11 @@ impl<'a> CheckpointStore<'a> {
                     s.last_offset,
                     s.last_indexed_at,
                     s.last_error,
-                    COUNT(r.id) AS imported_records
+                    COUNT(DISTINCT r.id) AS imported_records,
+                    COUNT(DISTINCT e.id) AS parse_errors
              FROM transcript_sources s
-             LEFT JOIN transcript_import_records r ON r.source_id = s.id",
+             LEFT JOIN transcript_import_records r ON r.source_id = s.id
+             LEFT JOIN transcript_parse_errors e ON e.source_id = s.id",
         );
         if options.errors_only {
             sql.push_str(" WHERE s.last_error IS NOT NULL");
@@ -141,9 +170,11 @@ impl<'a> CheckpointStore<'a> {
         );
 
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map([limit], |row| {
+        let rows = stmt.query_map([query_limit], |row| {
+            let canonical_path: String = row.get(0)?;
             Ok(CheckpointEntry {
-                canonical_path: row.get(0)?,
+                missing: !Path::new(&canonical_path).exists(),
+                canonical_path,
                 source_kind: row.get(1)?,
                 file_size: row.get(2)?,
                 file_mtime: row.get(3)?,
@@ -152,10 +183,172 @@ impl<'a> CheckpointStore<'a> {
                 last_indexed_at: row.get(6)?,
                 last_error: row.get(7)?,
                 imported_records: row.get(8)?,
+                parse_errors: row.get(9)?,
+            })
+        })?;
+        let mut checkpoints = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        if options.missing_only {
+            checkpoints.retain(|checkpoint| checkpoint.missing);
+            checkpoints.truncate(limit as usize);
+        }
+        Ok(checkpoints)
+    }
+
+    pub fn list_parse_errors(
+        &self,
+        options: &ParseErrorListOptions,
+    ) -> Result<Vec<ParseErrorEntry>> {
+        let conn = self.pool.get()?;
+        let limit = options.limit.unwrap_or(50).min(500);
+        let mut stmt = conn.prepare(
+            "SELECT s.canonical_path,
+                    s.source_kind,
+                    e.line_no,
+                    e.error,
+                    e.record_preview,
+                    e.seen_at
+             FROM transcript_parse_errors e
+             JOIN transcript_sources s ON s.id = e.source_id
+             ORDER BY e.seen_at DESC, s.canonical_path ASC, e.line_no ASC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit], |row| {
+            Ok(ParseErrorEntry {
+                canonical_path: row.get(0)?,
+                source_kind: row.get(1)?,
+                line_no: row.get(2)?,
+                error: row.get(3)?,
+                record_preview: row.get(4)?,
+                seen_at: row.get(5)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    pub fn prune_checkpoints(
+        &self,
+        options: &PruneCheckpointsOptions,
+    ) -> Result<PruneCheckpointsResult> {
+        if !options.missing_only {
+            anyhow::bail!("checkpoint pruning requires missing_only=true");
+        }
+        let checkpoints = self.list_checkpoints(&CheckpointListOptions {
+            errors_only: false,
+            missing_only: true,
+            limit: options.limit,
+        })?;
+        let paths: Vec<String> = checkpoints
+            .iter()
+            .map(|checkpoint| checkpoint.canonical_path.clone())
+            .collect();
+        if options.dry_run || checkpoints.is_empty() {
+            return Ok(PruneCheckpointsResult {
+                matched: checkpoints.len(),
+                pruned: 0,
+                dry_run: options.dry_run,
+                paths,
+            });
+        }
+
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+        for checkpoint in &checkpoints {
+            let source_id: i64 = tx.query_row(
+                "SELECT id FROM transcript_sources WHERE canonical_path = ?1",
+                [&checkpoint.canonical_path],
+                |row| row.get(0),
+            )?;
+            tx.execute(
+                "DELETE FROM transcript_parse_errors WHERE source_id = ?1",
+                [source_id],
+            )?;
+            tx.execute(
+                "DELETE FROM transcript_import_records WHERE source_id = ?1",
+                [source_id],
+            )?;
+            tx.execute("DELETE FROM transcript_sources WHERE id = ?1", [source_id])?;
+        }
+        tx.commit()?;
+        Ok(PruneCheckpointsResult {
+            matched: checkpoints.len(),
+            pruned: checkpoints.len(),
+            dry_run: false,
+            paths,
+        })
+    }
+
+    pub fn doctor(&self, db_path: &Path) -> Result<AiDoctorReport> {
+        let conn = self.pool.get()?;
+        let checkpoint_count =
+            conn.query_row("SELECT COUNT(*) FROM transcript_sources", [], |row| {
+                row.get(0)
+            })?;
+        let checkpoint_error_count = conn.query_row(
+            "SELECT COUNT(*) FROM transcript_sources WHERE last_error IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        let imported_record_count = conn.query_row(
+            "SELECT COUNT(*) FROM transcript_import_records",
+            [],
+            |row| row.get(0),
+        )?;
+        let parse_error_count =
+            conn.query_row("SELECT COUNT(*) FROM transcript_parse_errors", [], |row| {
+                row.get(0)
+            })?;
+        let newest = conn
+            .query_row(
+                "SELECT canonical_path, last_indexed_at
+                 FROM transcript_sources
+                 WHERE last_indexed_at IS NOT NULL
+                 ORDER BY last_indexed_at DESC
+                 LIMIT 1",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let missing_checkpoint_count: i64 = self
+            .list_checkpoints(&CheckpointListOptions {
+                errors_only: false,
+                missing_only: false,
+                limit: Some(500),
+            })?
+            .into_iter()
+            .filter(|checkpoint| checkpoint.missing)
+            .count() as i64;
+        let (claude_root, codex_root) = default_root_statuses();
+        Ok(AiDoctorReport {
+            db_path: db_path.display().to_string(),
+            claude_root,
+            codex_root,
+            checkpoint_count,
+            checkpoint_error_count,
+            missing_checkpoint_count,
+            imported_record_count,
+            parse_error_count,
+            newest_indexed_path: newest.as_ref().map(|(path, _)| path.clone()),
+            newest_indexed_at: newest.map(|(_, indexed_at)| indexed_at),
+        })
+    }
+}
+
+fn default_root_statuses() -> (TranscriptRootStatus, TranscriptRootStatus) {
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(""));
+    let claude = home.join(".claude/projects");
+    let codex = home.join(".codex/sessions");
+    (
+        TranscriptRootStatus {
+            path: claude.display().to_string(),
+            exists: claude.exists(),
+        },
+        TranscriptRootStatus {
+            path: codex.display().to_string(),
+            exists: codex.exists(),
+        },
+    )
 }
 
 pub fn claim_imports_in_tx(
@@ -182,6 +375,10 @@ pub fn update_source_metadata_in_tx(
     source_id: i64,
     file_metadata: &FileMetadata,
 ) -> Result<()> {
+    tx.execute(
+        "DELETE FROM transcript_parse_errors WHERE source_id = ?1",
+        [source_id],
+    )?;
     tx.execute(
         "UPDATE transcript_sources
          SET file_size = ?2,

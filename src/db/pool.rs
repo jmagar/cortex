@@ -298,6 +298,34 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 6: created transcript_import_records table");
     }
 
+    let migration_7_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 7",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_7_applied {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS transcript_parse_errors (
+                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                 source_id      INTEGER NOT NULL REFERENCES transcript_sources(id),
+                 line_no        INTEGER NOT NULL,
+                 error          TEXT NOT NULL,
+                 record_preview TEXT,
+                 seen_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(source_id, line_no, error, record_preview)
+             );
+             CREATE INDEX IF NOT EXISTS idx_transcript_parse_errors_source_seen
+                 ON transcript_parse_errors(source_id, seen_at DESC);
+             CREATE INDEX IF NOT EXISTS idx_transcript_parse_errors_seen
+                 ON transcript_parse_errors(seen_at DESC);
+             INSERT INTO schema_migrations (version) VALUES (7);",
+        )?;
+        tracing::info!("Migration 7: created transcript_parse_errors table");
+    }
+
     tracing::info!(path = %config.db_path.display(), "Database initialized");
     Ok(pool)
 }

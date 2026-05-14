@@ -54,3 +54,25 @@ fn mode_parse_accepts_setup_namespace() {
         Mode::Setup(_)
     ));
 }
+
+#[test]
+fn mode_parse_accepts_ai_index_timer_setup_namespace() {
+    assert!(matches!(
+        Mode::parse(vec![
+            "setup".into(),
+            "ai-index-timer".into(),
+            "install".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_binary_doctor() {
+    assert!(matches!(
+        Mode::parse(vec!["doctor".into(), "binary".into(), "--json".into()]).unwrap(),
+        Mode::DoctorBinary(_)
+    ));
+}

@@ -11,7 +11,9 @@ use syslog_mcp::compose::{
     CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
     ComposeService, ComposeStatus, ComposeTarget, MutationOptions, ProcessRunner,
 };
-use syslog_mcp::scanner::{CheckpointEntry, IndexResult};
+use syslog_mcp::scanner::{
+    AiDoctorReport, CheckpointEntry, IndexResult, ParseErrorEntry, PruneCheckpointsResult,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliCommand {
@@ -36,6 +38,9 @@ pub(crate) enum AiCommand {
     Index(AiIndexArgs),
     Add(AiAddArgs),
     Checkpoints(AiCheckpointsArgs),
+    Errors(AiErrorsArgs),
+    PruneCheckpoints(AiPruneCheckpointsArgs),
+    Doctor(OutputArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,6 +186,21 @@ pub(crate) struct AiAddArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AiCheckpointsArgs {
     pub errors_only: bool,
+    pub missing_only: bool,
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiErrorsArgs {
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiPruneCheckpointsArgs {
+    pub missing_only: bool,
+    pub dry_run: bool,
     pub limit: Option<u32>,
     pub json: bool,
 }
@@ -341,9 +361,24 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
             }
             AiCommand::Checkpoints(args) => {
                 let response = service
-                    .list_ai_checkpoints(args.errors_only, args.limit)
+                    .list_ai_checkpoints(args.errors_only, args.missing_only, args.limit)
                     .await?;
                 print_checkpoints_response(&response, args.json)?;
+            }
+            AiCommand::Errors(args) => {
+                let response = service.list_ai_parse_errors(args.limit).await?;
+                print_ai_parse_errors_response(&response, args.json)?;
+            }
+            AiCommand::PruneCheckpoints(args) => {
+                let response = service
+                    .prune_ai_checkpoints(args.missing_only, args.dry_run, args.limit)
+                    .await?;
+                print_prune_checkpoints_response(&response, args.json)?;
+            }
+            AiCommand::Doctor(args) => {
+                let response = service.ai_doctor().await?;
+                print_ai_doctor_response(&response, args.json)?;
+                ensure_ai_doctor_success(&response)?;
             }
         },
         CliCommand::Correlate(args) => {
@@ -563,6 +598,12 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
         "index" => parse_ai_index(rest),
         "add" => parse_ai_add(rest),
         "checkpoints" => parse_ai_checkpoints(rest),
+        "errors" => parse_ai_errors(rest),
+        "prune-checkpoints" => parse_ai_prune_checkpoints(rest),
+        "doctor" => Ok(CliCommand::Ai(AiCommand::Doctor(parse_output_args(
+            "ai doctor",
+            rest,
+        )?))),
         _ => bail!("unknown ai subcommand: {subcommand}"),
     }
 }
@@ -754,6 +795,7 @@ fn parse_ai_checkpoints(args: &[String]) -> Result<CliCommand> {
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--errors" => parsed.errors_only = true,
+            "--missing" => parsed.missing_only = true,
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
@@ -765,6 +807,49 @@ fn parse_ai_checkpoints(args: &[String]) -> Result<CliCommand> {
         }
     }
     Ok(CliCommand::Ai(AiCommand::Checkpoints(parsed)))
+}
+
+fn parse_ai_errors(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiErrorsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ => bail!("unknown ai errors option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Errors(parsed)))
+}
+
+fn parse_ai_prune_checkpoints(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiPruneCheckpointsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--missing" => parsed.missing_only = true,
+            "--dry-run" => parsed.dry_run = true,
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ => bail!("unknown ai prune-checkpoints option: {arg}"),
+        }
+    }
+    if !parsed.missing_only {
+        bail!("ai prune-checkpoints requires --missing");
+    }
+    Ok(CliCommand::Ai(AiCommand::PruneCheckpoints(parsed)))
 }
 
 fn parse_stats(args: &[String]) -> Result<CliCommand> {
@@ -1312,15 +1397,16 @@ fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Resul
     }
     println!("{} checkpoint(s)", response.len());
     println!(
-        "{:<12} {:<8} {:<24} {:<7} PATH",
-        "KIND", "RECORDS", "LAST INDEXED", "ERROR"
+        "{:<12} {:<8} {:<6} {:<7} {:<7} PATH",
+        "KIND", "RECORDS", "PARSE", "MISSING", "ERROR"
     );
     for checkpoint in response {
         println!(
-            "{:<12} {:<8} {:<24} {:<7} {}",
+            "{:<12} {:<8} {:<6} {:<7} {:<7} {}",
             checkpoint.source_kind,
             checkpoint.imported_records,
-            truncate(checkpoint.last_indexed_at.as_deref().unwrap_or("-"), 23),
+            checkpoint.parse_errors,
+            if checkpoint.missing { "yes" } else { "-" },
             if checkpoint.last_error.is_some() {
                 "yes"
             } else {
@@ -1332,6 +1418,87 @@ fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Resul
             println!("    error: {}", truncate(error, 160));
         }
     }
+    Ok(())
+}
+
+fn print_ai_parse_errors_response(response: &[ParseErrorEntry], json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("{} parse error(s)", response.len());
+    println!(
+        "{:<24} {:<8} {:<8} {:<40} ERROR",
+        "SEEN", "KIND", "LINE", "PATH"
+    );
+    for error in response {
+        println!(
+            "{:<24} {:<8} {:<8} {:<40} {}",
+            truncate(&error.seen_at, 23),
+            truncate(&error.source_kind, 8),
+            error.line_no,
+            truncate(&error.canonical_path, 39),
+            truncate(&error.error, 100),
+        );
+        if let Some(preview) = &error.record_preview {
+            println!("    preview: {}", truncate(preview, 160));
+        }
+    }
+    Ok(())
+}
+
+fn print_prune_checkpoints_response(response: &PruneCheckpointsResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "matched={} pruned={} dry_run={}",
+        response.matched, response.pruned, response.dry_run
+    );
+    for path in &response.paths {
+        println!("  {}", path);
+    }
+    Ok(())
+}
+
+fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("db_path: {}", response.db_path);
+    println!(
+        "claude_root: {} ({})",
+        response.claude_root.path,
+        if response.claude_root.exists {
+            "exists"
+        } else {
+            "missing"
+        }
+    );
+    println!(
+        "codex_root: {} ({})",
+        response.codex_root.path,
+        if response.codex_root.exists {
+            "exists"
+        } else {
+            "missing"
+        }
+    );
+    println!("checkpoint_count: {}", response.checkpoint_count);
+    println!(
+        "checkpoint_error_count: {}",
+        response.checkpoint_error_count
+    );
+    println!(
+        "missing_checkpoint_count: {}",
+        response.missing_checkpoint_count
+    );
+    println!("imported_record_count: {}", response.imported_record_count);
+    println!("parse_error_count: {}", response.parse_error_count);
+    println!(
+        "newest_indexed: {} {}",
+        response.newest_indexed_at.as_deref().unwrap_or("-"),
+        response.newest_indexed_path.as_deref().unwrap_or("-")
+    );
     Ok(())
 }
 
@@ -1381,6 +1548,14 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
             "{} transcript file(s) failed to index",
             response.file_errors.len()
         )
+    }
+}
+
+fn ensure_ai_doctor_success(response: &AiDoctorReport) -> Result<()> {
+    if response.claude_root.exists || response.codex_root.exists {
+        Ok(())
+    } else {
+        bail!("no local AI transcript roots found")
     }
 }
 

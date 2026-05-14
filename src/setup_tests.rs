@@ -34,3 +34,24 @@ fn installed_compose_asset_uses_published_image_only() {
     assert!(!compose.contains("dockerfile: config/Dockerfile"));
     assert!(compose.contains("      - path: ../.env\n"));
 }
+
+#[test]
+fn ai_index_timer_script_uses_host_syslog_and_disables_docker_ingest() {
+    let script = ai_index_script();
+    assert!(script.contains("command -v syslog"));
+    assert!(script.contains("syslog --version"));
+    assert!(script.contains("syslog ai index --json"));
+    assert!(script.contains("SYSLOG_DOCKER_INGEST_ENABLED"));
+    assert!(script.contains(".claude/plugins/data/syslog-jmagar-lab/syslog.db"));
+}
+
+#[test]
+fn ai_index_timer_units_are_host_user_units() {
+    let unit = ai_index_service_unit(std::path::Path::new("/home/me/.local/bin/syslog-ai-index"));
+    let timer = ai_index_timer_unit();
+
+    assert!(unit.contains("Description=syslog-mcp local AI transcript index"));
+    assert!(unit.contains("ExecStart=/home/me/.local/bin/syslog-ai-index"));
+    assert!(timer.contains("OnUnitActiveSec=30min"));
+    assert!(timer.contains("WantedBy=timers.target"));
+}
