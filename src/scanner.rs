@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -158,6 +158,14 @@ pub fn validate_path(path: &Path) -> Result<()> {
         bail!("file exceeds max size: {}", path.display());
     }
     Ok(())
+}
+
+pub fn is_supported_transcript_file(path: &Path) -> bool {
+    supported_discovered_file(path)
+}
+
+pub fn default_transcript_roots() -> Vec<PathBuf> {
+    default_roots()
 }
 
 fn classify_path_error(error: &anyhow::Error, result: &mut IndexResult) {
@@ -382,13 +390,27 @@ pub fn index_file_with_options(
             ..Default::default()
         });
     }
+    let append_start = if !options.force {
+        match checkpoint_store.source_metadata(source_id)? {
+            Some(metadata) => append_start_offset(&canonical_path, &metadata, &current_metadata)?,
+            None => None,
+        }
+    } else {
+        None
+    };
     let mut imports = Vec::new();
     let mut batch = Vec::new();
     let mut chunk_bytes = 0usize;
     let file = fs::File::open(&canonical_path)?;
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
-    let mut line_no = 0usize;
+    let mut line_no = if let Some(offset) = append_start {
+        let counted = hash_prefix_and_count_lines(reader.get_mut(), &mut hasher, offset)?;
+        reader.get_mut().seek(SeekFrom::Start(offset))?;
+        counted
+    } else {
+        0
+    };
     let mut result = IndexResult {
         discovered_files: 1,
         ..Default::default()
@@ -526,6 +548,77 @@ pub fn index_file_with_options(
         &mut result,
     )?;
     Ok(result)
+}
+
+fn append_start_offset(
+    path: &Path,
+    stored: &checkpoint::SourceMetadata,
+    current: &FileMetadata,
+) -> Result<Option<u64>> {
+    let Some(stored_size) = stored.file_size else {
+        return Ok(None);
+    };
+    if stored.last_error.is_some() || stored_size <= 0 {
+        return Ok(None);
+    }
+    let Ok(stored_size) = u64::try_from(stored_size) else {
+        return Ok(None);
+    };
+    let last_offset = stored
+        .last_offset
+        .and_then(|offset| u64::try_from(offset).ok())
+        .unwrap_or(stored_size);
+    if stored_size >= current.size || last_offset > current.size {
+        return Ok(None);
+    }
+    if last_offset == 0 || last_offset != stored_size {
+        return Ok(None);
+    }
+    if let Some(content_hash) = &stored.content_hash {
+        if hash_prefix(path, stored_size)? != *content_hash {
+            return Ok(None);
+        }
+    }
+    Ok(Some(last_offset))
+}
+
+fn hash_prefix(path: &Path, offset: u64) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut remaining = offset;
+    let mut buffer = [0u8; 8192];
+    let mut hasher = Sha256::new();
+    while remaining > 0 {
+        let to_read = buffer.len().min(remaining as usize);
+        let read = file.read(&mut buffer[..to_read])?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        remaining -= read as u64;
+    }
+    Ok(hex_digest(&hasher.finalize()))
+}
+
+fn hash_prefix_and_count_lines(
+    file: &mut fs::File,
+    hasher: &mut Sha256,
+    offset: u64,
+) -> Result<usize> {
+    file.seek(SeekFrom::Start(0))?;
+    let mut remaining = offset;
+    let mut buffer = [0u8; 8192];
+    let mut lines = 0usize;
+    while remaining > 0 {
+        let to_read = buffer.len().min(remaining as usize);
+        let read = file.read(&mut buffer[..to_read])?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        lines += buffer[..read].iter().filter(|byte| **byte == b'\n').count();
+        remaining -= read as u64;
+    }
+    Ok(lines)
 }
 
 pub fn list_checkpoints(

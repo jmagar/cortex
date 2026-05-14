@@ -13,6 +13,15 @@ pub struct CheckpointStore<'a> {
     pool: &'a DbPool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceMetadata {
+    pub file_size: Option<i64>,
+    pub file_mtime: Option<i64>,
+    pub content_hash: Option<String>,
+    pub last_offset: Option<i64>,
+    pub last_error: Option<String>,
+}
+
 impl<'a> CheckpointStore<'a> {
     pub fn new(pool: &'a DbPool) -> Self {
         Self { pool }
@@ -95,6 +104,27 @@ impl<'a> CheckpointStore<'a> {
         Ok(last_error.is_none()
             && stored_size == Some(file_size as i64)
             && stored_mtime == file_mtime)
+    }
+
+    pub fn source_metadata(&self, source_id: i64) -> Result<Option<SourceMetadata>> {
+        let conn = self.pool.get()?;
+        conn.query_row(
+            "SELECT file_size, file_mtime, content_hash, last_offset, last_error
+             FROM transcript_sources
+             WHERE id = ?1",
+            [source_id],
+            |row| {
+                Ok(SourceMetadata {
+                    file_size: row.get(0)?,
+                    file_mtime: row.get(1)?,
+                    content_hash: row.get(2)?,
+                    last_offset: row.get(3)?,
+                    last_error: row.get(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
     }
 
     pub fn reset_source(&self, source_id: i64, canonical_path: &str) -> Result<()> {

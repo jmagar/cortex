@@ -514,6 +514,73 @@ fn index_roots_counts_unsupported_files_without_parsing_them() {
 }
 
 #[test]
+fn scanner_exposes_default_roots_and_supported_file_policy() {
+    let roots = default_transcript_roots();
+    assert!(roots.iter().any(|path| path.ends_with(".claude/projects")));
+    assert!(roots.iter().any(|path| path.ends_with(".codex/sessions")));
+    assert!(is_supported_transcript_file(std::path::Path::new(
+        "session.jsonl"
+    )));
+    assert!(!is_supported_transcript_file(std::path::Path::new(
+        "session.json"
+    )));
+}
+
+#[test]
+fn append_only_file_indexes_only_new_records_after_checkpoint() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("session.jsonl");
+    std::fs::write(
+        &file,
+        "{\"uuid\":\"one\",\"type\":\"user\",\"timestamp\":\"2026-05-14T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+    )
+    .unwrap();
+
+    let first = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(first.ingested, 1);
+
+    let mut open = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&file)
+        .unwrap();
+    use std::io::Write;
+    writeln!(
+        open,
+        "{{\"uuid\":\"two\",\"type\":\"user\",\"timestamp\":\"2026-05-14T00:00:01Z\",\"message\":{{\"role\":\"user\",\"content\":\"second\"}}}}"
+    )
+    .unwrap();
+
+    let second = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(second.ingested, 1);
+    assert_eq!(second.skipped_dupes, 0);
+}
+
+#[test]
+fn rewritten_file_falls_back_to_duplicate_safe_full_scan() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("session.jsonl");
+    std::fs::write(
+        &file,
+        "{\"uuid\":\"one\",\"type\":\"user\",\"timestamp\":\"2026-05-14T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+    )
+    .unwrap();
+    assert_eq!(
+        index_file(&pool, &file, "explicit_file").unwrap().ingested,
+        1
+    );
+
+    std::fs::write(
+        &file,
+        "{\"uuid\":\"one\",\"type\":\"user\",\"timestamp\":\"2026-05-14T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"first changed\"}}\n",
+    )
+    .unwrap();
+
+    let second = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(second.ingested, 0);
+    assert!(second.skipped_dupes >= 1);
+}
+
+#[test]
 #[serial]
 fn index_roots_default_scans_claude_and_codex_roots() {
     let (pool, dir) = test_pool();

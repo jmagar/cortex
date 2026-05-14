@@ -137,6 +137,56 @@ fn parse_ai_add_requires_file() {
 }
 
 #[test]
+fn parse_ai_watch_defaults() {
+    let command = CliCommand::parse(strings(&["ai", "watch"])).unwrap();
+    assert_eq!(
+        command,
+        CliCommand::Ai(AiCommand::Watch(AiWatchArgs {
+            path: None,
+            debounce_ms: 750,
+            settle_ms: 500,
+            max_retries: 5,
+            no_initial_scan: false,
+            json: false,
+        }))
+    );
+}
+
+#[test]
+fn parse_ai_watch_all_options() {
+    let command = CliCommand::parse(strings(&[
+        "ai",
+        "watch",
+        "--path",
+        "/tmp/transcripts",
+        "--debounce-ms",
+        "100",
+        "--settle-ms=250",
+        "--max-retries=7",
+        "--no-initial-scan",
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(
+        command,
+        CliCommand::Ai(AiCommand::Watch(AiWatchArgs {
+            path: Some("/tmp/transcripts".into()),
+            debounce_ms: 100,
+            settle_ms: 250,
+            max_retries: 7,
+            no_initial_scan: true,
+            json: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_ai_watch_rejects_zero_timing_values() {
+    let err = CliCommand::parse(strings(&["ai", "watch", "--debounce-ms", "0"])).unwrap_err();
+    assert!(err.to_string().contains("positive integer"));
+}
+
+#[test]
 fn parse_ai_index_collects_reindex_controls() {
     let parsed = CliCommand::parse(strings(&[
         "ai",

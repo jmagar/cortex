@@ -63,6 +63,9 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         SetupCommandKind::AiIndexTimer(action) => {
             syslog_mcp::setup::run_ai_index_timer_setup(action).await?
         }
+        SetupCommandKind::AiWatchService(action) => {
+            syslog_mcp::setup::run_ai_watch_service_setup(action).await?
+        }
     };
     if command.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -201,6 +204,7 @@ struct SetupCommand {
 enum SetupCommandKind {
     Main(syslog_mcp::setup::SetupMode),
     AiIndexTimer(syslog_mcp::setup::AiIndexTimerAction),
+    AiWatchService(syslog_mcp::setup::AiWatchServiceAction),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -286,6 +290,30 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         }
         return Ok(SetupCommand {
             kind: SetupCommandKind::AiIndexTimer(action),
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
+        Some("ai-watch-service")
+    ) {
+        let _ = iter.next();
+        let mut action = syslog_mcp::setup::AiWatchServiceAction::Check;
+        for arg in iter {
+            match arg.as_str() {
+                "install" => action = syslog_mcp::setup::AiWatchServiceAction::Install,
+                "remove" => action = syslog_mcp::setup::AiWatchServiceAction::Remove,
+                "check" => action = syslog_mcp::setup::AiWatchServiceAction::Check,
+                "--json" => json = true,
+                "--help" | "-h" => {
+                    print_usage();
+                    std::process::exit(0);
+                }
+                other => anyhow::bail!("unknown ai-watch-service argument: {other}"),
+            }
+        }
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::AiWatchService(action),
             json,
         });
     }
@@ -395,6 +423,7 @@ fn print_usage() {
   syslog --version     Print version
   syslog setup [check|repair] [--json]
   syslog setup ai-index-timer install|remove|check [--json]
+  syslog setup ai-watch-service install|remove|check [--json]
   syslog doctor binary [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
@@ -410,6 +439,7 @@ fn print_usage() {
   syslog ai projects [--tool TOOL] [--from TIME] [--to TIME] [--json]
   syslog ai index [--path PATH] [--since TIME] [--force] [--json]
   syslog ai add --file FILE [--force] [--json]
+  syslog ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]
   syslog ai checkpoints [--errors] [--missing] [--limit N] [--json]
   syslog ai errors [--limit N] [--json]
   syslog ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]

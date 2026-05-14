@@ -379,7 +379,22 @@ them, and streams transcript files line-by-line in bounded SQLite chunks. Use
 `syslog ai checkpoints --errors` plus `syslog ai errors` to inspect structured
 scanner failures.
 
-The optional host-local index timer is managed by:
+For real-time local Claude/Codex transcript ingestion, install the host-local
+watch service:
+
+```bash
+syslog setup ai-watch-service install
+syslog setup ai-watch-service check
+syslog setup ai-watch-service remove
+```
+
+The watcher runs outside Docker because it needs host access to
+`~/.claude/projects` and `~/.codex/sessions`. It writes to the configured live
+SQLite DB and delegates every stable changed `.jsonl` file to the same scanner
+path used by `syslog ai add --file FILE`. Installing the watcher disables the
+older polling timer so both helpers do not scan the same files.
+
+The optional polling fallback is still available:
 
 ```bash
 syslog setup ai-index-timer install
@@ -387,15 +402,16 @@ syslog setup ai-index-timer check
 syslog setup ai-index-timer remove
 ```
 
-This timer is deliberately not inside the Docker container. It reads host-local
-Claude/Codex transcript files and runs the newest `syslog` binary on the host
-`PATH`; Docker Compose owns only the server/query runtime.
+Both helpers are deliberately not inside the Docker container. Docker Compose
+owns only the server/query runtime.
 
 Imported AI transcript messages are scrubbed for known credential/token patterns
-before storage and FTS indexing. The rows still live in the main `logs` table, so
-raw actions such as `search`, `tail`, `context`, and `get` can return scrubbed
-transcript text and local `ai_transcript_path` values. If storage guardrails
-cannot recover enough space, indexing fails before committing additional chunks.
+before storage and FTS indexing. The rows still live in the main `logs` table,
+so raw actions such as `search`, `tail`, `context`, and `get` can return
+scrubbed transcript text and local `ai_transcript_path` values within seconds of
+the transcript write. Scrubbing is best-effort, not a compliance boundary. If
+storage guardrails cannot recover enough space, indexing fails before committing
+additional chunks.
 
 **Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker ingest entries, `source_ip` identifies the configured Docker ingest host/container/stream and should be trusted only as far as the configured docker-socket-proxy endpoint and network path are trusted. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
 
@@ -440,7 +456,7 @@ Useful installer controls:
 ```bash
 SYSLOG_INSTALL_DRY_RUN=1 ./install.sh
 SYSLOG_INSTALL_PREFIX=/opt/syslog-mcp ./install.sh
-SYSLOG_VERSION=0.21.6 ./install.sh
+SYSLOG_VERSION=0.21.7 ./install.sh
 SYSLOG_INSTALL_SKIP_SETUP=1 ./install.sh
 ```
 
@@ -450,7 +466,7 @@ Useful setup commands:
 syslog setup          # first-run or normal repair
 syslog setup check    # inspect only; does not mutate files or start services
 syslog setup repair   # repair env/assets and restart the Docker stack
-syslog setup ai-index-timer install  # optional host-local transcript index timer
+syslog setup ai-watch-service install  # host-local real-time transcript watcher
 syslog doctor binary  # check host/container binary freshness
 ```
 
