@@ -924,17 +924,16 @@ fn record_file_error(result: &mut IndexResult, path: &Path, error: &anyhow::Erro
 fn record_discovered_path_error(result: &mut IndexResult, path: &Path, error: &anyhow::Error) {
     result.skipped_files += 1;
     if is_permission_denied(error) {
-        tracing::debug!(
+        tracing::warn!(
             path = %path.display(),
             error = %error,
             "Skipping unreadable transcript path during discovery"
         );
-    } else {
-        result.file_errors.push(IndexFileError {
-            path: path.display().to_string(),
-            error: error.to_string(),
-        });
     }
+    result.file_errors.push(IndexFileError {
+        path: path.display().to_string(),
+        error: error.to_string(),
+    });
 }
 
 fn is_permission_denied(error: &anyhow::Error) -> bool {
@@ -956,7 +955,7 @@ fn accept_metadata_field(
     }
     if trimmed.chars().count() > max_chars {
         result.dropped_metadata_fields += 1;
-        tracing::debug!(
+        tracing::warn!(
             field,
             max_chars,
             actual_chars = trimmed.chars().count(),

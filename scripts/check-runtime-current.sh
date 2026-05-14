@@ -6,6 +6,8 @@ set -euo pipefail
 MODE="auto"
 PULL="false"
 SERVICE="syslog-mcp"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEFAULT_COMPOSE_DIR="${SYSLOG_MCP_HOME:-${HOME}/.syslog-mcp}/compose"
 COMPOSE_DIR="${SYSLOG_MCP_COMPOSE_DIR:-$DEFAULT_COMPOSE_DIR}"
 ALLOW_LEGACY="false"
@@ -149,12 +151,12 @@ check_docker() {
   running_image="$(docker inspect "$cid" --format '{{.Image}}')"
   local_image="$(docker image inspect "$image" --format '{{.Id}}' 2>/dev/null || true)"
   repo_digests="$(docker image inspect "$image" --format '{{join .RepoDigests ", "}}' 2>/dev/null || true)"
-  repo_version="$(awk -F'"' '/^version = / {print $2; exit}' Cargo.toml 2>/dev/null || true)"
-  if [[ -n "$repo_version" ]]; then
-    container_version="$(docker exec "$cid" syslog --version 2>/dev/null | awk '{print $2}' || true)"
-  else
-    container_version=""
+  repo_version="$(awk -F'"' '/^version = / {print $2; exit}' "${REPO_DIR}/Cargo.toml" 2>/dev/null || true)"
+  if [[ -z "$repo_version" ]]; then
+    echo "FAIL: could not determine repo version from ${REPO_DIR}/Cargo.toml"
+    return 1
   fi
+  container_version="$(docker exec "$cid" syslog --version 2>/dev/null | awk '{print $2}' || true)"
 
   status_line container "$cid"
   status_line image "$image"

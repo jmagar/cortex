@@ -37,6 +37,12 @@ impl<'a> CheckpointStore<'a> {
             )
             .optional()?
         {
+            conn.execute(
+                "UPDATE transcript_sources
+                 SET source_kind = ?2
+                 WHERE id = ?1 AND source_kind != ?2",
+                params![id, source_kind],
+            )?;
             return Ok(id);
         }
         conn.execute(
@@ -66,6 +72,7 @@ impl<'a> CheckpointStore<'a> {
         record_preview: Option<&str>,
     ) -> Result<()> {
         let conn = self.pool.get()?;
+        let record_preview = record_preview.unwrap_or("");
         conn.execute(
             "INSERT OR IGNORE INTO transcript_parse_errors
                  (source_id, line_no, error, record_preview)
@@ -338,15 +345,14 @@ impl<'a> CheckpointStore<'a> {
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        let missing_checkpoint_count: i64 = self
-            .list_checkpoints(&CheckpointListOptions {
-                errors_only: false,
-                missing_only: false,
-                limit: Some(500),
-            })?
-            .into_iter()
-            .filter(|checkpoint| checkpoint.missing)
-            .count() as i64;
+        let mut stmt = conn.prepare("SELECT canonical_path FROM transcript_sources")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut missing_checkpoint_count = 0_i64;
+        for row in rows {
+            if !Path::new(&row?).exists() {
+                missing_checkpoint_count += 1;
+            }
+        }
         let (claude_root, codex_root) = default_root_statuses();
         Ok(AiDoctorReport {
             db_path: db_path.display().to_string(),

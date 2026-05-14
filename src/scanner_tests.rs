@@ -86,6 +86,92 @@ fn list_checkpoints_reports_errors_and_import_counts() {
 }
 
 #[test]
+fn prune_checkpoints_dry_run_and_delete_only_missing_sources() {
+    let (pool, dir) = test_pool();
+    let missing_file = dir.path().join("missing.jsonl");
+    std::fs::write(
+        &missing_file,
+        "{\"sessionId\":\"sess-missing\",\"content\":\"gone\"}\nnot-json\n",
+    )
+    .unwrap();
+    let present_file = dir.path().join("present.jsonl");
+    std::fs::write(
+        &present_file,
+        "{\"sessionId\":\"sess-present\",\"content\":\"still here\"}\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        index_file(&pool, &missing_file, "explicit_file")
+            .unwrap()
+            .ingested,
+        1
+    );
+    assert_eq!(
+        index_file(&pool, &present_file, "explicit_file")
+            .unwrap()
+            .ingested,
+        1
+    );
+    std::fs::remove_file(&missing_file).unwrap();
+
+    let missing = list_checkpoints(
+        &pool,
+        &CheckpointListOptions {
+            errors_only: false,
+            missing_only: true,
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(missing.len(), 1);
+    assert_eq!(
+        missing[0].canonical_path,
+        missing_file.display().to_string()
+    );
+
+    let dry_run = prune_checkpoints(
+        &pool,
+        &PruneCheckpointsOptions {
+            missing_only: true,
+            dry_run: true,
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(dry_run.matched, 1);
+    assert_eq!(dry_run.pruned, 0);
+    assert!(dry_run.dry_run);
+
+    let pruned = prune_checkpoints(
+        &pool,
+        &PruneCheckpointsOptions {
+            missing_only: true,
+            dry_run: false,
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(pruned.matched, 1);
+    assert_eq!(pruned.pruned, 1);
+
+    let remaining = list_checkpoints(
+        &pool,
+        &CheckpointListOptions {
+            errors_only: false,
+            missing_only: false,
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(
+        remaining[0].canonical_path,
+        present_file.display().to_string()
+    );
+}
+
+#[test]
 fn validate_path_rejects_symlinks() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("target");
@@ -899,5 +985,6 @@ fn index_roots_skips_unreadable_directories_and_continues() {
     let result = result.expect("unreadable directories should be skipped, not abort indexing");
     assert_eq!(result.ingested, 1);
     assert_eq!(result.skipped_files, 1);
-    assert_eq!(result.file_errors.len(), 0);
+    assert_eq!(result.file_errors.len(), 1);
+    assert!(result.file_errors[0].error.contains("Permission denied"));
 }

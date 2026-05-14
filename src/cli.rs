@@ -1626,6 +1626,7 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
     if response.file_errors.is_empty()
         && response.storage_blocked_chunks == 0
         && response.parse_errors == 0
+        && response.dropped_metadata_fields == 0
     {
         Ok(())
     } else if response.storage_blocked_chunks > 0 {
@@ -1637,6 +1638,11 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
         bail!(
             "{} transcript record(s) failed to parse",
             response.parse_errors
+        )
+    } else if response.dropped_metadata_fields > 0 {
+        bail!(
+            "{} transcript metadata field(s) were dropped",
+            response.dropped_metadata_fields
         )
     } else {
         bail!(

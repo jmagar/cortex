@@ -217,10 +217,12 @@ When installed as a Claude Code plugin, users are prompted for:
 
 | Field | Sensitive | Description |
 | --- | --- | --- |
-| `syslog_mcp_url` | no | Full MCP endpoint URL (e.g. `https://syslog.example.com/mcp`) |
-| `syslog_mcp_token` | yes | Bearer token for authentication |
+| `server_url` | no | Base server URL (e.g. `https://syslog.example.com`) |
+| `api_token` | yes | Bearer token used by the plugin MCP client; enforced by the server unless `no_auth=true` |
+| `no_auth` | no | Explicit local-only no-auth mode |
+| `is_server` | no | Whether this host owns the Docker Compose deployment |
 
-These values are interpolated into `.mcp.json` via `${userConfig.*}` syntax. See [plugin/CONFIG.md](plugin/CONFIG.md) for details.
+These values are interpolated into `plugins/.mcp.json` via `${user_config.*}` syntax. See [plugin/CONFIG.md](plugin/CONFIG.md) for details.
 
 ## .env.example conventions
 

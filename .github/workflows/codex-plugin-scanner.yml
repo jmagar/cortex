@@ -18,7 +18,16 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Check Codex plugin manifest
+        id: codex-plugin
+        run: |
+          if [ -f .codex-plugin/plugin.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Codex plugin scanner
+        if: steps.codex-plugin.outputs.present == 'true'
         uses: hashgraph-online/hol-codex-plugin-scanner-action@b45d6b583afe05819b24edc8e6418c9ad2e1f1d0 # v1
         with:
           plugin_dir: ".codex-plugin"

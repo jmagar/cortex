@@ -136,7 +136,11 @@ fn init_db_adds_transcript_checkpoint_tables() {
 
     let _pool = init_pool(&config).unwrap();
     let conn = rusqlite::Connection::open(&config.db_path).unwrap();
-    for table in ["transcript_sources", "transcript_import_records"] {
+    for table in [
+        "transcript_sources",
+        "transcript_import_records",
+        "transcript_parse_errors",
+    ] {
         let exists: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -146,6 +150,14 @@ fn init_db_adds_transcript_checkpoint_tables() {
             .unwrap();
         assert_eq!(exists, 1, "missing table {table}");
     }
+    let preview_not_null: i64 = conn
+        .query_row(
+            "SELECT [notnull] FROM pragma_table_info('transcript_parse_errors') WHERE name = 'record_preview'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(preview_not_null, 1);
 }
 
 #[test]

@@ -313,7 +313,7 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                  source_id      INTEGER NOT NULL REFERENCES transcript_sources(id),
                  line_no        INTEGER NOT NULL,
                  error          TEXT NOT NULL,
-                 record_preview TEXT,
+                 record_preview TEXT NOT NULL,
                  seen_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                  UNIQUE(source_id, line_no, error, record_preview)
              );

@@ -69,11 +69,17 @@ When installed as a Claude Code plugin, the token is managed via `userConfig` in
 ```json
 {
   "userConfig": {
-    "syslog_mcp_token": {
+    "api_token": {
       "type": "string",
       "title": "API Token",
-      "description": "Bearer token for authenticating MCP requests (leave empty if auth is disabled)",
-      "sensitive": true
+      "description": "Bearer token for authenticating MCP requests",
+      "sensitive": true,
+      "required": true
+    },
+    "no_auth": {
+      "type": "boolean",
+      "title": "Disable MCP auth",
+      "default": false
     }
   }
 }

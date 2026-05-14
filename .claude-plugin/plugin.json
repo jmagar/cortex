@@ -34,7 +34,7 @@
       "title": "API token",
       "description": "Bearer token for MCP HTTP authentication, sent on every request as `Authorization: Bearer <token>`. Server mode: pick any value — that becomes the secret the server enforces (generate one with `openssl rand -hex 32`, or use `just gen-token`). Client mode: paste the token your server admin configured. The same token must match on both sides; mismatched tokens return 401.",
       "sensitive": true,
-      "required": false
+      "required": true
     },
     "no_auth": {
       "type": "boolean",

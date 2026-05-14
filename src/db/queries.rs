@@ -293,7 +293,7 @@ pub fn search_ai_sessions(
     validate_fts_query(&params.query)?;
 
     let conn = pool.get()?;
-    let limit = params.limit.unwrap_or(20).min(100) as usize;
+    let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
     const CANDIDATE_CAP: usize = 5_000;
 
     let mut sql = String::from(

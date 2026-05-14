@@ -25,11 +25,11 @@ The published Claude Code plugin remains HTTP-first because plugin installs comm
 Connection credentials flow through two files:
 
 1. **`plugin.json`** -- declares `userConfig` fields that Claude Code prompts for at install time
-2. **`.mcp.json`** -- references those fields as `${userConfig.<key>}` in the URL and headers
+2. **`.mcp.json`** -- references those fields as `${user_config.<key>}` in the URL and headers
 
 ```text
 plugin.json userConfig (user enters values)
-  --> .mcp.json (${userConfig.*} interpolated by Claude Code)
+  --> .mcp.json (${user_config.*} interpolated by Claude Code)
     --> HTTP connection to running syslog-mcp server
 ```
 

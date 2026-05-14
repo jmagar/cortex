@@ -85,10 +85,20 @@ pass "ai checkpoints"
 
 tail_output="$(run_syslog tail -n 5 --app-name claude-transcript)"
 grep -q 'ai-smoke-session' <<<"$tail_output" || fail "tail output did not include fixture session"
-grep -qv ' localhost ' <<<"$tail_output" || fail "tail output still shows synthetic localhost transcript row"
+if grep -qE '\blocalhost\b' <<<"$tail_output"; then
+  fail "tail output still shows synthetic localhost transcript row"
+fi
 pass "tail transcript rendering"
 
 if [[ "${SYSLOG_AI_SMOKE_CHECK_RUNTIME:-1}" == "1" ]]; then
+  if bash scripts/check-runtime-current.sh >/tmp/syslog-ai-runtime-current.out 2>&1; then
+    pass "compose runtime current"
+  else
+    printf 'FAIL  compose runtime current check failed:\n' >&2
+    sed 's/^/      /' /tmp/syslog-ai-runtime-current.out >&2
+    exit 1
+  fi
+elif [[ "${SYSLOG_AI_SMOKE_CHECK_RUNTIME:-1}" == "warn" ]]; then
   if bash scripts/check-runtime-current.sh >/tmp/syslog-ai-runtime-current.out 2>&1; then
     pass "compose runtime current"
   else

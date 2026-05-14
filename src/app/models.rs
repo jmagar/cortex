@@ -59,6 +59,8 @@ pub struct ListSessionsResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiSessionEntry {
+    /// Stable response-local key for this host/tool/project/session tuple.
+    pub session_key: String,
     pub project: String,
     pub tool: String,
     pub session_id: String,
@@ -72,7 +74,14 @@ pub struct AiSessionEntry {
 
 impl From<db::AiSessionEntry> for AiSessionEntry {
     fn from(value: db::AiSessionEntry) -> Self {
+        let session_key = ai_session_key(
+            &value.hostname,
+            &value.ai_tool,
+            &value.ai_project,
+            &value.ai_session_id,
+        );
         Self {
+            session_key,
             project: value.ai_project,
             tool: value.ai_tool,
             session_id: value.ai_session_id,
@@ -97,6 +106,8 @@ pub struct SearchSessionsRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchedSessionEntry {
+    /// Stable response-local key for this host/tool/project/session tuple.
+    pub session_key: String,
     pub project: String,
     pub tool: String,
     pub session_id: String,
@@ -111,7 +122,14 @@ pub struct SearchedSessionEntry {
 
 impl From<db::SearchedAiSessionEntry> for SearchedSessionEntry {
     fn from(value: db::SearchedAiSessionEntry) -> Self {
+        let session_key = ai_session_key(
+            &value.hostname,
+            &value.ai_tool,
+            &value.ai_project,
+            &value.ai_session_id,
+        );
         Self {
+            session_key,
             project: value.ai_project,
             tool: value.ai_tool,
             session_id: value.ai_session_id,
@@ -123,6 +141,14 @@ impl From<db::SearchedAiSessionEntry> for SearchedSessionEntry {
             best_snippet: value.best_snippet,
         }
     }
+}
+
+fn ai_session_key(hostname: &str, tool: &str, project: &str, session_id: &str) -> String {
+    [hostname, tool, project, session_id]
+        .into_iter()
+        .map(|part| format!("{}:{part}", part.len()))
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

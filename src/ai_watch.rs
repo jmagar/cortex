@@ -187,7 +187,7 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
 
     tracing::info!(targets = ?targets, watched_dirs = watched_dirs.len(), "AI transcript watcher started");
     if options.initial_scan {
-        run_rescan(&service, &options, "initial").await;
+        let _ = run_rescan(&service, &options, "initial").await;
     }
 
     let tick_duration = options
@@ -205,8 +205,10 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
                 }
             }
             _ = tick.tick() => {
-                if overflow_rescan.swap(false, Ordering::Relaxed) {
-                    run_rescan(&service, &options, "rescan").await;
+                if overflow_rescan.swap(false, Ordering::Relaxed)
+                    && run_rescan(&service, &options, "rescan").await == RescanStatus::Retry
+                {
+                    overflow_rescan.store(true, Ordering::Relaxed);
                 }
                 process_pending(&service, &options, &mut pending).await;
             }
@@ -259,9 +261,10 @@ fn watch_directory_tree(
             Ok(()) => {
                 watched_dirs.insert(dir);
             }
-            Err(error) => {
-                tracing::warn!(path = %dir.display(), error = %error, "failed to watch AI transcript directory");
-            }
+            Err(error) => anyhow::bail!(
+                "failed to watch AI transcript directory {}: {error}",
+                dir.display()
+            ),
         }
     }
     Ok(())
@@ -271,15 +274,15 @@ fn collect_watch_dirs(root: &Path) -> Result<Vec<PathBuf>> {
     let mut dirs = Vec::new();
     if root.is_file() {
         if let Some(parent) = root.parent() {
-            collect_watch_dirs_inner(parent, &mut dirs)?;
+            collect_watch_dirs_inner(parent, &mut dirs, true)?;
         }
     } else {
-        collect_watch_dirs_inner(root, &mut dirs)?;
+        collect_watch_dirs_inner(root, &mut dirs, true)?;
     }
     Ok(dirs)
 }
 
-fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>, is_root: bool) -> Result<()> {
     if dirs.len() >= MAX_WATCH_DIRS {
         anyhow::bail!(
             "AI transcript watcher directory budget exceeded ({MAX_WATCH_DIRS}) while scanning {}",
@@ -289,7 +292,13 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>) -> Result<()> 
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) => {
-            tracing::warn!(path = %path.display(), error = %error, "failed to inspect AI transcript watch path");
+            if is_root {
+                anyhow::bail!(
+                    "failed to inspect AI transcript watch path {}: {error}",
+                    path.display()
+                );
+            }
+            tracing::warn!(path = %path.display(), error = %error, "skipping unreadable AI transcript watch path");
             return Ok(());
         }
     };
@@ -307,7 +316,13 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>) -> Result<()> 
     let read_dir = match std::fs::read_dir(path) {
         Ok(read_dir) => read_dir,
         Err(error) => {
-            tracing::warn!(path = %path.display(), error = %error, "failed to read AI transcript watch directory");
+            if is_root {
+                anyhow::bail!(
+                    "failed to read AI transcript watch directory {}: {error}",
+                    path.display()
+                );
+            }
+            tracing::warn!(path = %path.display(), error = %error, "skipping unreadable AI transcript watch directory");
             return Ok(());
         }
     };
@@ -316,13 +331,13 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>) -> Result<()> 
         match entry {
             Ok(entry) => entries.push(entry.path()),
             Err(error) => {
-                tracing::warn!(path = %path.display(), error = %error, "failed to read AI transcript watch directory entry");
+                tracing::warn!(path = %path.display(), error = %error, "skipping unreadable AI transcript watch directory entry");
             }
         }
     }
     entries.sort();
     for entry in entries {
-        collect_watch_dirs_inner(&entry, dirs)?;
+        collect_watch_dirs_inner(&entry, dirs, false)?;
     }
     Ok(())
 }
@@ -377,11 +392,23 @@ fn event_path_allowed(path: &Path, targets: &[WatchTarget]) -> bool {
     })
 }
 
-async fn run_rescan(service: &SyslogService, options: &WatchOptions, stage: &str) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RescanStatus {
+    Completed,
+    Retry,
+}
+
+async fn run_rescan(service: &SyslogService, options: &WatchOptions, stage: &str) -> RescanStatus {
     let path = options.path.as_ref().map(|path| path.display().to_string());
     match service.index_ai_roots(path, false, None).await {
-        Ok(result) => emit_index_result(stage, &result, options.json),
-        Err(error) => tracing::warn!(error = %error, "AI transcript rescan failed"),
+        Ok(result) => {
+            emit_index_result(stage, &result, options.json);
+            RescanStatus::Completed
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "AI transcript rescan failed");
+            RescanStatus::Retry
+        }
     }
 }
 
@@ -395,9 +422,14 @@ async fn process_pending(
     for path in paths {
         match pending.stable(&path, now, options.settle) {
             Ok(PendingState::Stable) => {
-                if process_file(service, options, &path).await {
+                let outcome = process_file(service, options, &path).await;
+                if outcome.retry {
                     if !pending.requeue(path.clone(), Instant::now(), options.max_retries) {
-                        tracing::warn!(path = %path.display(), "AI transcript indexing failed before retry cap");
+                        tracing::warn!(
+                            path = %path.display(),
+                            detail = outcome.detail.as_deref().unwrap_or("unknown failure"),
+                            "AI transcript indexing failed before retry cap"
+                        );
                         pending.remove(&path);
                     }
                 } else {
@@ -420,18 +452,41 @@ async fn process_pending(
     }
 }
 
-async fn process_file(service: &SyslogService, options: &WatchOptions, path: &Path) -> bool {
+struct ProcessOutcome {
+    retry: bool,
+    detail: Option<String>,
+}
+
+async fn process_file(
+    service: &SyslogService,
+    options: &WatchOptions,
+    path: &Path,
+) -> ProcessOutcome {
     tracing::debug!(path = %path.display(), "AI transcript watch indexing file");
     match service.add_ai_file(path.display().to_string(), false).await {
         Ok(result) => {
             emit_index_result("file", &result, options.json);
-            result.parse_errors > 0
+            let retry = result.parse_errors > 0
                 || result.storage_blocked_chunks > 0
-                || !result.file_errors.is_empty()
+                || result.dropped_metadata_fields > 0
+                || !result.file_errors.is_empty();
+            let detail = retry.then(|| {
+                format!(
+                    "parse_errors={} storage_blocked_chunks={} dropped_metadata_fields={} file_errors={}",
+                    result.parse_errors,
+                    result.storage_blocked_chunks,
+                    result.dropped_metadata_fields,
+                    result.file_errors.len()
+                )
+            });
+            ProcessOutcome { retry, detail }
         }
         Err(error) => {
             tracing::warn!(path = %path.display(), error = %error, "AI transcript indexing failed");
-            true
+            ProcessOutcome {
+                retry: true,
+                detail: Some(error.to_string()),
+            }
         }
     }
 }
@@ -450,15 +505,17 @@ fn emit_index_result(stage: &str, result: &IndexResult, json: bool) {
     if result.ingested > 0
         || result.parse_errors > 0
         || result.storage_blocked_chunks > 0
+        || result.dropped_metadata_fields > 0
         || !result.file_errors.is_empty()
     {
         println!(
-            "{stage}: files={} ingested={} duplicates={} parse_errors={} storage_blocked={} file_errors={}",
+            "{stage}: files={} ingested={} duplicates={} parse_errors={} storage_blocked={} dropped_metadata_fields={} file_errors={}",
             result.discovered_files,
             result.ingested,
             result.skipped_dupes,
             result.parse_errors,
             result.storage_blocked_chunks,
+            result.dropped_metadata_fields,
             result.file_errors.len()
         );
     }
@@ -489,150 +546,5 @@ async fn shutdown_signal() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pending_files_deduplicate_and_requeue_with_cap() {
-        let start = Instant::now();
-        let path = PathBuf::from("/tmp/session.jsonl");
-        let mut pending = PendingFiles::default();
-        assert!(pending.push(path.clone(), start));
-        assert!(pending.push(path.clone(), start + Duration::from_millis(25)));
-
-        assert_eq!(pending.files.len(), 1);
-        assert!(pending
-            .debounced_paths(
-                start + Duration::from_millis(100),
-                Duration::from_millis(200)
-            )
-            .is_empty());
-        assert_eq!(
-            pending.debounced_paths(
-                start + Duration::from_millis(300),
-                Duration::from_millis(200)
-            ),
-            vec![path.clone()]
-        );
-        assert!(pending.requeue(path.clone(), start + Duration::from_millis(301), 1));
-        assert!(!pending.requeue(path, start + Duration::from_millis(302), 1));
-    }
-
-    #[test]
-    fn pending_files_wait_until_file_is_stable() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("session.jsonl");
-        std::fs::write(&path, "{}\n").unwrap();
-
-        let start = Instant::now();
-        let mut pending = PendingFiles::default();
-        assert!(pending.push(path.clone(), start));
-
-        assert_eq!(
-            pending
-                .stable(&path, start, Duration::from_millis(100))
-                .unwrap(),
-            PendingState::NotReady
-        );
-        assert_eq!(
-            pending
-                .stable(
-                    &path,
-                    start + Duration::from_millis(50),
-                    Duration::from_millis(100)
-                )
-                .unwrap(),
-            PendingState::NotReady
-        );
-        assert_eq!(
-            pending
-                .stable(
-                    &path,
-                    start + Duration::from_millis(150),
-                    Duration::from_millis(100)
-                )
-                .unwrap(),
-            PendingState::Stable
-        );
-        assert_eq!(pending.files.get(&path).unwrap().retries, 0);
-    }
-
-    #[test]
-    fn pending_files_drops_terminal_paths() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("deleted.jsonl");
-        std::fs::write(&path, "{}\n").unwrap();
-        let start = Instant::now();
-        let mut pending = PendingFiles::default();
-        assert!(pending.push(path.clone(), start));
-        std::fs::remove_file(&path).unwrap();
-
-        assert_eq!(
-            pending
-                .stable(
-                    &path,
-                    start + Duration::from_millis(1),
-                    Duration::from_millis(1)
-                )
-                .unwrap(),
-            PendingState::Terminal
-        );
-    }
-
-    #[test]
-    fn pending_files_enforces_capacity() {
-        let start = Instant::now();
-        let mut pending = PendingFiles::default();
-        for index in 0..MAX_PENDING_FILES {
-            assert!(pending.push(PathBuf::from(format!("/tmp/{index}.jsonl")), start));
-        }
-        assert!(!pending.push(PathBuf::from("/tmp/overflow.jsonl"), start));
-    }
-
-    #[test]
-    fn collect_watch_dirs_includes_accessible_directories_without_file_recursion() {
-        let temp = tempfile::tempdir().unwrap();
-        let nested = temp.path().join("project");
-        std::fs::create_dir(&nested).unwrap();
-        let file = nested.join("session.jsonl");
-        std::fs::write(&file, "{}\n").unwrap();
-
-        let dirs = collect_watch_dirs(temp.path()).unwrap();
-
-        assert!(dirs.contains(&temp.path().to_path_buf()));
-        assert!(dirs.contains(&nested));
-        assert!(!dirs.contains(&file));
-    }
-
-    #[test]
-    fn exact_file_watch_target_rejects_sibling_events() {
-        let temp = tempfile::tempdir().unwrap();
-        let watched = temp.path().join("watched.jsonl");
-        let sibling = temp.path().join("sibling.jsonl");
-        std::fs::write(&watched, "{}\n").unwrap();
-        std::fs::write(&sibling, "{}\n").unwrap();
-
-        let targets = watch_targets(&test_watch_options(watched.clone())).unwrap();
-
-        assert!(event_path_allowed(&watched, &targets));
-        assert!(!event_path_allowed(&sibling, &targets));
-    }
-
-    #[test]
-    fn watch_targets_rejects_broad_current_directory() {
-        let err = watch_targets(&test_watch_options(std::env::current_dir().unwrap())).unwrap_err();
-
-        assert!(err.to_string().contains("unsafe transcript scan path"));
-    }
-
-    fn test_watch_options(path: PathBuf) -> WatchOptions {
-        WatchOptions {
-            path: Some(path),
-            debounce: Duration::from_millis(1),
-            settle: Duration::from_millis(1),
-            max_retries: 1,
-            initial_scan: false,
-            json: false,
-        }
-    }
-}
+#[path = "ai_watch_tests.rs"]
+mod tests;

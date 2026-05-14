@@ -5,6 +5,7 @@ set -euo pipefail
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
 INSTALL_URL="${SYSLOG_INSTALL_URL:-https://raw.githubusercontent.com/jmagar/syslog-mcp/main/install.sh}"
+INSTALL_SHA256="${SYSLOG_INSTALL_SHA256:-}"
 
 reject_unsafe_value() {
   local name="$1" value="${2:-}"
@@ -26,8 +27,20 @@ ensure_syslog_binary() {
   if command -v syslog >/dev/null 2>&1; then
     return 0
   fi
+  local tmp
+  tmp="$(mktemp)"
+  trap 'rm -f "${tmp}"' RETURN
   printf 'syslog plugin setup: syslog not found; running installer %s\n' "${INSTALL_URL}" >&2
-  curl -fsSL "${INSTALL_URL}" | sh
+  curl -fsSL -o "${tmp}" "${INSTALL_URL}"
+  if [[ -n "${INSTALL_SHA256}" ]]; then
+    printf '%s  %s\n' "${INSTALL_SHA256}" "${tmp}" | sha256sum -c -
+  elif [[ "${SYSLOG_INSTALL_ALLOW_UNVERIFIED:-false}" != "true" ]]; then
+    printf 'syslog plugin setup: refusing to run unverified installer; set SYSLOG_INSTALL_SHA256 or SYSLOG_INSTALL_ALLOW_UNVERIFIED=true\n' >&2
+    exit 1
+  fi
+  sh "${tmp}"
+  rm -f "${tmp}"
+  trap - RETURN
   export PATH="${HOME}/.local/bin:${PATH}"
   command -v syslog >/dev/null 2>&1 || {
     printf 'syslog plugin setup: installer completed but syslog is still not on PATH\n' >&2
@@ -36,7 +49,8 @@ ensure_syslog_binary() {
 }
 
 validate_client() {
-  local server_url="${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}"
+  local server_url
+  server_url="$(strip_trailing_mcp_path "${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}")"
   if curl -sf "${server_url%/}/health" >/dev/null 2>&1; then
     echo "syslog-mcp: connected to ${server_url%/}"
   else
