@@ -303,8 +303,7 @@ pub fn search_ai_sessions(
                    l.ai_session_id,
                    l.hostname,
                    l.timestamp,
-                   l.message,
-                   0.0 AS score
+                   l.message
             FROM logs_fts
             JOIN logs l ON l.id = logs_fts.rowid
             WHERE logs_fts MATCH ?1
@@ -335,7 +334,8 @@ pub fn search_ai_sessions(
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
     sql.push_str(&format!(
-        " LIMIT {}
+        " ORDER BY logs_fts.rowid DESC
+           LIMIT {}
          ),
          grouped AS (
             SELECT ai_project,
@@ -345,7 +345,6 @@ pub fn search_ai_sessions(
                    MIN(timestamp) AS first_seen,
                    MAX(timestamp) AS last_seen,
                    COUNT(*) AS match_count,
-                   MIN(score) AS best_score,
                    (
                        SELECT c2.message
                        FROM candidates c2
@@ -353,7 +352,7 @@ pub fn search_ai_sessions(
                          AND c2.ai_tool = c.ai_tool
                          AND c2.ai_session_id = c.ai_session_id
                          AND c2.hostname = c.hostname
-                       ORDER BY c2.score, c2.timestamp DESC
+                       ORDER BY c2.timestamp DESC
                        LIMIT 1
                    ) AS best_snippet
             FROM candidates c
@@ -375,7 +374,7 @@ pub fn search_ai_sessions(
                 COUNT(*) OVER() AS total_candidates,
                 (SELECT COUNT(*) FROM candidates) AS raw_candidate_count
          FROM grouped
-         ORDER BY best_score, last_seen DESC
+         ORDER BY last_seen DESC
          LIMIT {limit}",
         CANDIDATE_CAP + 1
     ));
