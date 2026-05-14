@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.6] - 2026-05-14
+
+### Fixed
+
+- **AI index timer activation**: `syslog setup ai-index-timer` now retries
+  `systemctl --user` with the inferred `/run/user/<uid>/bus` environment when
+  the caller lacks `DBUS_SESSION_BUS_ADDRESS`, so non-login tool contexts can
+  still enable, disable, and check the host-local timer.
+
 ## [0.21.5] - 2026-05-14
 
 ### Added
@@ -1100,7 +1109,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.5...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.6...HEAD
+[0.21.6]: https://github.com/jmagar/syslog-mcp/compare/v0.21.5...v0.21.6
 [0.21.5]: https://github.com/jmagar/syslog-mcp/compare/v0.21.4...v0.21.5
 [0.21.4]: https://github.com/jmagar/syslog-mcp/compare/v0.21.3...v0.21.4
 [0.21.3]: https://github.com/jmagar/syslog-mcp/compare/v0.21.2...v0.21.3

@@ -614,7 +614,7 @@ fn ai_index_timer_unit() -> &'static str {
 
 fn systemctl_user_phase(args: &[&str]) -> SetupPhase {
     let timer = PhaseTimer::start("systemctl-user");
-    match Command::new("systemctl").arg("--user").args(args).output() {
+    match run_systemctl_user(args) {
         Ok(output) if output.status.success() => timer.finish(
             SetupStatus::Ok,
             String::from_utf8_lossy(&output.stdout)
@@ -636,6 +636,37 @@ fn systemctl_user_phase(args: &[&str]) -> SetupPhase {
         }
         Err(error) => timer.finish(SetupStatus::Warn, error.to_string()),
     }
+}
+
+fn run_systemctl_user(args: &[&str]) -> io::Result<std::process::Output> {
+    let output = Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .output()?;
+    if output.status.success() || std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() {
+        return Ok(output);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.contains("DBUS_SESSION_BUS_ADDRESS") && !stderr.contains("user scope bus") {
+        return Ok(output);
+    }
+    let Some((runtime_dir, bus_address)) = inferred_user_bus_env() else {
+        return Ok(output);
+    };
+    Command::new("systemctl")
+        .env("XDG_RUNTIME_DIR", runtime_dir)
+        .env("DBUS_SESSION_BUS_ADDRESS", bus_address)
+        .arg("--user")
+        .args(args)
+        .output()
+}
+
+fn inferred_user_bus_env() -> Option<(PathBuf, String)> {
+    let uid = current_uid_gid().0;
+    let runtime_dir = PathBuf::from(format!("/run/user/{uid}"));
+    let bus = runtime_dir.join("bus");
+    bus.exists()
+        .then(|| (runtime_dir, format!("unix:path={}", bus.display())))
 }
 
 fn command_phase<const N: usize>(name: &'static str, args: [&str; N]) -> SetupPhase {

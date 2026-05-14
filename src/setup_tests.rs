@@ -55,3 +55,14 @@ fn ai_index_timer_units_are_host_user_units() {
     assert!(timer.contains("OnUnitActiveSec=30min"));
     assert!(timer.contains("WantedBy=timers.target"));
 }
+
+#[test]
+fn inferred_user_bus_env_uses_runtime_bus_when_present() {
+    let Some((runtime_dir, bus_address)) = inferred_user_bus_env() else {
+        return;
+    };
+
+    assert!(runtime_dir.is_absolute());
+    assert!(bus_address.starts_with("unix:path="));
+    assert!(bus_address.ends_with("/bus"));
+}
