@@ -26,6 +26,28 @@ pub struct WatchOptions {
 }
 
 #[derive(Debug, Clone)]
+enum WatchTarget {
+    Directory(PathBuf),
+    File { path: PathBuf, parent: PathBuf },
+}
+
+impl WatchTarget {
+    fn root(&self) -> &Path {
+        match self {
+            Self::Directory(path) => path,
+            Self::File { parent, .. } => parent,
+        }
+    }
+
+    fn allowed_file(&self) -> Option<&Path> {
+        match self {
+            Self::Directory(_) => None,
+            Self::File { path, .. } => Some(path),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct PendingFile {
     last_seen: Instant,
     retries: u8,
@@ -113,8 +135,8 @@ impl PendingFiles {
 }
 
 pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
-    let roots = watch_roots(&options);
-    if roots.is_empty() {
+    let targets = watch_targets(&options)?;
+    if targets.is_empty() {
         anyhow::bail!("no AI transcript roots exist to watch");
     }
 
@@ -131,14 +153,14 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
     )?;
 
     let mut watched_dirs = BTreeSet::new();
-    for root in &roots {
-        watch_directory_tree(&mut watcher, root, &mut watched_dirs);
+    for target in &targets {
+        watch_directory_tree(&mut watcher, target.root(), &mut watched_dirs);
     }
     if watched_dirs.is_empty() {
         anyhow::bail!("no accessible AI transcript directories exist to watch");
     }
 
-    tracing::info!(roots = ?roots, watched_dirs = watched_dirs.len(), "AI transcript watcher started");
+    tracing::info!(targets = ?targets, watched_dirs = watched_dirs.len(), "AI transcript watcher started");
     if options.initial_scan {
         run_rescan(&service, &options, "initial").await;
     }
@@ -153,7 +175,7 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
     loop {
         tokio::select! {
             Some(event) = rx.recv() => {
-                for dir in handle_event(event, &mut pending, &overflow_rescan) {
+                for dir in handle_event(event, &targets, &mut pending, &overflow_rescan) {
                     watch_directory_tree(&mut watcher, &dir, &mut watched_dirs);
                 }
             }
@@ -171,12 +193,26 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
     }
 }
 
-fn watch_roots(options: &WatchOptions) -> Vec<PathBuf> {
-    let roots = match &options.path {
-        Some(path) => vec![path.clone()],
-        None => scanner::default_transcript_roots(),
-    };
-    roots.into_iter().filter(|path| path.exists()).collect()
+fn watch_targets(options: &WatchOptions) -> Result<Vec<WatchTarget>> {
+    if let Some(path) = &options.path {
+        let canonical = scanner::validate_transcript_scan_path(path)?;
+        if canonical.is_file() {
+            let parent = canonical.parent().map(Path::to_path_buf).ok_or_else(|| {
+                anyhow::anyhow!("transcript file has no parent: {}", canonical.display())
+            })?;
+            return Ok(vec![WatchTarget::File {
+                path: canonical,
+                parent,
+            }]);
+        }
+        return Ok(vec![WatchTarget::Directory(canonical)]);
+    }
+
+    scanner::default_transcript_roots()
+        .into_iter()
+        .filter(|path| path.exists())
+        .map(|path| scanner::validate_transcript_scan_path(&path).map(WatchTarget::Directory))
+        .collect()
 }
 
 fn watch_directory_tree(
@@ -255,6 +291,7 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>) {
 
 fn handle_event(
     event: notify::Result<Event>,
+    targets: &[WatchTarget],
     pending: &mut PendingFiles,
     overflow_rescan: &AtomicBool,
 ) -> Vec<PathBuf> {
@@ -269,9 +306,14 @@ fn handle_event(
             if event.kind.is_create() || event.kind.is_modify() {
                 let now = Instant::now();
                 for path in event.paths {
-                    if event.kind.is_create() && path.is_dir() {
+                    if event.kind.is_create()
+                        && path.is_dir()
+                        && targets.iter().all(|target| target.allowed_file().is_none())
+                    {
                         new_dirs.push(path);
-                    } else if scanner::is_supported_transcript_file(&path) {
+                    } else if scanner::is_supported_transcript_file(&path)
+                        && event_path_allowed(&path, targets)
+                    {
                         pending.push(path, now);
                     }
                 }
@@ -280,6 +322,14 @@ fn handle_event(
         Err(error) => tracing::warn!(error = %error, "AI transcript watch event failed"),
     }
     new_dirs
+}
+
+fn event_path_allowed(path: &Path, targets: &[WatchTarget]) -> bool {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    targets.iter().any(|target| match target {
+        WatchTarget::Directory(root) => canonical.starts_with(root),
+        WatchTarget::File { path, .. } => &canonical == path,
+    })
 }
 
 async fn run_rescan(service: &SyslogService, options: &WatchOptions, stage: &str) {
@@ -463,5 +513,42 @@ mod tests {
         assert!(dirs.contains(&temp.path().to_path_buf()));
         assert!(dirs.contains(&nested));
         assert!(!dirs.contains(&file));
+    }
+
+    #[test]
+    fn exact_file_watch_target_rejects_sibling_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let watched = temp.path().join("watched.jsonl");
+        let sibling = temp.path().join("sibling.jsonl");
+        std::fs::write(&watched, "{}\n").unwrap();
+        std::fs::write(&sibling, "{}\n").unwrap();
+
+        let targets = watch_targets(&WatchOptions {
+            path: Some(watched.clone()),
+            debounce: Duration::from_millis(1),
+            settle: Duration::from_millis(1),
+            max_retries: 1,
+            initial_scan: false,
+            json: false,
+        })
+        .unwrap();
+
+        assert!(event_path_allowed(&watched, &targets));
+        assert!(!event_path_allowed(&sibling, &targets));
+    }
+
+    #[test]
+    fn watch_targets_rejects_broad_current_directory() {
+        let err = watch_targets(&WatchOptions {
+            path: Some(std::env::current_dir().unwrap()),
+            debounce: Duration::from_millis(1),
+            settle: Duration::from_millis(1),
+            max_retries: 1,
+            initial_scan: false,
+            json: false,
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unsafe transcript scan path"));
     }
 }

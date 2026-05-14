@@ -83,11 +83,36 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     assert!(unit.contains("NoNewPrivileges=true"));
     assert!(unit.contains("PrivateTmp=true"));
     assert!(unit.contains("ProtectSystem=strict"));
-    assert!(unit.contains("ReadOnlyPaths=-/home/me/.claude/projects -/home/me/.codex/sessions"));
+    assert!(unit.contains("ProtectHome=tmpfs"));
+    assert!(unit.contains("BindReadOnlyPaths=-/home/me/.claude/projects -/home/me/.codex/sessions"));
+    assert!(unit.contains("BindPaths=/home/me/.syslog-mcp/data /home/me/.local/state/syslog-mcp"));
     assert!(
         unit.contains("ReadWritePaths=/home/me/.syslog-mcp/data /home/me/.local/state/syslog-mcp")
     );
     assert!(unit.contains("WantedBy=default.target"));
+}
+
+#[test]
+fn setup_path_value_rejects_unit_breaking_characters() {
+    assert!(setup_path_value(std::path::Path::new("/home/me/syslog.db")).is_ok());
+    assert!(setup_path_value(std::path::Path::new("/home/me/bad path/syslog.db")).is_err());
+    assert!(setup_path_value(std::path::Path::new("/home/me/%n/syslog.db")).is_err());
+}
+
+#[test]
+fn db_path_from_setup_env_uses_absolute_compose_data_volume() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    std::fs::write(
+        &env_path,
+        "SYSLOG_MCP_DB_PATH=/data/syslog.db\nSYSLOG_MCP_DATA_VOLUME=/srv/syslog-data\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        db_path_from_setup_env(&env_path).unwrap(),
+        Some(std::path::PathBuf::from("/srv/syslog-data/syslog.db"))
+    );
 }
 
 #[test]
@@ -107,6 +132,22 @@ fn summarize_ai_index_output_reports_key_counts() {
         summary,
         "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 file_errors=1"
     );
+}
+
+#[test]
+fn ai_index_output_has_failures_detects_retryable_failures() {
+    assert!(!ai_index_output_has_failures(
+        r#"{"parse_errors":0,"storage_blocked_chunks":0,"file_errors":[]}"#
+    ));
+    assert!(ai_index_output_has_failures(
+        r#"{"parse_errors":1,"storage_blocked_chunks":0,"file_errors":[]}"#
+    ));
+    assert!(ai_index_output_has_failures(
+        r#"{"parse_errors":0,"storage_blocked_chunks":1,"file_errors":[]}"#
+    ));
+    assert!(ai_index_output_has_failures(
+        r#"{"parse_errors":0,"storage_blocked_chunks":0,"file_errors":["bad"]}"#
+    ));
 }
 
 #[test]

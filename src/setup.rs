@@ -718,10 +718,8 @@ fn remove_ai_watch_service_files(env_path: &Path, service_path: &Path) -> io::Re
 }
 
 fn ai_watch_env_file(db_path: &Path) -> String {
-    format!(
-        "SYSLOG_MCP_DB_PATH={}\nSYSLOG_DOCKER_INGEST_ENABLED=false\nRUST_LOG=warn\n",
-        db_path.display()
-    )
+    let db_path = setup_path_value(db_path).expect("validated AI watch DB path");
+    format!("SYSLOG_MCP_DB_PATH={db_path}\nSYSLOG_DOCKER_INGEST_ENABLED=false\nRUST_LOG=warn\n")
 }
 
 fn ai_watch_service_unit(
@@ -732,15 +730,17 @@ fn ai_watch_service_unit(
     user_home: &Path,
 ) -> String {
     let db_dir = db_path.parent().unwrap_or_else(|| Path::new("/"));
+    let env_path = setup_path_value(env_path).expect("validated AI watch env path");
+    let syslog_bin = setup_path_value(syslog_bin).expect("validated syslog binary path");
+    let user_home = setup_path_value(user_home).expect("validated user home path");
+    let claude_root = setup_path_value(&Path::new(&user_home).join(".claude/projects"))
+        .expect("validated Claude transcript root");
+    let codex_root = setup_path_value(&Path::new(&user_home).join(".codex/sessions"))
+        .expect("validated Codex transcript root");
+    let db_dir = setup_path_value(db_dir).expect("validated AI watch DB directory");
+    let state_dir = setup_path_value(state_dir).expect("validated AI watch state directory");
     format!(
-        "[Unit]\nDescription=syslog-mcp real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/syslog-mcp\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={}\nWorkingDirectory={}\nExecStart={} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nReadOnlyPaths=-{} -{}\nReadWritePaths={} {}\n\n[Install]\nWantedBy=default.target\n",
-        env_path.display(),
-        user_home.display(),
-        syslog_bin.display(),
-        user_home.join(".claude/projects").display(),
-        user_home.join(".codex/sessions").display(),
-        db_dir.display(),
-        state_dir.display()
+        "[Unit]\nDescription=syslog-mcp real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/syslog-mcp\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nWorkingDirectory={user_home}\nExecStart={syslog_bin} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=tmpfs\nBindReadOnlyPaths=-{claude_root} -{codex_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 
@@ -753,19 +753,24 @@ fn run_ai_watch_initial_index_phase(syslog_bin: &Path, env_path: &Path) -> Setup
         command.env(key, value);
     }
     match command.output() {
-        Ok(output) if output.status.success() => timer.finish(
-            SetupStatus::Ok,
-            summarize_ai_index_output(&String::from_utf8_lossy(&output.stdout)),
-        ),
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let status = if ai_index_output_has_failures(&stdout) {
+                SetupStatus::Error
+            } else {
+                SetupStatus::Ok
+            };
+            timer.finish(status, summarize_ai_index_output(&stdout))
+        }
         Ok(output) => timer.finish(
-            SetupStatus::Warn,
+            SetupStatus::Error,
             String::from_utf8_lossy(&output.stderr)
                 .lines()
                 .next()
                 .unwrap_or("initial AI index failed")
                 .to_string(),
         ),
-        Err(error) => timer.finish(SetupStatus::Warn, error.to_string()),
+        Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
     }
 }
 
@@ -800,6 +805,26 @@ fn summarize_ai_index_output(stdout: &str) -> String {
             .and_then(serde_json::Value::as_array)
             .map_or(0, Vec::len),
     )
+}
+
+fn ai_index_output_has_failures(stdout: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
+        return true;
+    };
+    value
+        .get("parse_errors")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        > 0
+        || value
+            .get("storage_blocked_chunks")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+            > 0
+        || value
+            .get("file_errors")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|errors| !errors.is_empty())
 }
 
 fn ai_index_timer_disabled_phase() -> SetupPhase {
@@ -865,6 +890,9 @@ fn resolve_ai_watch_db_path(setup_home: &Path, user_home: &Path) -> io::Result<P
             return validate_db_path(PathBuf::from(value));
         }
     }
+    if let Some(path) = db_path_from_setup_env(&setup_home.join(".env"))? {
+        return validate_db_path(path);
+    }
     let plugin_db = user_home.join(".claude/plugins/data/syslog-jmagar-lab/syslog.db");
     if plugin_db.exists() {
         return validate_db_path(plugin_db);
@@ -883,6 +911,43 @@ fn validate_db_path(path: PathBuf) -> io::Result<PathBuf> {
         ));
     }
     Ok(path)
+}
+
+fn db_path_from_setup_env(env_path: &Path) -> io::Result<Option<PathBuf>> {
+    let raw = match std::fs::read_to_string(env_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let values = parse_env(&raw);
+    if let Some(db_path) = values.get("SYSLOG_MCP_DB_PATH") {
+        if !db_path.trim().is_empty() && db_path != "/data/syslog.db" {
+            return Ok(Some(PathBuf::from(db_path)));
+        }
+    }
+    let Some(data_volume) = values.get("SYSLOG_MCP_DATA_VOLUME") else {
+        return Ok(None);
+    };
+    let volume_path = PathBuf::from(data_volume);
+    if volume_path.is_absolute() {
+        return Ok(Some(volume_path.join("syslog.db")));
+    }
+    Ok(None)
+}
+
+fn setup_path_value(path: &Path) -> io::Result<String> {
+    let raw = path.display().to_string();
+    if raw.is_empty()
+        || raw.chars().any(|ch| {
+            ch.is_control() || ch.is_whitespace() || matches!(ch, '"' | '\'' | '%' | '\\')
+        })
+    {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("unsupported character in setup path: {raw}"),
+        ));
+    }
+    Ok(raw)
 }
 
 fn write_executable_file(path: &Path, body: &str) -> io::Result<()> {
