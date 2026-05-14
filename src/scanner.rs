@@ -15,7 +15,10 @@ mod codex;
 
 pub use checkpoint::CheckpointStore;
 
-const MAX_FILE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
+const MAX_FILE_SIZE_BYTES: u64 = 1024 * 1024 * 1024;
+#[cfg(not(test))]
+const MAX_RECORD_SIZE_BYTES: usize = 512 * 1024 * 1024;
+#[cfg(test)]
 const MAX_RECORD_SIZE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_INDEX_CHUNK_RECORDS: usize = 500;
 const MAX_INDEX_CHUNK_BYTES: usize = 4 * 1024 * 1024;
@@ -223,6 +226,19 @@ pub fn index_file_with_storage(
     };
     let checkpoint_store = checkpoint::CheckpointStore::new(pool);
     let source_id = checkpoint_store.ensure_source(&canonical, source_kind.as_str())?;
+    let current_metadata = FileMetadata::from_path_metadata(&canonical_path)?;
+    if source_kind != SourceKind::ExplicitFile
+        && checkpoint_store.source_matches_metadata(
+            source_id,
+            current_metadata.size,
+            current_metadata.mtime,
+        )?
+    {
+        return Ok(IndexResult {
+            discovered_files: 1,
+            ..Default::default()
+        });
+    }
     let mut imports = Vec::new();
     let mut batch = Vec::new();
     let mut chunk_bytes = 0usize;
@@ -434,7 +450,7 @@ fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut I
     let read_dir = match fs::read_dir(path) {
         Ok(read_dir) => read_dir,
         Err(error) => {
-            record_file_error(result, path, &error.into());
+            record_discovered_path_error(result, path, &error.into());
             return;
         }
     };
@@ -442,7 +458,7 @@ fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut I
         match entry.with_context(|| format!("failed to read entry under {}", path.display())) {
             Ok(entry) => entries.push(entry.path()),
             Err(error) => {
-                record_file_error(result, path, &error);
+                record_discovered_path_error(result, path, &error);
             }
         }
     }
@@ -552,6 +568,28 @@ fn record_file_error(result: &mut IndexResult, path: &Path, error: &anyhow::Erro
         path: path.display().to_string(),
         error: error.to_string(),
     });
+}
+
+fn record_discovered_path_error(result: &mut IndexResult, path: &Path, error: &anyhow::Error) {
+    result.skipped_files += 1;
+    if is_permission_denied(error) {
+        tracing::debug!(
+            path = %path.display(),
+            error = %error,
+            "Skipping unreadable transcript path during discovery"
+        );
+    } else {
+        result.file_errors.push(IndexFileError {
+            path: path.display().to_string(),
+            error: error.to_string(),
+        });
+    }
+}
+
+fn is_permission_denied(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied)
 }
 
 fn accept_metadata_field(
@@ -694,19 +732,31 @@ pub(crate) struct FileMetadata {
 }
 
 impl FileMetadata {
-    fn from_path_hash(path: &Path, hash: &[u8]) -> Result<Self> {
+    fn from_path_metadata(path: &Path) -> Result<Self> {
         let metadata = fs::metadata(path)?;
-        let mtime = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|duration| duration.as_secs() as i64);
         Ok(Self {
             size: metadata.len(),
-            mtime,
+            mtime: metadata_mtime_secs(&metadata),
+            content_hash: String::new(),
+        })
+    }
+
+    fn from_path_hash(path: &Path, hash: &[u8]) -> Result<Self> {
+        let metadata = fs::metadata(path)?;
+        Ok(Self {
+            size: metadata.len(),
+            mtime: metadata_mtime_secs(&metadata),
             content_hash: hex_digest(hash),
         })
     }
+}
+
+fn metadata_mtime_secs(metadata: &fs::Metadata) -> Option<i64> {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs() as i64)
 }
 
 fn hex_digest(bytes: &[u8]) -> String {

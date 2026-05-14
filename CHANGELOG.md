@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-05-13
+
+### Fixed
+
+- **AI transcript CLI reliability**: Pointed the local debug CLI at the live
+  Compose data volume, made default indexing tolerate unreadable discovered
+  transcript directories without failing, and raised production scanner limits
+  for large Codex session metadata records.
+- **AI indexing performance**: Added metadata checkpoint short-circuiting for
+  unchanged Claude/Codex transcript files so repeated `syslog ai index` runs do
+  not reread the full transcript history.
+- **AI search latency**: Removed the expensive per-row FTS relevance sort from
+  grouped AI session search so common transcript terms stay usable on the live
+  multi-hundred-thousand-row database.
+
 ## [0.21.0] - 2026-05-13
 
 ### Added
@@ -1019,7 +1034,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/jmagar/syslog-mcp/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/jmagar/syslog-mcp/compare/v0.20.2...v0.21.0
 [0.20.2]: https://github.com/jmagar/syslog-mcp/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/jmagar/syslog-mcp/compare/v0.20.0...v0.20.1
