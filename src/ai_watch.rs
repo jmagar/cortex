@@ -612,15 +612,7 @@ mod tests {
         std::fs::write(&watched, "{}\n").unwrap();
         std::fs::write(&sibling, "{}\n").unwrap();
 
-        let targets = watch_targets(&WatchOptions {
-            path: Some(watched.clone()),
-            debounce: Duration::from_millis(1),
-            settle: Duration::from_millis(1),
-            max_retries: 1,
-            initial_scan: false,
-            json: false,
-        })
-        .unwrap();
+        let targets = watch_targets(&test_watch_options(watched.clone())).unwrap();
 
         assert!(event_path_allowed(&watched, &targets));
         assert!(!event_path_allowed(&sibling, &targets));
@@ -628,16 +620,19 @@ mod tests {
 
     #[test]
     fn watch_targets_rejects_broad_current_directory() {
-        let err = watch_targets(&WatchOptions {
-            path: Some(std::env::current_dir().unwrap()),
+        let err = watch_targets(&test_watch_options(std::env::current_dir().unwrap())).unwrap_err();
+
+        assert!(err.to_string().contains("unsafe transcript scan path"));
+    }
+
+    fn test_watch_options(path: PathBuf) -> WatchOptions {
+        WatchOptions {
+            path: Some(path),
             debounce: Duration::from_millis(1),
             settle: Duration::from_millis(1),
             max_retries: 1,
             initial_scan: false,
             json: false,
-        })
-        .unwrap_err();
-
-        assert!(err.to_string().contains("unsafe transcript scan path"));
+        }
     }
 }

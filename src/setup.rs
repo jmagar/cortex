@@ -347,6 +347,8 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
             phases.push(systemctl_user_phase(&["daemon-reload"]));
         }
         AiWatchServiceAction::Check => {
+            let syslog_bin = resolve_syslog_binary()?;
+            let db_path = resolve_ai_watch_db_path(&home, &user_home)?;
             phases.push(check_file_phase(
                 "ai-watch-env",
                 &watch_env_path,
@@ -356,6 +358,14 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
                 "ai-watch-service",
                 &service_path,
                 "run syslog setup ai-watch-service install",
+            ));
+            phases.push(check_ai_watch_service_content_phase(
+                &watch_env_path,
+                &service_path,
+                &state_dir,
+                &syslog_bin,
+                &db_path,
+                &user_home,
             ));
             phases.push(ai_index_timer_disabled_phase());
             phases.push(systemctl_user_required_phase(&[
@@ -717,6 +727,49 @@ fn remove_ai_watch_service_files(env_path: &Path, service_path: &Path) -> io::Re
     Ok(timer.finish(SetupStatus::Ok, "removed syslog AI watch service files"))
 }
 
+fn check_ai_watch_service_content_phase(
+    env_path: &Path,
+    service_path: &Path,
+    state_dir: &Path,
+    syslog_bin: &Path,
+    db_path: &Path,
+    user_home: &Path,
+) -> SetupPhase {
+    let timer = PhaseTimer::start("ai-watch-service-content");
+    let expected_env = ai_watch_env_file(db_path);
+    let expected_unit = ai_watch_service_unit(syslog_bin, env_path, db_path, state_dir, user_home);
+    let current_env = match std::fs::read_to_string(env_path) {
+        Ok(raw) => raw,
+        Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
+    };
+    let current_unit = match std::fs::read_to_string(service_path) {
+        Ok(raw) => raw,
+        Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
+    };
+    if current_env != expected_env {
+        return timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{} does not match generated AI watch environment",
+                env_path.display()
+            ),
+        );
+    }
+    if current_unit != expected_unit {
+        return timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{} does not match generated AI watch unit",
+                service_path.display()
+            ),
+        );
+    }
+    timer.finish(
+        SetupStatus::Ok,
+        "AI watch service files match generated content",
+    )
+}
+
 fn ai_watch_env_file(db_path: &Path) -> String {
     let db_path = setup_path_value(db_path).expect("validated AI watch DB path");
     format!("SYSLOG_MCP_DB_PATH={db_path}\nSYSLOG_DOCKER_INGEST_ENABLED=false\nRUST_LOG=warn\n")
@@ -854,25 +907,35 @@ fn systemctl_user_state(command: &str, unit: &str) -> Option<String> {
 
 fn resolve_syslog_binary() -> io::Result<PathBuf> {
     let current = std::env::current_exe()?;
-    if current.file_name().and_then(|name| name.to_str()) == Some("syslog") {
-        return validate_executable_path(current);
-    }
     let output = Command::new("sh")
         .args(["-c", "command -v syslog"])
         .output()?;
-    if !output.status.success() {
-        return Err(io::Error::new(
-            ErrorKind::NotFound,
-            "syslog binary not found on PATH",
-        ));
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return validate_executable_path(PathBuf::from(path));
+        }
     }
-    validate_executable_path(PathBuf::from(
-        String::from_utf8_lossy(&output.stdout).trim(),
+    if current.file_name().and_then(|name| name.to_str()) == Some("syslog") {
+        return validate_executable_path(current);
+    }
+    Err(io::Error::new(
+        ErrorKind::NotFound,
+        "syslog binary not found on PATH",
     ))
 }
 
 fn validate_executable_path(path: PathBuf) -> io::Result<PathBuf> {
     let canonical = path.canonicalize()?;
+    if !allow_debug_binary() && looks_like_debug_build_path(&canonical) {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "refusing to install AI watch service with debug/worktree binary {}; put the syslog wrapper on PATH or set SYSLOG_AI_WATCH_ALLOW_DEBUG_BINARY=true",
+                canonical.display()
+            ),
+        ));
+    }
     let metadata = std::fs::metadata(&canonical)?;
     if !metadata.is_file() {
         return Err(io::Error::new(
@@ -881,6 +944,17 @@ fn validate_executable_path(path: PathBuf) -> io::Result<PathBuf> {
         ));
     }
     Ok(canonical)
+}
+
+fn allow_debug_binary() -> bool {
+    std::env::var("SYSLOG_AI_WATCH_ALLOW_DEBUG_BINARY")
+        .ok()
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
+fn looks_like_debug_build_path(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    text.contains("/target/debug/") || text.contains("/.cache/cargo/debug/")
 }
 
 fn resolve_ai_watch_db_path(setup_home: &Path, user_home: &Path) -> io::Result<PathBuf> {
@@ -924,12 +998,34 @@ fn db_path_from_setup_env(env_path: &Path) -> io::Result<Option<PathBuf>> {
             return Ok(Some(PathBuf::from(db_path)));
         }
     }
+    let uses_container_db_path = values
+        .get("SYSLOG_MCP_DB_PATH")
+        .is_some_and(|db_path| db_path == "/data/syslog.db");
     let Some(data_volume) = values.get("SYSLOG_MCP_DATA_VOLUME") else {
+        if uses_container_db_path {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "{} uses SYSLOG_MCP_DB_PATH=/data/syslog.db but does not set absolute SYSLOG_MCP_DATA_VOLUME",
+                    env_path.display()
+                ),
+            ));
+        }
         return Ok(None);
     };
     let volume_path = PathBuf::from(data_volume);
     if volume_path.is_absolute() {
         return Ok(Some(volume_path.join("syslog.db")));
+    }
+    if uses_container_db_path {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "{} uses SYSLOG_MCP_DB_PATH=/data/syslog.db but SYSLOG_MCP_DATA_VOLUME is not absolute: {}",
+                env_path.display(),
+                data_volume
+            ),
+        ));
     }
     Ok(None)
 }

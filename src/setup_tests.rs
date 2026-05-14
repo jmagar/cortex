@@ -117,6 +117,62 @@ fn db_path_from_setup_env_uses_absolute_compose_data_volume() {
 }
 
 #[test]
+fn db_path_from_setup_env_rejects_container_db_without_absolute_data_volume() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    std::fs::write(
+        &env_path,
+        "SYSLOG_MCP_DB_PATH=/data/syslog.db\nSYSLOG_MCP_DATA_VOLUME=syslog-data\n",
+    )
+    .unwrap();
+
+    let err = db_path_from_setup_env(&env_path).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("SYSLOG_MCP_DATA_VOLUME is not absolute"));
+}
+
+#[test]
+fn validate_executable_path_rejects_debug_build_paths_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join(".cache/cargo/debug/syslog");
+    std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+
+    let err = validate_executable_path(bin).unwrap_err();
+    assert!(err.to_string().contains("debug/worktree binary"));
+}
+
+#[test]
+fn ai_watch_service_content_phase_detects_stale_unit() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join("ai-watch.env");
+    let service_path = dir.path().join("syslog-ai-watch.service");
+    let state_dir = dir.path().join("state");
+    let db_path = dir.path().join("data/syslog.db");
+    let user_home = dir.path().join("home");
+    let bin = dir.path().join("bin/syslog");
+    std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+    std::fs::write(&env_path, ai_watch_env_file(&db_path)).unwrap();
+    std::fs::write(&service_path, "stale unit").unwrap();
+
+    let phase = check_ai_watch_service_content_phase(
+        &env_path,
+        &service_path,
+        &state_dir,
+        &bin,
+        &db_path,
+        &user_home,
+    );
+
+    assert!(matches!(phase.status, SetupStatus::Error));
+    assert!(phase
+        .detail
+        .contains("does not match generated AI watch unit"));
+}
+
+#[test]
 fn summarize_ai_index_output_reports_key_counts() {
     let summary = summarize_ai_index_output(
         r#"{

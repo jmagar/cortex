@@ -14,6 +14,8 @@ fail() {
 out="$("${CHECKER}" --help)"
 [[ "${out}" == *"--mode auto|docker"* ]] || fail "help omits mode usage"
 [[ "${out}" == *"local cache"* ]] || fail "help omits Docker cache semantics"
+[[ "${out}" == *"--allow-legacy"* ]] || fail "help omits legacy escape hatch"
+[[ "${out}" == *"--allow-local-image"* ]] || fail "help omits local image escape hatch"
 
 set +e
 out="$("${CHECKER}" --bogus 2>&1)"
