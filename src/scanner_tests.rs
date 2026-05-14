@@ -584,8 +584,7 @@ fn rewritten_file_falls_back_to_duplicate_safe_full_scan() {
 #[serial]
 fn index_roots_default_scans_claude_and_codex_roots() {
     let (pool, dir) = test_pool();
-    let old_home = std::env::var_os("HOME");
-    std::env::set_var("HOME", dir.path());
+    let _home = HomeOverride::set(dir.path());
 
     let claude_root = dir.path().join(".claude/projects/-tmp-default");
     std::fs::create_dir_all(&claude_root).unwrap();
@@ -612,9 +611,6 @@ fn index_roots_default_scans_claude_and_codex_roots() {
     .unwrap();
 
     let result = index_roots(&pool, None).unwrap();
-    if let Some(home) = old_home {
-        std::env::set_var("HOME", home);
-    }
 
     assert_eq!(result.discovered_files, 2);
     assert_eq!(result.ingested, 2);
@@ -705,8 +701,7 @@ fn explicit_file_detects_codex_transcript_shape_outside_codex_root() {
 #[serial]
 fn default_index_does_not_skip_same_size_rewrite_with_new_mtime_nanos() {
     let (pool, dir) = test_pool();
-    let old_home = std::env::var_os("HOME");
-    std::env::set_var("HOME", dir.path());
+    let _home = HomeOverride::set(dir.path());
 
     let codex_root = dir.path().join(".codex/sessions/2026/05/14");
     std::fs::create_dir_all(&codex_root).unwrap();
@@ -735,9 +730,6 @@ fn default_index_does_not_skip_same_size_rewrite_with_new_mtime_nanos() {
     set_mtime(&file, 1_800_000_000, 2);
 
     let second = index_roots(&pool, None).unwrap();
-    if let Some(home) = old_home {
-        std::env::set_var("HOME", home);
-    }
 
     assert_eq!(second.ingested, 1);
     let search = search_ai_sessions(
@@ -756,8 +748,7 @@ fn default_index_does_not_skip_same_size_rewrite_with_new_mtime_nanos() {
 #[serial]
 fn default_index_does_not_skip_same_size_rewrite_with_preserved_mtime() {
     let (pool, dir) = test_pool();
-    let old_home = std::env::var_os("HOME");
-    std::env::set_var("HOME", dir.path());
+    let _home = HomeOverride::set(dir.path());
 
     let codex_root = dir.path().join(".codex/sessions/2026/05/14");
     std::fs::create_dir_all(&codex_root).unwrap();
@@ -786,9 +777,6 @@ fn default_index_does_not_skip_same_size_rewrite_with_preserved_mtime() {
     set_mtime(&file, 1_800_000_001, 1);
 
     let second = index_roots(&pool, None).unwrap();
-    if let Some(home) = old_home {
-        std::env::set_var("HOME", home);
-    }
 
     assert_eq!(second.ingested, 1);
     let search = search_ai_sessions(
@@ -851,6 +839,26 @@ fn set_mtime(path: &std::path::Path, secs: u64, nanos: u32) {
     let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
     file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::new(secs, nanos))
         .unwrap();
+}
+
+struct HomeOverride(Option<std::ffi::OsString>);
+
+impl HomeOverride {
+    fn set(path: &std::path::Path) -> Self {
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", path);
+        Self(previous)
+    }
+}
+
+impl Drop for HomeOverride {
+    fn drop(&mut self) {
+        if let Some(home) = &self.0 {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+    }
 }
 
 #[test]

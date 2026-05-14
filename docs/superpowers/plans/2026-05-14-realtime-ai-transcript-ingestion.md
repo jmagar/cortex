@@ -549,7 +549,7 @@ Expected: all pass.
 
 Add tests that assert:
 - `ai_watch_env_file` includes a canonical `SYSLOG_MCP_DB_PATH`.
-- `ai_watch_service_unit` uses absolute `ExecStart`, `EnvironmentFile`, `UMask=0077`, `Restart=on-failure`, restart limits, `NoNewPrivileges=true`, `PrivateTmp=true`, `ProtectSystem=strict`, `ReadOnlyPaths` for transcript roots, and `ReadWritePaths` for DB/state directories.
+- `ai_watch_service_unit` uses absolute `ExecStart`, `EnvironmentFile`, `UMask=0077`, `Restart=on-failure`, restart limits, `NoNewPrivileges=true`, `PrivateTmp=true`, `ProtectSystem=strict`, `BindReadOnlyPaths` for transcript roots, and `ReadWritePaths` for DB/state directories.
 - Install phases disable `syslog-ai-index.timer` before enabling `syslog-ai-watch.service`.
 - Timer absence is treated as OK, but active/enabled timer after install/check is an error.
 - `systemctl_user_phase` still uses the DBUS/XDG fallback already present in this branch.
@@ -569,7 +569,7 @@ pub enum AiWatchServiceAction {
 ```
 
 Add `run_ai_watch_service_setup(action)` mirroring `run_ai_index_timer_setup`, but with:
-- `~/.local/bin/syslog-ai-watch-env` or `~/.config/syslog-mcp/ai-watch.env` for environment.
+- `~/.config/syslog-mcp/ai-watch.env` for environment.
 - `~/.config/systemd/user/syslog-ai-watch.service`.
 - No shell lookup of `syslog` at runtime.
 - Resolved absolute binary from `std::env::current_exe()` when invoked through the intended wrapper, or from `command -v syslog` at install time followed by canonicalization and permission checks.
@@ -590,7 +590,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/syslog-mcp/ai-watch.env
-WorkingDirectory=%h
+WorkingDirectory=/
 ExecStart=/absolute/path/to/syslog ai watch --no-initial-scan --json
 Restart=on-failure
 RestartSec=5
@@ -598,14 +598,16 @@ UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadOnlyPaths=%h/.claude/projects %h/.codex/sessions
+ProtectHome=read-only
+BindReadOnlyPaths=-%h/.claude/projects -%h/.codex/sessions
+BindPaths=/absolute/db/dir %h/.local/state/syslog-mcp
 ReadWritePaths=/absolute/db/dir %h/.local/state/syslog-mcp
 
 [Install]
 WantedBy=default.target
 ```
 
-If `ProtectSystem=strict` or `ReadOnlyPaths` is not portable in this user service environment, include it in the plan tests as generated text and allow the live check to report systemd incompatibility clearly.
+If `ProtectSystem=strict` or `BindReadOnlyPaths` is not portable in this user service environment, include it in the plan tests as generated text and allow the live check to report systemd incompatibility clearly.
 
 - [ ] **Step 4: Install flow**
 

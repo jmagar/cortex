@@ -274,31 +274,13 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         Some("ai-index-timer")
     ) {
         let _ = iter.next();
-        let mut action = syslog_mcp::setup::AiIndexTimerAction::Check;
-        let mut action_seen = false;
-        for arg in iter {
-            match arg.as_str() {
-                "install" | "remove" | "check" => {
-                    if action_seen {
-                        anyhow::bail!("ai-index-timer action specified more than once");
-                    }
-                    action_seen = true;
-                    action = match arg.as_str() {
-                        "install" => syslog_mcp::setup::AiIndexTimerAction::Install,
-                        "remove" => syslog_mcp::setup::AiIndexTimerAction::Remove,
-                        _ => syslog_mcp::setup::AiIndexTimerAction::Check,
-                    };
-                }
-                "--json" => json = true,
-                "--help" | "-h" => {
-                    print_usage();
-                    std::process::exit(0);
-                }
-                other => anyhow::bail!("unknown ai-index-timer argument: {other}"),
-            }
-        }
+        let (action, json) = parse_setup_subcommand_args("ai-index-timer", iter)?;
         return Ok(SetupCommand {
-            kind: SetupCommandKind::AiIndexTimer(action),
+            kind: SetupCommandKind::AiIndexTimer(match action {
+                "install" => syslog_mcp::setup::AiIndexTimerAction::Install,
+                "remove" => syslog_mcp::setup::AiIndexTimerAction::Remove,
+                _ => syslog_mcp::setup::AiIndexTimerAction::Check,
+            }),
             json,
         });
     }
@@ -307,31 +289,13 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         Some("ai-watch-service")
     ) {
         let _ = iter.next();
-        let mut action = syslog_mcp::setup::AiWatchServiceAction::Check;
-        let mut action_seen = false;
-        for arg in iter {
-            match arg.as_str() {
-                "install" | "remove" | "check" => {
-                    if action_seen {
-                        anyhow::bail!("ai-watch-service action specified more than once");
-                    }
-                    action_seen = true;
-                    action = match arg.as_str() {
-                        "install" => syslog_mcp::setup::AiWatchServiceAction::Install,
-                        "remove" => syslog_mcp::setup::AiWatchServiceAction::Remove,
-                        _ => syslog_mcp::setup::AiWatchServiceAction::Check,
-                    };
-                }
-                "--json" => json = true,
-                "--help" | "-h" => {
-                    print_usage();
-                    std::process::exit(0);
-                }
-                other => anyhow::bail!("unknown ai-watch-service argument: {other}"),
-            }
-        }
+        let (action, json) = parse_setup_subcommand_args("ai-watch-service", iter)?;
         return Ok(SetupCommand {
-            kind: SetupCommandKind::AiWatchService(action),
+            kind: SetupCommandKind::AiWatchService(match action {
+                "install" => syslog_mcp::setup::AiWatchServiceAction::Install,
+                "remove" => syslog_mcp::setup::AiWatchServiceAction::Remove,
+                _ => syslog_mcp::setup::AiWatchServiceAction::Check,
+            }),
             json,
         });
     }
@@ -351,6 +315,37 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         kind: SetupCommandKind::Main(mode),
         json,
     })
+}
+
+fn parse_setup_subcommand_args<'a>(
+    name: &str,
+    args: impl Iterator<Item = &'a String>,
+) -> Result<(&'static str, bool)> {
+    let mut action = "check";
+    let mut action_seen = false;
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "install" | "remove" | "check" => {
+                if action_seen {
+                    anyhow::bail!("{name} action specified more than once");
+                }
+                action_seen = true;
+                action = match arg.as_str() {
+                    "install" => "install",
+                    "remove" => "remove",
+                    _ => "check",
+                };
+            }
+            "--json" => json = true,
+            "--help" | "-h" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            other => anyhow::bail!("unknown {name} argument: {other}"),
+        }
+    }
+    Ok((action, json))
 }
 
 fn parse_doctor_command(args: &[String]) -> Result<DoctorBinaryCommand> {
