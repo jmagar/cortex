@@ -275,11 +275,20 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     ) {
         let _ = iter.next();
         let mut action = syslog_mcp::setup::AiIndexTimerAction::Check;
+        let mut action_seen = false;
         for arg in iter {
             match arg.as_str() {
-                "install" => action = syslog_mcp::setup::AiIndexTimerAction::Install,
-                "remove" => action = syslog_mcp::setup::AiIndexTimerAction::Remove,
-                "check" => action = syslog_mcp::setup::AiIndexTimerAction::Check,
+                "install" | "remove" | "check" => {
+                    if action_seen {
+                        anyhow::bail!("ai-index-timer action specified more than once");
+                    }
+                    action_seen = true;
+                    action = match arg.as_str() {
+                        "install" => syslog_mcp::setup::AiIndexTimerAction::Install,
+                        "remove" => syslog_mcp::setup::AiIndexTimerAction::Remove,
+                        _ => syslog_mcp::setup::AiIndexTimerAction::Check,
+                    };
+                }
                 "--json" => json = true,
                 "--help" | "-h" => {
                     print_usage();
@@ -299,11 +308,20 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     ) {
         let _ = iter.next();
         let mut action = syslog_mcp::setup::AiWatchServiceAction::Check;
+        let mut action_seen = false;
         for arg in iter {
             match arg.as_str() {
-                "install" => action = syslog_mcp::setup::AiWatchServiceAction::Install,
-                "remove" => action = syslog_mcp::setup::AiWatchServiceAction::Remove,
-                "check" => action = syslog_mcp::setup::AiWatchServiceAction::Check,
+                "install" | "remove" | "check" => {
+                    if action_seen {
+                        anyhow::bail!("ai-watch-service action specified more than once");
+                    }
+                    action_seen = true;
+                    action = match arg.as_str() {
+                        "install" => syslog_mcp::setup::AiWatchServiceAction::Install,
+                        "remove" => syslog_mcp::setup::AiWatchServiceAction::Remove,
+                        _ => syslog_mcp::setup::AiWatchServiceAction::Check,
+                    };
+                }
                 "--json" => json = true,
                 "--help" | "-h" => {
                     print_usage();

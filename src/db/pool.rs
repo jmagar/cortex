@@ -237,16 +237,16 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
             }
         }
         conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time ON logs(ai_project, timestamp);
-             CREATE INDEX IF NOT EXISTS idx_logs_ai_session ON logs(ai_tool, ai_project, ai_session_id);
+            "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
+                 ON logs(ai_project, timestamp)
+                 WHERE ai_project IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_session
+                 ON logs(ai_tool, ai_project, ai_session_id)
+                 WHERE ai_tool IS NOT NULL;
              INSERT INTO schema_migrations (version) VALUES (4);",
         )?;
         tracing::info!("Migration 4: added AI transcript metadata columns and indexes");
     }
-    conn.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time ON logs(ai_project, timestamp);
-         CREATE INDEX IF NOT EXISTS idx_logs_ai_session ON logs(ai_tool, ai_project, ai_session_id);",
-    )?;
 
     let migration_5_applied: bool = conn
         .query_row(
@@ -325,6 +325,43 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         )?;
         tracing::info!("Migration 7: created transcript_parse_errors table");
     }
+
+    let migration_8_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 8",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_8_applied {
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_logs_ai_project_time;
+             DROP INDEX IF EXISTS idx_logs_ai_session;
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
+                 ON logs(ai_project, timestamp)
+                 WHERE ai_project IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_session
+                 ON logs(ai_tool, ai_project, ai_session_id)
+                 WHERE ai_tool IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_transcript_path
+                 ON logs(ai_transcript_path)
+                 WHERE ai_transcript_path IS NOT NULL;
+             INSERT INTO schema_migrations (version) VALUES (8);",
+        )?;
+        tracing::info!("Migration 8: rebuilt AI metadata indexes as partial indexes");
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
+             ON logs(ai_project, timestamp)
+             WHERE ai_project IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS idx_logs_ai_session
+             ON logs(ai_tool, ai_project, ai_session_id)
+             WHERE ai_tool IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS idx_logs_ai_transcript_path
+             ON logs(ai_transcript_path)
+             WHERE ai_transcript_path IS NOT NULL;",
+    )?;
 
     tracing::info!(path = %config.db_path.display(), "Database initialized");
     Ok(pool)

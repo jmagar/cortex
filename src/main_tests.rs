@@ -84,6 +84,21 @@ fn mode_parse_accepts_ai_watch_service_setup_namespace() {
 }
 
 #[test]
+fn mode_parse_rejects_duplicate_ai_watch_service_actions() {
+    let err = Mode::parse(vec![
+        "setup".into(),
+        "ai-watch-service".into(),
+        "install".into(),
+        "remove".into(),
+    ])
+    .unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("ai-watch-service action specified more than once"));
+}
+
+#[test]
 fn mode_parse_accepts_binary_doctor() {
     assert!(matches!(
         Mode::parse(vec!["doctor".into(), "binary".into(), "--json".into()]).unwrap(),

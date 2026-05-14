@@ -732,15 +732,14 @@ fn ai_watch_service_unit(
     let db_dir = db_path.parent().unwrap_or_else(|| Path::new("/"));
     let env_path = setup_path_value(env_path).expect("validated AI watch env path");
     let syslog_bin = setup_path_value(syslog_bin).expect("validated syslog binary path");
-    let user_home = setup_path_value(user_home).expect("validated user home path");
-    let claude_root = setup_path_value(&Path::new(&user_home).join(".claude/projects"))
+    let claude_root = setup_path_value(&user_home.join(".claude/projects"))
         .expect("validated Claude transcript root");
-    let codex_root = setup_path_value(&Path::new(&user_home).join(".codex/sessions"))
+    let codex_root = setup_path_value(&user_home.join(".codex/sessions"))
         .expect("validated Codex transcript root");
     let db_dir = setup_path_value(db_dir).expect("validated AI watch DB directory");
     let state_dir = setup_path_value(state_dir).expect("validated AI watch state directory");
     format!(
-        "[Unit]\nDescription=syslog-mcp real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/syslog-mcp\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nWorkingDirectory={user_home}\nExecStart={syslog_bin} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=tmpfs\nBindReadOnlyPaths=-{claude_root} -{codex_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=syslog-mcp real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/syslog-mcp\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nWorkingDirectory=/\nExecStart={syslog_bin} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nBindReadOnlyPaths=-{claude_root} -{codex_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 
