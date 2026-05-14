@@ -753,6 +753,57 @@ fn default_index_does_not_skip_same_size_rewrite_with_new_mtime_nanos() {
 }
 
 #[test]
+#[serial]
+fn default_index_does_not_skip_same_size_rewrite_with_preserved_mtime() {
+    let (pool, dir) = test_pool();
+    let old_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", dir.path());
+
+    let codex_root = dir.path().join(".codex/sessions/2026/05/14");
+    std::fs::create_dir_all(&codex_root).unwrap();
+    let file = codex_root.join("rollout-rewrite-preserved-mtime.jsonl");
+    std::fs::write(
+        &file,
+        concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"rewrite-preserved\",\"cwd\":\"/tmp/rewrite\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"content\":[{\"text\":\"alpha\"}]},\"timestamp\":\"2026-05-14T00:00:00Z\"}\n"
+        ),
+    )
+    .unwrap();
+    set_mtime(&file, 1_800_000_001, 1);
+
+    let first = index_roots(&pool, None).unwrap();
+    assert_eq!(first.ingested, 1);
+
+    std::fs::write(
+        &file,
+        concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"rewrite-preserved\",\"cwd\":\"/tmp/rewrite\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"content\":[{\"text\":\"bravo\"}]},\"timestamp\":\"2026-05-14T00:00:00Z\"}\n"
+        ),
+    )
+    .unwrap();
+    set_mtime(&file, 1_800_000_001, 1);
+
+    let second = index_roots(&pool, None).unwrap();
+    if let Some(home) = old_home {
+        std::env::set_var("HOME", home);
+    }
+
+    assert_eq!(second.ingested, 1);
+    let search = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "bravo".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(search.sessions[0].ai_session_id, "rewrite-preserved");
+}
+
+#[test]
 fn index_roots_since_skips_older_file_mtimes() {
     let (pool, dir) = test_pool();
     let old_file = dir.path().join("old.jsonl");

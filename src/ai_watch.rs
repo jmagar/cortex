@@ -14,6 +14,8 @@ use crate::app::SyslogService;
 use crate::scanner::{self, IndexResult};
 
 const WATCH_EVENT_BUFFER: usize = 1024;
+const MAX_WATCH_DIRS: usize = 8192;
+const MAX_PENDING_FILES: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub struct WatchOptions {
@@ -63,20 +65,26 @@ struct PendingFiles {
 }
 
 impl PendingFiles {
-    fn push(&mut self, path: PathBuf, now: Instant) {
-        self.files
-            .entry(path)
-            .and_modify(|entry| {
-                entry.last_seen = now;
-                self.coalesced_events += 1;
-            })
-            .or_insert(PendingFile {
+    fn push(&mut self, path: PathBuf, now: Instant) -> bool {
+        if let Some(entry) = self.files.get_mut(&path) {
+            entry.last_seen = now;
+            self.coalesced_events += 1;
+            return true;
+        }
+        if self.files.len() >= MAX_PENDING_FILES {
+            return false;
+        }
+        self.files.insert(
+            path,
+            PendingFile {
                 last_seen: now,
                 retries: 0,
                 last_len: None,
                 last_mtime: None,
                 stable_since: None,
-            });
+            },
+        );
+        true
     }
 
     fn requeue(&mut self, path: PathBuf, now: Instant, max_retries: u8) -> bool {
@@ -108,30 +116,47 @@ impl PendingFiles {
         self.files.remove(path);
     }
 
-    fn stable(&mut self, path: &Path, now: Instant, settle: Duration) -> Result<bool> {
+    fn clear(&mut self) {
+        self.files.clear();
+    }
+
+    fn stable(&mut self, path: &Path, now: Instant, settle: Duration) -> Result<PendingState> {
         let Some(entry) = self.files.get_mut(path) else {
-            return Ok(false);
+            return Ok(PendingState::Terminal);
         };
         let metadata = match std::fs::symlink_metadata(path) {
             Ok(metadata) if metadata.is_file() => metadata,
-            Ok(_) => return Ok(false),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Ok(_) => return Ok(PendingState::Terminal),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(PendingState::Terminal);
+            }
             Err(error) => return Err(error.into()),
         };
         if metadata.file_type().is_symlink() {
-            return Ok(false);
+            return Ok(PendingState::Terminal);
         }
         let len = metadata.len();
         let mtime = metadata.modified().ok();
         if entry.last_len == Some(len) && entry.last_mtime == mtime {
             let stable_since = *entry.stable_since.get_or_insert(now);
-            return Ok(now.duration_since(stable_since) >= settle);
+            return Ok(if now.duration_since(stable_since) >= settle {
+                PendingState::Stable
+            } else {
+                PendingState::NotReady
+            });
         }
         entry.last_len = Some(len);
         entry.last_mtime = mtime;
         entry.stable_since = Some(now);
-        Ok(false)
+        Ok(PendingState::NotReady)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingState {
+    NotReady,
+    Stable,
+    Terminal,
 }
 
 pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
@@ -154,7 +179,7 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
 
     let mut watched_dirs = BTreeSet::new();
     for target in &targets {
-        watch_directory_tree(&mut watcher, target.root(), &mut watched_dirs);
+        watch_directory_tree(&mut watcher, target.root(), &mut watched_dirs)?;
     }
     if watched_dirs.is_empty() {
         anyhow::bail!("no accessible AI transcript directories exist to watch");
@@ -176,7 +201,7 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
         tokio::select! {
             Some(event) = rx.recv() => {
                 for dir in handle_event(event, &targets, &mut pending, &overflow_rescan) {
-                    watch_directory_tree(&mut watcher, &dir, &mut watched_dirs);
+                    watch_directory_tree(&mut watcher, &dir, &mut watched_dirs)?;
                 }
             }
             _ = tick.tick() => {
@@ -219,11 +244,16 @@ fn watch_directory_tree(
     watcher: &mut RecommendedWatcher,
     root: &Path,
     watched_dirs: &mut BTreeSet<PathBuf>,
-) {
-    let dirs = collect_watch_dirs(root);
+) -> Result<()> {
+    let dirs = collect_watch_dirs(root)?;
     for dir in dirs {
         if watched_dirs.contains(&dir) {
             continue;
+        }
+        if watched_dirs.len() >= MAX_WATCH_DIRS {
+            anyhow::bail!(
+                "AI transcript watcher directory budget exceeded ({MAX_WATCH_DIRS}); use a narrower --path or raise system inotify limits"
+            );
         }
         match watcher.watch(&dir, RecursiveMode::NonRecursive) {
             Ok(()) => {
@@ -234,36 +264,43 @@ fn watch_directory_tree(
             }
         }
     }
+    Ok(())
 }
 
-fn collect_watch_dirs(root: &Path) -> Vec<PathBuf> {
+fn collect_watch_dirs(root: &Path) -> Result<Vec<PathBuf>> {
     let mut dirs = Vec::new();
     if root.is_file() {
         if let Some(parent) = root.parent() {
-            collect_watch_dirs_inner(parent, &mut dirs);
+            collect_watch_dirs_inner(parent, &mut dirs)?;
         }
     } else {
-        collect_watch_dirs_inner(root, &mut dirs);
+        collect_watch_dirs_inner(root, &mut dirs)?;
     }
-    dirs
+    Ok(dirs)
 }
 
-fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>) {
+fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>) -> Result<()> {
+    if dirs.len() >= MAX_WATCH_DIRS {
+        anyhow::bail!(
+            "AI transcript watcher directory budget exceeded ({MAX_WATCH_DIRS}) while scanning {}",
+            path.display()
+        );
+    }
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) => {
             tracing::warn!(path = %path.display(), error = %error, "failed to inspect AI transcript watch path");
-            return;
+            return Ok(());
         }
     };
     if metadata.file_type().is_symlink() {
-        return;
+        return Ok(());
     }
     if metadata.is_file() {
-        return;
+        return Ok(());
     }
     if !metadata.is_dir() {
-        return;
+        return Ok(());
     }
 
     dirs.push(path.to_path_buf());
@@ -271,7 +308,7 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>) {
         Ok(read_dir) => read_dir,
         Err(error) => {
             tracing::warn!(path = %path.display(), error = %error, "failed to read AI transcript watch directory");
-            return;
+            return Ok(());
         }
     };
     let mut entries = Vec::new();
@@ -285,8 +322,9 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>) {
     }
     entries.sort();
     for entry in entries {
-        collect_watch_dirs_inner(&entry, dirs);
+        collect_watch_dirs_inner(&entry, dirs)?;
     }
+    Ok(())
 }
 
 fn handle_event(
@@ -313,8 +351,15 @@ fn handle_event(
                         new_dirs.push(path);
                     } else if scanner::is_supported_transcript_file(&path)
                         && event_path_allowed(&path, targets)
+                        && !pending.push(path, now)
                     {
-                        pending.push(path, now);
+                        tracing::warn!(
+                            pending_files = pending.files.len(),
+                            limit = MAX_PENDING_FILES,
+                            "AI transcript pending queue exceeded; coalescing to root rescan"
+                        );
+                        pending.clear();
+                        overflow_rescan.store(true, Ordering::Relaxed);
                     }
                 }
             }
@@ -349,7 +394,7 @@ async fn process_pending(
     let paths = pending.debounced_paths(now, options.debounce);
     for path in paths {
         match pending.stable(&path, now, options.settle) {
-            Ok(true) => {
+            Ok(PendingState::Stable) => {
                 if process_file(service, options, &path).await {
                     if !pending.requeue(path.clone(), Instant::now(), options.max_retries) {
                         tracing::warn!(path = %path.display(), "AI transcript indexing failed before retry cap");
@@ -359,8 +404,11 @@ async fn process_pending(
                     pending.remove(&path);
                 }
             }
-            Ok(false) => {
+            Ok(PendingState::NotReady) => {
                 tracing::trace!(path = %path.display(), "AI transcript file is not stable yet");
+            }
+            Ok(PendingState::Terminal) => {
+                pending.remove(&path);
             }
             Err(error) => {
                 tracing::warn!(path = %path.display(), error = %error, "AI transcript metadata check failed");
@@ -449,8 +497,8 @@ mod tests {
         let start = Instant::now();
         let path = PathBuf::from("/tmp/session.jsonl");
         let mut pending = PendingFiles::default();
-        pending.push(path.clone(), start);
-        pending.push(path.clone(), start + Duration::from_millis(25));
+        assert!(pending.push(path.clone(), start));
+        assert!(pending.push(path.clone(), start + Duration::from_millis(25)));
 
         assert_eq!(pending.files.len(), 1);
         assert!(pending
@@ -478,26 +526,67 @@ mod tests {
 
         let start = Instant::now();
         let mut pending = PendingFiles::default();
-        pending.push(path.clone(), start);
+        assert!(pending.push(path.clone(), start));
 
-        assert!(!pending
-            .stable(&path, start, Duration::from_millis(100))
-            .unwrap());
-        assert!(!pending
-            .stable(
-                &path,
-                start + Duration::from_millis(50),
-                Duration::from_millis(100)
-            )
-            .unwrap());
-        assert!(pending
-            .stable(
-                &path,
-                start + Duration::from_millis(150),
-                Duration::from_millis(100)
-            )
-            .unwrap());
+        assert_eq!(
+            pending
+                .stable(&path, start, Duration::from_millis(100))
+                .unwrap(),
+            PendingState::NotReady
+        );
+        assert_eq!(
+            pending
+                .stable(
+                    &path,
+                    start + Duration::from_millis(50),
+                    Duration::from_millis(100)
+                )
+                .unwrap(),
+            PendingState::NotReady
+        );
+        assert_eq!(
+            pending
+                .stable(
+                    &path,
+                    start + Duration::from_millis(150),
+                    Duration::from_millis(100)
+                )
+                .unwrap(),
+            PendingState::Stable
+        );
         assert_eq!(pending.files.get(&path).unwrap().retries, 0);
+    }
+
+    #[test]
+    fn pending_files_drops_terminal_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("deleted.jsonl");
+        std::fs::write(&path, "{}\n").unwrap();
+        let start = Instant::now();
+        let mut pending = PendingFiles::default();
+        assert!(pending.push(path.clone(), start));
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(
+            pending
+                .stable(
+                    &path,
+                    start + Duration::from_millis(1),
+                    Duration::from_millis(1)
+                )
+                .unwrap(),
+            PendingState::Terminal
+        );
+    }
+
+    #[test]
+    fn pending_files_enforces_capacity() {
+        let start = Instant::now();
+        let mut pending = PendingFiles::default();
+        for index in 0..MAX_PENDING_FILES {
+            assert!(pending.push(PathBuf::from(format!("/tmp/{index}.jsonl")), start));
+        }
+        assert!(!pending.push(PathBuf::from("/tmp/overflow.jsonl"), start));
     }
 
     #[test]
@@ -508,7 +597,7 @@ mod tests {
         let file = nested.join("session.jsonl");
         std::fs::write(&file, "{}\n").unwrap();
 
-        let dirs = collect_watch_dirs(temp.path());
+        let dirs = collect_watch_dirs(temp.path()).unwrap();
 
         assert!(dirs.contains(&temp.path().to_path_buf()));
         assert!(dirs.contains(&nested));

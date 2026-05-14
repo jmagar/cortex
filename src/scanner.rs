@@ -383,6 +383,11 @@ pub fn index_file_with_options(
         checkpoint_store.reset_source(source_id, &canonical)?;
     }
     let current_metadata = FileMetadata::from_path_metadata(&canonical_path)?;
+    let stored_metadata = if !options.force {
+        checkpoint_store.source_metadata(source_id)?
+    } else {
+        None
+    };
     if !options.force
         && source_kind != SourceKind::ExplicitFile
         && checkpoint_store.source_matches_metadata(
@@ -390,6 +395,7 @@ pub fn index_file_with_options(
             current_metadata.size,
             current_metadata.mtime,
         )?
+        && source_hash_matches(&canonical_path, stored_metadata.as_ref())?
     {
         return Ok(IndexResult {
             discovered_files: 1,
@@ -397,8 +403,8 @@ pub fn index_file_with_options(
         });
     }
     let append_start = if !options.force {
-        match checkpoint_store.source_metadata(source_id)? {
-            Some(metadata) => append_start_offset(&canonical_path, &metadata, &current_metadata)?,
+        match stored_metadata.as_ref() {
+            Some(metadata) => append_start_offset(metadata, &current_metadata)?,
             None => None,
         }
     } else {
@@ -412,8 +418,19 @@ pub fn index_file_with_options(
     let mut hasher = Sha256::new();
     let mut line_no = if let Some(offset) = append_start {
         let counted = hash_prefix_and_count_lines(reader.get_mut(), &mut hasher, offset)?;
-        reader.get_mut().seek(SeekFrom::Start(offset))?;
-        counted
+        let prefix_hash = hex_digest(&hasher.clone().finalize());
+        if stored_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.content_hash.as_ref())
+            .is_some_and(|content_hash| prefix_hash != *content_hash)
+        {
+            hasher = Sha256::new();
+            reader.get_mut().seek(SeekFrom::Start(0))?;
+            0
+        } else {
+            reader.get_mut().seek(SeekFrom::Start(offset))?;
+            counted
+        }
     } else {
         0
     };
@@ -557,7 +574,6 @@ pub fn index_file_with_options(
 }
 
 fn append_start_offset(
-    path: &Path,
     stored: &checkpoint::SourceMetadata,
     current: &FileMetadata,
 ) -> Result<Option<u64>> {
@@ -580,27 +596,26 @@ fn append_start_offset(
     if last_offset == 0 || last_offset != stored_size {
         return Ok(None);
     }
-    if let Some(content_hash) = &stored.content_hash {
-        if hash_prefix(path, stored_size)? != *content_hash {
-            return Ok(None);
-        }
-    }
     Ok(Some(last_offset))
 }
 
-fn hash_prefix(path: &Path, offset: u64) -> Result<String> {
+fn source_hash_matches(path: &Path, stored: Option<&checkpoint::SourceMetadata>) -> Result<bool> {
+    let Some(content_hash) = stored.and_then(|metadata| metadata.content_hash.as_ref()) else {
+        return Ok(false);
+    };
+    Ok(hash_file(path)? == *content_hash)
+}
+
+fn hash_file(path: &Path) -> Result<String> {
     let mut file = fs::File::open(path)?;
-    let mut remaining = offset;
     let mut buffer = [0u8; 8192];
     let mut hasher = Sha256::new();
-    while remaining > 0 {
-        let to_read = buffer.len().min(remaining as usize);
-        let read = file.read(&mut buffer[..to_read])?;
+    loop {
+        let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
         }
         hasher.update(&buffer[..read]);
-        remaining -= read as u64;
     }
     Ok(hex_digest(&hasher.finalize()))
 }

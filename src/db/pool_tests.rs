@@ -89,6 +89,43 @@ fn init_db_adds_ai_session_metadata_columns() {
 }
 
 #[test]
+fn init_db_creates_partial_ai_metadata_indexes() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = crate::config::StorageConfig {
+        db_path,
+        ..Default::default()
+    };
+
+    let _pool = init_pool(&config).unwrap();
+    let conn = rusqlite::Connection::open(&config.db_path).unwrap();
+    let indexes: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name, sql FROM sqlite_schema
+                 WHERE type = 'index'
+                   AND name IN (
+                     'idx_logs_ai_project_time',
+                     'idx_logs_ai_session',
+                     'idx_logs_ai_transcript_path'
+                   )
+                 ORDER BY name",
+            )
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+
+    assert_eq!(indexes.len(), 3);
+    for (_, sql) in indexes {
+        assert!(sql.contains("WHERE"));
+        assert!(sql.contains("IS NOT NULL"));
+    }
+}
+
+#[test]
 fn init_db_adds_transcript_checkpoint_tables() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");

@@ -76,6 +76,7 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
 
     assert!(unit.contains("Type=simple"));
     assert!(unit.contains("EnvironmentFile=/home/me/.config/syslog-mcp/ai-watch.env"));
+    assert!(unit.contains("WorkingDirectory=/"));
     assert!(unit.contains("ExecStart=/home/me/.local/bin/syslog ai watch --no-initial-scan --json"));
     assert!(unit.contains("Restart=on-failure"));
     assert!(unit.contains("StartLimitBurst=5"));
@@ -83,7 +84,7 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     assert!(unit.contains("NoNewPrivileges=true"));
     assert!(unit.contains("PrivateTmp=true"));
     assert!(unit.contains("ProtectSystem=strict"));
-    assert!(unit.contains("ProtectHome=tmpfs"));
+    assert!(unit.contains("ProtectHome=read-only"));
     assert!(unit.contains("BindReadOnlyPaths=-/home/me/.claude/projects -/home/me/.codex/sessions"));
     assert!(unit.contains("BindPaths=/home/me/.syslog-mcp/data /home/me/.local/state/syslog-mcp"));
     assert!(
