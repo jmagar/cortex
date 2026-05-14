@@ -97,7 +97,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates/truncated. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999."
+                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999."
                 },
                 "n": {
                     "type": "integer",

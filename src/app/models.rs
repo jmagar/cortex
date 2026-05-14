@@ -128,6 +128,9 @@ impl From<db::SearchedAiSessionEntry> for SearchedSessionEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchSessionsResponse {
     pub total_candidates: usize,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
     pub truncated: bool,
     pub sessions: Vec<SearchedSessionEntry>,
 }
@@ -136,6 +139,9 @@ impl From<db::SearchAiSessionsResult> for SearchSessionsResponse {
     fn from(value: db::SearchAiSessionsResult) -> Self {
         Self {
             total_candidates: value.total_candidates,
+            candidate_rows: value.candidate_rows,
+            candidate_cap: value.candidate_cap,
+            candidate_window_truncated: value.candidate_window_truncated,
             truncated: value.truncated,
             sessions: value.sessions.into_iter().map(Into::into).collect(),
         }

@@ -401,6 +401,9 @@ pub fn search_ai_sessions(
 
     Ok(SearchAiSessionsResult {
         total_candidates,
+        candidate_rows: raw_candidate_count.min(CANDIDATE_CAP),
+        candidate_cap: CANDIDATE_CAP,
+        candidate_window_truncated: raw_candidate_count > CANDIDATE_CAP,
         truncated: total_candidates > sessions.len() || raw_candidate_count > CANDIDATE_CAP,
         sessions,
     })

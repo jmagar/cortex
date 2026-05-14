@@ -11,7 +11,7 @@ use syslog_mcp::compose::{
     CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
     ComposeService, ComposeStatus, ComposeTarget, MutationOptions, ProcessRunner,
 };
-use syslog_mcp::scanner::IndexResult;
+use syslog_mcp::scanner::{CheckpointEntry, IndexResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliCommand {
@@ -35,6 +35,7 @@ pub(crate) enum AiCommand {
     Projects(AiListArgs),
     Index(AiIndexArgs),
     Add(AiAddArgs),
+    Checkpoints(AiCheckpointsArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,12 +166,22 @@ pub(crate) struct AiListArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AiIndexArgs {
     pub path: Option<String>,
+    pub force: bool,
+    pub since: Option<String>,
     pub json: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AiAddArgs {
     pub file: String,
+    pub force: bool,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiCheckpointsArgs {
+    pub errors_only: bool,
+    pub limit: Option<u32>,
     pub json: bool,
 }
 
@@ -317,14 +328,22 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                 print_ai_projects_response(&response, json)?;
             }
             AiCommand::Index(args) => {
-                let response = service.index_ai_roots(args.path).await?;
+                let response = service
+                    .index_ai_roots(args.path, args.force, args.since)
+                    .await?;
                 print_index_response(&response, args.json)?;
                 ensure_index_success(&response)?;
             }
             AiCommand::Add(args) => {
-                let response = service.add_ai_file(args.file).await?;
+                let response = service.add_ai_file(args.file, args.force).await?;
                 print_index_response(&response, args.json)?;
                 ensure_index_success(&response)?;
+            }
+            AiCommand::Checkpoints(args) => {
+                let response = service
+                    .list_ai_checkpoints(args.errors_only, args.limit)
+                    .await?;
+                print_checkpoints_response(&response, args.json)?;
             }
         },
         CliCommand::Correlate(args) => {
@@ -543,6 +562,7 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
         "projects" => parse_ai_projects(rest),
         "index" => parse_ai_index(rest),
         "add" => parse_ai_add(rest),
+        "checkpoints" => parse_ai_checkpoints(rest),
         _ => bail!("unknown ai subcommand: {subcommand}"),
     }
 }
@@ -695,8 +715,13 @@ fn parse_ai_index(args: &[String]) -> Result<CliCommand> {
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--path" => parsed.path = Some(flags.value("--path")?),
+            "--force" => parsed.force = true,
+            "--since" => parsed.since = Some(flags.value("--since")?),
             _ if arg.starts_with("--path=") => {
                 parsed.path = Some(value_after_equals(arg, "--path")?)
+            }
+            _ if arg.starts_with("--since=") => {
+                parsed.since = Some(value_after_equals(arg, "--since")?)
             }
             _ => bail!("unknown ai index option: {arg}"),
         }
@@ -711,6 +736,7 @@ fn parse_ai_add(args: &[String]) -> Result<CliCommand> {
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--file" => parsed.file = flags.value("--file")?,
+            "--force" => parsed.force = true,
             _ if arg.starts_with("--file=") => parsed.file = value_after_equals(arg, "--file")?,
             _ => bail!("unknown ai add option: {arg}"),
         }
@@ -719,6 +745,26 @@ fn parse_ai_add(args: &[String]) -> Result<CliCommand> {
         bail!("ai add requires --file <PATH>");
     }
     Ok(CliCommand::Ai(AiCommand::Add(parsed)))
+}
+
+fn parse_ai_checkpoints(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiCheckpointsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--errors" => parsed.errors_only = true,
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ => bail!("unknown ai checkpoints option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Checkpoints(parsed)))
 }
 
 fn parse_stats(args: &[String]) -> Result<CliCommand> {
@@ -1007,7 +1053,7 @@ fn parse_u32_flag(flag: &str, value: String) -> Result<u32> {
         .map_err(|_| anyhow!("{flag} must be an unsigned integer"))
 }
 
-fn print_json<T: Serialize>(value: &T) -> Result<()> {
+fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
@@ -1125,14 +1171,21 @@ fn print_search_sessions_response(response: &SearchSessionsResponse, json: bool)
         return print_json(response);
     }
     println!(
-        "{} grouped session(s){}",
+        "{} grouped session(s) from {} newest matching row(s){}",
         response.sessions.len(),
+        response.candidate_rows,
         if response.truncated {
             " (truncated)"
         } else {
             ""
         }
     );
+    if response.candidate_window_truncated {
+        println!(
+            "search window capped at {} matching rows; use --project, --tool, --from, or --to to narrow exact grouping",
+            response.candidate_cap
+        );
+    }
     println!(
         "{:<10} {:<30} {:<20} {:<6} MATCH",
         "TOOL", "PROJECT", "SESSION ID", "EVENTS"
@@ -1249,6 +1302,35 @@ fn print_ai_projects_response(response: &ListAiProjectsResponse, json: bool) -> 
             project.session_count,
             project.tools.join(",")
         );
+    }
+    Ok(())
+}
+
+fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("{} checkpoint(s)", response.len());
+    println!(
+        "{:<12} {:<8} {:<24} {:<7} PATH",
+        "KIND", "RECORDS", "LAST INDEXED", "ERROR"
+    );
+    for checkpoint in response {
+        println!(
+            "{:<12} {:<8} {:<24} {:<7} {}",
+            checkpoint.source_kind,
+            checkpoint.imported_records,
+            truncate(checkpoint.last_indexed_at.as_deref().unwrap_or("-"), 23),
+            if checkpoint.last_error.is_some() {
+                "yes"
+            } else {
+                "-"
+            },
+            truncate(&checkpoint.canonical_path, 80),
+        );
+        if let Some(error) = &checkpoint.last_error {
+            println!("    error: {}", truncate(error, 160));
+        }
     }
     Ok(())
 }

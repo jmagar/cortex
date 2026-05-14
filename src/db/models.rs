@@ -124,6 +124,9 @@ pub struct SearchedAiSessionEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchAiSessionsResult {
     pub total_candidates: usize,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
     pub truncated: bool,
     pub sessions: Vec<SearchedAiSessionEntry>,
 }

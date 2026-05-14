@@ -42,6 +42,37 @@ pub struct IndexResult {
     pub file_errors: Vec<IndexFileError>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct IndexOptions {
+    pub root_override: Option<PathBuf>,
+    pub force: bool,
+    pub since_mtime_nanos: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct IndexFileOptions {
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CheckpointListOptions {
+    pub errors_only: bool,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CheckpointEntry {
+    pub canonical_path: String,
+    pub source_kind: String,
+    pub file_size: Option<i64>,
+    pub file_mtime: Option<i64>,
+    pub content_hash: Option<String>,
+    pub last_offset: Option<i64>,
+    pub last_indexed_at: Option<String>,
+    pub last_error: Option<String>,
+    pub imported_records: i64,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IndexFileError {
     pub path: String,
@@ -150,7 +181,22 @@ pub fn index_roots_with_storage(
     root_override: Option<&Path>,
     storage: Option<&StorageConfig>,
 ) -> Result<IndexResult> {
-    let roots = match root_override {
+    index_roots_with_options(
+        pool,
+        IndexOptions {
+            root_override: root_override.map(Path::to_path_buf),
+            ..Default::default()
+        },
+        storage,
+    )
+}
+
+pub fn index_roots_with_options(
+    pool: &DbPool,
+    options: IndexOptions,
+    storage: Option<&StorageConfig>,
+) -> Result<IndexResult> {
+    let roots = match options.root_override.as_deref() {
         Some(path) => {
             let mut result = IndexResult::default();
             if let Err(error) = validate_path(path).and_then(|_| reject_broad_scan_path(path)) {
@@ -174,7 +220,28 @@ pub fn index_roots_with_storage(
     files.sort();
     files.dedup();
     for file in files {
-        match index_file_with_storage(pool, &file, detect_source_kind(&file).as_str(), storage) {
+        if let Some(since_mtime_nanos) = options.since_mtime_nanos {
+            let metadata = match fs::metadata(&file) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    record_file_error(&mut result, &file, &error.into());
+                    continue;
+                }
+            };
+            if metadata_mtime_nanos(&metadata).is_some_and(|mtime| mtime < since_mtime_nanos) {
+                result.skipped_files += 1;
+                continue;
+            }
+        }
+        match index_file_with_options(
+            pool,
+            &file,
+            detect_source_kind(&file).as_str(),
+            IndexFileOptions {
+                force: options.force,
+            },
+            storage,
+        ) {
             Ok(file_result) => merge_result(&mut result, &file_result),
             Err(error) => {
                 classify_path_error(&error, &mut result);
@@ -194,6 +261,22 @@ pub fn index_file_with_storage(
     pool: &DbPool,
     path: &Path,
     source_kind: &str,
+    storage: Option<&StorageConfig>,
+) -> Result<IndexResult> {
+    index_file_with_options(
+        pool,
+        path,
+        source_kind,
+        IndexFileOptions::default(),
+        storage,
+    )
+}
+
+pub fn index_file_with_options(
+    pool: &DbPool,
+    path: &Path,
+    source_kind: &str,
+    options: IndexFileOptions,
     storage: Option<&StorageConfig>,
 ) -> Result<IndexResult> {
     validate_path(path)?;
@@ -229,8 +312,12 @@ pub fn index_file_with_storage(
     };
     let checkpoint_store = checkpoint::CheckpointStore::new(pool);
     let source_id = checkpoint_store.ensure_source(&canonical, source_kind.as_str())?;
+    if options.force {
+        checkpoint_store.reset_source(source_id, &canonical)?;
+    }
     let current_metadata = FileMetadata::from_path_metadata(&canonical_path)?;
-    if source_kind != SourceKind::ExplicitFile
+    if !options.force
+        && source_kind != SourceKind::ExplicitFile
         && checkpoint_store.source_matches_metadata(
             source_id,
             current_metadata.size,
@@ -378,6 +465,13 @@ pub fn index_file_with_storage(
         &mut result,
     )?;
     Ok(result)
+}
+
+pub fn list_checkpoints(
+    pool: &DbPool,
+    options: &CheckpointListOptions,
+) -> Result<Vec<CheckpointEntry>> {
+    checkpoint::CheckpointStore::new(pool).list_checkpoints(options)
 }
 
 fn flush_chunk(

@@ -373,7 +373,10 @@ can scan a known transcript directory or one explicit `.jsonl` file, and
 `~/.claude/projects`, `~/.codex/sessions`, or their children; broad roots such
 as `/`, `$HOME`, and the current repo root are rejected before walking. The
 scanner skips symlinks, counts unsupported non-`.jsonl` files without parsing
-them, and streams transcript files line-by-line in bounded SQLite chunks.
+them, and streams transcript files line-by-line in bounded SQLite chunks. Use
+`--force` to reimport a transcript path from scratch after parser changes,
+`--since RFC3339` to scan only recently modified files, and
+`syslog ai checkpoints --errors` to inspect structured scanner failures.
 
 Imported AI transcript messages are scrubbed for known credential/token patterns
 before storage and FTS indexing. The rows still live in the main `logs` table, so
@@ -424,7 +427,7 @@ Useful installer controls:
 ```bash
 SYSLOG_INSTALL_DRY_RUN=1 ./install.sh
 SYSLOG_INSTALL_PREFIX=/opt/syslog-mcp ./install.sh
-SYSLOG_VERSION=0.21.3 ./install.sh
+SYSLOG_VERSION=0.21.4 ./install.sh
 SYSLOG_INSTALL_SKIP_SETUP=1 ./install.sh
 ```
 
