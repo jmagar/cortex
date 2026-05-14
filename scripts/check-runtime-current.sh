@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Check whether the running syslog-mcp Docker Compose container is using the
-# current local compose image.
+# current local compose image and binary version.
 set -euo pipefail
 
 MODE="auto"
@@ -13,7 +13,8 @@ usage() {
 Usage: scripts/check-runtime-current.sh [--mode auto|docker] [--pull] [--compose-dir DIR]
 
 Checks:
-  docker:  running container image ID == local compose image ID
+  docker:  running container image ID == local compose image ID and
+           container `syslog --version` == repo Cargo.toml version
 
 Options:
   --pull                  Docker only: pull compose image before comparing.
@@ -81,9 +82,8 @@ compose_image() {
 }
 
 check_docker() {
-  local cid running_image image local_image repo_digests
+  local cid running_image image local_image repo_digests repo_version container_version label_compose_dir
   status_line mode docker
-  status_line compose_dir "$COMPOSE_DIR"
 
   if [[ -d "$COMPOSE_DIR" ]]; then
     cid="$(cd "$COMPOSE_DIR" && docker compose ps -q "$SERVICE" 2>/dev/null || true)"
@@ -97,6 +97,11 @@ check_docker() {
     echo "FAIL: syslog-mcp container is not running"
     return 1
   fi
+  label_compose_dir="$(docker inspect "$cid" --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' 2>/dev/null || true)"
+  if [[ -n "$label_compose_dir" && "$label_compose_dir" != "<no value>" ]]; then
+    COMPOSE_DIR="$label_compose_dir"
+  fi
+  status_line compose_dir "$COMPOSE_DIR"
 
   image="$(compose_image)"
   [[ -n "$image" ]] || image="$(docker inspect "$cid" --format '{{.Config.Image}}')"
@@ -108,12 +113,20 @@ check_docker() {
   running_image="$(docker inspect "$cid" --format '{{.Image}}')"
   local_image="$(docker image inspect "$image" --format '{{.Id}}' 2>/dev/null || true)"
   repo_digests="$(docker image inspect "$image" --format '{{join .RepoDigests ", "}}' 2>/dev/null || true)"
+  repo_version="$(awk -F'"' '/^version = / {print $2; exit}' Cargo.toml 2>/dev/null || true)"
+  if [[ -n "$repo_version" ]]; then
+    container_version="$(docker exec "$cid" syslog --version 2>/dev/null | awk '{print $2}' || true)"
+  else
+    container_version=""
+  fi
 
   status_line container "$cid"
   status_line image "$image"
   status_line running_image_id "$running_image"
   status_line local_image_id "${local_image:-missing}"
   [[ -n "$repo_digests" ]] && status_line repo_digests "$repo_digests"
+  [[ -n "$repo_version" ]] && status_line repo_version "$repo_version"
+  [[ -n "$container_version" ]] && status_line container_version "$container_version"
 
   if [[ -z "$local_image" ]]; then
     echo "FAIL: compose image is not present locally"
@@ -125,8 +138,13 @@ check_docker() {
     echo "fix: cd $COMPOSE_DIR && docker compose up -d --force-recreate --no-build $SERVICE"
     return 1
   fi
+  if [[ -n "$repo_version" && "$container_version" != "$repo_version" ]]; then
+    echo "STALE: container syslog version does not match repo version"
+    echo "fix: rebuild and restart the Compose service from this repo"
+    return 1
+  fi
 
-  echo "CURRENT: running container matches local compose image"
+  echo "CURRENT: running container matches local compose image and repo version"
 }
 
 if [[ "$MODE" == "auto" ]]; then

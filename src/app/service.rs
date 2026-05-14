@@ -330,12 +330,23 @@ impl SyslogService {
     pub async fn index_ai_roots(
         &self,
         path: Option<String>,
+        force: bool,
+        since: Option<String>,
     ) -> ServiceResult<scanner::IndexResult> {
         let storage = self.storage.clone();
+        let since_mtime_nanos = since
+            .as_deref()
+            .map(|raw| parse_required_timestamp(raw, "since"))
+            .transpose()?
+            .and_then(|dt| dt.timestamp_nanos_opt());
         self.run_db(move |pool| {
-            scanner::index_roots_with_storage(
+            scanner::index_roots_with_options(
                 pool,
-                path.as_deref().map(std::path::Path::new),
+                scanner::IndexOptions {
+                    root_override: path.map(std::path::PathBuf::from),
+                    force,
+                    since_mtime_nanos,
+                },
                 Some(&storage),
             )
         })
@@ -343,18 +354,34 @@ impl SyslogService {
         .map_err(classify_scanner_error)
     }
 
-    pub async fn add_ai_file(&self, file: String) -> ServiceResult<scanner::IndexResult> {
+    pub async fn add_ai_file(
+        &self,
+        file: String,
+        force: bool,
+    ) -> ServiceResult<scanner::IndexResult> {
         let storage = self.storage.clone();
         self.run_db(move |pool| {
-            scanner::index_file_with_storage(
+            scanner::index_file_with_options(
                 pool,
                 std::path::Path::new(&file),
                 "explicit_file",
+                scanner::IndexFileOptions { force },
                 Some(&storage),
             )
         })
         .await
         .map_err(classify_scanner_error)
+    }
+
+    pub async fn list_ai_checkpoints(
+        &self,
+        errors_only: bool,
+        limit: Option<u32>,
+    ) -> ServiceResult<Vec<scanner::CheckpointEntry>> {
+        self.run_db(move |pool| {
+            scanner::list_checkpoints(pool, &scanner::CheckpointListOptions { errors_only, limit })
+        })
+        .await
     }
 
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {

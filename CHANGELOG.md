@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.4] - 2026-05-14
+
+### Added
+
+- **AI scanner operations**: Added `syslog ai checkpoints`, `syslog ai index
+  --force`, `syslog ai index --since`, and `syslog ai add --force` so scanner
+  state, parser backfills, and selective reindexing are first-class CLI
+  workflows.
+- **AI smoke coverage**: Added `scripts/smoke-ai.sh` for live AI transcript
+  indexing/search/tail/checkpoint verification.
+
+### Fixed
+
+- **Runtime freshness check**: `scripts/check-runtime-current.sh` now verifies
+  the running Compose container binary version against the repo version in
+  addition to comparing Docker image IDs.
+- **Legacy unit cleanup**: Setup repair now removes stale `mnemo-index.*` user
+  units alongside the removed `syslog-mcp.service` systemd deployment.
+- **AI search truncation visibility**: Search responses now expose candidate
+  window metadata so capped grouping is explicit in JSON and human output.
+
 ## [0.21.3] - 2026-05-14
 
 ### Fixed
@@ -1057,7 +1078,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.3...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.4...HEAD
+[0.21.4]: https://github.com/jmagar/syslog-mcp/compare/v0.21.3...v0.21.4
 [0.21.3]: https://github.com/jmagar/syslog-mcp/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/jmagar/syslog-mcp/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/jmagar/syslog-mcp/compare/v0.21.0...v0.21.1

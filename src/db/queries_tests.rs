@@ -409,6 +409,9 @@ fn search_ai_sessions_candidate_cap_prefers_newer_rows() {
     .unwrap();
 
     assert!(result.truncated);
+    assert_eq!(result.candidate_cap, 5000);
+    assert_eq!(result.candidate_rows, 5000);
+    assert!(result.candidate_window_truncated);
     assert_eq!(result.sessions[0].ai_session_id, "newest");
     assert_eq!(result.sessions[0].ai_project, "/tmp/new");
 }

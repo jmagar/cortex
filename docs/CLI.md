@@ -137,6 +137,12 @@ Ranked grouped session search across AI transcript rows.
 syslog ai search authentication --tool claude --limit 10
 ```
 
+Human output now states that grouping is computed over the newest matching
+candidate window. JSON includes `total_candidates`, `candidate_rows`,
+`candidate_cap`, `candidate_window_truncated`, and `truncated`; when the
+candidate window is truncated, narrow with `--project`, `--tool`, `--from`, or
+`--to` for exact grouping within that filter.
+
 ### `syslog ai blocks`
 
 Bucket AI activity into 5-hour UTC windows.
@@ -188,6 +194,8 @@ Explicitly scan local transcript roots (`~/.claude/projects`, `~/.codex/sessions
 ```bash
 syslog ai index
 syslog ai index --path ~/.claude/projects
+syslog ai index --since 2026-05-14T00:00:00Z
+syslog ai index --path ~/.codex/sessions --force
 ```
 
 Path policy is intentionally narrow. Recursive `--path` scans are accepted only
@@ -199,12 +207,39 @@ files, unsupported files are counted but not parsed, and each file is streamed
 line-by-line with chunked SQLite transactions. If storage guardrails cannot
 recover enough space, indexing fails before committing additional chunks.
 
+`--since TIME` skips files whose filesystem modification time is older than the
+RFC3339 timestamp. `--force` clears existing import identities and previously
+stored log rows for each scanned transcript path before reimporting, which is
+the right option after parser fixes or scrubber changes.
+
 ### `syslog ai add`
 
 Ingest one explicit transcript file.
 
 ```bash
 syslog ai add --file ~/.claude/projects/example/session.jsonl
+syslog ai add --file ~/.codex/sessions/2026/05/14/session.jsonl --force
+```
+
+`--force` reimports that one transcript from scratch without leaving duplicate
+log rows.
+
+### `syslog ai checkpoints`
+
+Inspect structured scanner checkpoints without opening SQLite directly.
+
+```bash
+syslog ai checkpoints --limit 20
+syslog ai checkpoints --errors --json
+```
+
+The output shows source kind, imported record count, last successful checkpoint,
+and the last parser/indexing error when present.
+
+For a one-command live check of the AI transcript workflow, run:
+
+```bash
+bash scripts/smoke-ai.sh
 ```
 
 Imported transcript messages are scrubbed for known credential/token patterns

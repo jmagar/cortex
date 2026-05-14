@@ -454,19 +454,31 @@ fn cleanup_legacy_systemd() -> SetupPhase {
             return timer.finish(SetupStatus::Skipped, "HOME unset");
         }
     };
-    let _ = Command::new("systemctl")
-        .args(["--user", "disable", "--now", "syslog-mcp.service"])
-        .output();
-    let unit = home.join(".config/systemd/user/syslog-mcp.service");
-    let dropins = home.join(".config/systemd/user/syslog-mcp.service.d");
-    let _ = std::fs::remove_file(&unit);
-    let _ = std::fs::remove_dir_all(&dropins);
+    for unit in [
+        "syslog-mcp.service",
+        "mnemo-index.service",
+        "mnemo-index.timer",
+    ] {
+        let _ = Command::new("systemctl")
+            .args(["--user", "disable", "--now", unit])
+            .output();
+    }
+    for name in [
+        "syslog-mcp.service",
+        "mnemo-index.service",
+        "mnemo-index.timer",
+    ] {
+        let unit = home.join(".config/systemd/user").join(name);
+        let dropins = home.join(".config/systemd/user").join(format!("{name}.d"));
+        let _ = std::fs::remove_file(&unit);
+        let _ = std::fs::remove_dir_all(&dropins);
+    }
     let _ = Command::new("systemctl")
         .args(["--user", "daemon-reload"])
         .output();
     timer.finish(
         SetupStatus::Ok,
-        "removed stale user unit/drop-ins if present",
+        "removed stale syslog-mcp and mnemo-index user units/drop-ins if present",
     )
 }
 

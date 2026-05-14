@@ -2,7 +2,7 @@ use anyhow::Result;
 use rusqlite::{params, OptionalExtension, Transaction};
 
 use crate::db::DbPool;
-use crate::scanner::FileMetadata;
+use crate::scanner::{CheckpointEntry, CheckpointListOptions, FileMetadata};
 
 pub struct CheckpointStore<'a> {
     pool: &'a DbPool,
@@ -73,6 +73,88 @@ impl<'a> CheckpointStore<'a> {
         Ok(last_error.is_none()
             && stored_size == Some(file_size as i64)
             && stored_mtime == file_mtime)
+    }
+
+    pub fn reset_source(&self, source_id: i64, canonical_path: &str) -> Result<()> {
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM transcript_import_records WHERE source_id = ?1",
+            [source_id],
+        )?;
+        tx.execute(
+            "DELETE FROM logs WHERE ai_transcript_path = ?1",
+            [canonical_path],
+        )?;
+        tx.execute(
+            "UPDATE hosts
+             SET log_count = (SELECT COUNT(*) FROM logs WHERE logs.hostname = hosts.hostname),
+                 first_seen = COALESCE((SELECT MIN(received_at) FROM logs WHERE logs.hostname = hosts.hostname), first_seen),
+                 last_seen = COALESCE((SELECT MAX(received_at) FROM logs WHERE logs.hostname = hosts.hostname), last_seen)",
+            [],
+        )?;
+        tx.execute("DELETE FROM hosts WHERE log_count = 0", [])?;
+        tx.execute(
+            "UPDATE transcript_sources
+             SET file_size = NULL,
+                 file_mtime = NULL,
+                 content_hash = NULL,
+                 last_offset = 0,
+                 last_indexed_at = NULL,
+                 last_error = NULL
+             WHERE id = ?1",
+            [source_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_checkpoints(
+        &self,
+        options: &CheckpointListOptions,
+    ) -> Result<Vec<CheckpointEntry>> {
+        let conn = self.pool.get()?;
+        let limit = options.limit.unwrap_or(50).min(500);
+        let mut sql = String::from(
+            "SELECT s.canonical_path,
+                    s.source_kind,
+                    s.file_size,
+                    s.file_mtime,
+                    s.content_hash,
+                    s.last_offset,
+                    s.last_indexed_at,
+                    s.last_error,
+                    COUNT(r.id) AS imported_records
+             FROM transcript_sources s
+             LEFT JOIN transcript_import_records r ON r.source_id = s.id",
+        );
+        if options.errors_only {
+            sql.push_str(" WHERE s.last_error IS NOT NULL");
+        }
+        sql.push_str(
+            " GROUP BY s.id
+              ORDER BY
+                CASE WHEN s.last_error IS NULL THEN 1 ELSE 0 END,
+                COALESCE(s.last_indexed_at, '') DESC,
+                s.canonical_path ASC
+              LIMIT ?1",
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([limit], |row| {
+            Ok(CheckpointEntry {
+                canonical_path: row.get(0)?,
+                source_kind: row.get(1)?,
+                file_size: row.get(2)?,
+                file_mtime: row.get(3)?,
+                content_hash: row.get(4)?,
+                last_offset: row.get(5)?,
+                last_indexed_at: row.get(6)?,
+                last_error: row.get(7)?,
+                imported_records: row.get(8)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 }
 

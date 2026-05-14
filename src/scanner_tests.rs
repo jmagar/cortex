@@ -26,6 +26,65 @@ fn index_file_is_idempotent() {
 }
 
 #[test]
+fn force_reindexes_file_without_duplicate_logs() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("force.jsonl");
+    std::fs::write(&file, "{\"sessionId\":\"sess-1\",\"content\":\"first\"}\n").unwrap();
+    assert_eq!(
+        index_file(&pool, &file, "explicit_file").unwrap().ingested,
+        1
+    );
+
+    let forced = index_file_with_options(
+        &pool,
+        &file,
+        "explicit_file",
+        IndexFileOptions { force: true },
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(forced.ingested, 1);
+    assert_eq!(forced.skipped_dupes, 0);
+    let log_count: i64 = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(log_count, 1);
+}
+
+#[test]
+fn list_checkpoints_reports_errors_and_import_counts() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("broken.jsonl");
+    std::fs::write(
+        &file,
+        "{\"sessionId\":\"sess-1\",\"content\":\"ok\"}\nnot-json\n",
+    )
+    .unwrap();
+    let result = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(result.parse_errors, 1);
+
+    let checkpoints = list_checkpoints(
+        &pool,
+        &CheckpointListOptions {
+            errors_only: true,
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0].imported_records, 1);
+    assert!(checkpoints[0]
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("failed to parse"));
+}
+
+#[test]
 fn validate_path_rejects_symlinks() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("target");
@@ -623,6 +682,50 @@ fn default_index_does_not_skip_same_size_rewrite_with_new_mtime_nanos() {
     )
     .unwrap();
     assert_eq!(search.sessions[0].ai_session_id, "rewrite-session");
+}
+
+#[test]
+fn index_roots_since_skips_older_file_mtimes() {
+    let (pool, dir) = test_pool();
+    let old_file = dir.path().join("old.jsonl");
+    let new_file = dir.path().join("new.jsonl");
+    std::fs::write(
+        &old_file,
+        "{\"sessionId\":\"old\",\"content\":\"oldtoken\"}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &new_file,
+        "{\"sessionId\":\"new\",\"content\":\"newtoken\"}\n",
+    )
+    .unwrap();
+    set_mtime(&old_file, 1_700_000_000, 0);
+    set_mtime(&new_file, 1_800_000_000, 0);
+
+    let result = index_roots_with_options(
+        &pool,
+        IndexOptions {
+            root_override: Some(dir.path().to_path_buf()),
+            since_mtime_nanos: Some(1_750_000_000_000_000_000),
+            ..Default::default()
+        },
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(result.ingested, 1);
+    assert_eq!(result.skipped_files, 1);
+    assert_eq!(result.discovered_files, 1);
+    let search = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "newtoken".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(search.sessions[0].ai_session_id, "new");
 }
 
 fn set_mtime(path: &std::path::Path, secs: u64, nanos: u32) {

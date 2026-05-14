@@ -137,6 +137,51 @@ fn parse_ai_add_requires_file() {
 }
 
 #[test]
+fn parse_ai_index_collects_reindex_controls() {
+    let parsed = CliCommand::parse(strings(&[
+        "ai",
+        "index",
+        "--path=/tmp/session.jsonl",
+        "--since",
+        "2026-05-14T00:00:00Z",
+        "--force",
+        "--json",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::Index(AiIndexArgs {
+            path: Some("/tmp/session.jsonl".into()),
+            since: Some("2026-05-14T00:00:00Z".into()),
+            force: true,
+            json: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_ai_checkpoints_collects_filters() {
+    let parsed = CliCommand::parse(strings(&[
+        "ai",
+        "checkpoints",
+        "--errors",
+        "--limit=25",
+        "--json",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::Checkpoints(AiCheckpointsArgs {
+            errors_only: true,
+            limit: Some(25),
+            json: true,
+        }))
+    );
+}
+
+#[test]
 fn truncate_is_utf8_safe_for_non_ascii_project_names() {
     let value = truncate("项目路径-alpha", 6);
     assert!(value.ends_with('…'));
