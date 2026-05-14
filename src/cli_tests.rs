@@ -191,3 +191,29 @@ fn parse_compose_down_collects_yes_and_dry_run() {
         other => panic!("unexpected command: {other:?}"),
     }
 }
+
+#[test]
+fn parse_setup_plugin_hook_collects_json_and_no_repair() {
+    let parsed =
+        CliCommand::parse(strings(&["setup", "plugin-hook", "--json", "--no-repair"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Setup(SetupCommand::PluginHook(PluginHookArgs {
+            json: true,
+            no_repair: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_setup_check_and_repair() {
+    assert_eq!(
+        CliCommand::parse(strings(&["setup", "check", "--json"])).unwrap(),
+        CliCommand::Setup(SetupCommand::Check(SetupArgs { json: true }))
+    );
+    assert_eq!(
+        CliCommand::parse(strings(&["setup", "repair"])).unwrap(),
+        CliCommand::Setup(SetupCommand::Repair(SetupArgs { json: false }))
+    );
+}

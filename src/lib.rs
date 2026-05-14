@@ -4,6 +4,7 @@ pub mod api;
 pub mod app;
 pub mod compose;
 pub mod config;
+pub mod logging;
 pub mod mcp;
 pub mod observability;
 pub mod otlp;

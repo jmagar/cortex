@@ -1,9 +1,8 @@
 use anyhow::Result;
 use axum::Router;
 use rmcp::{transport::stdio, ServiceExt};
-use syslog_mcp::{api, mcp, runtime::RuntimeCore};
+use syslog_mcp::{api, logging, mcp, runtime::RuntimeCore};
 use tracing::info;
-use tracing_subscriber::{fmt, EnvFilter};
 
 mod cli;
 
@@ -19,14 +18,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(mode.default_log_filter())),
-        )
-        .with_writer(std::io::stderr)
-        .with_target(true)
-        .init();
+    logging::init(mode.default_log_filter());
 
     info!("syslog-mcp v{}", env!("CARGO_PKG_VERSION"));
 
@@ -49,6 +41,9 @@ async fn serve_stdio_mcp() -> Result<()> {
 async fn run_cli(command: cli::CliCommand) -> Result<()> {
     if matches!(command, cli::CliCommand::Compose(_)) {
         return cli::run_compose(command);
+    }
+    if let cli::CliCommand::Setup(command) = command {
+        return cli::run_setup(command);
     }
     let runtime = RuntimeCore::load_query_only().await?;
     cli::run(runtime.service(), command).await
@@ -144,6 +139,7 @@ impl Mode {
                         | "correlate"
                         | "stats"
                         | "compose"
+                        | "setup"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
@@ -192,6 +188,8 @@ fn print_usage() {
   syslog compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]
   syslog compose down --yes [--dry-run] [--allow-cwd-target] [--json]
   syslog compose logs [--tail N] [--json]
+  syslog setup check|repair [--json]
+  syslog setup plugin-hook [--no-repair] [--json]
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
   syslog stats [--json]
 
