@@ -76,6 +76,45 @@ fn ai_cli_add_and_query_commands_emit_json() {
 }
 
 #[test]
+fn ai_transcript_tail_uses_human_transcript_layout() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("cli-ai-human.db");
+    let transcript = dir.path().join("session.jsonl");
+    std::fs::write(
+        &transcript,
+        "{\"sessionId\":\"cli-human\",\"cwd\":\"/tmp/pretty-project\",\"content\":\"first line\\nsecond line\"}\n",
+    )
+    .unwrap();
+    let transcript_path = transcript
+        .to_str()
+        .expect("transcript path should be UTF-8");
+
+    let add = run_command(&db_path, &["ai", "add", "--file", transcript_path]);
+    assert!(add.status.success(), "ai add failed: {add:?}");
+
+    let tail = run_command(&db_path, &["tail", "-n", "1"]);
+    assert!(tail.status.success(), "tail failed: {tail:?}");
+    let stdout = String::from_utf8(tail.stdout).unwrap();
+    assert!(stdout.contains("claude"), "missing tool label:\n{stdout}");
+    assert!(
+        stdout.contains("/tmp/pretty-project"),
+        "missing project:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("session=cli-human"),
+        "missing session:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("    first line\n    second line"),
+        "message was not indented:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains(" localhost "),
+        "transcript output leaked synthetic localhost:\n{stdout}"
+    );
+}
+
+#[test]
 fn ai_cli_add_reports_parse_errors_and_exits_nonzero() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("cli-ai-bad.db");

@@ -546,6 +546,92 @@ fn index_file_uses_session_meta_for_codex_response_items() {
 }
 
 #[test]
+fn explicit_file_detects_codex_transcript_shape_outside_codex_root() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("exported-codex.jsonl");
+    std::fs::write(
+        &file,
+        concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"explicit-codex\",\"cwd\":\"/tmp/exported-codex\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"content\":[{\"type\":\"output_text\",\"text\":\"explicit codex imported\"}]},\"timestamp\":\"2026-05-11T00:00:00Z\"}\n"
+        ),
+    )
+    .unwrap();
+
+    let result = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(result.ingested, 1);
+    let search = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "imported".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(search.sessions[0].ai_tool, "codex");
+    assert_eq!(search.sessions[0].ai_session_id, "explicit-codex");
+    assert_eq!(search.sessions[0].ai_project, "/tmp/exported-codex");
+}
+
+#[test]
+#[serial]
+fn default_index_does_not_skip_same_size_rewrite_with_new_mtime_nanos() {
+    let (pool, dir) = test_pool();
+    let old_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", dir.path());
+
+    let codex_root = dir.path().join(".codex/sessions/2026/05/14");
+    std::fs::create_dir_all(&codex_root).unwrap();
+    let file = codex_root.join("rollout-rewrite.jsonl");
+    std::fs::write(
+        &file,
+        concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"rewrite-session\",\"cwd\":\"/tmp/rewrite\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"content\":[{\"text\":\"alpha\"}]},\"timestamp\":\"2026-05-14T00:00:00Z\"}\n"
+        ),
+    )
+    .unwrap();
+    set_mtime(&file, 1_800_000_000, 1);
+
+    let first = index_roots(&pool, None).unwrap();
+    assert_eq!(first.ingested, 1);
+
+    std::fs::write(
+        &file,
+        concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"rewrite-session\",\"cwd\":\"/tmp/rewrite\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"content\":[{\"text\":\"bravo\"}]},\"timestamp\":\"2026-05-14T00:00:00Z\"}\n"
+        ),
+    )
+    .unwrap();
+    set_mtime(&file, 1_800_000_000, 2);
+
+    let second = index_roots(&pool, None).unwrap();
+    if let Some(home) = old_home {
+        std::env::set_var("HOME", home);
+    }
+
+    assert_eq!(second.ingested, 1);
+    let search = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "bravo".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(search.sessions[0].ai_session_id, "rewrite-session");
+}
+
+fn set_mtime(path: &std::path::Path, secs: u64, nanos: u32) {
+    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::new(secs, nanos))
+        .unwrap();
+}
+
+#[test]
 fn index_roots_reports_file_errors_with_paths() {
     let (pool, dir) = test_pool();
     let target = dir.path().join("target.jsonl");

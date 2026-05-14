@@ -375,6 +375,45 @@ fn search_ai_sessions_groups_results() {
 }
 
 #[test]
+fn search_ai_sessions_candidate_cap_prefers_newer_rows() {
+    let (pool, _dir) = test_pool();
+    let mut entries = Vec::new();
+    for i in 0..=5000 {
+        entries.push(make_ai_entry(
+            &format!("2026-01-01T00:{:02}:00Z", i % 60),
+            "host-a",
+            "claude",
+            "/tmp/old",
+            &format!("old-{i}"),
+            "commontoken",
+        ));
+    }
+    entries.push(make_ai_entry(
+        "2026-01-02T00:00:00Z",
+        "host-a",
+        "claude",
+        "/tmp/new",
+        "newest",
+        "commontoken",
+    ));
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let result = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "commontoken".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(result.truncated);
+    assert_eq!(result.sessions[0].ai_session_id, "newest");
+    assert_eq!(result.sessions[0].ai_project, "/tmp/new");
+}
+
+#[test]
 fn ai_session_queries_respect_filters() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(

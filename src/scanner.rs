@@ -213,7 +213,10 @@ pub fn index_file_with_storage(
 
     let canonical_path = path.canonicalize()?;
     let canonical = canonical_path.to_string_lossy().to_string();
-    let source_kind = SourceKind::from_str(source_kind, &canonical_path);
+    let mut source_kind = SourceKind::from_str(source_kind, &canonical_path);
+    if source_kind == SourceKind::ExplicitFile {
+        source_kind = detect_explicit_file_source_kind(&canonical_path)?;
+    }
     let tool = source_kind.tool_name();
     let mut fallback_project = project_for_file(source_kind, &canonical_path);
     let mut fallback_session_id = if source_kind == SourceKind::CodexSession {
@@ -340,7 +343,12 @@ pub fn index_file_with_storage(
         line_no += 1;
     }
 
-    let file_metadata = FileMetadata::from_path_hash(&canonical_path, &hasher.finalize())?;
+    let final_metadata = FileMetadata::from_path_metadata(&canonical_path)?;
+    let unchanged_during_scan = current_metadata.same_size_and_mtime(&final_metadata);
+    let file_metadata = current_metadata.with_hash(&hasher.finalize());
+    let completion_metadata = unchanged_during_scan
+        .then_some(file_metadata)
+        .filter(|_| result.parse_errors == 0);
     if result.parse_errors > 0 {
         flush_chunk(
             pool,
@@ -366,7 +374,7 @@ pub fn index_file_with_storage(
         source_id,
         &mut batch,
         &mut imports,
-        Some(&file_metadata),
+        completion_metadata.as_ref(),
         &mut result,
     )?;
     Ok(result)
@@ -476,6 +484,50 @@ fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut I
 
 fn supported_discovered_file(path: &Path) -> bool {
     matches!(path.extension().and_then(|ext| ext.to_str()), Some("jsonl"))
+}
+
+fn detect_explicit_file_source_kind(path: &Path) -> Result<SourceKind> {
+    let file = fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut line_no = 0usize;
+    while line_no < 50 {
+        let Some(read_line) = read_bounded_line(&mut reader, &mut hasher)? else {
+            return Ok(SourceKind::ExplicitFile);
+        };
+        if read_line.oversized {
+            return Ok(SourceKind::ExplicitFile);
+        }
+        let line = read_line.text.trim_end_matches(['\r', '\n']);
+        if line.trim().is_empty() {
+            line_no += 1;
+            continue;
+        }
+        if looks_like_codex_record(line) {
+            return Ok(SourceKind::CodexSession);
+        }
+        match claude::parse_line(line, path, line_no) {
+            Ok(Some(_)) => return Ok(SourceKind::ExplicitFile),
+            Ok(None) => {}
+            Err(_) => return Ok(SourceKind::ExplicitFile),
+        }
+        line_no += 1;
+    }
+    Ok(SourceKind::ExplicitFile)
+}
+
+fn looks_like_codex_record(line: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return false;
+    };
+    matches!(
+        value.get("type").and_then(serde_json::Value::as_str),
+        Some("session_meta" | "response_item" | "event_msg" | "turn_context")
+    ) || value
+        .get("payload")
+        .and_then(|payload| payload.get("type"))
+        .and_then(serde_json::Value::as_str)
+        .is_some()
 }
 
 fn detect_source_kind(path: &Path) -> SourceKind {
@@ -736,27 +788,27 @@ impl FileMetadata {
         let metadata = fs::metadata(path)?;
         Ok(Self {
             size: metadata.len(),
-            mtime: metadata_mtime_secs(&metadata),
+            mtime: metadata_mtime_nanos(&metadata),
             content_hash: String::new(),
         })
     }
 
-    fn from_path_hash(path: &Path, hash: &[u8]) -> Result<Self> {
-        let metadata = fs::metadata(path)?;
-        Ok(Self {
-            size: metadata.len(),
-            mtime: metadata_mtime_secs(&metadata),
-            content_hash: hex_digest(hash),
-        })
+    fn with_hash(mut self, hash: &[u8]) -> Self {
+        self.content_hash = hex_digest(hash);
+        self
+    }
+
+    fn same_size_and_mtime(&self, other: &Self) -> bool {
+        self.size == other.size && self.mtime == other.mtime
     }
 }
 
-fn metadata_mtime_secs(metadata: &fs::Metadata) -> Option<i64> {
+fn metadata_mtime_nanos(metadata: &fs::Metadata) -> Option<i64> {
     metadata
         .modified()
         .ok()
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs() as i64)
+        .and_then(|duration| i64::try_from(duration.as_nanos()).ok())
 }
 
 fn hex_digest(bytes: &[u8]) -> String {

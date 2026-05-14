@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-05-14
+
+### Fixed
+
+- **AI transcript review cleanup**: Limited transcript-style CLI rendering to
+  actual transcript rows, kept the tool column bounded, made explicit `ai add
+  --file` inputs detect Codex JSONL shape outside the default session tree, and
+  tightened scanner checkpoints so same-size rewrites and concurrently appended
+  files are not skipped as fully indexed.
+- **AI session search ordering**: Ordered capped FTS candidates by newest row so
+  recent matching sessions are not hidden behind older high-volume transcript
+  history.
+- **Plugin metadata**: Removed the stale SSE endpoint claim from the Claude
+  plugin MCP port description.
+
 ## [0.21.2] - 2026-05-14
 
 ### Fixed
@@ -1042,7 +1057,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.2...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.3...HEAD
+[0.21.3]: https://github.com/jmagar/syslog-mcp/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/jmagar/syslog-mcp/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/jmagar/syslog-mcp/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/jmagar/syslog-mcp/compare/v0.20.2...v0.21.0

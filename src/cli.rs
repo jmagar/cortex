@@ -1024,7 +1024,7 @@ fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()
 }
 
 fn print_log(log: &LogEntry) {
-    if log.ai_tool.is_some() || log.ai_project.is_some() || log.ai_session_id.is_some() {
+    if is_transcript_log(log) {
         print_ai_log(log);
         return;
     }
@@ -1051,11 +1051,19 @@ fn print_ai_log(log: &LogEntry) {
         "{} {:<7} {:<8} {:<36} session={}",
         log.timestamp,
         log.severity,
-        tool,
+        truncate(tool, 8),
         truncate(project, 35),
         truncate(session, 24)
     );
     println!("    {}", indent_multiline(&log.message));
+}
+
+fn is_transcript_log(log: &LogEntry) -> bool {
+    log.source_ip.starts_with("transcript://")
+        || log
+            .app_name
+            .as_deref()
+            .is_some_and(|app| app.ends_with("-transcript"))
 }
 
 fn indent_multiline(value: &str) -> String {
