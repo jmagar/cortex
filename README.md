@@ -376,7 +376,20 @@ scanner skips symlinks, counts unsupported non-`.jsonl` files without parsing
 them, and streams transcript files line-by-line in bounded SQLite chunks. Use
 `--force` to reimport a transcript path from scratch after parser changes,
 `--since RFC3339` to scan only recently modified files, and
-`syslog ai checkpoints --errors` to inspect structured scanner failures.
+`syslog ai checkpoints --errors` plus `syslog ai errors` to inspect structured
+scanner failures.
+
+The optional host-local index timer is managed by:
+
+```bash
+syslog setup ai-index-timer install
+syslog setup ai-index-timer check
+syslog setup ai-index-timer remove
+```
+
+This timer is deliberately not inside the Docker container. It reads host-local
+Claude/Codex transcript files and runs the newest `syslog` binary on the host
+`PATH`; Docker Compose owns only the server/query runtime.
 
 Imported AI transcript messages are scrubbed for known credential/token patterns
 before storage and FTS indexing. The rows still live in the main `logs` table, so
@@ -427,7 +440,7 @@ Useful installer controls:
 ```bash
 SYSLOG_INSTALL_DRY_RUN=1 ./install.sh
 SYSLOG_INSTALL_PREFIX=/opt/syslog-mcp ./install.sh
-SYSLOG_VERSION=0.21.4 ./install.sh
+SYSLOG_VERSION=0.21.5 ./install.sh
 SYSLOG_INSTALL_SKIP_SETUP=1 ./install.sh
 ```
 
@@ -437,6 +450,8 @@ Useful setup commands:
 syslog setup          # first-run or normal repair
 syslog setup check    # inspect only; does not mutate files or start services
 syslog setup repair   # repair env/assets and restart the Docker stack
+syslog setup ai-index-timer install  # optional host-local transcript index timer
+syslog doctor binary  # check host/container binary freshness
 ```
 
 ### Claude Code plugin (recommended)

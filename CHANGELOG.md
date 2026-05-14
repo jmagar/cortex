@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.5] - 2026-05-14
+
+### Added
+
+- **Host-local AI index timer setup**: Added
+  `syslog setup ai-index-timer install|check|remove` to make the optional
+  transcript indexing timer syslog-owned while keeping it outside Docker
+  Compose.
+- **AI scanner diagnostics**: Added `syslog ai doctor`, `syslog ai errors`,
+  `syslog ai checkpoints --missing`, and
+  `syslog ai prune-checkpoints --missing` for live DB visibility and cleanup.
+- **Binary freshness doctor**: Added `syslog doctor binary` to report host
+  binary resolution, container version, and runtime-current status.
+- **AI MCP smoke coverage**: Added `scripts/smoke-ai-mcp.sh` to seed a fixture
+  and exercise the AI MCP actions over HTTP.
+
+### Changed
+
+- **Parse error storage**: Scanner parse failures are now persisted in
+  `transcript_parse_errors` with bounded scrubbed previews and are cleared when
+  a source indexes cleanly.
+
 ## [0.21.4] - 2026-05-14
 
 ### Added
@@ -1078,7 +1100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.4...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.5...HEAD
+[0.21.5]: https://github.com/jmagar/syslog-mcp/compare/v0.21.4...v0.21.5
 [0.21.4]: https://github.com/jmagar/syslog-mcp/compare/v0.21.3...v0.21.4
 [0.21.3]: https://github.com/jmagar/syslog-mcp/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/jmagar/syslog-mcp/compare/v0.21.1...v0.21.2

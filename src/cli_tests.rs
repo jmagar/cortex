@@ -175,10 +175,30 @@ fn parse_ai_checkpoints_collects_filters() {
         parsed,
         CliCommand::Ai(AiCommand::Checkpoints(AiCheckpointsArgs {
             errors_only: true,
+            missing_only: false,
             limit: Some(25),
             json: true,
         }))
     );
+}
+
+#[test]
+fn parse_ai_errors_collects_limit() {
+    let parsed = CliCommand::parse(strings(&["ai", "errors", "--limit", "10", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::Errors(AiErrorsArgs {
+            limit: Some(10),
+            json: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_ai_prune_checkpoints_requires_missing() {
+    let err = CliCommand::parse(strings(&["ai", "prune-checkpoints", "--dry-run"])).unwrap_err();
+    assert!(err.to_string().contains("--missing"));
 }
 
 #[test]

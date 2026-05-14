@@ -46,6 +46,9 @@ When seeding is enabled, the smoke scripts import
 `tests/fixtures/ai-session-smoke.jsonl` and assert that `sessions`,
 `search_sessions`, and `project_context` can retrieve real AI transcript rows,
 not just empty response envelopes.
+`scripts/smoke-ai-mcp.sh` additionally seeds a temporary transcript and calls
+the HTTP MCP endpoint for `search_sessions`, `usage_blocks`, `project_context`,
+`list_ai_tools`, and `list_ai_projects`.
 
 Action registry covered by live/script references: `search`, `tail`, `errors`,
 `hosts`, `sessions`, `search_sessions`, `usage_blocks`, `project_context`,

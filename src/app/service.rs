@@ -376,12 +376,55 @@ impl SyslogService {
     pub async fn list_ai_checkpoints(
         &self,
         errors_only: bool,
+        missing_only: bool,
         limit: Option<u32>,
     ) -> ServiceResult<Vec<scanner::CheckpointEntry>> {
         self.run_db(move |pool| {
-            scanner::list_checkpoints(pool, &scanner::CheckpointListOptions { errors_only, limit })
+            scanner::list_checkpoints(
+                pool,
+                &scanner::CheckpointListOptions {
+                    errors_only,
+                    missing_only,
+                    limit,
+                },
+            )
         })
         .await
+    }
+
+    pub async fn list_ai_parse_errors(
+        &self,
+        limit: Option<u32>,
+    ) -> ServiceResult<Vec<scanner::ParseErrorEntry>> {
+        self.run_db(move |pool| {
+            scanner::list_parse_errors(pool, &scanner::ParseErrorListOptions { limit })
+        })
+        .await
+    }
+
+    pub async fn prune_ai_checkpoints(
+        &self,
+        missing_only: bool,
+        dry_run: bool,
+        limit: Option<u32>,
+    ) -> ServiceResult<scanner::PruneCheckpointsResult> {
+        self.run_db(move |pool| {
+            scanner::prune_checkpoints(
+                pool,
+                &scanner::PruneCheckpointsOptions {
+                    missing_only,
+                    dry_run,
+                    limit,
+                },
+            )
+        })
+        .await
+    }
+
+    pub async fn ai_doctor(&self) -> ServiceResult<scanner::AiDoctorReport> {
+        let db_path = self.storage.db_path.clone();
+        self.run_db(move |pool| scanner::ai_doctor(pool, &db_path))
+            .await
     }
 
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {

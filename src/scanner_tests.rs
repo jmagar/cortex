@@ -70,6 +70,7 @@ fn list_checkpoints_reports_errors_and_import_counts() {
         &pool,
         &CheckpointListOptions {
             errors_only: true,
+            missing_only: false,
             limit: Some(10),
         },
     )

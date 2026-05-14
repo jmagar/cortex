@@ -57,6 +57,7 @@ pub struct IndexFileOptions {
 #[derive(Debug, Clone, Default)]
 pub struct CheckpointListOptions {
     pub errors_only: bool,
+    pub missing_only: bool,
     pub limit: Option<u32>,
 }
 
@@ -71,12 +72,64 @@ pub struct CheckpointEntry {
     pub last_indexed_at: Option<String>,
     pub last_error: Option<String>,
     pub imported_records: i64,
+    pub missing: bool,
+    pub parse_errors: i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IndexFileError {
     pub path: String,
     pub error: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ParseErrorListOptions {
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ParseErrorEntry {
+    pub canonical_path: String,
+    pub source_kind: String,
+    pub line_no: i64,
+    pub error: String,
+    pub record_preview: Option<String>,
+    pub seen_at: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PruneCheckpointsOptions {
+    pub missing_only: bool,
+    pub dry_run: bool,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PruneCheckpointsResult {
+    pub matched: usize,
+    pub pruned: usize,
+    pub dry_run: bool,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AiDoctorReport {
+    pub db_path: String,
+    pub claude_root: TranscriptRootStatus,
+    pub codex_root: TranscriptRootStatus,
+    pub checkpoint_count: i64,
+    pub checkpoint_error_count: i64,
+    pub missing_checkpoint_count: i64,
+    pub imported_record_count: i64,
+    pub parse_error_count: i64,
+    pub newest_indexed_path: Option<String>,
+    pub newest_indexed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TranscriptRootStatus {
+    pub path: String,
+    pub exists: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -347,7 +400,9 @@ pub fn index_file_with_options(
         };
         if read_line.oversized {
             result.parse_errors += 1;
-            checkpoint_store.mark_error(source_id, "transcript record exceeds max size")?;
+            let error = "transcript record exceeds max size";
+            checkpoint_store.record_parse_error(source_id, line_no as i64, error, None)?;
+            checkpoint_store.mark_error(source_id, error)?;
             line_no += 1;
             continue;
         }
@@ -424,6 +479,12 @@ pub fn index_file_with_options(
             Ok(None) => {}
             Err(error) => {
                 result.parse_errors += 1;
+                checkpoint_store.record_parse_error(
+                    source_id,
+                    line_no as i64,
+                    &error.to_string(),
+                    Some(&record_preview(line_text)),
+                )?;
                 checkpoint_store.mark_error(source_id, &error.to_string())?;
             }
         }
@@ -472,6 +533,24 @@ pub fn list_checkpoints(
     options: &CheckpointListOptions,
 ) -> Result<Vec<CheckpointEntry>> {
     checkpoint::CheckpointStore::new(pool).list_checkpoints(options)
+}
+
+pub fn list_parse_errors(
+    pool: &DbPool,
+    options: &ParseErrorListOptions,
+) -> Result<Vec<ParseErrorEntry>> {
+    checkpoint::CheckpointStore::new(pool).list_parse_errors(options)
+}
+
+pub fn prune_checkpoints(
+    pool: &DbPool,
+    options: &PruneCheckpointsOptions,
+) -> Result<PruneCheckpointsResult> {
+    checkpoint::CheckpointStore::new(pool).prune_checkpoints(options)
+}
+
+pub fn ai_doctor(pool: &DbPool, db_path: &Path) -> Result<AiDoctorReport> {
+    checkpoint::CheckpointStore::new(pool).doctor(db_path)
 }
 
 fn flush_chunk(
@@ -706,6 +785,18 @@ fn merge_result(total: &mut IndexResult, next: &IndexResult) {
     total.dropped_metadata_fields += next.dropped_metadata_fields;
     total.checkpoint_updates += next.checkpoint_updates;
     total.file_errors.extend(next.file_errors.iter().cloned());
+}
+
+fn record_preview(value: &str) -> String {
+    scrub_ai_message(&truncate_chars(value, 240), None)
+}
+
+fn truncate_chars(value: &str, max: usize) -> String {
+    if value.chars().count() <= max {
+        value.to_string()
+    } else {
+        value.chars().take(max).collect()
+    }
 }
 
 fn record_file_error(result: &mut IndexResult, path: &Path, error: &anyhow::Error) {
