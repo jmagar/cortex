@@ -26,6 +26,23 @@ pub enum AiIndexTimerAction {
     Check,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiWatchServiceAction {
+    Install,
+    Remove,
+    Check,
+}
+
+impl AiWatchServiceAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "ai-watch-service-install",
+            Self::Remove => "ai-watch-service-remove",
+            Self::Check => "ai-watch-service-check",
+        }
+    }
+}
+
 impl AiIndexTimerAction {
     fn as_str(self) -> &'static str {
         match self {
@@ -247,6 +264,107 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
             phases.push(systemctl_user_phase(&[
                 "is-enabled",
                 "syslog-ai-index.timer",
+            ]));
+        }
+    }
+
+    let elapsed_ms = started.elapsed().as_millis();
+    let has_errors = phases
+        .iter()
+        .any(|phase| matches!(phase.status, SetupStatus::Error));
+    Ok(SetupReport {
+        mode: action.as_str(),
+        elapsed_ms,
+        home,
+        env_path,
+        compose_dir,
+        data_dir,
+        health_url: "host-local helper".to_string(),
+        mcp_url: "host-local helper".to_string(),
+        phases,
+        has_errors,
+    })
+}
+
+pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Result<SetupReport> {
+    let started = Instant::now();
+    let home = syslog_home_dir()?;
+    let env_path = home.join(".env");
+    let compose_dir = home.join("compose");
+    let data_dir = home.join("data");
+    let user_home = user_home_dir()?;
+    let config_dir = user_home.join(".config/syslog-mcp");
+    let watch_env_path = config_dir.join("ai-watch.env");
+    let state_dir = user_home.join(".local/state/syslog-mcp");
+    let systemd_dir = user_home.join(".config/systemd/user");
+    let service_path = systemd_dir.join("syslog-ai-watch.service");
+    let mut phases = Vec::new();
+
+    match action {
+        AiWatchServiceAction::Install => {
+            let syslog_bin = resolve_syslog_binary()?;
+            let db_path = resolve_ai_watch_db_path(&home, &user_home)?;
+            phases.push(install_ai_watch_service_files(
+                &watch_env_path,
+                &service_path,
+                &systemd_dir,
+                &state_dir,
+                &syslog_bin,
+                &db_path,
+                &user_home,
+            )?);
+            phases.push(run_ai_watch_initial_index_phase(
+                &syslog_bin,
+                &watch_env_path,
+            ));
+            phases.push(systemctl_user_phase(&["daemon-reload"]));
+            phases.push(systemctl_user_phase(&[
+                "disable",
+                "--now",
+                "syslog-ai-index.timer",
+            ]));
+            phases.push(ai_index_timer_disabled_phase());
+            phases.push(systemctl_user_phase(&[
+                "reset-failed",
+                "syslog-ai-watch.service",
+            ]));
+            phases.push(systemctl_user_required_phase(&[
+                "enable",
+                "--now",
+                "syslog-ai-watch.service",
+            ]));
+        }
+        AiWatchServiceAction::Remove => {
+            phases.push(systemctl_user_phase(&[
+                "disable",
+                "--now",
+                "syslog-ai-watch.service",
+            ]));
+            phases.push(remove_ai_watch_service_files(
+                &watch_env_path,
+                &service_path,
+            )?);
+            phases.push(systemctl_user_phase(&["daemon-reload"]));
+        }
+        AiWatchServiceAction::Check => {
+            phases.push(check_file_phase(
+                "ai-watch-env",
+                &watch_env_path,
+                "run syslog setup ai-watch-service install",
+            ));
+            phases.push(check_file_phase(
+                "ai-watch-service",
+                &service_path,
+                "run syslog setup ai-watch-service install",
+            ));
+            phases.push(ai_index_timer_disabled_phase());
+            phases.push(systemctl_user_required_phase(&[
+                "is-enabled",
+                "syslog-ai-watch.service",
+            ]));
+            phases.push(systemctl_user_required_phase(&[
+                "is-active",
+                "syslog-ai-watch.service",
             ]));
         }
     }
@@ -561,12 +679,228 @@ fn remove_ai_index_timer_files(
     Ok(timer.finish(SetupStatus::Ok, "removed syslog AI index timer files"))
 }
 
+fn install_ai_watch_service_files(
+    env_path: &Path,
+    service_path: &Path,
+    systemd_dir: &Path,
+    state_dir: &Path,
+    syslog_bin: &Path,
+    db_path: &Path,
+    user_home: &Path,
+) -> io::Result<SetupPhase> {
+    let timer = PhaseTimer::start("ai-watch-service-files");
+    if let Some(env_dir) = env_path.parent() {
+        ensure_private_dir(env_dir)?;
+    }
+    ensure_private_dir(state_dir)?;
+    std::fs::create_dir_all(systemd_dir)?;
+    write_private_file(env_path, &ai_watch_env_file(db_path))?;
+    std::fs::write(
+        service_path,
+        ai_watch_service_unit(syslog_bin, env_path, db_path, state_dir, user_home),
+    )?;
+    Ok(timer.finish(
+        SetupStatus::Ok,
+        format!("wrote {}, {}", env_path.display(), service_path.display()),
+    ))
+}
+
+fn remove_ai_watch_service_files(env_path: &Path, service_path: &Path) -> io::Result<SetupPhase> {
+    let timer = PhaseTimer::start("ai-watch-service-files");
+    for path in [env_path, service_path] {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(timer.finish(SetupStatus::Ok, "removed syslog AI watch service files"))
+}
+
+fn ai_watch_env_file(db_path: &Path) -> String {
+    format!(
+        "SYSLOG_MCP_DB_PATH={}\nSYSLOG_DOCKER_INGEST_ENABLED=false\nRUST_LOG=warn\n",
+        db_path.display()
+    )
+}
+
+fn ai_watch_service_unit(
+    syslog_bin: &Path,
+    env_path: &Path,
+    db_path: &Path,
+    state_dir: &Path,
+    user_home: &Path,
+) -> String {
+    let db_dir = db_path.parent().unwrap_or_else(|| Path::new("/"));
+    format!(
+        "[Unit]\nDescription=syslog-mcp real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/syslog-mcp\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={}\nWorkingDirectory={}\nExecStart={} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nReadOnlyPaths=-{} -{}\nReadWritePaths={} {}\n\n[Install]\nWantedBy=default.target\n",
+        env_path.display(),
+        user_home.display(),
+        syslog_bin.display(),
+        user_home.join(".claude/projects").display(),
+        user_home.join(".codex/sessions").display(),
+        db_dir.display(),
+        state_dir.display()
+    )
+}
+
+fn run_ai_watch_initial_index_phase(syslog_bin: &Path, env_path: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("ai-watch-initial-index");
+    let env = parse_env(&std::fs::read_to_string(env_path).unwrap_or_default());
+    let mut command = Command::new(syslog_bin);
+    command.args(["ai", "index", "--json"]);
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    match command.output() {
+        Ok(output) if output.status.success() => timer.finish(
+            SetupStatus::Ok,
+            summarize_ai_index_output(&String::from_utf8_lossy(&output.stdout)),
+        ),
+        Ok(output) => timer.finish(
+            SetupStatus::Warn,
+            String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .next()
+                .unwrap_or("initial AI index failed")
+                .to_string(),
+        ),
+        Err(error) => timer.finish(SetupStatus::Warn, error.to_string()),
+    }
+}
+
+fn summarize_ai_index_output(stdout: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
+        return "indexed".to_string();
+    };
+    format!(
+        "indexed files={} ingested={} duplicates={} parse_errors={} storage_blocked={} file_errors={}",
+        value
+            .get("discovered_files")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("ingested")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("skipped_dupes")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("parse_errors")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("storage_blocked_chunks")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("file_errors")
+            .and_then(serde_json::Value::as_array)
+            .map_or(0, Vec::len),
+    )
+}
+
+fn ai_index_timer_disabled_phase() -> SetupPhase {
+    let timer = PhaseTimer::start("ai-index-timer-disabled");
+    let active = systemctl_user_state("is-active", "syslog-ai-index.timer");
+    let enabled = systemctl_user_state("is-enabled", "syslog-ai-index.timer");
+    if active.as_deref() == Some("active") || enabled.as_deref() == Some("enabled") {
+        return timer.finish(
+            SetupStatus::Error,
+            format!(
+                "syslog-ai-index.timer still active/enabled (active={active:?}, enabled={enabled:?})"
+            ),
+        );
+    }
+    timer.finish(
+        SetupStatus::Ok,
+        format!(
+            "syslog-ai-index.timer inactive or absent (active={active:?}, enabled={enabled:?})"
+        ),
+    )
+}
+
+fn systemctl_user_state(command: &str, unit: &str) -> Option<String> {
+    let output = run_systemctl_user(&[command, unit]).ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!stdout.is_empty()).then_some(stdout)
+}
+
+fn resolve_syslog_binary() -> io::Result<PathBuf> {
+    let current = std::env::current_exe()?;
+    if current.file_name().and_then(|name| name.to_str()) == Some("syslog") {
+        return validate_executable_path(current);
+    }
+    let output = Command::new("sh")
+        .args(["-c", "command -v syslog"])
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::new(
+            ErrorKind::NotFound,
+            "syslog binary not found on PATH",
+        ));
+    }
+    validate_executable_path(PathBuf::from(
+        String::from_utf8_lossy(&output.stdout).trim(),
+    ))
+}
+
+fn validate_executable_path(path: PathBuf) -> io::Result<PathBuf> {
+    let canonical = path.canonicalize()?;
+    let metadata = std::fs::metadata(&canonical)?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("not a file: {}", canonical.display()),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn resolve_ai_watch_db_path(setup_home: &Path, user_home: &Path) -> io::Result<PathBuf> {
+    if let Ok(value) = std::env::var("SYSLOG_MCP_DB_PATH") {
+        if !value.trim().is_empty() {
+            return validate_db_path(PathBuf::from(value));
+        }
+    }
+    let plugin_db = user_home.join(".claude/plugins/data/syslog-jmagar-lab/syslog.db");
+    if plugin_db.exists() {
+        return validate_db_path(plugin_db);
+    }
+    validate_db_path(setup_home.join("data/syslog.db"))
+}
+
+fn validate_db_path(path: PathBuf) -> io::Result<PathBuf> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("AI watch DB path must be absolute: {}", path.display()),
+        ));
+    }
+    Ok(path)
+}
+
 fn write_executable_file(path: &Path, body: &str) -> io::Result<()> {
     std::fs::write(path, body)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+fn write_private_file(path: &Path, body: &str) -> io::Result<()> {
+    std::fs::write(path, body)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
 }
@@ -635,6 +969,29 @@ fn systemctl_user_phase(args: &[&str]) -> SetupPhase {
             timer.finish(SetupStatus::Warn, "systemctl not found")
         }
         Err(error) => timer.finish(SetupStatus::Warn, error.to_string()),
+    }
+}
+
+fn systemctl_user_required_phase(args: &[&str]) -> SetupPhase {
+    let timer = PhaseTimer::start("systemctl-user");
+    match run_systemctl_user(args) {
+        Ok(output) if output.status.success() => timer.finish(
+            SetupStatus::Ok,
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .unwrap_or("ok")
+                .to_string(),
+        ),
+        Ok(output) => timer.finish(
+            SetupStatus::Error,
+            String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .next()
+                .unwrap_or("systemctl --user failed")
+                .to_string(),
+        ),
+        Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
     }
 }
 

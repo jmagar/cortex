@@ -224,6 +224,24 @@ syslog ai add --file ~/.codex/sessions/2026/05/14/session.jsonl --force
 `--force` reimports that one transcript from scratch without leaving duplicate
 log rows.
 
+### `syslog ai watch`
+
+Watch local Claude/Codex transcript roots and index stable changed `.jsonl`
+files as they are written.
+
+```bash
+syslog ai watch
+syslog ai watch --path ~/.claude/projects --no-initial-scan
+syslog ai watch --debounce-ms 750 --settle-ms 500 --max-retries 5 --json
+```
+
+The watcher is a host-local helper, not part of the Docker Compose runtime. It
+reuses the same scanner root policy, file support checks, checkpoints,
+append-offset indexing, duplicate suppression, parse-error persistence, and
+storage guardrails as `syslog ai index` and `syslog ai add`. The watcher only
+coalesces filesystem events, waits for files to stabilize, and retries
+transient parse/storage/file errors up to the configured cap.
+
 ### `syslog ai checkpoints`
 
 Inspect structured scanner checkpoints without opening SQLite directly.
@@ -277,10 +295,29 @@ The doctor reports the DB path in use, whether `~/.claude/projects` and
 `~/.codex/sessions` exist, checkpoint counts, missing checkpoint counts,
 imported record count, parse error count, and the newest indexed transcript.
 
+### `syslog setup ai-watch-service`
+
+Install, remove, or inspect the supported host-local user-systemd watcher for
+near-real-time transcript ingestion.
+
+```bash
+syslog setup ai-watch-service install
+syslog setup ai-watch-service check --json
+syslog setup ai-watch-service remove
+```
+
+Install resolves an absolute `syslog` binary and a concrete SQLite DB path,
+writes a private environment file under `~/.config/syslog-mcp/`, runs one
+initial `syslog ai index --json` phase, disables the older polling timer, and
+starts `syslog-ai-watch.service` with `syslog ai watch --no-initial-scan
+--json`. The helper is intentionally outside the container because it must read
+host-local Claude/Codex transcript files; Docker Compose remains the
+server/query deployment.
+
 ### `syslog setup ai-index-timer`
 
-Install, remove, or inspect the optional host-local user-systemd timer that
-periodically runs `syslog ai index`.
+Install, remove, or inspect the optional host-local user-systemd polling
+fallback that periodically runs `syslog ai index`.
 
 ```bash
 syslog setup ai-index-timer install
@@ -289,9 +326,10 @@ syslog setup ai-index-timer remove
 ```
 
 This helper is intentionally not part of the Docker container. It scans
-host-local transcript roots (`~/.claude/projects`, `~/.codex/sessions`) using
-the newest `syslog` binary on the host `PATH`, then writes to the configured
-SQLite DB. The container remains the Compose-managed server/query runtime.
+host-local transcript roots (`~/.claude/projects`, `~/.codex/sessions`) using a
+host `syslog` binary, then writes to the configured SQLite DB. Prefer
+`syslog setup ai-watch-service install` for normal use; the watcher install
+disables this timer to avoid duplicate background ingestion loops.
 
 ### `syslog doctor binary`
 
@@ -313,10 +351,13 @@ bash scripts/smoke-ai.sh
 bash scripts/smoke-ai-mcp.sh
 ```
 
+With `syslog-ai-watch.service` installed, new transcript lines usually become
+searchable within a few seconds of the writer closing or flushing the file.
 Imported transcript messages are scrubbed for known credential/token patterns
-before storage and FTS indexing. Raw log actions can still expose scrubbed AI
-messages and local `ai_transcript_path` values, so do not expose the database or
-MCP endpoint to untrusted clients.
+before storage and FTS indexing, but scrubbing is best-effort. Raw log actions
+can still expose scrubbed AI messages and local `ai_transcript_path` values, so
+do not expose the database or MCP endpoint to clients that should not see local
+AI session content.
 
 ### `syslog correlate`
 

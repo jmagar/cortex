@@ -57,6 +57,59 @@ fn ai_index_timer_units_are_host_user_units() {
 }
 
 #[test]
+fn ai_watch_env_file_pins_db_and_disables_docker_ingest() {
+    let env = ai_watch_env_file(std::path::Path::new("/home/me/syslog.db"));
+    assert!(env.contains("SYSLOG_MCP_DB_PATH=/home/me/syslog.db"));
+    assert!(env.contains("SYSLOG_DOCKER_INGEST_ENABLED=false"));
+    assert!(env.contains("RUST_LOG=warn"));
+}
+
+#[test]
+fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
+    let unit = ai_watch_service_unit(
+        std::path::Path::new("/home/me/.local/bin/syslog"),
+        std::path::Path::new("/home/me/.config/syslog-mcp/ai-watch.env"),
+        std::path::Path::new("/home/me/.syslog-mcp/data/syslog.db"),
+        std::path::Path::new("/home/me/.local/state/syslog-mcp"),
+        std::path::Path::new("/home/me"),
+    );
+
+    assert!(unit.contains("Type=simple"));
+    assert!(unit.contains("EnvironmentFile=/home/me/.config/syslog-mcp/ai-watch.env"));
+    assert!(unit.contains("ExecStart=/home/me/.local/bin/syslog ai watch --no-initial-scan --json"));
+    assert!(unit.contains("Restart=on-failure"));
+    assert!(unit.contains("StartLimitBurst=5"));
+    assert!(unit.contains("UMask=0077"));
+    assert!(unit.contains("NoNewPrivileges=true"));
+    assert!(unit.contains("PrivateTmp=true"));
+    assert!(unit.contains("ProtectSystem=strict"));
+    assert!(unit.contains("ReadOnlyPaths=-/home/me/.claude/projects -/home/me/.codex/sessions"));
+    assert!(
+        unit.contains("ReadWritePaths=/home/me/.syslog-mcp/data /home/me/.local/state/syslog-mcp")
+    );
+    assert!(unit.contains("WantedBy=default.target"));
+}
+
+#[test]
+fn summarize_ai_index_output_reports_key_counts() {
+    let summary = summarize_ai_index_output(
+        r#"{
+  "discovered_files": 3,
+  "ingested": 2,
+  "skipped_dupes": 1,
+  "parse_errors": 4,
+  "storage_blocked_chunks": 0,
+  "file_errors": ["bad"]
+}"#,
+    );
+
+    assert_eq!(
+        summary,
+        "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 file_errors=1"
+    );
+}
+
+#[test]
 fn inferred_user_bus_env_uses_runtime_bus_when_present() {
     let Some((runtime_dir, bus_address)) = inferred_user_bus_env() else {
         return;

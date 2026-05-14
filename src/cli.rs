@@ -37,6 +37,7 @@ pub(crate) enum AiCommand {
     Projects(AiListArgs),
     Index(AiIndexArgs),
     Add(AiAddArgs),
+    Watch(AiWatchArgs),
     Checkpoints(AiCheckpointsArgs),
     Errors(AiErrorsArgs),
     PruneCheckpoints(AiPruneCheckpointsArgs),
@@ -181,6 +182,29 @@ pub(crate) struct AiAddArgs {
     pub file: String,
     pub force: bool,
     pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AiWatchArgs {
+    pub path: Option<String>,
+    pub debounce_ms: u64,
+    pub settle_ms: u64,
+    pub max_retries: u8,
+    pub no_initial_scan: bool,
+    pub json: bool,
+}
+
+impl Default for AiWatchArgs {
+    fn default() -> Self {
+        Self {
+            path: None,
+            debounce_ms: 750,
+            settle_ms: 500,
+            max_retries: 5,
+            no_initial_scan: false,
+            json: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -358,6 +382,17 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                 let response = service.add_ai_file(args.file, args.force).await?;
                 print_index_response(&response, args.json)?;
                 ensure_index_success(&response)?;
+            }
+            AiCommand::Watch(args) => {
+                let options = syslog_mcp::ai_watch::WatchOptions {
+                    path: args.path.map(std::path::PathBuf::from),
+                    debounce: std::time::Duration::from_millis(args.debounce_ms),
+                    settle: std::time::Duration::from_millis(args.settle_ms),
+                    max_retries: args.max_retries,
+                    initial_scan: !args.no_initial_scan,
+                    json: args.json,
+                };
+                syslog_mcp::ai_watch::run(service, options).await?;
             }
             AiCommand::Checkpoints(args) => {
                 let response = service
@@ -597,6 +632,7 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
         "projects" => parse_ai_projects(rest),
         "index" => parse_ai_index(rest),
         "add" => parse_ai_add(rest),
+        "watch" => parse_ai_watch(rest),
         "checkpoints" => parse_ai_checkpoints(rest),
         "errors" => parse_ai_errors(rest),
         "prune-checkpoints" => parse_ai_prune_checkpoints(rest),
@@ -786,6 +822,65 @@ fn parse_ai_add(args: &[String]) -> Result<CliCommand> {
         bail!("ai add requires --file <PATH>");
     }
     Ok(CliCommand::Ai(AiCommand::Add(parsed)))
+}
+
+fn parse_positive_u64_flag(flag: &str, value: String) -> Result<u64> {
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| anyhow!("{flag} expects a positive integer"))?;
+    if parsed == 0 {
+        bail!("{flag} expects a positive integer");
+    }
+    Ok(parsed)
+}
+
+fn parse_ai_watch(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiWatchArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--path" => parsed.path = Some(flags.value("--path")?),
+            "--debounce-ms" => {
+                parsed.debounce_ms =
+                    parse_positive_u64_flag("--debounce-ms", flags.value("--debounce-ms")?)?;
+            }
+            "--settle-ms" => {
+                parsed.settle_ms =
+                    parse_positive_u64_flag("--settle-ms", flags.value("--settle-ms")?)?;
+            }
+            "--max-retries" => {
+                parsed.max_retries =
+                    parse_u32_flag("--max-retries", flags.value("--max-retries")?)?
+                        .try_into()
+                        .map_err(|_| anyhow!("--max-retries is too large"))?;
+            }
+            "--no-initial-scan" => parsed.no_initial_scan = true,
+            _ if arg.starts_with("--path=") => {
+                parsed.path = Some(value_after_equals(arg, "--path")?)
+            }
+            _ if arg.starts_with("--debounce-ms=") => {
+                parsed.debounce_ms = parse_positive_u64_flag(
+                    "--debounce-ms",
+                    value_after_equals(arg, "--debounce-ms")?,
+                )?;
+            }
+            _ if arg.starts_with("--settle-ms=") => {
+                parsed.settle_ms = parse_positive_u64_flag(
+                    "--settle-ms",
+                    value_after_equals(arg, "--settle-ms")?,
+                )?;
+            }
+            _ if arg.starts_with("--max-retries=") => {
+                parsed.max_retries =
+                    parse_u32_flag("--max-retries", value_after_equals(arg, "--max-retries")?)?
+                        .try_into()
+                        .map_err(|_| anyhow!("--max-retries is too large"))?;
+            }
+            _ => bail!("unknown ai watch option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Watch(parsed)))
 }
 
 fn parse_ai_checkpoints(args: &[String]) -> Result<CliCommand> {

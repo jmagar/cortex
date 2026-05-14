@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.7] - 2026-05-14
+
+### Added
+
+- **Real-time AI transcript ingestion**: Added `syslog ai watch` and
+  `syslog setup ai-watch-service install|check|remove` for host-local
+  filesystem watching of Claude and Codex transcript JSONL files. The watcher
+  reuses scanner checkpoints, duplicate suppression, parse-error persistence,
+  storage guardrails, and append-offset indexing while disabling the older
+  polling timer during service install to avoid duplicate background ingestion.
+
 ## [0.21.6] - 2026-05-14
 
 ### Fixed
