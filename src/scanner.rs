@@ -16,7 +16,7 @@ mod codex;
 pub use checkpoint::CheckpointStore;
 
 const MAX_FILE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
-const MAX_RECORD_SIZE_BYTES: usize = 64 * 1024;
+const MAX_RECORD_SIZE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_INDEX_CHUNK_RECORDS: usize = 500;
 const MAX_INDEX_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 const MAX_AI_PROJECT_CHARS: usize = 512;
