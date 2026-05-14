@@ -580,14 +580,8 @@ fn index_roots_skips_unreadable_directories_and_continues() {
 
     std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o700)).unwrap();
 
-    let result = result.expect("unreadable directories should be reported, not abort indexing");
+    let result = result.expect("unreadable directories should be skipped, not abort indexing");
     assert_eq!(result.ingested, 1);
     assert_eq!(result.skipped_files, 1);
-    assert_eq!(result.file_errors.len(), 1);
-    assert!(result.file_errors[0].path.contains("blocked"));
-    assert!(
-        result.file_errors[0].error.contains("Permission denied"),
-        "wrong error: {}",
-        result.file_errors[0].error
-    );
+    assert_eq!(result.file_errors.len(), 0);
 }

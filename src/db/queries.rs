@@ -304,7 +304,7 @@ pub fn search_ai_sessions(
                    l.hostname,
                    l.timestamp,
                    l.message,
-                   bm25(logs_fts) AS score
+                   0.0 AS score
             FROM logs_fts
             JOIN logs l ON l.id = logs_fts.rowid
             WHERE logs_fts MATCH ?1
@@ -335,8 +335,7 @@ pub fn search_ai_sessions(
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
     sql.push_str(&format!(
-        " ORDER BY score, l.timestamp DESC
-           LIMIT {}
+        " LIMIT {}
          ),
          grouped AS (
             SELECT ai_project,

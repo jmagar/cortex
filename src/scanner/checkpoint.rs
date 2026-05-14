@@ -43,6 +43,37 @@ impl<'a> CheckpointStore<'a> {
         )?;
         Ok(())
     }
+
+    pub fn source_matches_metadata(
+        &self,
+        source_id: i64,
+        file_size: u64,
+        file_mtime: Option<i64>,
+    ) -> Result<bool> {
+        let conn = self.pool.get()?;
+        let Some((stored_size, stored_mtime, last_error)) = conn
+            .query_row(
+                "SELECT file_size, file_mtime, last_error
+                 FROM transcript_sources
+                 WHERE id = ?1",
+                [source_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+        else {
+            return Ok(false);
+        };
+
+        Ok(last_error.is_none()
+            && stored_size == Some(file_size as i64)
+            && stored_mtime == file_mtime)
+    }
 }
 
 pub fn claim_imports_in_tx(
