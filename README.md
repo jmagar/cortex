@@ -480,7 +480,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 |-------|----------|---------|-------|
 | `is_server` | yes | `true` | Server mode hosts the receiver; client mode connects to a remote server |
 | `server_url` | no | `http://localhost:3100` | Server mode: leave default. Client mode: remote host URL (e.g. `http://shart:3100`) |
-| `api_token` | yes | — | Bearer token. Server mode: server requires this token. Client mode: token from the server admin. Stored in the system keychain. |
+| `api_token` | yes | — | Bearer token used by the plugin MCP client. Server mode: this becomes the token the server enforces unless `no_auth=true`. Client mode: token from the server admin. Stored in the system keychain. |
 | `syslog_host` / `syslog_port` | no | `0.0.0.0` / `1514` | Syslog listener bind (server mode) |
 | `mcp_host` / `mcp_port` | no | `0.0.0.0` / `3100` | MCP HTTP server bind (server mode) |
 | `data_dir` | no | `~/.syslog-mcp/data` | Optional SQLite directory override; default shared setup data persists outside plugin cache |
@@ -493,7 +493,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 
 **SessionStart hook automation** (in server mode):
 
-- Ensures the host `syslog` binary exists in `~/.local/bin`
+- Ensures the host `syslog` binary is on `PATH`; the installer defaults to `~/.local/bin`
 - Exports plugin userConfig as `SYSLOG_*` / `SYSLOG_MCP_*` environment values
 - Runs `syslog setup repair`, the same setup path used by the one-line installer
 - Repairs shared assets under `~/.syslog-mcp` and removes stale user-level `syslog-mcp.service` units/drop-ins left by older plugin versions

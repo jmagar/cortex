@@ -225,8 +225,8 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
                 &service_path,
                 &timer_path,
             )?);
-            phases.push(systemctl_user_phase(&["daemon-reload"]));
-            phases.push(systemctl_user_phase(&[
+            phases.push(systemctl_user_required_phase(&["daemon-reload"]));
+            phases.push(systemctl_user_required_phase(&[
                 "enable",
                 "--now",
                 "syslog-ai-index.timer",
@@ -828,10 +828,10 @@ fn run_ai_watch_initial_index_phase(syslog_bin: &Path, env_path: &Path) -> Setup
 
 fn summarize_ai_index_output(stdout: &str) -> String {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
-        return "indexed".to_string();
+        return "invalid ai index JSON output".to_string();
     };
     format!(
-        "indexed files={} ingested={} duplicates={} parse_errors={} storage_blocked={} file_errors={}",
+        "indexed files={} ingested={} duplicates={} parse_errors={} storage_blocked={} dropped_metadata_fields={} file_errors={}",
         value
             .get("discovered_files")
             .and_then(serde_json::Value::as_u64)
@@ -853,6 +853,10 @@ fn summarize_ai_index_output(stdout: &str) -> String {
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0),
         value
+            .get("dropped_metadata_fields")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
             .get("file_errors")
             .and_then(serde_json::Value::as_array)
             .map_or(0, Vec::len),
@@ -870,6 +874,11 @@ fn ai_index_output_has_failures(stdout: &str) -> bool {
         > 0
         || value
             .get("storage_blocked_chunks")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+            > 0
+        || value
+            .get("dropped_metadata_fields")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0)
             > 0
@@ -974,14 +983,14 @@ fn resolve_ai_watch_db_path(setup_home: &Path, user_home: &Path) -> io::Result<P
 }
 
 fn validate_db_path(path: PathBuf) -> io::Result<PathBuf> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     if !path.is_absolute() {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             format!("AI watch DB path must be absolute: {}", path.display()),
         ));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
     Ok(path)
 }
@@ -1046,22 +1055,40 @@ fn setup_path_value(path: &Path) -> io::Result<String> {
 }
 
 fn write_executable_file(path: &Path, body: &str) -> io::Result<()> {
-    std::fs::write(path, body)?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut options = std::fs::OpenOptions::new();
+        options
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o755)
+            .custom_flags(libc::O_NOFOLLOW);
+        options.open(path)?.write_all(body.as_bytes())?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
     }
+    #[cfg(not(unix))]
+    std::fs::write(path, body)?;
     Ok(())
 }
 
 fn write_private_file(path: &Path, body: &str) -> io::Result<()> {
-    std::fs::write(path, body)?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut options = std::fs::OpenOptions::new();
+        options
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW);
+        options.open(path)?.write_all(body.as_bytes())?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
+    #[cfg(not(unix))]
+    std::fs::write(path, body)?;
     Ok(())
 }
 
@@ -1225,14 +1252,27 @@ fn cleanup_legacy_systemd() -> SetupPhase {
             return timer.finish(SetupStatus::Skipped, "HOME unset");
         }
     };
+    let mut failures = Vec::new();
     for unit in [
         "syslog-mcp.service",
         "mnemo-index.service",
         "mnemo-index.timer",
     ] {
-        let _ = Command::new("systemctl")
+        match Command::new("systemctl")
             .args(["--user", "disable", "--now", unit])
-            .output();
+            .output()
+        {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => failures.push(format!(
+                "systemctl disable --now {unit}: {}",
+                String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .next()
+                    .unwrap_or("failed")
+            )),
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => failures.push(format!("systemctl disable --now {unit}: {error}")),
+        }
     }
     for name in [
         "syslog-mcp.service",
@@ -1241,12 +1281,28 @@ fn cleanup_legacy_systemd() -> SetupPhase {
     ] {
         let unit = home.join(".config/systemd/user").join(name);
         let dropins = home.join(".config/systemd/user").join(format!("{name}.d"));
-        let _ = std::fs::remove_file(&unit);
-        let _ = std::fs::remove_dir_all(&dropins);
+        if let Err(error) = std::fs::remove_file(&unit) {
+            if error.kind() != ErrorKind::NotFound {
+                failures.push(format!("remove {}: {error}", unit.display()));
+            }
+        }
+        if let Err(error) = std::fs::remove_dir_all(&dropins) {
+            if error.kind() != ErrorKind::NotFound {
+                failures.push(format!("remove {}: {error}", dropins.display()));
+            }
+        }
     }
-    let _ = Command::new("systemctl")
+    if let Err(error) = Command::new("systemctl")
         .args(["--user", "daemon-reload"])
-        .output();
+        .output()
+    {
+        if error.kind() != ErrorKind::NotFound {
+            failures.push(format!("systemctl daemon-reload: {error}"));
+        }
+    }
+    if !failures.is_empty() {
+        return timer.finish(SetupStatus::Warn, failures.join("; "));
+    }
     timer.finish(
         SetupStatus::Ok,
         "removed stale syslog-mcp and mnemo-index user units/drop-ins if present",
@@ -1341,16 +1397,16 @@ fn health_phase(env: &Option<BTreeMap<String, String>>) -> SetupPhase {
             timer.finish(SetupStatus::Ok, format!("{url} ready"))
         }
         Ok(output) => timer.finish(
-            SetupStatus::Warn,
+            SetupStatus::Error,
             String::from_utf8_lossy(&output.stderr)
                 .lines()
                 .next()
                 .unwrap_or("health check failed"),
         ),
         Err(err) if err.kind() == ErrorKind::NotFound => {
-            timer.finish(SetupStatus::Warn, "curl not found; skipped health check")
+            timer.finish(SetupStatus::Error, "curl not found; skipped health check")
         }
-        Err(err) => timer.finish(SetupStatus::Warn, err.to_string()),
+        Err(err) => timer.finish(SetupStatus::Error, err.to_string()),
     }
 }
 

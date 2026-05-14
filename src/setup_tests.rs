@@ -144,6 +144,37 @@ fn validate_executable_path_rejects_debug_build_paths_by_default() {
 }
 
 #[test]
+fn validate_db_path_rejects_relative_without_creating_parent() {
+    let relative_dir = format!(
+        "relative-db-dir-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let relative = std::path::PathBuf::from(&relative_dir).join("syslog.db");
+    let err = validate_db_path(relative).unwrap_err();
+    assert!(err.to_string().contains("must be absolute"));
+    assert!(!std::path::Path::new(&relative_dir).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn private_and_executable_writers_reject_symlinks() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("target");
+    let private_link = dir.path().join("private-link");
+    let exec_link = dir.path().join("exec-link");
+    std::fs::write(&target, "keep").unwrap();
+    std::os::unix::fs::symlink(&target, &private_link).unwrap();
+    std::os::unix::fs::symlink(&target, &exec_link).unwrap();
+
+    assert!(write_private_file(&private_link, "secret").is_err());
+    assert!(write_executable_file(&exec_link, "#!/bin/sh\n").is_err());
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+}
+
+#[test]
 fn ai_watch_service_content_phase_detects_stale_unit() {
     let dir = tempfile::tempdir().unwrap();
     let env_path = dir.path().join("ai-watch.env");
@@ -187,7 +218,7 @@ fn summarize_ai_index_output_reports_key_counts() {
 
     assert_eq!(
         summary,
-        "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 file_errors=1"
+        "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 dropped_metadata_fields=0 file_errors=1"
     );
 }
 
@@ -204,6 +235,9 @@ fn ai_index_output_has_failures_detects_retryable_failures() {
     ));
     assert!(ai_index_output_has_failures(
         r#"{"parse_errors":0,"storage_blocked_chunks":0,"file_errors":["bad"]}"#
+    ));
+    assert!(ai_index_output_has_failures(
+        r#"{"parse_errors":0,"storage_blocked_chunks":0,"dropped_metadata_fields":1,"file_errors":[]}"#
     ));
 }
 

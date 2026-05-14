@@ -7,12 +7,12 @@
     "url": "https://github.com/jmagar/syslog-mcp",
     "source": "github"
   },
-  "version": "0.10.0",
+  "version": "0.21.7",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/syslog-mcp:0.10.0",
-      "version": "0.10.0",
+      "identifier": "ghcr.io/jmagar/syslog-mcp:0.21.7",
+      "version": "0.21.7",
       "environmentVariables": [
         {
           "name": "SYSLOG_HOST",
@@ -28,7 +28,7 @@
         },
         {
           "name": "SYSLOG_PORT",
-          "description": "Syslog listener port (UDP + TCP). Default: 514.",
+          "description": "Syslog listener port (UDP + TCP). Default: 1514.",
           "isRequired": false,
           "isSecret": false
         }

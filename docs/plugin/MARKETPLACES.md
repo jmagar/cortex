@@ -7,9 +7,9 @@ Registration and publishing patterns for Claude, Codex, and Gemini marketplaces.
 | Marketplace | Manifest | Registry entry |
 | --- | --- | --- |
 | Claude Code | `.claude-plugin/plugin.json` | `claude-homelab` marketplace |
-| Codex | `.codex-plugin/plugin.json` | `claude-homelab` marketplace |
-| Gemini | `gemini-extension.json` | `claude-homelab` marketplace |
-| MCP Registry | `server.json` | `tv.tootie/syslog-mcp` |
+| Codex | `.codex-plugin/plugin.json` | Not currently shipped |
+| Gemini | `gemini-extension.json` | Not currently shipped |
+| MCP Registry | `server.json` | Tracked MCP Registry metadata |
 
 ## Installation
 
@@ -22,19 +22,19 @@ Registration and publishing patterns for Claude, Codex, and Gemini marketplaces.
 
 ### Codex CLI
 
-```bash
-codex plugin add jmagar/syslog-mcp
-```
+No Codex plugin manifest is currently shipped from this repo.
 
 ### Gemini CLI
 
-Place `gemini-extension.json` in the project root or `~/.gemini/`.
+No Gemini extension manifest is currently shipped from this repo.
 
 ## MCP Registry
 
-syslog-mcp is registered under the `tv.tootie` namespace with DNS verification via the `tootie.tv` domain.
+The repo ships `server.json` for MCP Registry metadata under the
+`tv.tootie/syslog-mcp` namespace, with DNS verification via the `tootie.tv`
+domain.
 
-Registry entry in `server.json`:
+Example registry entry:
 
 ```json
 {
@@ -42,7 +42,7 @@ Registry entry in `server.json`:
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/syslog-mcp:0.10.0"
+      "identifier": "ghcr.io/jmagar/syslog-mcp:0.21.7"
     }
   ]
 }
@@ -55,7 +55,7 @@ syslog-mcp uses OCI (Docker) images as the primary distribution package, not PyP
 | Registry | Image |
 | --- | --- |
 | GHCR | `ghcr.io/jmagar/syslog-mcp:latest` |
-| GHCR (versioned) | `ghcr.io/jmagar/syslog-mcp:0.10.0` |
+| GHCR (versioned) | `ghcr.io/jmagar/syslog-mcp:0.21.7` |
 
 Additionally published to crates.io for `cargo install` usage.
 

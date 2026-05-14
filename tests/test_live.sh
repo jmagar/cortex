@@ -754,11 +754,16 @@ run_docker_mode() {
 run_http_mode() {
   log_info "HTTP mode — testing against ${BASE_URL}"
   build_auth_args
-  seed_ai_fixture_local || {
-    log_error "AI transcript fixture seed failed"
-    return 2
-  }
-  log_info "Seeded AI transcript fixture"
+  if [[ "${BASE_URL}" == http://localhost:* || "${BASE_URL}" == http://127.0.0.1:* ]]; then
+    seed_ai_fixture_local || {
+      log_error "AI transcript fixture seed failed"
+      return 2
+    }
+    log_info "Seeded AI transcript fixture"
+  else
+    AI_SEEDED=false
+    log_info "Skipping local AI fixture seed for non-local HTTP target"
+  fi
   run_test_phases
   print_summary
 }

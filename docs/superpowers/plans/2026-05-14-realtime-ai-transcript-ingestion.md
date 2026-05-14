@@ -1,12 +1,14 @@
 # Real-Time AI Transcript Ingestion Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make Claude/Codex transcript ingestion real-time without duplicating the existing scanner, checkpoint, dedupe, parse-error, storage-budget, or DB-write logic.
 
 **Architecture:** Add a host-local watcher that observes scanner-owned transcript roots and delegates stable changed files to the existing `SyslogService` scanner path. The watcher is a discovery/scheduling adapter only. Parsing, row identity, checkpoint advancement, storage enforcement, parse-error persistence, and DB writes remain in `scanner`/`SyslogService`. Docker Compose remains the only server deployment path; the watcher is a user-level host helper because it needs access to `$HOME/.claude/projects` and `$HOME/.codex/sessions`.
 
 **Tech Stack:** Rust 1.86, `notify = "8.2.0"`, Tokio, SQLite/WAL via `rusqlite`, existing `SyslogService`, user-level systemd, Docker Compose runtime verification.
+
+**Implementation Status:** Completed in PR #24. Checkboxes below now record the implemented state after lavra research, lavra engineering review, lavra-review, code simplifier passes, pr-review-toolkit review, and GitHub PR comment fixes.
 
 ---
 
@@ -63,7 +65,7 @@
 - Modify: `src/cli_tests.rs`
 - Modify: `src/main.rs`
 
-- [ ] **Step 1: Add the MSRV-compatible dependency**
+- [x] **Step 1: Add the MSRV-compatible dependency**
 
 Run:
 
@@ -73,7 +75,7 @@ cargo add notify@8.2.0
 
 Expected: `Cargo.toml` contains `notify = "8.2.0"`. Do not use `EventKindMask`; it is not available in this stable API.
 
-- [ ] **Step 2: Add failing parser tests**
+- [x] **Step 2: Add failing parser tests**
 
 Add to `src/cli_tests.rs`:
 
@@ -129,7 +131,7 @@ fn parse_ai_watch_rejects_zero_timing_values() {
 }
 ```
 
-- [ ] **Step 3: Add CLI types and parser**
+- [x] **Step 3: Add CLI types and parser**
 
 In `src/cli.rs`, add `Watch(AiWatchArgs)` to `AiCommand` and add:
 
@@ -218,7 +220,7 @@ fn parse_ai_watch(args: &[String]) -> Result<CliCommand> {
 }
 ```
 
-- [ ] **Step 4: Add temporary runner arm and usage**
+- [x] **Step 4: Add temporary runner arm and usage**
 
 Add this temporary arm in `cli::run`:
 
@@ -232,7 +234,7 @@ Add to `src/main.rs` usage:
   syslog ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -252,7 +254,7 @@ Expected: all pass.
 - Modify: `src/scanner_tests.rs`
 - Modify: `src/scanner/checkpoint_tests.rs`
 
-- [ ] **Step 1: Add failing scanner helper tests**
+- [x] **Step 1: Add failing scanner helper tests**
 
 Add to `src/scanner_tests.rs`:
 
@@ -267,7 +269,7 @@ fn scanner_exposes_default_roots_and_supported_file_policy() {
 }
 ```
 
-- [ ] **Step 2: Export scanner-owned helpers**
+- [x] **Step 2: Export scanner-owned helpers**
 
 In `src/scanner.rs`, make the existing policy public:
 
@@ -283,7 +285,7 @@ pub fn default_transcript_roots() -> Vec<PathBuf> {
 
 Keep `supported_discovered_file` and `default_roots` as the internal implementation so existing scanner behavior remains unchanged.
 
-- [ ] **Step 3: Add append-only indexing tests**
+- [x] **Step 3: Add append-only indexing tests**
 
 Add to `src/scanner_tests.rs`:
 
@@ -337,7 +339,7 @@ fn rewritten_file_falls_back_to_duplicate_safe_full_scan() {
 }
 ```
 
-- [ ] **Step 4: Implement scanner append fast path**
+- [x] **Step 4: Implement scanner append fast path**
 
 Use existing checkpoint metadata. Add a `source_metadata(source_id)` method to `CheckpointStore` returning file size, mtime, hash, and last offset. In `index_file_with_options`, if not `force`, metadata exists, current size is greater than old size, current mtime is newer/equal, and the existing file prefix is still valid, seek to `last_offset` and parse only appended lines. If the file shrank, metadata is missing, or the prefix validation cannot be proven cheaply, fall back to the existing full scan. Do not change record key semantics.
 
@@ -345,11 +347,11 @@ Use `std::io::{Seek, SeekFrom}` and start line numbering from the stored last of
 
 After successful append parse with no parse errors, update source metadata and `last_offset` in the same transaction as imports/log rows. On parse errors, do not update completion metadata; watcher will retry.
 
-- [ ] **Step 5: Add transient SQLite retry for scanner chunks**
+- [x] **Step 5: Add transient SQLite retry for scanner chunks**
 
 Wrap `flush_chunk` transaction work in the same transient-lock retry policy used by syslog batch ingest. If the existing retry helper is private, extract a small shared helper in `src/db/ingest.rs` or retry inside scanner for `SQLITE_BUSY`/`SQLITE_LOCKED`. Tests should prove a retryable error does not advance checkpoint metadata before successful insert.
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
@@ -369,7 +371,7 @@ Expected: all pass.
 - Modify: `src/cli.rs`
 - Test: `src/ai_watch.rs`
 
-- [ ] **Step 1: Add watcher state tests first**
+- [x] **Step 1: Add watcher state tests first**
 
 Create `src/ai_watch.rs` with state tests:
 
@@ -461,7 +463,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Export module**
+- [x] **Step 2: Export module**
 
 In `src/lib.rs`, add:
 
@@ -469,7 +471,7 @@ In `src/lib.rs`, add:
 pub mod ai_watch;
 ```
 
-- [ ] **Step 3: Implement watcher API**
+- [x] **Step 3: Implement watcher API**
 
 Use `notify 8.2.0`:
 
@@ -506,7 +508,7 @@ Required behavior:
 - Bound concurrent scans to 2 with a semaphore or keep serial scans after eliminating serial settle sleeps. Do not allow unbounded spawned tasks.
 - Handle Ctrl-C and SIGTERM.
 
-- [ ] **Step 4: Wire CLI**
+- [x] **Step 4: Wire CLI**
 
 Replace the temporary arm:
 
@@ -524,7 +526,7 @@ AiCommand::Watch(args) => {
 }
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -545,7 +547,7 @@ Expected: all pass.
 - Modify: `src/main.rs`
 - Modify: `src/main_tests.rs`
 
-- [ ] **Step 1: Add setup tests**
+- [x] **Step 1: Add setup tests**
 
 Add tests that assert:
 - `ai_watch_env_file` includes a canonical `SYSLOG_MCP_DB_PATH`.
@@ -555,7 +557,7 @@ Add tests that assert:
 - `systemctl_user_phase` still uses the DBUS/XDG fallback already present in this branch.
 - The setup parser accepts `syslog setup ai-watch-service install|remove|check [--json]`.
 
-- [ ] **Step 2: Add setup action and runner**
+- [x] **Step 2: Add setup action and runner**
 
 In `src/setup.rs`, add:
 
@@ -575,7 +577,7 @@ Add `run_ai_watch_service_setup(action)` mirroring `run_ai_index_timer_setup`, b
 - Resolved absolute binary from `std::env::current_exe()` when invoked through the intended wrapper, or from `command -v syslog` at install time followed by canonicalization and permission checks.
 - Resolved DB path from explicit `SYSLOG_MCP_DB_PATH` if set, else the known live plugin DB if it exists. If multiple plausible DBs exist and no explicit value is set, return a warning/error requiring `SYSLOG_MCP_DB_PATH`.
 
-- [ ] **Step 3: Generate hardened unit**
+- [x] **Step 3: Generate hardened unit**
 
 The unit should look structurally like:
 
@@ -609,7 +611,7 @@ WantedBy=default.target
 
 If `ProtectSystem=strict` or `BindReadOnlyPaths` is not portable in this user service environment, include it in the plan tests as generated text and allow the live check to report systemd incompatibility clearly.
 
-- [ ] **Step 4: Install flow**
+- [x] **Step 4: Install flow**
 
 Install must:
 1. Write the env file with `SYSLOG_MCP_DB_PATH`, `SYSLOG_DOCKER_INGEST_ENABLED=false`, `RUST_LOG=warn`.
@@ -620,7 +622,7 @@ Install must:
 6. Verify timer inactive/disabled or absent.
 7. `systemctl --user enable --now syslog-ai-watch.service`.
 
-- [ ] **Step 5: Wire `src/main.rs` setup parser**
+- [x] **Step 5: Wire `src/main.rs` setup parser**
 
 Add `SetupCommandKind::AiWatchService(AiWatchServiceAction)` and parse:
 
@@ -630,7 +632,7 @@ syslog setup ai-watch-service install|remove|check [--json]
 
 Update usage.
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
@@ -652,7 +654,7 @@ Expected: setup parser and generated files pass.
 - Modify: `Cargo.lock`
 - Modify: `.claude-plugin/plugin.json`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Document:
 - `syslog ai watch` watches scanner-owned transcript roots and reuses `syslog ai add` semantics.
@@ -663,7 +665,7 @@ Document:
 - Transcript messages and transcript paths become searchable in near real time through existing query surfaces; scrubbing is best-effort, not a compliance boundary.
 - Troubleshooting: user systemd DBUS/XDG issues, inotify watch limits, service logs, and DB path mismatch.
 
-- [ ] **Step 2: Bump version**
+- [x] **Step 2: Bump version**
 
 Run:
 
@@ -673,7 +675,7 @@ bash scripts/bump-version.sh patch
 
 Expected: `0.21.6` becomes `0.21.7` in all version-bearing files.
 
-- [ ] **Step 3: Add changelog entry**
+- [x] **Step 3: Add changelog entry**
 
 Add under `0.21.7`:
 
@@ -685,7 +687,7 @@ Add under `0.21.7`:
   disabling the older polling timer during service install.
 ```
 
-- [ ] **Step 4: Verify docs consistency**
+- [x] **Step 4: Verify docs consistency**
 
 Run:
 
@@ -703,7 +705,7 @@ Expected: docs identify watcher as primary and timer as fallback.
 **Files:**
 - Modify only if verification exposes a defect.
 
-- [ ] **Step 1: Static/full local verification**
+- [x] **Step 1: Static/full local verification**
 
 Run:
 
@@ -714,7 +716,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 bash scripts/check-version-sync.sh
 ```
 
-- [ ] **Step 2: Compose-specific runtime verification**
+- [x] **Step 2: Compose-specific runtime verification**
 
 Run:
 
@@ -729,7 +731,7 @@ bash scripts/smoke-test.sh
 
 Do not use runtime auto-detection that can prefer a removed server-side systemd unit.
 
-- [ ] **Step 3: Install and inspect watcher service**
+- [x] **Step 3: Install and inspect watcher service**
 
 Run:
 
@@ -746,7 +748,7 @@ journalctl --user -u syslog-ai-watch.service -n 100 --no-pager
 
 Expected: watcher active/enabled, timer inactive/disabled or absent, no restart loop, no DB open errors.
 
-- [ ] **Step 4: Prove real-time ingestion with a disposable transcript**
+- [x] **Step 4: Prove real-time ingestion with a disposable transcript**
 
 Run:
 
@@ -767,7 +769,7 @@ rg -q "$(basename "$SMOKE_FILE")" /tmp/syslog-watch-smoke.json
 
 Expected: the row appears without running `syslog ai index` manually. Assert by unique message and transcript filename, not by an assumed decoded project path.
 
-- [ ] **Step 5: Prove duplicate prevention and cleanup**
+- [x] **Step 5: Prove duplicate prevention and cleanup**
 
 Run:
 
@@ -781,7 +783,7 @@ syslog ai doctor --json
 
 Expected: duplicate run ingests zero new rows or reports duplicates; doctor shows no parse errors introduced by the smoke.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 Run:
 

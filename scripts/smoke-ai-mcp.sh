@@ -7,8 +7,14 @@ SYSLOG_BIN="${SYSLOG_BIN:-syslog}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 MCP_URL="${SYSLOG_MCP_URL:-http://localhost:3100/mcp}"
 DB_PATH="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-${PROJECT_DIR}/data/syslog.db}}"
-QUERY="${SYSLOG_AI_SMOKE_QUERY:-aismoke}"
-PROJECT="/tmp/syslog-mcp-ai-smoke"
+RUN_ID="${SYSLOG_AI_SMOKE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
+  echo "FAIL  SYSLOG_AI_SMOKE_RUN_ID contains unsafe characters" >&2
+  exit 1
+fi
+QUERY="${SYSLOG_AI_SMOKE_QUERY:-aismoke-${RUN_ID}}"
+SESSION_ID="ai-smoke-session-${RUN_ID}"
+PROJECT="/tmp/syslog-mcp-ai-smoke-${RUN_ID}"
 
 pass() {
   printf 'PASS  %s\n' "$1"
@@ -26,7 +32,7 @@ load_token() {
   fi
   local env_file="${SYSLOG_MCP_ENV_FILE:-${SYSLOG_MCP_HOME:-${HOME}/.syslog-mcp}/.env}"
   if [[ -f "$env_file" ]]; then
-    awk -F= '$1=="SYSLOG_MCP_TOKEN" {print $2; exit}' "$env_file"
+    awk '$0 ~ /^SYSLOG_MCP_TOKEN=/ {sub(/^SYSLOG_MCP_TOKEN=/, ""); print; exit}' "$env_file"
   fi
 }
 
@@ -47,6 +53,10 @@ mcp_call() {
   fi
   curl -fsS -X POST "$MCP_URL" "${headers[@]}" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":${id},\"method\":\"tools/call\",\"params\":{\"name\":\"syslog\",\"arguments\":${args_json}}}"
+}
+
+tool_args() {
+  jq -nc "$@"
 }
 
 assert_mcp() {
@@ -86,8 +96,8 @@ FIXTURE="$SMOKE_DIR/ai-session-smoke.jsonl"
 now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 from="$(date -u -d '10 minutes ago' +'%Y-%m-%dT%H:%M:%SZ')"
 {
-  printf '{"sessionId":"ai-smoke-session","timestamp":"%s","cwd":"%s","content":"aismoke authentication smoke transcript seed from Claude"}\n' "$now" "$PROJECT"
-  printf '{"sessionId":"ai-smoke-session","timestamp":"%s","cwd":"%s","content":[{"type":"text","text":"aismoke project context MCP smoke content"}]}\n' "$now" "$PROJECT"
+  printf '{"sessionId":"%s","timestamp":"%s","cwd":"%s","content":"%s authentication smoke transcript seed from Claude"}\n' "$SESSION_ID" "$now" "$PROJECT" "$QUERY"
+  printf '{"sessionId":"%s","timestamp":"%s","cwd":"%s","content":[{"type":"text","text":"%s project context MCP smoke content"}]}\n' "$SESSION_ID" "$now" "$PROJECT" "$QUERY"
 } >"$FIXTURE"
 
 printf 'syslog: %s\n' "$("$SYSLOG_BIN" --version)"
@@ -97,24 +107,24 @@ printf 'mcp:    %s\n' "$MCP_URL"
 run_syslog ai add --file "$FIXTURE" --force --json >/dev/null
 pass "seeded AI transcript fixture"
 
-search_response="$(mcp_call 1 "{\"action\":\"search_sessions\",\"query\":\"${QUERY}\",\"tool\":\"claude\",\"project\":\"${PROJECT}\",\"limit\":5}")"
-assert_mcp "search_sessions did not return seeded session" "$search_response" "any(s.get('session_id') == 'ai-smoke-session' for s in data.get('sessions', []))"
+search_response="$(mcp_call 1 "$(tool_args --arg q "$QUERY" --arg project "$PROJECT" '{"action":"search_sessions","query":$q,"tool":"claude","project":$project,"limit":5}')")"
+assert_mcp "search_sessions did not return seeded session" "$search_response" "any(s.get('session_id') == '${SESSION_ID}' for s in data.get('sessions', []))"
 pass "mcp search_sessions"
 
-blocks_response="$(mcp_call 2 "{\"action\":\"usage_blocks\",\"tool\":\"claude\",\"project\":\"${PROJECT}\"}")"
+blocks_response="$(mcp_call 2 "$(tool_args --arg project "$PROJECT" '{"action":"usage_blocks","tool":"claude","project":$project}')")"
 assert_mcp "usage_blocks did not return blocks" "$blocks_response" "len(data.get('blocks', [])) >= 1"
 pass "mcp usage_blocks"
 
-context_response="$(mcp_call 3 "{\"action\":\"project_context\",\"tool\":\"claude\",\"project\":\"${PROJECT}\",\"limit\":5}")"
-assert_mcp "project_context did not include fixture project" "$context_response" "data.get('project') == '/tmp/syslog-mcp-ai-smoke' and data.get('event_count', 0) >= 1"
+context_response="$(mcp_call 3 "$(tool_args --arg project "$PROJECT" '{"action":"project_context","tool":"claude","project":$project,"limit":5}')")"
+assert_mcp "project_context did not include fixture project" "$context_response" "data.get('project') == '${PROJECT}' and data.get('event_count', 0) >= 1"
 pass "mcp project_context"
 
 tools_response="$(mcp_call 4 '{"action":"list_ai_tools"}')"
 assert_mcp "list_ai_tools did not include claude" "$tools_response" "any(t.get('tool') == 'claude' for t in data.get('tools', []))"
 pass "mcp list_ai_tools"
 
-projects_response="$(mcp_call 5 "{\"action\":\"list_ai_projects\",\"tool\":\"claude\",\"from\":\"${from}\"}")"
-assert_mcp "list_ai_projects did not include fixture project" "$projects_response" "any(p.get('project') == '/tmp/syslog-mcp-ai-smoke' for p in data.get('projects', []))"
+projects_response="$(mcp_call 5 "$(tool_args --arg from "$from" '{"action":"list_ai_projects","tool":"claude","from":$from}')")"
+assert_mcp "list_ai_projects did not include fixture project" "$projects_response" "any(p.get('project') == '${PROJECT}' for p in data.get('projects', []))"
 pass "mcp list_ai_projects"
 
 printf 'OK    AI MCP smoke passed\n'

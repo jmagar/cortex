@@ -72,6 +72,12 @@ One MCP tool: **`syslog`** — dispatches by `action` argument.
 | `stats` | DB stats (total logs, logical/physical size, free disk, configured thresholds, write-block state, time range) |
 | `status` | Lightweight runtime and DB health |
 | `apps` | Distinct application names with log and host counts |
+| `sessions` | AI transcript sessions grouped by project/tool/session/host |
+| `search_sessions` | Full-text search over indexed AI transcript sessions |
+| `usage_blocks` | AI transcript activity grouped into time blocks |
+| `project_context` | Recent AI transcript context for a project |
+| `list_ai_tools` | AI tools present in transcript metadata |
+| `list_ai_projects` | AI projects present in transcript metadata |
 | `source_ips` | Distinct source identifiers with hostname breakdown |
 | `timeline` | Bucketed counts over time |
 | `patterns` | Near-duplicate message template clusters |
@@ -82,11 +88,13 @@ One MCP tool: **`syslog`** — dispatches by `action` argument.
 | `clock_skew` | Per-host received_at minus timestamp distribution |
 | `anomalies` | Recent vs baseline volume/error comparison |
 | `compare` | Side-by-side comparison of two time ranges |
+| `compose_status` | Redacted Docker Compose runtime status projection |
+| `compose_doctor` | Redacted Docker Compose diagnostics projection |
 | `help` | Built-in usage reference |
 
-## Plugin Commands
+## Plugin Skills
 
-Slash commands available after installing the Claude Code plugin (`plugins/commands/`):
+Skills available after installing the Claude Code plugin (`plugins/skills/`):
 
 | Command | Description |
 |---------|-------------|

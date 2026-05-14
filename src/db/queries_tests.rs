@@ -417,6 +417,38 @@ fn search_ai_sessions_candidate_cap_prefers_newer_rows() {
 }
 
 #[test]
+fn search_ai_sessions_zero_limit_clamps_to_one_with_metadata() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            "claude",
+            "/tmp/project",
+            "sess-1",
+            "zerolimit",
+        )],
+    )
+    .unwrap();
+
+    let result = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "zerolimit".into(),
+            limit: Some(0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.sessions.len(), 1);
+    assert_eq!(result.total_candidates, 1);
+    assert_eq!(result.candidate_rows, 1);
+    assert!(!result.truncated);
+}
+
+#[test]
 fn ai_session_queries_respect_filters() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(

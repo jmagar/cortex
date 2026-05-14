@@ -697,13 +697,16 @@ impl Config {
 #[cfg(not(test))]
 fn load_setup_env_file() {
     let Ok(home) = crate::setup::syslog_home_dir() else {
+        tracing::trace!("load_setup_env_file: syslog home directory unavailable");
         return;
     };
     let path = home.join(".env");
     let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+        tracing::trace!(path = %path.display(), "load_setup_env_file: env file metadata unavailable");
         return;
     };
     if metadata.file_type().is_symlink() {
+        tracing::trace!(path = %path.display(), "load_setup_env_file: refusing symlinked env file");
         eprintln!(
             "syslog-mcp: warning: refusing to load symlinked env file {}",
             path.display()
@@ -711,20 +714,24 @@ fn load_setup_env_file() {
         return;
     }
     let Ok(raw) = std::fs::read_to_string(&path) else {
+        tracing::trace!(path = %path.display(), "load_setup_env_file: env file read failed");
         return;
     };
     let mut entries = Vec::new();
     for line in raw.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
+            tracing::trace!("load_setup_env_file: skipped blank/comment line");
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
+            tracing::trace!(line, "load_setup_env_file: skipped line without delimiter");
             continue;
         };
         let key = key.trim();
         let value = value.trim();
-        if key.is_empty() || key.contains(['\0', '=']) || value.contains(['\0']) {
+        if key.is_empty() || key.contains(['\0']) || value.contains(['\0']) {
+            tracing::trace!(key, "load_setup_env_file: skipped invalid env entry");
             continue;
         }
         entries.push((key.to_string(), value.to_string()));
@@ -734,9 +741,16 @@ fn load_setup_env_file() {
         .iter()
         .find(|(key, _)| key == "SYSLOG_MCP_DATA_VOLUME")
         .map(|(_, value)| value.clone());
+    if let Some(data_volume) = data_volume.as_deref() {
+        tracing::trace!(
+            data_volume,
+            "load_setup_env_file: found SYSLOG_MCP_DATA_VOLUME"
+        );
+    }
 
     for (key, mut value) in entries {
         if std::env::var_os(&key).is_some() {
+            tracing::trace!(key, "load_setup_env_file: process env already set");
             continue;
         }
         if key == "SYSLOG_MCP_DB_PATH" {
@@ -746,9 +760,11 @@ fn load_setup_env_file() {
                         .join(suffix)
                         .display()
                         .to_string();
+                    tracing::trace!(value, "load_setup_env_file: rewrote SYSLOG_MCP_DB_PATH");
                 }
             }
         }
+        tracing::trace!(key, "load_setup_env_file: setting env entry");
         std::env::set_var(key, value);
     }
 }

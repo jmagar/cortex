@@ -338,7 +338,14 @@ impl SyslogService {
             .as_deref()
             .map(|raw| parse_required_timestamp(raw, "since"))
             .transpose()?
-            .and_then(|dt| dt.timestamp_nanos_opt());
+            .map(|dt| {
+                dt.timestamp_nanos_opt().ok_or_else(|| {
+                    ServiceError::InvalidInput(
+                        "since timestamp out of i64 nanoseconds range".to_string(),
+                    )
+                })
+            })
+            .transpose()?;
         self.run_db(move |pool| {
             scanner::index_roots_with_options(
                 pool,

@@ -1,0 +1,157 @@
+use super::*;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+#[test]
+fn pending_files_deduplicate_and_requeue_with_cap() {
+    let start = Instant::now();
+    let path = PathBuf::from("/tmp/session.jsonl");
+    let mut pending = PendingFiles::default();
+    assert!(pending.push(path.clone(), start));
+    assert!(pending.push(path.clone(), start + Duration::from_millis(25)));
+
+    assert_eq!(pending.files.len(), 1);
+    assert!(pending
+        .debounced_paths(
+            start + Duration::from_millis(100),
+            Duration::from_millis(200)
+        )
+        .is_empty());
+    assert_eq!(
+        pending.debounced_paths(
+            start + Duration::from_millis(300),
+            Duration::from_millis(200)
+        ),
+        vec![path.clone()]
+    );
+    assert!(pending.requeue(path.clone(), start + Duration::from_millis(301), 1));
+    assert!(!pending.requeue(path, start + Duration::from_millis(302), 1));
+}
+
+#[test]
+fn pending_files_wait_until_file_is_stable() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("session.jsonl");
+    std::fs::write(&path, "{}\n").unwrap();
+
+    let start = Instant::now();
+    let mut pending = PendingFiles::default();
+    assert!(pending.push(path.clone(), start));
+
+    assert_eq!(
+        pending
+            .stable(&path, start, Duration::from_millis(100))
+            .unwrap(),
+        PendingState::NotReady
+    );
+    assert_eq!(
+        pending
+            .stable(
+                &path,
+                start + Duration::from_millis(50),
+                Duration::from_millis(100)
+            )
+            .unwrap(),
+        PendingState::NotReady
+    );
+    assert_eq!(
+        pending
+            .stable(
+                &path,
+                start + Duration::from_millis(150),
+                Duration::from_millis(100)
+            )
+            .unwrap(),
+        PendingState::Stable
+    );
+    assert_eq!(pending.files.get(&path).unwrap().retries, 0);
+}
+
+#[test]
+fn pending_files_drops_terminal_paths() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("deleted.jsonl");
+    std::fs::write(&path, "{}\n").unwrap();
+    let start = Instant::now();
+    let mut pending = PendingFiles::default();
+    assert!(pending.push(path.clone(), start));
+    std::fs::remove_file(&path).unwrap();
+
+    assert_eq!(
+        pending
+            .stable(
+                &path,
+                start + Duration::from_millis(1),
+                Duration::from_millis(1)
+            )
+            .unwrap(),
+        PendingState::Terminal
+    );
+}
+
+#[test]
+fn pending_files_enforces_capacity() {
+    let start = Instant::now();
+    let mut pending = PendingFiles::default();
+    for index in 0..MAX_PENDING_FILES {
+        assert!(pending.push(PathBuf::from(format!("/tmp/{index}.jsonl")), start));
+    }
+    assert!(!pending.push(PathBuf::from("/tmp/overflow.jsonl"), start));
+}
+
+#[test]
+fn collect_watch_dirs_includes_accessible_directories_without_file_recursion() {
+    let temp = tempfile::tempdir().unwrap();
+    let nested = temp.path().join("project");
+    std::fs::create_dir(&nested).unwrap();
+    let file = nested.join("session.jsonl");
+    std::fs::write(&file, "{}\n").unwrap();
+
+    let dirs = collect_watch_dirs(temp.path()).unwrap();
+
+    assert!(dirs.contains(&temp.path().to_path_buf()));
+    assert!(dirs.contains(&nested));
+    assert!(!dirs.contains(&file));
+}
+
+#[test]
+fn collect_watch_dirs_fails_when_root_is_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let missing = temp.path().join("missing");
+
+    let err = collect_watch_dirs(&missing).unwrap_err();
+
+    assert!(err.to_string().contains("failed to inspect"));
+}
+
+#[test]
+fn exact_file_watch_target_rejects_sibling_events() {
+    let temp = tempfile::tempdir().unwrap();
+    let watched = temp.path().join("watched.jsonl");
+    let sibling = temp.path().join("sibling.jsonl");
+    std::fs::write(&watched, "{}\n").unwrap();
+    std::fs::write(&sibling, "{}\n").unwrap();
+
+    let targets = watch_targets(&test_watch_options(watched.clone())).unwrap();
+
+    assert!(event_path_allowed(&watched, &targets));
+    assert!(!event_path_allowed(&sibling, &targets));
+}
+
+#[test]
+fn watch_targets_rejects_broad_current_directory() {
+    let err = watch_targets(&test_watch_options(std::env::current_dir().unwrap())).unwrap_err();
+
+    assert!(err.to_string().contains("unsafe transcript scan path"));
+}
+
+fn test_watch_options(path: PathBuf) -> WatchOptions {
+    WatchOptions {
+        path: Some(path),
+        debounce: Duration::from_millis(1),
+        settle: Duration::from_millis(1),
+        max_retries: 1,
+        initial_scan: false,
+        json: false,
+    }
+}
