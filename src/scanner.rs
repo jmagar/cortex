@@ -168,6 +168,12 @@ pub fn default_transcript_roots() -> Vec<PathBuf> {
     default_roots()
 }
 
+pub fn validate_transcript_scan_path(path: &Path) -> Result<PathBuf> {
+    validate_path(path)?;
+    reject_broad_scan_path(path)?;
+    Ok(path.canonicalize()?)
+}
+
 fn classify_path_error(error: &anyhow::Error, result: &mut IndexResult) {
     if let Some(path_error) = error.downcast_ref::<PathScanError>() {
         match path_error {
