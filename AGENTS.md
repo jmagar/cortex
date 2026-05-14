@@ -262,3 +262,9 @@ Bump type is determined by the commit message prefix:
 
 All files MUST have the same version. Never bump only one file.
 CHANGELOG.md must have an entry for every version bump.
+
+## Plugin setup hooks
+
+Plugin setup is owned by the binary. Keep `scripts/plugin-setup.sh` as a thin adapter that maps `CLAUDE_PLUGIN_OPTION_*` values to environment variables, prepares appdata, ensures `syslog` is on `PATH`, and then calls `syslog setup plugin-hook "$@"`.
+
+`syslog setup check` is read-only, `syslog setup repair` is idempotent, and `syslog setup plugin-hook --no-repair` is audit mode. Do not add Docker Compose, systemd, or service bootstrap logic back into the hook script.

@@ -1,5 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
+use std::net::TcpListener;
+use std::path::PathBuf;
 use syslog_mcp::app::{
     CorrelateEventsRequest, CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse,
     ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
@@ -24,6 +26,7 @@ pub(crate) enum CliCommand {
     Correlate(CorrelateArgs),
     Stats(OutputArgs),
     Compose(ComposeCommand),
+    Setup(SetupCommand),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +49,24 @@ pub(crate) enum ComposeCommand {
     Restart(ComposeMutationArgs),
     Pull(ComposeMutationArgs),
     Logs(ComposeLogsArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SetupCommand {
+    Check(SetupArgs),
+    Repair(SetupArgs),
+    PluginHook(PluginHookArgs),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SetupArgs {
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PluginHookArgs {
+    pub json: bool,
+    pub no_repair: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -189,8 +210,25 @@ impl CliCommand {
             "correlate" => parse_correlate(rest),
             "stats" => parse_stats(rest),
             "compose" => parse_compose(rest),
+            "setup" => parse_setup(rest),
             _ => bail!("unknown CLI command: {command}"),
         }
+    }
+}
+
+pub(crate) fn run_setup(command: SetupCommand) -> Result<()> {
+    match command {
+        SetupCommand::Check(args) => {
+            let report = setup_report(SetupMode::Check)?;
+            print_setup_report(&report, args.json)?;
+            ensure_setup_success(&report)
+        }
+        SetupCommand::Repair(args) => {
+            let report = setup_report(SetupMode::Repair)?;
+            print_setup_report(&report, args.json)?;
+            ensure_setup_success(&report)
+        }
+        SetupCommand::PluginHook(args) => run_plugin_hook(args),
     }
 }
 
@@ -348,6 +386,9 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
         }
         CliCommand::Compose(_) => {
             bail!("compose commands must run through run_compose");
+        }
+        CliCommand::Setup(_) => {
+            bail!("setup commands must run through run_setup");
         }
     }
     Ok(())
@@ -759,6 +800,47 @@ fn parse_compose(args: &[String]) -> Result<CliCommand> {
     }
 }
 
+fn parse_setup(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("setup requires a subcommand"))?;
+    match subcommand.as_str() {
+        "check" => Ok(CliCommand::Setup(SetupCommand::Check(parse_setup_args(
+            rest,
+        )?))),
+        "repair" => Ok(CliCommand::Setup(SetupCommand::Repair(parse_setup_args(
+            rest,
+        )?))),
+        "plugin-hook" | "hook" => Ok(CliCommand::Setup(SetupCommand::PluginHook(
+            parse_plugin_hook_args(rest)?,
+        ))),
+        other => bail!("unknown setup subcommand: {other}"),
+    }
+}
+
+fn parse_setup_args(args: &[String]) -> Result<SetupArgs> {
+    let mut parsed = SetupArgs::default();
+    for arg in args {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            _ => bail!("unknown setup option: {arg}"),
+        }
+    }
+    Ok(parsed)
+}
+
+fn parse_plugin_hook_args(args: &[String]) -> Result<PluginHookArgs> {
+    let mut parsed = PluginHookArgs::default();
+    for arg in args {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--no-repair" => parsed.no_repair = true,
+            _ => bail!("unknown setup plugin-hook option: {arg}"),
+        }
+    }
+    Ok(parsed)
+}
+
 fn parse_compose_args(args: &[String]) -> Result<ComposeArgs> {
     let mut parsed = ComposeArgs::default();
     parse_compose_common(args, &mut parsed.target, &mut parsed.json)?;
@@ -1005,6 +1087,251 @@ fn parse_u32_flag(flag: &str, value: String) -> Result<u32> {
     value
         .parse::<u32>()
         .map_err(|_| anyhow!("{flag} must be an unsigned integer"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum SetupMode {
+    Check,
+    Repair,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum SetupStatus {
+    Ok,
+    Warn,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SetupPhase {
+    name: &'static str,
+    status: SetupStatus,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SetupReport {
+    mode: SetupMode,
+    data_dir: PathBuf,
+    env_path: PathBuf,
+    phases: Vec<SetupPhase>,
+    has_errors: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PluginHookExitPolicy {
+    Success,
+    AdvisoryFailure,
+    BlockingFailure,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PluginHookReport {
+    exit_policy: PluginHookExitPolicy,
+    ran_repair: bool,
+    no_repair: bool,
+    blocking_failures: Vec<String>,
+    advisory_failures: Vec<String>,
+    check: SetupReport,
+    repair: Option<SetupReport>,
+}
+
+fn run_plugin_hook(args: PluginHookArgs) -> Result<()> {
+    let check = setup_report(SetupMode::Check)?;
+    let repair = if check.has_errors && !args.no_repair {
+        Some(setup_report(SetupMode::Repair)?)
+    } else {
+        None
+    };
+    let active = repair.as_ref().unwrap_or(&check);
+    let blocking_failures = setup_blocking_failures(active);
+    let advisory_failures = setup_advisory_failures(active);
+    let exit_policy = if !blocking_failures.is_empty() {
+        PluginHookExitPolicy::BlockingFailure
+    } else if !advisory_failures.is_empty() {
+        PluginHookExitPolicy::AdvisoryFailure
+    } else {
+        PluginHookExitPolicy::Success
+    };
+    let report = PluginHookReport {
+        exit_policy,
+        ran_repair: repair.is_some(),
+        no_repair: args.no_repair,
+        blocking_failures,
+        advisory_failures,
+        check,
+        repair,
+    };
+    print_plugin_hook_report(&report, args.json)?;
+    if matches!(report.exit_policy, PluginHookExitPolicy::BlockingFailure) {
+        bail!(
+            "syslog setup plugin-hook completed with blocking failed phases: {}",
+            report.blocking_failures.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn setup_report(mode: SetupMode) -> Result<SetupReport> {
+    let data_dir = setup_data_dir();
+    let env_path = data_dir.join(".env");
+
+    if matches!(mode, SetupMode::Repair) {
+        std::fs::create_dir_all(&data_dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&data_dir)?.permissions();
+            perms.set_mode(0o700);
+            std::fs::set_permissions(&data_dir, perms)?;
+        }
+    }
+
+    let mut phases = Vec::new();
+    phases.push(if data_dir.is_dir() {
+        SetupPhase {
+            name: "data-dir",
+            status: SetupStatus::Ok,
+            detail: format!("found {}", data_dir.display()),
+        }
+    } else {
+        SetupPhase {
+            name: "data-dir",
+            status: SetupStatus::Error,
+            detail: format!("missing {}; run syslog setup repair", data_dir.display()),
+        }
+    });
+    phases.push(if env_path.exists() {
+        SetupPhase {
+            name: "env",
+            status: SetupStatus::Ok,
+            detail: format!("found {}", env_path.display()),
+        }
+    } else {
+        SetupPhase {
+            name: "env",
+            status: SetupStatus::Warn,
+            detail: format!(
+                "missing {}; plugin env may be supplied by process",
+                env_path.display()
+            ),
+        }
+    });
+    phases.push(
+        if std::env::var("SYSLOG_MCP_TOKEN").is_ok()
+            || std::env::var("SYSLOG_MCP_API_TOKEN").is_ok()
+            || std::env::var("NO_AUTH").ok().as_deref() == Some("true")
+        {
+            SetupPhase {
+                name: "auth",
+                status: SetupStatus::Ok,
+                detail: "token/no_auth configuration present".to_string(),
+            }
+        } else {
+            SetupPhase {
+                name: "auth",
+                status: SetupStatus::Warn,
+                detail: "no SYSLOG_MCP_TOKEN/SYSLOG_MCP_API_TOKEN in process env".to_string(),
+            }
+        },
+    );
+    phases.push(mcp_port_phase());
+
+    let has_errors = phases
+        .iter()
+        .any(|phase| matches!(phase.status, SetupStatus::Error));
+    Ok(SetupReport {
+        mode,
+        data_dir,
+        env_path,
+        phases,
+        has_errors,
+    })
+}
+
+fn setup_data_dir() -> PathBuf {
+    std::env::var_os("SYSLOG_DATA_DIR")
+        .or_else(|| std::env::var_os("CLAUDE_PLUGIN_DATA"))
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".syslog-mcp")))
+        .unwrap_or_else(|| PathBuf::from(".syslog-mcp"))
+}
+
+fn mcp_port_phase() -> SetupPhase {
+    let port = setup_port("SYSLOG_MCP_PORT", 3100);
+    match TcpListener::bind(("127.0.0.1", port)) {
+        Ok(_) => SetupPhase {
+            name: "mcp-port",
+            status: SetupStatus::Ok,
+            detail: format!("port {port} available"),
+        },
+        Err(error) => SetupPhase {
+            name: "mcp-port",
+            status: SetupStatus::Warn,
+            detail: format!("port {port} is already in use: {error}"),
+        },
+    }
+}
+
+fn setup_port(env_name: &str, default: u16) -> u16 {
+    std::env::var(env_name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+}
+
+fn setup_blocking_failures(report: &SetupReport) -> Vec<String> {
+    report
+        .phases
+        .iter()
+        .filter(|phase| matches!(phase.status, SetupStatus::Error))
+        .map(|phase| phase.name.to_string())
+        .collect()
+}
+
+fn setup_advisory_failures(report: &SetupReport) -> Vec<String> {
+    report
+        .phases
+        .iter()
+        .filter(|phase| matches!(phase.status, SetupStatus::Warn))
+        .map(|phase| phase.name.to_string())
+        .collect()
+}
+
+fn ensure_setup_success(report: &SetupReport) -> Result<()> {
+    if report.has_errors {
+        bail!("syslog setup completed with failed phases");
+    }
+    Ok(())
+}
+
+fn print_setup_report(report: &SetupReport, json: bool) -> Result<()> {
+    if json {
+        return print_json(report);
+    }
+    println!("Syslog setup mode: {:?}", report.mode);
+    println!("Data dir: {}", report.data_dir.display());
+    println!("Env: {}", report.env_path.display());
+    for phase in &report.phases {
+        println!("{:?}\t{}\t{}", phase.status, phase.name, phase.detail);
+    }
+    Ok(())
+}
+
+fn print_plugin_hook_report(report: &PluginHookReport, json: bool) -> Result<()> {
+    if json {
+        return print_json(report);
+    }
+    print_setup_report(&report.check, false)?;
+    if let Some(repair) = &report.repair {
+        print_setup_report(repair, false)?;
+    }
+    println!("Plugin hook policy: {:?}", report.exit_policy);
+    println!("Plugin hook ran repair: {}", report.ran_repair);
+    Ok(())
 }
 
 fn print_json<T: Serialize>(value: &T) -> Result<()> {

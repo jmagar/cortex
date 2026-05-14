@@ -48,14 +48,6 @@ Thumbs.db
 # ── Caches (ALL tool caches go here) ─────────────────────────────────────────
 .cache/
 
-# ── Documentation artifacts (session/plan docs, not reference) ───────────────
-.docs/
-docs/plans/
-docs/sessions/
-docs/reports/
-docs/research/
-docs/superpowers/
-specs/
 
 # ── Build artifacts ──────────────────────────────────────────────────────────
 dist/
