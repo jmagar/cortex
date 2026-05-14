@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-05-14
+
+### Fixed
+
+- **AI transcript CLI rendering**: Render transcript rows in human CLI output
+  with AI tool, project, and session context instead of the synthetic
+  `localhost` hostname used by the storage layer.
+
 ## [0.21.1] - 2026-05-13
 
 ### Fixed
@@ -1034,7 +1042,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.1...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.2...HEAD
+[0.21.2]: https://github.com/jmagar/syslog-mcp/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/jmagar/syslog-mcp/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/jmagar/syslog-mcp/compare/v0.20.2...v0.21.0
 [0.20.2]: https://github.com/jmagar/syslog-mcp/compare/v0.20.1...v0.20.2

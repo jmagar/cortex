@@ -1024,11 +1024,42 @@ fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()
 }
 
 fn print_log(log: &LogEntry) {
+    if log.ai_tool.is_some() || log.ai_project.is_some() || log.ai_session_id.is_some() {
+        print_ai_log(log);
+        return;
+    }
     let app = log.app_name.as_deref().unwrap_or("-");
     println!(
         "{} {:<7} {:<20} {:<16} {}",
         log.timestamp, log.severity, log.hostname, app, log.message
     );
+}
+
+fn print_ai_log(log: &LogEntry) {
+    let tool = log
+        .ai_tool
+        .as_deref()
+        .or_else(|| {
+            log.app_name
+                .as_deref()
+                .and_then(|app| app.strip_suffix("-transcript"))
+        })
+        .unwrap_or("ai");
+    let project = log.ai_project.as_deref().unwrap_or("(unknown project)");
+    let session = log.ai_session_id.as_deref().unwrap_or("(unknown session)");
+    println!(
+        "{} {:<7} {:<8} {:<36} session={}",
+        log.timestamp,
+        log.severity,
+        tool,
+        truncate(project, 35),
+        truncate(session, 24)
+    );
+    println!("    {}", indent_multiline(&log.message));
+}
+
+fn indent_multiline(value: &str) -> String {
+    value.replace('\n', "\n    ")
 }
 
 fn print_errors_response(response: &GetErrorsResponse, json: bool) -> Result<()> {
