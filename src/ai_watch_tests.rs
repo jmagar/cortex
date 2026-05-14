@@ -124,6 +124,23 @@ fn collect_watch_dirs_fails_when_root_is_missing() {
     assert!(err.to_string().contains("failed to inspect"));
 }
 
+#[cfg(unix)]
+#[test]
+fn collect_watch_dirs_skips_unreadable_nested_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let blocked = temp.path().join("blocked");
+    std::fs::create_dir(&blocked).unwrap();
+    std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let dirs = collect_watch_dirs(temp.path()).unwrap();
+
+    std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(dirs.contains(&temp.path().to_path_buf()));
+    assert!(!dirs.contains(&blocked));
+}
+
 #[test]
 fn exact_file_watch_target_rejects_sibling_events() {
     let temp = tempfile::tempdir().unwrap();

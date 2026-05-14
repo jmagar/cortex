@@ -552,6 +552,7 @@ fn index_roots_ignores_claude_sessions_index_metadata() {
 }
 
 #[test]
+#[serial]
 fn index_roots_rejects_broad_home_root_and_repo_paths() {
     let (pool, _dir) = test_pool();
     let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());

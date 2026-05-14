@@ -312,7 +312,6 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>, is_root: bool)
         return Ok(());
     }
 
-    dirs.push(path.to_path_buf());
     let read_dir = match std::fs::read_dir(path) {
         Ok(read_dir) => read_dir,
         Err(error) => {
@@ -326,6 +325,7 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>, is_root: bool)
             return Ok(());
         }
     };
+    dirs.push(path.to_path_buf());
     let mut entries = Vec::new();
     for entry in read_dir {
         match entry {
