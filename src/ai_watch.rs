@@ -189,8 +189,10 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
     }
 
     tracing::info!(targets = ?targets, watched_dirs = watched_dirs.len(), "AI transcript watcher started");
-    if options.initial_scan {
-        let _ = run_rescan(&service, &options, "initial").await;
+    if options.initial_scan
+        && run_rescan(&service, &options, "initial").await == RescanStatus::Retry
+    {
+        overflow_rescan.store(true, Ordering::Relaxed);
     }
 
     let tick_duration = options

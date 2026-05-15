@@ -747,7 +747,9 @@ pub async fn run_setup_doctor() -> io::Result<SetupReport> {
 fn user_home_dir() -> io::Result<PathBuf> {
     let home =
         std::env::var("HOME").map_err(|_| io::Error::new(ErrorKind::NotFound, "HOME is unset"))?;
-    Ok(PathBuf::from(home))
+    let home = PathBuf::from(home);
+    setup_path_value(&home)?;
+    Ok(home)
 }
 
 pub fn syslog_home_dir() -> io::Result<PathBuf> {
@@ -1485,6 +1487,7 @@ fn resolve_syslog_binary() -> io::Result<PathBuf> {
 
 fn validate_executable_path(path: PathBuf) -> io::Result<PathBuf> {
     let canonical = path.canonicalize()?;
+    setup_path_value(&canonical)?;
     if !allow_debug_binary() && looks_like_debug_build_path(&canonical) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
@@ -1538,9 +1541,20 @@ fn validate_db_path(path: PathBuf) -> io::Result<PathBuf> {
             format!("AI watch DB path must be absolute: {}", path.display()),
         ));
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    setup_path_value(&path)?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    let Some(parent) = parent.filter(|parent| *parent != Path::new("/")) else {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "AI watch DB path must live under a non-root directory: {}",
+                path.display()
+            ),
+        ));
+    };
+    std::fs::create_dir_all(parent)?;
     Ok(path)
 }
 
@@ -1961,11 +1975,22 @@ fn health_phase(env: &Option<BTreeMap<String, String>>) -> SetupPhase {
 }
 
 fn current_uid_gid() -> (String, String) {
-    let uid = command_stdout("id", ["-u"]).unwrap_or_else(|| "1000".to_string());
-    let gid = command_stdout("id", ["-g"]).unwrap_or_else(|| "1000".to_string());
-    (uid, gid)
+    #[cfg(unix)]
+    {
+        // SAFETY: POSIX geteuid/getegid are infallible process queries.
+        let uid = unsafe { libc::geteuid() };
+        let gid = unsafe { libc::getegid() };
+        (uid.to_string(), gid.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        let uid = command_stdout("id", ["-u"]).unwrap_or_else(|| "1000".to_string());
+        let gid = command_stdout("id", ["-g"]).unwrap_or_else(|| "1000".to_string());
+        (uid, gid)
+    }
 }
 
+#[cfg(not(unix))]
 fn command_stdout<const N: usize>(program: &str, args: [&str; N]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
     output

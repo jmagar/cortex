@@ -237,7 +237,8 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
     let received_iso = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
-    let source_ip = peer.ip().to_string();
+    let source_ip = peer.to_string();
+    let peer_ip = peer.ip().to_string();
 
     let mut out = Vec::new();
     for resource_logs in &req.resource_logs {
@@ -298,7 +299,8 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     .unwrap_or_default();
                 let metadata_json = bounded_metadata_json(serde_json::json!({
                     "source_type": "otlp",
-                    "peer_ip": source_ip,
+                    "peer_ip": peer_ip,
+                    "peer_port": peer.port(),
                     "host_name": hostname,
                     "service_name": service_name,
                     "service_version": service_version,
@@ -311,8 +313,6 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     "resource_attributes": attrs_to_json(&resource_attrs),
                     "log_attributes": attrs_to_json(&log_attrs),
                 }));
-                let raw = metadata_json.clone();
-
                 out.push(LogBatchEntry {
                     timestamp,
                     hostname: hostname.clone(),
@@ -321,7 +321,7 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     app_name: service_name.clone(),
                     process_id: None,
                     message,
-                    raw,
+                    raw: metadata_json.clone(),
                     source_ip: source_ip.clone(),
                     docker_checkpoint: None,
                     ai_tool: extract_ai_tool(&log_attrs, &resource_attrs),

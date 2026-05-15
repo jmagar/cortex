@@ -170,6 +170,17 @@ fn validate_db_path_rejects_relative_without_creating_parent() {
     assert!(!std::path::Path::new(&relative_dir).exists());
 }
 
+#[test]
+fn validate_db_path_rejects_root_parent_and_unit_breaking_chars() {
+    let root_db = std::path::PathBuf::from("/syslog.db");
+    let err = validate_db_path(root_db).unwrap_err();
+    assert!(err.to_string().contains("non-root directory"));
+
+    let spaced = std::path::PathBuf::from("/tmp/syslog mcp/syslog.db");
+    let err = validate_db_path(spaced).unwrap_err();
+    assert!(err.to_string().contains("unsupported character"));
+}
+
 #[cfg(unix)]
 #[test]
 fn private_and_executable_writers_reject_symlinks() {

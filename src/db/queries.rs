@@ -542,8 +542,13 @@ pub fn search_ai_cusses(pool: &DbPool, params: &AiCussParams) -> Result<AiCussRe
 
     let candidate_window_truncated = candidate_rows.len() > CANDIDATE_CAP;
     let mut matches = Vec::new();
+    let mut result_limit_truncated = false;
     for entry in candidate_rows.iter().take(CANDIDATE_CAP) {
         if let Some(term) = first_cuss_term(&entry.message, &terms) {
+            if matches.len() == limit {
+                result_limit_truncated = true;
+                break;
+            }
             let (before_rows, after_rows) = ai_session_context(&conn, entry, before, after)?;
             matches.push(AiCussMatch {
                 term,
@@ -551,9 +556,6 @@ pub fn search_ai_cusses(pool: &DbPool, params: &AiCussParams) -> Result<AiCussRe
                 before: before_rows,
                 after: after_rows,
             });
-            if matches.len() == limit {
-                break;
-            }
         }
     }
 
@@ -562,7 +564,7 @@ pub fn search_ai_cusses(pool: &DbPool, params: &AiCussParams) -> Result<AiCussRe
         candidate_rows: candidate_rows.len().min(CANDIDATE_CAP),
         candidate_cap: CANDIDATE_CAP,
         candidate_window_truncated,
-        truncated: candidate_window_truncated || matches.len() == limit,
+        truncated: candidate_window_truncated || result_limit_truncated,
         matches,
     })
 }
