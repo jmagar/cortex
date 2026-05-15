@@ -51,8 +51,9 @@ pub(crate) fn insert_logs_batch_in_tx(
         let mut stmt = tx.prepare_cached(
             "INSERT INTO logs (
                 timestamp, hostname, facility, severity, app_name, process_id,
-                message, raw, source_ip, ai_tool, ai_project, ai_session_id, ai_transcript_path
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                message, raw, source_ip, ai_tool, ai_project, ai_session_id, ai_transcript_path,
+                metadata_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         )?;
 
         for entry in entries {
@@ -69,7 +70,8 @@ pub(crate) fn insert_logs_batch_in_tx(
                 entry.ai_tool,
                 entry.ai_project,
                 entry.ai_session_id,
-                entry.ai_transcript_path
+                entry.ai_transcript_path,
+                entry.metadata_json
             ])?;
         }
 

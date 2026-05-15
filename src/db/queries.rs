@@ -46,7 +46,7 @@ pub fn search_logs(pool: &DbPool, params: &SearchParams) -> Result<Vec<LogEntry>
         let mut sql = String::from(
             "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
                     l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
-                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path
+                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
              FROM logs l
              JOIN logs_fts ON logs_fts.rowid = l.id
              WHERE logs_fts MATCH ?1",
@@ -73,7 +73,7 @@ pub fn search_logs(pool: &DbPool, params: &SearchParams) -> Result<Vec<LogEntry>
         let mut sql = String::from(
             "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
                     l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
-                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path
+                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
              FROM logs l WHERE 1=1",
         );
         let mut bindings: Vec<rusqlite::types::Value> = vec![];
@@ -103,7 +103,7 @@ pub fn tail_logs(
     let mut sql = String::from(
         "SELECT id, timestamp, hostname, facility, severity,
                 app_name, process_id, message, received_at, source_ip,
-                ai_tool, ai_project, ai_session_id, ai_transcript_path
+                ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
          FROM logs WHERE 1=1",
     );
     let mut bindings: Vec<rusqlite::types::Value> = vec![];
@@ -422,7 +422,7 @@ pub fn search_ai_anchors(pool: &DbPool, params: &AiCorrelateParams) -> Result<Ve
         String::from(
             "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
                     l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
-                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path
+                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
              FROM logs_fts
              JOIN logs l ON l.id = logs_fts.rowid
              WHERE logs_fts MATCH ?1
@@ -434,7 +434,7 @@ pub fn search_ai_anchors(pool: &DbPool, params: &AiCorrelateParams) -> Result<Ve
         String::from(
             "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
                     l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
-                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path
+                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
              FROM logs l
              WHERE l.ai_project IS NOT NULL AND l.ai_project != ''
                AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
@@ -492,7 +492,7 @@ pub fn search_ai_cusses(pool: &DbPool, params: &AiCussParams) -> Result<AiCussRe
     let mut sql = String::from(
         "SELECT id, timestamp, hostname, facility, severity,
                 app_name, process_id, message, received_at, source_ip,
-                ai_tool, ai_project, ai_session_id, ai_transcript_path
+                ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
          FROM logs
          WHERE ai_project IS NOT NULL AND ai_project != ''
            AND ai_tool IS NOT NULL AND ai_tool != ''
@@ -793,7 +793,7 @@ fn ai_session_context(
     let mut before_stmt = conn.prepare(
         "SELECT id, timestamp, hostname, facility, severity,
                 app_name, process_id, message, received_at, source_ip,
-                ai_tool, ai_project, ai_session_id, ai_transcript_path
+                ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
          FROM logs
          WHERE hostname = ?1
            AND ai_tool = ?2
@@ -822,7 +822,7 @@ fn ai_session_context(
     let mut after_stmt = conn.prepare(
         "SELECT id, timestamp, hostname, facility, severity,
                 app_name, process_id, message, received_at, source_ip,
-                ai_tool, ai_project, ai_session_id, ai_transcript_path
+                ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
          FROM logs
          WHERE hostname = ?1
            AND ai_tool = ?2
@@ -1016,6 +1016,7 @@ pub(super) fn map_row(row: &rusqlite::Row) -> rusqlite::Result<LogEntry> {
         ai_project: row.get(11)?,
         ai_session_id: row.get(12)?,
         ai_transcript_path: row.get(13)?,
+        metadata_json: row.get(14)?,
     })
 }
 
@@ -1039,6 +1040,7 @@ pub(super) fn map_row_with_raw(
         ai_project: row.get(12)?,
         ai_session_id: row.get(13)?,
         ai_transcript_path: row.get(14)?,
+        metadata_json: row.get(15)?,
     })
 }
 

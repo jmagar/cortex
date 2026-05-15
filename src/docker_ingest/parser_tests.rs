@@ -37,6 +37,14 @@ fn stdout_frame_maps_to_info_log_entry() {
     assert_eq!(entry.process_id.as_deref(), Some("abcdef123456"));
     assert_eq!(entry.message, "started nginx");
     assert_eq!(entry.source_ip, "docker://edge-host-a/nginx-1/stdout");
+    let metadata: serde_json::Value =
+        serde_json::from_str(entry.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_type"], "docker_stream");
+    assert_eq!(metadata["docker_host"], "edge-host-a");
+    assert_eq!(metadata["container_id"], "abcdef1234567890");
+    assert_eq!(metadata["image"], "nginx:latest");
+    assert_eq!(metadata["compose_project"], "edge");
+    assert_eq!(metadata["stream"], "stdout");
 }
 
 #[test]
@@ -151,6 +159,12 @@ fn docker_start_event_maps_to_notice_log_entry() {
     assert_eq!(entry.source_ip, "docker-event://edge-host-a/nginx-1/start");
     assert!(entry.docker_checkpoint.is_none());
     assert!(entry.raw.contains("\"Action\":\"start\""));
+    let metadata: serde_json::Value =
+        serde_json::from_str(entry.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_type"], "docker_event");
+    assert_eq!(metadata["action"], "start");
+    assert_eq!(metadata["source_action"], "start");
+    assert_eq!(metadata["compose_service"], "nginx");
 }
 
 #[test]

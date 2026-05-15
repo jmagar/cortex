@@ -64,6 +64,7 @@ pub struct LogEntry {
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
     pub ai_transcript_path: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 impl From<db::LogEntry> for LogEntry {
@@ -83,6 +84,7 @@ impl From<db::LogEntry> for LogEntry {
             ai_project: value.ai_project,
             ai_session_id: value.ai_session_id,
             ai_transcript_path: value.ai_transcript_path,
+            metadata_json: value.metadata_json,
         }
     }
 }
@@ -843,6 +845,7 @@ pub struct LogEntryWithRaw {
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
     pub ai_transcript_path: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 impl From<db::LogEntryWithRaw> for LogEntryWithRaw {
@@ -863,6 +866,7 @@ impl From<db::LogEntryWithRaw> for LogEntryWithRaw {
             ai_project: value.ai_project,
             ai_session_id: value.ai_session_id,
             ai_transcript_path: value.ai_transcript_path,
+            metadata_json: value.metadata_json,
         }
     }
 }

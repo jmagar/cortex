@@ -776,6 +776,7 @@ impl SyslogService {
                             ai_project: row.ai_project.clone(),
                             ai_session_id: row.ai_session_id.clone(),
                             ai_transcript_path: row.ai_transcript_path.clone(),
+                            metadata_json: row.metadata_json.clone(),
                         };
                         (entry, row.hostname, row.timestamp, Some(row.id))
                     } else {
@@ -804,6 +805,7 @@ impl SyslogService {
                             ai_project: None,
                             ai_session_id: None,
                             ai_transcript_path: None,
+                            metadata_json: None,
                         };
                         (synthetic, hostname, timestamp, None)
                     };

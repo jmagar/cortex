@@ -187,7 +187,7 @@ pub(super) fn parse_syslog(raw: &str, source_ip: String) -> db::LogBatchEntry {
     // Vendor-specific fields extracted from the message body override syslog
     // header values. The header is a fallback when the vendor format provides
     // no value. Keep the standard RFC path as the final branch.
-    let (hostname, app_name, message) = if looks_like_timestamp(&raw_hostname)
+    let (hostname, app_name, message, input_format) = if looks_like_timestamp(&raw_hostname)
         && (raw_app_name.as_deref().unwrap_or("").contains("CEF:") || raw_message.contains("CEF:"))
     {
         // SECURITY NOTE: The hostname stored here is extracted from the CEF message
@@ -222,18 +222,30 @@ pub(super) fn parse_syslog(raw: &str, source_ip: String) -> db::LogBatchEntry {
         (
             truncate(&cef.hostname.unwrap_or_else(|| raw_hostname.clone()), 255).to_string(),
             cef.app_name
-                .or(raw_app_name)
+                .or(raw_app_name.clone())
                 .map(|s| truncate(&s, 128).to_string()),
             truncate(&cef.message.unwrap_or(raw_message), 8192).to_string(),
+            "cef",
         )
     } else {
         let hostname = if raw_hostname.is_empty() {
             "unknown".to_string()
         } else {
-            raw_hostname
+            raw_hostname.clone()
         };
-        (hostname, raw_app_name, raw_message)
+        (hostname, raw_app_name.clone(), raw_message, "syslog")
     };
+    let metadata_json = serde_json::json!({
+        "source_type": "syslog",
+        "input_format": input_format,
+        "source_addr": source_ip,
+        "parser": "syslog_loose",
+        "raw_hostname": raw_hostname,
+        "raw_app_name": raw_app_name,
+        "facility_num": facility_num,
+        "severity_num": severity_num,
+    })
+    .to_string();
 
     db::LogBatchEntry {
         timestamp,
@@ -250,6 +262,7 @@ pub(super) fn parse_syslog(raw: &str, source_ip: String) -> db::LogBatchEntry {
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: Some(metadata_json),
     }
 }
 

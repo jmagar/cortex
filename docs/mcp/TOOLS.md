@@ -209,6 +209,12 @@ AI transcript rows imported through `syslog ai index` or `syslog ai add` are sto
 
 OTLP AI metadata (`ai.tool`/`ai_tool`, `session.id`/`session_id`, `project.path`, `codebase.root_path`, and `session.cwd`) is producer-supplied, not network-verified identity. Oversized AI tool, project, and session values are rejected before storage; accepted OTLP metadata should be used for grouping/search convenience, not as an authorization or provenance boundary.
 
+Rows can include `metadata_json`, a source-specific JSON payload. Syslog rows
+record parser/source provenance, OTLP rows record resource/log attributes plus
+trace/span ids, Docker rows record host/container/image/compose/action details,
+and transcript rows record source kind, path, line number, record key, and scrub
+status. This metadata is for debugging and correlation, not authorization.
+
 ## See Also
 
 - [../CLI.md](../CLI.md) -- direct CLI commands backed by the same service methods

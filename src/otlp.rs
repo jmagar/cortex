@@ -295,7 +295,23 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     .as_ref()
                     .and_then(any_value_to_string)
                     .unwrap_or_default();
-                let raw = service_version.clone().unwrap_or_default();
+                let metadata_json = serde_json::json!({
+                    "source_type": "otlp",
+                    "peer_ip": source_ip,
+                    "host_name": hostname,
+                    "service_name": service_name,
+                    "service_version": service_version,
+                    "severity_number": log.severity_number,
+                    "severity_text": log.severity_text,
+                    "trace_id": hex_bytes(&log.trace_id),
+                    "span_id": hex_bytes(&log.span_id),
+                    "flags": log.flags,
+                    "event_name": log.event_name,
+                    "resource_attributes": attrs_to_json(&resource_attrs),
+                    "log_attributes": attrs_to_json(&log_attrs),
+                })
+                .to_string();
+                let raw = metadata_json.clone();
 
                 out.push(LogBatchEntry {
                     timestamp,
@@ -312,11 +328,42 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     ai_project,
                     ai_session_id,
                     ai_transcript_path: None,
+                    metadata_json: Some(metadata_json),
                 });
             }
         }
     }
     out
+}
+
+fn attrs_to_json(attrs: &HashMap<&str, &AnyValue>) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+    for (key, value) in attrs {
+        object.insert((*key).to_string(), any_value_to_json(value));
+    }
+    serde_json::Value::Object(object)
+}
+
+fn any_value_to_json(v: &AnyValue) -> serde_json::Value {
+    match v.value.as_ref() {
+        Some(AnyValueKind::StringValue(s)) => serde_json::Value::String(s.clone()),
+        Some(AnyValueKind::BoolValue(b)) => serde_json::Value::Bool(*b),
+        Some(AnyValueKind::IntValue(i)) => serde_json::Value::Number((*i).into()),
+        Some(AnyValueKind::DoubleValue(f)) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Some(AnyValueKind::BytesValue(b)) => serde_json::json!({"bytes_len": b.len()}),
+        Some(AnyValueKind::ArrayValue(arr)) => serde_json::json!({"array_len": arr.values.len()}),
+        Some(AnyValueKind::KvlistValue(kv)) => serde_json::json!({"kvlist_len": kv.values.len()}),
+        None => serde_json::Value::Null,
+    }
+}
+
+fn hex_bytes(bytes: &[u8]) -> Option<String> {
+    if bytes.is_empty() {
+        return None;
+    }
+    Some(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 fn extract_ai_tool(

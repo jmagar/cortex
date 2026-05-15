@@ -29,6 +29,7 @@ pub struct LogBatchEntry {
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
     pub ai_transcript_path: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -315,6 +316,7 @@ pub struct LogEntry {
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
     pub ai_transcript_path: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 /// Parameters for searching logs

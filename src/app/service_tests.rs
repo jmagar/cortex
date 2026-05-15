@@ -28,6 +28,7 @@ fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> Lo
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     }
 }
 
@@ -47,6 +48,7 @@ fn ai_entry(ts: &str, msg: &str) -> LogBatchEntry {
         ai_project: Some("/tmp/project".into()),
         ai_session_id: Some("sess-1".into()),
         ai_transcript_path: Some("/tmp/project/sess-1.jsonl".into()),
+        metadata_json: None,
     }
 }
 
@@ -228,6 +230,7 @@ async fn ai_service_methods_return_seeded_data() {
             ai_project: Some("/tmp/project".into()),
             ai_session_id: Some("sess-1".into()),
             ai_transcript_path: Some("/tmp/project/session.jsonl".into()),
+            metadata_json: None,
         }],
     )
     .unwrap();

@@ -17,6 +17,7 @@ fn log_batch_entry_keeps_claimed_hostname_separate_from_source_ip() {
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     };
 
     assert_eq!(entry.hostname, "claimed-host");

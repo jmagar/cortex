@@ -19,6 +19,7 @@ fn log_entry_conversion_preserves_network_sender_identity() {
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     });
 
     assert_eq!(entry.hostname, "claimed-host");
