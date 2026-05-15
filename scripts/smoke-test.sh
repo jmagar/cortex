@@ -152,7 +152,20 @@ send_tcp_seed() {
 run_syslog_ai_add() {
     local db_path="$1"
     local fixture="$2"
-    SYSLOG_MCP_DB_PATH="$db_path" syslog ai add --file "$fixture" --json
+    local syslog_bin="${SYSLOG_BIN:-}"
+
+    if [[ -z "$syslog_bin" ]]; then
+        if command -v syslog >/dev/null 2>&1; then
+            syslog_bin="$(command -v syslog)"
+        elif [[ -x "target/debug/syslog" ]]; then
+            syslog_bin="target/debug/syslog"
+        else
+            echo "syslog binary not found; install syslog on PATH, set SYSLOG_BIN, or run cargo build" >&2
+            return 127
+        fi
+    fi
+
+    SYSLOG_MCP_DB_PATH="$db_path" "$syslog_bin" ai add --file "$fixture" --json
 }
 
 seed_ai_fixture() {

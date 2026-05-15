@@ -298,22 +298,32 @@ fn summarize_ai_index_output_reports_key_counts() {
 }
 
 #[test]
-fn ai_index_output_has_failures_detects_retryable_failures() {
-    assert!(!ai_index_output_has_failures(
-        r#"{"parse_errors":0,"storage_blocked_chunks":0,"file_errors":[]}"#
-    ));
-    assert!(ai_index_output_has_failures(
-        r#"{"parse_errors":1,"storage_blocked_chunks":0,"file_errors":[]}"#
-    ));
-    assert!(ai_index_output_has_failures(
-        r#"{"parse_errors":0,"storage_blocked_chunks":1,"file_errors":[]}"#
-    ));
-    assert!(ai_index_output_has_failures(
-        r#"{"parse_errors":0,"storage_blocked_chunks":0,"file_errors":["bad"]}"#
-    ));
-    assert!(ai_index_output_has_failures(
-        r#"{"parse_errors":0,"storage_blocked_chunks":0,"dropped_metadata_fields":1,"file_errors":[]}"#
-    ));
+fn ai_index_output_status_classifies_blocking_and_recoverable_failures() {
+    assert_eq!(
+        ai_index_output_status(r#"{"parse_errors":0,"storage_blocked_chunks":0,"file_errors":[]}"#),
+        SetupStatus::Ok
+    );
+    assert_eq!(
+        ai_index_output_status(r#"{"parse_errors":1,"storage_blocked_chunks":0,"file_errors":[]}"#),
+        SetupStatus::Warn
+    );
+    assert_eq!(
+        ai_index_output_status(r#"{"parse_errors":0,"storage_blocked_chunks":1,"file_errors":[]}"#),
+        SetupStatus::Error
+    );
+    assert_eq!(
+        ai_index_output_status(
+            r#"{"parse_errors":0,"storage_blocked_chunks":0,"file_errors":["bad"]}"#
+        ),
+        SetupStatus::Warn
+    );
+    assert_eq!(
+        ai_index_output_status(
+            r#"{"parse_errors":0,"storage_blocked_chunks":0,"dropped_metadata_fields":1,"file_errors":[]}"#
+        ),
+        SetupStatus::Warn
+    );
+    assert_eq!(ai_index_output_status("not json"), SetupStatus::Error);
 }
 
 #[test]
