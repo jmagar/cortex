@@ -28,8 +28,9 @@ Options:
   --compose-dir DIR       Docker compose project dir (default: ~/.syslog-mcp/compose)
   --allow-legacy          Permit a running container from a non-canonical
                           Compose working directory.
-  --allow-local-image     Permit non-ghcr.io/jmagar/syslog-mcp images such as
-                          syslog-mcp:local-debug.
+  --allow-local-image     Permit arbitrary non-ghcr.io/jmagar/syslog-mcp
+                          images. The repo-supported syslog-mcp:local-debug
+                          image is accepted by default.
 EOF
 }
 
@@ -138,9 +139,9 @@ check_docker() {
 
   image="$(compose_image)"
   [[ -n "$image" ]] || image="$(docker inspect "$cid" --format '{{.Config.Image}}')"
-  if [[ "$ALLOW_LOCAL_IMAGE" != "true" && "$image" != ghcr.io/jmagar/syslog-mcp:* ]]; then
+  if [[ "$ALLOW_LOCAL_IMAGE" != "true" && "$image" != ghcr.io/jmagar/syslog-mcp:* && "$image" != "syslog-mcp:local-debug" ]]; then
     echo "FAIL: running container uses unsupported image: $image"
-    echo "fix: use ghcr.io/jmagar/syslog-mcp:<version> or rerun with --allow-local-image for an intentional local/debug deployment"
+    echo "fix: use ghcr.io/jmagar/syslog-mcp:<version>, syslog-mcp:local-debug, or rerun with --allow-local-image for an intentional custom deployment"
     return 1
   fi
 

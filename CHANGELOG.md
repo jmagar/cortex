@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `syslog setup debug-wrapper install|check|remove` for live watcher status,
   strict transcript-root ownership checks, and repo-managed local debug binary
   execution.
+- **Local debug runtime checks**: `scripts/check-runtime-current.sh` now treats
+  the repo-supported `syslog-mcp:local-debug` Compose image as a valid current
+  runtime target while still rejecting arbitrary local images by default.
 
 ### Fixed
 
