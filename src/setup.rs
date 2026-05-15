@@ -619,14 +619,20 @@ fn write_compose_assets(compose_dir: &Path) -> io::Result<SetupPhase> {
 }
 
 fn installed_compose_asset() -> String {
-    let without_build = COMPOSE_ASSET
-        .replace(
-            "    # Default to the published image so plugin deploys can `docker compose pull`\n    # without source. Override with --build (or `docker compose build`) for local\n    # source development.\n    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}\n    build:\n      context: .\n      dockerfile: config/Dockerfile\n",
-            "    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}\n",
-        );
-    assert_ne!(
-        without_build, COMPOSE_ASSET,
-        "installed compose asset transform failed: expected build stanza was not found"
+    let start = "    # syslog-setup-build-stanza-start\n";
+    let end = "    # syslog-setup-build-stanza-end\n";
+    let start_index = COMPOSE_ASSET
+        .find(start)
+        .expect("installed compose asset transform failed: build stanza start marker not found");
+    let after_start = start_index + start.len();
+    let end_index = COMPOSE_ASSET[after_start..]
+        .find(end)
+        .map(|index| after_start + index + end.len())
+        .expect("installed compose asset transform failed: build stanza end marker not found");
+    let without_build = format!(
+        "{}{}",
+        &COMPOSE_ASSET[..start_index],
+        &COMPOSE_ASSET[end_index..]
     );
     let installed = without_build.replace("      - path: .env\n", "      - path: ../.env\n");
     assert_ne!(
@@ -804,7 +810,15 @@ fn ai_watch_service_unit(
 
 fn run_ai_watch_initial_index_phase(syslog_bin: &Path, env_path: &Path) -> SetupPhase {
     let timer = PhaseTimer::start("ai-watch-initial-index");
-    let env = parse_env(&std::fs::read_to_string(env_path).unwrap_or_default());
+    let env = match std::fs::read_to_string(env_path) {
+        Ok(raw) => parse_env(&raw),
+        Err(error) => {
+            return timer.finish(
+                SetupStatus::Error,
+                format!("read {}: {error}", env_path.display()),
+            );
+        }
+    };
     let mut command = Command::new(syslog_bin);
     command.args(["ai", "index", "--json"]);
     for (key, value) in env {

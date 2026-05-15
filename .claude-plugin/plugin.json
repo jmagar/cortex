@@ -121,7 +121,7 @@
     "data_dir": {
       "type": "directory",
       "title": "Data directory",
-      "description": "Optional override for the SQLite database directory. Leave empty to use the shared setup default at ~/.syslog-mcp/data. Set only if you need the DB on a different volume — e.g. a larger or faster disk. Server mode only."
+      "description": "Absolute host path for the SQLite database directory in plugin server mode, for example /home/user/.syslog-mcp/data. Do not leave this empty in plugin mode: the setup hook exports it as SYSLOG_MCP_DATA_VOLUME so container paths like /data/syslog.db can be mapped back to the host. Set it to the shared setup default or a larger/faster disk. Server mode only."
     },
     "retention_days": {
       "type": "number",

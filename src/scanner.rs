@@ -1,8 +1,9 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::config::StorageConfig;
@@ -17,7 +18,7 @@ pub use checkpoint::CheckpointStore;
 
 const MAX_FILE_SIZE_BYTES: u64 = 1024 * 1024 * 1024;
 #[cfg(not(test))]
-const MAX_RECORD_SIZE_BYTES: usize = 512 * 1024 * 1024;
+const MAX_RECORD_SIZE_BYTES: usize = 32 * 1024 * 1024;
 #[cfg(test)]
 const MAX_RECORD_SIZE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_INDEX_CHUNK_RECORDS: usize = 500;
@@ -40,6 +41,8 @@ pub struct IndexResult {
     pub dropped_metadata_fields: usize,
     pub checkpoint_updates: usize,
     pub file_errors: Vec<IndexFileError>,
+    #[serde(skip)]
+    dropped_metadata_field_keys: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -155,13 +158,20 @@ pub fn validate_path(path: &Path) -> Result<()> {
         return Err(PathScanError::SymlinkNotAllowed(path.to_path_buf()).into());
     }
     if metadata.is_file() && metadata.len() > MAX_FILE_SIZE_BYTES {
-        bail!("file exceeds max size: {}", path.display());
+        return Err(PathScanError::FileTooLarge(path.to_path_buf()).into());
     }
     Ok(())
 }
 
 pub fn is_supported_transcript_file(path: &Path) -> bool {
     supported_discovered_file(path)
+}
+
+pub fn is_invalid_input_error(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<PathScanError>().is_some()
+        || error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
 }
 
 pub fn default_transcript_roots() -> Vec<PathBuf> {
@@ -179,6 +189,7 @@ fn classify_path_error(error: &anyhow::Error, result: &mut IndexResult) {
         match path_error {
             PathScanError::SymlinkNotAllowed(_) => result.skipped_symlinks += 1,
             PathScanError::UnsafePath(_) => result.skipped_unsafe_paths += 1,
+            PathScanError::FileTooLarge(_) | PathScanError::ExpectedFile(_) => {}
         }
     }
 }
@@ -206,6 +217,8 @@ fn reject_broad_scan_path(path: &Path) -> Result<()> {
 enum PathScanError {
     SymlinkNotAllowed(PathBuf),
     UnsafePath(PathBuf),
+    FileTooLarge(PathBuf),
+    ExpectedFile(PathBuf),
 }
 
 impl std::fmt::Display for PathScanError {
@@ -219,6 +232,8 @@ impl std::fmt::Display for PathScanError {
                 "unsafe transcript scan path: {}; pass a known transcript root or one .jsonl file",
                 path.display()
             ),
+            Self::FileTooLarge(path) => write!(f, "file exceeds max size: {}", path.display()),
+            Self::ExpectedFile(path) => write!(f, "expected a file path: {}", path.display()),
         }
     }
 }
@@ -348,7 +363,7 @@ pub fn index_file_with_options(
 ) -> Result<IndexResult> {
     validate_path(path)?;
     if !path.is_file() {
-        bail!("expected a file path: {}", path.display());
+        return Err(PathScanError::ExpectedFile(path.to_path_buf()).into());
     }
     if let Some(storage) = storage {
         let outcome = enforce_storage_budget(pool, storage)?;
@@ -470,6 +485,7 @@ pub fn index_file_with_options(
                     parsed.ai_project.as_deref().or(fallback_project.as_deref()),
                     MAX_AI_PROJECT_CHARS,
                     "ai_project",
+                    &canonical,
                     &mut result,
                 );
                 let session_id = accept_metadata_field(
@@ -479,12 +495,14 @@ pub fn index_file_with_options(
                         .or(fallback_session_id.as_deref()),
                     MAX_AI_SESSION_ID_CHARS,
                     "ai_session_id",
+                    &canonical,
                     &mut result,
                 );
                 let transcript_path = accept_metadata_field(
                     Some(&canonical),
                     MAX_TRANSCRIPT_PATH_CHARS,
                     "ai_transcript_path",
+                    &canonical,
                     &mut result,
                 );
                 let entry = LogBatchEntry {
@@ -702,7 +720,7 @@ fn flush_chunk(
     let claimed = checkpoint::claim_imports_in_tx(&tx, source_id, imports)?;
     let mut claimed_batch = Vec::with_capacity(batch.len());
     let mut skipped_dupes = 0usize;
-    for (entry, claimed) in batch.iter().cloned().zip(claimed) {
+    for (entry, claimed) in batch.drain(..).zip(claimed) {
         if claimed {
             claimed_batch.push(entry);
         } else {
@@ -721,7 +739,6 @@ fn flush_chunk(
     if completion_metadata.is_some() {
         result.checkpoint_updates += 1;
     }
-    batch.clear();
     imports.clear();
     Ok(true)
 }
@@ -946,6 +963,7 @@ fn accept_metadata_field(
     value: Option<&str>,
     max_chars: usize,
     field: &'static str,
+    file_key: &str,
     result: &mut IndexResult,
 ) -> Option<String> {
     let value = value?;
@@ -954,7 +972,12 @@ fn accept_metadata_field(
         return None;
     }
     if trimmed.chars().count() > max_chars {
-        result.dropped_metadata_fields += 1;
+        if result
+            .dropped_metadata_field_keys
+            .insert(format!("{file_key}:{field}"))
+        {
+            result.dropped_metadata_fields += 1;
+        }
         tracing::warn!(
             field,
             max_chars,

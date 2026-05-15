@@ -31,7 +31,7 @@ ensure_syslog_binary() {
   tmp="$(mktemp)"
   trap 'rm -f "${tmp}"' RETURN
   printf 'syslog plugin setup: syslog not found; running installer %s\n' "${INSTALL_URL}" >&2
-  curl -fsSL -o "${tmp}" "${INSTALL_URL}"
+  curl -fsSL --connect-timeout 5 --max-time 120 -o "${tmp}" "${INSTALL_URL}"
   if [[ -n "${INSTALL_SHA256}" ]]; then
     printf '%s  %s\n' "${INSTALL_SHA256}" "${tmp}" | sha256sum -c -
   elif [[ "${SYSLOG_INSTALL_ALLOW_UNVERIFIED:-false}" != "true" ]]; then
@@ -51,7 +51,7 @@ ensure_syslog_binary() {
 validate_client() {
   local server_url
   server_url="$(strip_trailing_mcp_path "${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}")"
-  if curl -sf "${server_url%/}/health" >/dev/null 2>&1; then
+  if curl -fsS --connect-timeout 2 --max-time 5 "${server_url%/}/health" >/dev/null 2>&1; then
     echo "syslog-mcp: connected to ${server_url%/}"
   else
     echo "WARNING: syslog-mcp server at ${server_url%/} is not reachable" >&2

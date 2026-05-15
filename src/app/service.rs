@@ -767,13 +767,7 @@ fn classify_scanner_error(error: ServiceError) -> ServiceError {
 }
 
 fn scanner_error_is_invalid_input(error: &anyhow::Error) -> bool {
-    let message = error.to_string();
-    message.contains("unsafe transcript scan path")
-        || message.contains("symlinks are not allowed")
-        || message.contains("file exceeds max size")
-        || message.contains("expected a file path")
-        || message.contains("No such file or directory")
-        || message.contains("os error 2")
+    scanner::is_invalid_input_error(error)
 }
 
 fn validate_optional_severity(severity: Option<String>) -> ServiceResult<Option<String>> {

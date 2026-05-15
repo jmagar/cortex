@@ -72,9 +72,8 @@ When installed as a Claude Code plugin, the token is managed via `userConfig` in
     "api_token": {
       "type": "string",
       "title": "API Token",
-      "description": "Bearer token for authenticating MCP requests",
-      "sensitive": true,
-      "required": true
+      "description": "Bearer token for authenticating MCP requests. Required unless no_auth is true.",
+      "sensitive": true
     },
     "no_auth": {
       "type": "boolean",
@@ -86,6 +85,8 @@ When installed as a Claude Code plugin, the token is managed via `userConfig` in
 ```
 
 Fields marked `"sensitive": true` are stored encrypted by Claude Code.
+When `"no_auth": true`, token enforcement is disabled and `api_token` is not
+required; otherwise provide `api_token`.
 
 ## Security practices
 

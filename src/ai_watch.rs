@@ -385,7 +385,14 @@ fn handle_event(
 }
 
 fn event_path_allowed(path: &Path, targets: &[WatchTarget]) -> bool {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canonical = path.canonicalize().unwrap_or_else(|error| {
+        tracing::warn!(
+            path = %path.display(),
+            error = %error,
+            "AI transcript event path canonicalization failed; using original path"
+        );
+        path.to_path_buf()
+    });
     targets.iter().any(|target| match target {
         WatchTarget::Directory(root) => canonical.starts_with(root),
         WatchTarget::File { path, .. } => &canonical == path,
