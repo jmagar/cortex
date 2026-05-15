@@ -121,7 +121,7 @@ fn build_entries_extracts_resource_attrs() {
     assert_eq!(e.message, "tool_call started");
     assert_eq!(e.severity, "info");
     assert_eq!(e.facility.as_deref(), Some("otlp"));
-    assert_eq!(e.source_ip, "127.0.0.1:12345");
+    assert_eq!(e.source_ip, "127.0.0.1");
 }
 
 #[test]

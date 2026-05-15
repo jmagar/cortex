@@ -165,6 +165,52 @@ fn docker_die_event_maps_to_warning_and_preserves_exit_code() {
 }
 
 #[test]
+fn docker_die_event_with_zero_exit_code_maps_to_notice() {
+    let mut event = event("die");
+    event
+        .actor
+        .as_mut()
+        .unwrap()
+        .attributes
+        .as_mut()
+        .unwrap()
+        .insert("exitCode".to_string(), "0".to_string());
+
+    let entry = docker_event_to_entry("edge-host-a", &event)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(entry.severity, "notice");
+    assert!(entry.message.contains("exit_code=0"));
+}
+
+#[test]
+fn docker_health_status_event_sanitizes_source_action_and_maps_unhealthy_warning() {
+    let entry = docker_event_to_entry("edge-host-a", &event("health_status: unhealthy"))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(entry.severity, "warning");
+    assert_eq!(
+        entry.source_ip,
+        "docker-event://edge-host-a/nginx-1/health_status_unhealthy"
+    );
+}
+
+#[test]
+fn docker_healthy_status_event_maps_to_notice() {
+    let entry = docker_event_to_entry("edge-host-a", &event("health_status: healthy"))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(entry.severity, "notice");
+    assert_eq!(
+        entry.source_ip,
+        "docker-event://edge-host-a/nginx-1/health_status_healthy"
+    );
+}
+
+#[test]
 fn docker_oom_event_maps_to_error() {
     let entry = docker_event_to_entry("edge-host-a", &event("oom"))
         .unwrap()

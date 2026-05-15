@@ -57,10 +57,10 @@ pub(super) fn docker_event_to_entry(
     let Some(action) = event.action.as_deref() else {
         return Ok(None);
     };
-    let Some(severity) = docker_event_severity(action) else {
+    let Some(actor) = event.actor.as_ref() else {
         return Ok(None);
     };
-    let Some(actor) = event.actor.as_ref() else {
+    let Some(severity) = docker_event_severity(action, actor) else {
         return Ok(None);
     };
     let Some(container_id) = actor.id.as_deref() else {
@@ -81,7 +81,12 @@ pub(super) fn docker_event_to_entry(
         process_id: Some(meta.short_id()),
         message,
         raw,
-        source_ip: format!("docker-event://{}/{}/{}", host_name, meta.name, action),
+        source_ip: format!(
+            "docker-event://{}/{}/{}",
+            host_name,
+            meta.name,
+            docker_event_source_action(action)
+        ),
         docker_checkpoint: None,
         ai_tool: None,
         ai_project: None,
@@ -143,14 +148,42 @@ fn docker_event_timestamp(event: &EventMessage) -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
-fn docker_event_severity(action: &str) -> Option<&'static str> {
+fn docker_event_severity(action: &str, actor: &EventActor) -> Option<&'static str> {
     match action {
-        "create" | "start" | "rename" | "unpause" => Some("notice"),
-        "restart" | "stop" | "die" | "destroy" | "kill" | "pause" => Some("warning"),
+        "create" | "start" | "rename" | "unpause" | "stop" | "destroy" => Some("notice"),
+        "restart" | "kill" | "pause" => Some("warning"),
+        "die" => match docker_event_exit_code(actor) {
+            Some(0) => Some("notice"),
+            Some(_) | None => Some("warning"),
+        },
         "oom" => Some("err"),
-        _ if action.starts_with("health_status:") => Some("notice"),
+        _ if action == "health_status: healthy" => Some("notice"),
+        _ if action.starts_with("health_status:") => Some("warning"),
         _ => None,
     }
+}
+
+fn docker_event_exit_code(actor: &EventActor) -> Option<i32> {
+    actor
+        .attributes
+        .as_ref()
+        .and_then(|attrs| attrs.get("exitCode").or_else(|| attrs.get("exit_code")))
+        .and_then(|value| value.parse().ok())
+}
+
+fn docker_event_source_action(action: &str) -> String {
+    let mut out = String::with_capacity(action.len());
+    let mut previous_separator = false;
+    for ch in action.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            out.push(ch);
+            previous_separator = false;
+        } else if !previous_separator {
+            out.push('_');
+            previous_separator = true;
+        }
+    }
+    out.trim_matches('_').to_string()
 }
 
 fn docker_event_message(action: &str, meta: &ContainerMeta, actor: &EventActor) -> String {

@@ -65,7 +65,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "source_ip": {
                     "type": "string",
-                    "description": "For action=search, tail, correlate, or ai_correlate: exact source identifier. Syslog uses IP:port; Docker stream rows use docker://host/container/stream; Docker lifecycle rows use docker-event://host/container/action."
+                    "description": "For action=search, tail, correlate, or ai_correlate: exact source identifier. Syslog uses IP:port; OTLP uses peer IP; Docker stream rows use docker://host/container/stream; Docker lifecycle rows use docker-event://host/container/action."
                 },
                 "severity": {
                     "type": "string",

@@ -236,7 +236,7 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
     let received_iso = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
-    let source_ip = peer.to_string();
+    let source_ip = peer.ip().to_string();
 
     let mut out = Vec::new();
     for resource_logs in &req.resource_logs {
