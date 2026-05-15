@@ -11,6 +11,7 @@ syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument s
 - `sessions`
 - `search_sessions`
 - `cuss`
+- `ai_correlate`
 - `usage_blocks`
 - `project_context`
 - `list_ai_tools`
@@ -54,6 +55,7 @@ json!({
                     "sessions",
                     "search_sessions",
                     "cuss",
+                    "ai_correlate",
                     "usage_blocks",
                     "project_context",
                     "list_ai_tools",

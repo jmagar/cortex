@@ -276,6 +276,46 @@ impl From<db::AiCussResult> for CussSearchResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiCorrelateRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub session_id: Option<String>,
+    pub ai_query: Option<String>,
+    pub log_query: Option<String>,
+    pub hostname: Option<String>,
+    pub source_ip: Option<String>,
+    pub app_name: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub window_minutes: Option<u32>,
+    pub severity_min: Option<String>,
+    pub limit: Option<u32>,
+    pub events_per_anchor: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCorrelationAnchor {
+    pub entry: LogEntry,
+    pub window_from: String,
+    pub window_to: String,
+    pub related: Vec<LogEntry>,
+    pub related_truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCorrelateResponse {
+    pub window_minutes: u32,
+    pub severity_min: String,
+    pub total_anchors: usize,
+    pub anchor_rows: usize,
+    pub anchor_limit: usize,
+    pub anchors_truncated: bool,
+    pub related_limit_per_anchor: usize,
+    pub total_related_events: usize,
+    pub anchors: Vec<AiCorrelationAnchor>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UsageBlocksRequest {
     pub project: Option<String>,
     pub tool: Option<String>,

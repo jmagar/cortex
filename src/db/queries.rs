@@ -5,10 +5,11 @@ use crate::config::StorageConfig;
 
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
 use super::models::{
-    AiCussMatch, AiCussParams, AiCussResult, AiProjectInventoryEntry, AiSessionEntry,
-    AiToolInventoryEntry, DbStats, ErrorSummaryEntry, HostEntry, ListAiProjectsParams,
-    ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry,
-    SearchAiSessionsParams, SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
+    AiCorrelateParams, AiCussMatch, AiCussParams, AiCussResult, AiProjectInventoryEntry,
+    AiSessionEntry, AiToolInventoryEntry, DbStats, ErrorSummaryEntry, HostEntry,
+    ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams,
+    ListAiToolsResult, LogEntry, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams,
+    SearchedAiSessionEntry,
 };
 use super::pool::DbPool;
 
@@ -407,6 +408,72 @@ pub fn search_ai_sessions(
         truncated: total_candidates > sessions.len() || raw_candidate_count > CANDIDATE_CAP,
         sessions,
     })
+}
+
+pub fn search_ai_anchors(pool: &DbPool, params: &AiCorrelateParams) -> Result<Vec<LogEntry>> {
+    let conn = pool.get()?;
+    let limit = params.limit.unwrap_or(10).clamp(1, 50);
+    let mut bindings: Vec<rusqlite::types::Value> = vec![];
+    let mut idx = 1usize;
+    let mut sql = if let Some(query) = &params.ai_query {
+        validate_fts_query(query)?;
+        bindings.push(rusqlite::types::Value::Text(query.clone()));
+        idx += 1;
+        String::from(
+            "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
+                    l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
+                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path
+             FROM logs_fts
+             JOIN logs l ON l.id = logs_fts.rowid
+             WHERE logs_fts MATCH ?1
+               AND l.ai_project IS NOT NULL AND l.ai_project != ''
+               AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
+               AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
+        )
+    } else {
+        String::from(
+            "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
+                    l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
+                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path
+             FROM logs l
+             WHERE l.ai_project IS NOT NULL AND l.ai_project != ''
+               AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
+               AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
+        )
+    };
+
+    if let Some(project) = &params.ai_project {
+        sql.push_str(&format!(" AND l.ai_project = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(project.clone()));
+        idx += 1;
+    }
+    if let Some(tool) = &params.ai_tool {
+        sql.push_str(&format!(" AND l.ai_tool = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(tool.clone()));
+        idx += 1;
+    }
+    if let Some(session_id) = &params.ai_session_id {
+        sql.push_str(&format!(" AND l.ai_session_id = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(session_id.clone()));
+        idx += 1;
+    }
+    if let Some(from) = &params.from {
+        sql.push_str(&format!(" AND l.timestamp >= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(from.clone()));
+        idx += 1;
+    }
+    if let Some(to) = &params.to {
+        sql.push_str(&format!(" AND l.timestamp <= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(to.clone()));
+    }
+
+    sql.push_str(&format!(
+        " ORDER BY l.timestamp DESC, l.id DESC LIMIT {}",
+        limit + 1
+    ));
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 const DEFAULT_AI_CUSS_TERMS: &[&str] = &[
@@ -913,6 +980,23 @@ fn append_filters(
         sql.push_str(&format!(" AND l.ai_session_id = ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(session_id.clone()));
         *idx += 1;
+    }
+    if params.exclude_ai {
+        sql.push_str(
+            " AND (l.ai_project IS NULL OR l.ai_project = '')
+              AND (l.ai_tool IS NULL OR l.ai_tool = '')
+              AND (l.ai_session_id IS NULL OR l.ai_session_id = '')
+              AND (l.ai_transcript_path IS NULL OR l.ai_transcript_path = '')
+              AND (
+                l.app_name IS NULL
+                OR l.app_name NOT IN (
+                    'ai-transcript',
+                    'claude-transcript',
+                    'codex-transcript',
+                    'gemini-transcript'
+                )
+              )",
+        );
     }
 }
 

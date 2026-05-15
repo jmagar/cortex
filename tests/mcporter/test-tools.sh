@@ -5,7 +5,7 @@
 # Exercises broad non-destructive checks for the action-based syslog MCP tool.
 # Action inventory reference (not every action is exercised below):
 #   syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions,
-#   syslog search_sessions, syslog cuss, syslog usage_blocks, syslog project_context,
+#   syslog search_sessions, syslog cuss, syslog ai_correlate, syslog usage_blocks, syslog project_context,
 #   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,
 #   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
@@ -519,6 +519,8 @@ suite_sessions() {
     syslog search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "total_candidates"
   run_test "syslog cuss: returns matches array" \
     syslog cuss "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"project":$project,"terms":$term,"limit":5,"before":1,"after":1}')" "matches"
+  run_test "syslog ai_correlate: returns anchors array" \
+    syslog ai_correlate "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":2,"events_per_anchor":3}')" "anchors"
   run_test "syslog usage_blocks: returns blocks array" \
     syslog usage_blocks '{}' "blocks"
   run_test "syslog project_context: returns project field" \

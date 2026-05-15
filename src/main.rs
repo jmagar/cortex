@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
     match mode {
         Mode::ServeMcp => serve_mcp().await,
         Mode::StdioMcp => serve_stdio_mcp().await,
-        Mode::Cli(command) => run_cli(command).await,
+        Mode::Cli(command) => run_cli(*command).await,
         Mode::Setup(command) => run_setup(command).await,
         Mode::DoctorBinary(command) => run_binary_doctor(command).await,
         Mode::Help => unreachable!("handled before logging initialization"),
@@ -194,7 +194,7 @@ async fn serve_mcp() -> Result<()> {
 enum Mode {
     ServeMcp,
     StdioMcp,
-    Cli(cli::CliCommand),
+    Cli(Box<cli::CliCommand>),
     Setup(SetupCommand),
     DoctorBinary(DoctorBinaryCommand),
     Help,
@@ -254,7 +254,7 @@ impl Mode {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
                 cli_args.push(command.clone());
                 cli_args.extend(rest.iter().cloned());
-                Ok(Self::Cli(cli::CliCommand::parse(cli_args)?))
+                Ok(Self::Cli(Box::new(cli::CliCommand::parse(cli_args)?)))
             }
             _ => {
                 print_usage();
@@ -508,6 +508,7 @@ fn print_usage() {
   syslog sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
   syslog ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]
   syslog ai cuss [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]
+  syslog ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--from TIME] [--to TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]
   syslog ai blocks [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--json]
   syslog ai context --project PATH [--tool TOOL] [--limit N] [--json]
   syslog ai tools [--project PATH] [--from TIME] [--to TIME] [--json]

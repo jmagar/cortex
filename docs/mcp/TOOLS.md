@@ -14,6 +14,7 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
 | `cuss` | Profanity hits in AI transcripts with same-session context |
+| `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
 | `usage_blocks` | AI activity in deterministic 5-hour windows |
 | `project_context` | Summary for one AI project path |
 | `list_ai_tools` | Distinct AI tools with counts |
@@ -95,6 +96,21 @@ Optional arguments: `project`, `tool`, `from`, `to`, `limit`, `before`, `after`,
 
 `terms` replaces the built-in profanity detector list when provided. `before`
 and `after` default to 2 and are capped at 20.
+
+## syslog ai_correlate
+
+Use AI transcript rows as timeline anchors and pull nearby non-AI syslog,
+Docker, OTLP, and host events from the same database. Related logs explicitly
+exclude AI transcript rows so session logs do not correlate with themselves.
+
+Required argument: `action = "ai_correlate"`
+
+Optional arguments: `project`, `tool`, `session_id`, `ai_query`, `log_query`,
+`hostname`, `source_ip`, `app_name`, `from`, `to`, `window_minutes`,
+`severity_min`, `limit`, `events_per_anchor`.
+
+`limit` caps AI anchors at 50. `events_per_anchor` caps related non-AI rows at
+200 per anchor. `window_minutes` searches before and after each AI timestamp.
 
 ## syslog usage_blocks
 

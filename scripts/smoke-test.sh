@@ -11,8 +11,8 @@
 #
 # Action inventory reference:
 #   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
-#   mcp_call sessions, mcp_call search_sessions, mcp_call cuss, mcp_call usage_blocks,
-#   mcp_call project_context, mcp_call list_ai_tools, mcp_call list_ai_projects,
+#   mcp_call sessions, mcp_call search_sessions, mcp_call cuss, mcp_call ai_correlate,
+#   mcp_call usage_blocks, mcp_call project_context, mcp_call list_ai_tools, mcp_call list_ai_projects,
 #   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
 #   mcp_call source_ips, mcp_call timeline, mcp_call patterns, mcp_call context,
 #   mcp_call get, mcp_call ingest_rate, mcp_call silent_hosts,
@@ -362,6 +362,18 @@ print('ok' if d.get('matches') else 'missing')
 " 2>/dev/null || echo "error")
     assert_eq "cuss: custom detector finds seeded fixture" "$CUSS_FOUND" "ok"
 fi
+
+AI_CORRELATE=$(mcp_call ai_correlate "project=${AI_SMOKE_PROJECT}" "limit=2" "events_per_anchor=3" 2>&1)
+assert_no_error "ai_correlate: no error" "$AI_CORRELATE"
+AI_CORRELATE_VALID=$(printf '%s\n' "$AI_CORRELATE" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert 'anchors' in d and isinstance(d['anchors'], list), 'anchors not a list'
+assert 'total_related_events' in d, 'total_related_events missing'
+assert 'related_limit_per_anchor' in d, 'related_limit_per_anchor missing'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "ai_correlate: response structure valid" "$AI_CORRELATE_VALID" "ok"
 
 USAGE_BLOCKS=$(mcp_call usage_blocks 2>&1)
 assert_no_error "usage_blocks: no error" "$USAGE_BLOCKS"

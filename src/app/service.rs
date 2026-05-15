@@ -7,17 +7,18 @@ use tokio::sync::Semaphore;
 
 use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
-    AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest, ClockSkewResponse,
-    CompareRequest, CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
-    CorrelateEventsResponse, CussSearchRequest, CussSearchResponse, DbBackupResult,
-    DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult,
-    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, IngestRateRequest,
-    IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
-    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
-    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
-    TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
+    AiCorrelateRequest, AiCorrelateResponse, AiCorrelationAnchor, AiSessionEntry, AnomaliesRequest,
+    AnomaliesResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse,
+    ContextRequest, ContextResponse, CorrelateEventsRequest, CorrelateEventsResponse,
+    CussSearchRequest, CussSearchResponse, DbBackupResult, DbCheckpointResult, DbIntegrityResult,
+    DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest, GetErrorsResponse,
+    GetLogRequest, GetLogResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
+    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
+    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse, ProjectContextRequest,
+    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
+    SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse, TailLogsRequest,
+    TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
@@ -94,6 +95,7 @@ impl SyslogService {
             ai_tool: None,
             ai_project: None,
             ai_session_id: None,
+            exclude_ai: false,
         };
         let logs = self
             .run_db(move |pool| db::search_logs(pool, &params))
@@ -221,6 +223,85 @@ impl SyslogService {
         Ok(result.into())
     }
 
+    pub async fn correlate_ai_logs(
+        &self,
+        req: AiCorrelateRequest,
+    ) -> ServiceResult<AiCorrelateResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let window = req.window_minutes.unwrap_or(5).clamp(1, 120);
+        let related_limit = req.events_per_anchor.unwrap_or(25).clamp(1, 200);
+        let anchor_limit = req.limit.unwrap_or(10).clamp(1, 50);
+        let severity_min = req.severity_min.unwrap_or_else(|| "warning".into());
+        let severity_levels = severity_at_or_above(&severity_min)?;
+        let anchor_params = db::AiCorrelateParams {
+            ai_project: req.project,
+            ai_tool: req.tool,
+            ai_session_id: req.session_id,
+            ai_query: req.ai_query,
+            from,
+            to,
+            limit: Some(anchor_limit),
+        };
+        let mut anchors = self
+            .run_db(move |pool| db::search_ai_anchors(pool, &anchor_params))
+            .await?;
+        let anchors_truncated = anchors.len() > anchor_limit as usize;
+        anchors.truncate(anchor_limit as usize);
+
+        let mut correlated = Vec::with_capacity(anchors.len());
+        let mut total_related_events = 0usize;
+        for anchor in anchors {
+            let ref_dt = parse_required_timestamp(&anchor.timestamp, "anchor.timestamp")?;
+            let delta = TimeDelta::try_minutes(i64::from(window))
+                .ok_or_else(|| ServiceError::InvalidInput("duration overflow".into()))?;
+            let window_from = rfc3339_z(ref_dt - delta);
+            let window_to = rfc3339_z(ref_dt + delta);
+            let search_params = SearchParams {
+                query: req.log_query.clone(),
+                hostname: req.hostname.clone(),
+                source_ip: req.source_ip.clone(),
+                severity: None,
+                severity_in: Some(severity_levels.clone()),
+                app_name: req.app_name.clone(),
+                facility: None,
+                process_id: None,
+                from: Some(window_from.clone()),
+                to: Some(window_to.clone()),
+                limit: Some(related_limit + 1),
+                ai_tool: None,
+                ai_project: None,
+                ai_session_id: None,
+                exclude_ai: true,
+            };
+            let mut related = self
+                .run_db(move |pool| db::search_logs(pool, &search_params))
+                .await?;
+            let related_truncated = related.len() > related_limit as usize;
+            related.truncate(related_limit as usize);
+            total_related_events += related.len();
+            correlated.push(AiCorrelationAnchor {
+                entry: anchor.into(),
+                window_from,
+                window_to,
+                related: related.into_iter().map(Into::into).collect(),
+                related_truncated,
+            });
+        }
+
+        Ok(AiCorrelateResponse {
+            window_minutes: window,
+            severity_min,
+            total_anchors: correlated.len(),
+            anchor_rows: correlated.len(),
+            anchor_limit: anchor_limit as usize,
+            anchors_truncated,
+            related_limit_per_anchor: related_limit as usize,
+            total_related_events,
+            anchors: correlated,
+        })
+    }
+
     pub async fn usage_blocks(
         &self,
         req: UsageBlocksRequest,
@@ -316,6 +397,7 @@ impl SyslogService {
             ai_tool: None,
             ai_project: None,
             ai_session_id: None,
+            exclude_ai: false,
         };
         let mut rows = self
             .run_db(move |pool| db::search_logs(pool, &params))

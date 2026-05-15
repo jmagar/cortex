@@ -327,6 +327,53 @@ fn make_ai_entry(
 }
 
 #[test]
+fn search_logs_exclude_ai_filters_structured_and_transcript_app_rows() {
+    let (pool, _dir) = test_pool();
+    let mut legacy_transcript = make_entry(
+        "2026-01-01T00:00:00Z",
+        "localhost",
+        "info",
+        "legacy codex transcript event",
+    );
+    legacy_transcript.app_name = Some("codex-transcript".into());
+
+    insert_logs_batch(
+        &pool,
+        &[
+            legacy_transcript,
+            make_ai_entry(
+                "2026-01-01T00:00:01Z",
+                "localhost",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "structured ai transcript event",
+            ),
+            make_entry(
+                "2026-01-01T00:00:02Z",
+                "host-a",
+                "warning",
+                "real host event",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let rows = search_logs(
+        &pool,
+        &SearchParams {
+            query: Some("event".into()),
+            exclude_ai: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].message, "real host event");
+}
+
+#[test]
 fn search_ai_sessions_groups_results() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(
