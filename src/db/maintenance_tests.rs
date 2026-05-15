@@ -34,6 +34,7 @@ fn make_entry(ts: &str, host: &str, severity: &str, msg: &str) -> LogBatchEntry 
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     }
 }
 
@@ -254,6 +255,7 @@ fn make_tagged(ts: &str, host: &str, severity: &str, app: &str, msg: &str) -> Lo
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     }
 }
 

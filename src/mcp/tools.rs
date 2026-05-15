@@ -1,11 +1,11 @@
 use serde_json::{json, Value};
 
 use crate::app::{
-    AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
-    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, PatternsRequest, ProjectContextRequest,
-    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
-    UsageBlocksRequest,
+    AiCorrelateRequest, AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest,
+    CorrelateEventsRequest, CussSearchRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
+    PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
+    SilentHostsRequest, TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
 use super::schemas::SYSLOG_ACTIONS;
@@ -37,6 +37,8 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "apps" => tool_list_apps(state, args).await,
         "sessions" => tool_list_sessions(state, args).await,
         "search_sessions" => tool_search_sessions(state, args).await,
+        "cuss" => tool_search_cusses(state, args).await,
+        "ai_correlate" => tool_ai_correlate(state, args).await,
         "usage_blocks" => tool_usage_blocks(state, args).await,
         "project_context" => tool_project_context(state, args).await,
         "list_ai_tools" => tool_list_ai_tools(state, args).await,
@@ -150,6 +152,62 @@ async fn tool_search_sessions(state: &AppState, args: Value) -> anyhow::Result<V
             from: string_arg(&args, "from"),
             to: string_arg(&args, "to"),
             limit: u32_arg(&args, "limit")?,
+        })
+        .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_search_cusses(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let terms = args
+        .get("terms")
+        .map(|value| {
+            if let Some(values) = value.as_array() {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(ToString::to_string))
+                    .collect()
+            } else {
+                value
+                    .as_str()
+                    .map(|term| vec![term.to_string()])
+                    .unwrap_or_default()
+            }
+        })
+        .unwrap_or_default();
+    let response = state
+        .service
+        .search_cusses(CussSearchRequest {
+            project: string_arg(&args, "project"),
+            tool: string_arg(&args, "tool"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
+            before: u32_arg(&args, "before")?,
+            after: u32_arg(&args, "after")?,
+            terms,
+        })
+        .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_ai_correlate(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let response = state
+        .service
+        .correlate_ai_logs(AiCorrelateRequest {
+            project: string_arg(&args, "project"),
+            tool: string_arg(&args, "tool"),
+            session_id: string_arg(&args, "session_id"),
+            ai_query: string_arg(&args, "ai_query"),
+            log_query: string_arg(&args, "log_query"),
+            hostname: string_arg(&args, "hostname"),
+            source_ip: string_arg(&args, "source_ip"),
+            app_name: string_arg(&args, "app_name"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            window_minutes: u32_arg(&args, "window_minutes")?,
+            severity_min: string_arg(&args, "severity_min"),
+            limit: u32_arg(&args, "limit")?,
+            events_per_anchor: u32_arg(&args, "events_per_anchor")?,
         })
         .await?;
     Ok(serde_json::to_value(response)?)
@@ -504,7 +562,7 @@ phrase matching with quotes, prefix matching with *.
 **Parameters:**
 - `query` (string) — FTS5 search query, e.g. `'kernel panic'`, `'OOM AND killer'`, `'"connection refused"'`, `'error*'`
 - `hostname` (string, optional) — filter by hostname (exact match); use `syslog hosts` to enumerate
-- `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; Docker ingest uses `docker://host/container/stream`.
+- `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
 - `severity` (string, optional) — one of: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`
 - `app_name` (string, optional) — filter by application name, e.g. `sshd`, `dockerd`, `kernel`
 - `facility` (string, optional) — filter by syslog facility name (e.g. `kern`, `auth`, `daemon`)
@@ -521,7 +579,7 @@ Equivalent to `tail -f` across all hosts.
 
 **Parameters:**
 - `hostname` (string, optional) — filter to a specific host
-- `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; Docker ingest uses `docker://host/container/stream`.
+- `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
 - `app_name` (string, optional) — filter to a specific application
 - `severity_min` (string, optional) — only return entries at or above this severity (e.g. `warning` returns warning + worse)
 - `n` (integer, optional) — number of recent entries (default 50, max 500)
@@ -579,6 +637,38 @@ Session-ranked full-text search across AI transcript rows. Returns grouped sessi
 
 ---
 
+## syslog cuss
+Detects profanity in AI transcript rows and returns each hit with surrounding rows from the same AI session.
+
+**Parameters:**
+- `project` (string, optional) — exact project path filter
+- `tool` (string, optional) — AI tool filter
+- `from`, `to` (string, optional) — time range (ISO 8601)
+- `limit` (integer, optional) — max matches (default 20, max 100)
+- `before`, `after` (integer, optional) — same-session context rows around each hit (default 2, max 20)
+- `terms` (array of strings, optional) — custom detector terms; replaces the built-in list
+
+---
+
+## syslog ai_correlate
+Cross-reference AI transcript anchor rows against nearby non-AI logs in the same database.
+Related rows explicitly exclude AI transcript rows, so the result surfaces host, Docker, OTLP, and syslog context around the AI session instead of duplicating transcript rows.
+
+**Parameters:**
+- `project` (string, optional) — exact AI project path filter
+- `tool` (string, optional) — AI tool filter
+- `session_id` (string, optional) — exact AI session id filter
+- `ai_query` (string, optional) — FTS5 query over AI transcript anchor rows
+- `log_query` (string, optional) — FTS5 query over related non-AI logs
+- `hostname`, `source_ip`, `app_name` (string, optional) — related log filters
+- `from`, `to` (string, optional) — AI anchor time range (ISO 8601)
+- `window_minutes` (integer, optional) — minutes before and after each AI anchor (default 5, max 120)
+- `severity_min` (string, optional) — minimum related log severity (default `warning`)
+- `limit` (integer, optional) — max AI anchors (default 10, max 50)
+- `events_per_anchor` (integer, optional) — max related non-AI rows per anchor (default 25, max 200)
+
+---
+
 ## syslog usage_blocks
 AI activity bucketed into deterministic 5-hour UTC windows.
 
@@ -619,7 +709,9 @@ Distinct AI projects with counts, tools used, and first/last seen timestamps.
 
 ## syslog source_ips
 List distinct source identifiers (network sender IP:port for syslog input,
-`docker://host/container/stream` for Docker ingest) with log counts, the number
+peer IP for OTLP input,
+`docker://host/container/stream` for Docker stream ingest, or
+`docker-event://host/container/action` for Docker lifecycle ingest) with log counts, the number
 of distinct hostnames each sender claims, and up to 10 top hostnames per sender.
 `source_ip` is the only network-verified identity — useful for spoof detection
 on hostname-spoofable formats (e.g. UniFi CEF).
@@ -638,7 +730,7 @@ of a reference timestamp. Results are grouped by host and ordered by time.
 - `window_minutes` (integer, optional) — minutes before and after reference_time to search (default 5, max 60)
 - `severity_min` (string, optional) — minimum severity to include (default `warning`); `debug` returns everything
 - `hostname` (string, optional) — limit correlation to a specific host
-- `source_ip` (string, optional) — limit correlation to an exact source identifier. Syslog uses verified `IP:port`; Docker ingest uses `docker://host/container/stream`.
+- `source_ip` (string, optional) — limit correlation to an exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
 - `query` (string, optional) — optional FTS query to narrow results
 - `limit` (integer, optional) — max total events to return (default 500, max 999)
 

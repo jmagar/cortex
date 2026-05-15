@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 /// from positional swaps between structurally identical `String`/`Option<String>` fields.
 ///
 /// For syslog input, `source_ip` records the actual network sender address (IP:port)
-/// independent of the hostname claimed in the syslog message body. Docker ingest uses
-/// a configured `docker://host/container/stream` source identifier instead.
+/// independent of the hostname claimed in the syslog message body. OTLP stores the
+/// peer IP without the ephemeral port. Docker ingest uses configured
+/// `docker://host/container/stream` and `docker-event://host/container/action`
+/// source identifiers instead.
 #[derive(Debug, Clone)]
 pub struct LogBatchEntry {
     pub timestamp: String,
@@ -19,13 +21,15 @@ pub struct LogBatchEntry {
     pub message: String,
     pub raw: String,
     /// Source identifier. Syslog input uses the actual network sender address
-    /// (IP:port); Docker ingest uses docker://host/container/stream.
+    /// (IP:port); OTLP uses peer IP; Docker ingest uses
+    /// docker://host/container/stream and docker-event://host/container/action.
     pub source_ip: String,
     pub docker_checkpoint: Option<DockerCheckpoint>,
     pub ai_tool: Option<String>,
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
     pub ai_transcript_path: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +133,47 @@ pub struct SearchAiSessionsResult {
     pub candidate_window_truncated: bool,
     pub truncated: bool,
     pub sessions: Vec<SearchedAiSessionEntry>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AiCussParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub before: Option<u32>,
+    pub after: Option<u32>,
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCussMatch {
+    pub term: String,
+    pub entry: LogEntry,
+    pub before: Vec<LogEntry>,
+    pub after: Vec<LogEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCussResult {
+    pub terms: Vec<String>,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
+    pub truncated: bool,
+    pub matches: Vec<AiCussMatch>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiCorrelateParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub ai_session_id: Option<String>,
+    pub ai_query: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -263,13 +308,15 @@ pub struct LogEntry {
     pub message: String,
     pub received_at: String,
     /// Source identifier. Syslog entries use verified network sender address
-    /// (IP:port); Docker ingest entries use docker://host/container/stream.
+    /// (IP:port); OTLP entries use peer IP; Docker ingest entries use
+    /// docker://host/container/stream or docker-event://host/container/action.
     /// Empty string for legacy rows inserted before this column was added.
     pub source_ip: String,
     pub ai_tool: Option<String>,
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
     pub ai_transcript_path: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 /// Parameters for searching logs
@@ -280,7 +327,8 @@ pub struct SearchParams {
     /// Filter by hostname
     pub hostname: Option<String>,
     /// Filter by source identifier. Syslog uses verified network sender address
-    /// (IP:port); Docker ingest uses docker://host/container/stream.
+    /// (IP:port); OTLP uses peer IP; Docker ingest uses
+    /// docker://host/container/stream or docker-event://host/container/action.
     pub source_ip: Option<String>,
     /// Filter by severity (exact match: emerg, alert, crit, err, warning, notice, info, debug)
     pub severity: Option<String>,
@@ -301,6 +349,7 @@ pub struct SearchParams {
     pub ai_tool: Option<String>,
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
+    pub exclude_ai: bool,
 }
 
 #[cfg(test)]

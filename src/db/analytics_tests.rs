@@ -36,6 +36,7 @@ fn entry_with_source_ip(
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     }
 }
 
@@ -254,6 +255,7 @@ fn ai_entry(ts: &str, tool: &str, project: &str, session_id: &str, message: &str
         ai_project: Some(project.to_string()),
         ai_session_id: Some(session_id.to_string()),
         ai_transcript_path: Some(format!("{project}/{session_id}.jsonl")),
+        metadata_json: None,
     }
 }
 

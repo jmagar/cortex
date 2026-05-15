@@ -28,6 +28,27 @@ fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> Lo
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
+    }
+}
+
+fn ai_entry(ts: &str, msg: &str) -> LogBatchEntry {
+    LogBatchEntry {
+        timestamp: ts.to_string(),
+        hostname: "localhost".into(),
+        facility: Some("local0".into()),
+        severity: "info".into(),
+        app_name: Some("codex-transcript".into()),
+        process_id: None,
+        message: msg.to_string(),
+        raw: msg.to_string(),
+        source_ip: "transcript://codex".into(),
+        docker_checkpoint: None,
+        ai_tool: Some("codex".into()),
+        ai_project: Some("/tmp/project".into()),
+        ai_session_id: Some("sess-1".into()),
+        ai_transcript_path: Some("/tmp/project/sess-1.jsonl".into()),
+        metadata_json: None,
     }
 }
 
@@ -80,6 +101,56 @@ async fn correlate_events_normalizes_window_groups_and_truncates() {
     assert!(response.truncated);
     assert_eq!(response.total_events, 1);
     assert_eq!(response.hosts_count, 1);
+}
+
+#[tokio::test]
+async fn correlate_ai_logs_cross_references_non_ai_logs_only() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[
+            ai_entry("2026-01-01T00:00:00Z", "debug deployment failure"),
+            entry(
+                "2026-01-01T00:01:00Z",
+                "host-a",
+                "err",
+                "container failed during deployment",
+                "10.0.0.1:514",
+            ),
+            entry(
+                "2026-01-01T00:02:00Z",
+                "host-a",
+                "info",
+                "filtered by severity",
+                "10.0.0.1:514",
+            ),
+            ai_entry("2026-01-01T00:03:00Z", "ai row should not be related"),
+        ],
+    )
+    .unwrap();
+
+    let response = service
+        .correlate_ai_logs(AiCorrelateRequest {
+            project: Some("/tmp/project".into()),
+            tool: Some("codex".into()),
+            ai_query: Some("deployment".into()),
+            log_query: Some("container".into()),
+            window_minutes: Some(5),
+            severity_min: Some("warning".into()),
+            limit: Some(1),
+            events_per_anchor: Some(5),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.total_anchors, 1);
+    assert_eq!(response.total_related_events, 1);
+    assert_eq!(
+        response.anchors[0].related[0].message,
+        "container failed during deployment"
+    );
+    assert!(response.anchors[0].related[0].ai_project.is_none());
 }
 
 #[tokio::test]
@@ -159,6 +230,7 @@ async fn ai_service_methods_return_seeded_data() {
             ai_project: Some("/tmp/project".into()),
             ai_session_id: Some("sess-1".into()),
             ai_transcript_path: Some("/tmp/project/session.jsonl".into()),
+            metadata_json: None,
         }],
     )
     .unwrap();

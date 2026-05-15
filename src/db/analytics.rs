@@ -294,7 +294,7 @@ pub fn get_ai_project_context(
     let mut recent_sql = String::from(
         "SELECT id, timestamp, hostname, facility, severity,
                 app_name, process_id, message, received_at, source_ip,
-                ai_tool, ai_project, ai_session_id, ai_transcript_path
+                ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
          FROM logs
          WHERE ai_project = ?1",
     );
@@ -778,7 +778,7 @@ pub fn fetch_log_by_id(pool: &DbPool, id: i64) -> Result<Option<LogEntryWithRaw>
     let mut stmt = conn.prepare(
         "SELECT id, timestamp, hostname, facility, severity,
                 app_name, process_id, message, raw, received_at, source_ip,
-                ai_tool, ai_project, ai_session_id, ai_transcript_path
+                ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
          FROM logs WHERE id = ?1",
     )?;
     let mut rows = stmt.query(params![id])?;
@@ -806,7 +806,7 @@ pub fn context_around(
             let mut before_stmt = conn.prepare(
                 "SELECT id, timestamp, hostname, facility, severity,
                         app_name, process_id, message, received_at, source_ip,
-                        ai_tool, ai_project, ai_session_id, ai_transcript_path
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
                  FROM logs
                  WHERE hostname = ?1
                    AND (timestamp < ?2 OR (timestamp = ?2 AND id < ?3))
@@ -823,7 +823,7 @@ pub fn context_around(
             let mut after_stmt = conn.prepare(
                 "SELECT id, timestamp, hostname, facility, severity,
                         app_name, process_id, message, received_at, source_ip,
-                        ai_tool, ai_project, ai_session_id, ai_transcript_path
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
                  FROM logs
                  WHERE hostname = ?1
                    AND (timestamp > ?2 OR (timestamp = ?2 AND id > ?3))
@@ -846,7 +846,7 @@ pub fn context_around(
             let mut before_stmt = conn.prepare(
                 "SELECT id, timestamp, hostname, facility, severity,
                         app_name, process_id, message, received_at, source_ip,
-                        ai_tool, ai_project, ai_session_id, ai_transcript_path
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
                  FROM logs
                  WHERE hostname = ?1 AND timestamp < ?2
                  ORDER BY timestamp DESC, id DESC
@@ -862,7 +862,7 @@ pub fn context_around(
             let mut after_stmt = conn.prepare(
                 "SELECT id, timestamp, hostname, facility, severity,
                         app_name, process_id, message, received_at, source_ip,
-                        ai_tool, ai_project, ai_session_id, ai_transcript_path
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
                  FROM logs
                  WHERE hostname = ?1 AND timestamp > ?2
                  ORDER BY timestamp ASC, id ASC
@@ -901,6 +901,7 @@ pub struct LogEntryWithRaw {
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
     pub ai_transcript_path: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 // -----------------------------------------------------------------------------

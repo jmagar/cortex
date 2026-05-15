@@ -21,6 +21,9 @@ syslog compose pull              # pull image for resolved Compose project
 syslog compose up                # run docker compose up -d for resolved service
 syslog compose restart           # restart resolved service
 syslog compose logs --tail 20    # bounded compose logs
+syslog db status                 # inspect SQLite maintenance state
+syslog db integrity              # run SQLite integrity_check
+syslog db backup                 # create WAL-safe SQLite backup
 ```
 
 ```bash
@@ -72,6 +75,12 @@ One MCP tool: **`syslog`** — dispatches by `action` argument.
 | `stats` | DB stats (total logs, logical/physical size, free disk, configured thresholds, write-block state, time range) |
 | `status` | Lightweight runtime and DB health |
 | `apps` | Distinct application names with log and host counts |
+| `sessions` | AI transcript sessions grouped by project/tool/session/host |
+| `search_sessions` | Full-text search over indexed AI transcript sessions |
+| `usage_blocks` | AI transcript activity grouped into time blocks |
+| `project_context` | Recent AI transcript context for a project |
+| `list_ai_tools` | AI tools present in transcript metadata |
+| `list_ai_projects` | AI projects present in transcript metadata |
 | `source_ips` | Distinct source identifiers with hostname breakdown |
 | `timeline` | Bucketed counts over time |
 | `patterns` | Near-duplicate message template clusters |
@@ -82,11 +91,13 @@ One MCP tool: **`syslog`** — dispatches by `action` argument.
 | `clock_skew` | Per-host received_at minus timestamp distribution |
 | `anomalies` | Recent vs baseline volume/error comparison |
 | `compare` | Side-by-side comparison of two time ranges |
+| `compose_status` | Redacted Docker Compose runtime status projection |
+| `compose_doctor` | Redacted Docker Compose diagnostics projection |
 | `help` | Built-in usage reference |
 
-## Plugin Commands
+## Plugin Skills
 
-Slash commands available after installing the Claude Code plugin (`plugins/commands/`):
+Skills available after installing the Claude Code plugin (`plugins/skills/`):
 
 | Command | Description |
 |---------|-------------|
@@ -160,6 +171,7 @@ RUST_LOG=info
 | `scripts/backup.sh` | WAL-safe SQLite backup script (checkpoint + `.backup` method) |
 | `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset helper for local/dev recovery |
 | `scripts/bump-version.sh` | Bump version across all version-bearing files; called by `just publish` |
+| `syslog db status\|integrity\|checkpoint\|vacuum\|backup` | Direct SQLite maintenance commands for the configured DB |
 | `scripts/check-version-sync.sh` | Assert all version-bearing files have the same version (used in CI) |
 | `scripts/block-env-commits.sh` | Pre-commit hook that blocks commits containing env credential patterns |
 | `CHANGELOG.md` | Version history; entry required per version bump |

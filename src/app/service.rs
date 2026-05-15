@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,10 +7,12 @@ use tokio::sync::Semaphore;
 
 use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
-    AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest, ClockSkewResponse,
-    CompareRequest, CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
-    CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
-    GetLogResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
+    AiCorrelateRequest, AiCorrelateResponse, AiCorrelationAnchor, AiSessionEntry, AnomaliesRequest,
+    AnomaliesResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse,
+    ContextRequest, ContextResponse, CorrelateEventsRequest, CorrelateEventsResponse,
+    CussSearchRequest, CussSearchResponse, DbBackupResult, DbCheckpointResult, DbIntegrityResult,
+    DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest, GetErrorsResponse,
+    GetLogRequest, GetLogResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
     ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
     ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
     ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse, ProjectContextRequest,
@@ -92,6 +95,7 @@ impl SyslogService {
             ai_tool: None,
             ai_project: None,
             ai_session_id: None,
+            exclude_ai: false,
         };
         let logs = self
             .run_db(move |pool| db::search_logs(pool, &params))
@@ -200,6 +204,104 @@ impl SyslogService {
         Ok(result.into())
     }
 
+    pub async fn search_cusses(&self, req: CussSearchRequest) -> ServiceResult<CussSearchResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let params = db::AiCussParams {
+            ai_project: req.project,
+            ai_tool: req.tool,
+            from,
+            to,
+            limit: req.limit,
+            before: req.before,
+            after: req.after,
+            terms: req.terms,
+        };
+        let result = self
+            .run_db(move |pool| db::search_ai_cusses(pool, &params))
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn correlate_ai_logs(
+        &self,
+        req: AiCorrelateRequest,
+    ) -> ServiceResult<AiCorrelateResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let window = req.window_minutes.unwrap_or(5).clamp(1, 120);
+        let related_limit = req.events_per_anchor.unwrap_or(25).clamp(1, 200);
+        let anchor_limit = req.limit.unwrap_or(10).clamp(1, 50);
+        let severity_min = req.severity_min.unwrap_or_else(|| "warning".into());
+        let severity_levels = severity_at_or_above(&severity_min)?;
+        let anchor_params = db::AiCorrelateParams {
+            ai_project: req.project,
+            ai_tool: req.tool,
+            ai_session_id: req.session_id,
+            ai_query: req.ai_query,
+            from,
+            to,
+            limit: Some(anchor_limit),
+        };
+        let mut anchors = self
+            .run_db(move |pool| db::search_ai_anchors(pool, &anchor_params))
+            .await?;
+        let anchors_truncated = anchors.len() > anchor_limit as usize;
+        anchors.truncate(anchor_limit as usize);
+
+        let mut correlated = Vec::with_capacity(anchors.len());
+        let mut total_related_events = 0usize;
+        for anchor in anchors {
+            let ref_dt = parse_required_timestamp(&anchor.timestamp, "anchor.timestamp")?;
+            let delta = TimeDelta::try_minutes(i64::from(window))
+                .ok_or_else(|| ServiceError::InvalidInput("duration overflow".into()))?;
+            let window_from = rfc3339_z(ref_dt - delta);
+            let window_to = rfc3339_z(ref_dt + delta);
+            let search_params = SearchParams {
+                query: req.log_query.clone(),
+                hostname: req.hostname.clone(),
+                source_ip: req.source_ip.clone(),
+                severity: None,
+                severity_in: Some(severity_levels.clone()),
+                app_name: req.app_name.clone(),
+                facility: None,
+                process_id: None,
+                from: Some(window_from.clone()),
+                to: Some(window_to.clone()),
+                limit: Some(related_limit + 1),
+                ai_tool: None,
+                ai_project: None,
+                ai_session_id: None,
+                exclude_ai: true,
+            };
+            let mut related = self
+                .run_db(move |pool| db::search_logs(pool, &search_params))
+                .await?;
+            let related_truncated = related.len() > related_limit as usize;
+            related.truncate(related_limit as usize);
+            total_related_events += related.len();
+            correlated.push(AiCorrelationAnchor {
+                entry: anchor.into(),
+                window_from,
+                window_to,
+                related: related.into_iter().map(Into::into).collect(),
+                related_truncated,
+            });
+        }
+
+        Ok(AiCorrelateResponse {
+            window_minutes: window,
+            severity_min,
+            total_anchors: correlated.len(),
+            anchor_rows: correlated.len(),
+            anchor_limit: anchor_limit as usize,
+            anchors_truncated,
+            related_limit_per_anchor: related_limit as usize,
+            total_related_events,
+            anchors: correlated,
+        })
+    }
+
     pub async fn usage_blocks(
         &self,
         req: UsageBlocksRequest,
@@ -295,6 +397,7 @@ impl SyslogService {
             ai_tool: None,
             ai_project: None,
             ai_session_id: None,
+            exclude_ai: false,
         };
         let mut rows = self
             .run_db(move |pool| db::search_logs(pool, &params))
@@ -327,6 +430,126 @@ impl SyslogService {
         Ok(stats)
     }
 
+    pub async fn db_status(&self) -> ServiceResult<DbMaintenanceStatus> {
+        let storage = self.storage.clone();
+        self.run_db(move |pool| {
+            let page_count = db::db_pragma_i64(pool, "page_count")?;
+            let freelist_count = db::db_pragma_i64(pool, "freelist_count")?;
+            let page_size = db::db_pragma_i64(pool, "page_size")?;
+            let auto_vacuum = db::db_pragma_i64(pool, "auto_vacuum")?;
+            let journal_mode = db::db_pragma_string(pool, "journal_mode")?;
+            let logical_size_bytes =
+                ((page_count - freelist_count).max(0) * page_size).max(0) as u64;
+            let physical_size_bytes = db::physical_size_bytes(&storage.db_path)?;
+            let wal_size_bytes = std::fs::metadata(wal_path(&storage.db_path))
+                .ok()
+                .map(|metadata| metadata.len());
+            let shm_size_bytes = std::fs::metadata(shm_path(&storage.db_path))
+                .ok()
+                .map(|metadata| metadata.len());
+            Ok(DbMaintenanceStatus {
+                db_path: storage.db_path,
+                page_count,
+                freelist_count,
+                page_size,
+                logical_size_bytes,
+                physical_size_bytes,
+                wal_size_bytes,
+                shm_size_bytes,
+                auto_vacuum,
+                journal_mode,
+                integrity_ok: None,
+                integrity_messages: Vec::new(),
+            })
+        })
+        .await
+    }
+
+    pub async fn db_integrity(&self) -> ServiceResult<DbIntegrityResult> {
+        self.run_db(move |pool| {
+            let messages = db::db_integrity_check(pool)?;
+            Ok(DbIntegrityResult {
+                ok: messages.len() == 1 && messages.first().is_some_and(|value| value == "ok"),
+                messages,
+            })
+        })
+        .await
+    }
+
+    pub async fn db_checkpoint(&self, mode: String) -> ServiceResult<DbCheckpointResult> {
+        self.run_db(move |pool| {
+            let (busy, log_frames, checkpointed_frames) = db::db_wal_checkpoint(pool, &mode)?;
+            Ok(DbCheckpointResult {
+                mode,
+                busy,
+                log_frames,
+                checkpointed_frames,
+            })
+        })
+        .await
+    }
+
+    pub async fn db_vacuum(
+        &self,
+        full: bool,
+        incremental_pages: u32,
+    ) -> ServiceResult<DbVacuumResult> {
+        let storage = self.storage.clone();
+        self.run_db(move |pool| {
+            let before_physical_size_bytes = db::physical_size_bytes(&storage.db_path)?;
+            if full {
+                db::db_full_vacuum(pool)?;
+            } else {
+                db::db_incremental_vacuum(pool, incremental_pages)?;
+            }
+            let after_physical_size_bytes = db::physical_size_bytes(&storage.db_path)?;
+            Ok(DbVacuumResult {
+                full,
+                incremental_pages,
+                before_physical_size_bytes,
+                after_physical_size_bytes,
+            })
+        })
+        .await
+    }
+
+    pub async fn db_backup(&self, output: Option<PathBuf>) -> ServiceResult<DbBackupResult> {
+        let db_path = self.storage.db_path.clone();
+        self.run_db(move |_pool| {
+            let backup_path = backup_path_for(&db_path, output)?;
+            if let Some(parent) = backup_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let escaped = backup_path.to_string_lossy().replace('\'', "''");
+            let output = std::process::Command::new("sqlite3")
+                .arg(&db_path)
+                .arg(format!(".backup '{escaped}'"))
+                .output()
+                .map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::NotFound {
+                        anyhow::anyhow!(
+                            "sqlite3 command not found in PATH; install sqlite3 to use database backup"
+                        )
+                    } else {
+                        error.into()
+                    }
+                })?;
+            if !output.status.success() {
+                anyhow::bail!(
+                    "sqlite3 backup failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            let size_bytes = std::fs::metadata(&backup_path)?.len();
+            Ok(DbBackupResult {
+                db_path,
+                backup_path,
+                size_bytes,
+            })
+        })
+        .await
+    }
+
     pub async fn index_ai_roots(
         &self,
         path: Option<String>,
@@ -338,7 +561,14 @@ impl SyslogService {
             .as_deref()
             .map(|raw| parse_required_timestamp(raw, "since"))
             .transpose()?
-            .and_then(|dt| dt.timestamp_nanos_opt());
+            .map(|dt| {
+                dt.timestamp_nanos_opt().ok_or_else(|| {
+                    ServiceError::InvalidInput(
+                        "since timestamp out of i64 nanoseconds range".to_string(),
+                    )
+                })
+            })
+            .transpose()?;
         self.run_db(move |pool| {
             scanner::index_roots_with_options(
                 pool,
@@ -555,6 +785,7 @@ impl SyslogService {
                             ai_project: row.ai_project.clone(),
                             ai_session_id: row.ai_session_id.clone(),
                             ai_transcript_path: row.ai_transcript_path.clone(),
+                            metadata_json: row.metadata_json.clone(),
                         };
                         (entry, row.hostname, row.timestamp, Some(row.id))
                     } else {
@@ -583,6 +814,7 @@ impl SyslogService {
                             ai_project: None,
                             ai_session_id: None,
                             ai_transcript_path: None,
+                            metadata_json: None,
                         };
                         (synthetic, hostname, timestamp, None)
                     };
@@ -760,13 +992,28 @@ fn classify_scanner_error(error: ServiceError) -> ServiceError {
 }
 
 fn scanner_error_is_invalid_input(error: &anyhow::Error) -> bool {
-    let message = error.to_string();
-    message.contains("unsafe transcript scan path")
-        || message.contains("symlinks are not allowed")
-        || message.contains("file exceeds max size")
-        || message.contains("expected a file path")
-        || message.contains("No such file or directory")
-        || message.contains("os error 2")
+    scanner::is_invalid_input_error(error)
+}
+
+fn wal_path(db_path: &std::path::Path) -> PathBuf {
+    PathBuf::from(format!("{}-wal", db_path.display()))
+}
+
+fn shm_path(db_path: &std::path::Path) -> PathBuf {
+    PathBuf::from(format!("{}-shm", db_path.display()))
+}
+
+fn backup_path_for(db_path: &std::path::Path, output: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    let timestamp = Utc::now().format("%Y-%m-%d-%H%M%S");
+    match output {
+        Some(path) if path.extension().is_some() => Ok(path),
+        Some(dir) => Ok(dir.join(format!("syslog-{timestamp}.db"))),
+        None => Ok(db_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("backups")
+            .join(format!("syslog-{timestamp}.db"))),
+    }
 }
 
 fn validate_optional_severity(severity: Option<String>) -> ServiceResult<Option<String>> {

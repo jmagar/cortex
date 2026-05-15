@@ -123,6 +123,7 @@ fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> Lo
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     }
 }
 
@@ -144,6 +145,7 @@ fn minimal_args_for_action(action: &str) -> Value {
     match action {
         "correlate" => json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"}),
         "search_sessions" => json!({"action": action, "query": "mounted"}),
+        "ai_correlate" => json!({"action": action, "project": "/tmp/project"}),
         "project_context" => json!({"action": action, "project": "/tmp/project"}),
         "context" => json!({"action": action, "log_id": 1}),
         "get" => json!({"action": action, "id": 1}),

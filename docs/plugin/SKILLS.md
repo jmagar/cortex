@@ -39,7 +39,7 @@ plugins/
 ### Contents
 
 `plugins/skills/syslog/SKILL.md` includes:
-- Tool inventory (1 tool: `syslog`, with all 8 actions described)
+- Tool inventory (1 tool: `syslog`, with the current MCP action set described)
 - Parameter reference for each tool
 - FTS5 query syntax guide
 - Common workflow patterns (health check, incident investigation, host onboarding)

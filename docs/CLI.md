@@ -143,6 +143,21 @@ candidate window. JSON includes `total_candidates`, `candidate_rows`,
 candidate window is truncated, narrow with `--project`, `--tool`, `--from`, or
 `--to` for exact grouping within that filter.
 
+### `syslog ai cuss`
+
+Detect profanity in AI transcript rows and return surrounding rows from the same
+AI session.
+
+```bash
+syslog ai cuss --project /home/jmagar/workspace/syslog-mcp --limit 10 --before 3 --after 3
+syslog ai cuss --tool codex --term dang --term heck --json
+```
+
+By default this uses the built-in profanity list and returns 2 rows before and
+after each hit. Use repeated `--term WORD` flags to replace the built-in list
+with a custom detector. JSON includes `candidate_rows`, `candidate_cap`,
+`candidate_window_truncated`, `truncated`, and `matches[].{term,entry,before,after}`.
+
 ### `syslog ai blocks`
 
 Bucket AI activity into 5-hour UTC windows.
@@ -164,6 +179,20 @@ syslog ai context --project /home/jmagar/workspace/syslog-mcp --limit 5
 
 Recent representative entries are capped at 20 rows, and message snippets are
 bounded to 256 characters for predictable MCP/CLI payload size.
+
+### `syslog ai correlate`
+
+Cross-reference AI transcript rows against nearby non-AI logs.
+
+```bash
+syslog ai correlate --project /home/jmagar/workspace/syslog-mcp --limit 5
+syslog ai correlate --ai-query deploy --log-query container --window-minutes 10 --severity-min warning --json
+```
+
+The AI side uses transcript rows as anchors. The related log side searches the
+normal log corpus inside each anchor window and excludes AI transcript rows, so
+the command surfaces host, Docker, OTLP, and syslog events around the session
+without duplicating the transcript stream itself.
 
 ### `syslog ai tools`
 
@@ -224,6 +253,24 @@ syslog ai add --file ~/.codex/sessions/2026/05/14/session.jsonl --force
 `--force` reimports that one transcript from scratch without leaving duplicate
 log rows.
 
+### `syslog ai watch`
+
+Watch local Claude/Codex transcript roots and index stable changed `.jsonl`
+files as they are written.
+
+```bash
+syslog ai watch
+syslog ai watch --path ~/.claude/projects --no-initial-scan
+syslog ai watch --debounce-ms 750 --settle-ms 500 --max-retries 5 --json
+```
+
+The watcher is a host-local helper, not part of the Docker Compose runtime. It
+reuses the same scanner root policy, file support checks, checkpoints,
+append-offset indexing, duplicate suppression, parse-error persistence, and
+storage guardrails as `syslog ai index` and `syslog ai add`. The watcher only
+coalesces filesystem events, waits for files to stabilize, and retries
+transient parse/storage/file errors up to the configured cap.
+
 ### `syslog ai checkpoints`
 
 Inspect structured scanner checkpoints without opening SQLite directly.
@@ -271,16 +318,141 @@ Summarize the local AI indexing state.
 ```bash
 syslog ai doctor
 syslog ai doctor --json
+syslog ai doctor --strict-permissions --json
 ```
 
 The doctor reports the DB path in use, whether `~/.claude/projects` and
-`~/.codex/sessions` exist, checkpoint counts, missing checkpoint counts,
+`~/.codex/sessions` exist, whether they are readable/writable by the current
+user, owner uid/gid, mode, checkpoint counts, missing checkpoint counts,
 imported record count, parse error count, and the newest indexed transcript.
+Without `--strict-permissions`, this is a report-only command. With
+`--strict-permissions`, it exits non-zero when either transcript root is
+missing, unreadable, unwritable, or owned by another user.
+
+### `syslog ai watch-status`
+
+Inspect the supported user-systemd watcher without reading systemd internals by
+hand.
+
+```bash
+syslog ai watch-status
+syslog ai watch-status --json
+```
+
+The status command reports `syslog-ai-watch.service` active/enabled state, main
+PID, ExecStart, and the latest bounded journal lines. It uses the same user bus
+fallback as setup commands, so it still works from shells or tool environments
+that do not export `DBUS_SESSION_BUS_ADDRESS`.
+
+### `syslog ai smoke-watch`
+
+Run a bounded live smoke test of the host-local watcher. The command writes a
+temporary Claude transcript under `~/.claude/projects`, waits for the watcher to
+ingest it into the configured database, deletes the temp file, then waits for
+the missing-checkpoint pruner to clear scanner metadata.
+
+```bash
+syslog ai smoke-watch
+syslog ai smoke-watch --json
+```
+
+This is a live command. It requires `syslog-ai-watch.service` to be running and
+writing to the same `SYSLOG_MCP_DB_PATH` used by the CLI process.
+
+### `syslog setup ai-watch-service`
+
+Install, remove, or inspect the supported host-local user-systemd watcher for
+near-real-time transcript ingestion.
+
+```bash
+syslog setup ai-watch-service install
+syslog setup ai-watch-service check --json
+syslog setup ai-watch-service remove
+```
+
+Install resolves an absolute `syslog` binary and a concrete SQLite DB path,
+writes a private environment file under `~/.config/syslog-mcp/`, runs one
+initial `syslog ai index --json` phase, disables the older polling timer, and
+starts `syslog-ai-watch.service` with `syslog ai watch --no-initial-scan
+--json`. The helper is intentionally outside the container because it must read
+host-local Claude/Codex transcript files; Docker Compose remains the
+server/query deployment. Remove events from watched transcript files trigger a
+bounded missing-checkpoint prune pass, which keeps scanner/checkpoint metadata
+from accumulating entries for deleted local session files without deleting
+already imported log rows.
+
+Initial-index transcript data quality issues are warnings, not install-blocking
+errors. The setup JSON includes `blocking_errors`, `data_quality_warnings`,
+`service_enabled`, and `watcher_healthy` so automation can distinguish a broken
+watcher from historical transcript cleanup work. When data-quality warnings are
+reported, inspect them with:
+
+```bash
+syslog ai errors --limit 20
+syslog ai checkpoints --errors
+syslog ai index --json
+```
+
+Storage-blocked writes, invalid JSON from the indexer, command failures, stale
+unit content, permission failures, and failed `systemctl enable --now` phases
+remain blocking errors. Installing the watch service disables the older
+`syslog-ai-index.timer` to avoid duplicate background ingestion loops.
+
+### `syslog setup debug-wrapper`
+
+Install, remove, or inspect the host-local debug wrapper at
+`~/.local/bin/syslog`.
+
+```bash
+syslog setup debug-wrapper install
+syslog setup debug-wrapper check --json
+syslog setup debug-wrapper remove
+```
+
+The wrapper is intentionally machine-local. It `cd`s into the configured repo
+or worktree, builds `cargo build --bin syslog` into `.cache/cargo`, then execs
+the fresh debug binary. For non-server commands it defaults Docker ingest off
+and bearer auth mode on, so regular CLI checks do not accidentally start
+container-log ingestion or OAuth-only config paths. Override the source checkout
+with `SYSLOG_MCP_REPO=/path/to/syslog-mcp syslog ...`.
+
+### `syslog setup debug-compose`
+
+Install, remove, or inspect the local debug Compose override under
+`~/.syslog-mcp/compose/docker-compose.override.yml`.
+
+```bash
+syslog setup debug-compose install
+syslog setup debug-compose check --json
+syslog setup debug-compose remove
+```
+
+The override is machine-local. It points the canonical Docker Compose project at
+the current repo/worktree and builds the `syslog-mcp:local-debug` image with the
+debug profile. This keeps `docker compose up -d --build` aligned with the same
+code that the host debug wrapper builds. `syslog setup` also writes
+`COMPOSE_PROJECT_NAME=syslog-jmagar-lab` to the setup `.env`, so direct
+`docker compose` commands target the canonical project instead of a cwd-derived
+project name.
+
+### `syslog setup doctor`
+
+Run the repo-owned local setup checks as one command.
+
+```bash
+syslog setup doctor
+syslog setup doctor --json
+```
+
+The doctor checks setup directories, `.env`, Compose assets, the debug wrapper,
+the debug Compose override, transcript-root permissions, disabled legacy index
+timer state, active/enabled watcher state, and container freshness via
+`scripts/check-runtime-current.sh --allow-local-image`.
 
 ### `syslog setup ai-index-timer`
 
-Install, remove, or inspect the optional host-local user-systemd timer that
-periodically runs `syslog ai index`.
+Install, remove, or inspect the optional host-local user-systemd polling
+fallback that periodically runs `syslog ai index`.
 
 ```bash
 syslog setup ai-index-timer install
@@ -289,9 +461,10 @@ syslog setup ai-index-timer remove
 ```
 
 This helper is intentionally not part of the Docker container. It scans
-host-local transcript roots (`~/.claude/projects`, `~/.codex/sessions`) using
-the newest `syslog` binary on the host `PATH`, then writes to the configured
-SQLite DB. The container remains the Compose-managed server/query runtime.
+host-local transcript roots (`~/.claude/projects`, `~/.codex/sessions`) using a
+host `syslog` binary, then writes to the configured SQLite DB. Prefer
+`syslog setup ai-watch-service install` for normal use; the watcher install
+disables this timer to avoid duplicate background ingestion loops.
 
 ### `syslog doctor binary`
 
@@ -313,10 +486,16 @@ bash scripts/smoke-ai.sh
 bash scripts/smoke-ai-mcp.sh
 ```
 
+The smoke scripts resolve `SYSLOG_BIN` first, then `syslog` on `PATH`, then the
+repo-local debug binary at `target/debug/syslog`.
+
+With `syslog-ai-watch.service` installed, new transcript lines usually become
+searchable within a few seconds of the writer closing or flushing the file.
 Imported transcript messages are scrubbed for known credential/token patterns
-before storage and FTS indexing. Raw log actions can still expose scrubbed AI
-messages and local `ai_transcript_path` values, so do not expose the database or
-MCP endpoint to untrusted clients.
+before storage and FTS indexing, but scrubbing is best-effort. Raw log actions
+can still expose scrubbed AI messages and local `ai_transcript_path` values, so
+do not expose the database or MCP endpoint to clients that should not see local
+AI session content.
 
 ### `syslog correlate`
 
@@ -349,6 +528,71 @@ Print database and storage guardrail metrics.
 syslog stats
 syslog stats --json
 ```
+
+### `syslog db status`
+
+Print SQLite maintenance state for the configured database.
+
+```bash
+syslog db status
+syslog db status --json
+```
+
+The status includes page counts, freelist count, page size, logical and physical
+database size, WAL/SHM sidecar sizes when present, journal mode, auto-vacuum
+mode, and no integrity scan. Use `syslog db integrity` for the full SQLite
+integrity check on large databases.
+
+### `syslog db integrity`
+
+Run `PRAGMA integrity_check` against the configured database.
+
+```bash
+syslog db integrity
+syslog db integrity --json
+```
+
+The command exits non-zero if SQLite reports anything other than `ok`.
+
+### `syslog db checkpoint`
+
+Run a WAL checkpoint.
+
+```bash
+syslog db checkpoint
+syslog db checkpoint --mode full
+syslog db checkpoint --mode truncate --json
+```
+
+Supported modes are `passive`, `full`, `restart`, and `truncate`. The command
+exits non-zero if SQLite reports the checkpoint as busy.
+
+### `syslog db vacuum`
+
+Run SQLite vacuum maintenance.
+
+```bash
+syslog db vacuum
+syslog db vacuum --pages 5000
+syslog db vacuum --full
+```
+
+The default is `PRAGMA incremental_vacuum(1000)`. `--full` runs `VACUUM` and can
+take longer on large databases.
+
+### `syslog db backup`
+
+Create a WAL-safe SQLite backup using the `sqlite3` CLI `.backup` command.
+
+```bash
+syslog db backup
+syslog db backup --output ~/.syslog-mcp/backups
+syslog db backup --output /tmp/syslog-copy.db --json
+```
+
+When `--output` is a directory or omitted, the command writes a timestamped
+`syslog-YYYY-MM-DD-HHMMSS.db` backup. When `--output` has a file extension, it
+is used as the exact destination file.
 
 ### `syslog compose`
 
@@ -403,6 +647,8 @@ The direct CLI and MCP tool share the same business layer:
 | `syslog hosts` | `syslog` with `action="hosts"` |
 | `syslog sessions` | `syslog` with `action="sessions"` |
 | `syslog ai search` | `syslog` with `action="search_sessions"` |
+| `syslog ai cuss` | `syslog` with `action="cuss"` |
+| `syslog ai correlate` | `syslog` with `action="ai_correlate"` |
 | `syslog ai blocks` | `syslog` with `action="usage_blocks"` |
 | `syslog ai context` | `syslog` with `action="project_context"` |
 | `syslog ai tools` | `syslog` with `action="list_ai_tools"` |

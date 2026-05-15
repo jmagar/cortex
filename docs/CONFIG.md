@@ -113,7 +113,7 @@ POST=0
 
 `CONTAINERS=1` exposes the broader read-only Docker container API to every client that can reach docker-socket-proxy. Bind the proxy on a trusted private network, firewall it so only syslog-mcp can connect, or put it behind authenticated TLS. Hosts using plain `http://` must set `allow_insecure_http = true` in the hosts file; otherwise config validation rejects them.
 
-Docker ingest is not included in the default smoke test because it requires a live docker-socket-proxy-compatible endpoint. For integration coverage, run a disposable docker-socket-proxy or mocked Docker HTTP fixture, set `SYSLOG_DOCKER_INGEST_ENABLED=true`, emit a unique container stdout/stderr line, and verify it with `search` or `tail`. Docker-ingested rows identify their source as `docker://<host>/<container>/<stream>`.
+Docker ingest is not included in the default smoke test because it requires a live docker-socket-proxy-compatible endpoint. For integration coverage, run a disposable docker-socket-proxy or mocked Docker HTTP fixture, set `SYSLOG_DOCKER_INGEST_ENABLED=true`, emit a unique container stdout/stderr line, and verify it with `search` or `tail`. Container stream rows identify their source as `docker://<host>/<container>/<stream>`. Container lifecycle events such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, and `oom` identify their source as `docker-event://<host>/<container>/<action>` and use `facility=docker`.
 
 ### MCP server (`SYSLOG_MCP_*`)
 
@@ -217,10 +217,12 @@ When installed as a Claude Code plugin, users are prompted for:
 
 | Field | Sensitive | Description |
 | --- | --- | --- |
-| `syslog_mcp_url` | no | Full MCP endpoint URL (e.g. `https://syslog.example.com/mcp`) |
-| `syslog_mcp_token` | yes | Bearer token for authentication |
+| `server_url` | no | Base server URL (e.g. `https://syslog.example.com`) |
+| `api_token` | yes | Bearer token used by the plugin MCP client; enforced by the server unless `no_auth=true` |
+| `no_auth` | no | Explicit local-only no-auth mode |
+| `is_server` | no | Whether this host owns the Docker Compose deployment |
 
-These values are interpolated into `.mcp.json` via `${userConfig.*}` syntax. See [plugin/CONFIG.md](plugin/CONFIG.md) for details.
+These values are interpolated into `plugins/.mcp.json` via `${user_config.*}` syntax. See [plugin/CONFIG.md](plugin/CONFIG.md) for details.
 
 ## .env.example conventions
 

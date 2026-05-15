@@ -11,8 +11,8 @@
 #
 # Action inventory reference:
 #   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
-#   mcp_call sessions, mcp_call search_sessions, mcp_call usage_blocks,
-#   mcp_call project_context, mcp_call list_ai_tools, mcp_call list_ai_projects,
+#   mcp_call sessions, mcp_call search_sessions, mcp_call cuss, mcp_call ai_correlate,
+#   mcp_call usage_blocks, mcp_call project_context, mcp_call list_ai_tools, mcp_call list_ai_projects,
 #   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
 #   mcp_call source_ips, mcp_call timeline, mcp_call patterns, mcp_call context,
 #   mcp_call get, mcp_call ingest_rate, mcp_call silent_hosts,
@@ -152,11 +152,20 @@ send_tcp_seed() {
 run_syslog_ai_add() {
     local db_path="$1"
     local fixture="$2"
-    if [[ -x "target/debug/syslog" ]]; then
-        SYSLOG_MCP_DB_PATH="$db_path" target/debug/syslog ai add --file "$fixture" --json
-    else
-        SYSLOG_MCP_DB_PATH="$db_path" cargo run --quiet -- ai add --file "$fixture" --json
+    local syslog_bin="${SYSLOG_BIN:-}"
+
+    if [[ -z "$syslog_bin" ]]; then
+        if command -v syslog >/dev/null 2>&1; then
+            syslog_bin="$(command -v syslog)"
+        elif [[ -x "target/debug/syslog" ]]; then
+            syslog_bin="target/debug/syslog"
+        else
+            echo "syslog binary not found; install syslog on PATH, set SYSLOG_BIN, or run cargo build" >&2
+            return 127
+        fi
     fi
+
+    SYSLOG_MCP_DB_PATH="$db_path" "$syslog_bin" ai add --file "$fixture" --json
 }
 
 seed_ai_fixture() {
@@ -343,6 +352,37 @@ print('ok' if d.get('total_candidates', 0) >= 1 else 'missing')
 " 2>/dev/null || echo "error")
     assert_eq "search_sessions: seeded fixture is searchable" "$SEARCH_SESSIONS_FOUND" "ok"
 fi
+
+CUSS=$(mcp_call cuss "project=${AI_SMOKE_PROJECT}" "terms=ai-smoke-authentication" "limit=5" "before=1" "after=1" 2>&1)
+assert_no_error "cuss: no error" "$CUSS"
+CUSS_VALID=$(printf '%s\n' "$CUSS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert isinstance(d.get('terms'), list), 'terms not a list'
+assert isinstance(d.get('matches'), list), 'matches not a list'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "cuss: response structure valid" "$CUSS_VALID" "ok"
+if [[ "$AI_SEEDED" -eq 1 ]]; then
+    CUSS_FOUND=$(printf '%s\n' "$CUSS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('ok' if d.get('matches') else 'missing')
+" 2>/dev/null || echo "error")
+    assert_eq "cuss: custom detector finds seeded fixture" "$CUSS_FOUND" "ok"
+fi
+
+AI_CORRELATE=$(mcp_call ai_correlate "project=${AI_SMOKE_PROJECT}" "limit=2" "events_per_anchor=3" 2>&1)
+assert_no_error "ai_correlate: no error" "$AI_CORRELATE"
+AI_CORRELATE_VALID=$(printf '%s\n' "$AI_CORRELATE" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert 'anchors' in d and isinstance(d['anchors'], list), 'anchors not a list'
+assert 'total_related_events' in d, 'total_related_events missing'
+assert 'related_limit_per_anchor' in d, 'related_limit_per_anchor missing'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "ai_correlate: response structure valid" "$AI_CORRELATE_VALID" "ok"
 
 USAGE_BLOCKS=$(mcp_call usage_blocks 2>&1)
 assert_no_error "usage_blocks: no error" "$USAGE_BLOCKS"

@@ -28,6 +28,81 @@ fn ensure_source_reuses_existing_source_id() {
 }
 
 #[test]
+fn ensure_source_updates_source_kind_for_existing_path() {
+    let (pool, _dir) = test_pool();
+    let store = CheckpointStore::new(&pool);
+
+    let source_id = store
+        .ensure_source("/tmp/session.jsonl", "explicit_file")
+        .unwrap();
+    assert_eq!(
+        store
+            .ensure_source("/tmp/session.jsonl", "codex_session")
+            .unwrap(),
+        source_id
+    );
+
+    let source_kind: String = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT source_kind FROM transcript_sources WHERE id = ?1",
+            [source_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(source_kind, "codex_session");
+}
+
+#[test]
+fn parse_error_without_preview_is_deduplicated() {
+    let (pool, _dir) = test_pool();
+    let store = CheckpointStore::new(&pool);
+    let source_id = store
+        .ensure_source("/tmp/session.jsonl", "explicit_file")
+        .unwrap();
+
+    store
+        .record_parse_error(source_id, 7, "record too large", None)
+        .unwrap();
+    store
+        .record_parse_error(source_id, 7, "record too large", None)
+        .unwrap();
+
+    let count: i64 = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM transcript_parse_errors", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn doctor_counts_all_missing_checkpoints_beyond_display_limit() {
+    let (pool, dir) = test_pool();
+    let store = CheckpointStore::new(&pool);
+    let missing_dir = dir.path().join("missing");
+    for index in 0..75 {
+        store
+            .ensure_source(
+                &missing_dir
+                    .join(format!("session-{index}.jsonl"))
+                    .display()
+                    .to_string(),
+                "explicit_file",
+            )
+            .unwrap();
+    }
+
+    let report = store.doctor(std::path::Path::new("/tmp/test.db")).unwrap();
+
+    assert_eq!(report.checkpoint_count, 75);
+    assert_eq!(report.missing_checkpoint_count, 75);
+}
+
+#[test]
 fn source_creation_and_parse_errors_do_not_advance_last_indexed_at() {
     let (pool, _dir) = test_pool();
     let store = CheckpointStore::new(&pool);

@@ -4,9 +4,11 @@ services:
     # without source. Override with --build (or `docker compose build`) for local
     # source development.
     image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}
+    # syslog-setup-build-stanza-start
     build:
       context: .
       dockerfile: config/Dockerfile
+    # syslog-setup-build-stanza-end
     container_name: syslog-mcp
     restart: unless-stopped
     user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"

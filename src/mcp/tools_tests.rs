@@ -119,6 +119,7 @@ async fn schema_actions_are_dispatchable() {
             ai_project: None,
             ai_session_id: None,
             ai_transcript_path: None,
+            metadata_json: None,
         }],
     )
     .unwrap();
@@ -128,6 +129,7 @@ async fn schema_actions_are_dispatchable() {
                 json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"})
             }
             "search_sessions" => json!({"action": action, "query": "schema"}),
+            "ai_correlate" => json!({"action": action, "project": "/tmp/project"}),
             "project_context" => json!({"action": action, "project": "/tmp/project"}),
             "context" => {
                 json!({"action": action, "hostname": "schema-test-host", "timestamp": "2026-01-01T00:00:00Z"})

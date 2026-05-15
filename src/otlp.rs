@@ -30,6 +30,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::db::LogBatchEntry;
 use crate::ingest::IngestTx;
+use crate::ingest_metadata::{attrs_to_metadata_object, bounded_metadata_json};
 use lab_auth::middleware::{parse_bearer_token, tokens_equal};
 
 /// Per-request body cap. Matches the OpenTelemetry Collector default for
@@ -237,6 +238,7 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
     let source_ip = peer.to_string();
+    let peer_ip = peer.ip().to_string();
 
     let mut out = Vec::new();
     for resource_logs in &req.resource_logs {
@@ -295,8 +297,22 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     .as_ref()
                     .and_then(any_value_to_string)
                     .unwrap_or_default();
-                let raw = service_version.clone().unwrap_or_default();
-
+                let metadata_json = bounded_metadata_json(serde_json::json!({
+                    "source_type": "otlp",
+                    "peer_ip": peer_ip,
+                    "peer_port": peer.port(),
+                    "host_name": hostname,
+                    "service_name": service_name,
+                    "service_version": service_version,
+                    "severity_number": log.severity_number,
+                    "severity_text": log.severity_text,
+                    "trace_id": hex_bytes(&log.trace_id),
+                    "span_id": hex_bytes(&log.span_id),
+                    "flags": log.flags,
+                    "event_name": log.event_name,
+                    "resource_attributes": attrs_to_json(&resource_attrs),
+                    "log_attributes": attrs_to_json(&log_attrs),
+                }));
                 out.push(LogBatchEntry {
                     timestamp,
                     hostname: hostname.clone(),
@@ -305,18 +321,49 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     app_name: service_name.clone(),
                     process_id: None,
                     message,
-                    raw,
+                    raw: metadata_json.clone(),
                     source_ip: source_ip.clone(),
                     docker_checkpoint: None,
                     ai_tool: extract_ai_tool(&log_attrs, &resource_attrs),
                     ai_project,
                     ai_session_id,
                     ai_transcript_path: None,
+                    metadata_json: Some(metadata_json),
                 });
             }
         }
     }
     out
+}
+
+fn attrs_to_json(attrs: &HashMap<&str, &AnyValue>) -> serde_json::Value {
+    attrs_to_metadata_object(
+        attrs
+            .iter()
+            .map(|(key, value)| (*key, any_value_to_json(value))),
+    )
+}
+
+fn any_value_to_json(v: &AnyValue) -> serde_json::Value {
+    match v.value.as_ref() {
+        Some(AnyValueKind::StringValue(s)) => serde_json::Value::String(s.clone()),
+        Some(AnyValueKind::BoolValue(b)) => serde_json::Value::Bool(*b),
+        Some(AnyValueKind::IntValue(i)) => serde_json::Value::Number((*i).into()),
+        Some(AnyValueKind::DoubleValue(f)) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Some(AnyValueKind::BytesValue(b)) => serde_json::json!({"bytes_len": b.len()}),
+        Some(AnyValueKind::ArrayValue(arr)) => serde_json::json!({"array_len": arr.values.len()}),
+        Some(AnyValueKind::KvlistValue(kv)) => serde_json::json!({"kvlist_len": kv.values.len()}),
+        None => serde_json::Value::Null,
+    }
+}
+
+fn hex_bytes(bytes: &[u8]) -> Option<String> {
+    if bytes.is_empty() {
+        return None;
+    }
+    Some(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 fn extract_ai_tool(

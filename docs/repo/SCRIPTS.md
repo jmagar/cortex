@@ -6,7 +6,7 @@ Scripts used for maintenance, hooks, and testing.
 
 | Script | Purpose | Usage |
 | --- | --- | --- |
-| `smoke-test.sh` | Live smoke test across all 8 MCP actions | `bash scripts/smoke-test.sh` |
+| `smoke-test.sh` | Live smoke test across the MCP action surface | `bash scripts/smoke-test.sh` |
 | `backup.sh` | WAL-safe SQLite backup using PRAGMA wal_checkpoint + .backup | `bash scripts/backup.sh` |
 | `reset-db.sh` | Backup first, then destructive DB reset (stop server first) | `bash scripts/reset-db.sh` |
 
@@ -14,12 +14,13 @@ Scripts used for maintenance, hooks, and testing.
 
 
 
-## Hook scripts (`hooks/scripts/`)
+## Hook scripts
 
 | Script | Purpose | Trigger |
 | --- | --- | --- |
-| `sync-env.sh` | Sync .env.example with server variables | Claude Code lifecycle |
-| `fix-env-perms.sh` | Set .env to chmod 600 | Claude Code lifecycle |
+| `plugins/hooks/hooks.json` | Claude Code lifecycle hook configuration | Claude Code lifecycle |
+| `scripts/plugin-setup.sh` | Plugin SessionStart setup/repair entrypoint | Claude Code lifecycle |
+| `scripts/block-env-commits.sh` | Blocks env credential commits when installed as a pre-commit hook | Git pre-commit |
 
 
 ## Test scripts (`tests/`)

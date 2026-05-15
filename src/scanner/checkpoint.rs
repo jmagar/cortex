@@ -13,6 +13,15 @@ pub struct CheckpointStore<'a> {
     pool: &'a DbPool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceMetadata {
+    pub file_size: Option<i64>,
+    pub file_mtime: Option<i64>,
+    pub content_hash: Option<String>,
+    pub last_offset: Option<i64>,
+    pub last_error: Option<String>,
+}
+
 impl<'a> CheckpointStore<'a> {
     pub fn new(pool: &'a DbPool) -> Self {
         Self { pool }
@@ -28,6 +37,12 @@ impl<'a> CheckpointStore<'a> {
             )
             .optional()?
         {
+            conn.execute(
+                "UPDATE transcript_sources
+                 SET source_kind = ?2
+                 WHERE id = ?1 AND source_kind != ?2",
+                params![id, source_kind],
+            )?;
             return Ok(id);
         }
         conn.execute(
@@ -57,6 +72,7 @@ impl<'a> CheckpointStore<'a> {
         record_preview: Option<&str>,
     ) -> Result<()> {
         let conn = self.pool.get()?;
+        let record_preview = record_preview.unwrap_or("");
         conn.execute(
             "INSERT OR IGNORE INTO transcript_parse_errors
                  (source_id, line_no, error, record_preview)
@@ -97,6 +113,27 @@ impl<'a> CheckpointStore<'a> {
             && stored_mtime == file_mtime)
     }
 
+    pub fn source_metadata(&self, source_id: i64) -> Result<Option<SourceMetadata>> {
+        let conn = self.pool.get()?;
+        conn.query_row(
+            "SELECT file_size, file_mtime, content_hash, last_offset, last_error
+             FROM transcript_sources
+             WHERE id = ?1",
+            [source_id],
+            |row| {
+                Ok(SourceMetadata {
+                    file_size: row.get(0)?,
+                    file_mtime: row.get(1)?,
+                    content_hash: row.get(2)?,
+                    last_offset: row.get(3)?,
+                    last_error: row.get(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
     pub fn reset_source(&self, source_id: i64, canonical_path: &str) -> Result<()> {
         let mut conn = self.pool.get()?;
         let tx = conn.transaction()?;
@@ -116,10 +153,14 @@ impl<'a> CheckpointStore<'a> {
             "UPDATE hosts
              SET log_count = (SELECT COUNT(*) FROM logs WHERE logs.hostname = hosts.hostname),
                  first_seen = COALESCE((SELECT MIN(received_at) FROM logs WHERE logs.hostname = hosts.hostname), first_seen),
-                 last_seen = COALESCE((SELECT MAX(received_at) FROM logs WHERE logs.hostname = hosts.hostname), last_seen)",
+                 last_seen = COALESCE((SELECT MAX(received_at) FROM logs WHERE logs.hostname = hosts.hostname), last_seen)
+             WHERE hostname = 'localhost'",
             [],
         )?;
-        tx.execute("DELETE FROM hosts WHERE log_count = 0", [])?;
+        tx.execute(
+            "DELETE FROM hosts WHERE hostname = 'localhost' AND log_count = 0",
+            [],
+        )?;
         tx.execute(
             "UPDATE transcript_sources
              SET file_size = NULL,
@@ -140,7 +181,7 @@ impl<'a> CheckpointStore<'a> {
         options: &CheckpointListOptions,
     ) -> Result<Vec<CheckpointEntry>> {
         let conn = self.pool.get()?;
-        let limit = options.limit.unwrap_or(50).min(500);
+        let limit = options.limit.unwrap_or(50).min(500) as usize;
         let query_limit = if options.missing_only { 5000 } else { limit };
         let mut sql = String::from(
             "SELECT s.canonical_path,
@@ -166,30 +207,41 @@ impl<'a> CheckpointStore<'a> {
                 CASE WHEN s.last_error IS NULL THEN 1 ELSE 0 END,
                 COALESCE(s.last_indexed_at, '') DESC,
                 s.canonical_path ASC
-              LIMIT ?1",
+              LIMIT ?1 OFFSET ?2",
         );
 
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map([query_limit], |row| {
-            let canonical_path: String = row.get(0)?;
-            Ok(CheckpointEntry {
-                missing: !Path::new(&canonical_path).exists(),
-                canonical_path,
-                source_kind: row.get(1)?,
-                file_size: row.get(2)?,
-                file_mtime: row.get(3)?,
-                content_hash: row.get(4)?,
-                last_offset: row.get(5)?,
-                last_indexed_at: row.get(6)?,
-                last_error: row.get(7)?,
-                imported_records: row.get(8)?,
-                parse_errors: row.get(9)?,
-            })
-        })?;
-        let mut checkpoints = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-        if options.missing_only {
-            checkpoints.retain(|checkpoint| checkpoint.missing);
-            checkpoints.truncate(limit as usize);
+        let mut checkpoints = Vec::new();
+        let mut offset = 0usize;
+        loop {
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map([query_limit as i64, offset as i64], |row| {
+                let canonical_path: String = row.get(0)?;
+                Ok(CheckpointEntry {
+                    missing: !Path::new(&canonical_path).exists(),
+                    canonical_path,
+                    source_kind: row.get(1)?,
+                    file_size: row.get(2)?,
+                    file_mtime: row.get(3)?,
+                    content_hash: row.get(4)?,
+                    last_offset: row.get(5)?,
+                    last_indexed_at: row.get(6)?,
+                    last_error: row.get(7)?,
+                    imported_records: row.get(8)?,
+                    parse_errors: row.get(9)?,
+                })
+            })?;
+            let batch = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+            let batch_len = batch.len();
+            if options.missing_only {
+                checkpoints.extend(batch.into_iter().filter(|checkpoint| checkpoint.missing));
+                checkpoints.truncate(limit);
+            } else {
+                checkpoints.extend(batch);
+            }
+            if !options.missing_only || checkpoints.len() >= limit || batch_len < query_limit {
+                break;
+            }
+            offset += query_limit;
         }
         Ok(checkpoints)
     }
@@ -308,15 +360,14 @@ impl<'a> CheckpointStore<'a> {
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        let missing_checkpoint_count: i64 = self
-            .list_checkpoints(&CheckpointListOptions {
-                errors_only: false,
-                missing_only: false,
-                limit: Some(500),
-            })?
-            .into_iter()
-            .filter(|checkpoint| checkpoint.missing)
-            .count() as i64;
+        let mut stmt = conn.prepare("SELECT canonical_path FROM transcript_sources")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut missing_checkpoint_count = 0_i64;
+        for row in rows {
+            if !Path::new(&row?).exists() {
+                missing_checkpoint_count += 1;
+            }
+        }
         let (claude_root, codex_root) = default_root_statuses();
         Ok(AiDoctorReport {
             db_path: db_path.display().to_string(),
@@ -340,15 +391,65 @@ fn default_root_statuses() -> (TranscriptRootStatus, TranscriptRootStatus) {
     let claude = home.join(".claude/projects");
     let codex = home.join(".codex/sessions");
     (
-        TranscriptRootStatus {
-            path: claude.display().to_string(),
-            exists: claude.exists(),
-        },
-        TranscriptRootStatus {
-            path: codex.display().to_string(),
-            exists: codex.exists(),
-        },
+        transcript_root_status(&claude),
+        transcript_root_status(&codex),
     )
+}
+
+fn transcript_root_status(path: &Path) -> TranscriptRootStatus {
+    let metadata = std::fs::metadata(path).ok();
+    let exists = metadata.is_some();
+    let readable = std::fs::read_dir(path).is_ok();
+    let writable = can_write_directory(path);
+    #[cfg(unix)]
+    let (owner_uid, owner_gid, mode, strict_ok) = {
+        use std::os::unix::fs::MetadataExt;
+        let current_uid = unsafe { libc::geteuid() };
+        let (owner_uid, owner_gid, mode) = metadata
+            .as_ref()
+            .map(|metadata| (metadata.uid(), metadata.gid(), metadata.mode() & 0o777))
+            .map_or((None, None, None), |(uid, gid, mode)| {
+                (Some(uid), Some(gid), Some(mode))
+            });
+        (
+            owner_uid,
+            owner_gid,
+            mode,
+            exists && readable && writable && owner_uid == Some(current_uid),
+        )
+    };
+    #[cfg(not(unix))]
+    let (owner_uid, owner_gid, mode, strict_ok) =
+        (None, None, None, exists && readable && writable);
+
+    TranscriptRootStatus {
+        path: path.display().to_string(),
+        exists,
+        readable,
+        writable,
+        owner_uid,
+        owner_gid,
+        mode,
+        strict_ok,
+    }
+}
+
+fn can_write_directory(path: &Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    let probe = path.join(format!(".syslog-mcp-write-check-{}", std::process::id()));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(probe);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 pub fn claim_imports_in_tx(

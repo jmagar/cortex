@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+pub mod ai_watch;
 pub mod api;
 pub mod app;
 pub mod compose;
@@ -16,6 +17,7 @@ pub mod syslog;
 pub(crate) mod db;
 pub(crate) mod docker_ingest;
 pub(crate) mod ingest;
+pub(crate) mod ingest_metadata;
 
 /// Test support: factory helpers for building [`mcp::AppState`] variants.
 ///

@@ -5,7 +5,8 @@ Complete listing of all plugin components.
 ## MCP tools
 
 syslog-mcp exposes one read-only MCP tool named `syslog`. The required `action`
-argument selects the operation.
+argument selects the operation. The authoritative action list lives in
+`src/mcp/schemas.rs` as `SYSLOG_ACTIONS`.
 
 | Action | Description | Destructive |
 | --- | --- | --- |
@@ -16,6 +17,9 @@ argument selects the operation.
 | `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |
 | `stats` | Database statistics: total logs, hosts, time range, DB size, free disk, write-block status | no |
 | `status` | Lightweight runtime status: DB health, queue/backpressure state, listener/writer counters, OTLP counters | no |
+| `sessions` / `search_sessions` / `cuss` / `ai_correlate` / `usage_blocks` / `project_context` / `list_ai_tools` / `list_ai_projects` | AI transcript session, detector, and cross-corpus analytics | no |
+| `apps` / `source_ips` / `timeline` / `patterns` / `context` / `get` / `ingest_rate` / `silent_hosts` / `clock_skew` / `anomalies` / `compare` | Extended log analytics and diagnostics | no |
+| `compose_status` / `compose_doctor` | Redacted Docker Compose runtime projections | no |
 | `help` | Returns markdown documentation for all actions | no |
 
 All MCP actions are read-only. syslog-mcp exposes no destructive operations via MCP.
@@ -32,6 +36,7 @@ methods as the MCP actions.
 | `syslog errors` | `errors` | Error/warning summary |
 | `syslog hosts` | `hosts` | Known host list |
 | `syslog correlate` | `correlate` | Cross-host event correlation |
+| `syslog ai correlate` | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs |
 | `syslog stats` | `stats` | Database and storage metrics |
 
 ## MCP resources
@@ -71,10 +76,10 @@ methods as the MCP actions.
 
 | Surface | Present | Path |
 | --- | --- | --- |
-| Skills | yes | `skills/syslog/SKILL.md` |
+| Skills | yes | `plugins/skills/` |
 | Agents | no | -- |
 | Commands | no | -- |
-| Hooks | yes | `hooks/` |
+| Hooks | yes | `plugins/hooks/` |
 | Channels | no | -- |
 | Output styles | no | -- |
 | Schedules | no | -- |
@@ -126,7 +131,7 @@ methods as the MCP actions.
 
 | Script | Purpose |
 | --- | --- |
-| `scripts/smoke-test.sh` | Live smoke test -- all 8 MCP actions via mcporter |
+| `scripts/smoke-test.sh` | Live smoke test -- current MCP action set via mcporter |
 | `scripts/backup.sh` | WAL-safe SQLite backup (checkpoint + `.backup` method) |
 | `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset for dev recovery |
 

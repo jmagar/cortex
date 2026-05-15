@@ -13,6 +13,8 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `hosts` | Host registry with first/last seen |
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
+| `cuss` | Profanity hits in AI transcripts with same-session context |
+| `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
 | `usage_blocks` | AI activity in deterministic 5-hour windows |
 | `project_context` | Summary for one AI project path |
 | `list_ai_tools` | Distinct AI tools with counts |
@@ -82,6 +84,33 @@ Search AI transcript rows with FTS5 and return grouped session results ranked by
 Required arguments: `action = "search_sessions"`, `query`
 
 Optional arguments: `project`, `tool`, `from`, `to`, `limit`.
+
+## syslog cuss
+
+Detect profanity in AI transcript rows and return the hit plus surrounding rows
+from the same AI session.
+
+Required argument: `action = "cuss"`
+
+Optional arguments: `project`, `tool`, `from`, `to`, `limit`, `before`, `after`, `terms`.
+
+`terms` replaces the built-in profanity detector list when provided. `before`
+and `after` default to 2 and are capped at 20.
+
+## syslog ai_correlate
+
+Use AI transcript rows as timeline anchors and pull nearby non-AI syslog,
+Docker, OTLP, and host events from the same database. Related logs explicitly
+exclude AI transcript rows so session logs do not correlate with themselves.
+
+Required argument: `action = "ai_correlate"`
+
+Optional arguments: `project`, `tool`, `session_id`, `ai_query`, `log_query`,
+`hostname`, `source_ip`, `app_name`, `from`, `to`, `window_minutes`,
+`severity_min`, `limit`, `events_per_anchor`.
+
+`limit` caps AI anchors at 50. `events_per_anchor` caps related non-AI rows at
+200 per anchor. `window_minutes` searches before and after each AI timestamp.
 
 ## syslog usage_blocks
 
@@ -179,6 +208,12 @@ JSON-RPC level errors use standard codes:
 AI transcript rows imported through `syslog ai index` or `syslog ai add` are stored in the main `logs` table. They are therefore visible through raw log actions such as `search`, `tail`, `context`, and `get`. Scanner imports scrub known credential/token patterns before storage and FTS indexing, but local `ai_transcript_path` values remain visible. Treat MCP log-read access as access to scrubbed transcript content plus local path metadata.
 
 OTLP AI metadata (`ai.tool`/`ai_tool`, `session.id`/`session_id`, `project.path`, `codebase.root_path`, and `session.cwd`) is producer-supplied, not network-verified identity. Oversized AI tool, project, and session values are rejected before storage; accepted OTLP metadata should be used for grouping/search convenience, not as an authorization or provenance boundary.
+
+Rows can include `metadata_json`, a source-specific JSON payload. Syslog rows
+record parser/source provenance, OTLP rows record resource/log attributes plus
+trace/span ids, Docker rows record host/container/image/compose/action details,
+and transcript rows record source kind, path, line number, record key, and scrub
+status. This metadata is for debugging and correlation, not authorization.
 
 ## See Also
 

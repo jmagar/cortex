@@ -109,5 +109,6 @@ The default `scripts/smoke-test.sh` covers live UDP and TCP ingest plus MCP acti
 1. Start a disposable docker-socket-proxy or mocked Docker HTTP fixture with `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, and `POST=0`.
 2. Start syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` and `SYSLOG_DOCKER_HOSTS=<fixture-host>`.
 3. Run a short-lived container that writes a unique marker to stdout and stderr.
-4. Verify `search` or `tail` returns the marker and that `source_ip` is `docker://<host>/<container>/<stream>`.
+4. Verify `search` or `tail` returns the marker and that stream rows use `source_ip=docker://<host>/<container>/<stream>`.
+5. Restart or recreate the disposable container and verify lifecycle rows use `source_ip=docker-event://<host>/<container>/<action>` with `facility=docker`.
 5. Stop the fixture and confirm syslog-mcp logs reconnect/backoff without crashing.

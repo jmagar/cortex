@@ -1157,7 +1157,7 @@ fn run_inspector_command(
     let timeout_secs = timeout.as_secs().max(1).to_string();
     let mut timeout_args = vec!["-k", "1s", &timeout_secs, program];
     timeout_args.extend(args);
-    std::process::Command::new("timeout")
+    let output = std::process::Command::new("timeout")
         .args(timeout_args)
         .output()
         .map_err(|e| {
@@ -1166,7 +1166,48 @@ fn run_inspector_command(
             } else {
                 anyhow!("failed to run {program} inspector command: {e}")
             }
-        })
+        })?;
+    if program == "systemctl"
+        && args.first() == Some(&"--user")
+        && !output.status.success()
+        && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none()
+        && systemctl_needs_user_bus_fallback(&output)
+    {
+        if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
+            let mut retry_args = vec!["-k", "1s", &timeout_secs, program];
+            retry_args.extend(args);
+            return std::process::Command::new("timeout")
+                .env("XDG_RUNTIME_DIR", runtime_dir)
+                .env("DBUS_SESSION_BUS_ADDRESS", bus_address)
+                .args(retry_args)
+                .output()
+                .map_err(|e| anyhow!("failed to run {program} inspector command: {e}"));
+        }
+    }
+    Ok(output)
+}
+
+fn systemctl_needs_user_bus_fallback(output: &std::process::Output) -> bool {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stderr.contains("DBUS_SESSION_BUS_ADDRESS") || stderr.contains("user scope bus")
+}
+
+fn inferred_user_bus_env() -> Option<(PathBuf, String)> {
+    let runtime_dir = PathBuf::from(format!("/run/user/{}", current_uid()));
+    let bus = runtime_dir.join("bus");
+    bus.exists()
+        .then(|| (runtime_dir, format!("unix:path={}", bus.display())))
+}
+
+fn current_uid() -> u32 {
+    #[cfg(unix)]
+    {
+        unsafe { libc::geteuid() }
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
 }
 
 fn container_info_from_inspect(value: serde_json::Value) -> Result<ContainerInfo> {

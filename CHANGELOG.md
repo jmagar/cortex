@@ -7,6 +7,126 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-05-15
+
+### Added
+
+- **Source metadata JSON**: Added nullable `logs.metadata_json` storage and
+  query response exposure for source-specific ingest metadata. Syslog rows now
+  record parser/source provenance, OTLP rows preserve resource/log attributes
+  plus trace/span ids, Docker rows preserve host/container/image/compose/action
+  details, and transcript rows preserve source kind, file path, line number,
+  record key, and scrub status.
+
+### Fixed
+
+- **AI tool schema parity**: Restored `gemini` to the MCP `tool` schema enum so
+  validation matches the runtime parser, docs, and query behavior.
+
+## [0.24.1] - 2026-05-15
+
+### Fixed
+
+- **OTLP source identity**: OTLP log ingest now stores the verified peer IP
+  without the ephemeral source port, keeping source inventory and correlation
+  stable across exporter reconnects.
+- **Docker lifecycle event classification**: Docker event ingest now sanitizes
+  health-status action names in `source_ip`, maps unhealthy health events to
+  warnings, and maps clean `die exitCode=0` events to notice instead of warning.
+
+## [0.24.0] - 2026-05-15
+
+### Added
+
+- **Docker lifecycle event ingest**: Docker ingest now persists container
+  lifecycle events such as `create`, `start`, `restart`, `die`, `stop`,
+  `destroy`, `rename`, and `oom` as searchable rows with
+  `source_ip=docker-event://host/container/action`, enabling AI-session
+  correlation against container restarts and rebuild/recreate activity.
+
+## [0.23.1] - 2026-05-15
+
+### Fixed
+
+- **Docker log severity inference**: Docker ingest now uses explicit severity
+  levels inside container log payloads before falling back to stream defaults,
+  so stderr `INFO` lines remain informational while unclassified stderr lines
+  still land as warnings.
+
+## [0.23.0] - 2026-05-15
+
+### Added
+
+- **AI/log cross-reference**: Added `syslog ai correlate` and MCP
+  `action="ai_correlate"` to use AI transcript rows as timeline anchors and
+  pull nearby non-AI syslog, Docker, OTLP, and host events from the same DB.
+
+### Fixed
+
+- **Transcript exclusion for correlation**: Related log searches now exclude
+  structured AI rows and legacy/plain transcript app rows such as
+  `codex-transcript`, preventing AI session streams from correlating with
+  themselves.
+
+## [0.22.0] - 2026-05-15
+
+### Added
+
+- **AI cuss detector**: Added `syslog ai cuss` and MCP `action="cuss"` to
+  detect profanity in AI transcript rows and return surrounding rows from the
+  same AI session.
+
+## [0.21.9] - 2026-05-14
+
+### Added
+
+- **DB maintenance CLI**: Added `syslog db status`, `integrity`,
+  `checkpoint`, `vacuum`, and `backup` for direct SQLite maintenance from the
+  same configured database used by MCP and stdio query mode.
+- **Live watcher smoke command**: Added `syslog ai smoke-watch` to write a
+  temporary transcript, prove the watcher ingests it, delete the file, and
+  verify missing-checkpoint pruning.
+- **Local debug setup doctoring**: Added `syslog setup debug-compose` and
+  `syslog setup doctor` so the repo can install/check the local debug Compose
+  override, debug wrapper, watcher service, transcript-root permissions, and
+  runtime freshness from first-class commands.
+
+### Fixed
+
+- **Compose diagnostics from tool shells**: Compose/systemd inspection now
+  retries `systemctl --user` with the inferred `/run/user/<uid>/bus`
+  environment when the caller lacks `DBUS_SESSION_BUS_ADDRESS`.
+
+## [0.21.8] - 2026-05-14
+
+### Added
+
+- **AI watcher hardening**: Added `syslog ai watch-status`,
+  `syslog ai doctor --strict-permissions`, and
+  `syslog setup debug-wrapper install|check|remove` for live watcher status,
+  strict transcript-root ownership checks, and repo-managed local debug binary
+  execution.
+- **Local debug runtime checks**: `scripts/check-runtime-current.sh` now treats
+  the repo-supported `syslog-mcp:local-debug` Compose image as a valid current
+  runtime target while still rejecting arbitrary local images by default.
+
+### Fixed
+
+- **Deleted transcript cleanup**: The real-time transcript watcher now reacts to
+  remove events by pruning missing scanner checkpoints, keeping structured
+  checkpoint metadata bounded without deleting imported log rows.
+
+## [0.21.7] - 2026-05-14
+
+### Added
+
+- **Real-time AI transcript ingestion**: Added `syslog ai watch` and
+  `syslog setup ai-watch-service install|check|remove` for host-local
+  filesystem watching of Claude and Codex transcript JSONL files. The watcher
+  reuses scanner checkpoints, duplicate suppression, parse-error persistence,
+  storage guardrails, and append-offset indexing while disabling the older
+  polling timer during service install to avoid duplicate background ingestion.
+
 ## [0.21.6] - 2026-05-14
 
 ### Fixed
@@ -43,7 +163,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **AI scanner operations**: Added `syslog ai checkpoints`, `syslog ai index
-  --force`, `syslog ai index --since`, and `syslog ai add --force` so scanner
+  --force`, `syslog ai index --since`, and `syslog ai add --file` so scanner
   state, parser backfills, and selective reindexing are first-class CLI
   workflows.
 - **AI smoke coverage**: Added `scripts/smoke-ai.sh` for live AI transcript
@@ -1109,7 +1229,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.6...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/jmagar/syslog-mcp/compare/v0.24.1...v0.25.0
+[0.24.1]: https://github.com/jmagar/syslog-mcp/compare/v0.24.0...v0.24.1
+[0.24.0]: https://github.com/jmagar/syslog-mcp/compare/v0.23.1...v0.24.0
+[0.23.1]: https://github.com/jmagar/syslog-mcp/compare/v0.23.0...v0.23.1
+[0.23.0]: https://github.com/jmagar/syslog-mcp/compare/v0.22.0...v0.23.0
+[0.22.0]: https://github.com/jmagar/syslog-mcp/compare/v0.21.9...v0.22.0
+[0.21.9]: https://github.com/jmagar/syslog-mcp/compare/v0.21.8...v0.21.9
+[0.21.8]: https://github.com/jmagar/syslog-mcp/compare/v0.21.7...v0.21.8
+[0.21.7]: https://github.com/jmagar/syslog-mcp/compare/v0.21.6...v0.21.7
 [0.21.6]: https://github.com/jmagar/syslog-mcp/compare/v0.21.5...v0.21.6
 [0.21.5]: https://github.com/jmagar/syslog-mcp/compare/v0.21.4...v0.21.5
 [0.21.4]: https://github.com/jmagar/syslog-mcp/compare/v0.21.3...v0.21.4

@@ -26,6 +26,68 @@ pub fn get_storage_metrics(pool: &DbPool, config: &StorageConfig) -> Result<Stor
     get_storage_metrics_with_probe(pool, config, &SystemDiskSpaceProbe)
 }
 
+pub fn physical_size_bytes(path: &Path) -> Result<u64> {
+    physical_db_size_bytes(path)
+}
+
+pub fn db_wal_checkpoint(pool: &DbPool, mode: &str) -> Result<(i64, i64, i64)> {
+    let mode = match mode {
+        "passive" => "PASSIVE",
+        "full" => "FULL",
+        "restart" => "RESTART",
+        "truncate" => "TRUNCATE",
+        other => anyhow::bail!("unsupported WAL checkpoint mode: {other}"),
+    };
+    let sql = format!("PRAGMA wal_checkpoint({mode})");
+    let conn = pool.get()?;
+    let result = conn.query_row(&sql, [], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+    Ok(result)
+}
+
+pub fn db_incremental_vacuum(pool: &DbPool, pages: u32) -> Result<()> {
+    let conn = pool.get()?;
+    conn.execute_batch(&format!("PRAGMA incremental_vacuum({pages});"))?;
+    Ok(())
+}
+
+pub fn db_full_vacuum(pool: &DbPool) -> Result<()> {
+    let conn = pool.get()?;
+    conn.execute_batch("VACUUM;")?;
+    Ok(())
+}
+
+pub fn db_integrity_check(pool: &DbPool) -> Result<Vec<String>> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare("PRAGMA integrity_check")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let messages = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(messages)
+}
+
+/// Reads a trusted, hardcoded integer PRAGMA name.
+///
+/// SQLite PRAGMA identifiers cannot be parameterized; do not pass untrusted
+/// input to this helper.
+pub(crate) fn db_pragma_i64(pool: &DbPool, pragma: &str) -> Result<i64> {
+    let conn = pool.get()?;
+    Ok(conn.query_row(&format!("PRAGMA {pragma}"), [], |row| row.get(0))?)
+}
+
+/// Reads a trusted, hardcoded string PRAGMA name.
+///
+/// SQLite PRAGMA identifiers cannot be parameterized; do not pass untrusted
+/// input to this helper.
+pub(crate) fn db_pragma_string(pool: &DbPool, pragma: &str) -> Result<String> {
+    let conn = pool.get()?;
+    Ok(conn.query_row(&format!("PRAGMA {pragma}"), [], |row| row.get(0))?)
+}
+
 pub fn get_storage_metrics_with_probe(
     pool: &DbPool,
     config: &StorageConfig,

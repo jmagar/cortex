@@ -6,11 +6,16 @@ set -euo pipefail
 MODE="auto"
 PULL="false"
 SERVICE="syslog-mcp"
-COMPOSE_DIR="${SYSLOG_MCP_COMPOSE_DIR:-${SYSLOG_MCP_HOME:-${HOME}/.syslog-mcp}/compose}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEFAULT_COMPOSE_DIR="${SYSLOG_MCP_HOME:-${HOME}/.syslog-mcp}/compose"
+COMPOSE_DIR="${SYSLOG_MCP_COMPOSE_DIR:-$DEFAULT_COMPOSE_DIR}"
+ALLOW_LEGACY="false"
+ALLOW_LOCAL_IMAGE="false"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/check-runtime-current.sh [--mode auto|docker] [--pull] [--compose-dir DIR]
+Usage: scripts/check-runtime-current.sh [--mode auto|docker] [--pull] [--compose-dir DIR] [--allow-legacy] [--allow-local-image]
 
 Checks:
   docker:  running container image ID == local compose image ID and
@@ -21,6 +26,11 @@ Options:
                           Without this, Docker mode only proves the container
                           matches the image already present in the local cache.
   --compose-dir DIR       Docker compose project dir (default: ~/.syslog-mcp/compose)
+  --allow-legacy          Permit a running container from a non-canonical
+                          Compose working directory.
+  --allow-local-image     Permit arbitrary non-ghcr.io/jmagar/syslog-mcp
+                          images. The repo-supported syslog-mcp:local-debug
+                          image is accepted by default.
 EOF
 }
 
@@ -44,6 +54,14 @@ while [[ $# -gt 0 ]]; do
     --compose-dir)
       COMPOSE_DIR="${2:?--compose-dir requires a value}"
       shift 2
+      ;;
+    --allow-legacy)
+      ALLOW_LEGACY="true"
+      shift
+      ;;
+    --allow-local-image)
+      ALLOW_LOCAL_IMAGE="true"
+      shift
       ;;
     -h|--help)
       usage
@@ -81,8 +99,17 @@ compose_image() {
   fi
 }
 
+realpath_or_echo() {
+  if command -v realpath >/dev/null 2>&1; then
+    realpath -m "$1"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
 check_docker() {
   local cid running_image image local_image repo_digests repo_version container_version label_compose_dir
+  local canonical_compose_dir canonical_default_dir
   status_line mode docker
 
   if [[ -d "$COMPOSE_DIR" ]]; then
@@ -102,9 +129,21 @@ check_docker() {
     COMPOSE_DIR="$label_compose_dir"
   fi
   status_line compose_dir "$COMPOSE_DIR"
+  canonical_compose_dir="$(realpath_or_echo "$COMPOSE_DIR")"
+  canonical_default_dir="$(realpath_or_echo "$DEFAULT_COMPOSE_DIR")"
+  if [[ "$ALLOW_LEGACY" != "true" && "$canonical_compose_dir" != "$canonical_default_dir" ]]; then
+    echo "FAIL: running container belongs to non-canonical Compose dir: $COMPOSE_DIR"
+    echo "fix: migrate to $DEFAULT_COMPOSE_DIR or rerun with --allow-legacy for an intentional local/debug deployment"
+    return 1
+  fi
 
   image="$(compose_image)"
   [[ -n "$image" ]] || image="$(docker inspect "$cid" --format '{{.Config.Image}}')"
+  if [[ "$ALLOW_LOCAL_IMAGE" != "true" && "$image" != ghcr.io/jmagar/syslog-mcp:* && "$image" != "syslog-mcp:local-debug" ]]; then
+    echo "FAIL: running container uses unsupported image: $image"
+    echo "fix: use ghcr.io/jmagar/syslog-mcp:<version>, syslog-mcp:local-debug, or rerun with --allow-local-image for an intentional custom deployment"
+    return 1
+  fi
 
   if [[ "$PULL" == "true" && -d "$COMPOSE_DIR" ]]; then
     (cd "$COMPOSE_DIR" && docker compose pull --quiet "$SERVICE")
@@ -113,12 +152,12 @@ check_docker() {
   running_image="$(docker inspect "$cid" --format '{{.Image}}')"
   local_image="$(docker image inspect "$image" --format '{{.Id}}' 2>/dev/null || true)"
   repo_digests="$(docker image inspect "$image" --format '{{join .RepoDigests ", "}}' 2>/dev/null || true)"
-  repo_version="$(awk -F'"' '/^version = / {print $2; exit}' Cargo.toml 2>/dev/null || true)"
-  if [[ -n "$repo_version" ]]; then
-    container_version="$(docker exec "$cid" syslog --version 2>/dev/null | awk '{print $2}' || true)"
-  else
-    container_version=""
+  repo_version="$(awk -F'"' '/^version = / {print $2; exit}' "${REPO_DIR}/Cargo.toml" 2>/dev/null || true)"
+  if [[ -z "$repo_version" ]]; then
+    echo "FAIL: could not determine repo version from ${REPO_DIR}/Cargo.toml"
+    return 1
   fi
+  container_version="$(docker exec "$cid" syslog --version 2>/dev/null | awk '{print $2}' || true)"
 
   status_line container "$cid"
   status_line image "$image"

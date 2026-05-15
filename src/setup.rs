@@ -26,6 +26,57 @@ pub enum AiIndexTimerAction {
     Check,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiWatchServiceAction {
+    Install,
+    Remove,
+    Check,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebugWrapperAction {
+    Install,
+    Remove,
+    Check,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebugComposeAction {
+    Install,
+    Remove,
+    Check,
+}
+
+impl DebugComposeAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "debug-compose-install",
+            Self::Remove => "debug-compose-remove",
+            Self::Check => "debug-compose-check",
+        }
+    }
+}
+
+impl DebugWrapperAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "debug-wrapper-install",
+            Self::Remove => "debug-wrapper-remove",
+            Self::Check => "debug-wrapper-check",
+        }
+    }
+}
+
+impl AiWatchServiceAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "ai-watch-service-install",
+            Self::Remove => "ai-watch-service-remove",
+            Self::Check => "ai-watch-service-check",
+        }
+    }
+}
+
 impl AiIndexTimerAction {
     fn as_str(self) -> &'static str {
         match self {
@@ -50,7 +101,7 @@ impl SetupMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SetupStatus {
     Ok,
@@ -59,10 +110,22 @@ pub enum SetupStatus {
     Skipped,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetupIssueKind {
+    BlockingError,
+    DataQualityWarning,
+    RuntimeState,
+    FileState,
+    Command,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SetupPhase {
     pub name: &'static str,
     pub status: SetupStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issue_kind: Option<SetupIssueKind>,
     pub detail: String,
     pub elapsed_ms: u128,
 }
@@ -79,6 +142,23 @@ pub struct SetupReport {
     pub mcp_url: String,
     pub phases: Vec<SetupPhase>,
     pub has_errors: bool,
+    pub blocking_errors: usize,
+    pub data_quality_warnings: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watcher_healthy: Option<bool>,
+}
+
+struct SetupReportInput {
+    mode: &'static str,
+    elapsed_ms: u128,
+    home: PathBuf,
+    env_path: PathBuf,
+    compose_dir: PathBuf,
+    data_dir: PathBuf,
+    health_url: String,
+    mcp_url: String,
 }
 
 struct PhaseTimer {
@@ -95,12 +175,91 @@ impl PhaseTimer {
     }
 
     fn finish(self, status: SetupStatus, detail: impl Into<String>) -> SetupPhase {
+        self.finish_with_issue(status, None, detail)
+    }
+
+    fn finish_with_issue(
+        self,
+        status: SetupStatus,
+        issue_kind: Option<SetupIssueKind>,
+        detail: impl Into<String>,
+    ) -> SetupPhase {
         SetupPhase {
             name: self.name,
             status,
+            issue_kind,
             detail: detail.into(),
             elapsed_ms: self.start.elapsed().as_millis(),
         }
+    }
+}
+
+fn phases_have_errors(phases: &[SetupPhase]) -> bool {
+    phases
+        .iter()
+        .any(|phase| matches!(phase.status, SetupStatus::Error))
+}
+
+fn report_summary(phases: &[SetupPhase]) -> (bool, usize, usize) {
+    let blocking_errors = phases
+        .iter()
+        .filter(|phase| matches!(phase.status, SetupStatus::Error))
+        .count();
+    let data_quality_warnings = phases
+        .iter()
+        .filter(|phase| matches!(phase.issue_kind, Some(SetupIssueKind::DataQualityWarning)))
+        .count();
+    (blocking_errors > 0, blocking_errors, data_quality_warnings)
+}
+
+fn ai_watch_service_state(phases: &[SetupPhase]) -> (Option<bool>, Option<bool>) {
+    let service_enabled = phase_is_ok(phases, AI_WATCH_SERVICE_ENABLED_PHASE);
+    let watcher_healthy = phase_is_ok(phases, AI_WATCH_SERVICE_ACTIVE_PHASE);
+    (service_enabled, watcher_healthy)
+}
+
+fn phase_is_ok(phases: &[SetupPhase], name: &str) -> Option<bool> {
+    phases
+        .iter()
+        .find(|phase| phase.name == name)
+        .map(|phase| matches!(phase.status, SetupStatus::Ok))
+}
+
+fn should_skip_ai_watch_systemd_enable(phases: &[SetupPhase]) -> bool {
+    phases_have_errors(phases)
+}
+
+fn skipped_phase(name: &'static str, detail: impl Into<String>) -> SetupPhase {
+    SetupPhase {
+        name,
+        status: SetupStatus::Skipped,
+        issue_kind: None,
+        detail: detail.into(),
+        elapsed_ms: 0,
+    }
+}
+
+const AI_WATCH_SERVICE_ENABLED_PHASE: &str = "ai-watch-service-enabled";
+const AI_WATCH_SERVICE_ACTIVE_PHASE: &str = "ai-watch-service-active";
+
+fn setup_report(input: SetupReportInput, phases: Vec<SetupPhase>) -> SetupReport {
+    let (has_errors, blocking_errors, data_quality_warnings) = report_summary(&phases);
+    let (service_enabled, watcher_healthy) = ai_watch_service_state(&phases);
+    SetupReport {
+        mode: input.mode,
+        elapsed_ms: input.elapsed_ms,
+        home: input.home,
+        env_path: input.env_path,
+        compose_dir: input.compose_dir,
+        data_dir: input.data_dir,
+        health_url: input.health_url,
+        mcp_url: input.mcp_url,
+        phases,
+        has_errors,
+        blocking_errors,
+        data_quality_warnings,
+        service_enabled,
+        watcher_healthy,
     }
 }
 
@@ -155,6 +314,7 @@ pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {
         phases.push(SetupPhase {
             name: "compose-up",
             status: SetupStatus::Skipped,
+            issue_kind: None,
             detail: if prereq_failed {
                 "skipped because earlier checks failed".to_string()
             } else {
@@ -165,26 +325,44 @@ pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {
     }
 
     let elapsed_ms = started.elapsed().as_millis();
-    let has_errors = phases
-        .iter()
-        .any(|phase| matches!(phase.status, SetupStatus::Error));
     let port = env
         .as_ref()
         .and_then(|values| values.get("SYSLOG_MCP_PORT"))
         .cloned()
         .unwrap_or_else(|| "3100".to_string());
-    Ok(SetupReport {
-        mode: mode.as_str(),
+    Ok(setup_report(
+        SetupReportInput {
+            mode: mode.as_str(),
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+            health_url: format!("http://127.0.0.1:{port}/health"),
+            mcp_url: format!("http://127.0.0.1:{port}/mcp"),
+        },
+        phases,
+    ))
+}
+
+fn host_local_report_input(
+    mode: &'static str,
+    elapsed_ms: u128,
+    home: PathBuf,
+    env_path: PathBuf,
+    compose_dir: PathBuf,
+    data_dir: PathBuf,
+) -> SetupReportInput {
+    SetupReportInput {
+        mode,
         elapsed_ms,
         home,
         env_path,
         compose_dir,
         data_dir,
-        health_url: format!("http://127.0.0.1:{port}/health"),
-        mcp_url: format!("http://127.0.0.1:{port}/mcp"),
-        phases,
-        has_errors,
-    })
+        health_url: "host-local helper".to_string(),
+        mcp_url: "host-local helper".to_string(),
+    }
 }
 
 pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<SetupReport> {
@@ -208,8 +386,8 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
                 &service_path,
                 &timer_path,
             )?);
-            phases.push(systemctl_user_phase(&["daemon-reload"]));
-            phases.push(systemctl_user_phase(&[
+            phases.push(systemctl_user_required_phase(&["daemon-reload"]));
+            phases.push(systemctl_user_required_phase(&[
                 "enable",
                 "--now",
                 "syslog-ai-index.timer",
@@ -252,27 +430,337 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
     }
 
     let elapsed_ms = started.elapsed().as_millis();
-    let has_errors = phases
-        .iter()
-        .any(|phase| matches!(phase.status, SetupStatus::Error));
-    Ok(SetupReport {
-        mode: action.as_str(),
-        elapsed_ms,
-        home,
-        env_path,
-        compose_dir,
-        data_dir,
-        health_url: "host-local helper".to_string(),
-        mcp_url: "host-local helper".to_string(),
+    Ok(setup_report(
+        host_local_report_input(
+            action.as_str(),
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+        ),
         phases,
-        has_errors,
-    })
+    ))
+}
+
+pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Result<SetupReport> {
+    let started = Instant::now();
+    let home = syslog_home_dir()?;
+    let env_path = home.join(".env");
+    let compose_dir = home.join("compose");
+    let data_dir = home.join("data");
+    let user_home = user_home_dir()?;
+    let config_dir = user_home.join(".config/syslog-mcp");
+    let watch_env_path = config_dir.join("ai-watch.env");
+    let state_dir = user_home.join(".local/state/syslog-mcp");
+    let systemd_dir = user_home.join(".config/systemd/user");
+    let service_path = systemd_dir.join("syslog-ai-watch.service");
+    let mut phases = Vec::new();
+
+    match action {
+        AiWatchServiceAction::Install => {
+            let syslog_bin = resolve_syslog_binary()?;
+            let db_path = resolve_ai_watch_db_path(&home, &user_home)?;
+            phases.push(install_ai_watch_service_files(
+                &watch_env_path,
+                &service_path,
+                &systemd_dir,
+                &state_dir,
+                &syslog_bin,
+                &db_path,
+                &user_home,
+            )?);
+            phases.push(transcript_root_permissions_phase(&user_home));
+            phases.push(run_ai_watch_initial_index_phase(
+                &syslog_bin,
+                &watch_env_path,
+            ));
+            if should_skip_ai_watch_systemd_enable(&phases) {
+                phases.push(skipped_phase(
+                    "systemd-enable",
+                    "skipped because earlier AI watch install checks failed",
+                ));
+                let elapsed_ms = started.elapsed().as_millis();
+                return Ok(setup_report(
+                    host_local_report_input(
+                        action.as_str(),
+                        elapsed_ms,
+                        home,
+                        env_path,
+                        compose_dir,
+                        data_dir,
+                    ),
+                    phases,
+                ));
+            }
+            phases.push(systemctl_user_phase(&["daemon-reload"]));
+            phases.push(systemctl_user_phase(&[
+                "disable",
+                "--now",
+                "syslog-ai-index.timer",
+            ]));
+            phases.push(ai_index_timer_disabled_phase());
+            phases.push(systemctl_user_phase(&[
+                "reset-failed",
+                "syslog-ai-watch.service",
+            ]));
+            phases.push(systemctl_user_required_phase(&[
+                "enable",
+                "--now",
+                "syslog-ai-watch.service",
+            ]));
+            phases.push(systemctl_user_required_named_phase(
+                AI_WATCH_SERVICE_ENABLED_PHASE,
+                &["is-enabled", "syslog-ai-watch.service"],
+            ));
+            phases.push(systemctl_user_required_named_phase(
+                AI_WATCH_SERVICE_ACTIVE_PHASE,
+                &["is-active", "syslog-ai-watch.service"],
+            ));
+        }
+        AiWatchServiceAction::Remove => {
+            phases.push(systemctl_user_phase(&[
+                "disable",
+                "--now",
+                "syslog-ai-watch.service",
+            ]));
+            phases.push(remove_ai_watch_service_files(
+                &watch_env_path,
+                &service_path,
+            )?);
+            phases.push(systemctl_user_phase(&["daemon-reload"]));
+        }
+        AiWatchServiceAction::Check => {
+            let syslog_bin = resolve_syslog_binary()?;
+            let db_path = resolve_ai_watch_db_path(&home, &user_home)?;
+            phases.push(check_file_phase(
+                "ai-watch-env",
+                &watch_env_path,
+                "run syslog setup ai-watch-service install",
+            ));
+            phases.push(check_file_phase(
+                "ai-watch-service",
+                &service_path,
+                "run syslog setup ai-watch-service install",
+            ));
+            phases.push(check_ai_watch_service_content_phase(
+                &watch_env_path,
+                &service_path,
+                &state_dir,
+                &syslog_bin,
+                &db_path,
+                &user_home,
+            ));
+            phases.push(transcript_root_permissions_phase(&user_home));
+            phases.push(ai_index_timer_disabled_phase());
+            phases.push(systemctl_user_required_named_phase(
+                AI_WATCH_SERVICE_ENABLED_PHASE,
+                &["is-enabled", "syslog-ai-watch.service"],
+            ));
+            phases.push(systemctl_user_required_named_phase(
+                AI_WATCH_SERVICE_ACTIVE_PHASE,
+                &["is-active", "syslog-ai-watch.service"],
+            ));
+        }
+    }
+
+    let elapsed_ms = started.elapsed().as_millis();
+    Ok(setup_report(
+        host_local_report_input(
+            action.as_str(),
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+        ),
+        phases,
+    ))
+}
+
+pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<SetupReport> {
+    let started = Instant::now();
+    let home = syslog_home_dir()?;
+    let env_path = home.join(".env");
+    let compose_dir = home.join("compose");
+    let data_dir = home.join("data");
+    let user_home = user_home_dir()?;
+    let wrapper_path = user_home.join(".local/bin/syslog");
+    let repo_path = std::env::current_dir()?;
+    let mut phases = Vec::new();
+
+    match action {
+        DebugWrapperAction::Install => {
+            if let Some(parent) = wrapper_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            write_executable_file(&wrapper_path, &debug_wrapper_script(&repo_path))?;
+            phases.push(
+                PhaseTimer::start("debug-wrapper")
+                    .finish(SetupStatus::Ok, format!("wrote {}", wrapper_path.display())),
+            );
+        }
+        DebugWrapperAction::Remove => match std::fs::remove_file(&wrapper_path) {
+            Ok(()) => phases.push(PhaseTimer::start("debug-wrapper").finish(
+                SetupStatus::Ok,
+                format!("removed {}", wrapper_path.display()),
+            )),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                phases.push(PhaseTimer::start("debug-wrapper").finish(
+                    SetupStatus::Ok,
+                    format!("{} already absent", wrapper_path.display()),
+                ));
+            }
+            Err(error) => return Err(error),
+        },
+        DebugWrapperAction::Check => {
+            phases.push(check_file_phase(
+                "debug-wrapper",
+                &wrapper_path,
+                "run syslog setup debug-wrapper install",
+            ));
+            phases.push(check_debug_wrapper_content_phase(&wrapper_path, &repo_path));
+        }
+    }
+
+    let elapsed_ms = started.elapsed().as_millis();
+    Ok(setup_report(
+        host_local_report_input(
+            action.as_str(),
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+        ),
+        phases,
+    ))
+}
+
+pub async fn run_debug_compose_setup(action: DebugComposeAction) -> io::Result<SetupReport> {
+    let started = Instant::now();
+    let home = syslog_home_dir()?;
+    let env_path = home.join(".env");
+    let compose_dir = home.join("compose");
+    let data_dir = home.join("data");
+    let override_path = compose_dir.join("docker-compose.override.yml");
+    let repo_path = std::env::current_dir()?;
+    let mut phases = Vec::new();
+
+    match action {
+        DebugComposeAction::Install => {
+            std::fs::create_dir_all(&compose_dir)?;
+            write_private_file(&override_path, &debug_compose_override(&repo_path))?;
+            phases.push(PhaseTimer::start("debug-compose").finish(
+                SetupStatus::Ok,
+                format!("wrote {}", override_path.display()),
+            ));
+        }
+        DebugComposeAction::Remove => match std::fs::remove_file(&override_path) {
+            Ok(()) => phases.push(PhaseTimer::start("debug-compose").finish(
+                SetupStatus::Ok,
+                format!("removed {}", override_path.display()),
+            )),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                phases.push(PhaseTimer::start("debug-compose").finish(
+                    SetupStatus::Ok,
+                    format!("{} already absent", override_path.display()),
+                ));
+            }
+            Err(error) => return Err(error),
+        },
+        DebugComposeAction::Check => {
+            phases.push(check_file_phase(
+                "debug-compose",
+                &override_path,
+                "run syslog setup debug-compose install",
+            ));
+            phases.push(check_debug_compose_content_phase(
+                &override_path,
+                &repo_path,
+            ));
+        }
+    }
+
+    let elapsed_ms = started.elapsed().as_millis();
+    Ok(setup_report(
+        SetupReportInput {
+            mode: action.as_str(),
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+            health_url: "local debug compose".to_string(),
+            mcp_url: "local debug compose".to_string(),
+        },
+        phases,
+    ))
+}
+
+pub async fn run_setup_doctor() -> io::Result<SetupReport> {
+    let started = Instant::now();
+    let home = syslog_home_dir()?;
+    let env_path = home.join(".env");
+    let compose_dir = home.join("compose");
+    let data_dir = home.join("data");
+    let user_home = user_home_dir()?;
+    let repo_path = std::env::current_dir()?;
+    let wrapper_path = user_home.join(".local/bin/syslog");
+    let debug_override_path = compose_dir.join("docker-compose.override.yml");
+    let mut phases = vec![
+        filesystem_phase(SetupMode::Check, &home, &data_dir, &compose_dir)?,
+        check_file_phase("env", &env_path, "run syslog setup"),
+        check_file_phase(
+            "compose-assets",
+            &compose_dir.join("docker-compose.yml"),
+            "run syslog setup repair",
+        ),
+        check_file_phase(
+            "debug-wrapper",
+            &wrapper_path,
+            "run syslog setup debug-wrapper install",
+        ),
+        check_debug_wrapper_content_phase(&wrapper_path, &repo_path),
+        check_file_phase(
+            "debug-compose",
+            &debug_override_path,
+            "run syslog setup debug-compose install",
+        ),
+        check_debug_compose_content_phase(&debug_override_path, &repo_path),
+        transcript_root_permissions_phase(&user_home),
+        ai_index_timer_disabled_phase(),
+    ];
+
+    phases.extend(
+        run_ai_watch_service_setup(AiWatchServiceAction::Check)
+            .await?
+            .phases,
+    );
+    phases.push(runtime_current_phase(&repo_path));
+
+    let elapsed_ms = started.elapsed().as_millis();
+    Ok(setup_report(
+        SetupReportInput {
+            mode: "doctor",
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+            health_url: "setup doctor".to_string(),
+            mcp_url: "setup doctor".to_string(),
+        },
+        phases,
+    ))
 }
 
 fn user_home_dir() -> io::Result<PathBuf> {
     let home =
         std::env::var("HOME").map_err(|_| io::Error::new(ErrorKind::NotFound, "HOME is unset"))?;
-    Ok(PathBuf::from(home))
+    let home = PathBuf::from(home);
+    setup_path_value(&home)?;
+    Ok(home)
 }
 
 pub fn syslog_home_dir() -> io::Result<PathBuf> {
@@ -380,6 +868,7 @@ fn ensure_env_file(path: &Path, data_dir: &Path) -> io::Result<EnvResult> {
     insert_process_or_default(&mut env, "SYSLOG_WRITE_CHANNEL_CAPACITY", "10000");
     insert_process_or_default(&mut env, "SYSLOG_DOCKER_INGEST_ENABLED", "false");
     insert_process_or_default(&mut env, "RUST_LOG", "info");
+    insert_process_or_default(&mut env, "COMPOSE_PROJECT_NAME", "syslog-jmagar-lab");
     insert_process_or_default(&mut env, "DOCKER_NETWORK", "syslog-mcp");
     insert_process_optional(&mut env, "SYSLOG_DOCKER_HOSTS");
     insert_process_optional(&mut env, "SYSLOG_MCP_PUBLIC_URL");
@@ -491,14 +980,20 @@ fn write_compose_assets(compose_dir: &Path) -> io::Result<SetupPhase> {
 }
 
 fn installed_compose_asset() -> String {
-    let without_build = COMPOSE_ASSET
-        .replace(
-            "    # Default to the published image so plugin deploys can `docker compose pull`\n    # without source. Override with --build (or `docker compose build`) for local\n    # source development.\n    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}\n    build:\n      context: .\n      dockerfile: config/Dockerfile\n",
-            "    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}\n",
-        );
-    assert_ne!(
-        without_build, COMPOSE_ASSET,
-        "installed compose asset transform failed: expected build stanza was not found"
+    let start = "    # syslog-setup-build-stanza-start\n";
+    let end = "    # syslog-setup-build-stanza-end\n";
+    let start_index = COMPOSE_ASSET
+        .find(start)
+        .expect("installed compose asset transform failed: build stanza start marker not found");
+    let after_start = start_index + start.len();
+    let end_index = COMPOSE_ASSET[after_start..]
+        .find(end)
+        .map(|index| after_start + index + end.len())
+        .expect("installed compose asset transform failed: build stanza end marker not found");
+    let without_build = format!(
+        "{}{}",
+        &COMPOSE_ASSET[..start_index],
+        &COMPOSE_ASSET[end_index..]
     );
     let installed = without_build.replace("      - path: .env\n", "      - path: ../.env\n");
     assert_ne!(
@@ -561,13 +1056,613 @@ fn remove_ai_index_timer_files(
     Ok(timer.finish(SetupStatus::Ok, "removed syslog AI index timer files"))
 }
 
-fn write_executable_file(path: &Path, body: &str) -> io::Result<()> {
-    std::fs::write(path, body)?;
+fn install_ai_watch_service_files(
+    env_path: &Path,
+    service_path: &Path,
+    systemd_dir: &Path,
+    state_dir: &Path,
+    syslog_bin: &Path,
+    db_path: &Path,
+    user_home: &Path,
+) -> io::Result<SetupPhase> {
+    let timer = PhaseTimer::start("ai-watch-service-files");
+    if let Some(env_dir) = env_path.parent() {
+        ensure_private_dir(env_dir)?;
+    }
+    ensure_private_dir(state_dir)?;
+    std::fs::create_dir_all(systemd_dir)?;
+    write_private_file(env_path, &ai_watch_env_file(db_path))?;
+    std::fs::write(
+        service_path,
+        ai_watch_service_unit(syslog_bin, env_path, db_path, state_dir, user_home),
+    )?;
+    Ok(timer.finish(
+        SetupStatus::Ok,
+        format!("wrote {}, {}", env_path.display(), service_path.display()),
+    ))
+}
+
+fn remove_ai_watch_service_files(env_path: &Path, service_path: &Path) -> io::Result<SetupPhase> {
+    let timer = PhaseTimer::start("ai-watch-service-files");
+    for path in [env_path, service_path] {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(timer.finish(SetupStatus::Ok, "removed syslog AI watch service files"))
+}
+
+fn check_ai_watch_service_content_phase(
+    env_path: &Path,
+    service_path: &Path,
+    state_dir: &Path,
+    syslog_bin: &Path,
+    db_path: &Path,
+    user_home: &Path,
+) -> SetupPhase {
+    let timer = PhaseTimer::start("ai-watch-service-content");
+    let expected_env = ai_watch_env_file(db_path);
+    let expected_unit = ai_watch_service_unit(syslog_bin, env_path, db_path, state_dir, user_home);
+    let current_env = match std::fs::read_to_string(env_path) {
+        Ok(raw) => raw,
+        Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
+    };
+    let current_unit = match std::fs::read_to_string(service_path) {
+        Ok(raw) => raw,
+        Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
+    };
+    if current_env != expected_env {
+        return timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{} does not match generated AI watch environment",
+                env_path.display()
+            ),
+        );
+    }
+    if current_unit != expected_unit {
+        return timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{} does not match generated AI watch unit",
+                service_path.display()
+            ),
+        );
+    }
+    timer.finish(
+        SetupStatus::Ok,
+        "AI watch service files match generated content",
+    )
+}
+
+fn ai_watch_env_file(db_path: &Path) -> String {
+    let db_path = setup_path_value(db_path).expect("validated AI watch DB path");
+    format!("SYSLOG_MCP_DB_PATH={db_path}\nSYSLOG_DOCKER_INGEST_ENABLED=false\nRUST_LOG=warn\n")
+}
+
+fn ai_watch_service_unit(
+    syslog_bin: &Path,
+    env_path: &Path,
+    db_path: &Path,
+    state_dir: &Path,
+    user_home: &Path,
+) -> String {
+    let db_dir = db_path.parent().unwrap_or_else(|| Path::new("/"));
+    let env_path = setup_path_value(env_path).expect("validated AI watch env path");
+    let syslog_bin = setup_path_value(syslog_bin).expect("validated syslog binary path");
+    let claude_root = setup_path_value(&user_home.join(".claude/projects"))
+        .expect("validated Claude transcript root");
+    let codex_root = setup_path_value(&user_home.join(".codex/sessions"))
+        .expect("validated Codex transcript root");
+    let user_local_bin =
+        setup_path_value(&user_home.join(".local/bin")).expect("validated user local bin path");
+    let user_cargo_bin =
+        setup_path_value(&user_home.join(".cargo/bin")).expect("validated user cargo bin path");
+    let cargo_target_dir = setup_path_value(&state_dir.join("cargo-target"))
+        .expect("validated AI watch cargo target directory");
+    let db_dir = setup_path_value(db_dir).expect("validated AI watch DB directory");
+    let state_dir = setup_path_value(state_dir).expect("validated AI watch state directory");
+    format!(
+        "[Unit]\nDescription=syslog-mcp real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/syslog-mcp\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nEnvironment=PATH={user_local_bin}:{user_cargo_bin}:/usr/local/bin:/usr/bin:/bin\nEnvironment=CARGO_TARGET_DIR={cargo_target_dir}\nWorkingDirectory=/\nExecStart={syslog_bin} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nBindReadOnlyPaths=-{claude_root} -{codex_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
+    )
+}
+
+fn debug_wrapper_script(repo_path: &Path) -> String {
+    let repo_path = setup_path_value(repo_path).expect("validated debug wrapper repo path");
+    format!(
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${{SYSLOG_MCP_REPO:-{repo_path}}}"
+if [[ ! -d "${{repo}}" ]]; then
+  repo="${{HOME}}/workspace/syslog-mcp"
+fi
+
+cd "${{repo}}"
+export CARGO_TARGET_DIR="${{CARGO_TARGET_DIR:-.cache/cargo}}"
+
+case "${{1:-}}" in
+  serve|setup)
+    ;;
+  *)
+    export SYSLOG_DOCKER_INGEST_ENABLED="${{SYSLOG_DOCKER_INGEST_ENABLED:-false}}"
+    export SYSLOG_MCP_AUTH_MODE="${{SYSLOG_MCP_AUTH_MODE:-bearer}}"
+    ;;
+esac
+
+cargo build --quiet --bin syslog
+exec "${{CARGO_TARGET_DIR}}/debug/syslog" "$@"
+"#
+    )
+}
+
+fn check_debug_wrapper_content_phase(wrapper_path: &Path, repo_path: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("debug-wrapper-content");
+    let expected = debug_wrapper_script(repo_path);
+    match std::fs::read_to_string(wrapper_path) {
+        Ok(current) if current == expected => {
+            timer.finish(SetupStatus::Ok, "debug wrapper matches generated content")
+        }
+        Ok(_) => timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{} does not match generated debug wrapper",
+                wrapper_path.display()
+            ),
+        ),
+        Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
+    }
+}
+
+fn debug_compose_override(repo_path: &Path) -> String {
+    let repo_path = setup_path_value(repo_path).expect("validated debug compose repo path");
+    format!(
+        "services:\n  syslog-mcp:\n    image: syslog-mcp:local-debug\n    build:\n      context: {repo_path}\n      dockerfile: config/Dockerfile\n      args:\n        SYSLOG_BUILD_PROFILE: debug\n"
+    )
+}
+
+fn check_debug_compose_content_phase(override_path: &Path, repo_path: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("debug-compose-content");
+    let expected = debug_compose_override(repo_path);
+    match std::fs::read_to_string(override_path) {
+        Ok(current) if current == expected => timer.finish(
+            SetupStatus::Ok,
+            "debug Compose override matches generated content",
+        ),
+        Ok(_) => timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{} does not match generated debug Compose override",
+                override_path.display()
+            ),
+        ),
+        Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
+    }
+}
+
+fn runtime_current_phase(repo_path: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("runtime-current");
+    let script = repo_path.join("scripts/check-runtime-current.sh");
+    if !script.exists() {
+        return timer.finish(SetupStatus::Error, format!("missing {}", script.display()));
+    }
+    match Command::new("bash")
+        .arg(script)
+        .arg("--allow-local-image")
+        .current_dir(repo_path)
+        .output()
+    {
+        Ok(output) if output.status.success() => timer.finish(
+            SetupStatus::Ok,
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .last()
+                .unwrap_or("runtime current")
+                .to_string(),
+        ),
+        Ok(output) => timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .trim()
+            .to_string(),
+        ),
+        Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
+    }
+}
+
+fn transcript_root_permissions_phase(user_home: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("ai-transcript-root-permissions");
+    let roots = [
+        user_home.join(".claude/projects"),
+        user_home.join(".codex/sessions"),
+    ];
+    let failures: Vec<String> = roots
+        .iter()
+        .filter_map(|root| transcript_root_permission_error(root))
+        .collect();
+    if failures.is_empty() {
+        timer.finish(
+            SetupStatus::Ok,
+            "AI transcript roots are owned/readable/writable",
+        )
+    } else {
+        timer.finish(SetupStatus::Error, failures.join("; "))
+    }
+}
+
+fn transcript_root_permission_error(root: &Path) -> Option<String> {
+    let metadata = match std::fs::metadata(root) {
+        Ok(metadata) => metadata,
+        Err(error) => return Some(format!("{}: {error}", root.display())),
+    };
+    if !metadata.is_dir() {
+        return Some(format!("{} is not a directory", root.display()));
+    }
+    if std::fs::read_dir(root).is_err() {
+        return Some(format!("{} is not readable", root.display()));
+    }
+    let probe = root.join(format!(".syslog-mcp-write-check-{}", std::process::id()));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(probe);
+        }
+        Err(error) => return Some(format!("{} is not writable: {error}", root.display())),
+    }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::MetadataExt;
+        let current_uid = unsafe { libc::geteuid() };
+        if metadata.uid() != current_uid {
+            return Some(format!(
+                "{} owner uid {} != current uid {}",
+                root.display(),
+                metadata.uid(),
+                current_uid
+            ));
+        }
+    }
+    None
+}
+
+fn run_ai_watch_initial_index_phase(syslog_bin: &Path, env_path: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("ai-watch-initial-index");
+    let env = match std::fs::read_to_string(env_path) {
+        Ok(raw) => parse_env(&raw),
+        Err(error) => {
+            return timer.finish(
+                SetupStatus::Error,
+                format!("read {}: {error}", env_path.display()),
+            );
+        }
+    };
+    let mut command = Command::new(syslog_bin);
+    command.args(["ai", "index", "--json"]);
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    match command.output() {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let (status, issue_kind) = ai_index_output_status(&stdout);
+            timer.finish_with_issue(status, issue_kind, summarize_ai_index_output(&stdout))
+        }
+        Ok(output) => timer.finish_with_issue(
+            SetupStatus::Error,
+            Some(SetupIssueKind::BlockingError),
+            String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .next()
+                .unwrap_or("initial AI index failed")
+                .to_string(),
+        ),
+        Err(error) => timer.finish_with_issue(
+            SetupStatus::Error,
+            Some(SetupIssueKind::BlockingError),
+            error.to_string(),
+        ),
+    }
+}
+
+fn summarize_ai_index_output(stdout: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
+        return "invalid ai index JSON output".to_string();
+    };
+    let summary = format!(
+        "indexed files={} ingested={} duplicates={} parse_errors={} storage_blocked={} dropped_metadata_fields={} file_errors={}",
+        value
+            .get("discovered_files")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("ingested")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("skipped_dupes")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("parse_errors")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("storage_blocked_chunks")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("dropped_metadata_fields")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("file_errors")
+            .and_then(serde_json::Value::as_array)
+            .map_or(0, Vec::len),
+    );
+    let (status, _) = ai_index_output_status(stdout);
+    if matches!(status, SetupStatus::Warn) {
+        format!(
+            "{summary}; inspect with `syslog ai errors --limit 20`, `syslog ai checkpoints --errors`, then rerun `syslog ai index --json` after fixes"
+        )
+    } else {
+        summary
+    }
+}
+
+fn ai_index_output_status(stdout: &str) -> (SetupStatus, Option<SetupIssueKind>) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
+        return (SetupStatus::Error, Some(SetupIssueKind::BlockingError));
+    };
+    if value
+        .get("storage_blocked_chunks")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        > 0
+    {
+        return (SetupStatus::Error, Some(SetupIssueKind::BlockingError));
+    }
+    if value
+        .get("parse_errors")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        > 0
+        || value
+            .get("dropped_metadata_fields")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+            > 0
+        || value
+            .get("file_errors")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|errors| !errors.is_empty())
+    {
+        return (SetupStatus::Warn, Some(SetupIssueKind::DataQualityWarning));
+    }
+    (SetupStatus::Ok, None)
+}
+
+fn ai_index_timer_disabled_phase() -> SetupPhase {
+    let timer = PhaseTimer::start("ai-index-timer-disabled");
+    let active = systemctl_user_state("is-active", "syslog-ai-index.timer");
+    let enabled = systemctl_user_state("is-enabled", "syslog-ai-index.timer");
+    if active.as_deref() == Some("active") || enabled.as_deref() == Some("enabled") {
+        return timer.finish(
+            SetupStatus::Error,
+            format!(
+                "syslog-ai-index.timer still active/enabled (active={active:?}, enabled={enabled:?})"
+            ),
+        );
+    }
+    timer.finish(
+        SetupStatus::Ok,
+        format!(
+            "syslog-ai-index.timer inactive or absent (active={active:?}, enabled={enabled:?})"
+        ),
+    )
+}
+
+fn systemctl_user_state(command: &str, unit: &str) -> Option<String> {
+    let output = run_systemctl_user(&[command, unit]).ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!stdout.is_empty()).then_some(stdout)
+}
+
+fn resolve_syslog_binary() -> io::Result<PathBuf> {
+    let current = std::env::current_exe()?;
+    let output = Command::new("sh")
+        .args(["-c", "command -v syslog"])
+        .output()?;
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return validate_executable_path(PathBuf::from(path));
+        }
+    }
+    if current.file_name().and_then(|name| name.to_str()) == Some("syslog") {
+        return validate_executable_path(current);
+    }
+    Err(io::Error::new(
+        ErrorKind::NotFound,
+        "syslog binary not found on PATH",
+    ))
+}
+
+fn validate_executable_path(path: PathBuf) -> io::Result<PathBuf> {
+    let canonical = path.canonicalize()?;
+    setup_path_value(&canonical)?;
+    if !allow_debug_binary() && looks_like_debug_build_path(&canonical) {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "refusing to install AI watch service with debug/worktree binary {}; put the syslog wrapper on PATH or set SYSLOG_AI_WATCH_ALLOW_DEBUG_BINARY=true",
+                canonical.display()
+            ),
+        ));
+    }
+    let metadata = std::fs::metadata(&canonical)?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("not a file: {}", canonical.display()),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn allow_debug_binary() -> bool {
+    std::env::var("SYSLOG_AI_WATCH_ALLOW_DEBUG_BINARY")
+        .ok()
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
+fn looks_like_debug_build_path(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    text.contains("/target/debug/") || text.contains("/.cache/cargo/debug/")
+}
+
+fn resolve_ai_watch_db_path(setup_home: &Path, user_home: &Path) -> io::Result<PathBuf> {
+    if let Ok(value) = std::env::var("SYSLOG_MCP_DB_PATH") {
+        if !value.trim().is_empty() {
+            return validate_db_path(PathBuf::from(value));
+        }
+    }
+    if let Some(path) = db_path_from_setup_env(&setup_home.join(".env"))? {
+        return validate_db_path(path);
+    }
+    let plugin_db = user_home.join(".claude/plugins/data/syslog-jmagar-lab/syslog.db");
+    if plugin_db.exists() {
+        return validate_db_path(plugin_db);
+    }
+    validate_db_path(setup_home.join("data/syslog.db"))
+}
+
+fn validate_db_path(path: PathBuf) -> io::Result<PathBuf> {
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("AI watch DB path must be absolute: {}", path.display()),
+        ));
+    }
+    setup_path_value(&path)?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    let Some(parent) = parent.filter(|parent| *parent != Path::new("/")) else {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "AI watch DB path must live under a non-root directory: {}",
+                path.display()
+            ),
+        ));
+    };
+    std::fs::create_dir_all(parent)?;
+    Ok(path)
+}
+
+fn db_path_from_setup_env(env_path: &Path) -> io::Result<Option<PathBuf>> {
+    let raw = match std::fs::read_to_string(env_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let values = parse_env(&raw);
+    if let Some(db_path) = values.get("SYSLOG_MCP_DB_PATH") {
+        if !db_path.trim().is_empty() && db_path != "/data/syslog.db" {
+            return Ok(Some(PathBuf::from(db_path)));
+        }
+    }
+    let uses_container_db_path = values
+        .get("SYSLOG_MCP_DB_PATH")
+        .is_some_and(|db_path| db_path == "/data/syslog.db");
+    let Some(data_volume) = values.get("SYSLOG_MCP_DATA_VOLUME") else {
+        if uses_container_db_path {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "{} uses SYSLOG_MCP_DB_PATH=/data/syslog.db but does not set absolute SYSLOG_MCP_DATA_VOLUME",
+                    env_path.display()
+                ),
+            ));
+        }
+        return Ok(None);
+    };
+    let volume_path = PathBuf::from(data_volume);
+    if volume_path.is_absolute() {
+        return Ok(Some(volume_path.join("syslog.db")));
+    }
+    if uses_container_db_path {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "{} uses SYSLOG_MCP_DB_PATH=/data/syslog.db but SYSLOG_MCP_DATA_VOLUME is not absolute: {}",
+                env_path.display(),
+                data_volume
+            ),
+        ));
+    }
+    Ok(None)
+}
+
+fn setup_path_value(path: &Path) -> io::Result<String> {
+    let raw = path.display().to_string();
+    if raw.is_empty()
+        || raw.chars().any(|ch| {
+            ch.is_control() || ch.is_whitespace() || matches!(ch, '"' | '\'' | '%' | '\\')
+        })
+    {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("unsupported character in setup path: {raw}"),
+        ));
+    }
+    Ok(raw)
+}
+
+fn write_executable_file(path: &Path, body: &str) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut options = std::fs::OpenOptions::new();
+        options
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o755)
+            .custom_flags(libc::O_NOFOLLOW);
+        options.open(path)?.write_all(body.as_bytes())?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
     }
+    #[cfg(not(unix))]
+    std::fs::write(path, body)?;
+    Ok(())
+}
+
+fn write_private_file(path: &Path, body: &str) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut options = std::fs::OpenOptions::new();
+        options
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW);
+        options.open(path)?.write_all(body.as_bytes())?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    #[cfg(not(unix))]
+    std::fs::write(path, body)?;
     Ok(())
 }
 
@@ -613,7 +1708,11 @@ fn ai_index_timer_unit() -> &'static str {
 }
 
 fn systemctl_user_phase(args: &[&str]) -> SetupPhase {
-    let timer = PhaseTimer::start("systemctl-user");
+    systemctl_user_named_phase("systemctl-user", args)
+}
+
+fn systemctl_user_named_phase(name: &'static str, args: &[&str]) -> SetupPhase {
+    let timer = PhaseTimer::start(name);
     match run_systemctl_user(args) {
         Ok(output) if output.status.success() => timer.finish(
             SetupStatus::Ok,
@@ -635,6 +1734,33 @@ fn systemctl_user_phase(args: &[&str]) -> SetupPhase {
             timer.finish(SetupStatus::Warn, "systemctl not found")
         }
         Err(error) => timer.finish(SetupStatus::Warn, error.to_string()),
+    }
+}
+
+fn systemctl_user_required_phase(args: &[&str]) -> SetupPhase {
+    systemctl_user_required_named_phase("systemctl-user", args)
+}
+
+fn systemctl_user_required_named_phase(name: &'static str, args: &[&str]) -> SetupPhase {
+    let timer = PhaseTimer::start(name);
+    match run_systemctl_user(args) {
+        Ok(output) if output.status.success() => timer.finish(
+            SetupStatus::Ok,
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .unwrap_or("ok")
+                .to_string(),
+        ),
+        Ok(output) => timer.finish(
+            SetupStatus::Error,
+            String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .next()
+                .unwrap_or("systemctl --user failed")
+                .to_string(),
+        ),
+        Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
     }
 }
 
@@ -708,14 +1834,24 @@ fn cleanup_legacy_systemd() -> SetupPhase {
             return timer.finish(SetupStatus::Skipped, "HOME unset");
         }
     };
+    let mut failures = Vec::new();
     for unit in [
         "syslog-mcp.service",
         "mnemo-index.service",
         "mnemo-index.timer",
     ] {
-        let _ = Command::new("systemctl")
-            .args(["--user", "disable", "--now", unit])
-            .output();
+        match run_systemctl_user(&["disable", "--now", unit]) {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => failures.push(format!(
+                "systemctl disable --now {unit}: {}",
+                String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .next()
+                    .unwrap_or("failed")
+            )),
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => failures.push(format!("systemctl disable --now {unit}: {error}")),
+        }
     }
     for name in [
         "syslog-mcp.service",
@@ -724,12 +1860,32 @@ fn cleanup_legacy_systemd() -> SetupPhase {
     ] {
         let unit = home.join(".config/systemd/user").join(name);
         let dropins = home.join(".config/systemd/user").join(format!("{name}.d"));
-        let _ = std::fs::remove_file(&unit);
-        let _ = std::fs::remove_dir_all(&dropins);
+        if let Err(error) = std::fs::remove_file(&unit) {
+            if error.kind() != ErrorKind::NotFound {
+                failures.push(format!("remove {}: {error}", unit.display()));
+            }
+        }
+        if let Err(error) = std::fs::remove_dir_all(&dropins) {
+            if error.kind() != ErrorKind::NotFound {
+                failures.push(format!("remove {}: {error}", dropins.display()));
+            }
+        }
     }
-    let _ = Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .output();
+    match run_systemctl_user(&["daemon-reload"]) {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => failures.push(format!(
+            "systemctl daemon-reload: {}",
+            String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .next()
+                .unwrap_or("failed")
+        )),
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => failures.push(format!("systemctl daemon-reload: {error}")),
+    }
+    if !failures.is_empty() {
+        return timer.finish(SetupStatus::Warn, failures.join("; "));
+    }
     timer.finish(
         SetupStatus::Ok,
         "removed stale syslog-mcp and mnemo-index user units/drop-ins if present",
@@ -824,25 +1980,36 @@ fn health_phase(env: &Option<BTreeMap<String, String>>) -> SetupPhase {
             timer.finish(SetupStatus::Ok, format!("{url} ready"))
         }
         Ok(output) => timer.finish(
-            SetupStatus::Warn,
+            SetupStatus::Error,
             String::from_utf8_lossy(&output.stderr)
                 .lines()
                 .next()
                 .unwrap_or("health check failed"),
         ),
         Err(err) if err.kind() == ErrorKind::NotFound => {
-            timer.finish(SetupStatus::Warn, "curl not found; skipped health check")
+            timer.finish(SetupStatus::Error, "curl not found; skipped health check")
         }
-        Err(err) => timer.finish(SetupStatus::Warn, err.to_string()),
+        Err(err) => timer.finish(SetupStatus::Error, err.to_string()),
     }
 }
 
 fn current_uid_gid() -> (String, String) {
-    let uid = command_stdout("id", ["-u"]).unwrap_or_else(|| "1000".to_string());
-    let gid = command_stdout("id", ["-g"]).unwrap_or_else(|| "1000".to_string());
-    (uid, gid)
+    #[cfg(unix)]
+    {
+        // SAFETY: POSIX geteuid/getegid are infallible process queries.
+        let uid = unsafe { libc::geteuid() };
+        let gid = unsafe { libc::getegid() };
+        (uid.to_string(), gid.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        let uid = command_stdout("id", ["-u"]).unwrap_or_else(|| "1000".to_string());
+        let gid = command_stdout("id", ["-g"]).unwrap_or_else(|| "1000".to_string());
+        (uid, gid)
+    }
 }
 
+#[cfg(not(unix))]
 fn command_stdout<const N: usize>(program: &str, args: [&str; N]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
     output
