@@ -66,6 +66,9 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         SetupCommandKind::AiWatchService(action) => {
             syslog_mcp::setup::run_ai_watch_service_setup(action).await?
         }
+        SetupCommandKind::DebugWrapper(action) => {
+            syslog_mcp::setup::run_debug_wrapper_setup(action).await?
+        }
     };
     if command.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -205,6 +208,7 @@ enum SetupCommandKind {
     Main(syslog_mcp::setup::SetupMode),
     AiIndexTimer(syslog_mcp::setup::AiIndexTimerAction),
     AiWatchService(syslog_mcp::setup::AiWatchServiceAction),
+    DebugWrapper(syslog_mcp::setup::DebugWrapperAction),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,6 +299,21 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
                 "install" => syslog_mcp::setup::AiWatchServiceAction::Install,
                 "remove" => syslog_mcp::setup::AiWatchServiceAction::Remove,
                 _ => syslog_mcp::setup::AiWatchServiceAction::Check,
+            }),
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
+        Some("debug-wrapper")
+    ) {
+        let _ = iter.next();
+        let (action, json) = parse_setup_subcommand_args("debug-wrapper", iter)?;
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::DebugWrapper(match action {
+                "install" => syslog_mcp::setup::DebugWrapperAction::Install,
+                "remove" => syslog_mcp::setup::DebugWrapperAction::Remove,
+                _ => syslog_mcp::setup::DebugWrapperAction::Check,
             }),
             json,
         });
@@ -437,6 +456,7 @@ fn print_usage() {
   syslog setup [check|repair] [--json]
   syslog setup ai-index-timer install|remove|check [--json]
   syslog setup ai-watch-service install|remove|check [--json]
+  syslog setup debug-wrapper install|remove|check [--json]
   syslog doctor binary [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
@@ -456,7 +476,8 @@ fn print_usage() {
   syslog ai checkpoints [--errors] [--missing] [--limit N] [--json]
   syslog ai errors [--limit N] [--json]
   syslog ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]
-  syslog ai doctor [--json]
+  syslog ai doctor [--strict-permissions] [--json]
+  syslog ai watch-status [--json]
   syslog compose doctor [--json]
   syslog compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]
   syslog compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]

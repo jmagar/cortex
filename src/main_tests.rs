@@ -84,6 +84,20 @@ fn mode_parse_accepts_ai_watch_service_setup_namespace() {
 }
 
 #[test]
+fn mode_parse_accepts_debug_wrapper_setup_namespace() {
+    assert!(matches!(
+        Mode::parse(vec![
+            "setup".into(),
+            "debug-wrapper".into(),
+            "check".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
 fn mode_parse_rejects_duplicate_ai_watch_service_actions() {
     let err = Mode::parse(vec![
         "setup".into(),

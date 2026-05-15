@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.8] - 2026-05-14
+
+### Added
+
+- **AI watcher hardening**: Added `syslog ai watch-status`,
+  `syslog ai doctor --strict-permissions`, and
+  `syslog setup debug-wrapper install|check|remove` for live watcher status,
+  strict transcript-root ownership checks, and repo-managed local debug binary
+  execution.
+
+### Fixed
+
+- **Deleted transcript cleanup**: The real-time transcript watcher now reacts to
+  remove events by pruning missing scanner checkpoints, keeping structured
+  checkpoint metadata bounded without deleting imported log rows.
+
 ## [0.21.7] - 2026-05-14
 
 ### Added
@@ -1120,7 +1136,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.7...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.8...HEAD
+[0.21.8]: https://github.com/jmagar/syslog-mcp/compare/v0.21.7...v0.21.8
 [0.21.7]: https://github.com/jmagar/syslog-mcp/compare/v0.21.6...v0.21.7
 [0.21.6]: https://github.com/jmagar/syslog-mcp/compare/v0.21.5...v0.21.6
 [0.21.5]: https://github.com/jmagar/syslog-mcp/compare/v0.21.4...v0.21.5

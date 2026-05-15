@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
+use std::path::PathBuf;
 use syslog_mcp::app::{
     CorrelateEventsRequest, CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse,
     ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
@@ -41,7 +42,8 @@ pub(crate) enum AiCommand {
     Checkpoints(AiCheckpointsArgs),
     Errors(AiErrorsArgs),
     PruneCheckpoints(AiPruneCheckpointsArgs),
-    Doctor(OutputArgs),
+    Doctor(AiDoctorArgs),
+    WatchStatus(OutputArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +60,12 @@ pub(crate) enum ComposeCommand {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OutputArgs {
     pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiDoctorArgs {
+    pub json: bool,
+    pub strict_permissions: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -413,7 +421,11 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
             AiCommand::Doctor(args) => {
                 let response = service.ai_doctor().await?;
                 print_ai_doctor_response(&response, args.json)?;
-                ensure_ai_doctor_success(&response)?;
+                ensure_ai_doctor_success(&response, args.strict_permissions)?;
+            }
+            AiCommand::WatchStatus(args) => {
+                let response = ai_watch_status()?;
+                print_ai_watch_status_response(&response, args.json)?;
             }
         },
         CliCommand::Correlate(args) => {
@@ -636,8 +648,9 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
         "checkpoints" => parse_ai_checkpoints(rest),
         "errors" => parse_ai_errors(rest),
         "prune-checkpoints" => parse_ai_prune_checkpoints(rest),
-        "doctor" => Ok(CliCommand::Ai(AiCommand::Doctor(parse_output_args(
-            "ai doctor",
+        "doctor" => parse_ai_doctor(rest),
+        "watch-status" => Ok(CliCommand::Ai(AiCommand::WatchStatus(parse_output_args(
+            "ai watch-status",
             rest,
         )?))),
         _ => bail!("unknown ai subcommand: {subcommand}"),
@@ -945,6 +958,139 @@ fn parse_ai_prune_checkpoints(args: &[String]) -> Result<CliCommand> {
         bail!("ai prune-checkpoints requires --missing");
     }
     Ok(CliCommand::Ai(AiCommand::PruneCheckpoints(parsed)))
+}
+
+fn parse_ai_doctor(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiDoctorArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--strict-permissions" => parsed.strict_permissions = true,
+            _ => bail!("unknown ai doctor option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Doctor(parsed)))
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AiWatchStatusReport {
+    service: String,
+    active: Option<String>,
+    enabled: Option<String>,
+    main_pid: Option<u32>,
+    exec_start: Option<String>,
+    latest_journal: Vec<String>,
+}
+
+fn ai_watch_status() -> Result<AiWatchStatusReport> {
+    const SERVICE: &str = "syslog-ai-watch.service";
+    let active = systemctl_user_output(&["is-active", SERVICE]).ok();
+    let enabled = systemctl_user_output(&["is-enabled", SERVICE]).ok();
+    let main_pid = systemctl_user_output(&["show", "-p", "MainPID", "--value", SERVICE])
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|pid| *pid > 0);
+    let exec_start = systemctl_user_output(&["show", "-p", "ExecStart", "--value", SERVICE]).ok();
+    let latest_journal = command_output(
+        "journalctl",
+        &[
+            "--user",
+            "-u",
+            SERVICE,
+            "-n",
+            "10",
+            "--no-pager",
+            "--output",
+            "short-iso",
+        ],
+    )
+    .map(|raw| raw.lines().map(str::to_string).collect())
+    .unwrap_or_default();
+    Ok(AiWatchStatusReport {
+        service: SERVICE.to_string(),
+        active,
+        enabled,
+        main_pid,
+        exec_start,
+        latest_journal,
+    })
+}
+
+fn systemctl_user_output(args: &[&str]) -> Result<String> {
+    let mut command = std::process::Command::new("systemctl");
+    command.arg("--user").args(args);
+    let output = command.output()?;
+    let output =
+        if output.status.success() || std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() {
+            output
+        } else if systemctl_needs_user_bus_fallback(&output) {
+            if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
+                std::process::Command::new("systemctl")
+                    .env("XDG_RUNTIME_DIR", runtime_dir)
+                    .env("DBUS_SESSION_BUS_ADDRESS", bus_address)
+                    .arg("--user")
+                    .args(args)
+                    .output()?
+            } else {
+                output
+            }
+        } else {
+            output
+        };
+    if !output.status.success() {
+        bail!(
+            "systemctl --user {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn systemctl_needs_user_bus_fallback(output: &std::process::Output) -> bool {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stderr.contains("DBUS_SESSION_BUS_ADDRESS") || stderr.contains("user scope bus")
+}
+
+fn inferred_user_bus_env() -> Option<(PathBuf, String)> {
+    let runtime_dir = PathBuf::from(format!("/run/user/{}", current_uid()));
+    let bus = runtime_dir.join("bus");
+    bus.exists()
+        .then(|| (runtime_dir, format!("unix:path={}", bus.display())))
+}
+
+fn current_uid() -> u32 {
+    #[cfg(unix)]
+    {
+        unsafe { libc::geteuid() }
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+fn command_output(program: &str, args: &[&str]) -> Result<String> {
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    if program == "journalctl" && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
+            command
+                .env("XDG_RUNTIME_DIR", runtime_dir)
+                .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
+        }
+    }
+    let output = command.output()?;
+    if !output.status.success() {
+        bail!(
+            "{} {} failed: {}",
+            program,
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 fn parse_stats(args: &[String]) -> Result<CliCommand> {
@@ -1561,22 +1707,34 @@ fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) -> Result<()>
     }
     println!("db_path: {}", response.db_path);
     println!(
-        "claude_root: {} ({})",
+        "claude_root: {} ({}, readable={}, writable={}, owner={:?}:{:?}, mode={:?}, strict_ok={})",
         response.claude_root.path,
         if response.claude_root.exists {
             "exists"
         } else {
             "missing"
-        }
+        },
+        response.claude_root.readable,
+        response.claude_root.writable,
+        response.claude_root.owner_uid,
+        response.claude_root.owner_gid,
+        response.claude_root.mode.map(|mode| format!("{mode:o}")),
+        response.claude_root.strict_ok
     );
     println!(
-        "codex_root: {} ({})",
+        "codex_root: {} ({}, readable={}, writable={}, owner={:?}:{:?}, mode={:?}, strict_ok={})",
         response.codex_root.path,
         if response.codex_root.exists {
             "exists"
         } else {
             "missing"
-        }
+        },
+        response.codex_root.readable,
+        response.codex_root.writable,
+        response.codex_root.owner_uid,
+        response.codex_root.owner_gid,
+        response.codex_root.mode.map(|mode| format!("{mode:o}")),
+        response.codex_root.strict_ok
     );
     println!("checkpoint_count: {}", response.checkpoint_count);
     println!(
@@ -1594,6 +1752,33 @@ fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) -> Result<()>
         response.newest_indexed_at.as_deref().unwrap_or("-"),
         response.newest_indexed_path.as_deref().unwrap_or("-")
     );
+    Ok(())
+}
+
+fn print_ai_watch_status_response(response: &AiWatchStatusReport, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("service: {}", response.service);
+    println!("active: {}", response.active.as_deref().unwrap_or("-"));
+    println!("enabled: {}", response.enabled.as_deref().unwrap_or("-"));
+    println!(
+        "main_pid: {}",
+        response
+            .main_pid
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "exec_start: {}",
+        response.exec_start.as_deref().unwrap_or("-")
+    );
+    if !response.latest_journal.is_empty() {
+        println!("latest_journal:");
+        for line in &response.latest_journal {
+            println!("  {line}");
+        }
+    }
     Ok(())
 }
 
@@ -1652,8 +1837,10 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
     }
 }
 
-fn ensure_ai_doctor_success(response: &AiDoctorReport) -> Result<()> {
-    let _ = response;
+fn ensure_ai_doctor_success(response: &AiDoctorReport, strict_permissions: bool) -> Result<()> {
+    if strict_permissions && (!response.claude_root.strict_ok || !response.codex_root.strict_ok) {
+        bail!("AI transcript root permission check failed");
+    }
     Ok(())
 }
 

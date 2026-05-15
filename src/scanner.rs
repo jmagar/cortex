@@ -133,6 +133,12 @@ pub struct AiDoctorReport {
 pub struct TranscriptRootStatus {
     pub path: String,
     pub exists: bool,
+    pub readable: bool,
+    pub writable: bool,
+    pub owner_uid: Option<u32>,
+    pub owner_gid: Option<u32>,
+    pub mode: Option<u32>,
+    pub strict_ok: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
