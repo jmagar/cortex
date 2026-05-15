@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-05-15
+
+### Fixed
+
+- **OTLP source identity**: OTLP log ingest now stores the verified peer IP
+  without the ephemeral source port, keeping source inventory and correlation
+  stable across exporter reconnects.
+- **Docker lifecycle event classification**: Docker event ingest now sanitizes
+  health-status action names in `source_ip`, maps unhealthy health events to
+  warnings, and maps clean `die exitCode=0` events to notice instead of warning.
+
 ## [0.24.0] - 2026-05-15
 
 ### Added

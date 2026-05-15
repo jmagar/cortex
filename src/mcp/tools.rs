@@ -562,7 +562,7 @@ phrase matching with quotes, prefix matching with *.
 **Parameters:**
 - `query` (string) — FTS5 search query, e.g. `'kernel panic'`, `'OOM AND killer'`, `'"connection refused"'`, `'error*'`
 - `hostname` (string, optional) — filter by hostname (exact match); use `syslog hosts` to enumerate
-- `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
+- `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
 - `severity` (string, optional) — one of: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`
 - `app_name` (string, optional) — filter by application name, e.g. `sshd`, `dockerd`, `kernel`
 - `facility` (string, optional) — filter by syslog facility name (e.g. `kern`, `auth`, `daemon`)
@@ -579,7 +579,7 @@ Equivalent to `tail -f` across all hosts.
 
 **Parameters:**
 - `hostname` (string, optional) — filter to a specific host
-- `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
+- `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
 - `app_name` (string, optional) — filter to a specific application
 - `severity_min` (string, optional) — only return entries at or above this severity (e.g. `warning` returns warning + worse)
 - `n` (integer, optional) — number of recent entries (default 50, max 500)
@@ -709,6 +709,7 @@ Distinct AI projects with counts, tools used, and first/last seen timestamps.
 
 ## syslog source_ips
 List distinct source identifiers (network sender IP:port for syslog input,
+peer IP for OTLP input,
 `docker://host/container/stream` for Docker stream ingest, or
 `docker-event://host/container/action` for Docker lifecycle ingest) with log counts, the number
 of distinct hostnames each sender claims, and up to 10 top hostnames per sender.
@@ -729,7 +730,7 @@ of a reference timestamp. Results are grouped by host and ordered by time.
 - `window_minutes` (integer, optional) — minutes before and after reference_time to search (default 5, max 60)
 - `severity_min` (string, optional) — minimum severity to include (default `warning`); `debug` returns everything
 - `hostname` (string, optional) — limit correlation to a specific host
-- `source_ip` (string, optional) — limit correlation to an exact source identifier. Syslog uses verified `IP:port`; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
+- `source_ip` (string, optional) — limit correlation to an exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
 - `query` (string, optional) — optional FTS query to narrow results
 - `limit` (integer, optional) — max total events to return (default 500, max 999)
 

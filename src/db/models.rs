@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 /// from positional swaps between structurally identical `String`/`Option<String>` fields.
 ///
 /// For syslog input, `source_ip` records the actual network sender address (IP:port)
-/// independent of the hostname claimed in the syslog message body. Docker ingest uses
-/// a configured `docker://host/container/stream` source identifier instead.
+/// independent of the hostname claimed in the syslog message body. OTLP stores the
+/// peer IP without the ephemeral port. Docker ingest uses configured
+/// `docker://host/container/stream` and `docker-event://host/container/action`
+/// source identifiers instead.
 #[derive(Debug, Clone)]
 pub struct LogBatchEntry {
     pub timestamp: String,
@@ -19,7 +21,8 @@ pub struct LogBatchEntry {
     pub message: String,
     pub raw: String,
     /// Source identifier. Syslog input uses the actual network sender address
-    /// (IP:port); Docker ingest uses docker://host/container/stream.
+    /// (IP:port); OTLP uses peer IP; Docker ingest uses
+    /// docker://host/container/stream and docker-event://host/container/action.
     pub source_ip: String,
     pub docker_checkpoint: Option<DockerCheckpoint>,
     pub ai_tool: Option<String>,
@@ -304,7 +307,8 @@ pub struct LogEntry {
     pub message: String,
     pub received_at: String,
     /// Source identifier. Syslog entries use verified network sender address
-    /// (IP:port); Docker ingest entries use docker://host/container/stream.
+    /// (IP:port); OTLP entries use peer IP; Docker ingest entries use
+    /// docker://host/container/stream or docker-event://host/container/action.
     /// Empty string for legacy rows inserted before this column was added.
     pub source_ip: String,
     pub ai_tool: Option<String>,
@@ -321,7 +325,8 @@ pub struct SearchParams {
     /// Filter by hostname
     pub hostname: Option<String>,
     /// Filter by source identifier. Syslog uses verified network sender address
-    /// (IP:port); Docker ingest uses docker://host/container/stream.
+    /// (IP:port); OTLP uses peer IP; Docker ingest uses
+    /// docker://host/container/stream or docker-event://host/container/action.
     pub source_ip: Option<String>,
     /// Filter by severity (exact match: emerg, alert, crit, err, warning, notice, info, debug)
     pub severity: Option<String>,
