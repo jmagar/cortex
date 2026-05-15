@@ -315,6 +315,21 @@ PID, ExecStart, and the latest bounded journal lines. It uses the same user bus
 fallback as setup commands, so it still works from shells or tool environments
 that do not export `DBUS_SESSION_BUS_ADDRESS`.
 
+### `syslog ai smoke-watch`
+
+Run a bounded live smoke test of the host-local watcher. The command writes a
+temporary Claude transcript under `~/.claude/projects`, waits for the watcher to
+ingest it into the configured database, deletes the temp file, then waits for
+the missing-checkpoint pruner to clear scanner metadata.
+
+```bash
+syslog ai smoke-watch
+syslog ai smoke-watch --json
+```
+
+This is a live command. It requires `syslog-ai-watch.service` to be running and
+writing to the same `SYSLOG_MCP_DB_PATH` used by the CLI process.
+
 ### `syslog setup ai-watch-service`
 
 Install, remove, or inspect the supported host-local user-systemd watcher for
@@ -354,6 +369,39 @@ the fresh debug binary. For non-server commands it defaults Docker ingest off
 and bearer auth mode on, so regular CLI checks do not accidentally start
 container-log ingestion or OAuth-only config paths. Override the source checkout
 with `SYSLOG_MCP_REPO=/path/to/syslog-mcp syslog ...`.
+
+### `syslog setup debug-compose`
+
+Install, remove, or inspect the local debug Compose override under
+`~/.syslog-mcp/compose/docker-compose.override.yml`.
+
+```bash
+syslog setup debug-compose install
+syslog setup debug-compose check --json
+syslog setup debug-compose remove
+```
+
+The override is machine-local. It points the canonical Docker Compose project at
+the current repo/worktree and builds the `syslog-mcp:local-debug` image with the
+debug profile. This keeps `docker compose up -d --build` aligned with the same
+code that the host debug wrapper builds. `syslog setup` also writes
+`COMPOSE_PROJECT_NAME=syslog-jmagar-lab` to the setup `.env`, so direct
+`docker compose` commands target the canonical project instead of a cwd-derived
+project name.
+
+### `syslog setup doctor`
+
+Run the repo-owned local setup checks as one command.
+
+```bash
+syslog setup doctor
+syslog setup doctor --json
+```
+
+The doctor checks setup directories, `.env`, Compose assets, the debug wrapper,
+the debug Compose override, transcript-root permissions, disabled legacy index
+timer state, active/enabled watcher state, and container freshness via
+`scripts/check-runtime-current.sh --allow-local-image`.
 
 ### `syslog setup ai-index-timer`
 
@@ -431,6 +479,71 @@ Print database and storage guardrail metrics.
 syslog stats
 syslog stats --json
 ```
+
+### `syslog db status`
+
+Print SQLite maintenance state for the configured database.
+
+```bash
+syslog db status
+syslog db status --json
+```
+
+The status includes page counts, freelist count, page size, logical and physical
+database size, WAL/SHM sidecar sizes when present, journal mode, auto-vacuum
+mode, and no integrity scan. Use `syslog db integrity` for the full SQLite
+integrity check on large databases.
+
+### `syslog db integrity`
+
+Run `PRAGMA integrity_check` against the configured database.
+
+```bash
+syslog db integrity
+syslog db integrity --json
+```
+
+The command exits non-zero if SQLite reports anything other than `ok`.
+
+### `syslog db checkpoint`
+
+Run a WAL checkpoint.
+
+```bash
+syslog db checkpoint
+syslog db checkpoint --mode full
+syslog db checkpoint --mode truncate --json
+```
+
+Supported modes are `passive`, `full`, `restart`, and `truncate`. The command
+exits non-zero if SQLite reports the checkpoint as busy.
+
+### `syslog db vacuum`
+
+Run SQLite vacuum maintenance.
+
+```bash
+syslog db vacuum
+syslog db vacuum --pages 5000
+syslog db vacuum --full
+```
+
+The default is `PRAGMA incremental_vacuum(1000)`. `--full` runs `VACUUM` and can
+take longer on large databases.
+
+### `syslog db backup`
+
+Create a WAL-safe SQLite backup using the `sqlite3` CLI `.backup` command.
+
+```bash
+syslog db backup
+syslog db backup --output ~/.syslog-mcp/backups
+syslog db backup --output /tmp/syslog-copy.db --json
+```
+
+When `--output` is a directory or omitted, the command writes a timestamped
+`syslog-YYYY-MM-DD-HHMMSS.db` backup. When `--output` has a file extension, it
+is used as the exact destination file.
 
 ### `syslog compose`
 

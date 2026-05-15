@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,8 +9,9 @@ use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
     AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest, ClockSkewResponse,
     CompareRequest, CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
-    CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
-    GetLogResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
+    CorrelateEventsResponse, DbBackupResult, DbCheckpointResult, DbIntegrityResult,
+    DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest, GetErrorsResponse,
+    GetLogRequest, GetLogResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
     ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
     ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
     ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse, ProjectContextRequest,
@@ -325,6 +327,117 @@ impl SyslogService {
             .await?
             .into();
         Ok(stats)
+    }
+
+    pub async fn db_status(&self) -> ServiceResult<DbMaintenanceStatus> {
+        let storage = self.storage.clone();
+        self.run_db(move |pool| {
+            let page_count = db::db_pragma_i64(pool, "page_count")?;
+            let freelist_count = db::db_pragma_i64(pool, "freelist_count")?;
+            let page_size = db::db_pragma_i64(pool, "page_size")?;
+            let auto_vacuum = db::db_pragma_i64(pool, "auto_vacuum")?;
+            let journal_mode = db::db_pragma_string(pool, "journal_mode")?;
+            let logical_size_bytes =
+                ((page_count - freelist_count).max(0) * page_size).max(0) as u64;
+            let physical_size_bytes = db::physical_size_bytes(&storage.db_path)?;
+            let wal_size_bytes = std::fs::metadata(wal_path(&storage.db_path))
+                .ok()
+                .map(|metadata| metadata.len());
+            let shm_size_bytes = std::fs::metadata(shm_path(&storage.db_path))
+                .ok()
+                .map(|metadata| metadata.len());
+            Ok(DbMaintenanceStatus {
+                db_path: storage.db_path,
+                page_count,
+                freelist_count,
+                page_size,
+                logical_size_bytes,
+                physical_size_bytes,
+                wal_size_bytes,
+                shm_size_bytes,
+                auto_vacuum,
+                journal_mode,
+                integrity_ok: None,
+                integrity_messages: Vec::new(),
+            })
+        })
+        .await
+    }
+
+    pub async fn db_integrity(&self) -> ServiceResult<DbIntegrityResult> {
+        self.run_db(move |pool| {
+            let messages = db::db_integrity_check(pool)?;
+            Ok(DbIntegrityResult {
+                ok: messages.len() == 1 && messages.first().is_some_and(|value| value == "ok"),
+                messages,
+            })
+        })
+        .await
+    }
+
+    pub async fn db_checkpoint(&self, mode: String) -> ServiceResult<DbCheckpointResult> {
+        self.run_db(move |pool| {
+            let (busy, log_frames, checkpointed_frames) = db::db_wal_checkpoint(pool, &mode)?;
+            Ok(DbCheckpointResult {
+                mode,
+                busy,
+                log_frames,
+                checkpointed_frames,
+            })
+        })
+        .await
+    }
+
+    pub async fn db_vacuum(
+        &self,
+        full: bool,
+        incremental_pages: u32,
+    ) -> ServiceResult<DbVacuumResult> {
+        let storage = self.storage.clone();
+        self.run_db(move |pool| {
+            let before_physical_size_bytes = db::physical_size_bytes(&storage.db_path)?;
+            if full {
+                db::db_full_vacuum(pool)?;
+            } else {
+                db::db_incremental_vacuum(pool, incremental_pages)?;
+            }
+            let after_physical_size_bytes = db::physical_size_bytes(&storage.db_path)?;
+            Ok(DbVacuumResult {
+                full,
+                incremental_pages,
+                before_physical_size_bytes,
+                after_physical_size_bytes,
+            })
+        })
+        .await
+    }
+
+    pub async fn db_backup(&self, output: Option<PathBuf>) -> ServiceResult<DbBackupResult> {
+        let db_path = self.storage.db_path.clone();
+        self.run_db(move |_pool| {
+            let backup_path = backup_path_for(&db_path, output)?;
+            if let Some(parent) = backup_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let escaped = backup_path.to_string_lossy().replace('\'', "''");
+            let output = std::process::Command::new("sqlite3")
+                .arg(&db_path)
+                .arg(format!(".backup '{escaped}'"))
+                .output()?;
+            if !output.status.success() {
+                anyhow::bail!(
+                    "sqlite3 backup failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            let size_bytes = std::fs::metadata(&backup_path)?.len();
+            Ok(DbBackupResult {
+                db_path,
+                backup_path,
+                size_bytes,
+            })
+        })
+        .await
     }
 
     pub async fn index_ai_roots(
@@ -768,6 +881,27 @@ fn classify_scanner_error(error: ServiceError) -> ServiceError {
 
 fn scanner_error_is_invalid_input(error: &anyhow::Error) -> bool {
     scanner::is_invalid_input_error(error)
+}
+
+fn wal_path(db_path: &std::path::Path) -> PathBuf {
+    PathBuf::from(format!("{}-wal", db_path.display()))
+}
+
+fn shm_path(db_path: &std::path::Path) -> PathBuf {
+    PathBuf::from(format!("{}-shm", db_path.display()))
+}
+
+fn backup_path_for(db_path: &std::path::Path, output: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    let timestamp = Utc::now().format("%Y-%m-%d-%H%M%S");
+    match output {
+        Some(path) if path.extension().is_some() => Ok(path),
+        Some(dir) => Ok(dir.join(format!("syslog-{timestamp}.db"))),
+        None => Ok(db_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("backups")
+            .join(format!("syslog-{timestamp}.db"))),
+    }
 }
 
 fn validate_optional_severity(severity: Option<String>) -> ServiceResult<Option<String>> {

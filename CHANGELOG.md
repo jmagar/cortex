@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.9] - 2026-05-14
+
+### Added
+
+- **DB maintenance CLI**: Added `syslog db status`, `integrity`,
+  `checkpoint`, `vacuum`, and `backup` for direct SQLite maintenance from the
+  same configured database used by MCP and stdio query mode.
+- **Live watcher smoke command**: Added `syslog ai smoke-watch` to write a
+  temporary transcript, prove the watcher ingests it, delete the file, and
+  verify missing-checkpoint pruning.
+- **Local debug setup doctoring**: Added `syslog setup debug-compose` and
+  `syslog setup doctor` so the repo can install/check the local debug Compose
+  override, debug wrapper, watcher service, transcript-root permissions, and
+  runtime freshness from first-class commands.
+
+### Fixed
+
+- **Compose diagnostics from tool shells**: Compose/systemd inspection now
+  retries `systemctl --user` with the inferred `/run/user/<uid>/bus`
+  environment when the caller lacks `DBUS_SESSION_BUS_ADDRESS`.
+
 ## [0.21.8] - 2026-05-14
 
 ### Added
@@ -1139,7 +1160,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.8...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.9...HEAD
+[0.21.9]: https://github.com/jmagar/syslog-mcp/compare/v0.21.8...v0.21.9
 [0.21.8]: https://github.com/jmagar/syslog-mcp/compare/v0.21.7...v0.21.8
 [0.21.7]: https://github.com/jmagar/syslog-mcp/compare/v0.21.6...v0.21.7
 [0.21.6]: https://github.com/jmagar/syslog-mcp/compare/v0.21.5...v0.21.6
