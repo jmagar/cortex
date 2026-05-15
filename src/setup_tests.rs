@@ -76,6 +76,12 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
 
     assert!(unit.contains("Type=simple"));
     assert!(unit.contains("EnvironmentFile=/home/me/.config/syslog-mcp/ai-watch.env"));
+    assert!(unit.contains(
+        "Environment=PATH=/home/me/.local/bin:/home/me/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+    ));
+    assert!(
+        unit.contains("Environment=CARGO_TARGET_DIR=/home/me/.local/state/syslog-mcp/cargo-target")
+    );
     assert!(unit.contains("WorkingDirectory=/"));
     assert!(unit.contains("ExecStart=/home/me/.local/bin/syslog ai watch --no-initial-scan --json"));
     assert!(unit.contains("Restart=on-failure"));

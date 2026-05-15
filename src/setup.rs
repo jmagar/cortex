@@ -789,10 +789,16 @@ fn ai_watch_service_unit(
         .expect("validated Claude transcript root");
     let codex_root = setup_path_value(&user_home.join(".codex/sessions"))
         .expect("validated Codex transcript root");
+    let user_local_bin =
+        setup_path_value(&user_home.join(".local/bin")).expect("validated user local bin path");
+    let user_cargo_bin =
+        setup_path_value(&user_home.join(".cargo/bin")).expect("validated user cargo bin path");
+    let cargo_target_dir = setup_path_value(&state_dir.join("cargo-target"))
+        .expect("validated AI watch cargo target directory");
     let db_dir = setup_path_value(db_dir).expect("validated AI watch DB directory");
     let state_dir = setup_path_value(state_dir).expect("validated AI watch state directory");
     format!(
-        "[Unit]\nDescription=syslog-mcp real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/syslog-mcp\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nWorkingDirectory=/\nExecStart={syslog_bin} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nBindReadOnlyPaths=-{claude_root} -{codex_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=syslog-mcp real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/syslog-mcp\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nEnvironment=PATH={user_local_bin}:{user_cargo_bin}:/usr/local/bin:/usr/bin:/bin\nEnvironment=CARGO_TARGET_DIR={cargo_target_dir}\nWorkingDirectory=/\nExecStart={syslog_bin} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nBindReadOnlyPaths=-{claude_root} -{codex_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 
