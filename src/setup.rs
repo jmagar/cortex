@@ -101,7 +101,7 @@ impl SetupMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SetupStatus {
     Ok,
@@ -1249,11 +1249,7 @@ fn run_ai_watch_initial_index_phase(syslog_bin: &Path, env_path: &Path) -> Setup
     match command.output() {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let status = if ai_index_output_has_failures(&stdout) {
-                SetupStatus::Error
-            } else {
-                SetupStatus::Ok
-            };
+            let status = ai_index_output_status(&stdout);
             timer.finish(status, summarize_ai_index_output(&stdout))
         }
         Ok(output) => timer.finish(
@@ -1305,20 +1301,23 @@ fn summarize_ai_index_output(stdout: &str) -> String {
     )
 }
 
-fn ai_index_output_has_failures(stdout: &str) -> bool {
+fn ai_index_output_status(stdout: &str) -> SetupStatus {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
-        return true;
+        return SetupStatus::Error;
     };
-    value
+    if value
+        .get("storage_blocked_chunks")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        > 0
+    {
+        return SetupStatus::Error;
+    }
+    if value
         .get("parse_errors")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0)
         > 0
-        || value
-            .get("storage_blocked_chunks")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0)
-            > 0
         || value
             .get("dropped_metadata_fields")
             .and_then(serde_json::Value::as_u64)
@@ -1328,6 +1327,10 @@ fn ai_index_output_has_failures(stdout: &str) -> bool {
             .get("file_errors")
             .and_then(serde_json::Value::as_array)
             .is_some_and(|errors| !errors.is_empty())
+    {
+        return SetupStatus::Warn;
+    }
+    SetupStatus::Ok
 }
 
 fn ai_index_timer_disabled_phase() -> SetupPhase {

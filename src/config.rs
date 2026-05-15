@@ -776,7 +776,8 @@ fn load_setup_env_file() {
 
 #[cfg(not(test))]
 fn is_supported_setup_env_key(key: &str) -> bool {
-    key.starts_with("SYSLOG_")
+    key == "NO_AUTH"
+        || key.starts_with("SYSLOG_")
         || key.starts_with("SYSLOG_MCP_")
         || key.starts_with("SYSLOG_API_")
         || key.starts_with("SYSLOG_DOCKER_")
