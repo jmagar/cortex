@@ -169,10 +169,12 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
     let prune_missing = Arc::new(AtomicBool::new(false));
     let (tx, mut rx) = mpsc::channel::<notify::Result<Event>>(WATCH_EVENT_BUFFER);
     let callback_rescan = Arc::clone(&overflow_rescan);
+    let callback_prune_missing = Arc::clone(&prune_missing);
     let mut watcher = RecommendedWatcher::new(
         move |event| {
             if tx.try_send(event).is_err() {
                 callback_rescan.store(true, Ordering::Relaxed);
+                callback_prune_missing.store(true, Ordering::Relaxed);
             }
         },
         Config::default().with_follow_symlinks(false),
@@ -206,8 +208,10 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
                 }
             }
             _ = tick.tick() => {
-                if prune_missing.swap(false, Ordering::Relaxed) {
-                    prune_missing_checkpoints(&service, options.json).await;
+                while prune_missing.swap(false, Ordering::Relaxed) {
+                    if prune_missing_checkpoints(&service, options.json).await {
+                        prune_missing.store(true, Ordering::Relaxed);
+                    }
                 }
                 if overflow_rescan.swap(false, Ordering::Relaxed)
                     && run_rescan(&service, &options, "rescan").await == RescanStatus::Retry
@@ -296,7 +300,7 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>, is_root: bool)
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) => {
-            if is_root {
+            if is_root && !is_transient_watch_error(&error) {
                 anyhow::bail!(
                     "failed to inspect AI transcript watch path {}: {error}",
                     path.display()
@@ -319,7 +323,7 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>, is_root: bool)
     let read_dir = match std::fs::read_dir(path) {
         Ok(read_dir) => read_dir,
         Err(error) => {
-            if is_root {
+            if is_root && !is_transient_watch_error(&error) {
                 anyhow::bail!(
                     "failed to read AI transcript watch directory {}: {error}",
                     path.display()
@@ -398,8 +402,21 @@ fn handle_event(
     new_dirs
 }
 
-async fn prune_missing_checkpoints(service: &SyslogService, json: bool) {
-    match service.prune_ai_checkpoints(true, false, Some(500)).await {
+fn is_transient_watch_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound
+            | std::io::ErrorKind::PermissionDenied
+            | std::io::ErrorKind::Other
+    )
+}
+
+async fn prune_missing_checkpoints(service: &SyslogService, json: bool) -> bool {
+    const PRUNE_LIMIT: u32 = 500;
+    match service
+        .prune_ai_checkpoints(true, false, Some(PRUNE_LIMIT))
+        .await
+    {
         Ok(result) => {
             if json {
                 println!(
@@ -415,9 +432,11 @@ async fn prune_missing_checkpoints(service: &SyslogService, json: bool) {
                 pruned = result.pruned,
                 "AI transcript watcher pruned missing transcript checkpoints"
             );
+            result.matched >= PRUNE_LIMIT as usize
         }
         Err(error) => {
             tracing::warn!(error = %error, "AI transcript watcher failed to prune missing checkpoints");
+            false
         }
     }
 }

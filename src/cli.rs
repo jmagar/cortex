@@ -1297,28 +1297,32 @@ struct AiSmokeWatchReport {
     missing_checkpoint_count: i64,
 }
 
+struct AiSmokeWatchTarget {
+    tool: &'static str,
+    project: String,
+    transcript_path: PathBuf,
+    body: String,
+}
+
 async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWatchReport> {
-    let home = std::env::var("HOME").map_err(|_| anyhow!("HOME is unset"))?;
+    let doctor = service.ai_doctor().await?;
     let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
     let session_id = format!("syslogsmokewatch{stamp}{}", std::process::id());
-    let dir = PathBuf::from(home).join(".claude/projects");
-    let transcript_path = dir.join(format!("syslog-smoke-watch-{stamp}.jsonl"));
-    std::fs::create_dir_all(&dir)?;
-    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
-    std::fs::write(
-        &transcript_path,
-        format!(
-            r#"{{"sessionId":"{session_id}","timestamp":"{now}","cwd":"/tmp/syslog-smoke-watch","content":"{session_id} live watcher smoke probe"}}"#
-        ) + "\n",
-    )?;
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let target = smoke_watch_target(&doctor, &stamp, &session_id, &now)?;
+    if let Some(parent) = target.transcript_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&target.transcript_path, &target.body)?;
+    let canonical_transcript_path = target.transcript_path.canonicalize()?;
 
     let mut ingested = false;
     for _ in 0..30 {
         let response = service
             .search_sessions(SearchSessionsRequest {
                 query: session_id.clone(),
-                project: Some("/tmp/syslog-smoke-watch".into()),
-                tool: Some("claude".into()),
+                project: Some(target.project.clone()),
+                tool: Some(target.tool.into()),
                 from: None,
                 to: None,
                 limit: Some(5),
@@ -1335,16 +1339,27 @@ async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWatchReport> {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     if !ingested {
-        let _ = std::fs::remove_file(&transcript_path);
+        let _ = std::fs::remove_file(&target.transcript_path);
         bail!("AI watch smoke file was not ingested within 30s");
     }
 
-    std::fs::remove_file(&transcript_path)?;
+    std::fs::remove_file(&target.transcript_path)?;
+    let canonical_transcript_path = canonical_transcript_path.to_string_lossy().to_string();
     let mut missing_checkpoint_count = i64::MAX;
+    let mut pruned_missing_checkpoint = false;
     for _ in 0..30 {
-        let doctor = service.ai_doctor().await?;
-        missing_checkpoint_count = doctor.missing_checkpoint_count;
-        if missing_checkpoint_count == 0 {
+        let result = service.prune_ai_checkpoints(true, false, Some(500)).await?;
+        if result
+            .paths
+            .iter()
+            .any(|path| path == &canonical_transcript_path)
+        {
+            pruned_missing_checkpoint = true;
+        }
+        let current_doctor = service.ai_doctor().await?;
+        missing_checkpoint_count = current_doctor.missing_checkpoint_count;
+        if pruned_missing_checkpoint || result.matched == 0 {
+            pruned_missing_checkpoint = true;
             break;
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -1352,11 +1367,73 @@ async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWatchReport> {
 
     Ok(AiSmokeWatchReport {
         session_id,
-        transcript_path,
+        transcript_path: target.transcript_path,
         ingested,
-        pruned_missing_checkpoint: missing_checkpoint_count == 0,
+        pruned_missing_checkpoint,
         missing_checkpoint_count,
     })
+}
+
+fn smoke_watch_target(
+    doctor: &AiDoctorReport,
+    stamp: &str,
+    session_id: &str,
+    now: &str,
+) -> Result<AiSmokeWatchTarget> {
+    let project = std::env::current_dir()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "/tmp/syslog-smoke-watch".to_string());
+    if doctor.claude_root.exists && doctor.claude_root.readable && doctor.claude_root.writable {
+        let root = PathBuf::from(&doctor.claude_root.path);
+        let transcript_path = root.join(format!("syslog-smoke-watch-{stamp}.jsonl"));
+        let body = serde_json::json!({
+            "sessionId": session_id,
+            "timestamp": now,
+            "cwd": project.clone(),
+            "content": format!("{session_id} live watcher smoke probe"),
+        })
+        .to_string()
+            + "\n";
+        return Ok(AiSmokeWatchTarget {
+            tool: "claude",
+            project,
+            transcript_path,
+            body,
+        });
+    }
+    if doctor.codex_root.exists && doctor.codex_root.readable && doctor.codex_root.writable {
+        let root = PathBuf::from(&doctor.codex_root.path);
+        let transcript_path = root.join(format!("syslog-smoke-watch-{stamp}.jsonl"));
+        let body = serde_json::json!({
+            "type": "session_meta",
+            "payload": {
+                "id": session_id,
+                "cwd": project.clone(),
+            },
+        })
+        .to_string()
+            + "\n"
+            + &serde_json::json!({
+                "type": "response_item",
+                "timestamp": now,
+                "payload": {
+                    "id": session_id,
+                    "content": [{
+                        "type": "output_text",
+                        "text": format!("{session_id} live watcher smoke probe"),
+                    }],
+                },
+            })
+            .to_string()
+            + "\n";
+        return Ok(AiSmokeWatchTarget {
+            tool: "codex",
+            project,
+            transcript_path,
+            body,
+        });
+    }
+    bail!("no writable AI transcript root is available for smoke-watch");
 }
 
 fn ai_watch_status() -> Result<AiWatchStatusReport> {
@@ -1414,6 +1491,10 @@ fn systemctl_user_output(args: &[&str]) -> Result<String> {
         } else {
             output
         };
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if output.status.success() || !stdout.is_empty() {
+        return Ok(stdout);
+    }
     if !output.status.success() {
         bail!(
             "systemctl --user {} failed: {}",
@@ -1421,7 +1502,7 @@ fn systemctl_user_output(args: &[&str]) -> Result<String> {
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(stdout)
 }
 
 fn systemctl_needs_user_bus_fallback(output: &std::process::Output) -> bool {
@@ -2358,8 +2439,13 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
     if response.file_errors.is_empty()
         && response.storage_blocked_chunks == 0
         && response.parse_errors == 0
-        && response.dropped_metadata_fields == 0
     {
+        if response.dropped_metadata_fields > 0 {
+            eprintln!(
+                "warning: {} transcript metadata field(s) were dropped",
+                response.dropped_metadata_fields
+            );
+        }
         Ok(())
     } else if response.storage_blocked_chunks > 0 {
         bail!(
@@ -2370,11 +2456,6 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
         bail!(
             "{} transcript record(s) failed to parse",
             response.parse_errors
-        )
-    } else if response.dropped_metadata_fields > 0 {
-        bail!(
-            "{} transcript metadata field(s) were dropped",
-            response.dropped_metadata_fields
         )
     } else {
         bail!(

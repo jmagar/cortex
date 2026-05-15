@@ -38,7 +38,7 @@ The current manifest declares:
 | `skills` | Exposes repo-local plugin skills |
 | `userConfig.server_url` | Base HTTP URL for the running syslog-mcp server |
 | `userConfig.api_token` | Required Bearer token used by the plugin MCP client; enforced by the server unless `no_auth=true` |
-| `userConfig.no_auth` | Explicit local-only no-auth mode |
+| `userConfig.no_auth` | Explicitly disables static-token enforcement for loopback or upstream-authenticated deployments |
 | `userConfig.is_server` | Whether this machine owns the local Docker Compose deployment |
 | `userConfig.syslog_port` / `syslog_host_port` / `mcp_port` | Container port mapping controls |
 | `userConfig.data_dir` | Host data directory for the Compose deployment |

@@ -17,10 +17,11 @@ pub use analytics::{
 pub use ingest::insert_logs_batch;
 pub(crate) use ingest::insert_logs_batch_in_tx;
 pub use maintenance::{
-    db_full_vacuum, db_incremental_vacuum, db_integrity_check, db_pragma_i64, db_pragma_string,
-    db_wal_checkpoint, enforce_storage_budget, get_storage_metrics, physical_size_bytes,
-    purge_by_tag_window, purge_old_logs, DiskSpaceProbe,
+    db_full_vacuum, db_incremental_vacuum, db_integrity_check, db_wal_checkpoint,
+    enforce_storage_budget, get_storage_metrics, physical_size_bytes, purge_by_tag_window,
+    purge_old_logs, DiskSpaceProbe,
 };
+pub(crate) use maintenance::{db_pragma_i64, db_pragma_string};
 pub use models::{
     AiCorrelateParams, AiCussMatch, AiCussParams, AiCussResult, AiProjectContext,
     AiProjectContextParams, AiProjectInventoryEntry, AiSessionEntry, AiToolInventoryEntry,

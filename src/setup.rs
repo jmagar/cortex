@@ -155,6 +155,21 @@ impl PhaseTimer {
     }
 }
 
+fn phases_have_errors(phases: &[SetupPhase]) -> bool {
+    phases
+        .iter()
+        .any(|phase| matches!(phase.status, SetupStatus::Error))
+}
+
+fn skipped_phase(name: &'static str, detail: impl Into<String>) -> SetupPhase {
+    SetupPhase {
+        name,
+        status: SetupStatus::Skipped,
+        detail: detail.into(),
+        elapsed_ms: 0,
+    }
+}
+
 pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {
     let started = Instant::now();
     let home = syslog_home_dir()?;
@@ -352,6 +367,26 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
                 &syslog_bin,
                 &watch_env_path,
             ));
+            if phases_have_errors(&phases) {
+                phases.push(skipped_phase(
+                    "systemd-enable",
+                    "skipped because earlier AI watch install checks failed",
+                ));
+                let elapsed_ms = started.elapsed().as_millis();
+                let has_errors = phases_have_errors(&phases);
+                return Ok(SetupReport {
+                    mode: action.as_str(),
+                    elapsed_ms,
+                    home,
+                    env_path,
+                    compose_dir,
+                    data_dir,
+                    health_url: "host-local helper".to_string(),
+                    mcp_url: "host-local helper".to_string(),
+                    phases,
+                    has_errors,
+                });
+            }
             phases.push(systemctl_user_phase(&["daemon-reload"]));
             phases.push(systemctl_user_phase(&[
                 "disable",

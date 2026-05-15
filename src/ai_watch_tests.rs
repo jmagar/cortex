@@ -115,13 +115,13 @@ fn collect_watch_dirs_includes_accessible_directories_without_file_recursion() {
 }
 
 #[test]
-fn collect_watch_dirs_fails_when_root_is_missing() {
+fn collect_watch_dirs_skips_missing_root() {
     let temp = tempfile::tempdir().unwrap();
     let missing = temp.path().join("missing");
 
-    let err = collect_watch_dirs(&missing).unwrap_err();
+    let dirs = collect_watch_dirs(&missing).unwrap();
 
-    assert!(err.to_string().contains("failed to inspect"));
+    assert!(dirs.is_empty());
 }
 
 #[cfg(unix)]

@@ -152,11 +152,7 @@ send_tcp_seed() {
 run_syslog_ai_add() {
     local db_path="$1"
     local fixture="$2"
-    if [[ -x "target/debug/syslog" ]]; then
-        SYSLOG_MCP_DB_PATH="$db_path" target/debug/syslog ai add --file "$fixture" --json
-    else
-        SYSLOG_MCP_DB_PATH="$db_path" cargo run --quiet -- ai add --file "$fixture" --json
-    fi
+    SYSLOG_MCP_DB_PATH="$db_path" syslog ai add --file "$fixture" --json
 }
 
 seed_ai_fixture() {

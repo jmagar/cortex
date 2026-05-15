@@ -70,12 +70,20 @@ pub fn db_integrity_check(pool: &DbPool) -> Result<Vec<String>> {
     Ok(messages)
 }
 
-pub fn db_pragma_i64(pool: &DbPool, pragma: &str) -> Result<i64> {
+/// Reads a trusted, hardcoded integer PRAGMA name.
+///
+/// SQLite PRAGMA identifiers cannot be parameterized; do not pass untrusted
+/// input to this helper.
+pub(crate) fn db_pragma_i64(pool: &DbPool, pragma: &str) -> Result<i64> {
     let conn = pool.get()?;
     Ok(conn.query_row(&format!("PRAGMA {pragma}"), [], |row| row.get(0))?)
 }
 
-pub fn db_pragma_string(pool: &DbPool, pragma: &str) -> Result<String> {
+/// Reads a trusted, hardcoded string PRAGMA name.
+///
+/// SQLite PRAGMA identifiers cannot be parameterized; do not pass untrusted
+/// input to this helper.
+pub(crate) fn db_pragma_string(pool: &DbPool, pragma: &str) -> Result<String> {
     let conn = pool.get()?;
     Ok(conn.query_row(&format!("PRAGMA {pragma}"), [], |row| row.get(0))?)
 }
