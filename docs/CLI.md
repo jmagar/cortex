@@ -137,6 +137,12 @@ Ranked grouped session search across AI transcript rows.
 syslog ai search authentication --tool claude --limit 10
 ```
 
+Human output now states that grouping is computed over the newest matching
+candidate window. JSON includes `total_candidates`, `candidate_rows`,
+`candidate_cap`, `candidate_window_truncated`, and `truncated`; when the
+candidate window is truncated, narrow with `--project`, `--tool`, `--from`, or
+`--to` for exact grouping within that filter.
+
 ### `syslog ai blocks`
 
 Bucket AI activity into 5-hour UTC windows.
@@ -144,6 +150,9 @@ Bucket AI activity into 5-hour UTC windows.
 ```bash
 syslog ai blocks --project /home/jmagar/workspace/syslog-mcp
 ```
+
+When `--from` is omitted, usage blocks default to the last 30 days. Returned
+JSON includes `total_blocks` and `truncated`; at most 1000 buckets are returned.
 
 ### `syslog ai context`
 
@@ -153,6 +162,9 @@ Summarize one AI project path.
 syslog ai context --project /home/jmagar/workspace/syslog-mcp --limit 5
 ```
 
+Recent representative entries are capped at 20 rows, and message snippets are
+bounded to 256 characters for predictable MCP/CLI payload size.
+
 ### `syslog ai tools`
 
 List distinct AI tools with counts.
@@ -160,6 +172,9 @@ List distinct AI tools with counts.
 ```bash
 syslog ai tools --json
 ```
+
+Returned JSON includes `total_tools` and `truncated`; at most 100 tools are
+returned.
 
 ### `syslog ai projects`
 
@@ -169,6 +184,9 @@ List distinct AI projects with counts.
 syslog ai projects --tool claude
 ```
 
+Returned JSON includes `total_projects` and `truncated`; at most 200 projects
+are returned.
+
 ### `syslog ai index`
 
 Explicitly scan local transcript roots (`~/.claude/projects`, `~/.codex/sessions`) or one `--path`.
@@ -176,7 +194,23 @@ Explicitly scan local transcript roots (`~/.claude/projects`, `~/.codex/sessions
 ```bash
 syslog ai index
 syslog ai index --path ~/.claude/projects
+syslog ai index --since 2026-05-14T00:00:00Z
+syslog ai index --path ~/.codex/sessions --force
 ```
+
+Path policy is intentionally narrow. Recursive `--path` scans are accepted only
+for known transcript roots (`~/.claude/projects`, `~/.codex/sessions`) or their
+children; one explicit `.jsonl` file can be imported outside those roots.
+`--path /`, `--path $HOME`, and the repo root are rejected before walking, and
+symlinks are skipped. Directories are scanned only for `.jsonl` transcript
+files, unsupported files are counted but not parsed, and each file is streamed
+line-by-line with chunked SQLite transactions. If storage guardrails cannot
+recover enough space, indexing fails before committing additional chunks.
+
+`--since TIME` skips files whose filesystem modification time is older than the
+RFC3339 timestamp. `--force` clears existing import identities and previously
+stored log rows for each scanned transcript path before reimporting, which is
+the right option after parser fixes or scrubber changes.
 
 ### `syslog ai add`
 
@@ -184,7 +218,105 @@ Ingest one explicit transcript file.
 
 ```bash
 syslog ai add --file ~/.claude/projects/example/session.jsonl
+syslog ai add --file ~/.codex/sessions/2026/05/14/session.jsonl --force
 ```
+
+`--force` reimports that one transcript from scratch without leaving duplicate
+log rows.
+
+### `syslog ai checkpoints`
+
+Inspect structured scanner checkpoints without opening SQLite directly.
+
+```bash
+syslog ai checkpoints --limit 20
+syslog ai checkpoints --errors --json
+syslog ai checkpoints --missing
+```
+
+The output shows source kind, imported record count, last successful checkpoint,
+missing-source status, parse error count, and the last parser/indexing error
+when present.
+
+### `syslog ai errors`
+
+Inspect persisted transcript parser errors.
+
+```bash
+syslog ai errors --limit 20
+syslog ai errors --json
+```
+
+Errors include source path, source kind, line number, timestamp, and a bounded
+scrubbed preview so parser failures can be investigated without opening the
+database directly.
+
+### `syslog ai prune-checkpoints`
+
+Remove checkpoints for transcript files that no longer exist.
+
+```bash
+syslog ai prune-checkpoints --missing --dry-run
+syslog ai prune-checkpoints --missing --limit 100
+```
+
+Pruning is deliberately limited to `--missing` checkpoints. It removes scanner
+source metadata, import identities, and parse-error rows for missing files; it
+does not delete already imported log rows.
+
+### `syslog ai doctor`
+
+Summarize the local AI indexing state.
+
+```bash
+syslog ai doctor
+syslog ai doctor --json
+```
+
+The doctor reports the DB path in use, whether `~/.claude/projects` and
+`~/.codex/sessions` exist, checkpoint counts, missing checkpoint counts,
+imported record count, parse error count, and the newest indexed transcript.
+
+### `syslog setup ai-index-timer`
+
+Install, remove, or inspect the optional host-local user-systemd timer that
+periodically runs `syslog ai index`.
+
+```bash
+syslog setup ai-index-timer install
+syslog setup ai-index-timer check --json
+syslog setup ai-index-timer remove
+```
+
+This helper is intentionally not part of the Docker container. It scans
+host-local transcript roots (`~/.claude/projects`, `~/.codex/sessions`) using
+the newest `syslog` binary on the host `PATH`, then writes to the configured
+SQLite DB. The container remains the Compose-managed server/query runtime.
+
+### `syslog doctor binary`
+
+Check whether the shell binary and running container line up with this repo.
+
+```bash
+syslog doctor binary
+syslog doctor binary --json
+```
+
+The doctor reports the current executable, `syslog` resolved from `PATH`, repo
+version, container version when Docker is available, and the result of
+`scripts/check-runtime-current.sh`.
+
+For a one-command live check of the AI transcript workflow, run:
+
+```bash
+bash scripts/smoke-ai.sh
+bash scripts/smoke-ai-mcp.sh
+```
+
+Imported transcript messages are scrubbed for known credential/token patterns
+before storage and FTS indexing. Raw log actions can still expose scrubbed AI
+messages and local `ai_transcript_path` values, so do not expose the database or
+MCP endpoint to untrusted clients.
 
 ### `syslog correlate`
 
@@ -254,7 +386,7 @@ Mutation flags:
 
 `syslog compose` refuses ambiguous target discovery, mismatched requested
 project/service selectors, cwd fallback without confirmation,
-project-name-only mutations, missing Compose files, systemd owner conflicts,
+project-name-only mutations, missing Compose files, legacy service conflicts,
 non-target listeners on syslog ports, and destructive service stop without
 `--yes`. `down` is intentionally service-scoped (`docker compose stop
 syslog-mcp`), not a project-wide `docker compose down`.

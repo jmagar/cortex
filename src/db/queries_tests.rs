@@ -248,6 +248,29 @@ fn test_search_severity_in_filter() {
 }
 
 #[test]
+fn tail_logs_filters_multiple_severities() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_entry("2026-01-01T00:00:00Z", "host-a", "err", "err msg"),
+            make_entry("2026-01-01T00:00:01Z", "host-a", "warning", "warn msg"),
+            make_entry("2026-01-01T00:00:02Z", "host-a", "info", "info msg"),
+        ],
+    )
+    .unwrap();
+
+    let severities = vec!["err".to_string(), "warning".to_string()];
+    let rows = tail_logs(&pool, Some("host-a"), None, None, Some(&severities), 10).unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| row.hostname == "host-a"));
+    assert!(rows
+        .iter()
+        .all(|row| ["err", "warning"].contains(&row.severity.as_str())));
+}
+
+#[test]
 fn search_logs_ignores_deleted_fts_phantom_rows() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(
@@ -352,6 +375,114 @@ fn search_ai_sessions_groups_results() {
 }
 
 #[test]
+fn search_ai_sessions_candidate_cap_prefers_newer_rows() {
+    let (pool, _dir) = test_pool();
+    let mut entries = Vec::new();
+    for i in 0..=5000 {
+        entries.push(make_ai_entry(
+            &format!("2026-01-01T00:{:02}:00Z", i % 60),
+            "host-a",
+            "claude",
+            "/tmp/old",
+            &format!("old-{i}"),
+            "commontoken",
+        ));
+    }
+    entries.push(make_ai_entry(
+        "2026-01-02T00:00:00Z",
+        "host-a",
+        "claude",
+        "/tmp/new",
+        "newest",
+        "commontoken",
+    ));
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let result = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "commontoken".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(result.truncated);
+    assert_eq!(result.candidate_cap, 5000);
+    assert_eq!(result.candidate_rows, 5000);
+    assert!(result.candidate_window_truncated);
+    assert_eq!(result.sessions[0].ai_session_id, "newest");
+    assert_eq!(result.sessions[0].ai_project, "/tmp/new");
+}
+
+#[test]
+fn ai_session_queries_respect_filters() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_ai_entry(
+                "2026-01-01T00:00:00Z",
+                "host-a",
+                "claude",
+                "/tmp/a",
+                "s1",
+                "auth needle",
+            ),
+            make_ai_entry(
+                "2026-01-01T01:00:00Z",
+                "host-b",
+                "codex",
+                "/tmp/b",
+                "s2",
+                "auth needle",
+            ),
+            make_ai_entry(
+                "2026-01-02T00:00:00Z",
+                "host-a",
+                "claude",
+                "/tmp/a",
+                "s3",
+                "auth needle",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let listed = list_ai_sessions(
+        &pool,
+        &ListAiSessionsParams {
+            ai_project: Some("/tmp/a".into()),
+            ai_tool: Some("claude".into()),
+            hostname: Some("host-a".into()),
+            from: Some("2026-01-01T00:00:00Z".into()),
+            to: Some("2026-01-01T23:59:59Z".into()),
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].ai_session_id, "s1");
+
+    let searched = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "needle".into(),
+            ai_project: Some("/tmp/b".into()),
+            ai_tool: Some("codex".into()),
+            from: Some("2026-01-01T00:30:00Z".into()),
+            to: Some("2026-01-01T01:30:00Z".into()),
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(searched.sessions.len(), 1);
+    assert_eq!(searched.sessions[0].ai_session_id, "s2");
+    assert_eq!(searched.sessions[0].hostname, "host-b");
+}
+
+#[test]
 fn list_ai_tool_and_project_inventory() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(
@@ -397,6 +528,33 @@ fn list_ai_tool_and_project_inventory() {
     .unwrap();
     assert_eq!(projects.projects.len(), 1);
     assert_eq!(projects.projects[0].project, "/tmp/a");
+}
+
+#[test]
+fn list_ai_inventory_reports_true_totals_and_truncation() {
+    let (pool, _dir) = test_pool();
+    let mut entries = Vec::new();
+    for i in 0..201 {
+        entries.push(make_ai_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            &format!("tool-{i:03}"),
+            &format!("/tmp/project-{i:03}"),
+            &format!("session-{i:03}"),
+            "inventory",
+        ));
+    }
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let tools = list_ai_tools(&pool, &ListAiToolsParams::default()).unwrap();
+    assert_eq!(tools.tools.len(), 100);
+    assert_eq!(tools.total_tools, 201);
+    assert!(tools.truncated);
+
+    let projects = list_ai_projects(&pool, &ListAiProjectsParams::default()).unwrap();
+    assert_eq!(projects.projects.len(), 200);
+    assert_eq!(projects.total_projects, 201);
+    assert!(projects.truncated);
 }
 
 #[test]

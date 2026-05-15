@@ -70,6 +70,8 @@ fn db_stats_conversion_preserves_guardrail_fields() {
 #[test]
 fn ai_inventory_conversions_preserve_counts() {
     let tools = ListAiToolsResponse::from(db::ListAiToolsResult {
+        total_tools: 1,
+        truncated: false,
         tools: vec![db::AiToolInventoryEntry {
             tool: "claude".into(),
             event_count: 4,
@@ -79,6 +81,8 @@ fn ai_inventory_conversions_preserve_counts() {
         }],
     });
     let projects = ListAiProjectsResponse::from(db::ListAiProjectsResult {
+        total_projects: 1,
+        truncated: false,
         projects: vec![db::AiProjectInventoryEntry {
             project: "/tmp/project".into(),
             tools: vec!["claude".into()],
@@ -90,5 +94,9 @@ fn ai_inventory_conversions_preserve_counts() {
     });
 
     assert_eq!(tools.tools[0].tool, "claude");
+    assert_eq!(tools.total_tools, 1);
+    assert!(!tools.truncated);
     assert_eq!(projects.projects[0].project, "/tmp/project");
+    assert_eq!(projects.total_projects, 1);
+    assert!(!projects.truncated);
 }

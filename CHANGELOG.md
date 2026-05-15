@@ -7,6 +7,150 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.6] - 2026-05-14
+
+### Fixed
+
+- **AI index timer activation**: `syslog setup ai-index-timer` now retries
+  `systemctl --user` with the inferred `/run/user/<uid>/bus` environment when
+  the caller lacks `DBUS_SESSION_BUS_ADDRESS`, so non-login tool contexts can
+  still enable, disable, and check the host-local timer.
+
+## [0.21.5] - 2026-05-14
+
+### Added
+
+- **Host-local AI index timer setup**: Added
+  `syslog setup ai-index-timer install|check|remove` to make the optional
+  transcript indexing timer syslog-owned while keeping it outside Docker
+  Compose.
+- **AI scanner diagnostics**: Added `syslog ai doctor`, `syslog ai errors`,
+  `syslog ai checkpoints --missing`, and
+  `syslog ai prune-checkpoints --missing` for live DB visibility and cleanup.
+- **Binary freshness doctor**: Added `syslog doctor binary` to report host
+  binary resolution, container version, and runtime-current status.
+- **AI MCP smoke coverage**: Added `scripts/smoke-ai-mcp.sh` to seed a fixture
+  and exercise the AI MCP actions over HTTP.
+
+### Changed
+
+- **Parse error storage**: Scanner parse failures are now persisted in
+  `transcript_parse_errors` with bounded scrubbed previews and are cleared when
+  a source indexes cleanly.
+
+## [0.21.4] - 2026-05-14
+
+### Added
+
+- **AI scanner operations**: Added `syslog ai checkpoints`, `syslog ai index
+  --force`, `syslog ai index --since`, and `syslog ai add --force` so scanner
+  state, parser backfills, and selective reindexing are first-class CLI
+  workflows.
+- **AI smoke coverage**: Added `scripts/smoke-ai.sh` for live AI transcript
+  indexing/search/tail/checkpoint verification.
+
+### Fixed
+
+- **Runtime freshness check**: `scripts/check-runtime-current.sh` now verifies
+  the running Compose container binary version against the repo version in
+  addition to comparing Docker image IDs.
+- **Legacy unit cleanup**: Setup repair now removes stale `mnemo-index.*` user
+  units alongside the removed `syslog-mcp.service` systemd deployment.
+- **AI search truncation visibility**: Search responses now expose candidate
+  window metadata so capped grouping is explicit in JSON and human output.
+
+## [0.21.3] - 2026-05-14
+
+### Fixed
+
+- **AI transcript review cleanup**: Limited transcript-style CLI rendering to
+  actual transcript rows, kept the tool column bounded, made explicit `ai add
+  --file` inputs detect Codex JSONL shape outside the default session tree, and
+  tightened scanner checkpoints so same-size rewrites and concurrently appended
+  files are not skipped as fully indexed.
+- **AI session search ordering**: Ordered capped FTS candidates by newest row so
+  recent matching sessions are not hidden behind older high-volume transcript
+  history.
+- **Plugin metadata**: Removed the stale SSE endpoint claim from the Claude
+  plugin MCP port description.
+
+## [0.21.2] - 2026-05-14
+
+### Fixed
+
+- **AI transcript CLI rendering**: Render transcript rows in human CLI output
+  with AI tool, project, and session context instead of the synthetic
+  `localhost` hostname used by the storage layer.
+
+## [0.21.1] - 2026-05-13
+
+### Fixed
+
+- **AI transcript CLI reliability**: Pointed the local debug CLI at the live
+  Compose data volume, made default indexing tolerate unreadable discovered
+  transcript directories without failing, and raised production scanner limits
+  for large Codex session metadata records.
+- **AI indexing performance**: Added metadata checkpoint short-circuiting for
+  unchanged Claude/Codex transcript files so repeated `syslog ai index` runs do
+  not reread the full transcript history.
+- **AI search latency**: Removed the expensive per-row FTS relevance sort from
+  grouped AI session search so common transcript terms stay usable on the live
+  multi-hundred-thousand-row database.
+
+## [0.21.0] - 2026-05-13
+
+### Added
+
+- **Shared setup command**: Added `syslog setup`, `syslog setup check`, and
+  `syslog setup repair` so the one-line installer and Claude Code plugin use
+  the same canonical host layout under `~/.syslog-mcp`.
+- **One-line installer**: Added `install.sh` to install the `syslog` binary and
+  optionally run Docker Compose setup from the installed binary.
+
+### Changed
+
+- **Plugin setup convergence**: Reworked the plugin hook into a thin
+  userConfig-to-env bridge that ensures the binary exists and delegates all
+  host repair to `syslog setup repair`.
+- **Installed CLI config loading**: Installed commands now load
+  `$SYSLOG_MCP_HOME/.env` or `~/.syslog-mcp/.env` automatically, while explicit
+  process environment variables still win.
+
+## [0.20.2] - 2026-05-13
+
+### Changed
+
+- **Compose-only plugin deployment**: Removed the systemd deployment mode,
+  deploy-mode cutover skill, and mode-aware setup paths. Server-mode plugin
+  installs now manage syslog-mcp only with Docker Compose while still removing
+  stale user units/drop-ins left by older versions.
+
+### Fixed
+
+- **Runtime freshness checks**: Narrowed the runtime-current checker and related
+  plugin skills to Docker Compose so stale systemd units or plugin-cache
+  binaries are no longer treated as valid deployment targets.
+
+## [0.20.1] - 2026-05-13
+
+### Fixed
+
+- **AI transcript indexing hardening**: Stream scanner reads line-by-line with
+  bounded chunked transactions, broad path rejection, symlink/unsupported-file
+  counters, storage-budget preflight checks, and checkpoint timestamps that only
+  advance after successful imports.
+- **Codex/Claude transcript parsing**: Preserve Codex file-level session
+  metadata instead of treating response item ids as session ids, and parse
+  Claude object-array content shapes.
+- **AI analytics bounds**: Add truncation metadata for tool/project inventories,
+  default usage blocks to a bounded lookback, and return bounded project-context
+  message snippets.
+
+### Changed
+
+- Updated CLI, MCP, README, and expansion docs to describe scanner path policy,
+  redaction behavior, storage blocking, and AI action result limits.
+
 ## [0.20.0] - 2026-05-12
 
 ### Added
@@ -965,7 +1109,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.17.7...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.6...HEAD
+[0.21.6]: https://github.com/jmagar/syslog-mcp/compare/v0.21.5...v0.21.6
+[0.21.5]: https://github.com/jmagar/syslog-mcp/compare/v0.21.4...v0.21.5
+[0.21.4]: https://github.com/jmagar/syslog-mcp/compare/v0.21.3...v0.21.4
+[0.21.3]: https://github.com/jmagar/syslog-mcp/compare/v0.21.2...v0.21.3
+[0.21.2]: https://github.com/jmagar/syslog-mcp/compare/v0.21.1...v0.21.2
+[0.21.1]: https://github.com/jmagar/syslog-mcp/compare/v0.21.0...v0.21.1
+[0.21.0]: https://github.com/jmagar/syslog-mcp/compare/v0.20.2...v0.21.0
+[0.20.2]: https://github.com/jmagar/syslog-mcp/compare/v0.20.1...v0.20.2
+[0.20.1]: https://github.com/jmagar/syslog-mcp/compare/v0.20.0...v0.20.1
+[0.20.0]: https://github.com/jmagar/syslog-mcp/compare/v0.19.2...v0.20.0
+[0.19.2]: https://github.com/jmagar/syslog-mcp/compare/v0.19.1...v0.19.2
+[0.19.1]: https://github.com/jmagar/syslog-mcp/compare/v0.19.0...v0.19.1
+[0.19.0]: https://github.com/jmagar/syslog-mcp/compare/v0.18.0...v0.19.0
+[0.18.0]: https://github.com/jmagar/syslog-mcp/compare/v0.17.7...v0.18.0
 [0.17.7]: https://github.com/jmagar/syslog-mcp/compare/v0.17.6...v0.17.7
 [0.17.6]: https://github.com/jmagar/syslog-mcp/compare/v0.17.5...v0.17.6
 [0.17.5]: https://github.com/jmagar/syslog-mcp/compare/v0.17.4...v0.17.5

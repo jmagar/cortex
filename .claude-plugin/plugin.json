@@ -116,7 +116,7 @@
     "mcp_port": {
       "type": "number",
       "title": "MCP HTTP port",
-      "description": "TCP port the MCP HTTP server listens on (serves POST /mcp, GET /health, GET /sse). Default 3100. Must match the port in server_url for clients to reach you. Avoid 3000 to dodge the common Node.js dev server collision. Server mode only.",
+      "description": "TCP port the MCP HTTP server listens on (serves POST /mcp and GET /health). Default 3100. Must match the port in server_url for clients to reach you. Avoid 3000 to dodge the common Node.js dev server collision. Server mode only.",
       "default": 3100
     },
     "max_db_size_mb": {

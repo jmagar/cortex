@@ -3,21 +3,34 @@
 FROM rust:1.90-slim-bookworm AS builder
 
 WORKDIR /app
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+ARG SYSLOG_BUILD_PROFILE=release
+RUN case "$SYSLOG_BUILD_PROFILE" in release|debug) ;; *) echo "invalid SYSLOG_BUILD_PROFILE=$SYSLOG_BUILD_PROFILE"; exit 1; esac
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
 # Cache deps
 COPY Cargo.toml Cargo.lock ./
 RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=syslog-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=syslog-cargo-target,target=/app/target,sharing=locked \
-    mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release --locked && rm -rf src
+    case "$SYSLOG_BUILD_PROFILE" in release|debug) ;; *) echo "invalid SYSLOG_BUILD_PROFILE=$SYSLOG_BUILD_PROFILE"; exit 1; esac && \
+    mkdir src && echo "fn main() {}" > src/main.rs && \
+    if [ "$SYSLOG_BUILD_PROFILE" = "release" ]; then cargo build --release --locked; else cargo build --locked; fi && \
+    rm -rf src
 
 # Build real binary
 COPY src/ src/
+COPY docker-compose.yml ./
+COPY config/Dockerfile config/Dockerfile
 RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=syslog-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=syslog-cargo-target,target=/app/target,sharing=locked \
-    touch src/main.rs && cargo build --release --locked && cp target/release/syslog /usr/local/bin/syslog
+    case "$SYSLOG_BUILD_PROFILE" in release|debug) ;; *) echo "invalid SYSLOG_BUILD_PROFILE=$SYSLOG_BUILD_PROFILE"; exit 1; esac && \
+    touch src/main.rs && \
+    if [ "$SYSLOG_BUILD_PROFILE" = "release" ]; then \
+      cargo build --release --locked && cp target/release/syslog /usr/local/bin/syslog; \
+    else \
+      cargo build --locked && cp target/debug/syslog /usr/local/bin/syslog; \
+    fi
 
 # Runtime
 FROM debian:bookworm-slim

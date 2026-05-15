@@ -176,7 +176,9 @@ JSON-RPC level errors use standard codes:
 
 ## Transcript Visibility Policy
 
-AI transcript rows imported through `syslog ai index` or `syslog ai add` are stored in the main `logs` table. They are therefore visible through raw log actions such as `search`, `tail`, `context`, and `get`. The `ai_transcript_path` field can expose local filesystem paths; no redaction is applied automatically.
+AI transcript rows imported through `syslog ai index` or `syslog ai add` are stored in the main `logs` table. They are therefore visible through raw log actions such as `search`, `tail`, `context`, and `get`. Scanner imports scrub known credential/token patterns before storage and FTS indexing, but local `ai_transcript_path` values remain visible. Treat MCP log-read access as access to scrubbed transcript content plus local path metadata.
+
+OTLP AI metadata (`ai.tool`/`ai_tool`, `session.id`/`session_id`, `project.path`, `codebase.root_path`, and `session.cwd`) is producer-supplied, not network-verified identity. Oversized AI tool, project, and session values are rejected before storage; accepted OTLP metadata should be used for grouping/search convenience, not as an authorization or provenance boundary.
 
 ## See Also
 

@@ -33,6 +33,10 @@ SEED_HOST="smoke-test-host"
 GHOST_HOST="nonexistent-host-xyz-404"
 RUN_ID="${SYSLOG_SMOKE_RUN_ID:-$(date -u +%Y%m%d%H%M%S)}"
 TCP_MARKER="smoketcp${RUN_ID}"
+AI_SMOKE_FIXTURE="${SYSLOG_SMOKE_AI_FIXTURE:-tests/fixtures/ai-session-smoke.jsonl}"
+AI_SMOKE_PROJECT="/tmp/syslog-mcp-ai-smoke"
+AI_SMOKE_QUERY='"ai-smoke-authentication"'
+AI_SEEDED=0
 
 trap '[[ -n "$_MCPORTER_CONFIG_TMPFILE" ]] && rm -f "$_MCPORTER_CONFIG_TMPFILE"' EXIT
 
@@ -72,7 +76,7 @@ mcp_call() {
 
 json_get() {
     local json="$1" field="$2"
-    echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d$field)" 2>/dev/null
+    printf '%s\n' "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d$field)" 2>/dev/null
 }
 
 assert_eq() {
@@ -95,7 +99,7 @@ assert_gte() {
 
 assert_no_error() {
     local label="$1" output="$2"
-    if echo "$output" | python3 -c "
+    if printf '%s\n' "$output" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -106,7 +110,7 @@ except Exception:
         pass "$label"
     else
         local detail
-        detail=$(echo "$output" | python3 -c "
+        detail=$(printf '%s\n' "$output" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -121,7 +125,7 @@ except Exception:
 
 assert_is_error() {
     local label="$1" output="$2"
-    if echo "$output" | python3 -c "
+    if printf '%s\n' "$output" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -130,7 +134,7 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null; then
         pass "$label"
-    elif echo "$output" | grep -q "^\[mcporter\] MCP error -32602:"; then
+    elif printf '%s\n' "$output" | grep -q "^\[mcporter\] MCP error -32602:"; then
         pass "$label"
     else
         fail "$label (expected tool isError=true or MCP invalid-params error)"
@@ -143,6 +147,31 @@ send_tcp_seed() {
         return 0
     fi
     printf '%s\n' "$message" | nc -w2 "$SYSLOG_HOST" "$SYSLOG_PORT" >/dev/null
+}
+
+run_syslog_ai_add() {
+    local db_path="$1"
+    local fixture="$2"
+    if [[ -x "target/debug/syslog" ]]; then
+        SYSLOG_MCP_DB_PATH="$db_path" target/debug/syslog ai add --file "$fixture" --json
+    else
+        SYSLOG_MCP_DB_PATH="$db_path" cargo run --quiet -- ai add --file "$fixture" --json
+    fi
+}
+
+seed_ai_fixture() {
+    [[ -f "$AI_SMOKE_FIXTURE" ]] || return 1
+
+    local db_path="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-data/syslog.db}}"
+    local output
+    if output="$(run_syslog_ai_add "$db_path" "$AI_SMOKE_FIXTURE" 2>&1)"; then
+        AI_SEEDED=1
+        echo "Seeded AI transcript fixture into ${db_path}: ${AI_SMOKE_FIXTURE}"
+    else
+        local rc=$?
+        echo "ERROR  AI transcript fixture seed failed: ${output}" >&2
+        return "$rc"
+    fi
 }
 
 # ─── Phase 1: Pre-flight ─────────────────────────────────────────────────────
@@ -158,7 +187,7 @@ HEALTH_STATUS=$(json_get "$HEALTH" "['status']")
 assert_eq "Health endpoint responds with ok" "$HEALTH_STATUS" "ok"
 
 TOOL_LIST=$(mcporter list syslog --config "$MCPORTER_CONFIG" 2>&1)
-TOOL_COUNT=$(echo "$TOOL_LIST" | grep -c "^  function " || true)
+TOOL_COUNT=$(printf '%s\n' "$TOOL_LIST" | grep -c "^  function " || true)
 assert_eq "mcporter lists exactly 1 tool (syslog)" "$TOOL_COUNT" "1"
 
 # ─── Phase 2: Seed test data ─────────────────────────────────────────────────
@@ -171,6 +200,10 @@ if [[ "$SKIP_SEED" -eq 0 ]]; then
     printf '<2>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     printf '<12>%s %s dockerd[99]: smoke-test: warning container restart\n'  "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
     send_tcp_seed "<14>$(date '+%b %e %H:%M:%S') ${SEED_HOST} tcpsmoke[77]: smoke-test tcp seed ${TCP_MARKER} bounded frame ok"
+    if ! seed_ai_fixture; then
+        echo -e "${COLOR_RED}ABORT${COLOR_RESET}  AI transcript fixture seed failed"
+        exit 1
+    fi
     sleep 2
     echo "Seeded 5 messages (4 UDP, 1 TCP) from $SEED_HOST; TCP marker=$TCP_MARKER"
 else
@@ -232,11 +265,11 @@ echo "Action: hosts"
 HOSTS=$(mcp_call hosts 2>&1)
 assert_no_error "hosts: no error" "$HOSTS"
 
-HOSTS_COUNT=$(echo "$HOSTS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['hosts']))" 2>/dev/null || echo "0")
+HOSTS_COUNT=$(printf '%s\n' "$HOSTS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['hosts']))" 2>/dev/null || echo "0")
 assert_gte "hosts: at least 1 host" "$HOSTS_COUNT" 1
 
 # All records have required fields and non-zero log counts
-HOSTS_VALID=$(echo "$HOSTS" | python3 -c "
+HOSTS_VALID=$(printf '%s\n' "$HOSTS" | python3 -c "
 import sys, json
 for h in json.load(sys.stdin)['hosts']:
     assert h.get('hostname'), 'hostname missing or empty'
@@ -250,7 +283,7 @@ assert_eq "hosts: all records have required fields and log_count > 0" "$HOSTS_VA
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     # Verify the seeded host actually appears by name
-    SEED_HOST_FOUND=$(echo "$HOSTS" | python3 -c "
+    SEED_HOST_FOUND=$(printf '%s\n' "$HOSTS" | python3 -c "
 import sys, json
 hosts = [h['hostname'] for h in json.load(sys.stdin)['hosts']]
 print('ok' if '${SEED_HOST}' in hosts else f'missing: {hosts}')
@@ -264,7 +297,7 @@ echo "Action: sessions"
 SESSIONS=$(mcp_call sessions "limit=10" 2>&1)
 assert_no_error "sessions: no error" "$SESSIONS"
 
-SESSIONS_VALID=$(echo "$SESSIONS" | python3 -c "
+SESSIONS_VALID=$(printf '%s\n' "$SESSIONS" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 assert 'count' in d, 'count missing'
@@ -281,11 +314,20 @@ print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "sessions: response structure valid" "$SESSIONS_VALID" "ok"
 
+if [[ "$AI_SEEDED" -eq 1 ]]; then
+    AI_SESSION_FOUND=$(printf '%s\n' "$SESSIONS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('ok' if any(s.get('project') == '${AI_SMOKE_PROJECT}' for s in d.get('sessions', [])) else 'missing')
+" 2>/dev/null || echo "error")
+    assert_eq "sessions: seeded AI project appears" "$AI_SESSION_FOUND" "ok"
+fi
+
 echo ""
 echo "Action: AI session analytics"
-SEARCH_SESSIONS=$(mcp_call search_sessions "query=authentication" "limit=10" 2>&1)
+SEARCH_SESSIONS=$(mcp_call search_sessions "query=${AI_SMOKE_QUERY}" "limit=10" 2>&1)
 assert_no_error "search_sessions: no error" "$SEARCH_SESSIONS"
-SEARCH_SESSIONS_VALID=$(echo "$SEARCH_SESSIONS" | python3 -c "
+SEARCH_SESSIONS_VALID=$(printf '%s\n' "$SEARCH_SESSIONS" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 assert 'total_candidates' in d, 'total_candidates missing'
@@ -293,10 +335,18 @@ assert isinstance(d.get('sessions'), list), 'sessions not a list'
 print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "search_sessions: response structure valid" "$SEARCH_SESSIONS_VALID" "ok"
+if [[ "$AI_SEEDED" -eq 1 ]]; then
+    SEARCH_SESSIONS_FOUND=$(printf '%s\n' "$SEARCH_SESSIONS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('ok' if d.get('total_candidates', 0) >= 1 else 'missing')
+" 2>/dev/null || echo "error")
+    assert_eq "search_sessions: seeded fixture is searchable" "$SEARCH_SESSIONS_FOUND" "ok"
+fi
 
 USAGE_BLOCKS=$(mcp_call usage_blocks 2>&1)
 assert_no_error "usage_blocks: no error" "$USAGE_BLOCKS"
-USAGE_BLOCKS_VALID=$(echo "$USAGE_BLOCKS" | python3 -c "
+USAGE_BLOCKS_VALID=$(printf '%s\n' "$USAGE_BLOCKS" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 assert isinstance(d.get('blocks'), list), 'blocks not a list'
@@ -305,20 +355,28 @@ print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "usage_blocks: response structure valid" "$USAGE_BLOCKS_VALID" "ok"
 
-PROJECT_CONTEXT=$(mcp_call project_context "project=/tmp" "limit=5" 2>&1)
+PROJECT_CONTEXT=$(mcp_call project_context "project=${AI_SMOKE_PROJECT}" "limit=5" 2>&1)
 assert_no_error "project_context: no error" "$PROJECT_CONTEXT"
-PROJECT_CONTEXT_VALID=$(echo "$PROJECT_CONTEXT" | python3 -c "
+PROJECT_CONTEXT_VALID=$(printf '%s\n' "$PROJECT_CONTEXT" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-assert d.get('project') == '/tmp', 'project mismatch'
+assert d.get('project') == '${AI_SMOKE_PROJECT}', 'project mismatch'
 assert isinstance(d.get('recent_entries'), list), 'recent_entries not a list'
 print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "project_context: response structure valid" "$PROJECT_CONTEXT_VALID" "ok"
+if [[ "$AI_SEEDED" -eq 1 ]]; then
+    PROJECT_CONTEXT_FOUND=$(printf '%s\n' "$PROJECT_CONTEXT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('ok' if len(d.get('recent_entries', [])) >= 1 else 'missing')
+" 2>/dev/null || echo "error")
+    assert_eq "project_context: seeded fixture has entries" "$PROJECT_CONTEXT_FOUND" "ok"
+fi
 
 AI_TOOLS=$(mcp_call list_ai_tools 2>&1)
 assert_no_error "list_ai_tools: no error" "$AI_TOOLS"
-AI_TOOLS_VALID=$(echo "$AI_TOOLS" | python3 -c "
+AI_TOOLS_VALID=$(printf '%s\n' "$AI_TOOLS" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 assert isinstance(d.get('tools'), list), 'tools not a list'
@@ -328,7 +386,7 @@ assert_eq "list_ai_tools: response structure valid" "$AI_TOOLS_VALID" "ok"
 
 AI_PROJECTS=$(mcp_call list_ai_projects 2>&1)
 assert_no_error "list_ai_projects: no error" "$AI_PROJECTS"
-AI_PROJECTS_VALID=$(echo "$AI_PROJECTS" | python3 -c "
+AI_PROJECTS_VALID=$(printf '%s\n' "$AI_PROJECTS" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 assert isinstance(d.get('projects'), list), 'projects not a list'
@@ -342,10 +400,10 @@ echo "Action: tail"
 TAIL=$(mcp_call tail "n=10" 2>&1)
 assert_no_error "tail: no error" "$TAIL"
 
-TAIL_COUNT=$(echo "$TAIL" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "0")
+TAIL_COUNT=$(printf '%s\n' "$TAIL" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "0")
 assert_gte "tail: returns >= 1 log" "$TAIL_COUNT" 1
 
-TAIL_VALID=$(echo "$TAIL" | python3 -c "
+TAIL_VALID=$(printf '%s\n' "$TAIL" | python3 -c "
 import sys, json
 logs = json.load(sys.stdin)['logs']
 assert logs, 'no logs'
@@ -360,7 +418,7 @@ print('ok')
 assert_eq "tail: log entries have required fields" "$TAIL_VALID" "ok"
 
 # Results must be in non-increasing timestamp order (most recent first)
-TAIL_ORDER=$(echo "$TAIL" | python3 -c "
+TAIL_ORDER=$(printf '%s\n' "$TAIL" | python3 -c "
 import sys, json
 logs = json.load(sys.stdin)['logs']
 for i in range(1, len(logs)):
@@ -374,7 +432,7 @@ if [[ "$SKIP_SEED" -eq 0 ]]; then
     # hostname= filter must only return logs for that host
     TAIL_FILTERED=$(mcp_call tail "hostname=${SEED_HOST}" "n=50" 2>&1)
     assert_no_error "tail(hostname filter): no error" "$TAIL_FILTERED"
-    TAIL_FILTER_VALID=$(echo "$TAIL_FILTERED" | python3 -c "
+    TAIL_FILTER_VALID=$(printf '%s\n' "$TAIL_FILTERED" | python3 -c "
 import sys, json
 logs = json.load(sys.stdin)['logs']
 assert logs, 'no logs returned for seeded host'
@@ -384,7 +442,7 @@ print('ok')
 " 2>/dev/null || echo "error")
     assert_eq "tail(hostname filter): only returns logs for '$SEED_HOST'" "$TAIL_FILTER_VALID" "ok"
 
-    TAIL_TCP_MARKER=$(echo "$TAIL_FILTERED" | python3 -c "
+    TAIL_TCP_MARKER=$(printf '%s\n' "$TAIL_FILTERED" | python3 -c "
 import sys, json
 logs = json.load(sys.stdin)['logs']
 matches = [l for l in logs if '${TCP_MARKER}' in (l.get('message') or '')]
@@ -401,9 +459,9 @@ echo "Action: search"
 # FTS5 keyword search — results must actually contain the query term
 SEARCH=$(mcp_call search "query=authentication" "limit=50" 2>&1)
 assert_no_error "search(query=authentication): no error" "$SEARCH"
-SEARCH_COUNT=$(echo "$SEARCH" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "0")
+SEARCH_COUNT=$(printf '%s\n' "$SEARCH" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "0")
 assert_gte "search(query=authentication): returns >= 1 result" "$SEARCH_COUNT" 1
-SEARCH_MATCH=$(echo "$SEARCH" | python3 -c "
+SEARCH_MATCH=$(printf '%s\n' "$SEARCH" | python3 -c "
 import sys, json
 for l in json.load(sys.stdin)['logs']:
     if 'authentication' not in (l.get('message') or '').lower():
@@ -415,7 +473,7 @@ assert_eq "search(query=authentication): all results contain query term" "$SEARC
 # Phrase search
 SEARCH_PHRASE=$(mcp_call search 'query="authentication failure"' "limit=10" 2>&1)
 assert_no_error "search(phrase): no error" "$SEARCH_PHRASE"
-PHRASE_MATCH=$(echo "$SEARCH_PHRASE" | python3 -c "
+PHRASE_MATCH=$(printf '%s\n' "$SEARCH_PHRASE" | python3 -c "
 import sys, json
 logs = json.load(sys.stdin)['logs']
 assert logs, 'phrase search returned no results'
@@ -430,7 +488,7 @@ if [[ "$SKIP_SEED" -eq 0 ]]; then
     # hostname= filter: should return only that host's logs
     SEARCH_HOST=$(mcp_call search "hostname=${SEED_HOST}" "limit=50" 2>&1)
     assert_no_error "search(hostname filter): no error" "$SEARCH_HOST"
-    SEARCH_HOST_VALID=$(echo "$SEARCH_HOST" | python3 -c "
+    SEARCH_HOST_VALID=$(printf '%s\n' "$SEARCH_HOST" | python3 -c "
 import sys, json
 logs = json.load(sys.stdin)['logs']
 assert logs, 'hostname filter returned no logs for seeded host'
@@ -443,7 +501,7 @@ print('ok')
     # severity= filter: warning should only return warning-level logs
     SEARCH_SEV=$(mcp_call search "hostname=${SEED_HOST}" "severity=warning" "limit=50" 2>&1)
     assert_no_error "search(severity filter): no error" "$SEARCH_SEV"
-    SEARCH_SEV_VALID=$(echo "$SEARCH_SEV" | python3 -c "
+    SEARCH_SEV_VALID=$(printf '%s\n' "$SEARCH_SEV" | python3 -c "
 import sys, json
 logs = json.load(sys.stdin)['logs']
 assert logs, 'severity filter returned no warning logs'
@@ -455,7 +513,7 @@ print('ok')
 
     SEARCH_TCP=$(mcp_call search "query=${TCP_MARKER}" "hostname=${SEED_HOST}" "limit=10" 2>&1)
     assert_no_error "search(TCP seed marker): no error" "$SEARCH_TCP"
-    SEARCH_TCP_VALID=$(echo "$SEARCH_TCP" | python3 -c "
+    SEARCH_TCP_VALID=$(printf '%s\n' "$SEARCH_TCP" | python3 -c "
 import sys, json
 logs = json.load(sys.stdin)['logs']
 assert logs, 'TCP seed marker search returned no logs'
@@ -470,13 +528,13 @@ fi
 # Nonexistent hostname must return 0 results (filter is not ignored)
 SEARCH_GHOST=$(mcp_call search "hostname=${GHOST_HOST}" "limit=10" 2>&1)
 assert_no_error "search(nonexistent hostname): no error" "$SEARCH_GHOST"
-GHOST_COUNT=$(echo "$SEARCH_GHOST" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "-1")
+GHOST_COUNT=$(printf '%s\n' "$SEARCH_GHOST" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "-1")
 assert_eq "search(nonexistent hostname): returns 0 results" "$GHOST_COUNT" "0"
 
 # limit=0 edge case
 SEARCH_ZERO=$(mcp_call search "limit=0" 2>&1)
 assert_no_error "search(limit=0): no error" "$SEARCH_ZERO"
-ZERO_COUNT=$(echo "$SEARCH_ZERO" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "-1")
+ZERO_COUNT=$(printf '%s\n' "$SEARCH_ZERO" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "-1")
 assert_eq "search(limit=0): returns 0 results" "$ZERO_COUNT" "0"
 
 # ── errors ────────────────────────────────────────────────────────────────────
@@ -486,7 +544,7 @@ ERRORS_OUT=$(mcp_call errors 2>&1)
 assert_no_error "errors: no error" "$ERRORS_OUT"
 
 # Structure + severity values are valid
-ERRORS_VALID=$(echo "$ERRORS_OUT" | python3 -c "
+ERRORS_VALID=$(printf '%s\n' "$ERRORS_OUT" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 assert 'summary' in d and isinstance(d['summary'], list), 'summary missing or not a list'
@@ -500,19 +558,19 @@ print('ok')
 assert_eq "errors: summary structure and severity values valid" "$ERRORS_VALID" "ok"
 
 # Info-level logs must NOT appear in error summary
-INFO_IN_ERRORS=$(echo "$ERRORS_OUT" | python3 -c "
+INFO_IN_ERRORS=$(printf '%s\n' "$ERRORS_OUT" | python3 -c "
 import sys, json
 info_rows = [i for i in json.load(sys.stdin)['summary'] if i['severity'] in ('info','debug','notice')]
 print('ok' if not info_rows else f'info/debug/notice leaked: {info_rows}')
 " 2>/dev/null || echo "error")
 assert_eq "errors: info/debug/notice levels absent from summary" "$INFO_IN_ERRORS" "ok"
 
-ERRORS_COUNT=$(echo "$ERRORS_OUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['summary']))" 2>/dev/null || echo "0")
+ERRORS_COUNT=$(printf '%s\n' "$ERRORS_OUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['summary']))" 2>/dev/null || echo "0")
 assert_gte "errors: at least 1 error group" "$ERRORS_COUNT" 1
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     # Seeded host must appear with err, crit, and warning entries
-    SEED_IN_ERRORS=$(echo "$ERRORS_OUT" | python3 -c "
+    SEED_IN_ERRORS=$(printf '%s\n' "$ERRORS_OUT" | python3 -c "
 import sys, json
 rows = json.load(sys.stdin)['summary']
 host_rows = [r for r in rows if r['hostname'] == '${SEED_HOST}']
@@ -532,7 +590,7 @@ REF_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 CORRELATE=$(mcp_call correlate "reference_time=$REF_TIME" "window_minutes=30" 2>&1)
 assert_no_error "correlate: no error" "$CORRELATE"
 
-CORRELATE_VALID=$(echo "$CORRELATE" | python3 -c "
+CORRELATE_VALID=$(printf '%s\n' "$CORRELATE" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 for field in ('reference_time', 'window_minutes', 'total_events', 'hosts', 'window_from', 'window_to', 'truncated'):
@@ -555,11 +613,11 @@ assert_eq "correlate: response structure valid" "$CORRELATE_VALID" "ok"
 CORRELATE_WINDOW=$(json_get "$CORRELATE" "['window_minutes']")
 assert_eq "correlate: window_minutes echoed back as 30" "$CORRELATE_WINDOW" "30"
 
-CORRELATE_EVENTS=$(echo "$CORRELATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_events'])" 2>/dev/null || echo "0")
+CORRELATE_EVENTS=$(printf '%s\n' "$CORRELATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_events'])" 2>/dev/null || echo "0")
 assert_gte "correlate: found events in 30-minute window" "$CORRELATE_EVENTS" 1
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
-    SEED_IN_CORRELATE=$(echo "$CORRELATE" | python3 -c "
+    SEED_IN_CORRELATE=$(printf '%s\n' "$CORRELATE" | python3 -c "
 import sys, json
 hosts = [h['hostname'] for h in json.load(sys.stdin)['hosts']]
 print('ok' if '${SEED_HOST}' in hosts else f'missing (got {hosts})')
@@ -576,7 +634,7 @@ echo ""
 echo "Action: compose_status"
 COMPOSE_STATUS=$(mcp_call compose_status 2>&1)
 assert_no_error "compose_status: no error" "$COMPOSE_STATUS"
-COMPOSE_STATUS_VALID=$(echo "$COMPOSE_STATUS" | python3 -c "
+COMPOSE_STATUS_VALID=$(printf '%s\n' "$COMPOSE_STATUS" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 for key in ('container_name', 'ownership', 'runtime_state', 'published_ports', 'diagnostics'):
@@ -587,7 +645,7 @@ assert 'image_id' not in text, 'image id leaked'
 print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "compose_status: redacted safe response valid" "$COMPOSE_STATUS_VALID" "ok"
-COMPOSE_STATUS_DOCTORABLE=$(echo "$COMPOSE_STATUS" | python3 -c "
+COMPOSE_STATUS_DOCTORABLE=$(printf '%s\n' "$COMPOSE_STATUS" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 print('yes' if d.get('runtime_state') != 'docker_unavailable' and d.get('ownership') == 'compose_owned' else 'no')
@@ -598,7 +656,7 @@ echo "Action: compose_doctor"
 if [[ "$COMPOSE_STATUS_DOCTORABLE" == "yes" ]]; then
     COMPOSE_DOCTOR=$(mcp_call compose_doctor 2>&1)
     assert_no_error "compose_doctor: no error" "$COMPOSE_DOCTOR"
-    COMPOSE_DOCTOR_VALID=$(echo "$COMPOSE_DOCTOR" | python3 -c "
+    COMPOSE_DOCTOR_VALID=$(printf '%s\n' "$COMPOSE_DOCTOR" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 for key in ('container_name', 'ownership', 'runtime_state'):
@@ -613,18 +671,34 @@ fi
 # ── help ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "Action: help"
-HELP=$(mcp_call help 2>&1)
-assert_no_error "help: no error" "$HELP"
-HELP_VALID=$(echo "$HELP" | python3 -c "
+HELP_FILE=$(mktemp /tmp/syslog-help-XXXXXX.json)
+if mcporter call --config "$MCPORTER_CONFIG" "syslog.syslog" "action=help" >"$HELP_FILE" 2>&1; then
+    if python3 -c "
 import sys, json
-d = json.load(sys.stdin)
+try:
+    d = json.load(open(sys.argv[1]))
+    sys.exit(1 if d.get('isError') else 0)
+except Exception:
+    sys.exit(1)
+" "$HELP_FILE" 2>/dev/null; then
+        pass "help: no error"
+    else
+        fail "help: no error (response was invalid JSON or isError=true)"
+    fi
+else
+    fail "help: no error (mcporter call failed)"
+fi
+HELP_VALID=$(python3 -c "
+import sys, json
+d = json.load(open(sys.argv[1]))
 assert 'help' in d, 'help key missing'
 text = d['help']
 assert len(text) > 100, 'help text suspiciously short'
 for section in ('search', 'tail', 'errors', 'hosts', 'sessions', 'correlate', 'stats', 'status'):
     assert section in text.lower(), f'help text missing section: {section}'
 print('ok')
-" 2>/dev/null || echo "error")
+" "$HELP_FILE" 2>/dev/null || echo "error")
+rm -f "$HELP_FILE"
 assert_eq "help: contains all action sections" "$HELP_VALID" "ok"
 
 # ── invalid action (negative test) ───────────────────────────────────────────

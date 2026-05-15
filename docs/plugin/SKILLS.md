@@ -1,3 +1,10 @@
+<!--
+SPDX-License-Identifier: MIT
+Author: jmagar
+License: MIT
+Description: Skill definitions and validation guidance for the syslog-mcp plugin.
+-->
+
 # Skill Definitions -- syslog-mcp
 
 Patterns for defining skills (domain knowledge modules) within the syslog-mcp plugin.
@@ -26,9 +33,8 @@ plugins/
 | `syslog-dr` | Comprehensive deployment health check, including runtime freshness. |
 | `syslog-deploy-dropins` | Deploy rsyslog forwarding drop-ins to fleet hosts over SSH. |
 | `syslog-redeploy` | Re-run the plugin setup hook and verify health plus runtime freshness. |
-| `syslog-logs` | Tail or follow syslog-mcp service logs from Docker or systemd. |
-| `syslog-cutover` | Switch between Docker and systemd deployment modes and verify health. |
-| `syslog-version-check` | Check whether the running runtime matches the installed binary or image. Docker `--pull` checks after refreshing the local image; without it, Docker checks only the local cache. |
+| `syslog-logs` | Tail or follow syslog-mcp service logs from Docker Compose. |
+| `syslog-version-check` | Check whether the running container matches the local Compose image. `--pull` checks after refreshing the local image; without it, Docker checks only the local cache. |
 
 ### Contents
 

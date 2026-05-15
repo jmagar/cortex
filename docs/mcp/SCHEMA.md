@@ -75,7 +75,10 @@ json!({
                     "help"
                 ]
             },
-            "query": { "type": "string" },
+            "query": {
+                "type": "string",
+                "description": "FTS5 query for search, search_sessions, and correlate. Hyphen is the FTS5 NOT operator; quote hyphenated terms as phrases, e.g. \"smoke-test\"."
+            },
             "hostname": { "type": "string" },
             "source_ip": { "type": "string" },
             "project": {
@@ -99,7 +102,10 @@ json!({
             "process_id": { "type": "string" },
             "from": { "type": "string" },
             "to": { "type": "string" },
-            "limit": { "type": "integer" },
+            "limit": {
+                "type": "integer",
+                "description": "Action-specific max rows. AI inventories and searches include truncation metadata; project_context snippets are bounded."
+            },
             "n": { "type": "integer" },
             "reference_time": { "type": "string" },
             "window_minutes": { "type": "integer" },
@@ -162,6 +168,7 @@ Input validation happens in the action handlers, not only at the schema level:
 
 - `action` is required and must be one of the supported actions
 - `limit` values are capped at their action-specific maximum
+- `query` uses SQLite FTS5 syntax; quote hyphenated terms because bare `-` means NOT
 - `severity` and `severity_min` are validated against known syslog levels
 - `reference_time`, `from`, `to`, `timestamp`, `since`, `a_from`, `a_to`, `b_from`, and `b_to` timestamps are parsed as RFC 3339 and normalized to UTC where required
 - Unknown parameters are ignored
