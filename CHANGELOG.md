@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   details, and transcript rows preserve source kind, file path, line number,
   record key, and scrub status.
 
+### Fixed
+
+- **AI tool schema parity**: Restored `gemini` to the MCP `tool` schema enum so
+  validation matches the runtime parser, docs, and query behavior.
+
 ## [0.24.1] - 2026-05-15
 
 ### Fixed
@@ -1224,7 +1229,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.21.9...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/jmagar/syslog-mcp/compare/v0.24.1...v0.25.0
+[0.24.1]: https://github.com/jmagar/syslog-mcp/compare/v0.24.0...v0.24.1
+[0.24.0]: https://github.com/jmagar/syslog-mcp/compare/v0.23.1...v0.24.0
+[0.23.1]: https://github.com/jmagar/syslog-mcp/compare/v0.23.0...v0.23.1
+[0.23.0]: https://github.com/jmagar/syslog-mcp/compare/v0.22.0...v0.23.0
+[0.22.0]: https://github.com/jmagar/syslog-mcp/compare/v0.21.9...v0.22.0
 [0.21.9]: https://github.com/jmagar/syslog-mcp/compare/v0.21.8...v0.21.9
 [0.21.8]: https://github.com/jmagar/syslog-mcp/compare/v0.21.7...v0.21.8
 [0.21.7]: https://github.com/jmagar/syslog-mcp/compare/v0.21.6...v0.21.7

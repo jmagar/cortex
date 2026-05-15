@@ -60,7 +60,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "tool": {
                     "type": "string",
-                    "enum": ["claude", "codex"],
+                    "enum": ["claude", "codex", "gemini"],
                     "description": "For action=sessions, search_sessions, cuss, ai_correlate, usage_blocks, project_context, or list_ai_projects: AI tool filter."
                 },
                 "source_ip": {

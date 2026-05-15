@@ -457,13 +457,12 @@ impl BinaryDoctorReport {
 }
 
 fn runtime_current_status() -> (Option<bool>, Option<String>) {
-    let script = std::path::Path::new("scripts/check-runtime-current.sh");
-    if !script.exists() {
+    let Some(script) = runtime_current_script_path() else {
         return (
             None,
             Some("scripts/check-runtime-current.sh not found".into()),
         );
-    }
+    };
     match std::process::Command::new("bash").arg(script).output() {
         Ok(output) if output.status.success() => (Some(true), None),
         Ok(output) => {
@@ -476,6 +475,28 @@ fn runtime_current_status() -> (Option<bool>, Option<String>) {
         }
         Err(error) => (None, Some(error.to_string())),
     }
+}
+
+fn runtime_current_script_path() -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os("SYSLOG_RUNTIME_CHECK_SCRIPT")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.exists())
+    {
+        return Some(path);
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join("scripts/check-runtime-current.sh"));
+            candidates.push(exe_dir.join("../scripts/check-runtime-current.sh"));
+            candidates.push(exe_dir.join("../../scripts/check-runtime-current.sh"));
+            candidates.push(exe_dir.join("../../../scripts/check-runtime-current.sh"));
+        }
+    }
+    candidates.push(std::path::PathBuf::from("scripts/check-runtime-current.sh"));
+
+    candidates.into_iter().find(|path| path.exists())
 }
 
 fn command_stdout(command: &str, args: &[&str]) -> Option<String> {

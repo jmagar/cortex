@@ -218,12 +218,13 @@ rows from the same AI session.
 | `after` | integer | Same-session rows after each hit (default 2, max 20) |
 | `terms` | array or string | Optional custom detector terms; replaces the built-in profanity list |
 
-```
+```text
 mcp__syslog__syslog(action="cuss", project="/home/jmagar/workspace/syslog-mcp", limit=10)
 mcp__syslog__syslog(action="cuss", tool="codex", terms=["dang", "heck"], before=3, after=3)
 ```
 
 **Response shape:**
+
 ```json
 {
   "terms": ["shit"],

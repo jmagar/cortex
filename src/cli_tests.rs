@@ -365,6 +365,56 @@ fn parse_ai_smoke_watch_accepts_json() {
 }
 
 #[test]
+fn smoke_watch_target_uses_codex_root_when_claude_is_unavailable() {
+    let temp = tempfile::tempdir().unwrap();
+    let codex_root = temp.path().join(".codex/sessions");
+    std::fs::create_dir_all(&codex_root).unwrap();
+    let doctor = AiDoctorReport {
+        db_path: "/tmp/syslog.db".into(),
+        claude_root: transcript_root_status("/missing", false),
+        codex_root: transcript_root_status(&codex_root.to_string_lossy(), true),
+        checkpoint_count: 0,
+        checkpoint_error_count: 0,
+        missing_checkpoint_count: 0,
+        imported_record_count: 0,
+        parse_error_count: 0,
+        newest_indexed_path: None,
+        newest_indexed_at: None,
+    };
+
+    let target = smoke_watch_target(&doctor, "stamp", "session-1", "2026-05-15T00:00:00Z")
+        .expect("codex root should be selected");
+
+    assert_eq!(target.tool, "codex");
+    assert_eq!(
+        target.project,
+        std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    );
+    assert!(target.transcript_path.starts_with(codex_root));
+    assert!(target.body.contains("\"type\":\"session_meta\""));
+    assert!(target.body.contains("\"type\":\"response_item\""));
+}
+
+fn transcript_root_status(
+    path: &str,
+    available: bool,
+) -> syslog_mcp::scanner::TranscriptRootStatus {
+    syslog_mcp::scanner::TranscriptRootStatus {
+        path: path.to_string(),
+        exists: available,
+        readable: available,
+        writable: available,
+        owner_uid: None,
+        owner_gid: None,
+        mode: None,
+        strict_ok: available,
+    }
+}
+
+#[test]
 fn parse_db_status_accepts_json() {
     let parsed = CliCommand::parse(strings(&["db", "status", "--json"])).unwrap();
 
