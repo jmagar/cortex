@@ -44,14 +44,14 @@ Compose diagnostics are non-mutating and are validated only for redacted shape,
 so the smoke test can pass on either Docker-backed or non-Docker deployments.
 When seeding is enabled, the smoke scripts import
 `tests/fixtures/ai-session-smoke.jsonl` and assert that `sessions`,
-`search_sessions`, and `project_context` can retrieve real AI transcript rows,
-not just empty response envelopes.
+`search_sessions`, `cuss`, and `project_context` can retrieve real AI transcript
+rows, not just empty response envelopes.
 `scripts/smoke-ai-mcp.sh` additionally seeds a temporary transcript and calls
-the HTTP MCP endpoint for `search_sessions`, `usage_blocks`, `project_context`,
-`list_ai_tools`, and `list_ai_projects`.
+the HTTP MCP endpoint for `search_sessions`, `cuss`, `usage_blocks`,
+`project_context`, `list_ai_tools`, and `list_ai_projects`.
 
 Action registry covered by live/script references: `search`, `tail`, `errors`,
-`hosts`, `sessions`, `search_sessions`, `usage_blocks`, `project_context`,
+`hosts`, `sessions`, `search_sessions`, `cuss`, `usage_blocks`, `project_context`,
 `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`,
 `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`,
 `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`,
@@ -70,6 +70,7 @@ mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
 mcporter call --config config/mcporter.json syslog.syslog action=search query=error limit=5
 mcporter call --config config/mcporter.json syslog.syslog action=hosts
 mcporter call --config config/mcporter.json syslog.syslog action=sessions
+mcporter call --config config/mcporter.json syslog.syslog action=cuss terms=ai-smoke-authentication limit=5
 mcporter call --config config/mcporter.json syslog.syslog action=apps
 mcporter call --config config/mcporter.json syslog.syslog action=source_ips
 mcporter call --config config/mcporter.json syslog.syslog action=timeline
@@ -119,7 +120,7 @@ curl -s -X POST http://localhost:3100/mcp \
 ## Testing checklist
 
 - [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions, syslog correlate, syslog stats, syslog status, syslog help
-- [ ] **AI session analytics return expected shape and seeded rows** -- syslog search_sessions, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects
+- [ ] **AI session analytics return expected shape and seeded rows** -- syslog search_sessions, syslog cuss, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects
 - [ ] **Auth: valid token** -- 200 with correct Bearer token
 - [ ] **Auth: invalid token** -- 401 Unauthorized
 - [ ] **Auth: no token when required** -- 401 Unauthorized

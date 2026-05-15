@@ -2,13 +2,13 @@ use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 use std::path::PathBuf;
 use syslog_mcp::app::{
-    CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
-    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest,
-    GetErrorsResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
-    ListAiToolsResponse, ListHostsResponse, LogEntry, ProjectContextRequest,
-    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
-    SearchSessionsResponse, SyslogService, TailLogsRequest, UsageBlocksRequest,
-    UsageBlocksResponse,
+    CorrelateEventsRequest, CorrelateEventsResponse, CussSearchRequest, CussSearchResponse,
+    DbBackupResult, DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats,
+    DbVacuumResult, GetErrorsRequest, GetErrorsResponse, ListAiProjectsRequest,
+    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListHostsResponse, LogEntry,
+    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
+    SearchSessionsRequest, SearchSessionsResponse, SyslogService, TailLogsRequest,
+    UsageBlocksRequest, UsageBlocksResponse,
 };
 use syslog_mcp::compose::{
     CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
@@ -35,6 +35,7 @@ pub(crate) enum CliCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AiCommand {
     Search(AiSearchArgs),
+    Cuss(AiCussArgs),
     Blocks(AiBlocksArgs),
     Context(AiContextArgs),
     Tools(AiListArgs),
@@ -199,6 +200,19 @@ pub(crate) struct AiSearchArgs {
     pub from: Option<String>,
     pub to: Option<String>,
     pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiCussArgs {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub before: Option<u32>,
+    pub after: Option<u32>,
+    pub terms: Vec<String>,
     pub json: bool,
 }
 
@@ -385,6 +399,22 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                     })
                     .await?;
                 print_search_sessions_response(&response, json)?;
+            }
+            AiCommand::Cuss(args) => {
+                let json = args.json;
+                let response = service
+                    .search_cusses(CussSearchRequest {
+                        project: args.project,
+                        tool: args.tool,
+                        from: args.from,
+                        to: args.to,
+                        limit: args.limit,
+                        before: args.before,
+                        after: args.after,
+                        terms: args.terms,
+                    })
+                    .await?;
+                print_cuss_search_response(&response, json)?;
             }
             AiCommand::Blocks(args) => {
                 let json = args.json;
@@ -725,6 +755,7 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
         .ok_or_else(|| anyhow!("ai requires a subcommand"))?;
     match subcommand.as_str() {
         "search" => parse_ai_search(rest),
+        "cuss" => parse_ai_cuss(rest),
         "blocks" => parse_ai_blocks(rest),
         "context" => parse_ai_context(rest),
         "tools" => parse_ai_tools(rest),
@@ -785,6 +816,60 @@ fn parse_ai_search(args: &[String]) -> Result<CliCommand> {
         bail!("ai search requires a query");
     }
     Ok(CliCommand::Ai(AiCommand::Search(parsed)))
+}
+
+fn parse_ai_cuss(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiCussArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            "--before" => {
+                parsed.before = Some(parse_u32_flag("--before", flags.value("--before")?)?)
+            }
+            "--after" => parsed.after = Some(parse_u32_flag("--after", flags.value("--after")?)?),
+            "--term" => parsed.terms.push(flags.value("--term")?),
+            _ if arg.starts_with("--project=") => {
+                parsed.project = Some(value_after_equals(arg, "--project")?)
+            }
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with("--before=") => {
+                parsed.before = Some(parse_u32_flag(
+                    "--before",
+                    value_after_equals(arg, "--before")?,
+                )?)
+            }
+            _ if arg.starts_with("--after=") => {
+                parsed.after = Some(parse_u32_flag(
+                    "--after",
+                    value_after_equals(arg, "--after")?,
+                )?)
+            }
+            _ if arg.starts_with("--term=") => {
+                parsed.terms.push(value_after_equals(arg, "--term")?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai cuss option: {arg}"),
+            _ => bail!("unexpected ai cuss argument: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Cuss(parsed)))
 }
 
 fn parse_ai_blocks(args: &[String]) -> Result<CliCommand> {
@@ -1761,6 +1846,47 @@ fn print_search_sessions_response(response: &SearchSessionsResponse, json: bool)
             session.event_count,
             session.match_count
         );
+    }
+    Ok(())
+}
+
+fn print_cuss_search_response(response: &CussSearchResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "{} cuss match(es) from {} candidate row(s){}",
+        response.matches.len(),
+        response.candidate_rows,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    if response.candidate_window_truncated {
+        println!(
+            "cuss scan capped at {} candidate rows; use --project, --tool, --from, or --to to narrow it",
+            response.candidate_cap
+        );
+    }
+    println!("terms: {}", response.terms.join(", "));
+    for item in &response.matches {
+        println!();
+        println!(
+            "match term={} id={} {}",
+            item.term, item.entry.id, item.entry.timestamp
+        );
+        for before in &item.before {
+            println!("  before:");
+            print_log(before);
+        }
+        println!("  hit:");
+        print_log(&item.entry);
+        for after in &item.after {
+            println!("  after:");
+            print_log(after);
+        }
     }
     Ok(())
 }

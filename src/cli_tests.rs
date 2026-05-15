@@ -125,6 +125,40 @@ fn parse_ai_search_collects_filters() {
 }
 
 #[test]
+fn parse_ai_cuss_collects_filters_and_context_options() {
+    let parsed = CliCommand::parse(strings(&[
+        "ai",
+        "cuss",
+        "--project=/tmp/project",
+        "--tool",
+        "codex",
+        "--limit",
+        "5",
+        "--before=3",
+        "--after",
+        "4",
+        "--term",
+        "dang",
+        "--json",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::Cuss(AiCussArgs {
+            project: Some("/tmp/project".into()),
+            tool: Some("codex".into()),
+            limit: Some(5),
+            before: Some(3),
+            after: Some(4),
+            terms: vec!["dang".into()],
+            json: true,
+            ..Default::default()
+        }))
+    );
+}
+
+#[test]
 fn parse_ai_context_requires_project() {
     let err = CliCommand::parse(strings(&["ai", "context"])).unwrap_err();
     assert!(err.to_string().contains("requires --project"));

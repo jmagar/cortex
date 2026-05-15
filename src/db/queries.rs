@@ -5,10 +5,10 @@ use crate::config::StorageConfig;
 
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
 use super::models::{
-    AiProjectInventoryEntry, AiSessionEntry, AiToolInventoryEntry, DbStats, ErrorSummaryEntry,
-    HostEntry, ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams,
-    ListAiToolsResult, LogEntry, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams,
-    SearchedAiSessionEntry,
+    AiCussMatch, AiCussParams, AiCussResult, AiProjectInventoryEntry, AiSessionEntry,
+    AiToolInventoryEntry, DbStats, ErrorSummaryEntry, HostEntry, ListAiProjectsParams,
+    ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry,
+    SearchAiSessionsParams, SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
 };
 use super::pool::DbPool;
 
@@ -409,6 +409,97 @@ pub fn search_ai_sessions(
     })
 }
 
+const DEFAULT_AI_CUSS_TERMS: &[&str] = &[
+    "asshole", "bastard", "bitch", "biznitch", "bullshit", "crap", "damn", "dick", "fuck",
+    "fucked", "fucker", "fucking", "hell", "piss", "shit", "shitty",
+];
+
+pub fn search_ai_cusses(pool: &DbPool, params: &AiCussParams) -> Result<AiCussResult> {
+    let conn = pool.get()?;
+    let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
+    let before = params.before.unwrap_or(2).min(20);
+    let after = params.after.unwrap_or(2).min(20);
+    let terms = normalized_cuss_terms(&params.terms);
+    const CANDIDATE_CAP: usize = 10_000;
+
+    let mut sql = String::from(
+        "SELECT id, timestamp, hostname, facility, severity,
+                app_name, process_id, message, received_at, source_ip,
+                ai_tool, ai_project, ai_session_id, ai_transcript_path
+         FROM logs
+         WHERE ai_project IS NOT NULL AND ai_project != ''
+           AND ai_tool IS NOT NULL AND ai_tool != ''
+           AND ai_session_id IS NOT NULL AND ai_session_id != ''
+           AND (",
+    );
+    let mut bindings = Vec::new();
+    let mut idx = 1usize;
+    for (term_idx, term) in terms.iter().enumerate() {
+        if term_idx > 0 {
+            sql.push_str(" OR ");
+        }
+        sql.push_str(&format!("lower(message) LIKE ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(format!("%{term}%")));
+        idx += 1;
+    }
+    sql.push(')');
+
+    if let Some(project) = &params.ai_project {
+        sql.push_str(&format!(" AND ai_project = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(project.clone()));
+        idx += 1;
+    }
+    if let Some(tool) = &params.ai_tool {
+        sql.push_str(&format!(" AND ai_tool = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(tool.clone()));
+        idx += 1;
+    }
+    if let Some(from) = &params.from {
+        sql.push_str(&format!(" AND timestamp >= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(from.clone()));
+        idx += 1;
+    }
+    if let Some(to) = &params.to {
+        sql.push_str(&format!(" AND timestamp <= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(to.clone()));
+    }
+    sql.push_str(&format!(
+        " ORDER BY timestamp DESC, id DESC LIMIT {}",
+        CANDIDATE_CAP + 1
+    ));
+
+    let mut stmt = conn.prepare(&sql)?;
+    let candidate_rows = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let candidate_window_truncated = candidate_rows.len() > CANDIDATE_CAP;
+    let mut matches = Vec::new();
+    for entry in candidate_rows.iter().take(CANDIDATE_CAP) {
+        if let Some(term) = first_cuss_term(&entry.message, &terms) {
+            let (before_rows, after_rows) = ai_session_context(&conn, entry, before, after)?;
+            matches.push(AiCussMatch {
+                term,
+                entry: entry.clone(),
+                before: before_rows,
+                after: after_rows,
+            });
+            if matches.len() == limit {
+                break;
+            }
+        }
+    }
+
+    Ok(AiCussResult {
+        terms,
+        candidate_rows: candidate_rows.len().min(CANDIDATE_CAP),
+        candidate_cap: CANDIDATE_CAP,
+        candidate_window_truncated,
+        truncated: candidate_window_truncated || matches.len() == limit,
+        matches,
+    })
+}
+
 pub fn list_ai_tools(pool: &DbPool, params: &ListAiToolsParams) -> Result<ListAiToolsResult> {
     let conn = pool.get()?;
     const LIMIT: usize = 100;
@@ -553,6 +644,143 @@ fn truncate_to_limit<T>(values: &mut Vec<T>, limit: usize) -> bool {
     let truncated = values.len() > limit;
     values.truncate(limit);
     truncated
+}
+
+fn normalized_cuss_terms(custom_terms: &[String]) -> Vec<String> {
+    let source: Vec<String> = if custom_terms.is_empty() {
+        DEFAULT_AI_CUSS_TERMS
+            .iter()
+            .map(|term| (*term).to_string())
+            .collect()
+    } else {
+        custom_terms.to_vec()
+    };
+
+    let mut terms = source
+        .into_iter()
+        .map(|term| term.trim().to_ascii_lowercase())
+        .filter(|term| {
+            !term.is_empty()
+                && term.len() <= 64
+                && term
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+        })
+        .collect::<Vec<_>>();
+    terms.sort();
+    terms.dedup();
+    if terms.is_empty() {
+        DEFAULT_AI_CUSS_TERMS
+            .iter()
+            .map(|term| (*term).to_string())
+            .collect()
+    } else {
+        terms
+    }
+}
+
+fn first_cuss_term(message: &str, terms: &[String]) -> Option<String> {
+    let lower = message.to_ascii_lowercase();
+    terms
+        .iter()
+        .filter_map(|term| first_term_index(&lower, term).map(|idx| (idx, term)))
+        .min_by_key(|(idx, _)| *idx)
+        .map(|(_, term)| term.clone())
+}
+
+fn first_term_index(message: &str, term: &str) -> Option<usize> {
+    let mut offset = 0usize;
+    while let Some(relative) = message[offset..].find(term) {
+        let start = offset + relative;
+        let end = start + term.len();
+        if is_cuss_boundary(message[..start].chars().next_back())
+            && is_cuss_boundary(message[end..].chars().next())
+        {
+            return Some(start);
+        }
+        offset = end;
+    }
+    None
+}
+
+fn is_cuss_boundary(ch: Option<char>) -> bool {
+    ch.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_')
+}
+
+fn ai_session_context(
+    conn: &rusqlite::Connection,
+    entry: &LogEntry,
+    before: u32,
+    after: u32,
+) -> Result<(Vec<LogEntry>, Vec<LogEntry>)> {
+    let Some(tool) = entry.ai_tool.as_deref() else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+    let Some(project) = entry.ai_project.as_deref() else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+    let Some(session_id) = entry.ai_session_id.as_deref() else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+
+    let mut before_stmt = conn.prepare(
+        "SELECT id, timestamp, hostname, facility, severity,
+                app_name, process_id, message, received_at, source_ip,
+                ai_tool, ai_project, ai_session_id, ai_transcript_path
+         FROM logs
+         WHERE hostname = ?1
+           AND ai_tool = ?2
+           AND ai_project = ?3
+           AND ai_session_id = ?4
+           AND (timestamp < ?5 OR (timestamp = ?5 AND id < ?6))
+         ORDER BY timestamp DESC, id DESC
+         LIMIT ?7",
+    )?;
+    let mut before_rows = before_stmt
+        .query_map(
+            params![
+                &entry.hostname,
+                tool,
+                project,
+                session_id,
+                &entry.timestamp,
+                entry.id,
+                before
+            ],
+            map_row,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    before_rows.reverse();
+
+    let mut after_stmt = conn.prepare(
+        "SELECT id, timestamp, hostname, facility, severity,
+                app_name, process_id, message, received_at, source_ip,
+                ai_tool, ai_project, ai_session_id, ai_transcript_path
+         FROM logs
+         WHERE hostname = ?1
+           AND ai_tool = ?2
+           AND ai_project = ?3
+           AND ai_session_id = ?4
+           AND (timestamp > ?5 OR (timestamp = ?5 AND id > ?6))
+         ORDER BY timestamp ASC, id ASC
+         LIMIT ?7",
+    )?;
+    let after_rows = after_stmt
+        .query_map(
+            params![
+                &entry.hostname,
+                tool,
+                project,
+                session_id,
+                &entry.timestamp,
+                entry.id,
+                after
+            ],
+            map_row,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok((before_rows, after_rows))
 }
 
 /// Get database stats

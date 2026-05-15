@@ -449,6 +449,79 @@ fn search_ai_sessions_zero_limit_clamps_to_one_with_metadata() {
 }
 
 #[test]
+fn search_ai_cusses_returns_same_session_context() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_ai_entry(
+                "2026-01-01T00:00:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "before row",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:01:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "this shit needs context",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:02:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "after row",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:03:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-2",
+                "other session row",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:04:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "assistant is not a cuss false positive",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let result = search_ai_cusses(
+        &pool,
+        &AiCussParams {
+            ai_project: Some("/tmp/project".into()),
+            ai_tool: Some("codex".into()),
+            limit: Some(10),
+            before: Some(1),
+            after: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.matches.len(), 1);
+    let hit = &result.matches[0];
+    assert_eq!(hit.term, "shit");
+    assert_eq!(hit.entry.message, "this shit needs context");
+    assert_eq!(hit.before.len(), 1);
+    assert_eq!(hit.before[0].message, "before row");
+    assert_eq!(hit.after.len(), 1);
+    assert_eq!(hit.after[0].message, "after row");
+}
+
+#[test]
 fn ai_session_queries_respect_filters() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(
