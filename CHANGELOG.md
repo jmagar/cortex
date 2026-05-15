@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-05-15
+
+### Fixed
+
+- **Docker log severity inference**: Docker ingest now uses explicit severity
+  levels inside container log payloads before falling back to stream defaults,
+  so stderr `INFO` lines remain informational while unclassified stderr lines
+  still land as warnings.
+
 ## [0.23.0] - 2026-05-15
 
 ### Added
