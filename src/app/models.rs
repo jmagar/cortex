@@ -221,6 +221,61 @@ impl From<db::SearchAiSessionsResult> for SearchSessionsResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CussSearchRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub before: Option<u32>,
+    pub after: Option<u32>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CussMatch {
+    pub term: String,
+    pub entry: LogEntry,
+    pub before: Vec<LogEntry>,
+    pub after: Vec<LogEntry>,
+}
+
+impl From<db::AiCussMatch> for CussMatch {
+    fn from(value: db::AiCussMatch) -> Self {
+        Self {
+            term: value.term,
+            entry: value.entry.into(),
+            before: value.before.into_iter().map(Into::into).collect(),
+            after: value.after.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CussSearchResponse {
+    pub terms: Vec<String>,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
+    pub truncated: bool,
+    pub matches: Vec<CussMatch>,
+}
+
+impl From<db::AiCussResult> for CussSearchResponse {
+    fn from(value: db::AiCussResult) -> Self {
+        Self {
+            terms: value.terms,
+            candidate_rows: value.candidate_rows,
+            candidate_cap: value.candidate_cap,
+            candidate_window_truncated: value.candidate_window_truncated,
+            truncated: value.truncated,
+            matches: value.matches.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UsageBlocksRequest {
     pub project: Option<String>,
     pub tool: Option<String>,

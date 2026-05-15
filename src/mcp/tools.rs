@@ -2,10 +2,10 @@ use serde_json::{json, Value};
 
 use crate::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
-    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, PatternsRequest, ProjectContextRequest,
-    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
-    UsageBlocksRequest,
+    CussSearchRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAiProjectsRequest,
+    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, PatternsRequest,
+    ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
+    TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
 use super::schemas::SYSLOG_ACTIONS;
@@ -37,6 +37,7 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "apps" => tool_list_apps(state, args).await,
         "sessions" => tool_list_sessions(state, args).await,
         "search_sessions" => tool_search_sessions(state, args).await,
+        "cuss" => tool_search_cusses(state, args).await,
         "usage_blocks" => tool_usage_blocks(state, args).await,
         "project_context" => tool_project_context(state, args).await,
         "list_ai_tools" => tool_list_ai_tools(state, args).await,
@@ -150,6 +151,39 @@ async fn tool_search_sessions(state: &AppState, args: Value) -> anyhow::Result<V
             from: string_arg(&args, "from"),
             to: string_arg(&args, "to"),
             limit: u32_arg(&args, "limit")?,
+        })
+        .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_search_cusses(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let terms = args
+        .get("terms")
+        .map(|value| {
+            if let Some(values) = value.as_array() {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(ToString::to_string))
+                    .collect()
+            } else {
+                value
+                    .as_str()
+                    .map(|term| vec![term.to_string()])
+                    .unwrap_or_default()
+            }
+        })
+        .unwrap_or_default();
+    let response = state
+        .service
+        .search_cusses(CussSearchRequest {
+            project: string_arg(&args, "project"),
+            tool: string_arg(&args, "tool"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
+            before: u32_arg(&args, "before")?,
+            after: u32_arg(&args, "after")?,
+            terms,
         })
         .await?;
     Ok(serde_json::to_value(response)?)
@@ -576,6 +610,19 @@ Session-ranked full-text search across AI transcript rows. Returns grouped sessi
 - `tool` (string, optional) — AI tool filter: `claude`, `codex`, or `gemini`
 - `from`, `to` (string, optional) — time range (ISO 8601)
 - `limit` (integer, optional) — max grouped sessions (default 20, max 100)
+
+---
+
+## syslog cuss
+Detects profanity in AI transcript rows and returns each hit with surrounding rows from the same AI session.
+
+**Parameters:**
+- `project` (string, optional) — exact project path filter
+- `tool` (string, optional) — AI tool filter
+- `from`, `to` (string, optional) — time range (ISO 8601)
+- `limit` (integer, optional) — max matches (default 20, max 100)
+- `before`, `after` (integer, optional) — same-session context rows around each hit (default 2, max 20)
+- `terms` (array of strings, optional) — custom detector terms; replaces the built-in list
 
 ---
 

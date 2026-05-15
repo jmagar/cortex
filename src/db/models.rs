@@ -131,6 +131,36 @@ pub struct SearchAiSessionsResult {
     pub sessions: Vec<SearchedAiSessionEntry>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct AiCussParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub before: Option<u32>,
+    pub after: Option<u32>,
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCussMatch {
+    pub term: String,
+    pub entry: LogEntry,
+    pub before: Vec<LogEntry>,
+    pub after: Vec<LogEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCussResult {
+    pub terms: Vec<String>,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
+    pub truncated: bool,
+    pub matches: Vec<AiCussMatch>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiUsageBlocksParams {
     pub ai_project: Option<String>,

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-05-15
+
+### Added
+
+- **AI cuss detector**: Added `syslog ai cuss` and MCP `action="cuss"` to
+  detect profanity in AI transcript rows and return surrounding rows from the
+  same AI session.
+
 ## [0.21.9] - 2026-05-14
 
 ### Added

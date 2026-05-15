@@ -507,6 +507,7 @@ fn print_usage() {
   syslog hosts [--json]
   syslog sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
   syslog ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]
+  syslog ai cuss [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]
   syslog ai blocks [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--json]
   syslog ai context --project PATH [--tool TOOL] [--limit N] [--json]
   syslog ai tools [--project PATH] [--from TIME] [--to TIME] [--json]
