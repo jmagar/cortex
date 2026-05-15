@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lightweight checks for check-runtime-current.sh argument handling. Runtime
-# systemd/docker behavior is verified live by the command itself.
+# Docker behavior is verified live by the command itself.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +12,7 @@ fail() {
 }
 
 out="$("${CHECKER}" --help)"
-[[ "${out}" == *"--mode auto|systemd|docker"* ]] || fail "help omits mode usage"
+[[ "${out}" == *"--mode auto|docker"* ]] || fail "help omits mode usage"
 [[ "${out}" == *"local cache"* ]] || fail "help omits Docker cache semantics"
 
 set +e

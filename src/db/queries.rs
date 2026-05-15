@@ -105,22 +105,22 @@ pub fn tail_logs(
                 ai_tool, ai_project, ai_session_id, ai_transcript_path
          FROM logs WHERE 1=1",
     );
-    let mut bindings: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+    let mut bindings: Vec<rusqlite::types::Value> = vec![];
     let mut idx = 1;
 
     if let Some(h) = hostname {
         sql.push_str(&format!(" AND hostname = ?{idx}"));
-        bindings.push(Box::new(h.to_string()));
+        bindings.push(rusqlite::types::Value::Text(h.to_string()));
         idx += 1;
     }
     if let Some(source_ip) = source_ip {
         sql.push_str(&format!(" AND source_ip = ?{idx}"));
-        bindings.push(Box::new(source_ip.to_string()));
+        bindings.push(rusqlite::types::Value::Text(source_ip.to_string()));
         idx += 1;
     }
     if let Some(a) = app_name {
         sql.push_str(&format!(" AND app_name = ?{idx}"));
-        bindings.push(Box::new(a.to_string()));
+        bindings.push(rusqlite::types::Value::Text(a.to_string()));
         idx += 1;
     }
     if let Some(levels) = severity_in {
@@ -129,13 +129,9 @@ pub fn tail_logs(
                 (0..levels.len()).map(|i| format!("?{}", idx + i)).collect();
             sql.push_str(&format!(" AND severity IN ({})", placeholders.join(", ")));
             for lvl in levels {
-                bindings.push(Box::new(lvl.clone()));
-                #[allow(unused_assignments)]
-                {
-                    idx += 1;
-                }
+                bindings.push(rusqlite::types::Value::Text(lvl.clone()));
+                idx += 1;
             }
-            idx += levels.len();
             debug_assert_eq!(bindings.len() + 1, idx);
         }
     }
@@ -143,10 +139,7 @@ pub fn tail_logs(
     sql.push_str(&format!(" ORDER BY timestamp DESC LIMIT {n}"));
 
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(
-        rusqlite::params_from_iter(bindings.iter().map(|b| b.as_ref())),
-        map_row,
-    )?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
@@ -310,8 +303,7 @@ pub fn search_ai_sessions(
                    l.ai_session_id,
                    l.hostname,
                    l.timestamp,
-                   l.message,
-                   bm25(logs_fts) AS score
+                   l.message
             FROM logs_fts
             JOIN logs l ON l.id = logs_fts.rowid
             WHERE logs_fts MATCH ?1
@@ -342,7 +334,7 @@ pub fn search_ai_sessions(
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
     sql.push_str(&format!(
-        " ORDER BY score, l.timestamp DESC
+        " ORDER BY logs_fts.rowid DESC
            LIMIT {}
          ),
          grouped AS (
@@ -353,7 +345,6 @@ pub fn search_ai_sessions(
                    MIN(timestamp) AS first_seen,
                    MAX(timestamp) AS last_seen,
                    COUNT(*) AS match_count,
-                   MIN(score) AS best_score,
                    (
                        SELECT c2.message
                        FROM candidates c2
@@ -361,7 +352,7 @@ pub fn search_ai_sessions(
                          AND c2.ai_tool = c.ai_tool
                          AND c2.ai_session_id = c.ai_session_id
                          AND c2.hostname = c.hostname
-                       ORDER BY c2.score, c2.timestamp DESC
+                       ORDER BY c2.timestamp DESC
                        LIMIT 1
                    ) AS best_snippet
             FROM candidates c
@@ -383,7 +374,7 @@ pub fn search_ai_sessions(
                 COUNT(*) OVER() AS total_candidates,
                 (SELECT COUNT(*) FROM candidates) AS raw_candidate_count
          FROM grouped
-         ORDER BY best_score, last_seen DESC
+         ORDER BY last_seen DESC
          LIMIT {limit}",
         CANDIDATE_CAP + 1
     ));
@@ -410,6 +401,9 @@ pub fn search_ai_sessions(
 
     Ok(SearchAiSessionsResult {
         total_candidates,
+        candidate_rows: raw_candidate_count.min(CANDIDATE_CAP),
+        candidate_cap: CANDIDATE_CAP,
+        candidate_window_truncated: raw_candidate_count > CANDIDATE_CAP,
         truncated: total_candidates > sessions.len() || raw_candidate_count > CANDIDATE_CAP,
         sessions,
     })
@@ -417,6 +411,7 @@ pub fn search_ai_sessions(
 
 pub fn list_ai_tools(pool: &DbPool, params: &ListAiToolsParams) -> Result<ListAiToolsResult> {
     let conn = pool.get()?;
+    const LIMIT: usize = 100;
     let mut sql = String::from(
         "SELECT ai_tool,
                 COUNT(*) AS event_count,
@@ -444,10 +439,16 @@ pub fn list_ai_tools(pool: &DbPool, params: &ListAiToolsParams) -> Result<ListAi
         sql.push_str(&format!(" AND timestamp <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
-    sql.push_str(" GROUP BY ai_tool ORDER BY event_count DESC, ai_tool ASC LIMIT 100");
+    let grouped_sql = format!("{sql} GROUP BY ai_tool");
+    let total_tools = count_grouped_rows(&conn, &grouped_sql, &bindings)?;
+    sql = grouped_sql;
+    sql.push_str(&format!(
+        " ORDER BY event_count DESC, ai_tool ASC LIMIT {}",
+        LIMIT + 1
+    ));
 
     let mut stmt = conn.prepare(&sql)?;
-    let tools = stmt
+    let mut tools = stmt
         .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
             Ok(AiToolInventoryEntry {
                 tool: row.get(0)?,
@@ -458,7 +459,12 @@ pub fn list_ai_tools(pool: &DbPool, params: &ListAiToolsParams) -> Result<ListAi
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(ListAiToolsResult { tools })
+    let truncated = truncate_to_limit(&mut tools, LIMIT);
+    Ok(ListAiToolsResult {
+        total_tools,
+        truncated,
+        tools,
+    })
 }
 
 pub fn list_ai_projects(
@@ -466,6 +472,7 @@ pub fn list_ai_projects(
     params: &ListAiProjectsParams,
 ) -> Result<ListAiProjectsResult> {
     let conn = pool.get()?;
+    const LIMIT: usize = 200;
     let mut sql = String::from(
         "SELECT ai_project,
                 GROUP_CONCAT(DISTINCT ai_tool) AS tools,
@@ -494,10 +501,16 @@ pub fn list_ai_projects(
         sql.push_str(&format!(" AND timestamp <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
-    sql.push_str(" GROUP BY ai_project ORDER BY event_count DESC, ai_project ASC LIMIT 200");
+    let grouped_sql = format!("{sql} GROUP BY ai_project");
+    let total_projects = count_grouped_rows(&conn, &grouped_sql, &bindings)?;
+    sql = grouped_sql;
+    sql.push_str(&format!(
+        " ORDER BY event_count DESC, ai_project ASC LIMIT {}",
+        LIMIT + 1
+    ));
 
     let mut stmt = conn.prepare(&sql)?;
-    let projects = stmt
+    let mut projects = stmt
         .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
             let tools = row
                 .get::<_, Option<String>>(1)?
@@ -516,7 +529,30 @@ pub fn list_ai_projects(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(ListAiProjectsResult { projects })
+    let truncated = truncate_to_limit(&mut projects, LIMIT);
+    Ok(ListAiProjectsResult {
+        total_projects,
+        truncated,
+        projects,
+    })
+}
+
+fn count_grouped_rows(
+    conn: &rusqlite::Connection,
+    grouped_sql: &str,
+    bindings: &[rusqlite::types::Value],
+) -> Result<usize> {
+    Ok(conn.query_row(
+        &format!("SELECT COUNT(*) FROM ({grouped_sql})"),
+        rusqlite::params_from_iter(bindings.iter()),
+        |row| row.get::<_, i64>(0),
+    )? as usize)
+}
+
+fn truncate_to_limit<T>(values: &mut Vec<T>, limit: usize) -> bool {
+    let truncated = values.len() > limit;
+    values.truncate(limit);
+    truncated
 }
 
 /// Get database stats

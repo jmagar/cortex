@@ -13,7 +13,7 @@ fn parse_line_extracts_top_level_content_and_session_id() {
     assert_eq!(parsed.message, "hello");
     assert_eq!(parsed.session_id.as_deref(), Some("claude-1"));
     assert_eq!(parsed.timestamp.as_deref(), Some("2026-05-11T00:00:00Z"));
-    assert!(parsed.record_key.starts_with("hash:"));
+    assert!(parsed.record_key.starts_with("line:0:hash:"));
     assert!(parsed.ai_project.is_none());
 }
 
@@ -39,6 +39,18 @@ fn parse_line_joins_string_content_arrays() {
 
     assert_eq!(parsed.message, "first second");
     assert_eq!(parsed.session_id.as_deref(), Some("claude-array"));
+}
+
+#[test]
+fn parse_line_extracts_project_and_object_array_content() {
+    let line = r#"{"session_id":"claude-array","cwd":"/work/project","content":[{"type":"text","text":"first"},{"type":"text","text":"second"}]}"#;
+
+    let parsed = parse_line(line, Path::new("/tmp/session.jsonl"), 0)
+        .unwrap()
+        .expect("object array content should produce a transcript record");
+
+    assert_eq!(parsed.message, "first second");
+    assert_eq!(parsed.ai_project.as_deref(), Some("/work/project"));
 }
 
 #[test]

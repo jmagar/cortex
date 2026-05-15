@@ -37,18 +37,14 @@ Most common cause: empty / wrong `$CLAUDE_PLUGIN_OPTION_SERVER_URL`, mismatched 
 
 ### Branch C — Service down / crashing / unhealthy
 
-1. **Which mode are we in?**
-   Run `echo "$CLAUDE_PLUGIN_OPTION_USE_DOCKER"` — `true` means Docker, `false` means systemd.
-2. **Get current state**:
-   - Docker: `docker ps --filter name=syslog-mcp --format '{{.Status}}'`
-   - Systemd: `systemctl --user status syslog-mcp.service`
-3. **If recently restarted / crashing — get the actual error**: use `syslog-logs` for the last 100 lines, or run the mode-specific journal/docker command manually. Look for: panic messages, port-bind errors (`address already in use`), DB lock errors, OOM kills.
-4. **Common service-failure causes (ranked by frequency in this plugin's history)**:
+1. **Get current state**:
+   `docker ps --filter name=syslog-mcp --format '{{.Status}}'`
+2. **If recently restarted / crashing — get the actual error**: use `syslog-logs` for the last 100 lines, or run `docker compose logs` manually. Look for: panic messages, port-bind errors (`address already in use`), DB lock errors, OOM kills.
+3. **Common service-failure causes (ranked by frequency in this plugin's history)**:
    1. Port `$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT` or `$CLAUDE_PLUGIN_OPTION_MCP_PORT` held by another process. Resolve with `sudo fuser -k <port>/tcp` or kill the offender.
-   2. Mode cutover left both running — `docker compose down` and `systemctl --user stop syslog-mcp` both, then use `syslog-redeploy`.
-   3. Database lock (another `syslog mcp` stdio process holds it). `pgrep -af "syslog mcp"` and kill stragglers.
-   4. Docker image missing/stale: `docker compose pull` to refresh.
-5. **If healthcheck failing but `/health` works manually**: Container is unhealthy because the healthcheck command inside the image is wrong/can't run. Compare image version to what you expect — `docker inspect syslog-mcp | jq '.[0].Config.Image'`.
+   2. Database lock (another `syslog mcp` stdio process holds it). `pgrep -af "syslog mcp"` and kill stragglers.
+   3. Docker image missing/stale: `docker compose pull` to refresh.
+4. **If healthcheck failing but `/health` works manually**: Container is unhealthy because the healthcheck command inside the image is wrong/can't run. Compare image version to what you expect — `docker inspect syslog-mcp | jq '.[0].Config.Image'`.
 
 ### Branch D — "Something's off" / vague / user doesn't know
 
@@ -68,8 +64,7 @@ The binary exposes runtime counters via `syslog action=stats` and `/health`. Use
 
 - For a single-host symptom, don't restart the whole stack — just fix that host's forwarder.
 - For an MCP-only failure with healthy ingest, don't touch the listener config.
-- If the immediate problem is a missing config, prefer `syslog-redeploy` over manual systemctl/docker commands.
-- If you're going to change deploy mode as part of the fix, use `syslog-cutover` not raw systemctl + docker compose.
+- If the immediate problem is a missing config, prefer `syslog-redeploy` over manual Docker commands.
 
 ## When to escalate to the user
 

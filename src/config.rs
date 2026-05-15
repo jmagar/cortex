@@ -487,6 +487,9 @@ impl Config {
             Err(e) => return Err(anyhow::anyhow!("Failed to read config.toml: {e}")),
         }
 
+        #[cfg(not(test))]
+        load_setup_env_file();
+
         // 3. Overlay environment variables (highest priority)
         //    SYSLOG_*     → syslog listener settings
         //    SYSLOG_MCP_* → MCP server + storage settings
@@ -688,6 +691,65 @@ impl Config {
         validate_docker_ingest_config(&config.docker_ingest)?;
 
         Ok(config)
+    }
+}
+
+#[cfg(not(test))]
+fn load_setup_env_file() {
+    let Ok(home) = crate::setup::syslog_home_dir() else {
+        return;
+    };
+    let path = home.join(".env");
+    let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+        return;
+    };
+    if metadata.file_type().is_symlink() {
+        eprintln!(
+            "syslog-mcp: warning: refusing to load symlinked env file {}",
+            path.display()
+        );
+        return;
+    }
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let mut entries = Vec::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if key.is_empty() || key.contains(['\0', '=']) || value.contains(['\0']) {
+            continue;
+        }
+        entries.push((key.to_string(), value.to_string()));
+    }
+
+    let data_volume = entries
+        .iter()
+        .find(|(key, _)| key == "SYSLOG_MCP_DATA_VOLUME")
+        .map(|(_, value)| value.clone());
+
+    for (key, mut value) in entries {
+        if std::env::var_os(&key).is_some() {
+            continue;
+        }
+        if key == "SYSLOG_MCP_DB_PATH" {
+            if let Some(suffix) = value.strip_prefix("/data/") {
+                if let Some(data_volume) = data_volume.as_deref() {
+                    value = PathBuf::from(data_volume)
+                        .join(suffix)
+                        .display()
+                        .to_string();
+                }
+            }
+        }
+        std::env::set_var(key, value);
     }
 }
 

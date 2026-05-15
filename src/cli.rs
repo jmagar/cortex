@@ -13,7 +13,9 @@ use syslog_mcp::compose::{
     CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
     ComposeService, ComposeStatus, ComposeTarget, MutationOptions, ProcessRunner,
 };
-use syslog_mcp::scanner::IndexResult;
+use syslog_mcp::scanner::{
+    AiDoctorReport, CheckpointEntry, IndexResult, ParseErrorEntry, PruneCheckpointsResult,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliCommand {
@@ -38,6 +40,10 @@ pub(crate) enum AiCommand {
     Projects(AiListArgs),
     Index(AiIndexArgs),
     Add(AiAddArgs),
+    Checkpoints(AiCheckpointsArgs),
+    Errors(AiErrorsArgs),
+    PruneCheckpoints(AiPruneCheckpointsArgs),
+    Doctor(OutputArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,12 +192,37 @@ pub(crate) struct AiListArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AiIndexArgs {
     pub path: Option<String>,
+    pub force: bool,
+    pub since: Option<String>,
     pub json: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AiAddArgs {
     pub file: String,
+    pub force: bool,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiCheckpointsArgs {
+    pub errors_only: bool,
+    pub missing_only: bool,
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiErrorsArgs {
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiPruneCheckpointsArgs {
+    pub missing_only: bool,
+    pub dry_run: bool,
+    pub limit: Option<u32>,
     pub json: bool,
 }
 
@@ -355,14 +386,37 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                 print_ai_projects_response(&response, json)?;
             }
             AiCommand::Index(args) => {
-                let response = service.index_ai_roots(args.path).await?;
+                let response = service
+                    .index_ai_roots(args.path, args.force, args.since)
+                    .await?;
                 print_index_response(&response, args.json)?;
                 ensure_index_success(&response)?;
             }
             AiCommand::Add(args) => {
-                let response = service.add_ai_file(args.file).await?;
+                let response = service.add_ai_file(args.file, args.force).await?;
                 print_index_response(&response, args.json)?;
                 ensure_index_success(&response)?;
+            }
+            AiCommand::Checkpoints(args) => {
+                let response = service
+                    .list_ai_checkpoints(args.errors_only, args.missing_only, args.limit)
+                    .await?;
+                print_checkpoints_response(&response, args.json)?;
+            }
+            AiCommand::Errors(args) => {
+                let response = service.list_ai_parse_errors(args.limit).await?;
+                print_ai_parse_errors_response(&response, args.json)?;
+            }
+            AiCommand::PruneCheckpoints(args) => {
+                let response = service
+                    .prune_ai_checkpoints(args.missing_only, args.dry_run, args.limit)
+                    .await?;
+                print_prune_checkpoints_response(&response, args.json)?;
+            }
+            AiCommand::Doctor(args) => {
+                let response = service.ai_doctor().await?;
+                print_ai_doctor_response(&response, args.json)?;
+                ensure_ai_doctor_success(&response)?;
             }
         },
         CliCommand::Correlate(args) => {
@@ -584,6 +638,13 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
         "projects" => parse_ai_projects(rest),
         "index" => parse_ai_index(rest),
         "add" => parse_ai_add(rest),
+        "checkpoints" => parse_ai_checkpoints(rest),
+        "errors" => parse_ai_errors(rest),
+        "prune-checkpoints" => parse_ai_prune_checkpoints(rest),
+        "doctor" => Ok(CliCommand::Ai(AiCommand::Doctor(parse_output_args(
+            "ai doctor",
+            rest,
+        )?))),
         _ => bail!("unknown ai subcommand: {subcommand}"),
     }
 }
@@ -736,8 +797,13 @@ fn parse_ai_index(args: &[String]) -> Result<CliCommand> {
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--path" => parsed.path = Some(flags.value("--path")?),
+            "--force" => parsed.force = true,
+            "--since" => parsed.since = Some(flags.value("--since")?),
             _ if arg.starts_with("--path=") => {
                 parsed.path = Some(value_after_equals(arg, "--path")?)
+            }
+            _ if arg.starts_with("--since=") => {
+                parsed.since = Some(value_after_equals(arg, "--since")?)
             }
             _ => bail!("unknown ai index option: {arg}"),
         }
@@ -752,6 +818,7 @@ fn parse_ai_add(args: &[String]) -> Result<CliCommand> {
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--file" => parsed.file = flags.value("--file")?,
+            "--force" => parsed.force = true,
             _ if arg.starts_with("--file=") => parsed.file = value_after_equals(arg, "--file")?,
             _ => bail!("unknown ai add option: {arg}"),
         }
@@ -760,6 +827,70 @@ fn parse_ai_add(args: &[String]) -> Result<CliCommand> {
         bail!("ai add requires --file <PATH>");
     }
     Ok(CliCommand::Ai(AiCommand::Add(parsed)))
+}
+
+fn parse_ai_checkpoints(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiCheckpointsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--errors" => parsed.errors_only = true,
+            "--missing" => parsed.missing_only = true,
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ => bail!("unknown ai checkpoints option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Checkpoints(parsed)))
+}
+
+fn parse_ai_errors(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiErrorsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ => bail!("unknown ai errors option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Errors(parsed)))
+}
+
+fn parse_ai_prune_checkpoints(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiPruneCheckpointsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--missing" => parsed.missing_only = true,
+            "--dry-run" => parsed.dry_run = true,
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ => bail!("unknown ai prune-checkpoints option: {arg}"),
+        }
+    }
+    if !parsed.missing_only {
+        bail!("ai prune-checkpoints requires --missing");
+    }
+    Ok(CliCommand::Ai(AiCommand::PruneCheckpoints(parsed)))
 }
 
 fn parse_stats(args: &[String]) -> Result<CliCommand> {
@@ -1334,7 +1465,7 @@ fn print_plugin_hook_report(report: &PluginHookReport, json: bool) -> Result<()>
     Ok(())
 }
 
-fn print_json<T: Serialize>(value: &T) -> Result<()> {
+fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
@@ -1351,11 +1482,50 @@ fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()
 }
 
 fn print_log(log: &LogEntry) {
+    if is_transcript_log(log) {
+        print_ai_log(log);
+        return;
+    }
     let app = log.app_name.as_deref().unwrap_or("-");
     println!(
         "{} {:<7} {:<20} {:<16} {}",
         log.timestamp, log.severity, log.hostname, app, log.message
     );
+}
+
+fn print_ai_log(log: &LogEntry) {
+    let tool = log
+        .ai_tool
+        .as_deref()
+        .or_else(|| {
+            log.app_name
+                .as_deref()
+                .and_then(|app| app.strip_suffix("-transcript"))
+        })
+        .unwrap_or("ai");
+    let project = log.ai_project.as_deref().unwrap_or("(unknown project)");
+    let session = log.ai_session_id.as_deref().unwrap_or("(unknown session)");
+    println!(
+        "{} {:<7} {:<8} {:<36} session={}",
+        log.timestamp,
+        log.severity,
+        truncate(tool, 8),
+        truncate(project, 35),
+        truncate(session, 24)
+    );
+    println!("    {}", indent_multiline(&log.message));
+}
+
+fn is_transcript_log(log: &LogEntry) -> bool {
+    log.source_ip.starts_with("transcript://")
+        || log
+            .app_name
+            .as_deref()
+            .is_some_and(|app| app.ends_with("-transcript"))
+}
+
+fn indent_multiline(value: &str) -> String {
+    value.replace('\n', "\n    ")
 }
 
 fn print_errors_response(response: &GetErrorsResponse, json: bool) -> Result<()> {
@@ -1413,14 +1583,21 @@ fn print_search_sessions_response(response: &SearchSessionsResponse, json: bool)
         return print_json(response);
     }
     println!(
-        "{} grouped session(s){}",
+        "{} grouped session(s) from {} newest matching row(s){}",
         response.sessions.len(),
+        response.candidate_rows,
         if response.truncated {
             " (truncated)"
         } else {
             ""
         }
     );
+    if response.candidate_window_truncated {
+        println!(
+            "search window capped at {} matching rows; use --project, --tool, --from, or --to to narrow exact grouping",
+            response.candidate_cap
+        );
+    }
     println!(
         "{:<10} {:<30} {:<20} {:<6} MATCH",
         "TOOL", "PROJECT", "SESSION ID", "EVENTS"
@@ -1442,7 +1619,16 @@ fn print_usage_blocks_response(response: &UsageBlocksResponse, json: bool) -> Re
     if json {
         return print_json(response);
     }
-    println!("{} usage block(s)", response.blocks.len());
+    println!(
+        "{} usage block(s) shown of {}{}",
+        response.blocks.len(),
+        response.total_blocks,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
     for block in &response.blocks {
         println!(
             "{} {} {} {} events={} sessions={}",
@@ -1466,6 +1652,15 @@ fn print_project_context_response(response: &ProjectContextResponse, json: bool)
     println!("tools: {}", response.tools.join(", "));
     println!("sessions: {}", response.sessions.len());
     println!("hosts: {}", response.hostnames.join(", "));
+    println!(
+        "recent_entries: {}{}",
+        response.recent_entries.len(),
+        if response.recent_entries_truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
     for entry in &response.recent_entries {
         print_log(entry);
     }
@@ -1476,6 +1671,16 @@ fn print_ai_tools_response(response: &ListAiToolsResponse, json: bool) -> Result
     if json {
         return print_json(response);
     }
+    println!(
+        "{} tool(s) shown of {}{}",
+        response.tools.len(),
+        response.total_tools,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
     println!("TOOL       EVENTS SESSIONS LAST SEEN");
     for tool in &response.tools {
         println!(
@@ -1490,6 +1695,16 @@ fn print_ai_projects_response(response: &ListAiProjectsResponse, json: bool) -> 
     if json {
         return print_json(response);
     }
+    println!(
+        "{} project(s) shown of {}{}",
+        response.projects.len(),
+        response.total_projects,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
     println!("PROJECT                          EVENTS SESSIONS TOOLS");
     for project in &response.projects {
         println!(
@@ -1503,17 +1718,134 @@ fn print_ai_projects_response(response: &ListAiProjectsResponse, json: bool) -> 
     Ok(())
 }
 
+fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("{} checkpoint(s)", response.len());
+    println!(
+        "{:<12} {:<8} {:<6} {:<7} {:<7} PATH",
+        "KIND", "RECORDS", "PARSE", "MISSING", "ERROR"
+    );
+    for checkpoint in response {
+        println!(
+            "{:<12} {:<8} {:<6} {:<7} {:<7} {}",
+            checkpoint.source_kind,
+            checkpoint.imported_records,
+            checkpoint.parse_errors,
+            if checkpoint.missing { "yes" } else { "-" },
+            if checkpoint.last_error.is_some() {
+                "yes"
+            } else {
+                "-"
+            },
+            truncate(&checkpoint.canonical_path, 80),
+        );
+        if let Some(error) = &checkpoint.last_error {
+            println!("    error: {}", truncate(error, 160));
+        }
+    }
+    Ok(())
+}
+
+fn print_ai_parse_errors_response(response: &[ParseErrorEntry], json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("{} parse error(s)", response.len());
+    println!(
+        "{:<24} {:<8} {:<8} {:<40} ERROR",
+        "SEEN", "KIND", "LINE", "PATH"
+    );
+    for error in response {
+        println!(
+            "{:<24} {:<8} {:<8} {:<40} {}",
+            truncate(&error.seen_at, 23),
+            truncate(&error.source_kind, 8),
+            error.line_no,
+            truncate(&error.canonical_path, 39),
+            truncate(&error.error, 100),
+        );
+        if let Some(preview) = &error.record_preview {
+            println!("    preview: {}", truncate(preview, 160));
+        }
+    }
+    Ok(())
+}
+
+fn print_prune_checkpoints_response(response: &PruneCheckpointsResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "matched={} pruned={} dry_run={}",
+        response.matched, response.pruned, response.dry_run
+    );
+    for path in &response.paths {
+        println!("  {}", path);
+    }
+    Ok(())
+}
+
+fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("db_path: {}", response.db_path);
+    println!(
+        "claude_root: {} ({})",
+        response.claude_root.path,
+        if response.claude_root.exists {
+            "exists"
+        } else {
+            "missing"
+        }
+    );
+    println!(
+        "codex_root: {} ({})",
+        response.codex_root.path,
+        if response.codex_root.exists {
+            "exists"
+        } else {
+            "missing"
+        }
+    );
+    println!("checkpoint_count: {}", response.checkpoint_count);
+    println!(
+        "checkpoint_error_count: {}",
+        response.checkpoint_error_count
+    );
+    println!(
+        "missing_checkpoint_count: {}",
+        response.missing_checkpoint_count
+    );
+    println!("imported_record_count: {}", response.imported_record_count);
+    println!("parse_error_count: {}", response.parse_error_count);
+    println!(
+        "newest_indexed: {} {}",
+        response.newest_indexed_at.as_deref().unwrap_or("-"),
+        response.newest_indexed_path.as_deref().unwrap_or("-")
+    );
+    Ok(())
+}
+
 fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
     println!(
-        "files={} ingested={} duplicates={} parse_errors={} skipped={} file_errors={}",
+        "files={} ingested={} duplicates={} parse_errors={} skipped={} unsupported={} symlinks={} unsafe_paths={} storage_blocked_chunks={} dropped_metadata_fields={} checkpoint_updates={} file_errors={}",
         response.discovered_files,
         response.ingested,
         response.skipped_dupes,
         response.parse_errors,
         response.skipped_files,
+        response.unsupported_files,
+        response.skipped_symlinks,
+        response.skipped_unsafe_paths,
+        response.storage_blocked_chunks,
+        response.dropped_metadata_fields,
+        response.checkpoint_updates,
         response.file_errors.len()
     );
     for error in &response.file_errors {
@@ -1523,8 +1855,21 @@ fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
 }
 
 fn ensure_index_success(response: &IndexResult) -> Result<()> {
-    if response.file_errors.is_empty() {
+    if response.file_errors.is_empty()
+        && response.storage_blocked_chunks == 0
+        && response.parse_errors == 0
+    {
         Ok(())
+    } else if response.storage_blocked_chunks > 0 {
+        bail!(
+            "{} transcript chunk(s) blocked by storage guardrails",
+            response.storage_blocked_chunks
+        )
+    } else if response.parse_errors > 0 {
+        bail!(
+            "{} transcript record(s) failed to parse",
+            response.parse_errors
+        )
     } else {
         bail!(
             "{} transcript file(s) failed to index",
@@ -1533,9 +1878,21 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
     }
 }
 
+fn ensure_ai_doctor_success(response: &AiDoctorReport) -> Result<()> {
+    if response.claude_root.exists || response.codex_root.exists {
+        Ok(())
+    } else {
+        bail!("no local AI transcript roots found")
+    }
+}
+
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() > max {
-        format!("{}…", &s[..max - 1])
+    if max == 0 {
+        return String::new();
+    }
+    if s.chars().count() > max {
+        let prefix: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{prefix}…")
     } else {
         s.to_string()
     }

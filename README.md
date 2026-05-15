@@ -364,6 +364,39 @@ Each stored log entry has these fields:
 | `ai_session_id` | text\|null | AI session unique identifier |
 | `ai_transcript_path` | text\|null | Full path to the source transcript file |
 
+### AI transcript indexing
+
+`syslog ai index` scans the default local transcript roots
+`~/.claude/projects` and `~/.codex/sessions`; `syslog ai index --path PATH`
+can scan a known transcript directory or one explicit `.jsonl` file, and
+`syslog ai add --file FILE` imports one file. Recursive scans are limited to
+`~/.claude/projects`, `~/.codex/sessions`, or their children; broad roots such
+as `/`, `$HOME`, and the current repo root are rejected before walking. The
+scanner skips symlinks, counts unsupported non-`.jsonl` files without parsing
+them, and streams transcript files line-by-line in bounded SQLite chunks. Use
+`--force` to reimport a transcript path from scratch after parser changes,
+`--since RFC3339` to scan only recently modified files, and
+`syslog ai checkpoints --errors` plus `syslog ai errors` to inspect structured
+scanner failures.
+
+The optional host-local index timer is managed by:
+
+```bash
+syslog setup ai-index-timer install
+syslog setup ai-index-timer check
+syslog setup ai-index-timer remove
+```
+
+This timer is deliberately not inside the Docker container. It reads host-local
+Claude/Codex transcript files and runs the newest `syslog` binary on the host
+`PATH`; Docker Compose owns only the server/query runtime.
+
+Imported AI transcript messages are scrubbed for known credential/token patterns
+before storage and FTS indexing. The rows still live in the main `logs` table, so
+raw actions such as `search`, `tail`, `context`, and `get` can return scrubbed
+transcript text and local `ai_transcript_path` values. If storage guardrails
+cannot recover enough space, indexing fails before committing additional chunks.
+
 **Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker ingest entries, `source_ip` identifies the configured Docker ingest host/container/stream and should be trusted only as far as the configured docker-socket-proxy endpoint and network path are trusted. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
 
 ### Severity levels
@@ -389,6 +422,38 @@ Ordered from most to least severe:
 
 ## Installation
 
+### One-line installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jmagar/syslog-mcp/main/install.sh | sh
+```
+
+The installer puts the host `syslog` binary in `~/.local/bin` and then runs
+`syslog setup`. Setup is idempotent and owns the shared host layout:
+
+- `~/.syslog-mcp/.env` — secrets, ports, Compose interpolation, runtime values
+- `~/.syslog-mcp/compose/docker-compose.yml` — Docker Compose deployment assets
+- `~/.syslog-mcp/data/syslog.db` — SQLite database and WAL/SHM sidecars
+
+Useful installer controls:
+
+```bash
+SYSLOG_INSTALL_DRY_RUN=1 ./install.sh
+SYSLOG_INSTALL_PREFIX=/opt/syslog-mcp ./install.sh
+SYSLOG_VERSION=0.21.6 ./install.sh
+SYSLOG_INSTALL_SKIP_SETUP=1 ./install.sh
+```
+
+Useful setup commands:
+
+```bash
+syslog setup          # first-run or normal repair
+syslog setup check    # inspect only; does not mutate files or start services
+syslog setup repair   # repair env/assets and restart the Docker stack
+syslog setup ai-index-timer install  # optional host-local transcript index timer
+syslog doctor binary  # check host/container binary freshness
+```
+
 ### Claude Code plugin (recommended)
 
 Install as a Claude Code plugin. The plugin handles deployment automatically — you choose between server mode (this machine hosts the syslog receiver + MCP server) and client mode (connect to a remote server).
@@ -398,12 +463,11 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 | Field | Required | Default | Notes |
 |-------|----------|---------|-------|
 | `is_server` | yes | `true` | Server mode hosts the receiver; client mode connects to a remote server |
-| `use_docker` | no | `false` | Server mode only — `true` deploys via `docker compose`, `false` via systemd user service |
 | `server_url` | no | `http://localhost:3100` | Server mode: leave default. Client mode: remote host URL (e.g. `http://shart:3100`) |
 | `api_token` | yes | — | Bearer token. Server mode: server requires this token. Client mode: token from the server admin. Stored in the system keychain. |
 | `syslog_host` / `syslog_port` | no | `0.0.0.0` / `1514` | Syslog listener bind (server mode) |
 | `mcp_host` / `mcp_port` | no | `0.0.0.0` / `3100` | MCP HTTP server bind (server mode) |
-| `data_dir` | no | `${CLAUDE_PLUGIN_DATA}` | SQLite directory (persists across plugin updates) |
+| `data_dir` | no | `~/.syslog-mcp/data` | Optional SQLite directory override; default shared setup data persists outside plugin cache |
 | `max_db_size_mb` | no | `8192` | DB size cap; oldest logs deleted when exceeded |
 | `retention_days` | no | `90` | `0` = keep forever |
 | `batch_size` | no | `100` | Number of parsed messages per SQLite batch |
@@ -413,9 +477,10 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 
 **SessionStart hook automation** (in server mode):
 
-- Symlinks `bin/syslog` to `~/.local/bin/syslog` so the binary is on your PATH
-- Writes `${CLAUDE_PLUGIN_DATA}/syslog-mcp.env` with the resolved config
-- Generates and starts the systemd user unit (or runs `docker compose up -d`) and restarts only when config actually changed
+- Ensures the host `syslog` binary exists in `~/.local/bin`
+- Exports plugin userConfig as `SYSLOG_*` / `SYSLOG_MCP_*` environment values
+- Runs `syslog setup repair`, the same setup path used by the one-line installer
+- Repairs shared assets under `~/.syslog-mcp` and removes stale user-level `syslog-mcp.service` units/drop-ins left by older plugin versions
 - All idempotent — safe to run on every session
 
 **Bundled skills**:
@@ -423,11 +488,12 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 - `syslog-dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
 - `syslog-deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
 - `syslog-redeploy` — re-run plugin setup after config or plugin changes
-- `syslog-logs` — mode-aware service log tailing from systemd or Docker
-- `syslog-cutover` — switch between systemd and Docker deployment modes with health verification
-- `syslog-version-check` — check whether the running systemd service or Docker container matches the installed binary or local image; add `--pull` in Docker mode to pull first, otherwise Docker checks only the local image cache
+- `syslog-logs` — Docker Compose service log tailing
+- `syslog-version-check` — check whether the running Docker container matches the local Compose image; add `--pull` to pull first, otherwise checks only the local image cache
 
-The plugin includes the `syslog` binary in `bin/` and is the simplest path. You can still deploy via Docker or build locally if you prefer to run the server outside the plugin.
+The plugin deploys the server with Docker Compose through the same `syslog setup`
+path as the one-line installer. You can still build and run the binary locally
+for development, but automated deployment is Compose-only.
 
 ### Docker
 
@@ -616,8 +682,9 @@ allow_insecure_http = true
 ```bash
 syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 syslog mcp        # query-only MCP stdio transport
+syslog setup      # install/repair shared ~/.syslog-mcp Docker Compose setup
 syslog stats      # query the SQLite DB directly from the CLI
-syslog compose doctor          # diagnose live Compose/systemd/listener ownership
+syslog compose doctor          # diagnose live Compose/listener ownership
 syslog compose status --json   # inspect canonical syslog-mcp container/project
 ```
 
@@ -638,7 +705,7 @@ syslog compose restart         # restart resolved service
 syslog compose logs --tail 20  # bounded compose logs
 ```
 
-`syslog compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, systemd/listener conflicts, and destructive `down` without `--yes`.
+`syslog compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, listener conflicts, and destructive `down` without `--yes`.
 
 See [docs/CLI.md](docs/CLI.md) for the full direct CLI reference, including flags, JSON output, and how CLI commands map to MCP actions.
 

@@ -1,29 +1,26 @@
 #!/usr/bin/env bash
-# Check whether the running syslog-mcp systemd unit or Docker container is using
-# the currently installed artifact.
+# Check whether the running syslog-mcp Docker Compose container is using the
+# current local compose image and binary version.
 set -euo pipefail
 
 MODE="auto"
 PULL="false"
-UNIT="syslog-mcp.service"
 SERVICE="syslog-mcp"
-COMPOSE_DIR="${SYSLOG_MCP_COMPOSE_DIR:-${HOME}/.claude/plugins/data/syslog-jmagar-lab}"
-EXPECTED_BINARY="${SYSLOG_MCP_EXPECTED_BINARY:-}"
+COMPOSE_DIR="${SYSLOG_MCP_COMPOSE_DIR:-${SYSLOG_MCP_HOME:-${HOME}/.syslog-mcp}/compose}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/check-runtime-current.sh [--mode auto|systemd|docker] [--pull] [--compose-dir DIR] [--expected-binary PATH]
+Usage: scripts/check-runtime-current.sh [--mode auto|docker] [--pull] [--compose-dir DIR]
 
 Checks:
-  systemd: running /proc/<pid>/exe hash == unit ExecStart binary hash
-  docker:  running container image ID == local compose image ID
+  docker:  running container image ID == local compose image ID and
+           container `syslog --version` == repo Cargo.toml version
 
 Options:
   --pull                  Docker only: pull compose image before comparing.
                           Without this, Docker mode only proves the container
                           matches the image already present in the local cache.
-  --compose-dir DIR       Docker compose project dir (default: plugin data dir)
-  --expected-binary PATH  Systemd: also compare running binary to this path
+  --compose-dir DIR       Docker compose project dir (default: ~/.syslog-mcp/compose)
 EOF
 }
 
@@ -32,7 +29,7 @@ while [[ $# -gt 0 ]]; do
     --mode)
       MODE="${2:?--mode requires a value}"
       case "$MODE" in
-        auto|systemd|docker) ;;
+        auto|docker) ;;
         *)
           echo "invalid mode: $MODE" >&2
           exit 2
@@ -48,10 +45,6 @@ while [[ $# -gt 0 ]]; do
       COMPOSE_DIR="${2:?--compose-dir requires a value}"
       shift 2
       ;;
-    --expected-binary)
-      EXPECTED_BINARY="${2:?--expected-binary requires a value}"
-      shift 2
-      ;;
     -h|--help)
       usage
       exit 0
@@ -64,26 +57,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-sha() {
-  sha256sum "$1" | awk '{print $1}'
-}
-
-version_of() {
-  local bin="$1"
-  if [[ -x "$bin" ]]; then
-    "$bin" --version 2>/dev/null || true
-  fi
-}
-
 status_line() {
   printf '%-10s %s\n' "$1" "$2"
 }
 
 detect_mode() {
-  if systemctl --user is-active --quiet "$UNIT" 2>/dev/null; then
-    echo systemd
-    return
-  fi
   if command -v docker >/dev/null 2>&1; then
     if [[ -d "$COMPOSE_DIR" ]] && (cd "$COMPOSE_DIR" && docker compose ps -q "$SERVICE" 2>/dev/null | grep -q .); then
       echo docker
@@ -97,65 +75,6 @@ detect_mode() {
   echo none
 }
 
-check_systemd() {
-  local pid exe unit_exec running_sha unit_sha expected_sha active
-  active="$(systemctl --user is-active "$UNIT" 2>/dev/null || true)"
-  status_line mode systemd
-  status_line unit "$UNIT"
-  status_line state "$active"
-  if [[ "$active" != "active" ]]; then
-    echo "FAIL: systemd unit is not active"
-    return 1
-  fi
-
-  pid="$(systemctl --user show "$UNIT" -p MainPID --value)"
-  if [[ -z "$pid" || "$pid" == "0" || ! -e "/proc/$pid/exe" ]]; then
-    echo "FAIL: cannot resolve running process for $UNIT"
-    return 1
-  fi
-
-  exe="$(readlink -f "/proc/$pid/exe")"
-  unit_exec="$(systemctl --user show "$UNIT" -p ExecStart --value \
-    | sed -n 's/.*path=\([^ ;]*\).*/\1/p' \
-    | head -1)"
-  if [[ -z "$unit_exec" ]]; then
-    echo "FAIL: cannot parse ExecStart for $UNIT"
-    return 1
-  fi
-  unit_exec="$(readlink -f "$unit_exec")"
-
-  running_sha="$(sha "/proc/$pid/exe")"
-  unit_sha="$(sha "$unit_exec")"
-  status_line pid "$pid"
-  status_line running_exe "$exe"
-  status_line unit_exec "$unit_exec"
-  status_line running_version "$(version_of "$exe")"
-  status_line unit_version "$(version_of "$unit_exec")"
-  status_line running_sha "$running_sha"
-  status_line unit_sha "$unit_sha"
-
-  if [[ "$running_sha" != "$unit_sha" ]]; then
-    echo "STALE: running process does not match unit ExecStart binary"
-    echo "fix: systemctl --user restart $UNIT"
-    return 1
-  fi
-
-  if [[ -n "$EXPECTED_BINARY" ]]; then
-    EXPECTED_BINARY="$(readlink -f "$EXPECTED_BINARY")"
-    expected_sha="$(sha "$EXPECTED_BINARY")"
-    status_line expected_binary "$EXPECTED_BINARY"
-    status_line expected_version "$(version_of "$EXPECTED_BINARY")"
-    status_line expected_sha "$expected_sha"
-    if [[ "$running_sha" != "$expected_sha" ]]; then
-      echo "STALE: running process does not match expected binary"
-      echo "fix: install $EXPECTED_BINARY to $unit_exec and restart $UNIT"
-      return 1
-    fi
-  fi
-
-  echo "CURRENT: running systemd service matches installed binary"
-}
-
 compose_image() {
   if [[ -d "$COMPOSE_DIR" ]]; then
     (cd "$COMPOSE_DIR" && docker compose config --images 2>/dev/null | head -1) || true
@@ -163,9 +82,8 @@ compose_image() {
 }
 
 check_docker() {
-  local cid running_image image local_image repo_digests
+  local cid running_image image local_image repo_digests repo_version container_version label_compose_dir
   status_line mode docker
-  status_line compose_dir "$COMPOSE_DIR"
 
   if [[ -d "$COMPOSE_DIR" ]]; then
     cid="$(cd "$COMPOSE_DIR" && docker compose ps -q "$SERVICE" 2>/dev/null || true)"
@@ -179,6 +97,11 @@ check_docker() {
     echo "FAIL: syslog-mcp container is not running"
     return 1
   fi
+  label_compose_dir="$(docker inspect "$cid" --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' 2>/dev/null || true)"
+  if [[ -n "$label_compose_dir" && "$label_compose_dir" != "<no value>" ]]; then
+    COMPOSE_DIR="$label_compose_dir"
+  fi
+  status_line compose_dir "$COMPOSE_DIR"
 
   image="$(compose_image)"
   [[ -n "$image" ]] || image="$(docker inspect "$cid" --format '{{.Config.Image}}')"
@@ -190,12 +113,20 @@ check_docker() {
   running_image="$(docker inspect "$cid" --format '{{.Image}}')"
   local_image="$(docker image inspect "$image" --format '{{.Id}}' 2>/dev/null || true)"
   repo_digests="$(docker image inspect "$image" --format '{{join .RepoDigests ", "}}' 2>/dev/null || true)"
+  repo_version="$(awk -F'"' '/^version = / {print $2; exit}' Cargo.toml 2>/dev/null || true)"
+  if [[ -n "$repo_version" ]]; then
+    container_version="$(docker exec "$cid" syslog --version 2>/dev/null | awk '{print $2}' || true)"
+  else
+    container_version=""
+  fi
 
   status_line container "$cid"
   status_line image "$image"
   status_line running_image_id "$running_image"
   status_line local_image_id "${local_image:-missing}"
   [[ -n "$repo_digests" ]] && status_line repo_digests "$repo_digests"
+  [[ -n "$repo_version" ]] && status_line repo_version "$repo_version"
+  [[ -n "$container_version" ]] && status_line container_version "$container_version"
 
   if [[ -z "$local_image" ]]; then
     echo "FAIL: compose image is not present locally"
@@ -207,8 +138,13 @@ check_docker() {
     echo "fix: cd $COMPOSE_DIR && docker compose up -d --force-recreate --no-build $SERVICE"
     return 1
   fi
+  if [[ -n "$repo_version" && "$container_version" != "$repo_version" ]]; then
+    echo "STALE: container syslog version does not match repo version"
+    echo "fix: rebuild and restart the Compose service from this repo"
+    return 1
+  fi
 
-  echo "CURRENT: running container matches local compose image"
+  echo "CURRENT: running container matches local compose image and repo version"
 }
 
 if [[ "$MODE" == "auto" ]]; then
@@ -216,10 +152,9 @@ if [[ "$MODE" == "auto" ]]; then
 fi
 
 case "$MODE" in
-  systemd) check_systemd ;;
   docker) check_docker ;;
   none)
-    echo "FAIL: no running syslog-mcp systemd unit or container detected"
+    echo "FAIL: no running syslog-mcp Docker container detected"
     exit 1
     ;;
   *)
