@@ -2,6 +2,7 @@ use chrono::Utc;
 use tracing::{debug, warn};
 
 use crate::db;
+use crate::ingest_metadata::bounded_metadata_json;
 
 /// Syslog facility names (RFC 5424).
 const FACILITIES: &[&str] = &[
@@ -235,7 +236,7 @@ pub(super) fn parse_syslog(raw: &str, source_ip: String) -> db::LogBatchEntry {
         };
         (hostname, raw_app_name.clone(), raw_message, "syslog")
     };
-    let metadata_json = serde_json::json!({
+    let metadata_json = bounded_metadata_json(serde_json::json!({
         "source_type": "syslog",
         "input_format": input_format,
         "source_addr": source_ip,
@@ -244,8 +245,7 @@ pub(super) fn parse_syslog(raw: &str, source_ip: String) -> db::LogBatchEntry {
         "raw_app_name": raw_app_name,
         "facility_num": facility_num,
         "severity_num": severity_num,
-    })
-    .to_string();
+    }));
 
     db::LogBatchEntry {
         timestamp,

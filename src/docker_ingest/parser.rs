@@ -4,6 +4,7 @@ use bollard::models::{EventActor, EventMessage};
 use chrono::TimeZone;
 
 use crate::db;
+use crate::ingest_metadata::bounded_metadata_json;
 
 use super::models::ContainerMeta;
 
@@ -28,7 +29,7 @@ pub(super) fn log_output_to_entry(
     let (timestamp, message) = split_docker_timestamp(&raw_line);
     let severity = infer_docker_severity(&message).unwrap_or(fallback_severity);
     let checkpoint_timestamp = timestamp.clone();
-    let metadata_json = serde_json::json!({
+    let metadata_json = bounded_metadata_json(serde_json::json!({
         "source_type": "docker_stream",
         "docker_host": host_name,
         "container_id": container.id,
@@ -39,8 +40,7 @@ pub(super) fn log_output_to_entry(
         "stream": stream,
         "fallback_severity": fallback_severity,
         "checkpoint_timestamp": checkpoint_timestamp,
-    })
-    .to_string();
+    }));
     Ok(Some(db::LogBatchEntry {
         timestamp,
         hostname: host_name.to_string(),
@@ -86,7 +86,7 @@ pub(super) fn docker_event_to_entry(
     let timestamp = docker_event_timestamp(event);
     let message = docker_event_message(action, &meta, actor);
     let raw = serde_json::to_string(event)?;
-    let metadata_json = serde_json::json!({
+    let metadata_json = bounded_metadata_json(serde_json::json!({
         "source_type": "docker_event",
         "docker_host": host_name,
         "container_id": container_id,
@@ -97,8 +97,7 @@ pub(super) fn docker_event_to_entry(
         "action": action,
         "source_action": docker_event_source_action(action),
         "exit_code": docker_event_exit_code(actor),
-    })
-    .to_string();
+    }));
     Ok(Some(db::LogBatchEntry {
         timestamp,
         hostname: host_name.to_string(),
