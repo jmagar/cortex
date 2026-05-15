@@ -740,6 +740,7 @@ fn load_setup_env_file() {
     let data_volume = entries
         .iter()
         .find(|(key, _)| key == "SYSLOG_MCP_DATA_VOLUME")
+        .filter(|(_, value)| !value.trim().is_empty())
         .map(|(_, value)| value.clone());
     if let Some(data_volume) = data_volume.as_deref() {
         tracing::trace!(

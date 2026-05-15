@@ -28,8 +28,13 @@ fn parse_env_ignores_comments_and_blank_lines() {
 
 #[test]
 fn installed_compose_asset_uses_published_image_only() {
+    assert!(COMPOSE_ASSET.contains("syslog-setup-build-stanza-start"));
+    assert!(COMPOSE_ASSET.contains("syslog-setup-build-stanza-end"));
     let compose = installed_compose_asset();
+    assert_ne!(compose, COMPOSE_ASSET);
     assert!(compose.contains("image: ghcr.io/jmagar/syslog-mcp:"));
+    assert!(!compose.contains("syslog-setup-build-stanza-start"));
+    assert!(!compose.contains("syslog-setup-build-stanza-end"));
     assert!(!compose.contains("\n    build:\n"));
     assert!(!compose.contains("dockerfile: config/Dockerfile"));
     assert!(compose.contains("      - path: ../.env\n"));

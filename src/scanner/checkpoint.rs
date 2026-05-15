@@ -153,10 +153,14 @@ impl<'a> CheckpointStore<'a> {
             "UPDATE hosts
              SET log_count = (SELECT COUNT(*) FROM logs WHERE logs.hostname = hosts.hostname),
                  first_seen = COALESCE((SELECT MIN(received_at) FROM logs WHERE logs.hostname = hosts.hostname), first_seen),
-                 last_seen = COALESCE((SELECT MAX(received_at) FROM logs WHERE logs.hostname = hosts.hostname), last_seen)",
+                 last_seen = COALESCE((SELECT MAX(received_at) FROM logs WHERE logs.hostname = hosts.hostname), last_seen)
+             WHERE hostname = 'localhost'",
             [],
         )?;
-        tx.execute("DELETE FROM hosts WHERE log_count = 0", [])?;
+        tx.execute(
+            "DELETE FROM hosts WHERE hostname = 'localhost' AND log_count = 0",
+            [],
+        )?;
         tx.execute(
             "UPDATE transcript_sources
              SET file_size = NULL,
@@ -177,7 +181,7 @@ impl<'a> CheckpointStore<'a> {
         options: &CheckpointListOptions,
     ) -> Result<Vec<CheckpointEntry>> {
         let conn = self.pool.get()?;
-        let limit = options.limit.unwrap_or(50).min(500);
+        let limit = options.limit.unwrap_or(50).min(500) as usize;
         let query_limit = if options.missing_only { 5000 } else { limit };
         let mut sql = String::from(
             "SELECT s.canonical_path,
@@ -203,30 +207,41 @@ impl<'a> CheckpointStore<'a> {
                 CASE WHEN s.last_error IS NULL THEN 1 ELSE 0 END,
                 COALESCE(s.last_indexed_at, '') DESC,
                 s.canonical_path ASC
-              LIMIT ?1",
+              LIMIT ?1 OFFSET ?2",
         );
 
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map([query_limit], |row| {
-            let canonical_path: String = row.get(0)?;
-            Ok(CheckpointEntry {
-                missing: !Path::new(&canonical_path).exists(),
-                canonical_path,
-                source_kind: row.get(1)?,
-                file_size: row.get(2)?,
-                file_mtime: row.get(3)?,
-                content_hash: row.get(4)?,
-                last_offset: row.get(5)?,
-                last_indexed_at: row.get(6)?,
-                last_error: row.get(7)?,
-                imported_records: row.get(8)?,
-                parse_errors: row.get(9)?,
-            })
-        })?;
-        let mut checkpoints = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-        if options.missing_only {
-            checkpoints.retain(|checkpoint| checkpoint.missing);
-            checkpoints.truncate(limit as usize);
+        let mut checkpoints = Vec::new();
+        let mut offset = 0usize;
+        loop {
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map([query_limit as i64, offset as i64], |row| {
+                let canonical_path: String = row.get(0)?;
+                Ok(CheckpointEntry {
+                    missing: !Path::new(&canonical_path).exists(),
+                    canonical_path,
+                    source_kind: row.get(1)?,
+                    file_size: row.get(2)?,
+                    file_mtime: row.get(3)?,
+                    content_hash: row.get(4)?,
+                    last_offset: row.get(5)?,
+                    last_indexed_at: row.get(6)?,
+                    last_error: row.get(7)?,
+                    imported_records: row.get(8)?,
+                    parse_errors: row.get(9)?,
+                })
+            })?;
+            let batch = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+            let batch_len = batch.len();
+            if options.missing_only {
+                checkpoints.extend(batch.into_iter().filter(|checkpoint| checkpoint.missing));
+                checkpoints.truncate(limit);
+            } else {
+                checkpoints.extend(batch);
+            }
+            if !options.missing_only || checkpoints.len() >= limit || batch_len < query_limit {
+                break;
+            }
+            offset += query_limit;
         }
         Ok(checkpoints)
     }

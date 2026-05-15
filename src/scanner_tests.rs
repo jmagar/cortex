@@ -361,7 +361,8 @@ fn scanner_drops_oversized_metadata_fields() {
     std::fs::write(
         &file,
         format!(
-            "{{\"sessionId\":\"{long_session}\",\"cwd\":\"{long_project}\",\"content\":\"metadata kept\"}}\n"
+            "{{\"sessionId\":\"{long_session}\",\"cwd\":\"{long_project}\",\"content\":\"metadata kept\"}}\n\
+             {{\"sessionId\":\"{long_session}\",\"cwd\":\"{long_project}\",\"content\":\"metadata kept again\"}}\n"
         ),
     )
     .unwrap();
@@ -987,5 +988,8 @@ fn index_roots_skips_unreadable_directories_and_continues() {
     assert_eq!(result.ingested, 1);
     assert_eq!(result.skipped_files, 1);
     assert_eq!(result.file_errors.len(), 1);
-    assert!(result.file_errors[0].error.contains("Permission denied"));
+    assert!(result.file_errors[0]
+        .error
+        .to_ascii_lowercase()
+        .contains("permission denied"));
 }

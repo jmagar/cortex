@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **AI scanner operations**: Added `syslog ai checkpoints`, `syslog ai index
-  --force`, `syslog ai index --since`, and `syslog ai add --force` so scanner
+  --force`, `syslog ai index --since`, and `syslog ai add --file` so scanner
   state, parser backfills, and selective reindexing are first-class CLI
   workflows.
 - **AI smoke coverage**: Added `scripts/smoke-ai.sh` for live AI transcript

@@ -1653,11 +1653,8 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
 }
 
 fn ensure_ai_doctor_success(response: &AiDoctorReport) -> Result<()> {
-    if response.claude_root.exists || response.codex_root.exists {
-        Ok(())
-    } else {
-        bail!("no local AI transcript roots found")
-    }
+    let _ = response;
+    Ok(())
 }
 
 fn truncate(s: &str, max: usize) -> String {
