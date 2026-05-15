@@ -12,7 +12,7 @@ if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
   echo "FAIL  SYSLOG_AI_SMOKE_RUN_ID contains unsafe characters" >&2
   exit 1
 fi
-QUERY="${SYSLOG_AI_SMOKE_QUERY:-aismoke-${RUN_ID}}"
+QUERY="${SYSLOG_AI_SMOKE_QUERY:-aismoke${RUN_ID//[^A-Za-z0-9]/}}"
 SESSION_ID="ai-smoke-session-${RUN_ID}"
 PROJECT="/tmp/syslog-mcp-ai-smoke-${RUN_ID}"
 
