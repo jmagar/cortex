@@ -37,8 +37,8 @@ where
             omitted += 1;
             continue;
         }
-        let key = truncate_chars(key, MAX_METADATA_KEY_CHARS);
-        object.insert(key.clone(), sanitize_value(value, Some(&key)));
+        let stored_key = truncate_chars(key, MAX_METADATA_KEY_CHARS);
+        object.insert(stored_key, sanitize_value(value, Some(key)));
     }
     if omitted > 0 {
         object.insert("_omitted_fields".to_string(), Value::Number(omitted.into()));
@@ -73,8 +73,8 @@ fn sanitize_object(values: Map<String, Value>) -> Value {
             omitted += 1;
             continue;
         }
-        let key = truncate_chars(&key, MAX_METADATA_KEY_CHARS);
-        object.insert(key.clone(), sanitize_value(value, Some(&key)));
+        let stored_key = truncate_chars(&key, MAX_METADATA_KEY_CHARS);
+        object.insert(stored_key, sanitize_value(value, Some(&key)));
     }
     if omitted > 0 {
         object.insert("_omitted_fields".to_string(), Value::Number(omitted.into()));
@@ -133,6 +133,18 @@ mod tests {
             .as_str()
             .unwrap()
             .ends_with("...[truncated]"));
+    }
+
+    #[test]
+    fn redacts_sensitive_keys_before_key_truncation() {
+        let long_sensitive_key = format!("{}token", "x".repeat(MAX_METADATA_KEY_CHARS + 20));
+        let stored_key = truncate_chars(&long_sensitive_key, MAX_METADATA_KEY_CHARS);
+        let value = attrs_to_metadata_object([(
+            long_sensitive_key.as_str(),
+            Value::String("secret".into()),
+        )]);
+
+        assert_eq!(value[stored_key], REDACTED);
     }
 
     #[test]
