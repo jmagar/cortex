@@ -70,7 +70,7 @@ Full-text search across all syslog messages with optional filters. Uses SQLite F
 |-----------|------|----------|---------|-------------|
 | `query` | string | no | — | FTS5 search query (see [FTS5 query syntax](#fts5-query-syntax)) |
 | `hostname` | string | no | — | Exact hostname match. Use `syslog` with `action: "hosts"` to enumerate. |
-| `source_ip` | string | no | — | Exact source identifier. Syslog entries use the verified network sender address (`IP:port`); Docker ingest entries use `docker://host/container/stream` from configured ingest metadata. |
+| `source_ip` | string | no | — | Exact source identifier. Syslog entries use the verified network sender address (`IP:port`); Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `severity` | string | no | — | One of: `emerg alert crit err warning notice info debug` |
 | `app_name` | string | no | — | Application name, e.g. `sshd`, `dockerd`, `kernel` |
 | `from` | string | no | — | Start of time range (ISO 8601 / RFC 3339, e.g. `2025-01-15T00:00:00Z`) |
@@ -122,7 +122,7 @@ Return the N most recent log entries. Equivalent to `tail -f` across all hosts.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `hostname` | string | no | — | Filter to a specific host |
-| `source_ip` | string | no | — | Filter to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); Docker ingest entries use `docker://host/container/stream` from configured ingest metadata. |
+| `source_ip` | string | no | — | Filter to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `app_name` | string | no | — | Filter to a specific application |
 | `n` | integer | no | 50 | Number of recent entries (hard cap: 500) |
 
@@ -230,7 +230,7 @@ Search for related events across multiple hosts within a ±N minute window aroun
 | `window_minutes` | integer | no | 5 | Minutes before and after `reference_time` (max 60) |
 | `severity_min` | string | no | `warning` | Minimum severity to include. `warning` returns `warning/err/crit/alert/emerg`. `debug` returns everything. |
 | `hostname` | string | no | — | Limit correlation to one host |
-| `source_ip` | string | no | — | Limit correlation to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); Docker ingest entries use `docker://host/container/stream`. |
+| `source_ip` | string | no | — | Limit correlation to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `query` | string | no | — | FTS5 query to narrow results |
 | `limit` | integer | no | 500 | Max total events (hard cap: 999) |
 
@@ -360,7 +360,7 @@ Each stored log entry has these fields:
 | `process_id` | text\|null | PID from the syslog message |
 | `message` | text | Log message body (FTS5-indexed) |
 | `received_at` | text | Server-side receipt timestamp (RFC 3339, UTC). Used for retention. |
-| `source_ip` | text | Source identifier. Syslog entries use the exact network sender address (`IP:port`) captured from the packet/connection peer. Docker ingest entries use `docker://host/container/stream` from configured Docker ingest metadata. |
+| `source_ip` | text | Source identifier. Syslog entries use the exact network sender address (`IP:port`) captured from the packet/connection peer. Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `ai_tool` | text\|null | AI tool name (e.g. `claude`, `codex`) |
 | `ai_project` | text\|null | AI project path |
 | `ai_session_id` | text\|null | AI session unique identifier |
@@ -629,7 +629,7 @@ allow_insecure_http = true
 
 The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to syslog-mcp, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
 
-Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. The expected stored `source_ip` shape is `docker://<host>/<container>/<stream>`.
+Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. Container stdout/stderr rows use `source_ip=docker://<host>/<container>/<stream>`. Container lifecycle rows for actions such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, and `oom` use `source_ip=docker-event://<host>/<container>/<action>`, `facility=docker`, and preserve the raw Docker event JSON.
 
 #### Storage
 

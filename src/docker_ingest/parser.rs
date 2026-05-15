@@ -1,5 +1,7 @@
 use anyhow::Result;
 use bollard::container::LogOutput;
+use bollard::models::{EventActor, EventMessage};
+use chrono::TimeZone;
 
 use crate::db;
 
@@ -48,6 +50,46 @@ pub(super) fn log_output_to_entry(
     }))
 }
 
+pub(super) fn docker_event_to_entry(
+    host_name: &str,
+    event: &EventMessage,
+) -> Result<Option<db::LogBatchEntry>> {
+    let Some(action) = event.action.as_deref() else {
+        return Ok(None);
+    };
+    let Some(severity) = docker_event_severity(action) else {
+        return Ok(None);
+    };
+    let Some(actor) = event.actor.as_ref() else {
+        return Ok(None);
+    };
+    let Some(container_id) = actor.id.as_deref() else {
+        return Ok(None);
+    };
+
+    let meta = container_meta_from_event_actor(container_id, actor);
+    let app_name = meta.app_name();
+    let timestamp = docker_event_timestamp(event);
+    let message = docker_event_message(action, &meta, actor);
+    let raw = serde_json::to_string(event)?;
+    Ok(Some(db::LogBatchEntry {
+        timestamp,
+        hostname: host_name.to_string(),
+        facility: Some("docker".to_string()),
+        severity: severity.to_string(),
+        app_name: Some(app_name),
+        process_id: Some(meta.short_id()),
+        message,
+        raw,
+        source_ip: format!("docker-event://{}/{}/{}", host_name, meta.name, action),
+        docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
+    }))
+}
+
 fn split_docker_timestamp(raw: &str) -> (String, String) {
     match raw.split_once(' ') {
         Some((ts, rest)) if chrono::DateTime::parse_from_rfc3339(ts).is_ok() => {
@@ -58,6 +100,81 @@ fn split_docker_timestamp(raw: &str) -> (String, String) {
             raw.to_string(),
         ),
     }
+}
+
+fn container_meta_from_event_actor(container_id: &str, actor: &EventActor) -> ContainerMeta {
+    let attributes = actor.attributes.as_ref();
+    let name = attributes
+        .and_then(|attrs| attrs.get("name"))
+        .map(|name| name.trim_start_matches('/').to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| container_id.chars().take(12).collect());
+    ContainerMeta {
+        id: container_id.to_string(),
+        name,
+        image: attributes
+            .and_then(|attrs| attrs.get("image"))
+            .cloned()
+            .unwrap_or_default(),
+        compose_project: attributes
+            .and_then(|attrs| attrs.get("com.docker.compose.project"))
+            .cloned(),
+        compose_service: attributes
+            .and_then(|attrs| attrs.get("com.docker.compose.service"))
+            .cloned(),
+    }
+}
+
+fn docker_event_timestamp(event: &EventMessage) -> String {
+    if let Some(time_nano) = event.time_nano {
+        let secs = time_nano.div_euclid(1_000_000_000);
+        let nanos = time_nano.rem_euclid(1_000_000_000) as u32;
+        if let Some(timestamp) = chrono::Utc.timestamp_opt(secs, nanos).single() {
+            return timestamp.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+        }
+    }
+
+    if let Some(secs) = event.time {
+        if let Some(timestamp) = chrono::Utc.timestamp_opt(secs, 0).single() {
+            return timestamp.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        }
+    }
+
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+fn docker_event_severity(action: &str) -> Option<&'static str> {
+    match action {
+        "create" | "start" | "rename" | "unpause" => Some("notice"),
+        "restart" | "stop" | "die" | "destroy" | "kill" | "pause" => Some("warning"),
+        "oom" => Some("err"),
+        _ if action.starts_with("health_status:") => Some("notice"),
+        _ => None,
+    }
+}
+
+fn docker_event_message(action: &str, meta: &ContainerMeta, actor: &EventActor) -> String {
+    let mut parts = vec![
+        format!("docker container event: {action}"),
+        format!("container={}", meta.name),
+    ];
+    if !meta.image.is_empty() {
+        parts.push(format!("image={}", meta.image));
+    }
+    if let Some(project) = &meta.compose_project {
+        parts.push(format!("compose_project={project}"));
+    }
+    if let Some(service) = &meta.compose_service {
+        parts.push(format!("compose_service={service}"));
+    }
+    if let Some(exit_code) = actor
+        .attributes
+        .as_ref()
+        .and_then(|attrs| attrs.get("exitCode").or_else(|| attrs.get("exit_code")))
+    {
+        parts.push(format!("exit_code={exit_code}"));
+    }
+    parts.join(" ")
 }
 
 fn infer_docker_severity(message: &str) -> Option<&'static str> {

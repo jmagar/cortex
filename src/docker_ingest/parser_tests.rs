@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use bollard::container::LogOutput;
+use bollard::models::{EventActor, EventMessage};
 use bytes::Bytes;
 
 use super::*;
@@ -130,6 +133,54 @@ fn json_log_level_overrides_stream_default() {
 }
 
 #[test]
+fn docker_start_event_maps_to_notice_log_entry() {
+    let entry = docker_event_to_entry("edge-host-a", &event("start"))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(entry.timestamp, "2026-05-05T01:02:03.123456789Z");
+    assert_eq!(entry.hostname, "edge-host-a");
+    assert_eq!(entry.facility.as_deref(), Some("docker"));
+    assert_eq!(entry.severity, "notice");
+    assert_eq!(entry.app_name.as_deref(), Some("edge/nginx/nginx-1"));
+    assert_eq!(entry.process_id.as_deref(), Some("abcdef123456"));
+    assert_eq!(
+        entry.message,
+        "docker container event: start container=nginx-1 image=nginx:latest compose_project=edge compose_service=nginx"
+    );
+    assert_eq!(entry.source_ip, "docker-event://edge-host-a/nginx-1/start");
+    assert!(entry.docker_checkpoint.is_none());
+    assert!(entry.raw.contains("\"Action\":\"start\""));
+}
+
+#[test]
+fn docker_die_event_maps_to_warning_and_preserves_exit_code() {
+    let entry = docker_event_to_entry("edge-host-a", &event("die"))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(entry.severity, "warning");
+    assert!(entry.message.contains("exit_code=137"));
+    assert_eq!(entry.source_ip, "docker-event://edge-host-a/nginx-1/die");
+}
+
+#[test]
+fn docker_oom_event_maps_to_error() {
+    let entry = docker_event_to_entry("edge-host-a", &event("oom"))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(entry.severity, "err");
+}
+
+#[test]
+fn docker_untracked_event_is_ignored() {
+    let entry = docker_event_to_entry("edge-host-a", &event("exec_start")).unwrap();
+
+    assert!(entry.is_none());
+}
+
+#[test]
 fn non_output_frames_are_ignored() {
     let entry = log_output_to_entry(
         "edge-host-a",
@@ -140,4 +191,28 @@ fn non_output_frames_are_ignored() {
     )
     .unwrap();
     assert!(entry.is_none());
+}
+
+fn event(action: &str) -> EventMessage {
+    let mut attributes = HashMap::new();
+    attributes.insert("name".to_string(), "nginx-1".to_string());
+    attributes.insert("image".to_string(), "nginx:latest".to_string());
+    attributes.insert("com.docker.compose.project".to_string(), "edge".to_string());
+    attributes.insert(
+        "com.docker.compose.service".to_string(),
+        "nginx".to_string(),
+    );
+    if matches!(action, "die" | "oom") {
+        attributes.insert("exitCode".to_string(), "137".to_string());
+    }
+
+    EventMessage {
+        action: Some(action.to_string()),
+        actor: Some(EventActor {
+            id: Some("abcdef1234567890".to_string()),
+            attributes: Some(attributes),
+        }),
+        time_nano: Some(1_777_942_923_123_456_789),
+        ..Default::default()
+    }
 }
