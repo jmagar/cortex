@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-05-15
+
+### Added
+
+- **Docker lifecycle event ingest**: Docker ingest now persists container
+  lifecycle events such as `create`, `start`, `restart`, `die`, `stop`,
+  `destroy`, `rename`, and `oom` as searchable rows with
+  `source_ip=docker-event://host/container/action`, enabling AI-session
+  correlation against container restarts and rebuild/recreate activity.
+
 ## [0.23.1] - 2026-05-15
 
 ### Fixed
