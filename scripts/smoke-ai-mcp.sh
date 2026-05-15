@@ -3,7 +3,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SYSLOG_BIN="${SYSLOG_BIN:-syslog}"
+SYSLOG_BIN="${SYSLOG_BIN:-}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 MCP_URL="${SYSLOG_MCP_URL:-http://localhost:3100/mcp}"
 DB_PATH="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-${PROJECT_DIR}/data/syslog.db}}"
@@ -23,6 +23,24 @@ pass() {
 fail() {
   printf 'FAIL  %s\n' "$1" >&2
   exit 1
+}
+
+resolve_syslog_bin() {
+  if [[ -n "$SYSLOG_BIN" ]]; then
+    if [[ -x "$SYSLOG_BIN" ]]; then
+      printf '%s\n' "$SYSLOG_BIN"
+    elif command -v "$SYSLOG_BIN" >/dev/null 2>&1; then
+      command -v "$SYSLOG_BIN"
+    else
+      fail "SYSLOG_BIN is not executable or on PATH: $SYSLOG_BIN"
+    fi
+  elif command -v syslog >/dev/null 2>&1; then
+    command -v syslog
+  elif [[ -x "${PROJECT_DIR}/target/debug/syslog" ]]; then
+    printf '%s\n' "${PROJECT_DIR}/target/debug/syslog"
+  else
+    fail "syslog binary not found; install syslog on PATH, set SYSLOG_BIN, or run cargo build"
+  fi
 }
 
 load_token() {
@@ -86,7 +104,8 @@ PY
 
 cd "$PROJECT_DIR"
 
-[[ -x "$(command -v "$SYSLOG_BIN")" ]] || fail "$SYSLOG_BIN is not on PATH"
+SYSLOG_BIN="$(resolve_syslog_bin)"
+[[ -x "$SYSLOG_BIN" ]] || fail "$SYSLOG_BIN is not executable"
 TOKEN="$(load_token || true)"
 export TOKEN
 

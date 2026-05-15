@@ -49,6 +49,9 @@ rows, not just empty response envelopes.
 `scripts/smoke-ai-mcp.sh` additionally seeds a temporary transcript and calls
 the HTTP MCP endpoint for `search_sessions`, `cuss`, `usage_blocks`,
 `project_context`, `list_ai_tools`, and `list_ai_projects`.
+The AI smoke scripts resolve `SYSLOG_BIN` first, then `syslog` on `PATH`, then
+the repo-local debug binary at `target/debug/syslog`, so repo-local builds do
+not require an installed shell binary.
 
 Action registry covered by live/script references: `search`, `tail`, `errors`,
 `hosts`, `sessions`, `search_sessions`, `cuss`, `ai_correlate`, `usage_blocks`, `project_context`,

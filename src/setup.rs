@@ -110,10 +110,22 @@ pub enum SetupStatus {
     Skipped,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetupIssueKind {
+    BlockingError,
+    DataQualityWarning,
+    RuntimeState,
+    FileState,
+    Command,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SetupPhase {
     pub name: &'static str,
     pub status: SetupStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issue_kind: Option<SetupIssueKind>,
     pub detail: String,
     pub elapsed_ms: u128,
 }
@@ -130,6 +142,23 @@ pub struct SetupReport {
     pub mcp_url: String,
     pub phases: Vec<SetupPhase>,
     pub has_errors: bool,
+    pub blocking_errors: usize,
+    pub data_quality_warnings: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watcher_healthy: Option<bool>,
+}
+
+struct SetupReportInput {
+    mode: &'static str,
+    elapsed_ms: u128,
+    home: PathBuf,
+    env_path: PathBuf,
+    compose_dir: PathBuf,
+    data_dir: PathBuf,
+    health_url: String,
+    mcp_url: String,
 }
 
 struct PhaseTimer {
@@ -146,9 +175,19 @@ impl PhaseTimer {
     }
 
     fn finish(self, status: SetupStatus, detail: impl Into<String>) -> SetupPhase {
+        self.finish_with_issue(status, None, detail)
+    }
+
+    fn finish_with_issue(
+        self,
+        status: SetupStatus,
+        issue_kind: Option<SetupIssueKind>,
+        detail: impl Into<String>,
+    ) -> SetupPhase {
         SetupPhase {
             name: self.name,
             status,
+            issue_kind,
             detail: detail.into(),
             elapsed_ms: self.start.elapsed().as_millis(),
         }
@@ -161,12 +200,63 @@ fn phases_have_errors(phases: &[SetupPhase]) -> bool {
         .any(|phase| matches!(phase.status, SetupStatus::Error))
 }
 
+fn report_summary(phases: &[SetupPhase]) -> (bool, usize, usize) {
+    let blocking_errors = phases
+        .iter()
+        .filter(|phase| matches!(phase.status, SetupStatus::Error))
+        .count();
+    let data_quality_warnings = phases
+        .iter()
+        .filter(|phase| matches!(phase.issue_kind, Some(SetupIssueKind::DataQualityWarning)))
+        .count();
+    (blocking_errors > 0, blocking_errors, data_quality_warnings)
+}
+
+fn ai_watch_service_state(phases: &[SetupPhase]) -> (Option<bool>, Option<bool>) {
+    let service_enabled = phase_is_ok(phases, "systemctl is-enabled syslog-ai-watch.service");
+    let watcher_healthy = phase_is_ok(phases, "systemctl is-active syslog-ai-watch.service");
+    (service_enabled, watcher_healthy)
+}
+
+fn phase_is_ok(phases: &[SetupPhase], name: &str) -> Option<bool> {
+    phases
+        .iter()
+        .find(|phase| phase.name == name)
+        .map(|phase| matches!(phase.status, SetupStatus::Ok))
+}
+
+fn should_skip_ai_watch_systemd_enable(phases: &[SetupPhase]) -> bool {
+    phases_have_errors(phases)
+}
+
 fn skipped_phase(name: &'static str, detail: impl Into<String>) -> SetupPhase {
     SetupPhase {
         name,
         status: SetupStatus::Skipped,
+        issue_kind: None,
         detail: detail.into(),
         elapsed_ms: 0,
+    }
+}
+
+fn setup_report(input: SetupReportInput, phases: Vec<SetupPhase>) -> SetupReport {
+    let (has_errors, blocking_errors, data_quality_warnings) = report_summary(&phases);
+    let (service_enabled, watcher_healthy) = ai_watch_service_state(&phases);
+    SetupReport {
+        mode: input.mode,
+        elapsed_ms: input.elapsed_ms,
+        home: input.home,
+        env_path: input.env_path,
+        compose_dir: input.compose_dir,
+        data_dir: input.data_dir,
+        health_url: input.health_url,
+        mcp_url: input.mcp_url,
+        phases,
+        has_errors,
+        blocking_errors,
+        data_quality_warnings,
+        service_enabled,
+        watcher_healthy,
     }
 }
 
@@ -221,6 +311,7 @@ pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {
         phases.push(SetupPhase {
             name: "compose-up",
             status: SetupStatus::Skipped,
+            issue_kind: None,
             detail: if prereq_failed {
                 "skipped because earlier checks failed".to_string()
             } else {
@@ -231,26 +322,44 @@ pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {
     }
 
     let elapsed_ms = started.elapsed().as_millis();
-    let has_errors = phases
-        .iter()
-        .any(|phase| matches!(phase.status, SetupStatus::Error));
     let port = env
         .as_ref()
         .and_then(|values| values.get("SYSLOG_MCP_PORT"))
         .cloned()
         .unwrap_or_else(|| "3100".to_string());
-    Ok(SetupReport {
-        mode: mode.as_str(),
+    Ok(setup_report(
+        SetupReportInput {
+            mode: mode.as_str(),
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+            health_url: format!("http://127.0.0.1:{port}/health"),
+            mcp_url: format!("http://127.0.0.1:{port}/mcp"),
+        },
+        phases,
+    ))
+}
+
+fn host_local_report_input(
+    mode: &'static str,
+    elapsed_ms: u128,
+    home: PathBuf,
+    env_path: PathBuf,
+    compose_dir: PathBuf,
+    data_dir: PathBuf,
+) -> SetupReportInput {
+    SetupReportInput {
+        mode,
         elapsed_ms,
         home,
         env_path,
         compose_dir,
         data_dir,
-        health_url: format!("http://127.0.0.1:{port}/health"),
-        mcp_url: format!("http://127.0.0.1:{port}/mcp"),
-        phases,
-        has_errors,
-    })
+        health_url: "host-local helper".to_string(),
+        mcp_url: "host-local helper".to_string(),
+    }
 }
 
 pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<SetupReport> {
@@ -318,21 +427,17 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
     }
 
     let elapsed_ms = started.elapsed().as_millis();
-    let has_errors = phases
-        .iter()
-        .any(|phase| matches!(phase.status, SetupStatus::Error));
-    Ok(SetupReport {
-        mode: action.as_str(),
-        elapsed_ms,
-        home,
-        env_path,
-        compose_dir,
-        data_dir,
-        health_url: "host-local helper".to_string(),
-        mcp_url: "host-local helper".to_string(),
+    Ok(setup_report(
+        host_local_report_input(
+            action.as_str(),
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+        ),
         phases,
-        has_errors,
-    })
+    ))
 }
 
 pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Result<SetupReport> {
@@ -367,25 +472,23 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
                 &syslog_bin,
                 &watch_env_path,
             ));
-            if phases_have_errors(&phases) {
+            if should_skip_ai_watch_systemd_enable(&phases) {
                 phases.push(skipped_phase(
                     "systemd-enable",
                     "skipped because earlier AI watch install checks failed",
                 ));
                 let elapsed_ms = started.elapsed().as_millis();
-                let has_errors = phases_have_errors(&phases);
-                return Ok(SetupReport {
-                    mode: action.as_str(),
-                    elapsed_ms,
-                    home,
-                    env_path,
-                    compose_dir,
-                    data_dir,
-                    health_url: "host-local helper".to_string(),
-                    mcp_url: "host-local helper".to_string(),
+                return Ok(setup_report(
+                    host_local_report_input(
+                        action.as_str(),
+                        elapsed_ms,
+                        home,
+                        env_path,
+                        compose_dir,
+                        data_dir,
+                    ),
                     phases,
-                    has_errors,
-                });
+                ));
             }
             phases.push(systemctl_user_phase(&["daemon-reload"]));
             phases.push(systemctl_user_phase(&[
@@ -451,21 +554,17 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
     }
 
     let elapsed_ms = started.elapsed().as_millis();
-    let has_errors = phases
-        .iter()
-        .any(|phase| matches!(phase.status, SetupStatus::Error));
-    Ok(SetupReport {
-        mode: action.as_str(),
-        elapsed_ms,
-        home,
-        env_path,
-        compose_dir,
-        data_dir,
-        health_url: "host-local helper".to_string(),
-        mcp_url: "host-local helper".to_string(),
+    Ok(setup_report(
+        host_local_report_input(
+            action.as_str(),
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+        ),
         phases,
-        has_errors,
-    })
+    ))
 }
 
 pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<SetupReport> {
@@ -514,21 +613,17 @@ pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<S
     }
 
     let elapsed_ms = started.elapsed().as_millis();
-    let has_errors = phases
-        .iter()
-        .any(|phase| matches!(phase.status, SetupStatus::Error));
-    Ok(SetupReport {
-        mode: action.as_str(),
-        elapsed_ms,
-        home,
-        env_path,
-        compose_dir,
-        data_dir,
-        health_url: "host-local helper".to_string(),
-        mcp_url: "host-local helper".to_string(),
+    Ok(setup_report(
+        host_local_report_input(
+            action.as_str(),
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+        ),
         phases,
-        has_errors,
-    })
+    ))
 }
 
 pub async fn run_debug_compose_setup(action: DebugComposeAction) -> io::Result<SetupReport> {
@@ -577,21 +672,19 @@ pub async fn run_debug_compose_setup(action: DebugComposeAction) -> io::Result<S
     }
 
     let elapsed_ms = started.elapsed().as_millis();
-    let has_errors = phases
-        .iter()
-        .any(|phase| matches!(phase.status, SetupStatus::Error));
-    Ok(SetupReport {
-        mode: action.as_str(),
-        elapsed_ms,
-        home,
-        env_path,
-        compose_dir,
-        data_dir,
-        health_url: "local debug compose".to_string(),
-        mcp_url: "local debug compose".to_string(),
+    Ok(setup_report(
+        SetupReportInput {
+            mode: action.as_str(),
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+            health_url: "local debug compose".to_string(),
+            mcp_url: "local debug compose".to_string(),
+        },
         phases,
-        has_errors,
-    })
+    ))
 }
 
 pub async fn run_setup_doctor() -> io::Result<SetupReport> {
@@ -636,21 +729,19 @@ pub async fn run_setup_doctor() -> io::Result<SetupReport> {
     phases.push(runtime_current_phase(&repo_path));
 
     let elapsed_ms = started.elapsed().as_millis();
-    let has_errors = phases
-        .iter()
-        .any(|phase| matches!(phase.status, SetupStatus::Error));
-    Ok(SetupReport {
-        mode: "doctor",
-        elapsed_ms,
-        home,
-        env_path,
-        compose_dir,
-        data_dir,
-        health_url: "setup doctor".to_string(),
-        mcp_url: "setup doctor".to_string(),
+    Ok(setup_report(
+        SetupReportInput {
+            mode: "doctor",
+            elapsed_ms,
+            home,
+            env_path,
+            compose_dir,
+            data_dir,
+            health_url: "setup doctor".to_string(),
+            mcp_url: "setup doctor".to_string(),
+        },
         phases,
-        has_errors,
-    })
+    ))
 }
 
 fn user_home_dir() -> io::Result<PathBuf> {
@@ -1249,18 +1340,23 @@ fn run_ai_watch_initial_index_phase(syslog_bin: &Path, env_path: &Path) -> Setup
     match command.output() {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let status = ai_index_output_status(&stdout);
-            timer.finish(status, summarize_ai_index_output(&stdout))
+            let (status, issue_kind) = ai_index_output_status(&stdout);
+            timer.finish_with_issue(status, issue_kind, summarize_ai_index_output(&stdout))
         }
-        Ok(output) => timer.finish(
+        Ok(output) => timer.finish_with_issue(
             SetupStatus::Error,
+            Some(SetupIssueKind::BlockingError),
             String::from_utf8_lossy(&output.stderr)
                 .lines()
                 .next()
                 .unwrap_or("initial AI index failed")
                 .to_string(),
         ),
-        Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
+        Err(error) => timer.finish_with_issue(
+            SetupStatus::Error,
+            Some(SetupIssueKind::BlockingError),
+            error.to_string(),
+        ),
     }
 }
 
@@ -1268,7 +1364,7 @@ fn summarize_ai_index_output(stdout: &str) -> String {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
         return "invalid ai index JSON output".to_string();
     };
-    format!(
+    let summary = format!(
         "indexed files={} ingested={} duplicates={} parse_errors={} storage_blocked={} dropped_metadata_fields={} file_errors={}",
         value
             .get("discovered_files")
@@ -1298,12 +1394,20 @@ fn summarize_ai_index_output(stdout: &str) -> String {
             .get("file_errors")
             .and_then(serde_json::Value::as_array)
             .map_or(0, Vec::len),
-    )
+    );
+    let (status, _) = ai_index_output_status(stdout);
+    if matches!(status, SetupStatus::Warn) {
+        format!(
+            "{summary}; inspect with `syslog ai errors --limit 20`, `syslog ai checkpoints --errors`, then rerun `syslog ai index --json` after fixes"
+        )
+    } else {
+        summary
+    }
 }
 
-fn ai_index_output_status(stdout: &str) -> SetupStatus {
+fn ai_index_output_status(stdout: &str) -> (SetupStatus, Option<SetupIssueKind>) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
-        return SetupStatus::Error;
+        return (SetupStatus::Error, Some(SetupIssueKind::BlockingError));
     };
     if value
         .get("storage_blocked_chunks")
@@ -1311,7 +1415,7 @@ fn ai_index_output_status(stdout: &str) -> SetupStatus {
         .unwrap_or(0)
         > 0
     {
-        return SetupStatus::Error;
+        return (SetupStatus::Error, Some(SetupIssueKind::BlockingError));
     }
     if value
         .get("parse_errors")
@@ -1328,9 +1432,9 @@ fn ai_index_output_status(stdout: &str) -> SetupStatus {
             .and_then(serde_json::Value::as_array)
             .is_some_and(|errors| !errors.is_empty())
     {
-        return SetupStatus::Warn;
+        return (SetupStatus::Warn, Some(SetupIssueKind::DataQualityWarning));
     }
-    SetupStatus::Ok
+    (SetupStatus::Ok, None)
 }
 
 fn ai_index_timer_disabled_phase() -> SetupPhase {

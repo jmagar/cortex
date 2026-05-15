@@ -293,7 +293,7 @@ fn summarize_ai_index_output_reports_key_counts() {
 
     assert_eq!(
         summary,
-        "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 dropped_metadata_fields=0 file_errors=1"
+        "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 dropped_metadata_fields=0 file_errors=1; inspect with `syslog ai errors --limit 20`, `syslog ai checkpoints --errors`, then rerun `syslog ai index --json` after fixes"
     );
 }
 
@@ -301,29 +301,87 @@ fn summarize_ai_index_output_reports_key_counts() {
 fn ai_index_output_status_classifies_blocking_and_recoverable_failures() {
     assert_eq!(
         ai_index_output_status(r#"{"parse_errors":0,"storage_blocked_chunks":0,"file_errors":[]}"#),
-        SetupStatus::Ok
+        (SetupStatus::Ok, None)
     );
     assert_eq!(
         ai_index_output_status(r#"{"parse_errors":1,"storage_blocked_chunks":0,"file_errors":[]}"#),
-        SetupStatus::Warn
+        (SetupStatus::Warn, Some(SetupIssueKind::DataQualityWarning))
     );
     assert_eq!(
         ai_index_output_status(r#"{"parse_errors":0,"storage_blocked_chunks":1,"file_errors":[]}"#),
-        SetupStatus::Error
+        (SetupStatus::Error, Some(SetupIssueKind::BlockingError))
     );
     assert_eq!(
         ai_index_output_status(
             r#"{"parse_errors":0,"storage_blocked_chunks":0,"file_errors":["bad"]}"#
         ),
-        SetupStatus::Warn
+        (SetupStatus::Warn, Some(SetupIssueKind::DataQualityWarning))
     );
     assert_eq!(
         ai_index_output_status(
             r#"{"parse_errors":0,"storage_blocked_chunks":0,"dropped_metadata_fields":1,"file_errors":[]}"#
         ),
-        SetupStatus::Warn
+        (SetupStatus::Warn, Some(SetupIssueKind::DataQualityWarning))
     );
-    assert_eq!(ai_index_output_status("not json"), SetupStatus::Error);
+    assert_eq!(
+        ai_index_output_status("not json"),
+        (SetupStatus::Error, Some(SetupIssueKind::BlockingError))
+    );
+}
+
+#[test]
+fn ai_watch_systemd_enable_gate_allows_data_quality_warnings() {
+    let phases = vec![
+        PhaseTimer::start("ai-watch-service-files").finish(SetupStatus::Ok, "ok"),
+        PhaseTimer::start("ai-watch-initial-index").finish_with_issue(
+            SetupStatus::Warn,
+            Some(SetupIssueKind::DataQualityWarning),
+            "parse_errors=1",
+        ),
+    ];
+    assert!(!should_skip_ai_watch_systemd_enable(&phases));
+
+    let mut phases_with_error = phases;
+    phases_with_error.push(PhaseTimer::start("systemd").finish_with_issue(
+        SetupStatus::Error,
+        Some(SetupIssueKind::BlockingError),
+        "systemctl failed",
+    ));
+    assert!(should_skip_ai_watch_systemd_enable(&phases_with_error));
+}
+
+#[test]
+fn setup_report_exposes_ai_watch_summary_fields() {
+    let phases = vec![
+        PhaseTimer::start("ai-watch-initial-index").finish_with_issue(
+            SetupStatus::Warn,
+            Some(SetupIssueKind::DataQualityWarning),
+            "parse_errors=1",
+        ),
+        PhaseTimer::start("systemctl is-enabled syslog-ai-watch.service")
+            .finish(SetupStatus::Ok, "enabled"),
+        PhaseTimer::start("systemctl is-active syslog-ai-watch.service")
+            .finish(SetupStatus::Error, "inactive"),
+    ];
+    let report = setup_report(
+        SetupReportInput {
+            mode: "ai-watch-service-check",
+            elapsed_ms: 0,
+            home: PathBuf::from("/tmp/home"),
+            env_path: PathBuf::from("/tmp/home/.env"),
+            compose_dir: PathBuf::from("/tmp/home/compose"),
+            data_dir: PathBuf::from("/tmp/home/data"),
+            health_url: "host-local helper".to_string(),
+            mcp_url: "host-local helper".to_string(),
+        },
+        phases,
+    );
+
+    assert!(report.has_errors);
+    assert_eq!(report.blocking_errors, 1);
+    assert_eq!(report.data_quality_warnings, 1);
+    assert_eq!(report.service_enabled, Some(true));
+    assert_eq!(report.watcher_healthy, Some(false));
 }
 
 #[test]

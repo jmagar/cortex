@@ -381,6 +381,23 @@ bounded missing-checkpoint prune pass, which keeps scanner/checkpoint metadata
 from accumulating entries for deleted local session files without deleting
 already imported log rows.
 
+Initial-index transcript data quality issues are warnings, not install-blocking
+errors. The setup JSON includes `blocking_errors`, `data_quality_warnings`,
+`service_enabled`, and `watcher_healthy` so automation can distinguish a broken
+watcher from historical transcript cleanup work. When data-quality warnings are
+reported, inspect them with:
+
+```bash
+syslog ai errors --limit 20
+syslog ai checkpoints --errors
+syslog ai index --json
+```
+
+Storage-blocked writes, invalid JSON from the indexer, command failures, stale
+unit content, permission failures, and failed `systemctl enable --now` phases
+remain blocking errors. Installing the watch service disables the older
+`syslog-ai-index.timer` to avoid duplicate background ingestion loops.
+
 ### `syslog setup debug-wrapper`
 
 Install, remove, or inspect the host-local debug wrapper at
@@ -468,6 +485,9 @@ For a one-command live check of the AI transcript workflow, run:
 bash scripts/smoke-ai.sh
 bash scripts/smoke-ai-mcp.sh
 ```
+
+The smoke scripts resolve `SYSLOG_BIN` first, then `syslog` on `PATH`, then the
+repo-local debug binary at `target/debug/syslog`.
 
 With `syslog-ai-watch.service` installed, new transcript lines usually become
 searchable within a few seconds of the writer closing or flushing the file.
