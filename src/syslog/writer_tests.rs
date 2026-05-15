@@ -31,6 +31,7 @@ fn make_entry(message: &str) -> db::LogBatchEntry {
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     }
 }
 

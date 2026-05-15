@@ -511,6 +511,16 @@ pub fn index_file_with_options(
                     &canonical,
                     &mut result,
                 );
+                let metadata_json = serde_json::json!({
+                    "source_type": "transcript",
+                    "source_kind": source_kind.as_str(),
+                    "tool": tool,
+                    "canonical_path": canonical,
+                    "line_no": line_no,
+                    "record_key": record_key,
+                    "content_scrubbed": true,
+                })
+                .to_string();
                 let entry = LogBatchEntry {
                     timestamp: normalize_timestamp(parsed.timestamp.as_deref())?,
                     hostname: "localhost".to_string(),
@@ -526,6 +536,7 @@ pub fn index_file_with_options(
                     ai_project: project,
                     ai_session_id: session_id,
                     ai_transcript_path: transcript_path,
+                    metadata_json: Some(metadata_json),
                 };
                 chunk_bytes = chunk_bytes.saturating_add(log_entry_string_bytes(&entry));
                 batch.push(entry);
@@ -1031,6 +1042,7 @@ fn log_entry_string_bytes(entry: &LogBatchEntry) -> usize {
         .saturating_add(entry.ai_project.as_ref().map_or(0, String::len))
         .saturating_add(entry.ai_session_id.as_ref().map_or(0, String::len))
         .saturating_add(entry.ai_transcript_path.as_ref().map_or(0, String::len))
+        .saturating_add(entry.metadata_json.as_ref().map_or(0, String::len))
 }
 
 struct ReadLine {

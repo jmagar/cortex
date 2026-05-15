@@ -76,6 +76,7 @@ fn init_db_adds_ai_session_metadata_columns() {
         "ai_project",
         "ai_session_id",
         "ai_transcript_path",
+        "metadata_json",
     ] {
         let exists: i64 = conn
             .query_row(
@@ -213,6 +214,7 @@ fn init_db_migrates_legacy_ai_schema_without_losing_logs() {
         "ai_project",
         "ai_session_id",
         "ai_transcript_path",
+        "metadata_json",
     ] {
         let exists: i64 = conn
             .query_row(

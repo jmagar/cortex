@@ -23,6 +23,17 @@ fn index_file_is_idempotent() {
     assert_eq!(first.ingested, 1);
     assert_eq!(second.ingested, 0);
     assert_eq!(second.skipped_dupes, 1);
+    let metadata_json: String = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT metadata_json FROM logs", [], |row| row.get(0))
+        .unwrap();
+    let metadata: serde_json::Value = serde_json::from_str(&metadata_json).unwrap();
+    assert_eq!(metadata["source_type"], "transcript");
+    assert_eq!(metadata["source_kind"], "explicit_file");
+    assert_eq!(metadata["tool"], "claude");
+    assert_eq!(metadata["line_no"], 0);
+    assert_eq!(metadata["content_scrubbed"], true);
 }
 
 #[test]

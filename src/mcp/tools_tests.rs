@@ -119,6 +119,7 @@ async fn schema_actions_are_dispatchable() {
             ai_project: None,
             ai_session_id: None,
             ai_transcript_path: None,
+            metadata_json: None,
         }],
     )
     .unwrap();

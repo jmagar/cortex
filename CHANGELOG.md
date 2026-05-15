@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-05-15
+
+### Added
+
+- **Source metadata JSON**: Added nullable `logs.metadata_json` storage and
+  query response exposure for source-specific ingest metadata. Syslog rows now
+  record parser/source provenance, OTLP rows preserve resource/log attributes
+  plus trace/span ids, Docker rows preserve host/container/image/compose/action
+  details, and transcript rows preserve source kind, file path, line number,
+  record key, and scrub status.
+
 ## [0.24.1] - 2026-05-15
 
 ### Fixed

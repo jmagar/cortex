@@ -58,7 +58,8 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
             ai_tool            TEXT,
             ai_project         TEXT,
             ai_session_id      TEXT,
-            ai_transcript_path TEXT
+            ai_transcript_path TEXT,
+            metadata_json      TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
@@ -351,6 +352,31 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         )?;
         tracing::info!("Migration 8: rebuilt AI metadata indexes as partial indexes");
     }
+
+    let migration_9_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 9",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_9_applied {
+        let metadata_col_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('logs') WHERE name = 'metadata_json'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !metadata_col_exists {
+            conn.execute_batch("ALTER TABLE logs ADD COLUMN metadata_json TEXT")?;
+        }
+        conn.execute_batch("INSERT INTO schema_migrations (version) VALUES (9);")?;
+        tracing::info!("Migration 9: added logs.metadata_json");
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)

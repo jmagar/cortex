@@ -31,6 +31,7 @@ fn make_entry(ts: &str, host: &str, severity: &str, msg: &str) -> LogBatchEntry 
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     }
 }
 
@@ -323,6 +324,7 @@ fn make_ai_entry(
         ai_project: Some(project.to_string()),
         ai_session_id: Some(session_id.to_string()),
         ai_transcript_path: Some(format!("{project}/{session_id}.jsonl")),
+        metadata_json: None,
     }
 }
 
@@ -732,6 +734,7 @@ fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
                 ai_transcript_path: Some(
                     "/home/jmagar/.codex/sessions/2026/05/11/rollout-abc.jsonl".into(),
                 ),
+                metadata_json: None,
             },
             LogBatchEntry {
                 timestamp: "2026-05-11T00:01:00Z".into(),
@@ -750,6 +753,7 @@ fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
                 ai_transcript_path: Some(
                     "/home/jmagar/.codex/sessions/2026/05/11/rollout-abc.jsonl".into(),
                 ),
+                metadata_json: None,
             },
         ],
     )

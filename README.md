@@ -365,6 +365,7 @@ Each stored log entry has these fields:
 | `ai_project` | text\|null | AI project path |
 | `ai_session_id` | text\|null | AI session unique identifier |
 | `ai_transcript_path` | text\|null | Full path to the source transcript file |
+| `metadata_json` | text\|null | Source-specific JSON metadata. Syslog rows include parser/source provenance; OTLP rows include resource/log attributes plus trace/span ids; Docker rows include host/container/image/compose/action details; transcript rows include source kind, file path, line number, record key, and scrub status. |
 
 ### AI transcript indexing
 
@@ -415,7 +416,7 @@ the transcript write. Scrubbing is best-effort, not a compliance boundary. If
 storage guardrails cannot recover enough space, indexing fails before committing
 additional chunks.
 
-**Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker ingest entries, `source_ip` identifies the configured Docker ingest host/container/stream and should be trusted only as far as the configured docker-socket-proxy endpoint and network path are trusted. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
+**Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker ingest entries, `source_ip` identifies the configured Docker ingest host/container/stream and should be trusted only as far as the configured docker-socket-proxy endpoint and network path are trusted. `metadata_json` preserves source-specific context for debugging and correlation, but it is not an authorization boundary. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
 
 ### Severity levels
 
