@@ -391,15 +391,65 @@ fn default_root_statuses() -> (TranscriptRootStatus, TranscriptRootStatus) {
     let claude = home.join(".claude/projects");
     let codex = home.join(".codex/sessions");
     (
-        TranscriptRootStatus {
-            path: claude.display().to_string(),
-            exists: claude.exists(),
-        },
-        TranscriptRootStatus {
-            path: codex.display().to_string(),
-            exists: codex.exists(),
-        },
+        transcript_root_status(&claude),
+        transcript_root_status(&codex),
     )
+}
+
+fn transcript_root_status(path: &Path) -> TranscriptRootStatus {
+    let metadata = std::fs::metadata(path).ok();
+    let exists = metadata.is_some();
+    let readable = std::fs::read_dir(path).is_ok();
+    let writable = can_write_directory(path);
+    #[cfg(unix)]
+    let (owner_uid, owner_gid, mode, strict_ok) = {
+        use std::os::unix::fs::MetadataExt;
+        let current_uid = unsafe { libc::geteuid() };
+        let (owner_uid, owner_gid, mode) = metadata
+            .as_ref()
+            .map(|metadata| (metadata.uid(), metadata.gid(), metadata.mode() & 0o777))
+            .map_or((None, None, None), |(uid, gid, mode)| {
+                (Some(uid), Some(gid), Some(mode))
+            });
+        (
+            owner_uid,
+            owner_gid,
+            mode,
+            exists && readable && writable && owner_uid == Some(current_uid),
+        )
+    };
+    #[cfg(not(unix))]
+    let (owner_uid, owner_gid, mode, strict_ok) =
+        (None, None, None, exists && readable && writable);
+
+    TranscriptRootStatus {
+        path: path.display().to_string(),
+        exists,
+        readable,
+        writable,
+        owner_uid,
+        owner_gid,
+        mode,
+        strict_ok,
+    }
+}
+
+fn can_write_directory(path: &Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    let probe = path.join(format!(".syslog-mcp-write-check-{}", std::process::id()));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(probe);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 pub fn claim_imports_in_tx(

@@ -289,11 +289,31 @@ Summarize the local AI indexing state.
 ```bash
 syslog ai doctor
 syslog ai doctor --json
+syslog ai doctor --strict-permissions --json
 ```
 
 The doctor reports the DB path in use, whether `~/.claude/projects` and
-`~/.codex/sessions` exist, checkpoint counts, missing checkpoint counts,
+`~/.codex/sessions` exist, whether they are readable/writable by the current
+user, owner uid/gid, mode, checkpoint counts, missing checkpoint counts,
 imported record count, parse error count, and the newest indexed transcript.
+Without `--strict-permissions`, this is a report-only command. With
+`--strict-permissions`, it exits non-zero when either transcript root is
+missing, unreadable, unwritable, or owned by another user.
+
+### `syslog ai watch-status`
+
+Inspect the supported user-systemd watcher without reading systemd internals by
+hand.
+
+```bash
+syslog ai watch-status
+syslog ai watch-status --json
+```
+
+The status command reports `syslog-ai-watch.service` active/enabled state, main
+PID, ExecStart, and the latest bounded journal lines. It uses the same user bus
+fallback as setup commands, so it still works from shells or tool environments
+that do not export `DBUS_SESSION_BUS_ADDRESS`.
 
 ### `syslog setup ai-watch-service`
 
@@ -312,7 +332,28 @@ initial `syslog ai index --json` phase, disables the older polling timer, and
 starts `syslog-ai-watch.service` with `syslog ai watch --no-initial-scan
 --json`. The helper is intentionally outside the container because it must read
 host-local Claude/Codex transcript files; Docker Compose remains the
-server/query deployment.
+server/query deployment. Remove events from watched transcript files trigger a
+bounded missing-checkpoint prune pass, which keeps scanner/checkpoint metadata
+from accumulating entries for deleted local session files without deleting
+already imported log rows.
+
+### `syslog setup debug-wrapper`
+
+Install, remove, or inspect the host-local debug wrapper at
+`~/.local/bin/syslog`.
+
+```bash
+syslog setup debug-wrapper install
+syslog setup debug-wrapper check --json
+syslog setup debug-wrapper remove
+```
+
+The wrapper is intentionally machine-local. It `cd`s into the configured repo
+or worktree, builds `cargo build --bin syslog` into `.cache/cargo`, then execs
+the fresh debug binary. For non-server commands it defaults Docker ingest off
+and bearer auth mode on, so regular CLI checks do not accidentally start
+container-log ingestion or OAuth-only config paths. Override the source checkout
+with `SYSLOG_MCP_REPO=/path/to/syslog-mcp syslog ...`.
 
 ### `syslog setup ai-index-timer`
 

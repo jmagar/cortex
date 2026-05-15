@@ -162,6 +162,34 @@ fn watch_targets_rejects_broad_current_directory() {
     assert!(err.to_string().contains("unsafe transcript scan path"));
 }
 
+#[test]
+fn remove_event_drops_pending_file_and_requests_checkpoint_prune() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("session.jsonl");
+    std::fs::write(&path, "{}\n").unwrap();
+    let targets = watch_targets(&test_watch_options(temp.path().to_path_buf())).unwrap();
+    let mut pending = PendingFiles::default();
+    assert!(pending.push(path.clone(), Instant::now()));
+    std::fs::remove_file(&path).unwrap();
+    let overflow_rescan = std::sync::atomic::AtomicBool::new(false);
+    let prune_missing = std::sync::atomic::AtomicBool::new(false);
+    let event = notify::Event::new(notify::EventKind::Remove(notify::event::RemoveKind::File))
+        .add_path(path.clone());
+
+    let new_dirs = handle_event(
+        Ok(event),
+        &targets,
+        &mut pending,
+        &overflow_rescan,
+        &prune_missing,
+    );
+
+    assert!(new_dirs.is_empty());
+    assert!(!pending.files.contains_key(&path));
+    assert!(!overflow_rescan.load(std::sync::atomic::Ordering::Relaxed));
+    assert!(prune_missing.load(std::sync::atomic::Ordering::Relaxed));
+}
+
 fn test_watch_options(path: PathBuf) -> WatchOptions {
     WatchOptions {
         path: Some(path),

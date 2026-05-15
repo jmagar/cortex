@@ -166,6 +166,7 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
     }
 
     let overflow_rescan = Arc::new(AtomicBool::new(false));
+    let prune_missing = Arc::new(AtomicBool::new(false));
     let (tx, mut rx) = mpsc::channel::<notify::Result<Event>>(WATCH_EVENT_BUFFER);
     let callback_rescan = Arc::clone(&overflow_rescan);
     let mut watcher = RecommendedWatcher::new(
@@ -200,11 +201,14 @@ pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
     loop {
         tokio::select! {
             Some(event) = rx.recv() => {
-                for dir in handle_event(event, &targets, &mut pending, &overflow_rescan) {
+                for dir in handle_event(event, &targets, &mut pending, &overflow_rescan, &prune_missing) {
                     watch_directory_tree(&mut watcher, &dir, &mut watched_dirs)?;
                 }
             }
             _ = tick.tick() => {
+                if prune_missing.swap(false, Ordering::Relaxed) {
+                    prune_missing_checkpoints(&service, options.json).await;
+                }
                 if overflow_rescan.swap(false, Ordering::Relaxed)
                     && run_rescan(&service, &options, "rescan").await == RescanStatus::Retry
                 {
@@ -347,6 +351,7 @@ fn handle_event(
     targets: &[WatchTarget],
     pending: &mut PendingFiles,
     overflow_rescan: &AtomicBool,
+    prune_missing: &AtomicBool,
 ) -> Vec<PathBuf> {
     let mut new_dirs = Vec::new();
     match event {
@@ -377,11 +382,44 @@ fn handle_event(
                         overflow_rescan.store(true, Ordering::Relaxed);
                     }
                 }
+            } else if event.kind.is_remove() {
+                for path in event.paths {
+                    if scanner::is_supported_transcript_file(&path)
+                        && event_path_allowed_missing_ok(&path, targets)
+                    {
+                        pending.remove(&path);
+                        prune_missing.store(true, Ordering::Relaxed);
+                    }
+                }
             }
         }
         Err(error) => tracing::warn!(error = %error, "AI transcript watch event failed"),
     }
     new_dirs
+}
+
+async fn prune_missing_checkpoints(service: &SyslogService, json: bool) {
+    match service.prune_ai_checkpoints(true, false, Some(500)).await {
+        Ok(result) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "stage": "prune_missing",
+                        "result": result,
+                    })
+                );
+            }
+            tracing::info!(
+                matched = result.matched,
+                pruned = result.pruned,
+                "AI transcript watcher pruned missing transcript checkpoints"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "AI transcript watcher failed to prune missing checkpoints");
+        }
+    }
 }
 
 fn event_path_allowed(path: &Path, targets: &[WatchTarget]) -> bool {
@@ -393,9 +431,18 @@ fn event_path_allowed(path: &Path, targets: &[WatchTarget]) -> bool {
         );
         path.to_path_buf()
     });
+    canonical_path_allowed(&canonical, targets)
+}
+
+fn event_path_allowed_missing_ok(path: &Path, targets: &[WatchTarget]) -> bool {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    canonical_path_allowed(&canonical, targets)
+}
+
+fn canonical_path_allowed(canonical: &Path, targets: &[WatchTarget]) -> bool {
     targets.iter().any(|target| match target {
         WatchTarget::Directory(root) => canonical.starts_with(root),
-        WatchTarget::File { path, .. } => &canonical == path,
+        WatchTarget::File { path, .. } => canonical == path,
     })
 }
 

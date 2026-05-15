@@ -33,6 +33,23 @@ pub enum AiWatchServiceAction {
     Check,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebugWrapperAction {
+    Install,
+    Remove,
+    Check,
+}
+
+impl DebugWrapperAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "debug-wrapper-install",
+            Self::Remove => "debug-wrapper-remove",
+            Self::Check => "debug-wrapper-check",
+        }
+    }
+}
+
 impl AiWatchServiceAction {
     fn as_str(self) -> &'static str {
         match self {
@@ -313,6 +330,7 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
                 &db_path,
                 &user_home,
             )?);
+            phases.push(transcript_root_permissions_phase(&user_home));
             phases.push(run_ai_watch_initial_index_phase(
                 &syslog_bin,
                 &watch_env_path,
@@ -367,6 +385,7 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
                 &db_path,
                 &user_home,
             ));
+            phases.push(transcript_root_permissions_phase(&user_home));
             phases.push(ai_index_timer_disabled_phase());
             phases.push(systemctl_user_required_phase(&[
                 "is-enabled",
@@ -376,6 +395,69 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
                 "is-active",
                 "syslog-ai-watch.service",
             ]));
+        }
+    }
+
+    let elapsed_ms = started.elapsed().as_millis();
+    let has_errors = phases
+        .iter()
+        .any(|phase| matches!(phase.status, SetupStatus::Error));
+    Ok(SetupReport {
+        mode: action.as_str(),
+        elapsed_ms,
+        home,
+        env_path,
+        compose_dir,
+        data_dir,
+        health_url: "host-local helper".to_string(),
+        mcp_url: "host-local helper".to_string(),
+        phases,
+        has_errors,
+    })
+}
+
+pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<SetupReport> {
+    let started = Instant::now();
+    let home = syslog_home_dir()?;
+    let env_path = home.join(".env");
+    let compose_dir = home.join("compose");
+    let data_dir = home.join("data");
+    let user_home = user_home_dir()?;
+    let wrapper_path = user_home.join(".local/bin/syslog");
+    let repo_path = std::env::current_dir()?;
+    let mut phases = Vec::new();
+
+    match action {
+        DebugWrapperAction::Install => {
+            if let Some(parent) = wrapper_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            write_executable_file(&wrapper_path, &debug_wrapper_script(&repo_path))?;
+            phases.push(
+                PhaseTimer::start("debug-wrapper")
+                    .finish(SetupStatus::Ok, format!("wrote {}", wrapper_path.display())),
+            );
+        }
+        DebugWrapperAction::Remove => match std::fs::remove_file(&wrapper_path) {
+            Ok(()) => phases.push(PhaseTimer::start("debug-wrapper").finish(
+                SetupStatus::Ok,
+                format!("removed {}", wrapper_path.display()),
+            )),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                phases.push(PhaseTimer::start("debug-wrapper").finish(
+                    SetupStatus::Ok,
+                    format!("{} already absent", wrapper_path.display()),
+                ));
+            }
+            Err(error) => return Err(error),
+        },
+        DebugWrapperAction::Check => {
+            phases.push(check_file_phase(
+                "debug-wrapper",
+                &wrapper_path,
+                "run syslog setup debug-wrapper install",
+            ));
+            phases.push(check_debug_wrapper_content_phase(&wrapper_path, &repo_path));
         }
     }
 
@@ -806,6 +888,111 @@ fn ai_watch_service_unit(
     format!(
         "[Unit]\nDescription=syslog-mcp real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/syslog-mcp\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nEnvironment=PATH={user_local_bin}:{user_cargo_bin}:/usr/local/bin:/usr/bin:/bin\nEnvironment=CARGO_TARGET_DIR={cargo_target_dir}\nWorkingDirectory=/\nExecStart={syslog_bin} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nBindReadOnlyPaths=-{claude_root} -{codex_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
     )
+}
+
+fn debug_wrapper_script(repo_path: &Path) -> String {
+    let repo_path = setup_path_value(repo_path).expect("validated debug wrapper repo path");
+    format!(
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${{SYSLOG_MCP_REPO:-{repo_path}}}"
+if [[ ! -d "${{repo}}" ]]; then
+  repo="${{HOME}}/workspace/syslog-mcp"
+fi
+
+cd "${{repo}}"
+export CARGO_TARGET_DIR="${{CARGO_TARGET_DIR:-.cache/cargo}}"
+
+case "${{1:-}}" in
+  serve|setup)
+    ;;
+  *)
+    export SYSLOG_DOCKER_INGEST_ENABLED="${{SYSLOG_DOCKER_INGEST_ENABLED:-false}}"
+    export SYSLOG_MCP_AUTH_MODE="${{SYSLOG_MCP_AUTH_MODE:-bearer}}"
+    ;;
+esac
+
+cargo build --quiet --bin syslog
+exec "${{CARGO_TARGET_DIR}}/debug/syslog" "$@"
+"#
+    )
+}
+
+fn check_debug_wrapper_content_phase(wrapper_path: &Path, repo_path: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("debug-wrapper-content");
+    let expected = debug_wrapper_script(repo_path);
+    match std::fs::read_to_string(wrapper_path) {
+        Ok(current) if current == expected => {
+            timer.finish(SetupStatus::Ok, "debug wrapper matches generated content")
+        }
+        Ok(_) => timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{} does not match generated debug wrapper",
+                wrapper_path.display()
+            ),
+        ),
+        Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
+    }
+}
+
+fn transcript_root_permissions_phase(user_home: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("ai-transcript-root-permissions");
+    let roots = [
+        user_home.join(".claude/projects"),
+        user_home.join(".codex/sessions"),
+    ];
+    let failures: Vec<String> = roots
+        .iter()
+        .filter_map(|root| transcript_root_permission_error(root))
+        .collect();
+    if failures.is_empty() {
+        timer.finish(
+            SetupStatus::Ok,
+            "AI transcript roots are owned/readable/writable",
+        )
+    } else {
+        timer.finish(SetupStatus::Error, failures.join("; "))
+    }
+}
+
+fn transcript_root_permission_error(root: &Path) -> Option<String> {
+    let metadata = match std::fs::metadata(root) {
+        Ok(metadata) => metadata,
+        Err(error) => return Some(format!("{}: {error}", root.display())),
+    };
+    if !metadata.is_dir() {
+        return Some(format!("{} is not a directory", root.display()));
+    }
+    if std::fs::read_dir(root).is_err() {
+        return Some(format!("{} is not readable", root.display()));
+    }
+    let probe = root.join(format!(".syslog-mcp-write-check-{}", std::process::id()));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(probe);
+        }
+        Err(error) => return Some(format!("{} is not writable: {error}", root.display())),
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let current_uid = unsafe { libc::geteuid() };
+        if metadata.uid() != current_uid {
+            return Some(format!(
+                "{} owner uid {} != current uid {}",
+                root.display(),
+                metadata.uid(),
+                current_uid
+            ));
+        }
+    }
+    None
 }
 
 fn run_ai_watch_initial_index_phase(syslog_bin: &Path, env_path: &Path) -> SetupPhase {

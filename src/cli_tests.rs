@@ -252,6 +252,30 @@ fn parse_ai_prune_checkpoints_requires_missing() {
 }
 
 #[test]
+fn parse_ai_doctor_accepts_strict_permissions() {
+    let parsed =
+        CliCommand::parse(strings(&["ai", "doctor", "--strict-permissions", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::Doctor(AiDoctorArgs {
+            json: true,
+            strict_permissions: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_ai_watch_status_accepts_json() {
+    let parsed = CliCommand::parse(strings(&["ai", "watch-status", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::WatchStatus(OutputArgs { json: true }))
+    );
+}
+
+#[test]
 fn truncate_is_utf8_safe_for_non_ascii_project_names() {
     let value = truncate("项目路径-alpha", 6);
     assert!(value.ends_with('…'));

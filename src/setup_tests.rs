@@ -215,6 +215,44 @@ fn ai_watch_service_content_phase_detects_stale_unit() {
 }
 
 #[test]
+fn debug_wrapper_script_builds_current_repo_debug_binary() {
+    let script = debug_wrapper_script(std::path::Path::new("/home/me/workspace/syslog-mcp"));
+
+    assert!(script.contains(r#"repo="${SYSLOG_MCP_REPO:-/home/me/workspace/syslog-mcp}""#));
+    assert!(script.contains(r#"repo="${HOME}/workspace/syslog-mcp""#));
+    assert!(script.contains(r#"export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.cache/cargo}""#));
+    assert!(script.contains("SYSLOG_DOCKER_INGEST_ENABLED"));
+    assert!(script.contains("SYSLOG_MCP_AUTH_MODE"));
+    assert!(script.contains("cargo build --quiet --bin syslog"));
+    assert!(script.contains(r#"exec "${CARGO_TARGET_DIR}/debug/syslog" "$@""#));
+}
+
+#[test]
+fn debug_wrapper_content_phase_detects_stale_wrapper() {
+    let dir = tempfile::tempdir().unwrap();
+    let wrapper = dir.path().join("syslog");
+    std::fs::write(&wrapper, "#!/bin/sh\nexec old\n").unwrap();
+
+    let phase = check_debug_wrapper_content_phase(&wrapper, dir.path());
+
+    assert!(matches!(phase.status, SetupStatus::Error));
+    assert!(phase
+        .detail
+        .contains("does not match generated debug wrapper"));
+}
+
+#[test]
+fn transcript_root_permissions_phase_reports_missing_roots() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let phase = transcript_root_permissions_phase(dir.path());
+
+    assert!(matches!(phase.status, SetupStatus::Error));
+    assert!(phase.detail.contains(".claude/projects"));
+    assert!(phase.detail.contains(".codex/sessions"));
+}
+
+#[test]
 fn summarize_ai_index_output_reports_key_counts() {
     let summary = summarize_ai_index_output(
         r#"{
