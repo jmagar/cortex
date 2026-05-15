@@ -213,8 +213,8 @@ fn report_summary(phases: &[SetupPhase]) -> (bool, usize, usize) {
 }
 
 fn ai_watch_service_state(phases: &[SetupPhase]) -> (Option<bool>, Option<bool>) {
-    let service_enabled = phase_is_ok(phases, "systemctl is-enabled syslog-ai-watch.service");
-    let watcher_healthy = phase_is_ok(phases, "systemctl is-active syslog-ai-watch.service");
+    let service_enabled = phase_is_ok(phases, AI_WATCH_SERVICE_ENABLED_PHASE);
+    let watcher_healthy = phase_is_ok(phases, AI_WATCH_SERVICE_ACTIVE_PHASE);
     (service_enabled, watcher_healthy)
 }
 
@@ -238,6 +238,9 @@ fn skipped_phase(name: &'static str, detail: impl Into<String>) -> SetupPhase {
         elapsed_ms: 0,
     }
 }
+
+const AI_WATCH_SERVICE_ENABLED_PHASE: &str = "ai-watch-service-enabled";
+const AI_WATCH_SERVICE_ACTIVE_PHASE: &str = "ai-watch-service-active";
 
 fn setup_report(input: SetupReportInput, phases: Vec<SetupPhase>) -> SetupReport {
     let (has_errors, blocking_errors, data_quality_warnings) = report_summary(&phases);
@@ -506,6 +509,14 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
                 "--now",
                 "syslog-ai-watch.service",
             ]));
+            phases.push(systemctl_user_required_named_phase(
+                AI_WATCH_SERVICE_ENABLED_PHASE,
+                &["is-enabled", "syslog-ai-watch.service"],
+            ));
+            phases.push(systemctl_user_required_named_phase(
+                AI_WATCH_SERVICE_ACTIVE_PHASE,
+                &["is-active", "syslog-ai-watch.service"],
+            ));
         }
         AiWatchServiceAction::Remove => {
             phases.push(systemctl_user_phase(&[
@@ -542,14 +553,14 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
             ));
             phases.push(transcript_root_permissions_phase(&user_home));
             phases.push(ai_index_timer_disabled_phase());
-            phases.push(systemctl_user_required_phase(&[
-                "is-enabled",
-                "syslog-ai-watch.service",
-            ]));
-            phases.push(systemctl_user_required_phase(&[
-                "is-active",
-                "syslog-ai-watch.service",
-            ]));
+            phases.push(systemctl_user_required_named_phase(
+                AI_WATCH_SERVICE_ENABLED_PHASE,
+                &["is-enabled", "syslog-ai-watch.service"],
+            ));
+            phases.push(systemctl_user_required_named_phase(
+                AI_WATCH_SERVICE_ACTIVE_PHASE,
+                &["is-active", "syslog-ai-watch.service"],
+            ));
         }
     }
 
@@ -1697,7 +1708,11 @@ fn ai_index_timer_unit() -> &'static str {
 }
 
 fn systemctl_user_phase(args: &[&str]) -> SetupPhase {
-    let timer = PhaseTimer::start("systemctl-user");
+    systemctl_user_named_phase("systemctl-user", args)
+}
+
+fn systemctl_user_named_phase(name: &'static str, args: &[&str]) -> SetupPhase {
+    let timer = PhaseTimer::start(name);
     match run_systemctl_user(args) {
         Ok(output) if output.status.success() => timer.finish(
             SetupStatus::Ok,
@@ -1723,7 +1738,11 @@ fn systemctl_user_phase(args: &[&str]) -> SetupPhase {
 }
 
 fn systemctl_user_required_phase(args: &[&str]) -> SetupPhase {
-    let timer = PhaseTimer::start("systemctl-user");
+    systemctl_user_required_named_phase("systemctl-user", args)
+}
+
+fn systemctl_user_required_named_phase(name: &'static str, args: &[&str]) -> SetupPhase {
+    let timer = PhaseTimer::start(name);
     match run_systemctl_user(args) {
         Ok(output) if output.status.success() => timer.finish(
             SetupStatus::Ok,
