@@ -2,11 +2,13 @@ use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 use std::path::PathBuf;
 use syslog_mcp::app::{
-    CorrelateEventsRequest, CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse,
-    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
-    ListHostsResponse, LogEntry, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
-    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SyslogService,
-    TailLogsRequest, UsageBlocksRequest, UsageBlocksResponse,
+    CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
+    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest,
+    GetErrorsResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
+    ListAiToolsResponse, ListHostsResponse, LogEntry, ProjectContextRequest,
+    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
+    SearchSessionsResponse, SyslogService, TailLogsRequest, UsageBlocksRequest,
+    UsageBlocksResponse,
 };
 use syslog_mcp::compose::{
     CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
@@ -27,6 +29,7 @@ pub(crate) enum CliCommand {
     Correlate(CorrelateArgs),
     Stats(OutputArgs),
     Compose(ComposeCommand),
+    Db(DbCommand),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +47,7 @@ pub(crate) enum AiCommand {
     PruneCheckpoints(AiPruneCheckpointsArgs),
     Doctor(AiDoctorArgs),
     WatchStatus(OutputArgs),
+    SmokeWatch(OutputArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,8 +61,55 @@ pub(crate) enum ComposeCommand {
     Logs(ComposeLogsArgs),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DbCommand {
+    Status(OutputArgs),
+    Integrity(OutputArgs),
+    Checkpoint(DbCheckpointArgs),
+    Vacuum(DbVacuumArgs),
+    Backup(DbBackupArgs),
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OutputArgs {
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DbCheckpointArgs {
+    pub mode: String,
+    pub json: bool,
+}
+
+impl Default for DbCheckpointArgs {
+    fn default() -> Self {
+        Self {
+            mode: "passive".into(),
+            json: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DbVacuumArgs {
+    pub full: bool,
+    pub pages: u32,
+    pub json: bool,
+}
+
+impl Default for DbVacuumArgs {
+    fn default() -> Self {
+        Self {
+            full: false,
+            pages: 1000,
+            json: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct DbBackupArgs {
+    pub output: Option<String>,
     pub json: bool,
 }
 
@@ -252,6 +303,7 @@ impl CliCommand {
             "correlate" => parse_correlate(rest),
             "stats" => parse_stats(rest),
             "compose" => parse_compose(rest),
+            "db" => parse_db(rest),
             _ => bail!("unknown CLI command: {command}"),
         }
     }
@@ -427,6 +479,13 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                 let response = ai_watch_status()?;
                 print_ai_watch_status_response(&response, args.json)?;
             }
+            AiCommand::SmokeWatch(args) => {
+                let response = ai_smoke_watch(&service).await?;
+                print_ai_smoke_watch_response(&response, args.json)?;
+                if !response.pruned_missing_checkpoint {
+                    bail!("AI watch smoke checkpoint was not pruned within 30s");
+                }
+            }
         },
         CliCommand::Correlate(args) => {
             let json = args.json;
@@ -447,6 +506,34 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
             let response = service.get_stats().await?;
             print_stats_response(&response, args.json)?;
         }
+        CliCommand::Db(args) => match args {
+            DbCommand::Status(args) => {
+                let response = service.db_status().await?;
+                print_db_status_response(&response, args.json)?;
+            }
+            DbCommand::Integrity(args) => {
+                let response = service.db_integrity().await?;
+                print_db_integrity_response(&response, args.json)?;
+                if !response.ok {
+                    bail!("database integrity check failed");
+                }
+            }
+            DbCommand::Checkpoint(args) => {
+                let response = service.db_checkpoint(args.mode).await?;
+                print_db_checkpoint_response(&response, args.json)?;
+                if response.busy != 0 {
+                    bail!("database WAL checkpoint was busy");
+                }
+            }
+            DbCommand::Vacuum(args) => {
+                let response = service.db_vacuum(args.full, args.pages).await?;
+                print_db_vacuum_response(&response, args.json)?;
+            }
+            DbCommand::Backup(args) => {
+                let response = service.db_backup(args.output.map(PathBuf::from)).await?;
+                print_db_backup_response(&response, args.json)?;
+            }
+        },
         CliCommand::Compose(_) => {
             bail!("compose commands must run through run_compose");
         }
@@ -651,6 +738,10 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
         "doctor" => parse_ai_doctor(rest),
         "watch-status" => Ok(CliCommand::Ai(AiCommand::WatchStatus(parse_output_args(
             "ai watch-status",
+            rest,
+        )?))),
+        "smoke-watch" => Ok(CliCommand::Ai(AiCommand::SmokeWatch(parse_output_args(
+            "ai smoke-watch",
             rest,
         )?))),
         _ => bail!("unknown ai subcommand: {subcommand}"),
@@ -983,6 +1074,77 @@ struct AiWatchStatusReport {
     latest_journal: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct AiSmokeWatchReport {
+    session_id: String,
+    transcript_path: PathBuf,
+    ingested: bool,
+    pruned_missing_checkpoint: bool,
+    missing_checkpoint_count: i64,
+}
+
+async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWatchReport> {
+    let home = std::env::var("HOME").map_err(|_| anyhow!("HOME is unset"))?;
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let session_id = format!("syslogsmokewatch{stamp}{}", std::process::id());
+    let dir = PathBuf::from(home).join(".claude/projects");
+    let transcript_path = dir.join(format!("syslog-smoke-watch-{stamp}.jsonl"));
+    std::fs::create_dir_all(&dir)?;
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+    std::fs::write(
+        &transcript_path,
+        format!(
+            r#"{{"sessionId":"{session_id}","timestamp":"{now}","cwd":"/tmp/syslog-smoke-watch","content":"{session_id} live watcher smoke probe"}}"#
+        ) + "\n",
+    )?;
+
+    let mut ingested = false;
+    for _ in 0..30 {
+        let response = service
+            .search_sessions(SearchSessionsRequest {
+                query: session_id.clone(),
+                project: Some("/tmp/syslog-smoke-watch".into()),
+                tool: Some("claude".into()),
+                from: None,
+                to: None,
+                limit: Some(5),
+            })
+            .await?;
+        if response
+            .sessions
+            .iter()
+            .any(|session| session.session_id == session_id)
+        {
+            ingested = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    if !ingested {
+        let _ = std::fs::remove_file(&transcript_path);
+        bail!("AI watch smoke file was not ingested within 30s");
+    }
+
+    std::fs::remove_file(&transcript_path)?;
+    let mut missing_checkpoint_count = i64::MAX;
+    for _ in 0..30 {
+        let doctor = service.ai_doctor().await?;
+        missing_checkpoint_count = doctor.missing_checkpoint_count;
+        if missing_checkpoint_count == 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+
+    Ok(AiSmokeWatchReport {
+        session_id,
+        transcript_path,
+        ingested,
+        pruned_missing_checkpoint: missing_checkpoint_count == 0,
+        missing_checkpoint_count,
+    })
+}
+
 fn ai_watch_status() -> Result<AiWatchStatusReport> {
     const SERVICE: &str = "syslog-ai-watch.service";
     let active = systemctl_user_output(&["is-active", SERVICE]).ok();
@@ -1095,6 +1257,80 @@ fn command_output(program: &str, args: &[&str]) -> Result<String> {
 
 fn parse_stats(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Stats(parse_output_args("stats", args)?))
+}
+
+fn parse_db(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("db requires a subcommand"))?;
+    match subcommand.as_str() {
+        "status" => Ok(CliCommand::Db(DbCommand::Status(parse_output_args(
+            "db status",
+            rest,
+        )?))),
+        "integrity" => Ok(CliCommand::Db(DbCommand::Integrity(parse_output_args(
+            "db integrity",
+            rest,
+        )?))),
+        "checkpoint" => parse_db_checkpoint(rest),
+        "vacuum" => parse_db_vacuum(rest),
+        "backup" => parse_db_backup(rest),
+        _ => bail!("unknown db subcommand: {subcommand}"),
+    }
+}
+
+fn parse_db_checkpoint(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = DbCheckpointArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--mode" => parsed.mode = flags.value("--mode")?,
+            _ if arg.starts_with("--mode=") => parsed.mode = value_after_equals(arg, "--mode")?,
+            _ => bail!("unknown db checkpoint option: {arg}"),
+        }
+    }
+    match parsed.mode.as_str() {
+        "passive" | "full" | "restart" | "truncate" => {}
+        _ => bail!("--mode must be one of passive, full, restart, truncate"),
+    }
+    Ok(CliCommand::Db(DbCommand::Checkpoint(parsed)))
+}
+
+fn parse_db_vacuum(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = DbVacuumArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--full" => parsed.full = true,
+            "--pages" => parsed.pages = parse_u32_flag("--pages", flags.value("--pages")?)?,
+            _ if arg.starts_with("--pages=") => {
+                parsed.pages = parse_u32_flag("--pages", value_after_equals(arg, "--pages")?)?
+            }
+            _ => bail!("unknown db vacuum option: {arg}"),
+        }
+    }
+    if parsed.pages == 0 {
+        bail!("--pages must be greater than zero");
+    }
+    Ok(CliCommand::Db(DbCommand::Vacuum(parsed)))
+}
+
+fn parse_db_backup(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = DbBackupArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--output" => parsed.output = Some(flags.value("--output")?),
+            _ if arg.starts_with("--output=") => {
+                parsed.output = Some(value_after_equals(arg, "--output")?)
+            }
+            _ => bail!("unknown db backup option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Db(DbCommand::Backup(parsed)))
 }
 
 fn parse_compose(args: &[String]) -> Result<CliCommand> {
@@ -1782,6 +2018,24 @@ fn print_ai_watch_status_response(response: &AiWatchStatusReport, json: bool) ->
     Ok(())
 }
 
+fn print_ai_smoke_watch_response(response: &AiSmokeWatchReport, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("session_id: {}", response.session_id);
+    println!("transcript_path: {}", response.transcript_path.display());
+    println!("ingested: {}", response.ingested);
+    println!(
+        "pruned_missing_checkpoint: {}",
+        response.pruned_missing_checkpoint
+    );
+    println!(
+        "missing_checkpoint_count: {}",
+        response.missing_checkpoint_count
+    );
+    Ok(())
+}
+
 fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
     if json {
         return print_json(response);
@@ -1901,6 +2155,91 @@ fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
     println!("min_free_disk_mb: {}", stats.min_free_disk_mb);
     println!("write_blocked: {}", stats.write_blocked);
     println!("phantom_fts_rows: {}", stats.phantom_fts_rows);
+    Ok(())
+}
+
+fn print_db_status_response(status: &DbMaintenanceStatus, json: bool) -> Result<()> {
+    if json {
+        return print_json(status);
+    }
+    println!("db_path: {}", status.db_path.display());
+    println!("page_count: {}", status.page_count);
+    println!("freelist_count: {}", status.freelist_count);
+    println!("page_size: {}", status.page_size);
+    println!("logical_size_bytes: {}", status.logical_size_bytes);
+    println!("physical_size_bytes: {}", status.physical_size_bytes);
+    println!(
+        "wal_size_bytes: {}",
+        status
+            .wal_size_bytes
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "shm_size_bytes: {}",
+        status
+            .shm_size_bytes
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!("auto_vacuum: {}", status.auto_vacuum);
+    println!("journal_mode: {}", status.journal_mode);
+    println!(
+        "integrity_ok: {}",
+        status
+            .integrity_ok
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "not checked".to_string())
+    );
+    Ok(())
+}
+
+fn print_db_integrity_response(response: &DbIntegrityResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("ok: {}", response.ok);
+    for message in &response.messages {
+        println!("{message}");
+    }
+    Ok(())
+}
+
+fn print_db_checkpoint_response(response: &DbCheckpointResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("mode: {}", response.mode);
+    println!("busy: {}", response.busy);
+    println!("log_frames: {}", response.log_frames);
+    println!("checkpointed_frames: {}", response.checkpointed_frames);
+    Ok(())
+}
+
+fn print_db_vacuum_response(response: &DbVacuumResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("full: {}", response.full);
+    println!("incremental_pages: {}", response.incremental_pages);
+    println!(
+        "before_physical_size_bytes: {}",
+        response.before_physical_size_bytes
+    );
+    println!(
+        "after_physical_size_bytes: {}",
+        response.after_physical_size_bytes
+    );
+    Ok(())
+}
+
+fn print_db_backup_response(response: &DbBackupResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("db_path: {}", response.db_path.display());
+    println!("backup_path: {}", response.backup_path.display());
+    println!("size_bytes: {}", response.size_bytes);
     Ok(())
 }
 

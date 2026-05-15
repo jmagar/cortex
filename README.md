@@ -451,12 +451,16 @@ The installer puts the host `syslog` binary in `~/.local/bin` and then runs
 - `~/.syslog-mcp/compose/docker-compose.yml` — Docker Compose deployment assets
 - `~/.syslog-mcp/data/syslog.db` — SQLite database and WAL/SHM sidecars
 
+Setup writes `COMPOSE_PROJECT_NAME=syslog-jmagar-lab` so direct
+`docker compose` commands in `~/.syslog-mcp/compose` target the same canonical
+container as `syslog compose`.
+
 Useful installer controls:
 
 ```bash
 SYSLOG_INSTALL_DRY_RUN=1 ./install.sh
 SYSLOG_INSTALL_PREFIX=/opt/syslog-mcp ./install.sh
-SYSLOG_VERSION=0.21.8 ./install.sh
+SYSLOG_VERSION=0.21.9 ./install.sh
 SYSLOG_INSTALL_SKIP_SETUP=1 ./install.sh
 ```
 
@@ -700,6 +704,8 @@ syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 syslog mcp        # query-only MCP stdio transport
 syslog setup      # install/repair shared ~/.syslog-mcp Docker Compose setup
 syslog stats      # query the SQLite DB directly from the CLI
+syslog db status  # inspect SQLite maintenance state
+syslog db backup  # create a WAL-safe SQLite backup
 syslog compose doctor          # diagnose live Compose/listener ownership
 syslog compose status --json   # inspect canonical syslog-mcp container/project
 ```
@@ -715,6 +721,9 @@ syslog errors --from 2026-01-01T00:00:00Z
 syslog hosts
 syslog correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
 syslog stats --json
+syslog db integrity            # run PRAGMA integrity_check
+syslog db checkpoint --mode full
+syslog db vacuum --pages 1000
 syslog compose pull            # pull image for resolved Compose project
 syslog compose up              # run docker compose up -d for resolved service
 syslog compose restart         # restart resolved service

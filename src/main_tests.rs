@@ -48,6 +48,14 @@ fn mode_parse_accepts_compose_namespace() {
 }
 
 #[test]
+fn mode_parse_accepts_db_namespace() {
+    assert!(matches!(
+        Mode::parse(vec!["db".into(), "status".into(), "--json".into()]).unwrap(),
+        Mode::Cli(_)
+    ));
+}
+
+#[test]
 fn mode_parse_accepts_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec!["setup".into(), "check".into(), "--json".into()]).unwrap(),
@@ -93,6 +101,28 @@ fn mode_parse_accepts_debug_wrapper_setup_namespace() {
             "--json".into()
         ])
         .unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_debug_compose_setup_namespace() {
+    assert!(matches!(
+        Mode::parse(vec![
+            "setup".into(),
+            "debug-compose".into(),
+            "check".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_setup_doctor_namespace() {
+    assert!(matches!(
+        Mode::parse(vec!["setup".into(), "doctor".into(), "--json".into()]).unwrap(),
         Mode::Setup(_)
     ));
 }

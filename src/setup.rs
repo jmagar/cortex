@@ -40,6 +40,23 @@ pub enum DebugWrapperAction {
     Check,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebugComposeAction {
+    Install,
+    Remove,
+    Check,
+}
+
+impl DebugComposeAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "debug-compose-install",
+            Self::Remove => "debug-compose-remove",
+            Self::Check => "debug-compose-check",
+        }
+    }
+}
+
 impl DebugWrapperAction {
     fn as_str(self) -> &'static str {
         match self {
@@ -479,6 +496,128 @@ pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<S
     })
 }
 
+pub async fn run_debug_compose_setup(action: DebugComposeAction) -> io::Result<SetupReport> {
+    let started = Instant::now();
+    let home = syslog_home_dir()?;
+    let env_path = home.join(".env");
+    let compose_dir = home.join("compose");
+    let data_dir = home.join("data");
+    let override_path = compose_dir.join("docker-compose.override.yml");
+    let repo_path = std::env::current_dir()?;
+    let mut phases = Vec::new();
+
+    match action {
+        DebugComposeAction::Install => {
+            std::fs::create_dir_all(&compose_dir)?;
+            write_private_file(&override_path, &debug_compose_override(&repo_path))?;
+            phases.push(PhaseTimer::start("debug-compose").finish(
+                SetupStatus::Ok,
+                format!("wrote {}", override_path.display()),
+            ));
+        }
+        DebugComposeAction::Remove => match std::fs::remove_file(&override_path) {
+            Ok(()) => phases.push(PhaseTimer::start("debug-compose").finish(
+                SetupStatus::Ok,
+                format!("removed {}", override_path.display()),
+            )),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                phases.push(PhaseTimer::start("debug-compose").finish(
+                    SetupStatus::Ok,
+                    format!("{} already absent", override_path.display()),
+                ));
+            }
+            Err(error) => return Err(error),
+        },
+        DebugComposeAction::Check => {
+            phases.push(check_file_phase(
+                "debug-compose",
+                &override_path,
+                "run syslog setup debug-compose install",
+            ));
+            phases.push(check_debug_compose_content_phase(
+                &override_path,
+                &repo_path,
+            ));
+        }
+    }
+
+    let elapsed_ms = started.elapsed().as_millis();
+    let has_errors = phases
+        .iter()
+        .any(|phase| matches!(phase.status, SetupStatus::Error));
+    Ok(SetupReport {
+        mode: action.as_str(),
+        elapsed_ms,
+        home,
+        env_path,
+        compose_dir,
+        data_dir,
+        health_url: "local debug compose".to_string(),
+        mcp_url: "local debug compose".to_string(),
+        phases,
+        has_errors,
+    })
+}
+
+pub async fn run_setup_doctor() -> io::Result<SetupReport> {
+    let started = Instant::now();
+    let home = syslog_home_dir()?;
+    let env_path = home.join(".env");
+    let compose_dir = home.join("compose");
+    let data_dir = home.join("data");
+    let user_home = user_home_dir()?;
+    let repo_path = std::env::current_dir()?;
+    let wrapper_path = user_home.join(".local/bin/syslog");
+    let debug_override_path = compose_dir.join("docker-compose.override.yml");
+    let mut phases = vec![
+        filesystem_phase(SetupMode::Check, &home, &data_dir, &compose_dir)?,
+        check_file_phase("env", &env_path, "run syslog setup"),
+        check_file_phase(
+            "compose-assets",
+            &compose_dir.join("docker-compose.yml"),
+            "run syslog setup repair",
+        ),
+        check_file_phase(
+            "debug-wrapper",
+            &wrapper_path,
+            "run syslog setup debug-wrapper install",
+        ),
+        check_debug_wrapper_content_phase(&wrapper_path, &repo_path),
+        check_file_phase(
+            "debug-compose",
+            &debug_override_path,
+            "run syslog setup debug-compose install",
+        ),
+        check_debug_compose_content_phase(&debug_override_path, &repo_path),
+        transcript_root_permissions_phase(&user_home),
+        ai_index_timer_disabled_phase(),
+    ];
+
+    phases.extend(
+        run_ai_watch_service_setup(AiWatchServiceAction::Check)
+            .await?
+            .phases,
+    );
+    phases.push(runtime_current_phase(&repo_path));
+
+    let elapsed_ms = started.elapsed().as_millis();
+    let has_errors = phases
+        .iter()
+        .any(|phase| matches!(phase.status, SetupStatus::Error));
+    Ok(SetupReport {
+        mode: "doctor",
+        elapsed_ms,
+        home,
+        env_path,
+        compose_dir,
+        data_dir,
+        health_url: "setup doctor".to_string(),
+        mcp_url: "setup doctor".to_string(),
+        phases,
+        has_errors,
+    })
+}
+
 fn user_home_dir() -> io::Result<PathBuf> {
     let home =
         std::env::var("HOME").map_err(|_| io::Error::new(ErrorKind::NotFound, "HOME is unset"))?;
@@ -590,6 +729,7 @@ fn ensure_env_file(path: &Path, data_dir: &Path) -> io::Result<EnvResult> {
     insert_process_or_default(&mut env, "SYSLOG_WRITE_CHANNEL_CAPACITY", "10000");
     insert_process_or_default(&mut env, "SYSLOG_DOCKER_INGEST_ENABLED", "false");
     insert_process_or_default(&mut env, "RUST_LOG", "info");
+    insert_process_or_default(&mut env, "COMPOSE_PROJECT_NAME", "syslog-jmagar-lab");
     insert_process_or_default(&mut env, "DOCKER_NETWORK", "syslog-mcp");
     insert_process_optional(&mut env, "SYSLOG_DOCKER_HOSTS");
     insert_process_optional(&mut env, "SYSLOG_MCP_PUBLIC_URL");
@@ -932,6 +1072,66 @@ fn check_debug_wrapper_content_phase(wrapper_path: &Path, repo_path: &Path) -> S
                 "{} does not match generated debug wrapper",
                 wrapper_path.display()
             ),
+        ),
+        Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
+    }
+}
+
+fn debug_compose_override(repo_path: &Path) -> String {
+    let repo_path = setup_path_value(repo_path).expect("validated debug compose repo path");
+    format!(
+        "services:\n  syslog-mcp:\n    image: syslog-mcp:local-debug\n    build:\n      context: {repo_path}\n      dockerfile: config/Dockerfile\n      args:\n        SYSLOG_BUILD_PROFILE: debug\n"
+    )
+}
+
+fn check_debug_compose_content_phase(override_path: &Path, repo_path: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("debug-compose-content");
+    let expected = debug_compose_override(repo_path);
+    match std::fs::read_to_string(override_path) {
+        Ok(current) if current == expected => timer.finish(
+            SetupStatus::Ok,
+            "debug Compose override matches generated content",
+        ),
+        Ok(_) => timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{} does not match generated debug Compose override",
+                override_path.display()
+            ),
+        ),
+        Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
+    }
+}
+
+fn runtime_current_phase(repo_path: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("runtime-current");
+    let script = repo_path.join("scripts/check-runtime-current.sh");
+    if !script.exists() {
+        return timer.finish(SetupStatus::Error, format!("missing {}", script.display()));
+    }
+    match Command::new("bash")
+        .arg(script)
+        .arg("--allow-local-image")
+        .current_dir(repo_path)
+        .output()
+    {
+        Ok(output) if output.status.success() => timer.finish(
+            SetupStatus::Ok,
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .last()
+                .unwrap_or("runtime current")
+                .to_string(),
+        ),
+        Ok(output) => timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .trim()
+            .to_string(),
         ),
         Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
     }
@@ -1465,10 +1665,7 @@ fn cleanup_legacy_systemd() -> SetupPhase {
         "mnemo-index.service",
         "mnemo-index.timer",
     ] {
-        match Command::new("systemctl")
-            .args(["--user", "disable", "--now", unit])
-            .output()
-        {
+        match run_systemctl_user(&["disable", "--now", unit]) {
             Ok(output) if output.status.success() => {}
             Ok(output) => failures.push(format!(
                 "systemctl disable --now {unit}: {}",
@@ -1499,13 +1696,17 @@ fn cleanup_legacy_systemd() -> SetupPhase {
             }
         }
     }
-    if let Err(error) = Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .output()
-    {
-        if error.kind() != ErrorKind::NotFound {
-            failures.push(format!("systemctl daemon-reload: {error}"));
-        }
+    match run_systemctl_user(&["daemon-reload"]) {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => failures.push(format!(
+            "systemctl daemon-reload: {}",
+            String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .next()
+                .unwrap_or("failed")
+        )),
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => failures.push(format!("systemctl daemon-reload: {error}")),
     }
     if !failures.is_empty() {
         return timer.finish(SetupStatus::Warn, failures.join("; "));

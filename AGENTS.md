@@ -21,6 +21,9 @@ syslog compose pull              # pull image for resolved Compose project
 syslog compose up                # run docker compose up -d for resolved service
 syslog compose restart           # restart resolved service
 syslog compose logs --tail 20    # bounded compose logs
+syslog db status                 # inspect SQLite maintenance state
+syslog db integrity              # run SQLite integrity_check
+syslog db backup                 # create WAL-safe SQLite backup
 ```
 
 ```bash
@@ -168,6 +171,7 @@ RUST_LOG=info
 | `scripts/backup.sh` | WAL-safe SQLite backup script (checkpoint + `.backup` method) |
 | `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset helper for local/dev recovery |
 | `scripts/bump-version.sh` | Bump version across all version-bearing files; called by `just publish` |
+| `syslog db status\|integrity\|checkpoint\|vacuum\|backup` | Direct SQLite maintenance commands for the configured DB |
 | `scripts/check-version-sync.sh` | Assert all version-bearing files have the same version (used in CI) |
 | `scripts/block-env-commits.sh` | Pre-commit hook that blocks commits containing env credential patterns |
 | `CHANGELOG.md` | Version history; entry required per version bump |

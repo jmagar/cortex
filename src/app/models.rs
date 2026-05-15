@@ -1,6 +1,52 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use crate::db;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbMaintenanceStatus {
+    pub db_path: PathBuf,
+    pub page_count: i64,
+    pub freelist_count: i64,
+    pub page_size: i64,
+    pub logical_size_bytes: u64,
+    pub physical_size_bytes: u64,
+    pub wal_size_bytes: Option<u64>,
+    pub shm_size_bytes: Option<u64>,
+    pub auto_vacuum: i64,
+    pub journal_mode: String,
+    pub integrity_ok: Option<bool>,
+    pub integrity_messages: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbCheckpointResult {
+    pub mode: String,
+    pub busy: i64,
+    pub log_frames: i64,
+    pub checkpointed_frames: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbVacuumResult {
+    pub full: bool,
+    pub incremental_pages: u32,
+    pub before_physical_size_bytes: u64,
+    pub after_physical_size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbIntegrityResult {
+    pub ok: bool,
+    pub messages: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbBackupResult {
+    pub db_path: PathBuf,
+    pub backup_path: PathBuf,
+    pub size_bytes: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {

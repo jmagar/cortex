@@ -69,6 +69,10 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         SetupCommandKind::DebugWrapper(action) => {
             syslog_mcp::setup::run_debug_wrapper_setup(action).await?
         }
+        SetupCommandKind::DebugCompose(action) => {
+            syslog_mcp::setup::run_debug_compose_setup(action).await?
+        }
+        SetupCommandKind::Doctor => syslog_mcp::setup::run_setup_doctor().await?,
     };
     if command.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -209,6 +213,8 @@ enum SetupCommandKind {
     AiIndexTimer(syslog_mcp::setup::AiIndexTimerAction),
     AiWatchService(syslog_mcp::setup::AiWatchServiceAction),
     DebugWrapper(syslog_mcp::setup::DebugWrapperAction),
+    DebugCompose(syslog_mcp::setup::DebugComposeAction),
+    Doctor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -241,6 +247,7 @@ impl Mode {
                         | "ai"
                         | "correlate"
                         | "stats"
+                        | "db"
                         | "compose"
                 ) =>
             {
@@ -273,6 +280,23 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     let mut mode = syslog_mcp::setup::SetupMode::FirstRun;
     let mut json = false;
     let mut iter = args.iter();
+    if matches!(iter.clone().next().map(String::as_str), Some("doctor")) {
+        let _ = iter.next();
+        for arg in iter {
+            match arg.as_str() {
+                "--json" => json = true,
+                "--help" | "-h" => {
+                    print_usage();
+                    std::process::exit(0);
+                }
+                other => anyhow::bail!("unknown setup doctor argument: {other}"),
+            }
+        }
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::Doctor,
+            json,
+        });
+    }
     if matches!(
         iter.clone().next().map(String::as_str),
         Some("ai-index-timer")
@@ -314,6 +338,21 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
                 "install" => syslog_mcp::setup::DebugWrapperAction::Install,
                 "remove" => syslog_mcp::setup::DebugWrapperAction::Remove,
                 _ => syslog_mcp::setup::DebugWrapperAction::Check,
+            }),
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
+        Some("debug-compose")
+    ) {
+        let _ = iter.next();
+        let (action, json) = parse_setup_subcommand_args("debug-compose", iter)?;
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::DebugCompose(match action {
+                "install" => syslog_mcp::setup::DebugComposeAction::Install,
+                "remove" => syslog_mcp::setup::DebugComposeAction::Remove,
+                _ => syslog_mcp::setup::DebugComposeAction::Check,
             }),
             json,
         });
@@ -457,6 +496,8 @@ fn print_usage() {
   syslog setup ai-index-timer install|remove|check [--json]
   syslog setup ai-watch-service install|remove|check [--json]
   syslog setup debug-wrapper install|remove|check [--json]
+  syslog setup debug-compose install|remove|check [--json]
+  syslog setup doctor [--json]
   syslog doctor binary [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
@@ -478,6 +519,11 @@ fn print_usage() {
   syslog ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]
   syslog ai doctor [--strict-permissions] [--json]
   syslog ai watch-status [--json]
+  syslog ai smoke-watch [--json]
+  syslog db status|integrity [--json]
+  syslog db checkpoint [--mode passive|full|restart|truncate] [--json]
+  syslog db vacuum [--pages N|--full] [--json]
+  syslog db backup [--output PATH] [--json]
   syslog compose doctor [--json]
   syslog compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]
   syslog compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]

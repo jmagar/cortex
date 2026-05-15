@@ -276,6 +276,74 @@ fn parse_ai_watch_status_accepts_json() {
 }
 
 #[test]
+fn parse_ai_smoke_watch_accepts_json() {
+    let parsed = CliCommand::parse(strings(&["ai", "smoke-watch", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::SmokeWatch(OutputArgs { json: true }))
+    );
+}
+
+#[test]
+fn parse_db_status_accepts_json() {
+    let parsed = CliCommand::parse(strings(&["db", "status", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Db(DbCommand::Status(OutputArgs { json: true }))
+    );
+}
+
+#[test]
+fn parse_db_checkpoint_accepts_modes() {
+    let parsed =
+        CliCommand::parse(strings(&["db", "checkpoint", "--mode=truncate", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Db(DbCommand::Checkpoint(DbCheckpointArgs {
+            mode: "truncate".into(),
+            json: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_db_checkpoint_rejects_unknown_mode() {
+    let err = CliCommand::parse(strings(&["db", "checkpoint", "--mode", "bogus"])).unwrap_err();
+    assert!(err.to_string().contains("passive, full, restart, truncate"));
+}
+
+#[test]
+fn parse_db_vacuum_and_backup_options() {
+    let vacuum = CliCommand::parse(strings(&["db", "vacuum", "--pages", "250"])).unwrap();
+    assert_eq!(
+        vacuum,
+        CliCommand::Db(DbCommand::Vacuum(DbVacuumArgs {
+            full: false,
+            pages: 250,
+            json: false,
+        }))
+    );
+
+    let backup = CliCommand::parse(strings(&[
+        "db",
+        "backup",
+        "--output=/tmp/syslog-backups",
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(
+        backup,
+        CliCommand::Db(DbCommand::Backup(DbBackupArgs {
+            output: Some("/tmp/syslog-backups".into()),
+            json: true,
+        }))
+    );
+}
+
+#[test]
 fn truncate_is_utf8_safe_for_non_ascii_project_names() {
     let value = truncate("项目路径-alpha", 6);
     assert!(value.ends_with('…'));

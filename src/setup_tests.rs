@@ -17,6 +17,7 @@ fn ensure_env_file_preserves_existing_token_and_adds_compose_defaults() {
     assert!(raw.contains("SYSLOG_MCP_TOKEN=keep-me"));
     assert!(raw.contains("SYSLOG_MCP_DATA_VOLUME="));
     assert!(raw.contains("SYSLOG_MCP_DB_PATH=/data/syslog.db"));
+    assert!(raw.contains("COMPOSE_PROJECT_NAME=syslog-jmagar-lab"));
 }
 
 #[test]
@@ -239,6 +240,31 @@ fn debug_wrapper_content_phase_detects_stale_wrapper() {
     assert!(phase
         .detail
         .contains("does not match generated debug wrapper"));
+}
+
+#[test]
+fn debug_compose_override_builds_local_debug_image_from_repo() {
+    let override_yaml =
+        debug_compose_override(std::path::Path::new("/home/me/workspace/syslog-mcp"));
+
+    assert!(override_yaml.contains("image: syslog-mcp:local-debug"));
+    assert!(override_yaml.contains("context: /home/me/workspace/syslog-mcp"));
+    assert!(override_yaml.contains("dockerfile: config/Dockerfile"));
+    assert!(override_yaml.contains("SYSLOG_BUILD_PROFILE: debug"));
+}
+
+#[test]
+fn debug_compose_content_phase_detects_stale_override() {
+    let dir = tempfile::tempdir().unwrap();
+    let override_path = dir.path().join("docker-compose.override.yml");
+    std::fs::write(&override_path, "services: {}\n").unwrap();
+
+    let phase = check_debug_compose_content_phase(&override_path, dir.path());
+
+    assert!(matches!(phase.status, SetupStatus::Error));
+    assert!(phase
+        .detail
+        .contains("does not match generated debug Compose override"));
 }
 
 #[test]
