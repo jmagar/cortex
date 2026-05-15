@@ -398,6 +398,24 @@ fn smoke_watch_target_uses_codex_root_when_claude_is_unavailable() {
     assert!(target.body.contains("\"type\":\"response_item\""));
 }
 
+#[test]
+fn strict_ai_doctor_permissions_ignore_missing_roots() {
+    let doctor = AiDoctorReport {
+        db_path: "/tmp/syslog.db".into(),
+        claude_root: transcript_root_status("/missing", false),
+        codex_root: transcript_root_status("/tmp/codex", true),
+        checkpoint_count: 0,
+        checkpoint_error_count: 0,
+        missing_checkpoint_count: 0,
+        imported_record_count: 0,
+        parse_error_count: 0,
+        newest_indexed_path: None,
+        newest_indexed_at: None,
+    };
+
+    ensure_ai_doctor_success(&doctor, true).expect("missing roots should not fail strict mode");
+}
+
 fn transcript_root_status(
     path: &str,
     available: bool,

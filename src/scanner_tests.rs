@@ -655,6 +655,24 @@ fn append_only_file_indexes_only_new_records_after_checkpoint() {
 }
 
 #[test]
+fn append_start_requires_stored_content_hash() {
+    let stored = checkpoint::SourceMetadata {
+        file_size: Some(10),
+        file_mtime: Some(1),
+        content_hash: None,
+        last_offset: Some(10),
+        last_error: None,
+    };
+    let current = FileMetadata {
+        size: 20,
+        mtime: Some(2),
+        content_hash: "new".to_string(),
+    };
+
+    assert_eq!(append_start_offset(&stored, &current).unwrap(), None);
+}
+
+#[test]
 fn rewritten_file_falls_back_to_duplicate_safe_full_scan() {
     let (pool, dir) = test_pool();
     let file = dir.path().join("session.jsonl");

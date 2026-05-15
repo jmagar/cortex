@@ -618,6 +618,9 @@ fn append_start_offset(
     if stored.last_error.is_some() || stored_size <= 0 {
         return Ok(None);
     }
+    if stored.content_hash.is_none() {
+        return Ok(None);
+    }
     let Ok(stored_size) = u64::try_from(stored_size) else {
         return Ok(None);
     };

@@ -718,14 +718,17 @@ fn load_setup_env_file() {
         return;
     };
     let mut entries = Vec::new();
-    for line in raw.lines() {
+    for (line_no, line) in raw.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             tracing::trace!("load_setup_env_file: skipped blank/comment line");
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
-            tracing::trace!(line, "load_setup_env_file: skipped line without delimiter");
+            tracing::trace!(
+                line_no = line_no + 1,
+                "load_setup_env_file: skipped line without delimiter"
+            );
             continue;
         };
         let key = key.trim();

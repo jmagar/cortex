@@ -571,6 +571,71 @@ fn search_ai_cusses_returns_same_session_context() {
 }
 
 #[test]
+fn search_ai_cusses_truncates_only_when_additional_match_exists() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_ai_entry(
+                "2026-01-01T00:00:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "one shit",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:01:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "plain row",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let exact = search_ai_cusses(
+        &pool,
+        &AiCussParams {
+            ai_project: Some("/tmp/project".into()),
+            ai_tool: Some("codex".into()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(exact.matches.len(), 1);
+    assert!(!exact.truncated);
+
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-01-01T00:02:00Z",
+            "host-a",
+            "codex",
+            "/tmp/project",
+            "sess-1",
+            "two shit",
+        )],
+    )
+    .unwrap();
+    let truncated = search_ai_cusses(
+        &pool,
+        &AiCussParams {
+            ai_project: Some("/tmp/project".into()),
+            ai_tool: Some("codex".into()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(truncated.matches.len(), 1);
+    assert!(truncated.truncated);
+}
+
+#[test]
 fn ai_session_queries_respect_filters() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(

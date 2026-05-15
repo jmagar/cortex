@@ -524,7 +524,16 @@ impl SyslogService {
             let output = std::process::Command::new("sqlite3")
                 .arg(&db_path)
                 .arg(format!(".backup '{escaped}'"))
-                .output()?;
+                .output()
+                .map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::NotFound {
+                        anyhow::anyhow!(
+                            "sqlite3 command not found in PATH; install sqlite3 to use database backup"
+                        )
+                    } else {
+                        error.into()
+                    }
+                })?;
             if !output.status.success() {
                 anyhow::bail!(
                     "sqlite3 backup failed: {}",

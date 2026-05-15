@@ -1358,8 +1358,7 @@ async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWatchReport> {
         }
         let current_doctor = service.ai_doctor().await?;
         missing_checkpoint_count = current_doctor.missing_checkpoint_count;
-        if pruned_missing_checkpoint || result.matched == 0 {
-            pruned_missing_checkpoint = true;
+        if pruned_missing_checkpoint {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -2466,7 +2465,10 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
 }
 
 fn ensure_ai_doctor_success(response: &AiDoctorReport, strict_permissions: bool) -> Result<()> {
-    if strict_permissions && (!response.claude_root.strict_ok || !response.codex_root.strict_ok) {
+    if strict_permissions
+        && ((response.claude_root.exists && !response.claude_root.strict_ok)
+            || (response.codex_root.exists && !response.codex_root.strict_ok))
+    {
         bail!("AI transcript root permission check failed");
     }
     Ok(())
