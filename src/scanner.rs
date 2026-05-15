@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::config::StorageConfig;
 use crate::db::{enforce_storage_budget, insert_logs_batch_in_tx, DbPool, LogBatchEntry};
+use crate::ingest_metadata::bounded_metadata_json;
 use crate::syslog::enrichment::{project_from_transcript_path, scrub_ai_message};
 
 mod checkpoint;
@@ -511,7 +512,7 @@ pub fn index_file_with_options(
                     &canonical,
                     &mut result,
                 );
-                let metadata_json = serde_json::json!({
+                let metadata_json = bounded_metadata_json(serde_json::json!({
                     "source_type": "transcript",
                     "source_kind": source_kind.as_str(),
                     "tool": tool,
@@ -519,8 +520,7 @@ pub fn index_file_with_options(
                     "line_no": line_no,
                     "record_key": record_key,
                     "content_scrubbed": true,
-                })
-                .to_string();
+                }));
                 let entry = LogBatchEntry {
                     timestamp: normalize_timestamp(parsed.timestamp.as_deref())?,
                     hostname: "localhost".to_string(),

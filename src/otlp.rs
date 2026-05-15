@@ -30,6 +30,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::db::LogBatchEntry;
 use crate::ingest::IngestTx;
+use crate::ingest_metadata::{attrs_to_metadata_object, bounded_metadata_json};
 use lab_auth::middleware::{parse_bearer_token, tokens_equal};
 
 /// Per-request body cap. Matches the OpenTelemetry Collector default for
@@ -295,7 +296,7 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     .as_ref()
                     .and_then(any_value_to_string)
                     .unwrap_or_default();
-                let metadata_json = serde_json::json!({
+                let metadata_json = bounded_metadata_json(serde_json::json!({
                     "source_type": "otlp",
                     "peer_ip": source_ip,
                     "host_name": hostname,
@@ -309,8 +310,7 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     "event_name": log.event_name,
                     "resource_attributes": attrs_to_json(&resource_attrs),
                     "log_attributes": attrs_to_json(&log_attrs),
-                })
-                .to_string();
+                }));
                 let raw = metadata_json.clone();
 
                 out.push(LogBatchEntry {
@@ -337,11 +337,11 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
 }
 
 fn attrs_to_json(attrs: &HashMap<&str, &AnyValue>) -> serde_json::Value {
-    let mut object = serde_json::Map::new();
-    for (key, value) in attrs {
-        object.insert((*key).to_string(), any_value_to_json(value));
-    }
-    serde_json::Value::Object(object)
+    attrs_to_metadata_object(
+        attrs
+            .iter()
+            .map(|(key, value)| (*key, any_value_to_json(value))),
+    )
 }
 
 fn any_value_to_json(v: &AnyValue) -> serde_json::Value {
