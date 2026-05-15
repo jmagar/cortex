@@ -369,10 +369,8 @@ fn setup_report_exposes_ai_watch_summary_fields() {
             Some(SetupIssueKind::DataQualityWarning),
             "parse_errors=1",
         ),
-        PhaseTimer::start("systemctl is-enabled syslog-ai-watch.service")
-            .finish(SetupStatus::Ok, "enabled"),
-        PhaseTimer::start("systemctl is-active syslog-ai-watch.service")
-            .finish(SetupStatus::Error, "inactive"),
+        PhaseTimer::start(AI_WATCH_SERVICE_ENABLED_PHASE).finish(SetupStatus::Ok, "enabled"),
+        PhaseTimer::start(AI_WATCH_SERVICE_ACTIVE_PHASE).finish(SetupStatus::Error, "inactive"),
     ];
     let report = setup_report(
         SetupReportInput {
