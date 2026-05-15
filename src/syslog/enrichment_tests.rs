@@ -20,6 +20,7 @@ fn entry(app: &str, msg: &str, source_ip: &str, severity: &str) -> LogBatchEntry
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     }
 }
 

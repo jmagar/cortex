@@ -31,6 +31,7 @@ fn make_entry(ts: &str, host: &str, severity: &str, msg: &str) -> LogBatchEntry 
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     }
 }
 
@@ -323,7 +324,55 @@ fn make_ai_entry(
         ai_project: Some(project.to_string()),
         ai_session_id: Some(session_id.to_string()),
         ai_transcript_path: Some(format!("{project}/{session_id}.jsonl")),
+        metadata_json: None,
     }
+}
+
+#[test]
+fn search_logs_exclude_ai_filters_structured_and_transcript_app_rows() {
+    let (pool, _dir) = test_pool();
+    let mut legacy_transcript = make_entry(
+        "2026-01-01T00:00:00Z",
+        "localhost",
+        "info",
+        "legacy codex transcript event",
+    );
+    legacy_transcript.app_name = Some("codex-transcript".into());
+
+    insert_logs_batch(
+        &pool,
+        &[
+            legacy_transcript,
+            make_ai_entry(
+                "2026-01-01T00:00:01Z",
+                "localhost",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "structured ai transcript event",
+            ),
+            make_entry(
+                "2026-01-01T00:00:02Z",
+                "host-a",
+                "warning",
+                "real host event",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let rows = search_logs(
+        &pool,
+        &SearchParams {
+            query: Some("event".into()),
+            exclude_ai: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].message, "real host event");
 }
 
 #[test]
@@ -414,6 +463,176 @@ fn search_ai_sessions_candidate_cap_prefers_newer_rows() {
     assert!(result.candidate_window_truncated);
     assert_eq!(result.sessions[0].ai_session_id, "newest");
     assert_eq!(result.sessions[0].ai_project, "/tmp/new");
+}
+
+#[test]
+fn search_ai_sessions_zero_limit_clamps_to_one_with_metadata() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            "claude",
+            "/tmp/project",
+            "sess-1",
+            "zerolimit",
+        )],
+    )
+    .unwrap();
+
+    let result = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "zerolimit".into(),
+            limit: Some(0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.sessions.len(), 1);
+    assert_eq!(result.total_candidates, 1);
+    assert_eq!(result.candidate_rows, 1);
+    assert!(!result.truncated);
+}
+
+#[test]
+fn search_ai_cusses_returns_same_session_context() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_ai_entry(
+                "2026-01-01T00:00:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "before row",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:01:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "this shit needs context",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:02:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "after row",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:03:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-2",
+                "other session row",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:04:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "assistant is not a cuss false positive",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let result = search_ai_cusses(
+        &pool,
+        &AiCussParams {
+            ai_project: Some("/tmp/project".into()),
+            ai_tool: Some("codex".into()),
+            limit: Some(10),
+            before: Some(1),
+            after: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.matches.len(), 1);
+    let hit = &result.matches[0];
+    assert_eq!(hit.term, "shit");
+    assert_eq!(hit.entry.message, "this shit needs context");
+    assert_eq!(hit.before.len(), 1);
+    assert_eq!(hit.before[0].message, "before row");
+    assert_eq!(hit.after.len(), 1);
+    assert_eq!(hit.after[0].message, "after row");
+}
+
+#[test]
+fn search_ai_cusses_truncates_only_when_additional_match_exists() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_ai_entry(
+                "2026-01-01T00:00:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "one shit",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:01:00Z",
+                "host-a",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "plain row",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let exact = search_ai_cusses(
+        &pool,
+        &AiCussParams {
+            ai_project: Some("/tmp/project".into()),
+            ai_tool: Some("codex".into()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(exact.matches.len(), 1);
+    assert!(!exact.truncated);
+
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-01-01T00:02:00Z",
+            "host-a",
+            "codex",
+            "/tmp/project",
+            "sess-1",
+            "two shit",
+        )],
+    )
+    .unwrap();
+    let truncated = search_ai_cusses(
+        &pool,
+        &AiCussParams {
+            ai_project: Some("/tmp/project".into()),
+            ai_tool: Some("codex".into()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(truncated.matches.len(), 1);
+    assert!(truncated.truncated);
 }
 
 #[test]
@@ -580,6 +799,7 @@ fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
                 ai_transcript_path: Some(
                     "/home/jmagar/.codex/sessions/2026/05/11/rollout-abc.jsonl".into(),
                 ),
+                metadata_json: None,
             },
             LogBatchEntry {
                 timestamp: "2026-05-11T00:01:00Z".into(),
@@ -598,6 +818,7 @@ fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
                 ai_transcript_path: Some(
                     "/home/jmagar/.codex/sessions/2026/05/11/rollout-abc.jsonl".into(),
                 ),
+                metadata_json: None,
             },
         ],
     )

@@ -19,7 +19,7 @@
 #
 # Action inventory reference (not every action is exercised by this live test):
 #   syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions,
-#   syslog search_sessions, syslog usage_blocks, syslog project_context,
+#   syslog search_sessions, syslog cuss, syslog ai_correlate, syslog usage_blocks, syslog project_context,
 #   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,
 #   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
@@ -534,6 +534,19 @@ phase_tools() {
     assert_jq "syslog search_sessions — seeded fixture is searchable" "${search_sessions_result}" '.total_candidates >= 1' "true"
   fi
 
+  local cuss_result
+  cuss_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"action":"cuss","project":$project,"terms":$term,"limit":5,"before":1,"after":1}')")" || cuss_result=""
+  assert_jq "syslog cuss — terms field is array" "${cuss_result}" '.terms | type' "array"
+  assert_jq "syslog cuss — matches field is array" "${cuss_result}" '.matches | type' "array"
+  if [[ "${AI_SEEDED}" == true ]]; then
+    assert_jq "syslog cuss — custom detector finds seeded fixture" "${cuss_result}" '.matches | length >= 1' "true"
+  fi
+
+  local ai_correlate_result
+  ai_correlate_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"ai_correlate","project":$project,"limit":2,"events_per_anchor":3}')")" || ai_correlate_result=""
+  assert_jq "syslog ai_correlate — anchors field is array" "${ai_correlate_result}" '.anchors | type' "array"
+  assert_jq "syslog ai_correlate — total_related_events present" "${ai_correlate_result}" '.total_related_events != null'
+
   local usage_blocks_result
   usage_blocks_result="$(call_tool syslog '{"action":"usage_blocks"}')" || usage_blocks_result=""
   assert_jq "syslog usage_blocks — blocks field is array" "${usage_blocks_result}" '.blocks | type' "array"
@@ -754,11 +767,16 @@ run_docker_mode() {
 run_http_mode() {
   log_info "HTTP mode — testing against ${BASE_URL}"
   build_auth_args
-  seed_ai_fixture_local || {
-    log_error "AI transcript fixture seed failed"
-    return 2
-  }
-  log_info "Seeded AI transcript fixture"
+  if [[ "${BASE_URL}" == http://localhost:* || "${BASE_URL}" == http://127.0.0.1:* ]]; then
+    seed_ai_fixture_local || {
+      log_error "AI transcript fixture seed failed"
+      return 2
+    }
+    log_info "Seeded AI transcript fixture"
+  else
+    AI_SEEDED=false
+    log_info "Skipping local AI fixture seed for non-local HTTP target"
+  fi
   run_test_phases
   print_summary
 }

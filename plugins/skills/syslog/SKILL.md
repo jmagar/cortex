@@ -19,6 +19,8 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `hosts` | List all known hosts with first/last seen |
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
+| `cuss` | Profanity hits in AI transcripts with same-session context |
+| `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
 | `usage_blocks` | AI activity in 5-hour windows |
 | `project_context` | Summary for one AI project path |
 | `list_ai_tools` | Distinct AI tools with counts |
@@ -194,6 +196,44 @@ mcp__syslog__syslog(action="sessions", tool="codex", limit=20)
       "last_seen": "2026-05-11T04:10:00.000Z",
       "event_count": 42
     }
+  ]
+}
+```
+
+---
+
+### `action="cuss"` — AI transcript cuss detector
+
+Detect profanity in AI transcript rows and return each hit with surrounding
+rows from the same AI session.
+
+| param | type | description |
+|-------|------|-------------|
+| `project` | string | Exact project path filter |
+| `tool` | string | AI tool filter |
+| `from` | string | Start time (ISO 8601) |
+| `to` | string | End time (ISO 8601) |
+| `limit` | integer | Max matches (default 20, max 100) |
+| `before` | integer | Same-session rows before each hit (default 2, max 20) |
+| `after` | integer | Same-session rows after each hit (default 2, max 20) |
+| `terms` | array or string | Optional custom detector terms; replaces the built-in profanity list |
+
+```text
+mcp__syslog__syslog(action="cuss", project="/home/jmagar/workspace/syslog-mcp", limit=10)
+mcp__syslog__syslog(action="cuss", tool="codex", terms=["dang", "heck"], before=3, after=3)
+```
+
+**Response shape:**
+
+```json
+{
+  "terms": ["shit"],
+  "candidate_rows": 1,
+  "candidate_cap": 10000,
+  "candidate_window_truncated": false,
+  "truncated": false,
+  "matches": [
+    {"term": "shit", "entry": {"message": "..."}, "before": [], "after": []}
   ]
 }
 ```

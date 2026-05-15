@@ -48,6 +48,14 @@ fn mode_parse_accepts_compose_namespace() {
 }
 
 #[test]
+fn mode_parse_accepts_db_namespace() {
+    assert!(matches!(
+        Mode::parse(vec!["db".into(), "status".into(), "--json".into()]).unwrap(),
+        Mode::Cli(_)
+    ));
+}
+
+#[test]
 fn mode_parse_accepts_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
@@ -77,6 +85,71 @@ fn mode_parse_accepts_ai_index_timer_setup_namespace() {
         .unwrap(),
         Mode::Setup(_)
     ));
+}
+
+#[test]
+fn mode_parse_accepts_ai_watch_service_setup_namespace() {
+    assert!(matches!(
+        Mode::parse(vec![
+            "setup".into(),
+            "ai-watch-service".into(),
+            "install".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_debug_wrapper_setup_namespace() {
+    assert!(matches!(
+        Mode::parse(vec![
+            "setup".into(),
+            "debug-wrapper".into(),
+            "check".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_debug_compose_setup_namespace() {
+    assert!(matches!(
+        Mode::parse(vec![
+            "setup".into(),
+            "debug-compose".into(),
+            "check".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_setup_doctor_namespace() {
+    assert!(matches!(
+        Mode::parse(vec!["setup".into(), "doctor".into(), "--json".into()]).unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
+fn mode_parse_rejects_duplicate_ai_watch_service_actions() {
+    let err = Mode::parse(vec![
+        "setup".into(),
+        "ai-watch-service".into(),
+        "install".into(),
+        "remove".into(),
+    ])
+    .unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("ai-watch-service action specified more than once"));
 }
 
 #[test]

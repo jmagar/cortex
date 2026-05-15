@@ -23,6 +23,17 @@ fn index_file_is_idempotent() {
     assert_eq!(first.ingested, 1);
     assert_eq!(second.ingested, 0);
     assert_eq!(second.skipped_dupes, 1);
+    let metadata_json: String = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT metadata_json FROM logs", [], |row| row.get(0))
+        .unwrap();
+    let metadata: serde_json::Value = serde_json::from_str(&metadata_json).unwrap();
+    assert_eq!(metadata["source_type"], "transcript");
+    assert_eq!(metadata["source_kind"], "explicit_file");
+    assert_eq!(metadata["tool"], "claude");
+    assert_eq!(metadata["line_no"], 0);
+    assert_eq!(metadata["content_scrubbed"], true);
 }
 
 #[test]
@@ -83,6 +94,92 @@ fn list_checkpoints_reports_errors_and_import_counts() {
         .as_deref()
         .unwrap()
         .contains("failed to parse"));
+}
+
+#[test]
+fn prune_checkpoints_dry_run_and_delete_only_missing_sources() {
+    let (pool, dir) = test_pool();
+    let missing_file = dir.path().join("missing.jsonl");
+    std::fs::write(
+        &missing_file,
+        "{\"sessionId\":\"sess-missing\",\"content\":\"gone\"}\nnot-json\n",
+    )
+    .unwrap();
+    let present_file = dir.path().join("present.jsonl");
+    std::fs::write(
+        &present_file,
+        "{\"sessionId\":\"sess-present\",\"content\":\"still here\"}\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        index_file(&pool, &missing_file, "explicit_file")
+            .unwrap()
+            .ingested,
+        1
+    );
+    assert_eq!(
+        index_file(&pool, &present_file, "explicit_file")
+            .unwrap()
+            .ingested,
+        1
+    );
+    std::fs::remove_file(&missing_file).unwrap();
+
+    let missing = list_checkpoints(
+        &pool,
+        &CheckpointListOptions {
+            errors_only: false,
+            missing_only: true,
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(missing.len(), 1);
+    assert_eq!(
+        missing[0].canonical_path,
+        missing_file.display().to_string()
+    );
+
+    let dry_run = prune_checkpoints(
+        &pool,
+        &PruneCheckpointsOptions {
+            missing_only: true,
+            dry_run: true,
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(dry_run.matched, 1);
+    assert_eq!(dry_run.pruned, 0);
+    assert!(dry_run.dry_run);
+
+    let pruned = prune_checkpoints(
+        &pool,
+        &PruneCheckpointsOptions {
+            missing_only: true,
+            dry_run: false,
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(pruned.matched, 1);
+    assert_eq!(pruned.pruned, 1);
+
+    let remaining = list_checkpoints(
+        &pool,
+        &CheckpointListOptions {
+            errors_only: false,
+            missing_only: false,
+            limit: Some(10),
+        },
+    )
+    .unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(
+        remaining[0].canonical_path,
+        present_file.display().to_string()
+    );
 }
 
 #[test]
@@ -275,7 +372,8 @@ fn scanner_drops_oversized_metadata_fields() {
     std::fs::write(
         &file,
         format!(
-            "{{\"sessionId\":\"{long_session}\",\"cwd\":\"{long_project}\",\"content\":\"metadata kept\"}}\n"
+            "{{\"sessionId\":\"{long_session}\",\"cwd\":\"{long_project}\",\"content\":\"metadata kept\"}}\n\
+             {{\"sessionId\":\"{long_session}\",\"cwd\":\"{long_project}\",\"content\":\"metadata kept again\"}}\n"
         ),
     )
     .unwrap();
@@ -466,6 +564,7 @@ fn index_roots_ignores_claude_sessions_index_metadata() {
 }
 
 #[test]
+#[serial]
 fn index_roots_rejects_broad_home_root_and_repo_paths() {
     let (pool, _dir) = test_pool();
     let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
@@ -514,11 +613,95 @@ fn index_roots_counts_unsupported_files_without_parsing_them() {
 }
 
 #[test]
+fn scanner_exposes_default_roots_and_supported_file_policy() {
+    let roots = default_transcript_roots();
+    assert!(roots.iter().any(|path| path.ends_with(".claude/projects")));
+    assert!(roots.iter().any(|path| path.ends_with(".codex/sessions")));
+    assert!(is_supported_transcript_file(std::path::Path::new(
+        "session.jsonl"
+    )));
+    assert!(!is_supported_transcript_file(std::path::Path::new(
+        "session.json"
+    )));
+}
+
+#[test]
+fn append_only_file_indexes_only_new_records_after_checkpoint() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("session.jsonl");
+    std::fs::write(
+        &file,
+        "{\"uuid\":\"one\",\"type\":\"user\",\"timestamp\":\"2026-05-14T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+    )
+    .unwrap();
+
+    let first = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(first.ingested, 1);
+
+    let mut open = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&file)
+        .unwrap();
+    use std::io::Write;
+    writeln!(
+        open,
+        "{{\"uuid\":\"two\",\"type\":\"user\",\"timestamp\":\"2026-05-14T00:00:01Z\",\"message\":{{\"role\":\"user\",\"content\":\"second\"}}}}"
+    )
+    .unwrap();
+
+    let second = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(second.ingested, 1);
+    assert_eq!(second.skipped_dupes, 0);
+}
+
+#[test]
+fn append_start_requires_stored_content_hash() {
+    let stored = checkpoint::SourceMetadata {
+        file_size: Some(10),
+        file_mtime: Some(1),
+        content_hash: None,
+        last_offset: Some(10),
+        last_error: None,
+    };
+    let current = FileMetadata {
+        size: 20,
+        mtime: Some(2),
+        content_hash: "new".to_string(),
+    };
+
+    assert_eq!(append_start_offset(&stored, &current).unwrap(), None);
+}
+
+#[test]
+fn rewritten_file_falls_back_to_duplicate_safe_full_scan() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("session.jsonl");
+    std::fs::write(
+        &file,
+        "{\"uuid\":\"one\",\"type\":\"user\",\"timestamp\":\"2026-05-14T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+    )
+    .unwrap();
+    assert_eq!(
+        index_file(&pool, &file, "explicit_file").unwrap().ingested,
+        1
+    );
+
+    std::fs::write(
+        &file,
+        "{\"uuid\":\"one\",\"type\":\"user\",\"timestamp\":\"2026-05-14T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"first changed\"}}\n",
+    )
+    .unwrap();
+
+    let second = index_file(&pool, &file, "explicit_file").unwrap();
+    assert_eq!(second.ingested, 0);
+    assert!(second.skipped_dupes >= 1);
+}
+
+#[test]
 #[serial]
 fn index_roots_default_scans_claude_and_codex_roots() {
     let (pool, dir) = test_pool();
-    let old_home = std::env::var_os("HOME");
-    std::env::set_var("HOME", dir.path());
+    let _home = HomeOverride::set(dir.path());
 
     let claude_root = dir.path().join(".claude/projects/-tmp-default");
     std::fs::create_dir_all(&claude_root).unwrap();
@@ -545,9 +728,6 @@ fn index_roots_default_scans_claude_and_codex_roots() {
     .unwrap();
 
     let result = index_roots(&pool, None).unwrap();
-    if let Some(home) = old_home {
-        std::env::set_var("HOME", home);
-    }
 
     assert_eq!(result.discovered_files, 2);
     assert_eq!(result.ingested, 2);
@@ -638,8 +818,7 @@ fn explicit_file_detects_codex_transcript_shape_outside_codex_root() {
 #[serial]
 fn default_index_does_not_skip_same_size_rewrite_with_new_mtime_nanos() {
     let (pool, dir) = test_pool();
-    let old_home = std::env::var_os("HOME");
-    std::env::set_var("HOME", dir.path());
+    let _home = HomeOverride::set(dir.path());
 
     let codex_root = dir.path().join(".codex/sessions/2026/05/14");
     std::fs::create_dir_all(&codex_root).unwrap();
@@ -668,9 +847,6 @@ fn default_index_does_not_skip_same_size_rewrite_with_new_mtime_nanos() {
     set_mtime(&file, 1_800_000_000, 2);
 
     let second = index_roots(&pool, None).unwrap();
-    if let Some(home) = old_home {
-        std::env::set_var("HOME", home);
-    }
 
     assert_eq!(second.ingested, 1);
     let search = search_ai_sessions(
@@ -683,6 +859,53 @@ fn default_index_does_not_skip_same_size_rewrite_with_new_mtime_nanos() {
     )
     .unwrap();
     assert_eq!(search.sessions[0].ai_session_id, "rewrite-session");
+}
+
+#[test]
+#[serial]
+fn default_index_does_not_skip_same_size_rewrite_with_preserved_mtime() {
+    let (pool, dir) = test_pool();
+    let _home = HomeOverride::set(dir.path());
+
+    let codex_root = dir.path().join(".codex/sessions/2026/05/14");
+    std::fs::create_dir_all(&codex_root).unwrap();
+    let file = codex_root.join("rollout-rewrite-preserved-mtime.jsonl");
+    std::fs::write(
+        &file,
+        concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"rewrite-preserved\",\"cwd\":\"/tmp/rewrite\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"content\":[{\"text\":\"alpha\"}]},\"timestamp\":\"2026-05-14T00:00:00Z\"}\n"
+        ),
+    )
+    .unwrap();
+    set_mtime(&file, 1_800_000_001, 1);
+
+    let first = index_roots(&pool, None).unwrap();
+    assert_eq!(first.ingested, 1);
+
+    std::fs::write(
+        &file,
+        concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"rewrite-preserved\",\"cwd\":\"/tmp/rewrite\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"content\":[{\"text\":\"bravo\"}]},\"timestamp\":\"2026-05-14T00:00:00Z\"}\n"
+        ),
+    )
+    .unwrap();
+    set_mtime(&file, 1_800_000_001, 1);
+
+    let second = index_roots(&pool, None).unwrap();
+
+    assert_eq!(second.ingested, 1);
+    let search = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "bravo".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(search.sessions[0].ai_session_id, "rewrite-preserved");
 }
 
 #[test]
@@ -735,6 +958,26 @@ fn set_mtime(path: &std::path::Path, secs: u64, nanos: u32) {
         .unwrap();
 }
 
+struct HomeOverride(Option<std::ffi::OsString>);
+
+impl HomeOverride {
+    fn set(path: &std::path::Path) -> Self {
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", path);
+        Self(previous)
+    }
+}
+
+impl Drop for HomeOverride {
+    fn drop(&mut self) {
+        if let Some(home) = &self.0 {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+    }
+}
+
 #[test]
 fn index_roots_reports_file_errors_with_paths() {
     let (pool, dir) = test_pool();
@@ -773,5 +1016,9 @@ fn index_roots_skips_unreadable_directories_and_continues() {
     let result = result.expect("unreadable directories should be skipped, not abort indexing");
     assert_eq!(result.ingested, 1);
     assert_eq!(result.skipped_files, 1);
-    assert_eq!(result.file_errors.len(), 0);
+    assert_eq!(result.file_errors.len(), 1);
+    assert!(result.file_errors[0]
+        .error
+        .to_ascii_lowercase()
+        .contains("permission denied"));
 }

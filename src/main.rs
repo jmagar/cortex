@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     match mode {
         Mode::ServeMcp => serve_mcp().await,
         Mode::StdioMcp => serve_stdio_mcp().await,
-        Mode::Cli(command) => run_cli(command).await,
+        Mode::Cli(command) => run_cli(*command).await,
         Mode::Setup(command) => run_setup(command).await,
         Mode::DoctorBinary(command) => run_binary_doctor(command).await,
         Mode::Help => unreachable!("handled before logging initialization"),
@@ -58,6 +58,16 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         SetupCommandKind::AiIndexTimer(action) => {
             syslog_mcp::setup::run_ai_index_timer_setup(action).await?
         }
+        SetupCommandKind::AiWatchService(action) => {
+            syslog_mcp::setup::run_ai_watch_service_setup(action).await?
+        }
+        SetupCommandKind::DebugWrapper(action) => {
+            syslog_mcp::setup::run_debug_wrapper_setup(action).await?
+        }
+        SetupCommandKind::DebugCompose(action) => {
+            syslog_mcp::setup::run_debug_compose_setup(action).await?
+        }
+        SetupCommandKind::Doctor => syslog_mcp::setup::run_setup_doctor().await?,
     };
     if command.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -179,7 +189,7 @@ async fn serve_mcp() -> Result<()> {
 enum Mode {
     ServeMcp,
     StdioMcp,
-    Cli(cli::CliCommand),
+    Cli(Box<cli::CliCommand>),
     Setup(SetupCommand),
     DoctorBinary(DoctorBinaryCommand),
     Help,
@@ -196,6 +206,10 @@ struct SetupCommand {
 enum SetupCommandKind {
     Main(syslog_mcp::setup::SetupMode),
     AiIndexTimer(syslog_mcp::setup::AiIndexTimerAction),
+    AiWatchService(syslog_mcp::setup::AiWatchServiceAction),
+    DebugWrapper(syslog_mcp::setup::DebugWrapperAction),
+    DebugCompose(syslog_mcp::setup::DebugComposeAction),
+    Doctor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,6 +245,7 @@ impl Mode {
                         | "ai"
                         | "correlate"
                         | "stats"
+                        | "db"
                         | "compose"
                         | "setup"
                 ) =>
@@ -238,7 +253,7 @@ impl Mode {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
                 cli_args.push(command.clone());
                 cli_args.extend(rest.iter().cloned());
-                Ok(Self::Cli(cli::CliCommand::parse(cli_args)?))
+                Ok(Self::Cli(Box::new(cli::CliCommand::parse(cli_args)?)))
             }
             _ => {
                 print_usage();
@@ -264,27 +279,80 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     let mut mode = syslog_mcp::setup::SetupMode::FirstRun;
     let mut json = false;
     let mut iter = args.iter();
-    if matches!(
-        iter.clone().next().map(String::as_str),
-        Some("ai-index-timer")
-    ) {
+    if matches!(iter.clone().next().map(String::as_str), Some("doctor")) {
         let _ = iter.next();
-        let mut action = syslog_mcp::setup::AiIndexTimerAction::Check;
         for arg in iter {
             match arg.as_str() {
-                "install" => action = syslog_mcp::setup::AiIndexTimerAction::Install,
-                "remove" => action = syslog_mcp::setup::AiIndexTimerAction::Remove,
-                "check" => action = syslog_mcp::setup::AiIndexTimerAction::Check,
                 "--json" => json = true,
                 "--help" | "-h" => {
                     print_usage();
                     std::process::exit(0);
                 }
-                other => anyhow::bail!("unknown ai-index-timer argument: {other}"),
+                other => anyhow::bail!("unknown setup doctor argument: {other}"),
             }
         }
         return Ok(SetupCommand {
-            kind: SetupCommandKind::AiIndexTimer(action),
+            kind: SetupCommandKind::Doctor,
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
+        Some("ai-index-timer")
+    ) {
+        let _ = iter.next();
+        let (action, json) = parse_setup_subcommand_args("ai-index-timer", iter)?;
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::AiIndexTimer(match action {
+                "install" => syslog_mcp::setup::AiIndexTimerAction::Install,
+                "remove" => syslog_mcp::setup::AiIndexTimerAction::Remove,
+                _ => syslog_mcp::setup::AiIndexTimerAction::Check,
+            }),
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
+        Some("ai-watch-service")
+    ) {
+        let _ = iter.next();
+        let (action, json) = parse_setup_subcommand_args("ai-watch-service", iter)?;
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::AiWatchService(match action {
+                "install" => syslog_mcp::setup::AiWatchServiceAction::Install,
+                "remove" => syslog_mcp::setup::AiWatchServiceAction::Remove,
+                _ => syslog_mcp::setup::AiWatchServiceAction::Check,
+            }),
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
+        Some("debug-wrapper")
+    ) {
+        let _ = iter.next();
+        let (action, json) = parse_setup_subcommand_args("debug-wrapper", iter)?;
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::DebugWrapper(match action {
+                "install" => syslog_mcp::setup::DebugWrapperAction::Install,
+                "remove" => syslog_mcp::setup::DebugWrapperAction::Remove,
+                _ => syslog_mcp::setup::DebugWrapperAction::Check,
+            }),
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
+        Some("debug-compose")
+    ) {
+        let _ = iter.next();
+        let (action, json) = parse_setup_subcommand_args("debug-compose", iter)?;
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::DebugCompose(match action {
+                "install" => syslog_mcp::setup::DebugComposeAction::Install,
+                "remove" => syslog_mcp::setup::DebugComposeAction::Remove,
+                _ => syslog_mcp::setup::DebugComposeAction::Check,
+            }),
             json,
         });
     }
@@ -304,6 +372,37 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         kind: SetupCommandKind::Main(mode),
         json,
     })
+}
+
+fn parse_setup_subcommand_args<'a>(
+    name: &str,
+    args: impl Iterator<Item = &'a String>,
+) -> Result<(&'static str, bool)> {
+    let mut action = "check";
+    let mut action_seen = false;
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "install" | "remove" | "check" => {
+                if action_seen {
+                    anyhow::bail!("{name} action specified more than once");
+                }
+                action_seen = true;
+                action = match arg.as_str() {
+                    "install" => "install",
+                    "remove" => "remove",
+                    _ => "check",
+                };
+            }
+            "--json" => json = true,
+            "--help" | "-h" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            other => anyhow::bail!("unknown {name} argument: {other}"),
+        }
+    }
+    Ok((action, json))
 }
 
 fn parse_doctor_command(args: &[String]) -> Result<DoctorBinaryCommand> {
@@ -357,13 +456,12 @@ impl BinaryDoctorReport {
 }
 
 fn runtime_current_status() -> (Option<bool>, Option<String>) {
-    let script = std::path::Path::new("scripts/check-runtime-current.sh");
-    if !script.exists() {
+    let Some(script) = runtime_current_script_path() else {
         return (
             None,
             Some("scripts/check-runtime-current.sh not found".into()),
         );
-    }
+    };
     match std::process::Command::new("bash").arg(script).output() {
         Ok(output) if output.status.success() => (Some(true), None),
         Ok(output) => {
@@ -376,6 +474,28 @@ fn runtime_current_status() -> (Option<bool>, Option<String>) {
         }
         Err(error) => (None, Some(error.to_string())),
     }
+}
+
+fn runtime_current_script_path() -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os("SYSLOG_RUNTIME_CHECK_SCRIPT")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.exists())
+    {
+        return Some(path);
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join("scripts/check-runtime-current.sh"));
+            candidates.push(exe_dir.join("../scripts/check-runtime-current.sh"));
+            candidates.push(exe_dir.join("../../scripts/check-runtime-current.sh"));
+            candidates.push(exe_dir.join("../../../scripts/check-runtime-current.sh"));
+        }
+    }
+    candidates.push(std::path::PathBuf::from("scripts/check-runtime-current.sh"));
+
+    candidates.into_iter().find(|path| path.exists())
 }
 
 fn command_stdout(command: &str, args: &[&str]) -> Option<String> {
@@ -394,6 +514,10 @@ fn print_usage() {
   syslog --version     Print version
   syslog setup [check|repair] [--json]
   syslog setup ai-index-timer install|remove|check [--json]
+  syslog setup ai-watch-service install|remove|check [--json]
+  syslog setup debug-wrapper install|remove|check [--json]
+  syslog setup debug-compose install|remove|check [--json]
+  syslog setup doctor [--json]
   syslog doctor binary [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
@@ -403,16 +527,25 @@ fn print_usage() {
   syslog hosts [--json]
   syslog sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
   syslog ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]
+  syslog ai cuss [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]
+  syslog ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--from TIME] [--to TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]
   syslog ai blocks [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--json]
   syslog ai context --project PATH [--tool TOOL] [--limit N] [--json]
   syslog ai tools [--project PATH] [--from TIME] [--to TIME] [--json]
   syslog ai projects [--tool TOOL] [--from TIME] [--to TIME] [--json]
   syslog ai index [--path PATH] [--since TIME] [--force] [--json]
   syslog ai add --file FILE [--force] [--json]
+  syslog ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]
   syslog ai checkpoints [--errors] [--missing] [--limit N] [--json]
   syslog ai errors [--limit N] [--json]
   syslog ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]
-  syslog ai doctor [--json]
+  syslog ai doctor [--strict-permissions] [--json]
+  syslog ai watch-status [--json]
+  syslog ai smoke-watch [--json]
+  syslog db status|integrity [--json]
+  syslog db checkpoint [--mode passive|full|restart|truncate] [--json]
+  syslog db vacuum [--pages N|--full] [--json]
+  syslog db backup [--output PATH] [--json]
   syslog compose doctor [--json]
   syslog compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]
   syslog compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]

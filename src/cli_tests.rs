@@ -125,6 +125,85 @@ fn parse_ai_search_collects_filters() {
 }
 
 #[test]
+fn parse_ai_cuss_collects_filters_and_context_options() {
+    let parsed = CliCommand::parse(strings(&[
+        "ai",
+        "cuss",
+        "--project=/tmp/project",
+        "--tool",
+        "codex",
+        "--limit",
+        "5",
+        "--before=3",
+        "--after",
+        "4",
+        "--term",
+        "dang",
+        "--json",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::Cuss(AiCussArgs {
+            project: Some("/tmp/project".into()),
+            tool: Some("codex".into()),
+            limit: Some(5),
+            before: Some(3),
+            after: Some(4),
+            terms: vec!["dang".into()],
+            json: true,
+            ..Default::default()
+        }))
+    );
+}
+
+#[test]
+fn parse_ai_correlate_collects_cross_reference_filters() {
+    let parsed = CliCommand::parse(strings(&[
+        "ai",
+        "correlate",
+        "--project=/tmp/project",
+        "--tool",
+        "codex",
+        "--session-id",
+        "sess-1",
+        "--ai-query",
+        "deploy",
+        "--log-query=error",
+        "--hostname",
+        "host-a",
+        "--app-name",
+        "dockerd",
+        "--window-minutes",
+        "15",
+        "--severity-min=err",
+        "--events-per-anchor",
+        "12",
+        "--json",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::Correlate(AiCorrelateArgs {
+            project: Some("/tmp/project".into()),
+            tool: Some("codex".into()),
+            session_id: Some("sess-1".into()),
+            ai_query: Some("deploy".into()),
+            log_query: Some("error".into()),
+            hostname: Some("host-a".into()),
+            app_name: Some("dockerd".into()),
+            window_minutes: Some(15),
+            severity_min: Some("err".into()),
+            events_per_anchor: Some(12),
+            json: true,
+            ..Default::default()
+        }))
+    );
+}
+
+#[test]
 fn parse_ai_context_requires_project() {
     let err = CliCommand::parse(strings(&["ai", "context"])).unwrap_err();
     assert!(err.to_string().contains("requires --project"));
@@ -134,6 +213,56 @@ fn parse_ai_context_requires_project() {
 fn parse_ai_add_requires_file() {
     let err = CliCommand::parse(strings(&["ai", "add"])).unwrap_err();
     assert!(err.to_string().contains("--file"));
+}
+
+#[test]
+fn parse_ai_watch_defaults() {
+    let command = CliCommand::parse(strings(&["ai", "watch"])).unwrap();
+    assert_eq!(
+        command,
+        CliCommand::Ai(AiCommand::Watch(AiWatchArgs {
+            path: None,
+            debounce_ms: 750,
+            settle_ms: 500,
+            max_retries: 5,
+            no_initial_scan: false,
+            json: false,
+        }))
+    );
+}
+
+#[test]
+fn parse_ai_watch_all_options() {
+    let command = CliCommand::parse(strings(&[
+        "ai",
+        "watch",
+        "--path",
+        "/tmp/transcripts",
+        "--debounce-ms",
+        "100",
+        "--settle-ms=250",
+        "--max-retries=7",
+        "--no-initial-scan",
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(
+        command,
+        CliCommand::Ai(AiCommand::Watch(AiWatchArgs {
+            path: Some("/tmp/transcripts".into()),
+            debounce_ms: 100,
+            settle_ms: 250,
+            max_retries: 7,
+            no_initial_scan: true,
+            json: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_ai_watch_rejects_zero_timing_values() {
+    let err = CliCommand::parse(strings(&["ai", "watch", "--debounce-ms", "0"])).unwrap_err();
+    assert!(err.to_string().contains("positive integer"));
 }
 
 #[test]
@@ -199,6 +328,166 @@ fn parse_ai_errors_collects_limit() {
 fn parse_ai_prune_checkpoints_requires_missing() {
     let err = CliCommand::parse(strings(&["ai", "prune-checkpoints", "--dry-run"])).unwrap_err();
     assert!(err.to_string().contains("--missing"));
+}
+
+#[test]
+fn parse_ai_doctor_accepts_strict_permissions() {
+    let parsed =
+        CliCommand::parse(strings(&["ai", "doctor", "--strict-permissions", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::Doctor(AiDoctorArgs {
+            json: true,
+            strict_permissions: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_ai_watch_status_accepts_json() {
+    let parsed = CliCommand::parse(strings(&["ai", "watch-status", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::WatchStatus(OutputArgs { json: true }))
+    );
+}
+
+#[test]
+fn parse_ai_smoke_watch_accepts_json() {
+    let parsed = CliCommand::parse(strings(&["ai", "smoke-watch", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::SmokeWatch(OutputArgs { json: true }))
+    );
+}
+
+#[test]
+fn smoke_watch_target_uses_codex_root_when_claude_is_unavailable() {
+    let temp = tempfile::tempdir().unwrap();
+    let codex_root = temp.path().join(".codex/sessions");
+    std::fs::create_dir_all(&codex_root).unwrap();
+    let doctor = AiDoctorReport {
+        db_path: "/tmp/syslog.db".into(),
+        claude_root: transcript_root_status("/missing", false),
+        codex_root: transcript_root_status(&codex_root.to_string_lossy(), true),
+        checkpoint_count: 0,
+        checkpoint_error_count: 0,
+        missing_checkpoint_count: 0,
+        imported_record_count: 0,
+        parse_error_count: 0,
+        newest_indexed_path: None,
+        newest_indexed_at: None,
+    };
+
+    let target = smoke_watch_target(&doctor, "stamp", "session-1", "2026-05-15T00:00:00Z")
+        .expect("codex root should be selected");
+
+    assert_eq!(target.tool, "codex");
+    assert_eq!(
+        target.project,
+        std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    );
+    assert!(target.transcript_path.starts_with(codex_root));
+    assert!(target.body.contains("\"type\":\"session_meta\""));
+    assert!(target.body.contains("\"type\":\"response_item\""));
+}
+
+#[test]
+fn strict_ai_doctor_permissions_ignore_missing_roots() {
+    let doctor = AiDoctorReport {
+        db_path: "/tmp/syslog.db".into(),
+        claude_root: transcript_root_status("/missing", false),
+        codex_root: transcript_root_status("/tmp/codex", true),
+        checkpoint_count: 0,
+        checkpoint_error_count: 0,
+        missing_checkpoint_count: 0,
+        imported_record_count: 0,
+        parse_error_count: 0,
+        newest_indexed_path: None,
+        newest_indexed_at: None,
+    };
+
+    ensure_ai_doctor_success(&doctor, true).expect("missing roots should not fail strict mode");
+}
+
+fn transcript_root_status(
+    path: &str,
+    available: bool,
+) -> syslog_mcp::scanner::TranscriptRootStatus {
+    syslog_mcp::scanner::TranscriptRootStatus {
+        path: path.to_string(),
+        exists: available,
+        readable: available,
+        writable: available,
+        owner_uid: None,
+        owner_gid: None,
+        mode: None,
+        strict_ok: available,
+    }
+}
+
+#[test]
+fn parse_db_status_accepts_json() {
+    let parsed = CliCommand::parse(strings(&["db", "status", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Db(DbCommand::Status(OutputArgs { json: true }))
+    );
+}
+
+#[test]
+fn parse_db_checkpoint_accepts_modes() {
+    let parsed =
+        CliCommand::parse(strings(&["db", "checkpoint", "--mode=truncate", "--json"])).unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Db(DbCommand::Checkpoint(DbCheckpointArgs {
+            mode: "truncate".into(),
+            json: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_db_checkpoint_rejects_unknown_mode() {
+    let err = CliCommand::parse(strings(&["db", "checkpoint", "--mode", "bogus"])).unwrap_err();
+    assert!(err.to_string().contains("passive, full, restart, truncate"));
+}
+
+#[test]
+fn parse_db_vacuum_and_backup_options() {
+    let vacuum = CliCommand::parse(strings(&["db", "vacuum", "--pages", "250"])).unwrap();
+    assert_eq!(
+        vacuum,
+        CliCommand::Db(DbCommand::Vacuum(DbVacuumArgs {
+            full: false,
+            pages: 250,
+            json: false,
+        }))
+    );
+
+    let backup = CliCommand::parse(strings(&[
+        "db",
+        "backup",
+        "--output=/tmp/syslog-backups",
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(
+        backup,
+        CliCommand::Db(DbCommand::Backup(DbBackupArgs {
+            output: Some("/tmp/syslog-backups".into()),
+            json: true,
+        }))
+    );
 }
 
 #[test]

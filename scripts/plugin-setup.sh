@@ -42,8 +42,9 @@ ensure_syslog_binary() {
 }
 
 validate_client() {
-  local server_url="${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}"
-  if curl -sf "${server_url%/}/health" >/dev/null 2>&1; then
+  local server_url
+  server_url="$(strip_trailing_mcp_path "${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}")"
+  if curl -fsS --connect-timeout 2 --max-time 5 "${server_url%/}/health" >/dev/null 2>&1; then
     echo "syslog-mcp: connected to ${server_url%/}"
   else
     echo "WARNING: syslog-mcp server at ${server_url%/} is not reachable" >&2

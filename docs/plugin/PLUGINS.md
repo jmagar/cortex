@@ -1,91 +1,62 @@
 <!--
 plugin: syslog-mcp
 surface: plugin-manifests
-version: 0.10.0
+version: 0.21.7
 author: Jacob Magar
 license: MIT
-description: Reference for syslog-mcp plugin manifests and version metadata.
+description: Current syslog-mcp Claude Code plugin manifest reference.
 -->
 
 # Plugin Manifest Reference -- syslog-mcp
 
-Structure and conventions for plugin manifest files.
+This repo currently ships the Claude Code plugin manifest at
+`.claude-plugin/plugin.json`. The manifest version is kept in sync with
+`Cargo.toml`; future plugin manifests must use the same version.
 
 ## File locations
 
-| File | Platform | Key fields |
+| File | Platform | Status |
 | --- | --- | --- |
-| `.claude-plugin/plugin.json` | Claude Code | name, version, tools, userConfig |
-| `.codex-plugin/plugin.json` | Codex | name, version, description |
-| `gemini-extension.json` | Gemini | mcpServers configuration |
-| `server.json` | MCP Registry | name, packages, transport |
+| `.claude-plugin/plugin.json` | Claude Code | Current plugin manifest |
+| `plugins/.mcp.json` | Claude Code | MCP server template referenced by the manifest |
+| `plugins/hooks/hooks.json` | Claude Code | SessionStart and ConfigChange hook registration |
+| `plugins/skills/` | Claude Code | Plugin skill surfaces |
 
-All manifests must have the same `version` value.
+This repo does not currently ship tracked Codex or Gemini manifest files. It
+does ship `server.json` for MCP Registry metadata. Do not copy older Codex or
+Gemini examples from release history into new docs without adding the actual
+manifest files.
 
-## .claude-plugin/plugin.json
+## Claude Code plugin.json
 
-```json
-{
-  "name": "syslog-mcp",
-  "version": "0.10.0",
-  "description": "Syslog management via MCP",
-  "author": "jmagar",
-  "repository": "https://github.com/jmagar/syslog-mcp",
-  "license": "MIT",
-  "keywords": ["syslog", "mcp", "logging", "homelab"],
-  "tools": ["syslog"],
-  "transport": "http",
-  "port": 3100,
-  "userConfig": {
-    "SYSLOG_MCP_URL": {
-      "type": "string",
-      "title": "Syslog MCP URL",
-      "description": "Base URL of the syslog-mcp server",
-      "sensitive": false,
-      "default": "https://syslog.tootie.tv/mcp"
-    },
-    "syslog_mcp_token": {
-      "type": "string",
-      "title": "API Token",
-      "description": "Bearer token for authenticating MCP requests",
-      "sensitive": true
-    }
-  }
-}
-```
+The current manifest declares:
 
-## .codex-plugin/plugin.json
+| Field | Purpose |
+| --- | --- |
+| `mcpServers` | Points Claude Code at `./plugins/.mcp.json` |
+| `hooks` | Runs `plugins/hooks/hooks.json` |
+| `skills` | Exposes repo-local plugin skills |
+| `userConfig.server_url` | Base HTTP URL for the running syslog-mcp server |
+| `userConfig.api_token` | Required Bearer token used by the plugin MCP client; enforced by the server unless `no_auth=true` |
+| `userConfig.no_auth` | Explicitly disables static-token enforcement for loopback or upstream-authenticated deployments |
+| `userConfig.is_server` | Whether this machine owns the local Docker Compose deployment |
+| `userConfig.syslog_port` / `syslog_host_port` / `mcp_port` | Container port mapping controls |
+| `userConfig.data_dir` | Host data directory for the Compose deployment |
+| `userConfig.auth_mode` and OAuth fields | Optional OAuth/JWT configuration |
+| `userConfig.docker_ingest_*` | Optional docker-socket-proxy log ingestion |
 
-Contains name, version, description, and Codex-specific metadata.
-
-## gemini-extension.json
-
-Contains `mcpServers` configuration for Gemini CLI discovery.
-
-## server.json
-
-MCP Registry entry with OCI package reference:
-
-```json
-{
-  "name": "tv.tootie/syslog-mcp",
-  "title": "Syslog MCP",
-  "version": "0.10.0",
-  "packages": [
-    {
-      "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/syslog-mcp:0.10.0"
-    }
-  ]
-}
-```
+`plugins/.mcp.json` interpolates these values with `${user_config.*}`
+placeholders. Keep docs and validation scripts aligned with that syntax.
 
 ## Version synchronization
 
-All manifests must be updated together when bumping versions. Use `just publish [major|minor|patch]` to automate this.
+Use `just publish [major|minor|patch]` for releases. That flow bumps
+`Cargo.toml`, `.claude-plugin/plugin.json`, and any future version-bearing
+files together, then updates `CHANGELOG.md`.
 
 ## See also
 
-- [MARKETPLACES.md](MARKETPLACES.md) -- marketplace publishing
-- [CONFIG.md](CONFIG.md) -- plugin settings and userConfig
-- [../mcp/PUBLISH.md](../mcp/PUBLISH.md) -- versioning strategy
+- [CONFIG.md](CONFIG.md) -- plugin settings and userConfig fields
+- [HOOKS.md](HOOKS.md) -- plugin hook behavior
+- [SKILLS.md](SKILLS.md) -- plugin skills
+- [../mcp/PUBLISH.md](../mcp/PUBLISH.md) -- publishing and transport notes

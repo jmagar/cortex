@@ -24,7 +24,7 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `cuss`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md).
 
@@ -36,6 +36,8 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `hosts` | Host registry with first/last seen |
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
+| `cuss` | Profanity hits in AI transcripts with same-session context |
+| `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
 | `usage_blocks` | AI activity in 5-hour UTC windows |
 | `project_context` | Summary for one AI project path |
 | `list_ai_tools` | Distinct AI tools with counts |
@@ -68,7 +70,7 @@ Full-text search across all syslog messages with optional filters. Uses SQLite F
 |-----------|------|----------|---------|-------------|
 | `query` | string | no | — | FTS5 search query (see [FTS5 query syntax](#fts5-query-syntax)) |
 | `hostname` | string | no | — | Exact hostname match. Use `syslog` with `action: "hosts"` to enumerate. |
-| `source_ip` | string | no | — | Exact source identifier. Syslog entries use the verified network sender address (`IP:port`); Docker ingest entries use `docker://host/container/stream` from configured ingest metadata. |
+| `source_ip` | string | no | — | Exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `severity` | string | no | — | One of: `emerg alert crit err warning notice info debug` |
 | `app_name` | string | no | — | Application name, e.g. `sshd`, `dockerd`, `kernel` |
 | `from` | string | no | — | Start of time range (ISO 8601 / RFC 3339, e.g. `2025-01-15T00:00:00Z`) |
@@ -120,7 +122,7 @@ Return the N most recent log entries. Equivalent to `tail -f` across all hosts.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `hostname` | string | no | — | Filter to a specific host |
-| `source_ip` | string | no | — | Filter to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); Docker ingest entries use `docker://host/container/stream` from configured ingest metadata. |
+| `source_ip` | string | no | — | Filter to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `app_name` | string | no | — | Filter to a specific application |
 | `n` | integer | no | 50 | Number of recent entries (hard cap: 500) |
 
@@ -228,7 +230,7 @@ Search for related events across multiple hosts within a ±N minute window aroun
 | `window_minutes` | integer | no | 5 | Minutes before and after `reference_time` (max 60) |
 | `severity_min` | string | no | `warning` | Minimum severity to include. `warning` returns `warning/err/crit/alert/emerg`. `debug` returns everything. |
 | `hostname` | string | no | — | Limit correlation to one host |
-| `source_ip` | string | no | — | Limit correlation to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); Docker ingest entries use `docker://host/container/stream`. |
+| `source_ip` | string | no | — | Limit correlation to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `query` | string | no | — | FTS5 query to narrow results |
 | `limit` | integer | no | 500 | Max total events (hard cap: 999) |
 
@@ -358,11 +360,12 @@ Each stored log entry has these fields:
 | `process_id` | text\|null | PID from the syslog message |
 | `message` | text | Log message body (FTS5-indexed) |
 | `received_at` | text | Server-side receipt timestamp (RFC 3339, UTC). Used for retention. |
-| `source_ip` | text | Source identifier. Syslog entries use the exact network sender address (`IP:port`) captured from the packet/connection peer. Docker ingest entries use `docker://host/container/stream` from configured Docker ingest metadata. |
+| `source_ip` | text | Source identifier. Syslog entries use the exact network sender address (`IP:port`) captured from the packet/connection peer. OTLP rows use the peer IP without the ephemeral source port. Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `ai_tool` | text\|null | AI tool name (e.g. `claude`, `codex`) |
 | `ai_project` | text\|null | AI project path |
 | `ai_session_id` | text\|null | AI session unique identifier |
 | `ai_transcript_path` | text\|null | Full path to the source transcript file |
+| `metadata_json` | text\|null | Source-specific JSON metadata. Syslog rows include parser/source provenance; OTLP rows include resource/log attributes plus trace/span ids; Docker rows include host/container/image/compose/action details; transcript rows include source kind, file path, line number, record key, and scrub status. |
 
 ### AI transcript indexing
 
@@ -379,7 +382,22 @@ them, and streams transcript files line-by-line in bounded SQLite chunks. Use
 `syslog ai checkpoints --errors` plus `syslog ai errors` to inspect structured
 scanner failures.
 
-The optional host-local index timer is managed by:
+For real-time local Claude/Codex transcript ingestion, install the host-local
+watch service:
+
+```bash
+syslog setup ai-watch-service install
+syslog setup ai-watch-service check
+syslog setup ai-watch-service remove
+```
+
+The watcher runs outside Docker because it needs host access to
+`~/.claude/projects` and `~/.codex/sessions`. It writes to the configured live
+SQLite DB and delegates every stable changed `.jsonl` file to the same scanner
+path used by `syslog ai add --file FILE`. Installing the watcher disables the
+older polling timer so both helpers do not scan the same files.
+
+The optional polling fallback is still available:
 
 ```bash
 syslog setup ai-index-timer install
@@ -387,17 +405,18 @@ syslog setup ai-index-timer check
 syslog setup ai-index-timer remove
 ```
 
-This timer is deliberately not inside the Docker container. It reads host-local
-Claude/Codex transcript files and runs the newest `syslog` binary on the host
-`PATH`; Docker Compose owns only the server/query runtime.
+Both helpers are deliberately not inside the Docker container. Docker Compose
+owns only the server/query runtime.
 
 Imported AI transcript messages are scrubbed for known credential/token patterns
-before storage and FTS indexing. The rows still live in the main `logs` table, so
-raw actions such as `search`, `tail`, `context`, and `get` can return scrubbed
-transcript text and local `ai_transcript_path` values. If storage guardrails
-cannot recover enough space, indexing fails before committing additional chunks.
+before storage and FTS indexing. The rows still live in the main `logs` table,
+so raw actions such as `search`, `tail`, `context`, and `get` can return
+scrubbed transcript text and local `ai_transcript_path` values within seconds of
+the transcript write. Scrubbing is best-effort, not a compliance boundary. If
+storage guardrails cannot recover enough space, indexing fails before committing
+additional chunks.
 
-**Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker ingest entries, `source_ip` identifies the configured Docker ingest host/container/stream and should be trusted only as far as the configured docker-socket-proxy endpoint and network path are trusted. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
+**Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker ingest entries, `source_ip` identifies the configured Docker ingest host/container/stream and should be trusted only as far as the configured docker-socket-proxy endpoint and network path are trusted. `metadata_json` preserves source-specific context for debugging and correlation, but it is not an authorization boundary. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
 
 ### Severity levels
 
@@ -435,12 +454,16 @@ The installer puts the host `syslog` binary in `~/.local/bin` and then runs
 - `~/.syslog-mcp/compose/docker-compose.yml` — Docker Compose deployment assets
 - `~/.syslog-mcp/data/syslog.db` — SQLite database and WAL/SHM sidecars
 
+Setup writes `COMPOSE_PROJECT_NAME=syslog-jmagar-lab` so direct
+`docker compose` commands in `~/.syslog-mcp/compose` target the same canonical
+container as `syslog compose`.
+
 Useful installer controls:
 
 ```bash
 SYSLOG_INSTALL_DRY_RUN=1 ./install.sh
 SYSLOG_INSTALL_PREFIX=/opt/syslog-mcp ./install.sh
-SYSLOG_VERSION=0.21.6 ./install.sh
+SYSLOG_VERSION=0.25.0 ./install.sh
 SYSLOG_INSTALL_SKIP_SETUP=1 ./install.sh
 ```
 
@@ -450,7 +473,7 @@ Useful setup commands:
 syslog setup          # first-run or normal repair
 syslog setup check    # inspect only; does not mutate files or start services
 syslog setup repair   # repair env/assets and restart the Docker stack
-syslog setup ai-index-timer install  # optional host-local transcript index timer
+syslog setup ai-watch-service install  # host-local real-time transcript watcher
 syslog doctor binary  # check host/container binary freshness
 ```
 
@@ -464,7 +487,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 |-------|----------|---------|-------|
 | `is_server` | yes | `true` | Server mode hosts the receiver; client mode connects to a remote server |
 | `server_url` | no | `http://localhost:3100` | Server mode: leave default. Client mode: remote host URL (e.g. `http://shart:3100`) |
-| `api_token` | yes | — | Bearer token. Server mode: server requires this token. Client mode: token from the server admin. Stored in the system keychain. |
+| `api_token` | yes | — | Bearer token used by the plugin MCP client. Server mode: this becomes the token the server enforces unless `no_auth=true`. Client mode: token from the server admin. Stored in the system keychain. |
 | `syslog_host` / `syslog_port` | no | `0.0.0.0` / `1514` | Syslog listener bind (server mode) |
 | `mcp_host` / `mcp_port` | no | `0.0.0.0` / `3100` | MCP HTTP server bind (server mode) |
 | `data_dir` | no | `~/.syslog-mcp/data` | Optional SQLite directory override; default shared setup data persists outside plugin cache |
@@ -477,7 +500,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 
 **SessionStart hook automation** (in server mode):
 
-- Ensures the host `syslog` binary exists in `~/.local/bin`
+- Ensures the host `syslog` binary is on `PATH`; the installer defaults to `~/.local/bin`
 - Exports plugin userConfig as `SYSLOG_*` / `SYSLOG_MCP_*` environment values
 - Runs `syslog setup repair`, the same setup path used by the one-line installer
 - Repairs shared assets under `~/.syslog-mcp` and removes stale user-level `syslog-mcp.service` units/drop-ins left by older plugin versions
@@ -607,7 +630,7 @@ allow_insecure_http = true
 
 The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to syslog-mcp, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
 
-Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. The expected stored `source_ip` shape is `docker://<host>/<container>/<stream>`.
+Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. Container stdout/stderr rows use `source_ip=docker://<host>/<container>/<stream>`. Container lifecycle rows for actions such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, `oom`, and `health_status:*` use `source_ip=docker-event://<host>/<container>/<sanitized-action>`, `facility=docker`, and preserve the raw Docker event JSON.
 
 #### Storage
 
@@ -684,6 +707,8 @@ syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 syslog mcp        # query-only MCP stdio transport
 syslog setup      # install/repair shared ~/.syslog-mcp Docker Compose setup
 syslog stats      # query the SQLite DB directly from the CLI
+syslog db status  # inspect SQLite maintenance state
+syslog db backup  # create a WAL-safe SQLite backup
 syslog compose doctor          # diagnose live Compose/listener ownership
 syslog compose status --json   # inspect canonical syslog-mcp container/project
 ```
@@ -699,6 +724,9 @@ syslog errors --from 2026-01-01T00:00:00Z
 syslog hosts
 syslog correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
 syslog stats --json
+syslog db integrity            # run PRAGMA integrity_check
+syslog db checkpoint --mode full
+syslog db vacuum --pages 1000
 syslog compose pull            # pull image for resolved Compose project
 syslog compose up              # run docker compose up -d for resolved service
 syslog compose restart         # restart resolved service

@@ -76,6 +76,7 @@ fn init_db_adds_ai_session_metadata_columns() {
         "ai_project",
         "ai_session_id",
         "ai_transcript_path",
+        "metadata_json",
     ] {
         let exists: i64 = conn
             .query_row(
@@ -85,6 +86,43 @@ fn init_db_adds_ai_session_metadata_columns() {
             )
             .unwrap();
         assert_eq!(exists, 1, "missing column {column}");
+    }
+}
+
+#[test]
+fn init_db_creates_partial_ai_metadata_indexes() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = crate::config::StorageConfig {
+        db_path,
+        ..Default::default()
+    };
+
+    let _pool = init_pool(&config).unwrap();
+    let conn = rusqlite::Connection::open(&config.db_path).unwrap();
+    let indexes: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name, sql FROM sqlite_schema
+                 WHERE type = 'index'
+                   AND name IN (
+                     'idx_logs_ai_project_time',
+                     'idx_logs_ai_session',
+                     'idx_logs_ai_transcript_path'
+                   )
+                 ORDER BY name",
+            )
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+
+    assert_eq!(indexes.len(), 3);
+    for (_, sql) in indexes {
+        assert!(sql.contains("WHERE"));
+        assert!(sql.contains("IS NOT NULL"));
     }
 }
 
@@ -99,7 +137,11 @@ fn init_db_adds_transcript_checkpoint_tables() {
 
     let _pool = init_pool(&config).unwrap();
     let conn = rusqlite::Connection::open(&config.db_path).unwrap();
-    for table in ["transcript_sources", "transcript_import_records"] {
+    for table in [
+        "transcript_sources",
+        "transcript_import_records",
+        "transcript_parse_errors",
+    ] {
         let exists: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -109,6 +151,14 @@ fn init_db_adds_transcript_checkpoint_tables() {
             .unwrap();
         assert_eq!(exists, 1, "missing table {table}");
     }
+    let preview_not_null: i64 = conn
+        .query_row(
+            "SELECT [notnull] FROM pragma_table_info('transcript_parse_errors') WHERE name = 'record_preview'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(preview_not_null, 1);
 }
 
 #[test]
@@ -164,6 +214,7 @@ fn init_db_migrates_legacy_ai_schema_without_losing_logs() {
         "ai_project",
         "ai_session_id",
         "ai_transcript_path",
+        "metadata_json",
     ] {
         let exists: i64 = conn
             .query_row(

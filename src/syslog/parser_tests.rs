@@ -24,6 +24,12 @@ fn test_parse_syslog_unifi_cef_hostname() {
     assert_eq!(parsed.hostname, "The Mothership");
     assert_eq!(parsed.app_name.as_deref(), Some("Test Syslog"));
     assert_eq!(parsed.message, "Test Syslog");
+    let metadata: serde_json::Value =
+        serde_json::from_str(parsed.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_type"], "syslog");
+    assert_eq!(metadata["input_format"], "cef");
+    assert_eq!(metadata["source_addr"], "192.168.1.1:514");
+    assert_eq!(metadata["raw_hostname"], "2026-03-29T02:52:21.587Z");
 }
 
 #[test]

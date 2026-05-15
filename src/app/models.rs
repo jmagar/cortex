@@ -1,6 +1,52 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use crate::db;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbMaintenanceStatus {
+    pub db_path: PathBuf,
+    pub page_count: i64,
+    pub freelist_count: i64,
+    pub page_size: i64,
+    pub logical_size_bytes: u64,
+    pub physical_size_bytes: u64,
+    pub wal_size_bytes: Option<u64>,
+    pub shm_size_bytes: Option<u64>,
+    pub auto_vacuum: i64,
+    pub journal_mode: String,
+    pub integrity_ok: Option<bool>,
+    pub integrity_messages: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbCheckpointResult {
+    pub mode: String,
+    pub busy: i64,
+    pub log_frames: i64,
+    pub checkpointed_frames: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbVacuumResult {
+    pub full: bool,
+    pub incremental_pages: u32,
+    pub before_physical_size_bytes: u64,
+    pub after_physical_size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbIntegrityResult {
+    pub ok: bool,
+    pub messages: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbBackupResult {
+    pub db_path: PathBuf,
+    pub backup_path: PathBuf,
+    pub size_bytes: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
@@ -18,6 +64,7 @@ pub struct LogEntry {
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
     pub ai_transcript_path: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 impl From<db::LogEntry> for LogEntry {
@@ -37,6 +84,7 @@ impl From<db::LogEntry> for LogEntry {
             ai_project: value.ai_project,
             ai_session_id: value.ai_session_id,
             ai_transcript_path: value.ai_transcript_path,
+            metadata_json: value.metadata_json,
         }
     }
 }
@@ -59,6 +107,8 @@ pub struct ListSessionsResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiSessionEntry {
+    /// Stable response-local key for this host/tool/project/session tuple.
+    pub session_key: String,
     pub project: String,
     pub tool: String,
     pub session_id: String,
@@ -72,7 +122,14 @@ pub struct AiSessionEntry {
 
 impl From<db::AiSessionEntry> for AiSessionEntry {
     fn from(value: db::AiSessionEntry) -> Self {
+        let session_key = ai_session_key(
+            &value.hostname,
+            &value.ai_tool,
+            &value.ai_project,
+            &value.ai_session_id,
+        );
         Self {
+            session_key,
             project: value.ai_project,
             tool: value.ai_tool,
             session_id: value.ai_session_id,
@@ -97,6 +154,8 @@ pub struct SearchSessionsRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchedSessionEntry {
+    /// Stable response-local key for this host/tool/project/session tuple.
+    pub session_key: String,
     pub project: String,
     pub tool: String,
     pub session_id: String,
@@ -111,7 +170,14 @@ pub struct SearchedSessionEntry {
 
 impl From<db::SearchedAiSessionEntry> for SearchedSessionEntry {
     fn from(value: db::SearchedAiSessionEntry) -> Self {
+        let session_key = ai_session_key(
+            &value.hostname,
+            &value.ai_tool,
+            &value.ai_project,
+            &value.ai_session_id,
+        );
         Self {
+            session_key,
             project: value.ai_project,
             tool: value.ai_tool,
             session_id: value.ai_session_id,
@@ -123,6 +189,14 @@ impl From<db::SearchedAiSessionEntry> for SearchedSessionEntry {
             best_snippet: value.best_snippet,
         }
     }
+}
+
+fn ai_session_key(hostname: &str, tool: &str, project: &str, session_id: &str) -> String {
+    [hostname, tool, project, session_id]
+        .into_iter()
+        .map(|part| format!("{}:{part}", part.len()))
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,6 +220,101 @@ impl From<db::SearchAiSessionsResult> for SearchSessionsResponse {
             sessions: value.sessions.into_iter().map(Into::into).collect(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CussSearchRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub before: Option<u32>,
+    pub after: Option<u32>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CussMatch {
+    pub term: String,
+    pub entry: LogEntry,
+    pub before: Vec<LogEntry>,
+    pub after: Vec<LogEntry>,
+}
+
+impl From<db::AiCussMatch> for CussMatch {
+    fn from(value: db::AiCussMatch) -> Self {
+        Self {
+            term: value.term,
+            entry: value.entry.into(),
+            before: value.before.into_iter().map(Into::into).collect(),
+            after: value.after.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CussSearchResponse {
+    pub terms: Vec<String>,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
+    pub truncated: bool,
+    pub matches: Vec<CussMatch>,
+}
+
+impl From<db::AiCussResult> for CussSearchResponse {
+    fn from(value: db::AiCussResult) -> Self {
+        Self {
+            terms: value.terms,
+            candidate_rows: value.candidate_rows,
+            candidate_cap: value.candidate_cap,
+            candidate_window_truncated: value.candidate_window_truncated,
+            truncated: value.truncated,
+            matches: value.matches.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiCorrelateRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub session_id: Option<String>,
+    pub ai_query: Option<String>,
+    pub log_query: Option<String>,
+    pub hostname: Option<String>,
+    pub source_ip: Option<String>,
+    pub app_name: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub window_minutes: Option<u32>,
+    pub severity_min: Option<String>,
+    pub limit: Option<u32>,
+    pub events_per_anchor: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCorrelationAnchor {
+    pub entry: LogEntry,
+    pub window_from: String,
+    pub window_to: String,
+    pub related: Vec<LogEntry>,
+    pub related_truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCorrelateResponse {
+    pub window_minutes: u32,
+    pub severity_min: String,
+    pub total_anchors: usize,
+    pub anchor_rows: usize,
+    pub anchor_limit: usize,
+    pub anchors_truncated: bool,
+    pub related_limit_per_anchor: usize,
+    pub total_related_events: usize,
+    pub anchors: Vec<AiCorrelationAnchor>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -676,6 +845,7 @@ pub struct LogEntryWithRaw {
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
     pub ai_transcript_path: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 impl From<db::LogEntryWithRaw> for LogEntryWithRaw {
@@ -696,6 +866,7 @@ impl From<db::LogEntryWithRaw> for LogEntryWithRaw {
             ai_project: value.ai_project,
             ai_session_id: value.ai_session_id,
             ai_transcript_path: value.ai_transcript_path,
+            metadata_json: value.metadata_json,
         }
     }
 }

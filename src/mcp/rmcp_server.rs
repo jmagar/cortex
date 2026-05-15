@@ -41,6 +41,8 @@ const READ_ONLY_ACTIONS: &[&str] = &[
     "apps",
     "sessions",
     "search_sessions",
+    "cuss",
+    "ai_correlate",
     "usage_blocks",
     "project_context",
     "list_ai_tools",

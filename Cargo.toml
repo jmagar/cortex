@@ -1,6 +1,6 @@
 [package]
 name = "syslog-mcp"
-version = "0.21.6"
+version = "0.25.0"
 edition = "2021"
 rust-version = "1.86"
 description = "Syslog receiver + MCP server for homelab log intelligence"
@@ -76,6 +76,7 @@ opentelemetry-proto = { version = "0.31", default-features = false, features = [
   "logs",
 ] }
 prost = "0.14"
+notify = "8.2.0"
 
 [features]
 test-support = []

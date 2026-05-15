@@ -3,7 +3,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SYSLOG_BIN="${SYSLOG_BIN:-syslog}"
+SYSLOG_BIN="${SYSLOG_BIN:-}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 DB_PATH="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-${PROJECT_DIR}/data/syslog.db}}"
 SOURCE_FIXTURE="${SYSLOG_AI_SMOKE_FIXTURE:-${PROJECT_DIR}/tests/fixtures/ai-session-smoke.jsonl}"
@@ -16,6 +16,24 @@ pass() {
 fail() {
   printf 'FAIL  %s\n' "$1" >&2
   exit 1
+}
+
+resolve_syslog_bin() {
+  if [[ -n "$SYSLOG_BIN" ]]; then
+    if [[ -x "$SYSLOG_BIN" ]]; then
+      printf '%s\n' "$SYSLOG_BIN"
+    elif command -v "$SYSLOG_BIN" >/dev/null 2>&1; then
+      command -v "$SYSLOG_BIN"
+    else
+      fail "SYSLOG_BIN is not executable or on PATH: $SYSLOG_BIN"
+    fi
+  elif command -v syslog >/dev/null 2>&1; then
+    command -v syslog
+  elif [[ -x "${PROJECT_DIR}/target/debug/syslog" ]]; then
+    printf '%s\n' "${PROJECT_DIR}/target/debug/syslog"
+  else
+    fail "syslog binary not found; install syslog on PATH, set SYSLOG_BIN, or run cargo build"
+  fi
 }
 
 run_syslog() {
@@ -43,7 +61,8 @@ PY
 
 cd "$PROJECT_DIR"
 
-[[ -x "$(command -v "$SYSLOG_BIN")" ]] || fail "$SYSLOG_BIN is not on PATH"
+SYSLOG_BIN="$(resolve_syslog_bin)"
+[[ -x "$SYSLOG_BIN" ]] || fail "$SYSLOG_BIN is not executable"
 [[ -f "$SOURCE_FIXTURE" ]] || fail "fixture missing: $SOURCE_FIXTURE"
 
 SMOKE_DIR="$(mktemp -d)"
@@ -85,10 +104,20 @@ pass "ai checkpoints"
 
 tail_output="$(run_syslog tail -n 5 --app-name claude-transcript)"
 grep -q 'ai-smoke-session' <<<"$tail_output" || fail "tail output did not include fixture session"
-grep -qv ' localhost ' <<<"$tail_output" || fail "tail output still shows synthetic localhost transcript row"
+if grep -qE '\blocalhost\b' <<<"$tail_output"; then
+  fail "tail output still shows synthetic localhost transcript row"
+fi
 pass "tail transcript rendering"
 
 if [[ "${SYSLOG_AI_SMOKE_CHECK_RUNTIME:-1}" == "1" ]]; then
+  if bash scripts/check-runtime-current.sh >/tmp/syslog-ai-runtime-current.out 2>&1; then
+    pass "compose runtime current"
+  else
+    printf 'FAIL  compose runtime current check failed:\n' >&2
+    sed 's/^/      /' /tmp/syslog-ai-runtime-current.out >&2
+    exit 1
+  fi
+elif [[ "${SYSLOG_AI_SMOKE_CHECK_RUNTIME:-1}" == "warn" ]]; then
   if bash scripts/check-runtime-current.sh >/tmp/syslog-ai-runtime-current.out 2>&1; then
     pass "compose runtime current"
   else

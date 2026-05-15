@@ -14,7 +14,7 @@ use crate::observability::RuntimeObservability;
 use super::checkpoint::load_checkpoint;
 use super::client::DockerHostClient;
 use super::models::ContainerMeta;
-use super::parser::log_output_to_entry;
+use super::parser::{docker_event_to_entry, log_output_to_entry};
 
 const MIN_STREAM_DURATION_FOR_BACKOFF_RESET: Duration = Duration::from_secs(30);
 const RECONNECT_JITTER_MIN_PCT: u64 = 80;
@@ -189,6 +189,11 @@ async fn follow_container_events(
     while let Some(event) = events.next().await {
         let event = event?;
         runtime.observability.record_docker_ingest_event();
+        if let Some(entry) = docker_event_to_entry(&runtime.host.name, &event)? {
+            if runtime.ingest.send(entry).await.is_err() {
+                anyhow::bail!("Docker ingest channel closed");
+            }
+        }
         let action = event.action.unwrap_or_default();
         let Some(actor) = event.actor else {
             continue;

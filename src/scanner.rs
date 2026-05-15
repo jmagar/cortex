@@ -1,12 +1,14 @@
+use std::collections::HashSet;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::config::StorageConfig;
 use crate::db::{enforce_storage_budget, insert_logs_batch_in_tx, DbPool, LogBatchEntry};
+use crate::ingest_metadata::bounded_metadata_json;
 use crate::syslog::enrichment::{project_from_transcript_path, scrub_ai_message};
 
 mod checkpoint;
@@ -17,7 +19,7 @@ pub use checkpoint::CheckpointStore;
 
 const MAX_FILE_SIZE_BYTES: u64 = 1024 * 1024 * 1024;
 #[cfg(not(test))]
-const MAX_RECORD_SIZE_BYTES: usize = 512 * 1024 * 1024;
+const MAX_RECORD_SIZE_BYTES: usize = 32 * 1024 * 1024;
 #[cfg(test)]
 const MAX_RECORD_SIZE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_INDEX_CHUNK_RECORDS: usize = 500;
@@ -40,6 +42,8 @@ pub struct IndexResult {
     pub dropped_metadata_fields: usize,
     pub checkpoint_updates: usize,
     pub file_errors: Vec<IndexFileError>,
+    #[serde(skip)]
+    dropped_metadata_field_keys: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -130,6 +134,12 @@ pub struct AiDoctorReport {
 pub struct TranscriptRootStatus {
     pub path: String,
     pub exists: bool,
+    pub readable: bool,
+    pub writable: bool,
+    pub owner_uid: Option<u32>,
+    pub owner_gid: Option<u32>,
+    pub mode: Option<u32>,
+    pub strict_ok: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,9 +165,30 @@ pub fn validate_path(path: &Path) -> Result<()> {
         return Err(PathScanError::SymlinkNotAllowed(path.to_path_buf()).into());
     }
     if metadata.is_file() && metadata.len() > MAX_FILE_SIZE_BYTES {
-        bail!("file exceeds max size: {}", path.display());
+        return Err(PathScanError::FileTooLarge(path.to_path_buf()).into());
     }
     Ok(())
+}
+
+pub fn is_supported_transcript_file(path: &Path) -> bool {
+    supported_discovered_file(path)
+}
+
+pub fn is_invalid_input_error(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<PathScanError>().is_some()
+        || error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
+}
+
+pub fn default_transcript_roots() -> Vec<PathBuf> {
+    default_roots()
+}
+
+pub fn validate_transcript_scan_path(path: &Path) -> Result<PathBuf> {
+    validate_path(path)?;
+    reject_broad_scan_path(path)?;
+    Ok(path.canonicalize()?)
 }
 
 fn classify_path_error(error: &anyhow::Error, result: &mut IndexResult) {
@@ -165,6 +196,7 @@ fn classify_path_error(error: &anyhow::Error, result: &mut IndexResult) {
         match path_error {
             PathScanError::SymlinkNotAllowed(_) => result.skipped_symlinks += 1,
             PathScanError::UnsafePath(_) => result.skipped_unsafe_paths += 1,
+            PathScanError::FileTooLarge(_) | PathScanError::ExpectedFile(_) => {}
         }
     }
 }
@@ -192,6 +224,8 @@ fn reject_broad_scan_path(path: &Path) -> Result<()> {
 enum PathScanError {
     SymlinkNotAllowed(PathBuf),
     UnsafePath(PathBuf),
+    FileTooLarge(PathBuf),
+    ExpectedFile(PathBuf),
 }
 
 impl std::fmt::Display for PathScanError {
@@ -205,6 +239,8 @@ impl std::fmt::Display for PathScanError {
                 "unsafe transcript scan path: {}; pass a known transcript root or one .jsonl file",
                 path.display()
             ),
+            Self::FileTooLarge(path) => write!(f, "file exceeds max size: {}", path.display()),
+            Self::ExpectedFile(path) => write!(f, "expected a file path: {}", path.display()),
         }
     }
 }
@@ -334,7 +370,7 @@ pub fn index_file_with_options(
 ) -> Result<IndexResult> {
     validate_path(path)?;
     if !path.is_file() {
-        bail!("expected a file path: {}", path.display());
+        return Err(PathScanError::ExpectedFile(path.to_path_buf()).into());
     }
     if let Some(storage) = storage {
         let outcome = enforce_storage_budget(pool, storage)?;
@@ -369,6 +405,11 @@ pub fn index_file_with_options(
         checkpoint_store.reset_source(source_id, &canonical)?;
     }
     let current_metadata = FileMetadata::from_path_metadata(&canonical_path)?;
+    let stored_metadata = if !options.force {
+        checkpoint_store.source_metadata(source_id)?
+    } else {
+        None
+    };
     if !options.force
         && source_kind != SourceKind::ExplicitFile
         && checkpoint_store.source_matches_metadata(
@@ -376,19 +417,45 @@ pub fn index_file_with_options(
             current_metadata.size,
             current_metadata.mtime,
         )?
+        && source_hash_matches(&canonical_path, stored_metadata.as_ref())?
     {
         return Ok(IndexResult {
             discovered_files: 1,
             ..Default::default()
         });
     }
+    let append_start = if !options.force {
+        match stored_metadata.as_ref() {
+            Some(metadata) => append_start_offset(metadata, &current_metadata)?,
+            None => None,
+        }
+    } else {
+        None
+    };
     let mut imports = Vec::new();
     let mut batch = Vec::new();
     let mut chunk_bytes = 0usize;
     let file = fs::File::open(&canonical_path)?;
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
-    let mut line_no = 0usize;
+    let mut line_no = if let Some(offset) = append_start {
+        let counted = hash_prefix_and_count_lines(reader.get_mut(), &mut hasher, offset)?;
+        let prefix_hash = hex_digest(&hasher.clone().finalize());
+        if stored_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.content_hash.as_ref())
+            .is_some_and(|content_hash| prefix_hash != *content_hash)
+        {
+            hasher = Sha256::new();
+            reader.get_mut().seek(SeekFrom::Start(0))?;
+            0
+        } else {
+            reader.get_mut().seek(SeekFrom::Start(offset))?;
+            counted
+        }
+    } else {
+        0
+    };
     let mut result = IndexResult {
         discovered_files: 1,
         ..Default::default()
@@ -425,6 +492,7 @@ pub fn index_file_with_options(
                     parsed.ai_project.as_deref().or(fallback_project.as_deref()),
                     MAX_AI_PROJECT_CHARS,
                     "ai_project",
+                    &canonical,
                     &mut result,
                 );
                 let session_id = accept_metadata_field(
@@ -434,14 +502,25 @@ pub fn index_file_with_options(
                         .or(fallback_session_id.as_deref()),
                     MAX_AI_SESSION_ID_CHARS,
                     "ai_session_id",
+                    &canonical,
                     &mut result,
                 );
                 let transcript_path = accept_metadata_field(
                     Some(&canonical),
                     MAX_TRANSCRIPT_PATH_CHARS,
                     "ai_transcript_path",
+                    &canonical,
                     &mut result,
                 );
+                let metadata_json = bounded_metadata_json(serde_json::json!({
+                    "source_type": "transcript",
+                    "source_kind": source_kind.as_str(),
+                    "tool": tool,
+                    "canonical_path": canonical,
+                    "line_no": line_no,
+                    "record_key": record_key,
+                    "content_scrubbed": true,
+                }));
                 let entry = LogBatchEntry {
                     timestamp: normalize_timestamp(parsed.timestamp.as_deref())?,
                     hostname: "localhost".to_string(),
@@ -457,6 +536,7 @@ pub fn index_file_with_options(
                     ai_project: project,
                     ai_session_id: session_id,
                     ai_transcript_path: transcript_path,
+                    metadata_json: Some(metadata_json),
                 };
                 chunk_bytes = chunk_bytes.saturating_add(log_entry_string_bytes(&entry));
                 batch.push(entry);
@@ -528,6 +608,78 @@ pub fn index_file_with_options(
     Ok(result)
 }
 
+fn append_start_offset(
+    stored: &checkpoint::SourceMetadata,
+    current: &FileMetadata,
+) -> Result<Option<u64>> {
+    let Some(stored_size) = stored.file_size else {
+        return Ok(None);
+    };
+    if stored.last_error.is_some() || stored_size <= 0 {
+        return Ok(None);
+    }
+    if stored.content_hash.is_none() {
+        return Ok(None);
+    }
+    let Ok(stored_size) = u64::try_from(stored_size) else {
+        return Ok(None);
+    };
+    let last_offset = stored
+        .last_offset
+        .and_then(|offset| u64::try_from(offset).ok())
+        .unwrap_or(stored_size);
+    if stored_size >= current.size || last_offset > current.size {
+        return Ok(None);
+    }
+    if last_offset == 0 || last_offset != stored_size {
+        return Ok(None);
+    }
+    Ok(Some(last_offset))
+}
+
+fn source_hash_matches(path: &Path, stored: Option<&checkpoint::SourceMetadata>) -> Result<bool> {
+    let Some(content_hash) = stored.and_then(|metadata| metadata.content_hash.as_ref()) else {
+        return Ok(false);
+    };
+    Ok(hash_file(path)? == *content_hash)
+}
+
+fn hash_file(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut buffer = [0u8; 8192];
+    let mut hasher = Sha256::new();
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hex_digest(&hasher.finalize()))
+}
+
+fn hash_prefix_and_count_lines(
+    file: &mut fs::File,
+    hasher: &mut Sha256,
+    offset: u64,
+) -> Result<usize> {
+    file.seek(SeekFrom::Start(0))?;
+    let mut remaining = offset;
+    let mut buffer = [0u8; 8192];
+    let mut lines = 0usize;
+    while remaining > 0 {
+        let to_read = buffer.len().min(remaining as usize);
+        let read = file.read(&mut buffer[..to_read])?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        lines += buffer[..read].iter().filter(|byte| **byte == b'\n').count();
+        remaining -= read as u64;
+    }
+    Ok(lines)
+}
+
 pub fn list_checkpoints(
     pool: &DbPool,
     options: &CheckpointListOptions,
@@ -588,7 +740,7 @@ fn flush_chunk(
     let claimed = checkpoint::claim_imports_in_tx(&tx, source_id, imports)?;
     let mut claimed_batch = Vec::with_capacity(batch.len());
     let mut skipped_dupes = 0usize;
-    for (entry, claimed) in batch.iter().cloned().zip(claimed) {
+    for (entry, claimed) in batch.drain(..).zip(claimed) {
         if claimed {
             claimed_batch.push(entry);
         } else {
@@ -607,7 +759,6 @@ fn flush_chunk(
     if completion_metadata.is_some() {
         result.checkpoint_updates += 1;
     }
-    batch.clear();
     imports.clear();
     Ok(true)
 }
@@ -810,17 +961,16 @@ fn record_file_error(result: &mut IndexResult, path: &Path, error: &anyhow::Erro
 fn record_discovered_path_error(result: &mut IndexResult, path: &Path, error: &anyhow::Error) {
     result.skipped_files += 1;
     if is_permission_denied(error) {
-        tracing::debug!(
+        tracing::warn!(
             path = %path.display(),
             error = %error,
             "Skipping unreadable transcript path during discovery"
         );
-    } else {
-        result.file_errors.push(IndexFileError {
-            path: path.display().to_string(),
-            error: error.to_string(),
-        });
     }
+    result.file_errors.push(IndexFileError {
+        path: path.display().to_string(),
+        error: error.to_string(),
+    });
 }
 
 fn is_permission_denied(error: &anyhow::Error) -> bool {
@@ -833,6 +983,7 @@ fn accept_metadata_field(
     value: Option<&str>,
     max_chars: usize,
     field: &'static str,
+    file_key: &str,
     result: &mut IndexResult,
 ) -> Option<String> {
     let value = value?;
@@ -841,8 +992,13 @@ fn accept_metadata_field(
         return None;
     }
     if trimmed.chars().count() > max_chars {
-        result.dropped_metadata_fields += 1;
-        tracing::debug!(
+        if result
+            .dropped_metadata_field_keys
+            .insert(format!("{file_key}:{field}"))
+        {
+            result.dropped_metadata_fields += 1;
+        }
+        tracing::warn!(
             field,
             max_chars,
             actual_chars = trimmed.chars().count(),
@@ -889,6 +1045,7 @@ fn log_entry_string_bytes(entry: &LogBatchEntry) -> usize {
         .saturating_add(entry.ai_project.as_ref().map_or(0, String::len))
         .saturating_add(entry.ai_session_id.as_ref().map_or(0, String::len))
         .saturating_add(entry.ai_transcript_path.as_ref().map_or(0, String::len))
+        .saturating_add(entry.metadata_json.as_ref().map_or(0, String::len))
 }
 
 struct ReadLine {

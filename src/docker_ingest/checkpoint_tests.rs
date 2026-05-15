@@ -69,5 +69,6 @@ fn entry_with_checkpoint(host_name: &str, container_id: &str, timestamp: &str) -
         ai_project: None,
         ai_session_id: None,
         ai_transcript_path: None,
+        metadata_json: None,
     }
 }

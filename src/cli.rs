@@ -3,7 +3,9 @@ use serde::Serialize;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use syslog_mcp::app::{
-    CorrelateEventsRequest, CorrelateEventsResponse, DbStats, GetErrorsRequest, GetErrorsResponse,
+    AiCorrelateRequest, AiCorrelateResponse, CorrelateEventsRequest, CorrelateEventsResponse,
+    CussSearchRequest, CussSearchResponse, DbBackupResult, DbCheckpointResult, DbIntegrityResult,
+    DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest, GetErrorsResponse,
     ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
     ListHostsResponse, LogEntry, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
     SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SyslogService,
@@ -29,21 +31,27 @@ pub(crate) enum CliCommand {
     Stats(OutputArgs),
     Compose(ComposeCommand),
     Setup(SetupCommand),
+    Db(DbCommand),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AiCommand {
     Search(AiSearchArgs),
+    Cuss(AiCussArgs),
+    Correlate(AiCorrelateArgs),
     Blocks(AiBlocksArgs),
     Context(AiContextArgs),
     Tools(AiListArgs),
     Projects(AiListArgs),
     Index(AiIndexArgs),
     Add(AiAddArgs),
+    Watch(AiWatchArgs),
     Checkpoints(AiCheckpointsArgs),
     Errors(AiErrorsArgs),
     PruneCheckpoints(AiPruneCheckpointsArgs),
-    Doctor(OutputArgs),
+    Doctor(AiDoctorArgs),
+    WatchStatus(OutputArgs),
+    SmokeWatch(OutputArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,9 +83,62 @@ pub(crate) struct PluginHookArgs {
     pub no_repair: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DbCommand {
+    Status(OutputArgs),
+    Integrity(OutputArgs),
+    Checkpoint(DbCheckpointArgs),
+    Vacuum(DbVacuumArgs),
+    Backup(DbBackupArgs),
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OutputArgs {
     pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DbCheckpointArgs {
+    pub mode: String,
+    pub json: bool,
+}
+
+impl Default for DbCheckpointArgs {
+    fn default() -> Self {
+        Self {
+            mode: "passive".into(),
+            json: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DbVacuumArgs {
+    pub full: bool,
+    pub pages: u32,
+    pub json: bool,
+}
+
+impl Default for DbVacuumArgs {
+    fn default() -> Self {
+        Self {
+            full: false,
+            pages: 1000,
+            json: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct DbBackupArgs {
+    pub output: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiDoctorArgs {
+    pub json: bool,
+    pub strict_permissions: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -164,6 +225,38 @@ pub(crate) struct AiSearchArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiCussArgs {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub before: Option<u32>,
+    pub after: Option<u32>,
+    pub terms: Vec<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiCorrelateArgs {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub session_id: Option<String>,
+    pub ai_query: Option<String>,
+    pub log_query: Option<String>,
+    pub hostname: Option<String>,
+    pub source_ip: Option<String>,
+    pub app_name: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub window_minutes: Option<u32>,
+    pub severity_min: Option<String>,
+    pub limit: Option<u32>,
+    pub events_per_anchor: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AiBlocksArgs {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -204,6 +297,29 @@ pub(crate) struct AiAddArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AiWatchArgs {
+    pub path: Option<String>,
+    pub debounce_ms: u64,
+    pub settle_ms: u64,
+    pub max_retries: u8,
+    pub no_initial_scan: bool,
+    pub json: bool,
+}
+
+impl Default for AiWatchArgs {
+    fn default() -> Self {
+        Self {
+            path: None,
+            debounce_ms: 750,
+            settle_ms: 500,
+            max_retries: 5,
+            no_initial_scan: false,
+            json: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AiCheckpointsArgs {
     pub errors_only: bool,
@@ -242,6 +358,7 @@ impl CliCommand {
             "stats" => parse_stats(rest),
             "compose" => parse_compose(rest),
             "setup" => parse_setup(rest),
+            "db" => parse_db(rest),
             _ => bail!("unknown CLI command: {command}"),
         }
     }
@@ -340,6 +457,44 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                     .await?;
                 print_search_sessions_response(&response, json)?;
             }
+            AiCommand::Cuss(args) => {
+                let json = args.json;
+                let response = service
+                    .search_cusses(CussSearchRequest {
+                        project: args.project,
+                        tool: args.tool,
+                        from: args.from,
+                        to: args.to,
+                        limit: args.limit,
+                        before: args.before,
+                        after: args.after,
+                        terms: args.terms,
+                    })
+                    .await?;
+                print_cuss_search_response(&response, json)?;
+            }
+            AiCommand::Correlate(args) => {
+                let json = args.json;
+                let response = service
+                    .correlate_ai_logs(AiCorrelateRequest {
+                        project: args.project,
+                        tool: args.tool,
+                        session_id: args.session_id,
+                        ai_query: args.ai_query,
+                        log_query: args.log_query,
+                        hostname: args.hostname,
+                        source_ip: args.source_ip,
+                        app_name: args.app_name,
+                        from: args.from,
+                        to: args.to,
+                        window_minutes: args.window_minutes,
+                        severity_min: args.severity_min,
+                        limit: args.limit,
+                        events_per_anchor: args.events_per_anchor,
+                    })
+                    .await?;
+                print_ai_correlate_response(&response, json)?;
+            }
             AiCommand::Blocks(args) => {
                 let json = args.json;
                 let response = service
@@ -397,6 +552,17 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                 print_index_response(&response, args.json)?;
                 ensure_index_success(&response)?;
             }
+            AiCommand::Watch(args) => {
+                let options = syslog_mcp::ai_watch::WatchOptions {
+                    path: args.path.map(std::path::PathBuf::from),
+                    debounce: std::time::Duration::from_millis(args.debounce_ms),
+                    settle: std::time::Duration::from_millis(args.settle_ms),
+                    max_retries: args.max_retries,
+                    initial_scan: !args.no_initial_scan,
+                    json: args.json,
+                };
+                syslog_mcp::ai_watch::run(service, options).await?;
+            }
             AiCommand::Checkpoints(args) => {
                 let response = service
                     .list_ai_checkpoints(args.errors_only, args.missing_only, args.limit)
@@ -416,7 +582,18 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
             AiCommand::Doctor(args) => {
                 let response = service.ai_doctor().await?;
                 print_ai_doctor_response(&response, args.json)?;
-                ensure_ai_doctor_success(&response)?;
+                ensure_ai_doctor_success(&response, args.strict_permissions)?;
+            }
+            AiCommand::WatchStatus(args) => {
+                let response = ai_watch_status()?;
+                print_ai_watch_status_response(&response, args.json)?;
+            }
+            AiCommand::SmokeWatch(args) => {
+                let response = ai_smoke_watch(&service).await?;
+                print_ai_smoke_watch_response(&response, args.json)?;
+                if !response.pruned_missing_checkpoint {
+                    bail!("AI watch smoke checkpoint was not pruned within 30s");
+                }
             }
         },
         CliCommand::Correlate(args) => {
@@ -438,6 +615,34 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
             let response = service.get_stats().await?;
             print_stats_response(&response, args.json)?;
         }
+        CliCommand::Db(args) => match args {
+            DbCommand::Status(args) => {
+                let response = service.db_status().await?;
+                print_db_status_response(&response, args.json)?;
+            }
+            DbCommand::Integrity(args) => {
+                let response = service.db_integrity().await?;
+                print_db_integrity_response(&response, args.json)?;
+                if !response.ok {
+                    bail!("database integrity check failed");
+                }
+            }
+            DbCommand::Checkpoint(args) => {
+                let response = service.db_checkpoint(args.mode).await?;
+                print_db_checkpoint_response(&response, args.json)?;
+                if response.busy != 0 {
+                    bail!("database WAL checkpoint was busy");
+                }
+            }
+            DbCommand::Vacuum(args) => {
+                let response = service.db_vacuum(args.full, args.pages).await?;
+                print_db_vacuum_response(&response, args.json)?;
+            }
+            DbCommand::Backup(args) => {
+                let response = service.db_backup(args.output.map(PathBuf::from)).await?;
+                print_db_backup_response(&response, args.json)?;
+            }
+        },
         CliCommand::Compose(_) => {
             bail!("compose commands must run through run_compose");
         }
@@ -632,17 +837,25 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
         .ok_or_else(|| anyhow!("ai requires a subcommand"))?;
     match subcommand.as_str() {
         "search" => parse_ai_search(rest),
+        "cuss" => parse_ai_cuss(rest),
+        "correlate" => parse_ai_correlate(rest),
         "blocks" => parse_ai_blocks(rest),
         "context" => parse_ai_context(rest),
         "tools" => parse_ai_tools(rest),
         "projects" => parse_ai_projects(rest),
         "index" => parse_ai_index(rest),
         "add" => parse_ai_add(rest),
+        "watch" => parse_ai_watch(rest),
         "checkpoints" => parse_ai_checkpoints(rest),
         "errors" => parse_ai_errors(rest),
         "prune-checkpoints" => parse_ai_prune_checkpoints(rest),
-        "doctor" => Ok(CliCommand::Ai(AiCommand::Doctor(parse_output_args(
-            "ai doctor",
+        "doctor" => parse_ai_doctor(rest),
+        "watch-status" => Ok(CliCommand::Ai(AiCommand::WatchStatus(parse_output_args(
+            "ai watch-status",
+            rest,
+        )?))),
+        "smoke-watch" => Ok(CliCommand::Ai(AiCommand::SmokeWatch(parse_output_args(
+            "ai smoke-watch",
             rest,
         )?))),
         _ => bail!("unknown ai subcommand: {subcommand}"),
@@ -686,6 +899,146 @@ fn parse_ai_search(args: &[String]) -> Result<CliCommand> {
         bail!("ai search requires a query");
     }
     Ok(CliCommand::Ai(AiCommand::Search(parsed)))
+}
+
+fn parse_ai_cuss(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiCussArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            "--before" => {
+                parsed.before = Some(parse_u32_flag("--before", flags.value("--before")?)?)
+            }
+            "--after" => parsed.after = Some(parse_u32_flag("--after", flags.value("--after")?)?),
+            "--term" => parsed.terms.push(flags.value("--term")?),
+            _ if arg.starts_with("--project=") => {
+                parsed.project = Some(value_after_equals(arg, "--project")?)
+            }
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with("--before=") => {
+                parsed.before = Some(parse_u32_flag(
+                    "--before",
+                    value_after_equals(arg, "--before")?,
+                )?)
+            }
+            _ if arg.starts_with("--after=") => {
+                parsed.after = Some(parse_u32_flag(
+                    "--after",
+                    value_after_equals(arg, "--after")?,
+                )?)
+            }
+            _ if arg.starts_with("--term=") => {
+                parsed.terms.push(value_after_equals(arg, "--term")?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai cuss option: {arg}"),
+            _ => bail!("unexpected ai cuss argument: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Cuss(parsed)))
+}
+
+fn parse_ai_correlate(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiCorrelateArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--session-id" => parsed.session_id = Some(flags.value("--session-id")?),
+            "--ai-query" => parsed.ai_query = Some(flags.value("--ai-query")?),
+            "--log-query" => parsed.log_query = Some(flags.value("--log-query")?),
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--source-ip" => parsed.source_ip = Some(flags.value("--source-ip")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--window-minutes" => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    flags.value("--window-minutes")?,
+                )?)
+            }
+            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            "--events-per-anchor" => {
+                parsed.events_per_anchor = Some(parse_u32_flag(
+                    "--events-per-anchor",
+                    flags.value("--events-per-anchor")?,
+                )?)
+            }
+            _ if arg.starts_with("--project=") => {
+                parsed.project = Some(value_after_equals(arg, "--project")?)
+            }
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--session-id=") => {
+                parsed.session_id = Some(value_after_equals(arg, "--session-id")?)
+            }
+            _ if arg.starts_with("--ai-query=") => {
+                parsed.ai_query = Some(value_after_equals(arg, "--ai-query")?)
+            }
+            _ if arg.starts_with("--log-query=") => {
+                parsed.log_query = Some(value_after_equals(arg, "--log-query")?)
+            }
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--source-ip=") => {
+                parsed.source_ip = Some(value_after_equals(arg, "--source-ip")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--window-minutes=") => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    value_after_equals(arg, "--window-minutes")?,
+                )?)
+            }
+            _ if arg.starts_with("--severity-min=") => {
+                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with("--events-per-anchor=") => {
+                parsed.events_per_anchor = Some(parse_u32_flag(
+                    "--events-per-anchor",
+                    value_after_equals(arg, "--events-per-anchor")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai correlate option: {arg}"),
+            _ => bail!("unexpected ai correlate argument: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Correlate(parsed)))
 }
 
 fn parse_ai_blocks(args: &[String]) -> Result<CliCommand> {
@@ -829,6 +1182,65 @@ fn parse_ai_add(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Ai(AiCommand::Add(parsed)))
 }
 
+fn parse_positive_u64_flag(flag: &str, value: String) -> Result<u64> {
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| anyhow!("{flag} expects a positive integer"))?;
+    if parsed == 0 {
+        bail!("{flag} expects a positive integer");
+    }
+    Ok(parsed)
+}
+
+fn parse_ai_watch(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiWatchArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--path" => parsed.path = Some(flags.value("--path")?),
+            "--debounce-ms" => {
+                parsed.debounce_ms =
+                    parse_positive_u64_flag("--debounce-ms", flags.value("--debounce-ms")?)?;
+            }
+            "--settle-ms" => {
+                parsed.settle_ms =
+                    parse_positive_u64_flag("--settle-ms", flags.value("--settle-ms")?)?;
+            }
+            "--max-retries" => {
+                parsed.max_retries =
+                    parse_u32_flag("--max-retries", flags.value("--max-retries")?)?
+                        .try_into()
+                        .map_err(|_| anyhow!("--max-retries is too large"))?;
+            }
+            "--no-initial-scan" => parsed.no_initial_scan = true,
+            _ if arg.starts_with("--path=") => {
+                parsed.path = Some(value_after_equals(arg, "--path")?)
+            }
+            _ if arg.starts_with("--debounce-ms=") => {
+                parsed.debounce_ms = parse_positive_u64_flag(
+                    "--debounce-ms",
+                    value_after_equals(arg, "--debounce-ms")?,
+                )?;
+            }
+            _ if arg.starts_with("--settle-ms=") => {
+                parsed.settle_ms = parse_positive_u64_flag(
+                    "--settle-ms",
+                    value_after_equals(arg, "--settle-ms")?,
+                )?;
+            }
+            _ if arg.starts_with("--max-retries=") => {
+                parsed.max_retries =
+                    parse_u32_flag("--max-retries", value_after_equals(arg, "--max-retries")?)?
+                        .try_into()
+                        .map_err(|_| anyhow!("--max-retries is too large"))?;
+            }
+            _ => bail!("unknown ai watch option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Watch(parsed)))
+}
+
 fn parse_ai_checkpoints(args: &[String]) -> Result<CliCommand> {
     let mut parsed = AiCheckpointsArgs::default();
     let mut flags = FlagCursor::new(args);
@@ -893,8 +1305,366 @@ fn parse_ai_prune_checkpoints(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Ai(AiCommand::PruneCheckpoints(parsed)))
 }
 
+fn parse_ai_doctor(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiDoctorArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--strict-permissions" => parsed.strict_permissions = true,
+            _ => bail!("unknown ai doctor option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Doctor(parsed)))
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AiWatchStatusReport {
+    service: String,
+    active: Option<String>,
+    enabled: Option<String>,
+    main_pid: Option<u32>,
+    exec_start: Option<String>,
+    latest_journal: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AiSmokeWatchReport {
+    session_id: String,
+    transcript_path: PathBuf,
+    ingested: bool,
+    pruned_missing_checkpoint: bool,
+    missing_checkpoint_count: i64,
+}
+
+struct AiSmokeWatchTarget {
+    tool: &'static str,
+    project: String,
+    transcript_path: PathBuf,
+    body: String,
+}
+
+async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWatchReport> {
+    let doctor = service.ai_doctor().await?;
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let session_id = format!("syslogsmokewatch{stamp}{}", std::process::id());
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let target = smoke_watch_target(&doctor, &stamp, &session_id, &now)?;
+    if let Some(parent) = target.transcript_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&target.transcript_path, &target.body)?;
+    let canonical_transcript_path = target.transcript_path.canonicalize()?;
+
+    let mut ingested = false;
+    for _ in 0..30 {
+        let response = service
+            .search_sessions(SearchSessionsRequest {
+                query: session_id.clone(),
+                project: Some(target.project.clone()),
+                tool: Some(target.tool.into()),
+                from: None,
+                to: None,
+                limit: Some(5),
+            })
+            .await?;
+        if response
+            .sessions
+            .iter()
+            .any(|session| session.session_id == session_id)
+        {
+            ingested = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    if !ingested {
+        let _ = std::fs::remove_file(&target.transcript_path);
+        bail!("AI watch smoke file was not ingested within 30s");
+    }
+
+    std::fs::remove_file(&target.transcript_path)?;
+    let canonical_transcript_path = canonical_transcript_path.to_string_lossy().to_string();
+    let mut missing_checkpoint_count = i64::MAX;
+    let mut pruned_missing_checkpoint = false;
+    for _ in 0..30 {
+        let result = service.prune_ai_checkpoints(true, false, Some(500)).await?;
+        if result
+            .paths
+            .iter()
+            .any(|path| path == &canonical_transcript_path)
+        {
+            pruned_missing_checkpoint = true;
+        }
+        let current_doctor = service.ai_doctor().await?;
+        missing_checkpoint_count = current_doctor.missing_checkpoint_count;
+        if pruned_missing_checkpoint {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+
+    Ok(AiSmokeWatchReport {
+        session_id,
+        transcript_path: target.transcript_path,
+        ingested,
+        pruned_missing_checkpoint,
+        missing_checkpoint_count,
+    })
+}
+
+fn smoke_watch_target(
+    doctor: &AiDoctorReport,
+    stamp: &str,
+    session_id: &str,
+    now: &str,
+) -> Result<AiSmokeWatchTarget> {
+    let project = std::env::current_dir()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "/tmp/syslog-smoke-watch".to_string());
+    if doctor.claude_root.exists && doctor.claude_root.readable && doctor.claude_root.writable {
+        let root = PathBuf::from(&doctor.claude_root.path);
+        let transcript_path = root.join(format!("syslog-smoke-watch-{stamp}.jsonl"));
+        let body = serde_json::json!({
+            "sessionId": session_id,
+            "timestamp": now,
+            "cwd": project.clone(),
+            "content": format!("{session_id} live watcher smoke probe"),
+        })
+        .to_string()
+            + "\n";
+        return Ok(AiSmokeWatchTarget {
+            tool: "claude",
+            project,
+            transcript_path,
+            body,
+        });
+    }
+    if doctor.codex_root.exists && doctor.codex_root.readable && doctor.codex_root.writable {
+        let root = PathBuf::from(&doctor.codex_root.path);
+        let transcript_path = root.join(format!("syslog-smoke-watch-{stamp}.jsonl"));
+        let body = serde_json::json!({
+            "type": "session_meta",
+            "payload": {
+                "id": session_id,
+                "cwd": project.clone(),
+            },
+        })
+        .to_string()
+            + "\n"
+            + &serde_json::json!({
+                "type": "response_item",
+                "timestamp": now,
+                "payload": {
+                    "id": session_id,
+                    "content": [{
+                        "type": "output_text",
+                        "text": format!("{session_id} live watcher smoke probe"),
+                    }],
+                },
+            })
+            .to_string()
+            + "\n";
+        return Ok(AiSmokeWatchTarget {
+            tool: "codex",
+            project,
+            transcript_path,
+            body,
+        });
+    }
+    bail!("no writable AI transcript root is available for smoke-watch");
+}
+
+fn ai_watch_status() -> Result<AiWatchStatusReport> {
+    const SERVICE: &str = "syslog-ai-watch.service";
+    let active = systemctl_user_output(&["is-active", SERVICE]).ok();
+    let enabled = systemctl_user_output(&["is-enabled", SERVICE]).ok();
+    let main_pid = systemctl_user_output(&["show", "-p", "MainPID", "--value", SERVICE])
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|pid| *pid > 0);
+    let exec_start = systemctl_user_output(&["show", "-p", "ExecStart", "--value", SERVICE]).ok();
+    let latest_journal = command_output(
+        "journalctl",
+        &[
+            "--user",
+            "-u",
+            SERVICE,
+            "-n",
+            "10",
+            "--no-pager",
+            "--output",
+            "short-iso",
+        ],
+    )
+    .map(|raw| raw.lines().map(str::to_string).collect())
+    .unwrap_or_default();
+    Ok(AiWatchStatusReport {
+        service: SERVICE.to_string(),
+        active,
+        enabled,
+        main_pid,
+        exec_start,
+        latest_journal,
+    })
+}
+
+fn systemctl_user_output(args: &[&str]) -> Result<String> {
+    let mut command = std::process::Command::new("systemctl");
+    command.arg("--user").args(args);
+    let output = command.output()?;
+    let output =
+        if output.status.success() || std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() {
+            output
+        } else if systemctl_needs_user_bus_fallback(&output) {
+            if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
+                std::process::Command::new("systemctl")
+                    .env("XDG_RUNTIME_DIR", runtime_dir)
+                    .env("DBUS_SESSION_BUS_ADDRESS", bus_address)
+                    .arg("--user")
+                    .args(args)
+                    .output()?
+            } else {
+                output
+            }
+        } else {
+            output
+        };
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if output.status.success() || !stdout.is_empty() {
+        return Ok(stdout);
+    }
+    if !output.status.success() {
+        bail!(
+            "systemctl --user {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(stdout)
+}
+
+fn systemctl_needs_user_bus_fallback(output: &std::process::Output) -> bool {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stderr.contains("DBUS_SESSION_BUS_ADDRESS") || stderr.contains("user scope bus")
+}
+
+fn inferred_user_bus_env() -> Option<(PathBuf, String)> {
+    let runtime_dir = PathBuf::from(format!("/run/user/{}", current_uid()));
+    let bus = runtime_dir.join("bus");
+    bus.exists()
+        .then(|| (runtime_dir, format!("unix:path={}", bus.display())))
+}
+
+fn current_uid() -> u32 {
+    #[cfg(unix)]
+    {
+        unsafe { libc::geteuid() }
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+fn command_output(program: &str, args: &[&str]) -> Result<String> {
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    if program == "journalctl" && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
+            command
+                .env("XDG_RUNTIME_DIR", runtime_dir)
+                .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
+        }
+    }
+    let output = command.output()?;
+    if !output.status.success() {
+        bail!(
+            "{} {} failed: {}",
+            program,
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 fn parse_stats(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Stats(parse_output_args("stats", args)?))
+}
+
+fn parse_db(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("db requires a subcommand"))?;
+    match subcommand.as_str() {
+        "status" => Ok(CliCommand::Db(DbCommand::Status(parse_output_args(
+            "db status",
+            rest,
+        )?))),
+        "integrity" => Ok(CliCommand::Db(DbCommand::Integrity(parse_output_args(
+            "db integrity",
+            rest,
+        )?))),
+        "checkpoint" => parse_db_checkpoint(rest),
+        "vacuum" => parse_db_vacuum(rest),
+        "backup" => parse_db_backup(rest),
+        _ => bail!("unknown db subcommand: {subcommand}"),
+    }
+}
+
+fn parse_db_checkpoint(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = DbCheckpointArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--mode" => parsed.mode = flags.value("--mode")?,
+            _ if arg.starts_with("--mode=") => parsed.mode = value_after_equals(arg, "--mode")?,
+            _ => bail!("unknown db checkpoint option: {arg}"),
+        }
+    }
+    match parsed.mode.as_str() {
+        "passive" | "full" | "restart" | "truncate" => {}
+        _ => bail!("--mode must be one of passive, full, restart, truncate"),
+    }
+    Ok(CliCommand::Db(DbCommand::Checkpoint(parsed)))
+}
+
+fn parse_db_vacuum(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = DbVacuumArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--full" => parsed.full = true,
+            "--pages" => parsed.pages = parse_u32_flag("--pages", flags.value("--pages")?)?,
+            _ if arg.starts_with("--pages=") => {
+                parsed.pages = parse_u32_flag("--pages", value_after_equals(arg, "--pages")?)?
+            }
+            _ => bail!("unknown db vacuum option: {arg}"),
+        }
+    }
+    if parsed.pages == 0 {
+        bail!("--pages must be greater than zero");
+    }
+    Ok(CliCommand::Db(DbCommand::Vacuum(parsed)))
+}
+
+fn parse_db_backup(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = DbBackupArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--output" => parsed.output = Some(flags.value("--output")?),
+            _ if arg.starts_with("--output=") => {
+                parsed.output = Some(value_after_equals(arg, "--output")?)
+            }
+            _ => bail!("unknown db backup option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Db(DbCommand::Backup(parsed)))
 }
 
 fn parse_compose(args: &[String]) -> Result<CliCommand> {
@@ -1615,6 +2385,85 @@ fn print_search_sessions_response(response: &SearchSessionsResponse, json: bool)
     Ok(())
 }
 
+fn print_cuss_search_response(response: &CussSearchResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "{} cuss match(es) from {} candidate row(s){}",
+        response.matches.len(),
+        response.candidate_rows,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    if response.candidate_window_truncated {
+        println!(
+            "cuss scan capped at {} candidate rows; use --project, --tool, --from, or --to to narrow it",
+            response.candidate_cap
+        );
+    }
+    println!("terms: {}", response.terms.join(", "));
+    for item in &response.matches {
+        println!();
+        println!(
+            "match term={} id={} {}",
+            item.term, item.entry.id, item.entry.timestamp
+        );
+        for before in &item.before {
+            println!("  before:");
+            print_log(before);
+        }
+        println!("  hit:");
+        print_log(&item.entry);
+        for after in &item.after {
+            println!("  after:");
+            print_log(after);
+        }
+    }
+    Ok(())
+}
+
+fn print_ai_correlate_response(response: &AiCorrelateResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "{} AI anchor(s), {} related non-AI event(s), +/-{}m, severity >= {}{}",
+        response.total_anchors,
+        response.total_related_events,
+        response.window_minutes,
+        response.severity_min,
+        if response.anchors_truncated {
+            " (anchors truncated)"
+        } else {
+            ""
+        }
+    );
+    for anchor in &response.anchors {
+        println!();
+        println!(
+            "AI anchor id={} {} window={}..{}{}",
+            anchor.entry.id,
+            anchor.entry.timestamp,
+            anchor.window_from,
+            anchor.window_to,
+            if anchor.related_truncated {
+                " (related truncated)"
+            } else {
+                ""
+            }
+        );
+        print_log(&anchor.entry);
+        for log in &anchor.related {
+            print_log(log);
+        }
+    }
+    Ok(())
+}
+
 fn print_usage_blocks_response(response: &UsageBlocksResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);
@@ -1793,22 +2642,34 @@ fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) -> Result<()>
     }
     println!("db_path: {}", response.db_path);
     println!(
-        "claude_root: {} ({})",
+        "claude_root: {} ({}, readable={}, writable={}, owner={:?}:{:?}, mode={:?}, strict_ok={})",
         response.claude_root.path,
         if response.claude_root.exists {
             "exists"
         } else {
             "missing"
-        }
+        },
+        response.claude_root.readable,
+        response.claude_root.writable,
+        response.claude_root.owner_uid,
+        response.claude_root.owner_gid,
+        response.claude_root.mode.map(|mode| format!("{mode:o}")),
+        response.claude_root.strict_ok
     );
     println!(
-        "codex_root: {} ({})",
+        "codex_root: {} ({}, readable={}, writable={}, owner={:?}:{:?}, mode={:?}, strict_ok={})",
         response.codex_root.path,
         if response.codex_root.exists {
             "exists"
         } else {
             "missing"
-        }
+        },
+        response.codex_root.readable,
+        response.codex_root.writable,
+        response.codex_root.owner_uid,
+        response.codex_root.owner_gid,
+        response.codex_root.mode.map(|mode| format!("{mode:o}")),
+        response.codex_root.strict_ok
     );
     println!("checkpoint_count: {}", response.checkpoint_count);
     println!(
@@ -1825,6 +2686,51 @@ fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) -> Result<()>
         "newest_indexed: {} {}",
         response.newest_indexed_at.as_deref().unwrap_or("-"),
         response.newest_indexed_path.as_deref().unwrap_or("-")
+    );
+    Ok(())
+}
+
+fn print_ai_watch_status_response(response: &AiWatchStatusReport, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("service: {}", response.service);
+    println!("active: {}", response.active.as_deref().unwrap_or("-"));
+    println!("enabled: {}", response.enabled.as_deref().unwrap_or("-"));
+    println!(
+        "main_pid: {}",
+        response
+            .main_pid
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "exec_start: {}",
+        response.exec_start.as_deref().unwrap_or("-")
+    );
+    if !response.latest_journal.is_empty() {
+        println!("latest_journal:");
+        for line in &response.latest_journal {
+            println!("  {line}");
+        }
+    }
+    Ok(())
+}
+
+fn print_ai_smoke_watch_response(response: &AiSmokeWatchReport, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("session_id: {}", response.session_id);
+    println!("transcript_path: {}", response.transcript_path.display());
+    println!("ingested: {}", response.ingested);
+    println!(
+        "pruned_missing_checkpoint: {}",
+        response.pruned_missing_checkpoint
+    );
+    println!(
+        "missing_checkpoint_count: {}",
+        response.missing_checkpoint_count
     );
     Ok(())
 }
@@ -1859,6 +2765,12 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
         && response.storage_blocked_chunks == 0
         && response.parse_errors == 0
     {
+        if response.dropped_metadata_fields > 0 {
+            eprintln!(
+                "warning: {} transcript metadata field(s) were dropped",
+                response.dropped_metadata_fields
+            );
+        }
         Ok(())
     } else if response.storage_blocked_chunks > 0 {
         bail!(
@@ -1878,12 +2790,14 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
     }
 }
 
-fn ensure_ai_doctor_success(response: &AiDoctorReport) -> Result<()> {
-    if response.claude_root.exists || response.codex_root.exists {
-        Ok(())
-    } else {
-        bail!("no local AI transcript roots found")
+fn ensure_ai_doctor_success(response: &AiDoctorReport, strict_permissions: bool) -> Result<()> {
+    if strict_permissions
+        && ((response.claude_root.exists && !response.claude_root.strict_ok)
+            || (response.codex_root.exists && !response.codex_root.strict_ok))
+    {
+        bail!("AI transcript root permission check failed");
     }
+    Ok(())
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -1943,6 +2857,91 @@ fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
     println!("min_free_disk_mb: {}", stats.min_free_disk_mb);
     println!("write_blocked: {}", stats.write_blocked);
     println!("phantom_fts_rows: {}", stats.phantom_fts_rows);
+    Ok(())
+}
+
+fn print_db_status_response(status: &DbMaintenanceStatus, json: bool) -> Result<()> {
+    if json {
+        return print_json(status);
+    }
+    println!("db_path: {}", status.db_path.display());
+    println!("page_count: {}", status.page_count);
+    println!("freelist_count: {}", status.freelist_count);
+    println!("page_size: {}", status.page_size);
+    println!("logical_size_bytes: {}", status.logical_size_bytes);
+    println!("physical_size_bytes: {}", status.physical_size_bytes);
+    println!(
+        "wal_size_bytes: {}",
+        status
+            .wal_size_bytes
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "shm_size_bytes: {}",
+        status
+            .shm_size_bytes
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!("auto_vacuum: {}", status.auto_vacuum);
+    println!("journal_mode: {}", status.journal_mode);
+    println!(
+        "integrity_ok: {}",
+        status
+            .integrity_ok
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "not checked".to_string())
+    );
+    Ok(())
+}
+
+fn print_db_integrity_response(response: &DbIntegrityResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("ok: {}", response.ok);
+    for message in &response.messages {
+        println!("{message}");
+    }
+    Ok(())
+}
+
+fn print_db_checkpoint_response(response: &DbCheckpointResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("mode: {}", response.mode);
+    println!("busy: {}", response.busy);
+    println!("log_frames: {}", response.log_frames);
+    println!("checkpointed_frames: {}", response.checkpointed_frames);
+    Ok(())
+}
+
+fn print_db_vacuum_response(response: &DbVacuumResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("full: {}", response.full);
+    println!("incremental_pages: {}", response.incremental_pages);
+    println!(
+        "before_physical_size_bytes: {}",
+        response.before_physical_size_bytes
+    );
+    println!(
+        "after_physical_size_bytes: {}",
+        response.after_physical_size_bytes
+    );
+    Ok(())
+}
+
+fn print_db_backup_response(response: &DbBackupResult, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("db_path: {}", response.db_path.display());
+    println!("backup_path: {}", response.backup_path.display());
+    println!("size_bytes: {}", response.size_bytes);
     Ok(())
 }
 
