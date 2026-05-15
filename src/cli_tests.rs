@@ -159,6 +159,51 @@ fn parse_ai_cuss_collects_filters_and_context_options() {
 }
 
 #[test]
+fn parse_ai_correlate_collects_cross_reference_filters() {
+    let parsed = CliCommand::parse(strings(&[
+        "ai",
+        "correlate",
+        "--project=/tmp/project",
+        "--tool",
+        "codex",
+        "--session-id",
+        "sess-1",
+        "--ai-query",
+        "deploy",
+        "--log-query=error",
+        "--hostname",
+        "host-a",
+        "--app-name",
+        "dockerd",
+        "--window-minutes",
+        "15",
+        "--severity-min=err",
+        "--events-per-anchor",
+        "12",
+        "--json",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Ai(AiCommand::Correlate(AiCorrelateArgs {
+            project: Some("/tmp/project".into()),
+            tool: Some("codex".into()),
+            session_id: Some("sess-1".into()),
+            ai_query: Some("deploy".into()),
+            log_query: Some("error".into()),
+            hostname: Some("host-a".into()),
+            app_name: Some("dockerd".into()),
+            window_minutes: Some(15),
+            severity_min: Some("err".into()),
+            events_per_anchor: Some(12),
+            json: true,
+            ..Default::default()
+        }))
+    );
+}
+
+#[test]
 fn parse_ai_context_requires_project() {
     let err = CliCommand::parse(strings(&["ai", "context"])).unwrap_err();
     assert!(err.to_string().contains("requires --project"));

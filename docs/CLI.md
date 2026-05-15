@@ -180,6 +180,20 @@ syslog ai context --project /home/jmagar/workspace/syslog-mcp --limit 5
 Recent representative entries are capped at 20 rows, and message snippets are
 bounded to 256 characters for predictable MCP/CLI payload size.
 
+### `syslog ai correlate`
+
+Cross-reference AI transcript rows against nearby non-AI logs.
+
+```bash
+syslog ai correlate --project /home/jmagar/workspace/syslog-mcp --limit 5
+syslog ai correlate --ai-query deploy --log-query container --window-minutes 10 --severity-min warning --json
+```
+
+The AI side uses transcript rows as anchors. The related log side searches the
+normal log corpus inside each anchor window and excludes AI transcript rows, so
+the command surfaces host, Docker, OTLP, and syslog events around the session
+without duplicating the transcript stream itself.
+
 ### `syslog ai tools`
 
 List distinct AI tools with counts.
@@ -614,6 +628,7 @@ The direct CLI and MCP tool share the same business layer:
 | `syslog sessions` | `syslog` with `action="sessions"` |
 | `syslog ai search` | `syslog` with `action="search_sessions"` |
 | `syslog ai cuss` | `syslog` with `action="cuss"` |
+| `syslog ai correlate` | `syslog` with `action="ai_correlate"` |
 | `syslog ai blocks` | `syslog` with `action="usage_blocks"` |
 | `syslog ai context` | `syslog` with `action="project_context"` |
 | `syslog ai tools` | `syslog` with `action="list_ai_tools"` |

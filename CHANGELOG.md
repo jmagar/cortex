@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-05-15
+
+### Added
+
+- **AI/log cross-reference**: Added `syslog ai correlate` and MCP
+  `action="ai_correlate"` to use AI transcript rows as timeline anchors and
+  pull nearby non-AI syslog, Docker, OTLP, and host events from the same DB.
+
+### Fixed
+
+- **Transcript exclusion for correlation**: Related log searches now exclude
+  structured AI rows and legacy/plain transcript app rows such as
+  `codex-transcript`, preventing AI session streams from correlating with
+  themselves.
+
 ## [0.22.0] - 2026-05-15
 
 ### Added

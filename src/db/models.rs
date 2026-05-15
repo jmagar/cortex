@@ -162,6 +162,17 @@ pub struct AiCussResult {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiCorrelateParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub ai_session_id: Option<String>,
+    pub ai_query: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiUsageBlocksParams {
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
@@ -331,6 +342,7 @@ pub struct SearchParams {
     pub ai_tool: Option<String>,
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
+    pub exclude_ai: bool,
 }
 
 #[cfg(test)]

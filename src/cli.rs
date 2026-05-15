@@ -2,13 +2,13 @@ use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 use std::path::PathBuf;
 use syslog_mcp::app::{
-    CorrelateEventsRequest, CorrelateEventsResponse, CussSearchRequest, CussSearchResponse,
-    DbBackupResult, DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats,
-    DbVacuumResult, GetErrorsRequest, GetErrorsResponse, ListAiProjectsRequest,
-    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListHostsResponse, LogEntry,
-    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, SyslogService, TailLogsRequest,
-    UsageBlocksRequest, UsageBlocksResponse,
+    AiCorrelateRequest, AiCorrelateResponse, CorrelateEventsRequest, CorrelateEventsResponse,
+    CussSearchRequest, CussSearchResponse, DbBackupResult, DbCheckpointResult, DbIntegrityResult,
+    DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest, GetErrorsResponse,
+    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
+    ListHostsResponse, LogEntry, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SyslogService,
+    TailLogsRequest, UsageBlocksRequest, UsageBlocksResponse,
 };
 use syslog_mcp::compose::{
     CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
@@ -36,6 +36,7 @@ pub(crate) enum CliCommand {
 pub(crate) enum AiCommand {
     Search(AiSearchArgs),
     Cuss(AiCussArgs),
+    Correlate(AiCorrelateArgs),
     Blocks(AiBlocksArgs),
     Context(AiContextArgs),
     Tools(AiListArgs),
@@ -213,6 +214,25 @@ pub(crate) struct AiCussArgs {
     pub before: Option<u32>,
     pub after: Option<u32>,
     pub terms: Vec<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiCorrelateArgs {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub session_id: Option<String>,
+    pub ai_query: Option<String>,
+    pub log_query: Option<String>,
+    pub hostname: Option<String>,
+    pub source_ip: Option<String>,
+    pub app_name: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub window_minutes: Option<u32>,
+    pub severity_min: Option<String>,
+    pub limit: Option<u32>,
+    pub events_per_anchor: Option<u32>,
     pub json: bool,
 }
 
@@ -415,6 +435,28 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                     })
                     .await?;
                 print_cuss_search_response(&response, json)?;
+            }
+            AiCommand::Correlate(args) => {
+                let json = args.json;
+                let response = service
+                    .correlate_ai_logs(AiCorrelateRequest {
+                        project: args.project,
+                        tool: args.tool,
+                        session_id: args.session_id,
+                        ai_query: args.ai_query,
+                        log_query: args.log_query,
+                        hostname: args.hostname,
+                        source_ip: args.source_ip,
+                        app_name: args.app_name,
+                        from: args.from,
+                        to: args.to,
+                        window_minutes: args.window_minutes,
+                        severity_min: args.severity_min,
+                        limit: args.limit,
+                        events_per_anchor: args.events_per_anchor,
+                    })
+                    .await?;
+                print_ai_correlate_response(&response, json)?;
             }
             AiCommand::Blocks(args) => {
                 let json = args.json;
@@ -756,6 +798,7 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
     match subcommand.as_str() {
         "search" => parse_ai_search(rest),
         "cuss" => parse_ai_cuss(rest),
+        "correlate" => parse_ai_correlate(rest),
         "blocks" => parse_ai_blocks(rest),
         "context" => parse_ai_context(rest),
         "tools" => parse_ai_tools(rest),
@@ -870,6 +913,92 @@ fn parse_ai_cuss(args: &[String]) -> Result<CliCommand> {
         }
     }
     Ok(CliCommand::Ai(AiCommand::Cuss(parsed)))
+}
+
+fn parse_ai_correlate(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiCorrelateArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--session-id" => parsed.session_id = Some(flags.value("--session-id")?),
+            "--ai-query" => parsed.ai_query = Some(flags.value("--ai-query")?),
+            "--log-query" => parsed.log_query = Some(flags.value("--log-query")?),
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--source-ip" => parsed.source_ip = Some(flags.value("--source-ip")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--window-minutes" => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    flags.value("--window-minutes")?,
+                )?)
+            }
+            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            "--events-per-anchor" => {
+                parsed.events_per_anchor = Some(parse_u32_flag(
+                    "--events-per-anchor",
+                    flags.value("--events-per-anchor")?,
+                )?)
+            }
+            _ if arg.starts_with("--project=") => {
+                parsed.project = Some(value_after_equals(arg, "--project")?)
+            }
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--session-id=") => {
+                parsed.session_id = Some(value_after_equals(arg, "--session-id")?)
+            }
+            _ if arg.starts_with("--ai-query=") => {
+                parsed.ai_query = Some(value_after_equals(arg, "--ai-query")?)
+            }
+            _ if arg.starts_with("--log-query=") => {
+                parsed.log_query = Some(value_after_equals(arg, "--log-query")?)
+            }
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--source-ip=") => {
+                parsed.source_ip = Some(value_after_equals(arg, "--source-ip")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--window-minutes=") => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    value_after_equals(arg, "--window-minutes")?,
+                )?)
+            }
+            _ if arg.starts_with("--severity-min=") => {
+                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with("--events-per-anchor=") => {
+                parsed.events_per_anchor = Some(parse_u32_flag(
+                    "--events-per-anchor",
+                    value_after_equals(arg, "--events-per-anchor")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai correlate option: {arg}"),
+            _ => bail!("unexpected ai correlate argument: {arg}"),
+        }
+    }
+    Ok(CliCommand::Ai(AiCommand::Correlate(parsed)))
 }
 
 fn parse_ai_blocks(args: &[String]) -> Result<CliCommand> {
@@ -1886,6 +2015,44 @@ fn print_cuss_search_response(response: &CussSearchResponse, json: bool) -> Resu
         for after in &item.after {
             println!("  after:");
             print_log(after);
+        }
+    }
+    Ok(())
+}
+
+fn print_ai_correlate_response(response: &AiCorrelateResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "{} AI anchor(s), {} related non-AI event(s), +/-{}m, severity >= {}{}",
+        response.total_anchors,
+        response.total_related_events,
+        response.window_minutes,
+        response.severity_min,
+        if response.anchors_truncated {
+            " (anchors truncated)"
+        } else {
+            ""
+        }
+    );
+    for anchor in &response.anchors {
+        println!();
+        println!(
+            "AI anchor id={} {} window={}..{}{}",
+            anchor.entry.id,
+            anchor.entry.timestamp,
+            anchor.window_from,
+            anchor.window_to,
+            if anchor.related_truncated {
+                " (related truncated)"
+            } else {
+                ""
+            }
+        );
+        print_log(&anchor.entry);
+        for log in &anchor.related {
+            print_log(log);
         }
     }
     Ok(())
