@@ -150,7 +150,7 @@ The **server** owns the schedule. Each connected agent receives a `schedule.set`
 
 ## 5. On-Demand Pull Flow
 
-```
+```text
 MCP client ──action──▶ syslog-mcp server
                             │
                             │ 1. cache check (probe_results, freshness window)
@@ -329,7 +329,7 @@ pub struct BlackholeEntry {
 
 **Default path set** (resolved per-user; agent scans all `/home/*` + `/root`):
 
-```
+```text
 ~/.cargo/target          (Rust)
 ~/.cargo/registry        (Rust)
 ~/.rustup
@@ -407,7 +407,7 @@ pub struct PsiBucket { pub avg10: f32, pub avg60: f32, pub avg300: f32, pub tota
 
 **Implementation**: read `/proc/pressure/memory` (one open + read; ~200 bytes). Parse two lines:
 
-```
+```text
 some avg10=0.00 avg60=0.00 avg300=0.00 total=...
 full avg10=0.00 avg60=0.00 avg300=0.00 total=...
 ```

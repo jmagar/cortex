@@ -30,7 +30,7 @@ The agent must:
 
 ## 2. Topology
 
-```
+```text
 ┌───────────────────────────────────────────────────────────────────────┐
 │                              tootie                                   │
 │                                                                       │
@@ -52,7 +52,7 @@ The agent must:
 │                                                  ▼                    │
 │  HTTP API / MCP (:3100) ──────────►  ┌────────────────────────────┐   │
 │                                      │ db/ pool + queries         │   │
-│                                      │  logs (source_kind=…)      │   │
+│                                      │  logs (metadata.source_kind=…) │  │
 │                                      │  agents (NEW table)        │   │
 │                                      └────────────────────────────┘   │
 └───────────────────────────────────────────────────────────────────────┘
@@ -65,7 +65,7 @@ The agent must:
                 │ syslog agent (NEW binary on each  │
                 │ remote host)                      │
                 │  - tailers (journald, files, ...) │
-                │  - local buffer (sled)            │
+                │  - local buffer (redb)            │
                 │  - JSON-RPC client                │
                 │  - probe registry (epic fue9)     │
                 └───────────────────────────────────┘
@@ -329,7 +329,7 @@ The unauthenticated socket window is bounded by `handshake_timeout = 5s` and an 
 
 ### 7.1 State machine (agent-side)
 
-```
+```text
 Disconnected ──(start)──► Connecting
    ▲                         │
    │              wss upgrade│
@@ -351,7 +351,7 @@ Disconnected ──(start)──► Connecting
 
 Full-jitter exponential backoff over `(base=1s, cap=60s)`:
 
-```
+```text
 delay = random_between(0, min(cap, base * 2^attempt))
 ```
 
@@ -582,24 +582,24 @@ A new MCP action `agent.probe` (separate spec) calls `ProbeRouter::invoke`. Insi
 
 ## 12. Co-existence With UDP/TCP Listener
 
-### `source_kind` enum on `logs`
+### Source identification
 
-Add a `source_kind TEXT NOT NULL DEFAULT 'syslog-udp'` column via migration. Values:
+**`source_kind` is stored in `metadata_json`, not as a column on `logs`.** Per the cross-cutting audit locked in `docs/contracts/source-kinds.md` and `docs/contracts/log-row-shape.md` (invariant 1: "no source-private columns"), all ingest sources identify themselves via the `source_ip` URI scheme and the `metadata_json.source_kind` key — not a dedicated SQL column.
 
-| Value            | Producer                                |
-| ---------------- | --------------------------------------- |
-| `syslog-udp`     | UDP listener (default for legacy)       |
-| `syslog-tcp`     | TCP listener                            |
-| `agent`          | WS agent path                           |
-| `docker-stream`  | Docker container stdout/stderr ingester |
-| `docker-event`   | Docker lifecycle event ingester         |
-| `otlp`           | OTLP HTTP ingest (existing)             |
-| `unifi-api`      | UniFi poller (epic C)                   |
-| `adguard-api`    | AdGuard poller (epic C)                 |
+The agent path sets `source_ip = "agent://<host_id>/"` on every row it produces. The existing enrichment dispatch (epic 1wjr) and MCP filters key off this URI scheme to distinguish agent rows from UDP/TCP syslog rows.
 
-Closed enumeration pinned in `docs/contracts/source-kinds.md`. Splits `docker-ingest` (used in this spec's earlier draft) into the two-way `docker-stream` / `docker-event` per the source-kinds contract.
+The closed enumeration of `source_kind` values is pinned in `docs/contracts/source-kinds.md`. Relevant values for this epic:
 
-Both listeners and the agent path tag their rows; index added: `CREATE INDEX idx_logs_source_kind_received_at ON logs(source_kind, received_at)`.
+| Value            | Producer                                | `source_ip` scheme        |
+| ---------------- | --------------------------------------- | ------------------------- |
+| `syslog-udp`     | UDP listener                            | `udp://…`                 |
+| `syslog-tcp`     | TCP listener                            | `tcp://…`                 |
+| `agent`          | WS agent path (this spec)               | `agent://<host_id>/`      |
+| `docker-stream`  | Docker container stdout/stderr ingester | `docker://…`              |
+| `docker-event`   | Docker lifecycle event ingester         | `docker-event://…`        |
+| `otlp`           | OTLP HTTP ingest                        | `otlp://…`                |
+| `unifi-api`      | UniFi poller (epic C)                   | `unifi://<controller>/`   |
+| `adguard-api`    | AdGuard poller (epic C)                 | `adguard://<host>/`       |
 
 ### Dedup
 
@@ -608,7 +608,7 @@ A host running BOTH rsyslog→UDP AND the agent will produce two rows per event.
 - On hosts where we install the agent, the deploy hook (`scripts/agent-deploy.sh`, future) **disables** the rsyslog forwarding drop-in installed by the existing `syslog-deploy-dropins` skill.
 - The agent itself reads journald, not via the syslog socket, so rsyslog on that host can continue to write to disk locally without forwarding.
 
-If duplicates do appear, downstream search queries can filter `source_kind = 'agent'` to get the canonical agent stream.
+If duplicates do appear, downstream search queries can filter on `source_ip LIKE 'agent://%'` to get the canonical agent stream.
 
 ---
 

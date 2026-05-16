@@ -19,7 +19,7 @@
 
 The new framework sits between syslog parsing and the SQL `INSERT` — at the same point in the pipeline as the existing `enrich_entry` in `src/syslog/enrichment.rs`. Every entry, regardless of origin (RFC syslog, Docker stream, Docker event, OTLP, AdGuard API poller), is already shaped into a `LogBatchEntry` before it reaches the writer. The dispatcher therefore needs no new transport — it runs on the writer hot path against an already-decoded envelope.
 
-```
+```text
 +-----------------+   +---------------+   +-----------------+
 | syslog UDP/TCP  |   | docker stream |   | adguard API     |
 | (parse_syslog)  |   | (docker_ingest|   | poller          |

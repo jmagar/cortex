@@ -34,7 +34,7 @@ V1 success criterion: the user's three concrete pain points are eliminated.
 
 ## 2. Architecture
 
-```
+```text
                       Enrichment pipeline (Epic B)
                                   │
               parsed LogEntry { fields: {http_status,
@@ -101,7 +101,7 @@ Both the rule evaluator and the digest scheduler are background tasks owned by `
 
 We use the **stored-config** endpoint (`/notify/{config_key}`) so the user's backend list lives on the apprise side, not in syslog-mcp config. Form-encoded body (apprise's native form; also accepts JSON — either works, we pick form for simpler `reqwest` ergonomics):
 
-```
+```http
 POST {apprise_url}/notify/{config_key}
 Content-Type: application/x-www-form-urlencoded
 X-Apprise-Token: {token}      # optional, only if apprise-api is auth-protected
@@ -390,7 +390,7 @@ Scheduler: `tokio::time::interval` driven, with a small `chrono_tz` step that co
 
 One apprise POST per digest:
 
-```
+```http
 POST {apprise_url}/notify/{config_key}
 title=syslog-mcp digest — 2026-05-16
 body=<rendered markdown>

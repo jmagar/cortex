@@ -27,7 +27,7 @@ Concrete user-facing capabilities:
 
 ## 2. Architecture
 
-```
+```text
 INGEST PATH (write side, idempotent)
 ────────────────────────────────────
 
@@ -136,7 +136,7 @@ What gets embedded is a **templated incident card** — structured text combinin
 
 ### Template
 
-```
+```text
 INCIDENT {incident_id}
 host={host} app={app_name} source={epic_b_source}
 window={t_start}..{t_end} ({duration_s}s) event_count={n}
@@ -155,7 +155,7 @@ sample lines:
 
 ### Worked Example A — Kernel OOM
 
-```
+```text
 INCIDENT inc_2026-05-15T03:17:12Z_jenny_a4f9
 host=jenny app=kernel source=kernel.oom
 window=2026-05-15T03:17:08Z..2026-05-15T03:17:34Z (26s) event_count=4
@@ -178,7 +178,7 @@ sample lines:
 
 ### Worked Example B — Docker container die
 
-```
+```text
 INCIDENT inc_2026-05-15T14:02:03Z_squirts_b7e2
 host=squirts app=dockerd source=docker_event
 window=2026-05-15T14:02:00Z..2026-05-15T14:02:15Z (15s) event_count=2
@@ -199,7 +199,7 @@ sample lines:
 
 ### Worked Example C — Fail2ban cluster
 
-```
+```text
 INCIDENT inc_2026-05-15T07:44:00Z_tootie_c1a3
 host=tootie app=fail2ban source=fail2ban
 window=2026-05-15T07:44:00Z..2026-05-15T07:48:51Z (291s) event_count=14
@@ -306,7 +306,7 @@ Three entry points, all converging on a single internal `IncidentQuery`:
 
 ### 7.2 axon hybrid query parameters
 
-```
+```yaml
 action: query
 query: <card_text_or_freeform>
 collection: <default>           # one shared collection, filtered by source_type
@@ -321,7 +321,7 @@ We filter results client-side on `payload.source_type == "incident"` (until axon
 
 In parallel with the axon call, run `search_ai_sessions` from `src/db/queries.rs`:
 
-```
+```rust
 SearchAiSessionsParams {
     fts_query: <keywords extracted from card: container_name, victim_comm, jail, etc.>,
     project: optional,

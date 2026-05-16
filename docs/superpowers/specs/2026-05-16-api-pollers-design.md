@@ -35,7 +35,7 @@ dispatch as RFC 3164/5424 syslog. The two sources:
 
 ## 2. Architecture
 
-```
+```text
                                           ┌─────────────────────────────┐
    AdGuard Home  ──── HTTPS basicAuth ─▶  │  adguard_poller (tokio task) │
    (./control/querylog?older_than=…)      │  cursor: last item time      │
@@ -196,7 +196,7 @@ Mapping:
 | `process_id`          | `subsystem` (`"lan"` / `"wlan"` / `"wan"`) |
 | `message`             | `msg`                                      |
 | `raw`                 | the entire JSON event re-serialized        |
-| `source_ip`           | `unifi://<controller_host>/site/<site>`    |
+| `source_ip`           | `unifi://<controller_host>/`               |
 | `metadata_json`       | `{"unifi": {"key": "...", "_id": "...", "ip": "...", "mac": "...", "ap": "...", "ssid": "...", "user": "..."}}` |
 
 `source_kind` is **not** a column on `logs`. Per locked decision (4), poller rows are
@@ -324,7 +324,7 @@ for 7-day retention (line 58).
 | `process_id`          | `client_info.name` if present, else `client`             |
 | `message`             | `"{reason} {client} {question.name} {question.type} → {answer[0].value or ''} ({elapsedMs}ms via {upstream})"` |
 | `raw`                 | re-serialized JSON                                        |
-| `source_ip`           | `adguard://<hostname>/<client>`                           |
+| `source_ip`           | `adguard://<hostname>/`                                   |
 | `metadata_json`       | `{"adguard": {<full record minus prompt-sized fields>}}` |
 
 `metadata_json.adguard` is the canonical input that `adguard_parser` reads (epic 1wjr).
@@ -395,7 +395,7 @@ page_size = 500
 Env var equivalents follow the flat `SYSLOG_MCP_*` convention (recorded in
 `Memory · Infrastructure & Deployment`):
 
-```
+```bash
 SYSLOG_MCP_POLLERS_UNIFI_ENABLED
 SYSLOG_MCP_POLLERS_UNIFI_URL
 SYSLOG_MCP_POLLERS_UNIFI_API_KEY
