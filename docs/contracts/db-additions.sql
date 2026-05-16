@@ -204,7 +204,7 @@ CREATE INDEX IF NOT EXISTS idx_metrics_ts
 -- Cited by retention-policy.md and probe-registry-design.md §6.
 -- Retention: 5m → 90d, 1h → 365d. Downsampling worker is part of Epic D maintenance.
 
-CREATE TABLE metrics_gauge_5m (
+CREATE TABLE IF NOT EXISTS metrics_gauge_5m (
     host_id      TEXT NOT NULL,
     metric_name  TEXT NOT NULL,
     labels_hash  TEXT NOT NULL,            -- BLAKE3 of normalized labels JSON; reduces label cardinality
@@ -217,10 +217,10 @@ CREATE TABLE metrics_gauge_5m (
     PRIMARY KEY (host_id, metric_name, labels_hash, bucket_ts)
 ) WITHOUT ROWID;
 
-CREATE INDEX idx_metrics_gauge_5m_lookup
+CREATE INDEX IF NOT EXISTS idx_metrics_gauge_5m_lookup
     ON metrics_gauge_5m (host_id, metric_name, bucket_ts DESC);
 
-CREATE TABLE metrics_gauge_1h (
+CREATE TABLE IF NOT EXISTS metrics_gauge_1h (
     host_id      TEXT NOT NULL,
     metric_name  TEXT NOT NULL,
     labels_hash  TEXT NOT NULL,
@@ -233,7 +233,7 @@ CREATE TABLE metrics_gauge_1h (
     PRIMARY KEY (host_id, metric_name, labels_hash, bucket_ts)
 ) WITHOUT ROWID;
 
-CREATE INDEX idx_metrics_gauge_1h_lookup
+CREATE INDEX IF NOT EXISTS idx_metrics_gauge_1h_lookup
     ON metrics_gauge_1h (host_id, metric_name, bucket_ts DESC);
 
 -- One row per probe execution. JSON payload is a serialized ProbeOutput.
@@ -285,7 +285,8 @@ CREATE TABLE IF NOT EXISTS alert_state (
 -- "All currently active alerts" — partial index over the active set only.
 -- (Source: §6)
 CREATE INDEX IF NOT EXISTS idx_alert_state_active
-    ON alert_state(ack_at) WHERE ack_at IS NULL;
+    ON alert_state(ack_at)
+    WHERE ack_at IS NULL;
 
 -- "Recent fire history for rule X" / escalator scans. (Source: §6)
 CREATE INDEX IF NOT EXISTS idx_alert_state_rule_lastfired
@@ -333,7 +334,8 @@ CREATE INDEX IF NOT EXISTS idx_incidents_host_time
 -- Embed-pipeline worker scans only the non-embedded set. Partial index keeps
 -- this trivially fast even as the corpus grows. (Source: §6)
 CREATE INDEX IF NOT EXISTS idx_incidents_embed_status
-    ON incidents(embed_status) WHERE embed_status != 'embedded';
+    ON incidents(embed_status)
+    WHERE embed_status != 'embedded';
 
 -- =============================================================================
 -- End of contract.

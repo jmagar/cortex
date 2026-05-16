@@ -193,12 +193,14 @@ pub struct ContainerHealth {
 /// { "probe": "mem.top", "payload": { "processes": [...] } }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "probe", content = "payload", rename_all = "snake_case")]
+#[serde(tag = "probe", content = "payload")]
 pub enum ProbeOutput {
     /// `disk.usage` — per-mountpoint capacity.
+    #[serde(rename = "disk.usage")]
     DiskUsage { mounts: Vec<MountInfo> },
 
     /// `disk.blackholes` — high-churn build-cache paths.
+    #[serde(rename = "disk.blackholes")]
     DiskBlackholes {
         entries: Vec<BlackholeEntry>,
         /// Paths whose walker hit its time or entry budget.
@@ -206,6 +208,7 @@ pub enum ProbeOutput {
     },
 
     /// `mem.top` — top-N processes by RSS.
+    #[serde(rename = "mem.top")]
     MemTop {
         total_mem_bytes: u64,
         avail_mem_bytes: u64,
@@ -214,6 +217,7 @@ pub enum ProbeOutput {
 
     /// `mem.pressure` — PSI memory pressure (some + full buckets, three
     /// averaging windows each plus total_us).
+    #[serde(rename = "mem.pressure")]
     MemPressure {
         avg10: f32,
         avg60: f32,
@@ -226,12 +230,15 @@ pub enum ProbeOutput {
     },
 
     /// `net.neigh` — ARP/NDP neighbour table.
+    #[serde(rename = "net.neigh")]
     NetNeigh { entries: Vec<NeighEntry> },
 
     /// `net.dns_check` — per-(hostname × resolver) probe.
+    #[serde(rename = "net.dns_check")]
     NetDnsCheck { results: Vec<DnsCheckResult> },
 
     /// `systemd.failed` — failed unit enumeration.
+    #[serde(rename = "systemd.failed")]
     SystemdFailed {
         /// `running` | `degraded` | `maintenance` | ...
         system_state: String,
@@ -239,6 +246,7 @@ pub enum ProbeOutput {
     },
 
     /// `docker.health` — per-container state.
+    #[serde(rename = "docker.health")]
     DockerHealth {
         containers: Vec<ContainerHealth>,
         daemon_version: Option<String>,
