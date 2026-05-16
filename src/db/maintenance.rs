@@ -62,9 +62,16 @@ pub fn db_full_vacuum(pool: &DbPool) -> Result<()> {
     Ok(())
 }
 
-pub fn db_integrity_check(pool: &DbPool) -> Result<Vec<String>> {
+/// Run `PRAGMA integrity_check` (full) or `PRAGMA quick_check` (skips
+/// cross-row consistency, ~10x faster on multi-GB databases).
+pub fn db_integrity_check(pool: &DbPool, quick: bool) -> Result<Vec<String>> {
     let conn = pool.get()?;
-    let mut stmt = conn.prepare("PRAGMA integrity_check")?;
+    let pragma = if quick {
+        "quick_check"
+    } else {
+        "integrity_check"
+    };
+    let mut stmt = conn.prepare(&format!("PRAGMA {pragma}"))?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     let messages = rows.collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(messages)

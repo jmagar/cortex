@@ -468,9 +468,9 @@ impl SyslogService {
         .await
     }
 
-    pub async fn db_integrity(&self) -> ServiceResult<DbIntegrityResult> {
+    pub async fn db_integrity(&self, quick: bool) -> ServiceResult<DbIntegrityResult> {
         self.run_db(move |pool| {
-            let messages = db::db_integrity_check(pool)?;
+            let messages = db::db_integrity_check(pool, quick)?;
             Ok(DbIntegrityResult {
                 ok: messages.len() == 1 && messages.first().is_some_and(|value| value == "ok"),
                 messages,

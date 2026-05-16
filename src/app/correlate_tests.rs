@@ -33,8 +33,8 @@ fn severity_threshold_expands_to_more_severe_levels() {
 
 #[test]
 fn severity_threshold_rejects_unknown_levels() {
-    let err = severity_at_or_above("fatal").expect_err("invalid severity should fail");
-    assert!(err.to_string().contains("Invalid severity_min 'fatal'"));
+    let err = severity_at_or_above("bogus").expect_err("invalid severity should fail");
+    assert!(err.to_string().contains("Invalid severity_min 'bogus'"));
 }
 
 #[test]

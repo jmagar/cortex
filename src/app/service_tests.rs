@@ -204,12 +204,12 @@ async fn search_logs_rejects_invalid_severity() {
 
     let err = service
         .search_logs(SearchLogsRequest {
-            severity: Some("critical".into()),
+            severity: Some("bogus".into()),
             ..Default::default()
         })
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("Invalid severity 'critical'"));
+    assert!(err.to_string().contains("Invalid severity 'bogus'"));
     assert!(err.to_string().contains("emerg, alert, crit"));
 }
 

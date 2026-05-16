@@ -299,7 +299,11 @@ fn migration_13_adds_enrichment_columns() {
     }
 
     let version_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM schema_migrations WHERE version = 13", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 13",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(version_count, 1, "migration 13 row not recorded");
 }

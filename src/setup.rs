@@ -721,13 +721,19 @@ pub async fn run_setup_doctor() -> io::Result<SetupReport> {
             &wrapper_path,
             "run syslog setup debug-wrapper install",
         ),
-        check_debug_wrapper_content_phase(&wrapper_path, &repo_path),
+        downgrade_dev_phase(
+            check_debug_wrapper_content_phase(&wrapper_path, &repo_path),
+            "production binary installed (not the dev wrapper — expected in production)",
+        ),
         check_file_phase(
             "debug-compose",
             &debug_override_path,
             "run syslog setup debug-compose install",
         ),
-        check_debug_compose_content_phase(&debug_override_path, &repo_path),
+        downgrade_dev_phase(
+            check_debug_compose_content_phase(&debug_override_path, &repo_path),
+            "override uses production config (not the debug build override — expected in production)",
+        ),
         transcript_root_permissions_phase(&user_home),
         ai_index_timer_disabled_phase(),
     ];
@@ -1196,6 +1202,24 @@ cargo build --quiet --bin syslog
 exec "${{CARGO_TARGET_DIR}}/debug/syslog" "$@"
 "#
     )
+}
+
+/// Dev-mode checks (debug-wrapper-content, debug-compose-content) always fail
+/// when a production binary/override is installed. In `setup doctor` that's the
+/// expected steady state, so we downgrade Error → Warn with a clearer detail
+/// and rewrite the issue kind accordingly. Other contexts (e.g. `syslog setup
+/// debug-wrapper check`) keep the raw Error semantics.
+fn downgrade_dev_phase(phase: SetupPhase, detail: &str) -> SetupPhase {
+    if matches!(phase.status, SetupStatus::Error) {
+        SetupPhase {
+            status: SetupStatus::Warn,
+            issue_kind: None,
+            detail: detail.to_string(),
+            ..phase
+        }
+    } else {
+        phase
+    }
 }
 
 fn check_debug_wrapper_content_phase(wrapper_path: &Path, repo_path: &Path) -> SetupPhase {
