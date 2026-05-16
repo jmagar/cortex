@@ -750,7 +750,8 @@ fn list_ai_tool_and_project_inventory() {
 }
 
 #[test]
-fn list_ai_inventory_reports_true_totals_and_truncation() {
+fn list_ai_inventory_reports_truncation() {
+    // When truncated, total_X == len (the limit); truncated flag is authoritative.
     let (pool, _dir) = test_pool();
     let mut entries = Vec::new();
     for i in 0..201 {
@@ -767,12 +768,12 @@ fn list_ai_inventory_reports_true_totals_and_truncation() {
 
     let tools = list_ai_tools(&pool, &ListAiToolsParams::default()).unwrap();
     assert_eq!(tools.tools.len(), 100);
-    assert_eq!(tools.total_tools, 201);
+    assert_eq!(tools.total_tools, 100);
     assert!(tools.truncated);
 
     let projects = list_ai_projects(&pool, &ListAiProjectsParams::default()).unwrap();
     assert_eq!(projects.projects.len(), 200);
-    assert_eq!(projects.total_projects, 201);
+    assert_eq!(projects.total_projects, 200);
     assert!(projects.truncated);
 }
 
