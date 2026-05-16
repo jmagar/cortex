@@ -535,6 +535,38 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         );
     }
 
+    // Migration 13: enrichment-framework columns + partial indexes.
+    // Spec: docs/superpowers/specs/2026-05-16-enrichment-framework-design.md §5
+    // Contract: docs/contracts/db-additions.sql Epic B section
+    let already_applied_13: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM schema_migrations WHERE version = 13",
+        [],
+        |r| r.get(0),
+    )?;
+    if already_applied_13 == 0 {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+             ALTER TABLE logs ADD COLUMN http_status  INTEGER;
+             ALTER TABLE logs ADD COLUMN auth_outcome TEXT;
+             ALTER TABLE logs ADD COLUMN dns_blocked  INTEGER;
+             ALTER TABLE logs ADD COLUMN event_action TEXT;
+             ALTER TABLE logs ADD COLUMN parse_error  TEXT;
+
+             CREATE INDEX IF NOT EXISTS idx_logs_http_status_time
+                 ON logs(http_status, timestamp) WHERE http_status IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_auth_outcome_time
+                 ON logs(auth_outcome, timestamp) WHERE auth_outcome IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_dns_blocked_time
+                 ON logs(dns_blocked, timestamp) WHERE dns_blocked IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_event_action_time
+                 ON logs(event_action, timestamp) WHERE event_action IS NOT NULL;
+
+             INSERT INTO schema_migrations (version) VALUES (13);
+             COMMIT;",
+        )?;
+        tracing::info!("Migration 13: added enrichment columns + partial indexes");
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
