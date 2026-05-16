@@ -114,17 +114,19 @@ pub(crate) fn process_chunk(
              ORDER BY id ASC
              LIMIT ?2",
         )?;
-        stmt.query_map(rusqlite::params![last_id, chunk_size], |row| {
-            Ok(ScanRow {
-                id: row.get(0)?,
-                severity: row.get(1)?,
-                message: row.get(2)?,
-                timestamp: row.get(3)?,
-                hostname: row.get(4)?,
-                app_name: row.get(5)?,
-            })
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?
+        let collected = stmt
+            .query_map(rusqlite::params![last_id, chunk_size], |row| {
+                Ok(ScanRow {
+                    id: row.get(0)?,
+                    severity: row.get(1)?,
+                    message: row.get(2)?,
+                    timestamp: row.get(3)?,
+                    hostname: row.get(4)?,
+                    app_name: row.get(5)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        collected
     };
 
     if rows.is_empty() {
