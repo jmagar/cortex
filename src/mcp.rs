@@ -3,7 +3,7 @@ use std::sync::Arc;
 use lab_auth::AuthLayer;
 
 use crate::app::SyslogService;
-use crate::config::McpConfig;
+use crate::config::{McpConfig, NotificationsConfig};
 use crate::observability::RuntimeObservability;
 use crate::otlp::OtlpCounters;
 
@@ -73,6 +73,12 @@ impl std::fmt::Debug for AuthPolicy {
 pub struct AppState {
     pub service: SyslogService,
     pub config: McpConfig,
+    /// Notifications subsystem configuration. Carried separately from `config`
+    /// because `McpConfig` is the MCP-layer slice; notifications config lives
+    /// on the top-level `Config` struct. Tools that need Apprise URLs (e.g.
+    /// `notifications_test`) must read from here, not from caller-supplied args,
+    /// to prevent SSRF.
+    pub notifications_config: NotificationsConfig,
     pub otlp_counters: Arc<OtlpCounters>,
     /// Authentication policy. Construction MUST name a variant — there is no
     /// implicit default. See [`AuthPolicy`].

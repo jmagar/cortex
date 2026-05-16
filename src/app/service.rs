@@ -983,6 +983,172 @@ impl SyslogService {
             delta_total_errors,
         })
     }
+
+    // ---- Error detection MCP actions ----------------------------------------
+
+    pub async fn unaddressed_errors(
+        &self,
+        req: super::models::UnaddressedErrorsRequest,
+    ) -> ServiceResult<super::models::UnaddressedErrorsResponse> {
+        let limit = req.limit.unwrap_or(50) as i64;
+        let include_acked = req.include_acknowledged.unwrap_or(false);
+        self.run_db(move |pool| {
+            let rows = crate::db::error_signatures::read_unaddressed(pool, limit, include_acked)?;
+            let signatures = rows
+                .into_iter()
+                .map(|r| super::models::ErrorSignatureEntry {
+                    signature_hash: r.signature_hash,
+                    template: r.template,
+                    sample_message: r.sample_message,
+                    severity: r.severity,
+                    sample_hostname: r.sample_hostname,
+                    sample_app_name: r.sample_app_name,
+                    first_seen_at: r.first_seen_at,
+                    last_seen_at: r.last_seen_at,
+                    total_count: r.total_count,
+                    count_last_1h: r.count_last_1h,
+                    acknowledged_at: r.acknowledged_at,
+                })
+                .collect();
+            Ok(super::models::UnaddressedErrorsResponse { signatures })
+        })
+        .await
+    }
+
+    pub async fn ack_error(
+        &self,
+        req: super::models::AckErrorRequest,
+        actor: &str,
+    ) -> ServiceResult<super::models::AckErrorResponse> {
+        if let Some(ref n) = req.notes {
+            if n.len() > 4096 {
+                return Err(ServiceError::InvalidInput(
+                    "notes exceeds 4096 chars".into(),
+                ));
+            }
+        }
+        let hash = req.signature_hash.clone();
+        let notes = req.notes.clone();
+        let actor_owned = actor.to_string();
+        // Check it exists first
+        let h = hash.clone();
+        let exists = self
+            .run_db(move |pool| {
+                Ok(crate::db::error_signatures::read_signature_by_hash(
+                    pool,
+                    &h,
+                    crate::app::error_detection::NORMALIZER_VERSION,
+                )?
+                .is_some())
+            })
+            .await?;
+        if !exists {
+            return Err(ServiceError::NotFound(format!(
+                "Signature '{}' not found",
+                hash
+            )));
+        }
+        let now = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+        let now_clone = now.clone();
+        let actor_clone = actor_owned.clone();
+        let hash_clone = hash.clone();
+        self.run_db(move |pool| {
+            let mut conn = pool.get()?;
+            let tx = conn.transaction()?;
+            crate::db::error_signatures::record_ack_event(
+                &tx,
+                &hash_clone,
+                crate::app::error_detection::NORMALIZER_VERSION,
+                "ack",
+                &actor_clone,
+                notes.as_deref(),
+            )?;
+            crate::db::error_signatures::update_ack_projection(
+                &tx,
+                &hash_clone,
+                crate::app::error_detection::NORMALIZER_VERSION,
+                Some(&now_clone),
+                Some(&actor_clone),
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await?;
+        Ok(super::models::AckErrorResponse {
+            signature_hash: hash,
+            acknowledged_at: now,
+            actor: actor_owned,
+        })
+    }
+
+    pub async fn unack_error(
+        &self,
+        req: super::models::UnackErrorRequest,
+        actor: &str,
+    ) -> ServiceResult<super::models::UnackErrorResponse> {
+        if let Some(ref r) = req.reason {
+            if r.len() > 4096 {
+                return Err(ServiceError::InvalidInput(
+                    "reason exceeds 4096 chars".into(),
+                ));
+            }
+        }
+        let hash = req.signature_hash.clone();
+        let reason = req.reason.clone();
+        let actor_owned = actor.to_string();
+        // Check it exists first
+        let h = hash.clone();
+        let exists = self
+            .run_db(move |pool| {
+                Ok(crate::db::error_signatures::read_signature_by_hash(
+                    pool,
+                    &h,
+                    crate::app::error_detection::NORMALIZER_VERSION,
+                )?
+                .is_some())
+            })
+            .await?;
+        if !exists {
+            return Err(ServiceError::NotFound(format!(
+                "Signature '{}' not found",
+                hash
+            )));
+        }
+        let now = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+        let actor_clone = actor_owned.clone();
+        let hash_clone = hash.clone();
+        self.run_db(move |pool| {
+            let mut conn = pool.get()?;
+            let tx = conn.transaction()?;
+            crate::db::error_signatures::record_ack_event(
+                &tx,
+                &hash_clone,
+                crate::app::error_detection::NORMALIZER_VERSION,
+                "unack",
+                &actor_clone,
+                reason.as_deref(),
+            )?;
+            crate::db::error_signatures::update_ack_projection(
+                &tx,
+                &hash_clone,
+                crate::app::error_detection::NORMALIZER_VERSION,
+                None,
+                None,
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await?;
+        Ok(super::models::UnackErrorResponse {
+            signature_hash: hash,
+            unacked_at: now,
+            actor: actor_owned,
+        })
+    }
 }
 
 fn classify_scanner_error(error: ServiceError) -> ServiceError {
@@ -1016,6 +1182,94 @@ fn backup_path_for(db_path: &std::path::Path, output: Option<PathBuf>) -> anyhow
             .unwrap_or_else(|| std::path::Path::new("."))
             .join("backups")
             .join(format!("syslog-{timestamp}.db"))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Notifications service methods
+
+impl SyslogService {
+    /// List recent notification firings.
+    pub async fn notifications_recent(
+        &self,
+        limit: i64,
+        rule_id: Option<String>,
+        since: Option<String>,
+    ) -> ServiceResult<Vec<crate::db::notifications::FiringRow>> {
+        self.run_db(move |pool| {
+            let conn = pool.get()?;
+            crate::db::notifications::firings_recent(
+                &conn,
+                limit,
+                rule_id.as_deref(),
+                since.as_deref(),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+    }
+
+    /// Send a test notification via Apprise. Rate-limited to 10/min per actor.
+    ///
+    /// # Rate limiting
+    /// Uses an in-memory counter per `actor` string. Resets after 60s of
+    /// inactivity per actor.
+    pub async fn notifications_test(
+        &self,
+        body: String,
+        actor: String,
+        apprise_url: String,
+        apprise_urls: Vec<String>,
+    ) -> ServiceResult<String> {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        use std::time::Instant;
+
+        const MAX_PER_MIN: u32 = 10;
+
+        // In-memory rate limiter: actor -> (count, window_start)
+        static RATE_LIMITER: OnceLock<Mutex<HashMap<String, (u32, Instant)>>> = OnceLock::new();
+        let limiter = RATE_LIMITER.get_or_init(|| Mutex::new(HashMap::new()));
+
+        {
+            let mut map = limiter.lock().unwrap_or_else(|e| e.into_inner());
+            let now = Instant::now();
+            // Evict stale entries (window elapsed) to prevent unbounded map growth.
+            map.retain(|_, entry| entry.1.elapsed().as_secs() < 60);
+            let entry = map.entry(actor.clone()).or_insert((0, now));
+            // Reset window if > 60s has elapsed (belt-and-suspenders after retain)
+            if entry.1.elapsed().as_secs() >= 60 {
+                *entry = (0, now);
+            }
+            entry.0 += 1;
+            if entry.0 > MAX_PER_MIN {
+                return Err(crate::app::ServiceError::InvalidInput(format!(
+                    "Rate limit exceeded for actor '{actor}': max {MAX_PER_MIN} test notifications per minute"
+                )));
+            }
+        }
+
+        // Send test notification asynchronously
+        let client = crate::notifications::apprise::AppriseClient::new(apprise_url);
+        let escaped_body = crate::notifications::apprise::escape_for_notification(&body);
+        let result = client
+            .notify(
+                &apprise_urls,
+                "Test Notification",
+                &escaped_body,
+                crate::notifications::apprise::NotifyType::Info,
+            )
+            .await;
+
+        match result {
+            Ok(resp) => Ok(format!(
+                "Test notification sent (status {})",
+                resp.status_code
+            )),
+            Err(e) => Err(crate::app::ServiceError::Internal(anyhow::anyhow!(
+                "Apprise delivery failed: {e}"
+            ))),
+        }
     }
 }
 

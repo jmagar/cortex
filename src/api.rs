@@ -190,6 +190,9 @@ fn respond<T: serde::Serialize>(result: crate::app::ServiceResult<T>) -> axum::r
         Err(crate::app::ServiceError::Busy(msg)) => {
             (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": msg}))).into_response()
         }
+        Err(crate::app::ServiceError::NotFound(msg)) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": msg}))).into_response()
+        }
         Err(crate::app::ServiceError::Internal(err)) => {
             tracing::error!(error = %err, "API request failed");
             (

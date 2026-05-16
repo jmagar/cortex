@@ -23,6 +23,7 @@ fn test_state_with_token(token: Option<String>) -> (AppState, Arc<db::DbPool>, t
                 allowed_origins: Vec::new(),
                 auth: Default::default(),
             },
+            notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
             auth_policy: crate::mcp::AuthPolicy::LoopbackDev,
             observability: Arc::new(crate::observability::RuntimeObservability::default()),
@@ -138,6 +139,11 @@ async fn schema_actions_are_dispatchable() {
             "compare" => {
                 json!({"action": action, "a_from": "2026-01-01T00:00:00Z", "a_to": "2026-01-01T00:01:00Z", "b_from": "2026-01-01T00:01:00Z", "b_to": "2026-01-01T00:02:00Z"})
             }
+            // ack_error / unack_error require signature_hash; provide a non-existent one
+            // so they dispatch and return NotFound (not "required parameter" error).
+            "ack_error" | "unack_error" => {
+                json!({"action": action, "signature_hash": "0000000000000000000000000000000000000000000000000000000000000000"})
+            }
             _ => json!({"action": action}),
         };
         let result = execute_tool(&h.state, "syslog", args).await;
@@ -146,6 +152,33 @@ async fn schema_actions_are_dispatchable() {
                 assert!(
                     error.to_string().contains("compose doctor failed"),
                     "compose_doctor failed before dispatching: {error}"
+                );
+            }
+        } else if matches!(*action, "ack_error" | "unack_error") {
+            // These require an existing signature. When given a non-existent hash,
+            // they must return Err (ServiceError::NotFound propagates via ?).
+            match result {
+                Err(ref error) => {
+                    assert!(
+                        error.to_string().to_lowercase().contains("not found")
+                            || error.to_string().contains("Signature"),
+                        "action={action} returned unexpected error: {error}"
+                    );
+                }
+                Ok(_) => {
+                    panic!("action={action} with non-existent hash should return NotFound, got Ok")
+                }
+            }
+        } else if *action == "notifications_test" {
+            // notifications_test requires a live Apprise server; transient/delivery
+            // failures are expected in test environments.
+            if let Err(ref error) = result {
+                assert!(
+                    error.to_string().contains("Apprise")
+                        || error.to_string().contains("delivery")
+                        || error.to_string().contains("Rate limit")
+                        || error.to_string().contains("no_apprise"),
+                    "action={action} failed unexpectedly: {error}"
                 );
             }
         } else {

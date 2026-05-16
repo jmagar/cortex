@@ -35,6 +35,11 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `compare` | Side-by-side comparison of two time ranges |
 | `compose_status` | Redacted read-only Compose deployment diagnostics |
 | `compose_doctor` | Strict Compose deployment health diagnostics |
+| `unaddressed_errors` | List unacknowledged repeating error signatures |
+| `ack_error` | Acknowledge an error signature to suppress it from future reports |
+| `unack_error` | Revoke an acknowledgement so a signature reappears in reports |
+| `notifications_recent` | List recent notification firings |
+| `notifications_test` | Send a test notification via Apprise |
 | `help` | Markdown reference for all actions |
 
 ## syslog search

@@ -493,81 +493,6 @@ pub struct PatternEntry {
     pub hostnames: Vec<String>,
 }
 
-/// Normalise a message into a template by replacing variable runs with
-/// placeholders. Designed to collapse near-duplicates without external regex
-/// dependencies — character-class scan only.
-///
-/// Pattern detection is byte-level (all targets — digits, hex, IPv4, UUIDs —
-/// are ASCII), but non-ASCII bytes are passed through as their proper
-/// codepoint so internationalised log messages stay valid UTF-8.
-pub(super) fn normalize_template(msg: &str) -> String {
-    let bytes = msg.as_bytes();
-    let mut out = String::with_capacity(msg.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if !b.is_ascii() {
-            // Multi-byte UTF-8 sequence — copy the whole codepoint intact rather
-            // than splitting it into mojibake. Indexing `msg[i..]` is safe because
-            // the index lands on a char boundary (we only advance by char widths
-            // or full ASCII pattern matches).
-            let ch = msg[i..].chars().next().expect("char at boundary");
-            out.push(ch);
-            i += ch.len_utf8();
-            continue;
-        }
-        // UUID: 8-4-4-4-12 hex with dashes
-        if is_hex(b) && looks_like_uuid_at(bytes, i) {
-            out.push_str("<uuid>");
-            i += 36;
-            continue;
-        }
-        // IPv4 / IPv4:port (digits + dots, optionally :digits)
-        if b.is_ascii_digit() {
-            if let Some(end) = ipv4_end(bytes, i) {
-                out.push_str("<ip>");
-                i = end;
-                if i < bytes.len() && bytes[i] == b':' {
-                    let mut j = i + 1;
-                    while j < bytes.len() && bytes[j].is_ascii_digit() {
-                        j += 1;
-                    }
-                    if j > i + 1 {
-                        out.push_str(":<n>");
-                        i = j;
-                    }
-                }
-                continue;
-            }
-        }
-        // Long hex run (>= 8 chars) — typical for hashes
-        if is_hex(b) {
-            let mut j = i;
-            while j < bytes.len() && is_hex(bytes[j]) {
-                j += 1;
-            }
-            if j - i >= 8 {
-                out.push_str("<hex>");
-                i = j;
-                continue;
-            }
-        }
-        // Numeric run
-        if b.is_ascii_digit() {
-            let mut j = i;
-            while j < bytes.len() && bytes[j].is_ascii_digit() {
-                j += 1;
-            }
-            out.push_str("<n>");
-            i = j;
-            continue;
-        }
-        out.push(b as char);
-        i += 1;
-    }
-    out
-}
-
 fn split_csv(value: Option<String>) -> Vec<String> {
     value
         .unwrap_or_default()
@@ -575,50 +500,6 @@ fn split_csv(value: Option<String>) -> Vec<String> {
         .filter(|item| !item.is_empty())
         .map(ToString::to_string)
         .collect()
-}
-
-fn is_hex(b: u8) -> bool {
-    b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || (b'A'..=b'F').contains(&b)
-}
-
-fn looks_like_uuid_at(bytes: &[u8], i: usize) -> bool {
-    if i + 36 > bytes.len() {
-        return false;
-    }
-    let positions = [8, 13, 18, 23];
-    for (k, b) in bytes[i..i + 36].iter().enumerate() {
-        if positions.contains(&k) {
-            if *b != b'-' {
-                return false;
-            }
-        } else if !is_hex(*b) {
-            return false;
-        }
-    }
-    true
-}
-
-fn ipv4_end(bytes: &[u8], start: usize) -> Option<usize> {
-    let mut i = start;
-    let mut octets = 0;
-    while octets < 4 {
-        let octet_start = i;
-        while i < bytes.len() && bytes[i].is_ascii_digit() {
-            i += 1;
-        }
-        let len = i - octet_start;
-        if !(1..=3).contains(&len) {
-            return None;
-        }
-        octets += 1;
-        if octets < 4 {
-            if i >= bytes.len() || bytes[i] != b'.' {
-                return None;
-            }
-            i += 1;
-        }
-    }
-    Some(i)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -701,7 +582,7 @@ pub fn patterns(
             overflow = true;
             break;
         }
-        let template = normalize_template(&msg);
+        let template = crate::app::error_detection::normalize::normalize_template(&msg);
         let entry = by_template.entry(template).or_insert_with(|| Acc {
             count: 0,
             sample: msg.clone(),

@@ -21,7 +21,9 @@ use crate::{
     },
 };
 
-use super::{allowed_hosts, allowed_origins, is_validation_error, required_scope_for};
+use super::{
+    allowed_hosts, allowed_origins, is_validation_error, required_scope_for, ADMIN_ACTIONS,
+};
 
 fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -39,6 +41,7 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
             allowed_origins: Vec::new(),
             auth: Default::default(),
         },
+        notifications_config: crate::config::NotificationsConfig::default(),
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
         auth_policy: crate::mcp::AuthPolicy::LoopbackDev,
         observability: Arc::new(crate::observability::RuntimeObservability::default()),
@@ -63,6 +66,7 @@ fn mounted_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
             allowed_origins: Vec::new(),
             auth: Default::default(),
         },
+        notifications_config: crate::config::NotificationsConfig::default(),
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
         auth_policy: AuthPolicy::Mounted { auth_state: None },
         observability: Arc::new(crate::observability::RuntimeObservability::default()),
@@ -622,7 +626,8 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
 }
 
 /// `AuthPolicy::Mounted` + valid AuthContext with `syslog:read` → read
-/// actions permitted.
+/// actions permitted, but admin actions (ack_error, unack_error, notifications_test)
+/// are denied.
 #[tokio::test]
 async fn mounted_policy_with_read_scope_permits_read_actions() {
     let (state, pool, _dir) = mounted_state();
@@ -633,7 +638,7 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
     for action in SYSLOG_ACTIONS
         .iter()
         .copied()
-        .filter(|action| *action != "help")
+        .filter(|action| *action != "help" && !ADMIN_ACTIONS.contains(action))
     {
         let (status, response) = post_rmcp(
             router.clone(),
@@ -655,6 +660,29 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
             "action={action} got forbidden; response: {response}"
         );
     }
+
+    // Admin actions must be denied for syslog:read-only callers.
+    for action in ADMIN_ACTIONS {
+        let (status, response) = post_rmcp(
+            router.clone(),
+            jsonrpc_request(
+                21,
+                "tools/call",
+                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            response["error"]["code"], -32600,
+            "admin action={action} should be denied with read-only scope; response: {response}"
+        );
+        let msg = response["error"]["message"].as_str().unwrap_or("");
+        assert!(
+            msg.contains("requires scope: syslog:admin"),
+            "denial message should reference admin scope; got: {msg}"
+        );
+    }
 }
 
 #[test]
@@ -662,12 +690,20 @@ fn public_read_actions_require_syslog_read_scope() {
     for action in SYSLOG_ACTIONS
         .iter()
         .copied()
-        .filter(|action| *action != "help")
+        .filter(|action| *action != "help" && !ADMIN_ACTIONS.contains(action))
     {
         assert_eq!(
             required_scope_for(action),
             Some("syslog:read"),
             "action={action} must require syslog:read"
+        );
+    }
+    // Admin actions require syslog:admin, not syslog:read
+    for action in ADMIN_ACTIONS {
+        assert_eq!(
+            required_scope_for(action),
+            Some("syslog:admin"),
+            "admin action={action} must require syslog:admin"
         );
     }
     assert_eq!(required_scope_for("help"), None);
@@ -739,7 +775,7 @@ async fn mounted_policy_with_both_scopes_permits_all_actions() {
     assert!(response["result"].is_object(), "response: {response}");
 }
 
-/// `AuthPolicy::Mounted` + AuthContext with EMPTY scopes + read action → denied.
+/// `AuthPolicy::Mounted` + AuthContext with EMPTY scopes + any action → denied.
 #[tokio::test]
 async fn mounted_policy_with_empty_scopes_denies_read_actions() {
     let (state, _pool, _dir) = mounted_state();
@@ -766,9 +802,15 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
             "action={action} with empty scopes should be denied; response: {response}"
         );
         let msg = response["error"]["message"].as_str().unwrap_or("");
+        // Read actions require syslog:read; admin actions require syslog:admin.
+        let expected_scope = if ADMIN_ACTIONS.contains(&action) {
+            "syslog:admin"
+        } else {
+            "syslog:read"
+        };
         assert!(
-            msg.contains("requires scope: syslog:read"),
-            "error message should name the required scope; got: {msg}"
+            msg.contains(&format!("requires scope: {expected_scope}")),
+            "error message should name the required scope '{expected_scope}' for action={action}; got: {msg}"
         );
     }
 }

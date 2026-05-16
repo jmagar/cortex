@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::error_detection::normalize::normalize_template;
 use crate::config::StorageConfig;
 use crate::db::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
 

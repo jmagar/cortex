@@ -1085,6 +1085,64 @@ impl From<db::RangeSummary> for RangeSummary {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Error Detection models
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UnaddressedErrorsRequest {
+    /// Maximum number of signatures to return.
+    pub limit: Option<u32>,
+    /// Include already-acknowledged signatures in the result.
+    pub include_acknowledged: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnaddressedErrorsResponse {
+    pub signatures: Vec<ErrorSignatureEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ErrorSignatureEntry {
+    pub signature_hash: String,
+    pub template: String,
+    pub sample_message: String,
+    pub severity: String,
+    pub sample_hostname: String,
+    pub sample_app_name: Option<String>,
+    pub first_seen_at: String,
+    pub last_seen_at: String,
+    pub total_count: i64,
+    pub count_last_1h: i64,
+    pub acknowledged_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AckErrorRequest {
+    pub signature_hash: String,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AckErrorResponse {
+    pub signature_hash: String,
+    pub acknowledged_at: String,
+    pub actor: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnackErrorRequest {
+    pub signature_hash: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnackErrorResponse {
+    pub signature_hash: String,
+    pub unacked_at: String,
+    pub actor: String,
+}
+
 #[cfg(test)]
 #[path = "models_tests.rs"]
 mod tests;

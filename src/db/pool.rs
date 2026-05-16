@@ -377,6 +377,164 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 9: added logs.metadata_json");
     }
 
+    // Migration 10: error signature detection tables.
+    let migration_10_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 10",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_10_applied {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS error_signatures (
+                 signature_hash      TEXT NOT NULL,
+                 normalizer_version  INTEGER NOT NULL,
+                 template            TEXT NOT NULL,
+                 sample_message      TEXT NOT NULL,
+                 sample_hostname     TEXT NOT NULL,
+                 sample_app_name     TEXT,
+                 severity            TEXT NOT NULL,
+                 first_seen_at       TEXT NOT NULL,
+                 last_seen_at        TEXT NOT NULL,
+                 total_count         INTEGER NOT NULL DEFAULT 0,
+                 acknowledged_at     TEXT,
+                 acknowledged_by     TEXT,
+                 PRIMARY KEY (signature_hash, normalizer_version)
+             );
+             CREATE INDEX IF NOT EXISTS idx_error_sigs_last_seen
+                 ON error_signatures(last_seen_at DESC);
+             CREATE INDEX IF NOT EXISTS idx_error_sigs_ack
+                 ON error_signatures(acknowledged_at)
+                 WHERE acknowledged_at IS NULL;
+
+             CREATE TABLE IF NOT EXISTS error_signature_windows (
+                 signature_hash      TEXT NOT NULL,
+                 normalizer_version  INTEGER NOT NULL,
+                 window_start        TEXT NOT NULL,
+                 window_end          TEXT NOT NULL,
+                 count_in_window     INTEGER NOT NULL,
+                 PRIMARY KEY (signature_hash, normalizer_version, window_start, window_end)
+             );
+
+             CREATE TABLE IF NOT EXISTS error_signature_ack_events (
+                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                 signature_hash      TEXT NOT NULL,
+                 normalizer_version  INTEGER NOT NULL,
+                 event_type          TEXT NOT NULL CHECK (event_type IN ('ack','unack')),
+                 actor               TEXT NOT NULL,
+                 notes               TEXT CHECK (notes IS NULL OR length(notes) <= 4096),
+                 created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+             );
+             CREATE INDEX IF NOT EXISTS idx_ack_events_sig
+                 ON error_signature_ack_events(signature_hash, created_at DESC);
+
+             CREATE TABLE IF NOT EXISTS error_scan_cursor (
+                 id                      INTEGER PRIMARY KEY CHECK (id = 1),
+                 last_scanned_log_id     INTEGER NOT NULL DEFAULT 0,
+                 last_scan_completed_at  TEXT
+             );
+             INSERT OR IGNORE INTO error_scan_cursor (id, last_scanned_log_id) VALUES (1, 0);
+
+             INSERT INTO schema_migrations (version) VALUES (10);",
+        )?;
+        tracing::info!("Migration 10: created error signature detection tables");
+    }
+
+    // Migration 11: notifications outbox and firings tables.
+    let migration_11_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 11",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_11_applied {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS notifications_outbox (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 dedup_key TEXT NOT NULL,
+                 rule_id TEXT NOT NULL,
+                 severity TEXT NOT NULL,
+                 hostname TEXT NOT NULL,
+                 title TEXT NOT NULL,
+                 body TEXT NOT NULL,
+                 apprise_urls_json TEXT NOT NULL,
+                 apprise_tags TEXT,
+                 enqueued_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                 next_attempt_at TEXT NOT NULL,
+                 attempt_count INTEGER NOT NULL DEFAULT 0,
+                 last_status_code INTEGER,
+                 last_error TEXT,
+                 status TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending','sent','dead','dropped'))
+             );
+             CREATE INDEX IF NOT EXISTS idx_outbox_pending
+                 ON notifications_outbox(status, next_attempt_at)
+                 WHERE status = 'pending';
+             CREATE INDEX IF NOT EXISTS idx_outbox_dedup
+                 ON notifications_outbox(dedup_key, enqueued_at DESC);
+
+             CREATE TABLE IF NOT EXISTS notification_firings (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 outbox_id INTEGER NOT NULL,
+                 rule_id TEXT NOT NULL,
+                 severity TEXT NOT NULL,
+                 hostname TEXT NOT NULL,
+                 fired_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                 status_code INTEGER,
+                 notes TEXT
+             );
+             CREATE INDEX IF NOT EXISTS idx_firings_fired_at
+                 ON notification_firings(fired_at DESC);
+             CREATE INDEX IF NOT EXISTS idx_firings_rule
+                 ON notification_firings(rule_id, fired_at DESC);
+
+             INSERT INTO schema_migrations (version) VALUES (11);",
+        )?;
+        tracing::info!("Migration 11: created notifications outbox and firings tables");
+    }
+
+    // Migration 12: add dedup_key column to notification_firings and unique partial
+    // index on notifications_outbox to fix TOCTOU on outbox_insert.
+    let migration_12_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 12",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_12_applied {
+        // Add dedup_key to notification_firings so dedup checks are scoped per
+        // (rule_id, hostname, dedup_key) rather than just (rule_id, hostname).
+        // Without this, all error_sig firings share rule_id='unaddressed_error_signature'
+        // and the first firing suppresses all subsequent ones regardless of signature.
+        let dedup_col_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notification_firings') WHERE name = 'dedup_key'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !dedup_col_exists {
+            conn.execute_batch(
+                "ALTER TABLE notification_firings ADD COLUMN dedup_key TEXT NOT NULL DEFAULT '';",
+            )?;
+        }
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_dedup_pending
+                 ON notifications_outbox(dedup_key) WHERE status = 'pending';
+             INSERT INTO schema_migrations (version) VALUES (12);",
+        )?;
+        tracing::info!(
+            "Migration 12: added notification_firings.dedup_key, unique partial index on outbox"
+        );
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
