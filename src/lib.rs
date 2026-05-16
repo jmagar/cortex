@@ -2,6 +2,7 @@
 
 pub mod ai_watch;
 pub mod api;
+pub mod enrich;
 pub mod app;
 pub mod compose;
 pub mod config;
