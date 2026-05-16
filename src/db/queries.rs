@@ -490,48 +490,40 @@ pub fn search_ai_cusses(pool: &DbPool, params: &AiCussParams) -> Result<AiCussRe
     const CANDIDATE_CAP: usize = 10_000;
 
     let mut sql = String::from(
-        "SELECT id, timestamp, hostname, facility, severity,
-                app_name, process_id, message, received_at, source_ip,
-                ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
-         FROM logs
-         WHERE ai_project IS NOT NULL AND ai_project != ''
-           AND ai_tool IS NOT NULL AND ai_tool != ''
-           AND ai_session_id IS NOT NULL AND ai_session_id != ''
-           AND (",
+        "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
+                l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
+                l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
+         FROM logs_fts
+         JOIN logs l ON l.id = logs_fts.rowid
+         WHERE logs_fts MATCH ?1
+           AND l.ai_project IS NOT NULL AND l.ai_project != ''
+           AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
+           AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
     );
-    let mut bindings = Vec::new();
-    let mut idx = 1usize;
-    for (term_idx, term) in terms.iter().enumerate() {
-        if term_idx > 0 {
-            sql.push_str(" OR ");
-        }
-        sql.push_str(&format!("lower(message) LIKE ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(format!("%{term}%")));
-        idx += 1;
-    }
-    sql.push(')');
+    let mut bindings = vec![rusqlite::types::Value::Text(cuss_fts_query(&terms))];
+    let mut idx = 2usize;
 
     if let Some(project) = &params.ai_project {
-        sql.push_str(&format!(" AND ai_project = ?{idx}"));
+        sql.push_str(&format!(" AND l.ai_project = ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(project.clone()));
         idx += 1;
     }
     if let Some(tool) = &params.ai_tool {
-        sql.push_str(&format!(" AND ai_tool = ?{idx}"));
+        sql.push_str(&format!(" AND l.ai_tool = ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(tool.clone()));
         idx += 1;
     }
     if let Some(from) = &params.from {
-        sql.push_str(&format!(" AND timestamp >= ?{idx}"));
+        sql.push_str(&format!(" AND l.timestamp >= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         idx += 1;
     }
     if let Some(to) = &params.to {
-        sql.push_str(&format!(" AND timestamp <= ?{idx}"));
+        sql.push_str(&format!(" AND l.timestamp <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
     sql.push_str(&format!(
-        " ORDER BY timestamp DESC, id DESC LIMIT {}",
+        " ORDER BY l.timestamp DESC, l.id DESC LIMIT {}",
         CANDIDATE_CAP + 1
     ));
 
@@ -746,6 +738,14 @@ fn normalized_cuss_terms(custom_terms: &[String]) -> Vec<String> {
     } else {
         terms
     }
+}
+
+fn cuss_fts_query(terms: &[String]) -> String {
+    terms
+        .iter()
+        .map(|term| format!("\"{term}\""))
+        .collect::<Vec<_>>()
+        .join(" OR ")
 }
 
 fn first_cuss_term(message: &str, terms: &[String]) -> Option<String> {
