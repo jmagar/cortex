@@ -8,6 +8,7 @@ use tracing::{debug, error, info};
 use super::enrichment::{enrich_entry, EnrichmentConfig};
 use crate::config::StorageConfig;
 use crate::db::{self, DbPool};
+use crate::enrich::EnrichmentPipeline;
 use crate::observability::RuntimeObservability;
 
 const INGEST_SUMMARY_INTERVAL_SECS: u64 = 60;
@@ -22,6 +23,7 @@ pub(crate) struct WriterContext {
     storage: StorageConfig,
     storage_state: Arc<Mutex<Option<db::StorageBudgetState>>>,
     enrichment: EnrichmentConfig,
+    pub pipeline: Arc<EnrichmentPipeline>,
     observability: Arc<RuntimeObservability>,
 }
 
@@ -31,6 +33,7 @@ impl WriterContext {
         storage: StorageConfig,
         storage_state: Arc<Mutex<Option<db::StorageBudgetState>>>,
         enrichment: EnrichmentConfig,
+        pipeline: Arc<EnrichmentPipeline>,
         observability: Arc<RuntimeObservability>,
     ) -> Self {
         Self {
@@ -38,6 +41,7 @@ impl WriterContext {
             storage,
             storage_state,
             enrichment,
+            pipeline,
             observability,
         }
     }
@@ -125,7 +129,11 @@ pub(super) async fn flush_batch(
     // spawn_blocking call below stays focused on the SQL write.
     let batch_to_write: Vec<db::LogBatchEntry> = std::mem::take(batch)
         .into_iter()
-        .map(|e| enrich_entry(e, &context.enrichment))
+        .map(|e| {
+            let mut e = enrich_entry(e, &context.enrichment);
+            context.pipeline.dispatch(&mut e);
+            e
+        })
         .collect();
     let count = batch_to_write.len();
     let started = Instant::now();

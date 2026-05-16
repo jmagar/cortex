@@ -56,6 +56,9 @@ toml = "0.8"
 lab-auth = { git = "https://github.com/jmagar/lab.git", rev = "87cec3241f9baef22335de9cc8629ebbcd8ba047", package = "lab-auth" }
 url = "2"
 
+# Errors
+thiserror = "1"
+
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -63,6 +66,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utils
 anyhow = "1"
 libc = "0.2"
+lru = "0.12"
 rustix = { version = "0.38", features = ["fs"] }
 regex = "1"
 sha2 = "0.10"

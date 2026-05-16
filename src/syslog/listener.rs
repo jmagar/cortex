@@ -6,6 +6,7 @@ use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
+use crate::enrich::{stamp_source_kind, SourceKind};
 use crate::ingest::IngestTx;
 
 use super::parser::parse_syslog;
@@ -60,11 +61,9 @@ pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) 
                     None => {}
                 }
 
-                if ingest
-                    .send(parse_syslog(&raw, addr.to_string()))
-                    .await
-                    .is_err()
-                {
+                let mut entry = parse_syslog(&raw, addr.to_string());
+                stamp_source_kind(&mut entry, SourceKind::SyslogUdp);
+                if ingest.send(entry).await.is_err() {
                     error!("Write channel closed");
                     break;
                 }
@@ -140,7 +139,8 @@ pub(super) async fn handle_tcp_connection(
                     queue_depth = ingest.queue_depth(),
                     "TCP syslog line received"
                 );
-                let entry = parse_syslog(&line, addr.to_string());
+                let mut entry = parse_syslog(&line, addr.to_string());
+                stamp_source_kind(&mut entry, SourceKind::SyslogTcp);
                 if peer_hostname.is_none() {
                     peer_hostname = Some(entry.hostname.clone());
                     info!(

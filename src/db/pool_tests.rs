@@ -246,6 +246,65 @@ fn init_db_migrates_legacy_ai_schema_without_losing_logs() {
 }
 
 #[test]
+fn migration_13_adds_enrichment_columns() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = crate::config::StorageConfig {
+        db_path: dir.path().join("test.db"),
+        wal_mode: true,
+        pool_size: 1,
+        ..Default::default()
+    };
+    let pool = init_pool(&config).expect("init_pool ok");
+    let conn = pool.get().unwrap();
+
+    let cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(logs)")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(1))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+
+    for expected in [
+        "http_status",
+        "auth_outcome",
+        "dns_blocked",
+        "event_action",
+        "parse_error",
+    ] {
+        assert!(
+            cols.contains(&expected.to_string()),
+            "missing column {expected}"
+        );
+    }
+
+    let indices: Vec<String> = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='logs'")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+
+    for expected in [
+        "idx_logs_http_status_time",
+        "idx_logs_auth_outcome_time",
+        "idx_logs_dns_blocked_time",
+        "idx_logs_event_action_time",
+    ] {
+        assert!(
+            indices.contains(&expected.to_string()),
+            "missing index {expected}"
+        );
+    }
+
+    let version_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM schema_migrations WHERE version = 13", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version_count, 1, "migration 13 row not recorded");
+}
+
+#[test]
 fn transcript_import_identity_enforces_uniqueness() {
     let dir = tempfile::tempdir().unwrap();
     let config = crate::config::StorageConfig {

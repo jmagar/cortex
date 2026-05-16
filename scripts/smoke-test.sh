@@ -771,6 +771,27 @@ else
     echo "INFO: OAuth not enabled (/.well-known returned $DISCOVERY) — skipping OAuth endpoint checks"
 fi
 
+# ─── Enrichment framework smoke (epic syslog-mcp-1wjr) ─────────────────────
+# Forward a synthetic SWAG access line, then assert http_status materialised.
+echo ""
+echo "Enrichment framework smoke"
+SWAG_LINE='<134>1 2026-05-16T10:00:00Z localhost swag - - - 192.0.2.55 - - [16/May/2026:10:00:00 +0000] "GET /smoke HTTP/1.1" 418 13 "-" "smoketest/1.0"'
+echo "$SWAG_LINE" | nc -w1 -u "${SYSLOG_HOST:-127.0.0.1}" "${SYSLOG_PORT:-1514}" || true
+sleep 1
+
+if command -v sqlite3 >/dev/null 2>&1; then
+    DB_PATH="${SYSLOG_MCP_DB_PATH:-/data/syslog.db}"
+    COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM logs WHERE http_status = 418" 2>/dev/null || echo "0")
+    if [ "$COUNT" = "0" ]; then
+        echo "WARN: enrichment smoke — http_status=418 not found (sqlite3 check)"
+    else
+        echo "PASS: enrichment framework wired (http_status=418 found)"
+        PASS=$((PASS + 1))
+    fi
+else
+    echo "SKIP: enrichment smoke — sqlite3 not available"
+fi
+
 # ─── Phase 4: Summary ────────────────────────────────────────────────────────
 echo ""
 echo -e "${COLOR_BOLD}[4/4] Results${COLOR_RESET}"

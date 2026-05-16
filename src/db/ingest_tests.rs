@@ -32,6 +32,11 @@ fn make_entry(ts: &str, host: &str, severity: &str, msg: &str) -> LogBatchEntry 
         ai_session_id: None,
         ai_transcript_path: None,
         metadata_json: None,
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
     }
 }
 
@@ -115,4 +120,56 @@ fn test_batch_mixed_hosts() {
 
     let hb = hosts.iter().find(|h| h.hostname == "host-b").unwrap();
     assert_eq!(hb.log_count, 1);
+}
+
+#[test]
+#[allow(clippy::type_complexity)]
+fn insert_logs_batch_persists_enrichment_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = crate::config::StorageConfig {
+        db_path: dir.path().join("test.db"),
+        wal_mode: true,
+        pool_size: 1,
+        ..Default::default()
+    };
+    let pool = crate::db::pool::init_pool(&config).unwrap();
+
+    let entry = crate::db::LogBatchEntry {
+        timestamp: "2026-05-16T10:00:00Z".to_string(),
+        hostname: "test-host".to_string(),
+        facility: None,
+        severity: "info".to_string(),
+        app_name: Some("swag".to_string()),
+        process_id: None,
+        message: "GET / 200".to_string(),
+        raw: "raw line".to_string(),
+        source_ip: "docker://localhost/swag/stdout".to_string(),
+        docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
+        metadata_json: Some(r#"{"swag":{"method":"GET"}}"#.to_string()),
+        http_status: Some(200),
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: Some("http_request".to_string()),
+        parse_error: None,
+    };
+
+    super::insert_logs_batch(&pool, &[entry]).expect("insert ok");
+
+    let conn = pool.get().unwrap();
+    let row: (Option<i32>, Option<String>, Option<i64>, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT http_status, auth_outcome, dns_blocked, event_action, parse_error FROM logs LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .unwrap();
+    assert_eq!(row.0, Some(200));
+    assert_eq!(row.1, None);
+    assert_eq!(row.2, None);
+    assert_eq!(row.3, Some("http_request".to_string()));
+    assert_eq!(row.4, None);
 }
