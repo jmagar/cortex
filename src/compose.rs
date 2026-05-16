@@ -662,12 +662,18 @@ fn listener_belongs_to_target<I: DockerInspect>(
     if !published_ports.contains(&listener.port) {
         return Ok(false);
     }
-    let Some(process) = listener.process.as_deref() else {
-        return Ok(false);
-    };
-    if !process.contains("users:") || !process.contains("docker-proxy") {
-        return Ok(false);
+    // If ss shows process info with the users: field, verify it is docker-proxy.
+    // Any other named process definitively owns the port and is not our target.
+    // When running without root, ss omits process info (no users: field), so we
+    // fall through to the docker ps ownership check below.
+    if let Some(process) = listener.process.as_deref() {
+        if process.contains("users:") && !process.contains("docker-proxy") {
+            return Ok(false);
+        }
     }
+    // Use docker ps --filter publish=PORT to confirm ownership. This works without
+    // root privileges, unlike ss process inspection, and handles the common
+    // non-root deployment scenario correctly.
     let Some(owner) = inspector.published_port_owner(listener.port)? else {
         return Ok(false);
     };

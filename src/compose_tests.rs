@@ -755,6 +755,32 @@ fn live_target_refuses_published_listener_with_unknown_owner() {
 }
 
 #[test]
+fn live_target_allows_listener_without_process_info_when_docker_confirms_owner() {
+    // Non-root scenario: ss cannot report process names so the listener has no
+    // "users:" field, but docker ps confirms the target container owns the port.
+    let mut owners = BTreeMap::new();
+    owners.insert(3100, "abc".into());
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(labelled_container()),
+            listeners: vec![ListenerInfo {
+                port: 3100,
+                process: Some("LISTEN 0 4096 0.0.0.0:3100 0.0.0.0:*".into()),
+                belongs_to_target: false,
+            }],
+            published_port_owners: owners,
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = target_from_container(&labelled_container(), &ComposeDefaults::default());
+    service
+        .preflight_mutation(ComposeMutation::Up, &target, &MutationOptions::default())
+        .unwrap();
+}
+
+#[test]
 fn up_invocation_is_detached_and_uses_project_directory_and_all_files() {
     let service = ComposeService::new(
         FakeInspector::default(),

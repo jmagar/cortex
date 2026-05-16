@@ -1707,6 +1707,22 @@ fn ai_index_timer_unit() -> &'static str {
     "[Unit]\nDescription=Run syslog-mcp local AI transcript index\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=30min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
 }
 
+/// Returns a human-readable message for a failed systemctl invocation.
+/// Prefers stdout (where `is-active` and `is-enabled` write the service state)
+/// over stderr (where other subcommands write errors).
+fn systemctl_error_message(output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Some(line) = stdout.lines().find(|l| !l.trim().is_empty()) {
+        return line.to_string();
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stderr
+        .lines()
+        .next()
+        .unwrap_or("systemctl --user failed")
+        .to_string()
+}
+
 fn systemctl_user_phase(args: &[&str]) -> SetupPhase {
     systemctl_user_named_phase("systemctl-user", args)
 }
@@ -1724,11 +1740,7 @@ fn systemctl_user_named_phase(name: &'static str, args: &[&str]) -> SetupPhase {
         ),
         Ok(output) => timer.finish(
             SetupStatus::Warn,
-            String::from_utf8_lossy(&output.stderr)
-                .lines()
-                .next()
-                .unwrap_or("systemctl --user failed")
-                .to_string(),
+            systemctl_error_message(&output),
         ),
         Err(error) if error.kind() == ErrorKind::NotFound => {
             timer.finish(SetupStatus::Warn, "systemctl not found")
@@ -1754,11 +1766,7 @@ fn systemctl_user_required_named_phase(name: &'static str, args: &[&str]) -> Set
         ),
         Ok(output) => timer.finish(
             SetupStatus::Error,
-            String::from_utf8_lossy(&output.stderr)
-                .lines()
-                .next()
-                .unwrap_or("systemctl --user failed")
-                .to_string(),
+            systemctl_error_message(&output),
         ),
         Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
     }
