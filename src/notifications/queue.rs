@@ -8,7 +8,7 @@ use anyhow::Result;
 pub use crate::db::notifications::{
     backoff_next_attempt_at, firings_insert, firings_recent, firings_recent_dedup_check,
     outbox_claim_pending, outbox_insert, outbox_mark_dead, outbox_mark_dropped, outbox_mark_sent,
-    outbox_schedule_retry, OutboxInsertParams, OutboxRow,
+    outbox_schedule_retry, FiringInsertParams, OutboxInsertParams, OutboxRow,
 };
 use crate::db::DbPool;
 

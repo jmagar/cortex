@@ -56,26 +56,15 @@ pub struct FiringRow {
 
 /// Insert a row into `notifications_outbox`.
 ///
-/// Idempotent on `(dedup_key, status='pending')`: skips insert if there is
-/// already a pending row with the same dedup_key (avoid duplicate queuing
-/// within the same dedup window).
+/// Idempotent on `(dedup_key, status='pending')` via the partial unique index
+/// `idx_outbox_dedup_pending` (migration 12). Uses `INSERT OR IGNORE` to
+/// avoid a TOCTOU race between the SELECT COUNT(*) guard and the INSERT.
 pub fn outbox_insert(
     conn: &rusqlite::Connection,
     params: &OutboxInsertParams,
 ) -> rusqlite::Result<()> {
-    // Skip insert if a pending row with this dedup_key already exists.
-    let existing: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM notifications_outbox
-         WHERE dedup_key = ?1 AND status = 'pending'",
-        rusqlite::params![params.dedup_key],
-        |row| row.get(0),
-    )?;
-    if existing > 0 {
-        return Ok(());
-    }
-
     conn.execute(
-        "INSERT INTO notifications_outbox
+        "INSERT OR IGNORE INTO notifications_outbox
              (dedup_key, rule_id, severity, hostname, title, body, apprise_urls_json, next_attempt_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![
@@ -201,39 +190,55 @@ pub fn outbox_schedule_retry(
 // ---------------------------------------------------------------------------
 // Firings
 
+/// Parameters for inserting a row into `notification_firings`.
+pub struct FiringInsertParams<'a> {
+    pub outbox_id: i64,
+    pub rule_id: &'a str,
+    pub severity: &'a str,
+    pub hostname: &'a str,
+    pub status_code: Option<i64>,
+    pub notes: Option<&'a str>,
+    /// Mirrors the outbox row's dedup_key so that dedup checks are scoped to
+    /// a specific error signature rather than all firings for (rule_id, hostname).
+    pub dedup_key: &'a str,
+}
+
 /// Insert a row into `notification_firings`.
 pub fn firings_insert(
     conn: &rusqlite::Connection,
-    outbox_id: i64,
-    rule_id: &str,
-    severity: &str,
-    hostname: &str,
-    status_code: Option<i64>,
-    notes: Option<&str>,
+    p: FiringInsertParams<'_>,
 ) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO notification_firings
-             (outbox_id, rule_id, severity, hostname, status_code, notes)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![outbox_id, rule_id, severity, hostname, status_code, notes],
+             (outbox_id, rule_id, severity, hostname, status_code, notes, dedup_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![p.outbox_id, p.rule_id, p.severity, p.hostname, p.status_code, p.notes, p.dedup_key],
     )?;
     Ok(())
 }
 
-/// Check if there is a recent firing for the given rule+hostname within the
-/// dedup window (seconds). Returns true if a firing already exists (suppress).
+/// Check if there is a recent firing for the given rule+hostname+dedup_key
+/// within the dedup window (seconds). Returns true if a firing already exists
+/// (suppress).
+///
+/// The `dedup_key` parameter is essential for rules that share a `rule_id`
+/// (e.g. `unaddressed_error_signature` fires once per distinct error hash).
+/// Without it, the first firing would suppress all subsequent ones regardless
+/// of which signature they belong to.
 pub fn firings_recent_dedup_check(
     conn: &rusqlite::Connection,
     rule_id: &str,
     hostname: &str,
+    dedup_key: &str,
     dedup_window_secs: u64,
 ) -> rusqlite::Result<bool> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM notification_firings
          WHERE rule_id = ?1
            AND hostname = ?2
-           AND fired_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('-%d seconds', ?3))",
-        params![rule_id, hostname, dedup_window_secs as i64],
+           AND dedup_key = ?3
+           AND fired_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('-%d seconds', ?4))",
+        params![rule_id, hostname, dedup_key, dedup_window_secs as i64],
         |row| row.get(0),
     )?;
     Ok(count > 0)

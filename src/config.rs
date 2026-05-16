@@ -801,6 +801,7 @@ impl Config {
         }
         validate_syslog_config(&config.syslog)?;
         validate_storage_config(&config.storage)?;
+        validate_notifications_config(&config.notifications)?;
         validate_host(&config.syslog.host)?;
         validate_host(&config.mcp.host)?;
         validate_auth_config(&config, check_bind)?;
@@ -1239,6 +1240,21 @@ fn validate_storage_config(storage: &StorageConfig) -> anyhow::Result<()> {
         ));
     }
 
+    Ok(())
+}
+
+/// Validate the notifications configuration.
+///
+/// Fails at startup if notifications are enabled but no Apprise URLs are
+/// configured — without URLs all notifications would be silently dropped.
+fn validate_notifications_config(cfg: &NotificationsConfig) -> anyhow::Result<()> {
+    if cfg.enabled && cfg.apprise_urls.is_empty() && cfg.apprise_url.is_empty() {
+        anyhow::bail!(
+            "[notifications] enabled = true but no apprise_urls configured; \
+             all notifications will be silently dropped. \
+             Configure apprise_urls (or apprise_url) or set enabled = false."
+        );
+    }
     Ok(())
 }
 

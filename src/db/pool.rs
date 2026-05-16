@@ -497,6 +497,44 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 11: created notifications outbox and firings tables");
     }
 
+    // Migration 12: add dedup_key column to notification_firings and unique partial
+    // index on notifications_outbox to fix TOCTOU on outbox_insert.
+    let migration_12_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 12",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_12_applied {
+        // Add dedup_key to notification_firings so dedup checks are scoped per
+        // (rule_id, hostname, dedup_key) rather than just (rule_id, hostname).
+        // Without this, all error_sig firings share rule_id='unaddressed_error_signature'
+        // and the first firing suppresses all subsequent ones regardless of signature.
+        let dedup_col_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notification_firings') WHERE name = 'dedup_key'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !dedup_col_exists {
+            conn.execute_batch(
+                "ALTER TABLE notification_firings ADD COLUMN dedup_key TEXT NOT NULL DEFAULT '';",
+            )?;
+        }
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_dedup_pending
+                 ON notifications_outbox(dedup_key) WHERE status = 'pending';
+             INSERT INTO schema_migrations (version) VALUES (12);",
+        )?;
+        tracing::info!(
+            "Migration 12: added notification_firings.dedup_key, unique partial index on outbox"
+        );
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)

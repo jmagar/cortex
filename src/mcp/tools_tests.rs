@@ -23,6 +23,7 @@ fn test_state_with_token(token: Option<String>) -> (AppState, Arc<db::DbPool>, t
                 allowed_origins: Vec::new(),
                 auth: Default::default(),
             },
+            notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
             auth_policy: crate::mcp::AuthPolicy::LoopbackDev,
             observability: Arc::new(crate::observability::RuntimeObservability::default()),

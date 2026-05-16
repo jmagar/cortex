@@ -522,6 +522,25 @@ fn string_arg(args: &Value, name: &str) -> Option<String> {
     args.get(name).and_then(|v| v.as_str()).map(String::from)
 }
 
+/// Return a stable actor identifier from the app state's auth policy.
+///
+/// Full per-request OAuth claim extraction requires threading the `AuthContext`
+/// extension through the tool dispatch call chain. Until that plumbing is in
+/// place, this helper at least distinguishes between the three auth modes so
+/// audit logs aren't uniformly `"mcp:bearer"`.
+///
+/// TODO: thread `AuthContext` from routes/rmcp_server into tool handlers and
+/// use `auth_ctx.subject()` here instead.
+fn extract_actor(state: &AppState) -> &'static str {
+    match &state.auth_policy {
+        super::AuthPolicy::LoopbackDev => "mcp:loopback",
+        super::AuthPolicy::Mounted {
+            auth_state: Some(_),
+        } => "mcp:oauth",
+        super::AuthPolicy::Mounted { auth_state: None } => "mcp:bearer",
+    }
+}
+
 fn u32_arg(args: &Value, name: &str) -> anyhow::Result<Option<u32>> {
     let Some(value) = args.get(name) else {
         return Ok(None);
@@ -578,9 +597,10 @@ async fn tool_ack_error(state: &AppState, args: Value) -> anyhow::Result<Value> 
         signature_hash: hash,
         notes: string_arg(&args, "notes"),
     };
+    let actor = extract_actor(state);
     let resp = state
         .service
-        .ack_error(req, "mcp:bearer")
+        .ack_error(req, actor)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(serde_json::to_value(resp)?)
@@ -594,9 +614,10 @@ async fn tool_unack_error(state: &AppState, args: Value) -> anyhow::Result<Value
         signature_hash: hash,
         reason: string_arg(&args, "reason"),
     };
+    let actor = extract_actor(state);
     let resp = state
         .service
-        .unack_error(req, "mcp:bearer")
+        .unack_error(req, actor)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(serde_json::to_value(resp)?)
@@ -621,17 +642,12 @@ async fn tool_notifications_recent(state: &AppState, args: Value) -> anyhow::Res
 async fn tool_notifications_test(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let body = string_arg(&args, "body")
         .unwrap_or_else(|| "Test notification from syslog-mcp".to_string());
-    let actor = string_arg(&args, "actor").unwrap_or_else(|| "mcp:anon".to_string());
-    let apprise_url = string_arg(&args, "apprise_url").unwrap_or_default();
-    let apprise_urls: Vec<String> = args
-        .get("apprise_urls")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
+    // Actor is derived from the auth policy, not from caller-supplied args.
+    let actor = extract_actor(state).to_string();
+    // Apprise URLs come exclusively from server config to prevent SSRF.
+    // Caller-supplied apprise_url / apprise_urls are intentionally ignored.
+    let apprise_url = state.notifications_config.apprise_url.clone();
+    let apprise_urls = state.notifications_config.apprise_urls.clone();
 
     let result = state
         .service

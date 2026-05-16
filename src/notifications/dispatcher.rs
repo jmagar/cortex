@@ -23,6 +23,7 @@ use crate::config::NotificationsConfig;
 use crate::db::notifications::{
     backoff_next_attempt_at, firings_insert, firings_recent_dedup_check, outbox_claim_pending,
     outbox_mark_dead, outbox_mark_dropped, outbox_mark_sent, outbox_schedule_retry,
+    FiringInsertParams,
 };
 use crate::db::DbPool;
 use crate::notifications::apprise::{AppriseClient, AppriseError, NotifyType};
@@ -50,28 +51,32 @@ pub(crate) async fn run_dispatch_cycle(
     let mut dispatched = 0u64;
 
     for row in rows {
-        // Acquire maintenance permit before any DB write
+        // ----------------------------------------------------------------
+        // Phase 1: acquire permit → run dedup + ack checks → drop permit.
+        // The permit must NOT be held across the HTTP call (5s timeout).
+        // ----------------------------------------------------------------
         let Ok(permit) = Arc::clone(&permit_sem).acquire_owned().await else {
             tracing::error!("dispatcher: maintenance semaphore closed, aborting");
             break;
         };
 
         // --- Dedup check (within permit) ---
+        let dedup_key_clone = row.dedup_key.clone();
         let is_dedup = {
             let pool_d = Arc::clone(&pool);
             let rule_id = row.rule_id.clone();
             let hostname = row.hostname.clone();
+            let dedup_key = row.dedup_key.clone();
             let dedup_secs = cfg.dedup_window_secs;
             tokio::task::spawn_blocking(move || -> Result<bool> {
                 let conn = pool_d.get()?;
-                firings_recent_dedup_check(&conn, &rule_id, &hostname, dedup_secs)
+                firings_recent_dedup_check(&conn, &rule_id, &hostname, &dedup_key, dedup_secs)
                     .map_err(anyhow::Error::from)
             })
             .await??
         };
 
         if is_dedup {
-            // Drop the permit, mark as dropped
             let pool_dd = Arc::clone(&pool);
             let row_id = row.id;
             tokio::task::spawn_blocking(move || -> Result<()> {
@@ -93,20 +98,27 @@ pub(crate) async fn run_dispatch_cycle(
         if row.rule_id == "unaddressed_error_signature" {
             // dedup_key = "error_sig:{hash}"
             if let Some(hash) = row.dedup_key.strip_prefix("error_sig:") {
+                use rusqlite::OptionalExtension;
                 let hash_owned = hash.to_string();
                 let normalizer_version = crate::app::error_detection::NORMALIZER_VERSION;
                 let pool_ack = Arc::clone(&pool);
                 let is_acked = tokio::task::spawn_blocking(move || -> Result<bool> {
                     let conn = pool_ack.get()?;
-                    let acked: Option<String> = conn
+                    // .optional() converts "no rows" into None (as opposed to
+                    // Err(QueryReturnedNoRows)). The row's acknowledged_at column
+                    // is itself nullable, so we get Option<Option<String>>:
+                    // - None          → signature not found → not acked
+                    // - Some(None)    → found but acknowledged_at IS NULL → not acked
+                    // - Some(Some(_)) → found and acknowledged_at is set → acked
+                    let acked: Option<Option<String>> = conn
                         .query_row(
                             "SELECT acknowledged_at FROM error_signatures
-                             WHERE signature_hash = ?1 AND normalizer_version = ?2",
+                             WHERE signature_hash = ?1 AND normalizer_version = ?2 LIMIT 1",
                             rusqlite::params![hash_owned, normalizer_version],
                             |row| row.get(0),
                         )
-                        .unwrap_or(None);
-                    Ok(acked.is_some())
+                        .optional()?;
+                    Ok(matches!(acked, Some(Some(_))))
                 })
                 .await??;
 
@@ -130,7 +142,13 @@ pub(crate) async fn run_dispatch_cycle(
             }
         }
 
-        // --- Deliver via Apprise ---
+        // Phase 1 complete — drop permit before the HTTP call.
+        drop(permit);
+
+        // ----------------------------------------------------------------
+        // Phase 2: Deliver via Apprise — NO permit held during HTTP call.
+        // ----------------------------------------------------------------
+
         // Parse URLs from JSON
         let urls: Vec<String> = serde_json::from_str(&row.apprise_urls_json).unwrap_or_default();
         // Override with config URLs if outbox has empty list (e.g. from error scanner)
@@ -145,6 +163,11 @@ pub(crate) async fn run_dispatch_cycle(
                 rule_id = %row.rule_id,
                 "dispatcher: no apprise URLs configured, dropping notification"
             );
+            // Phase 3: re-acquire permit for DB write-back.
+            let Ok(permit3) = Arc::clone(&permit_sem).acquire_owned().await else {
+                tracing::error!("dispatcher: maintenance semaphore closed, aborting");
+                break;
+            };
             let pool_dd = Arc::clone(&pool);
             let row_id = row.id;
             tokio::task::spawn_blocking(move || -> Result<()> {
@@ -153,7 +176,7 @@ pub(crate) async fn run_dispatch_cycle(
                 Ok(())
             })
             .await??;
-            drop(permit);
+            drop(permit3);
             continue;
         }
 
@@ -169,20 +192,38 @@ pub(crate) async fn run_dispatch_cycle(
         let rule_id = row.rule_id.clone();
         let severity = row.severity.clone();
         let hostname = row.hostname.clone();
+        let dedup_key = dedup_key_clone;
+
+        // ----------------------------------------------------------------
+        // Phase 3: re-acquire permit → write outbox status + firing → drop.
+        // ----------------------------------------------------------------
+        let Ok(permit3) = Arc::clone(&permit_sem).acquire_owned().await else {
+            tracing::error!("dispatcher: maintenance semaphore closed, aborting");
+            break;
+        };
 
         match delivery_result {
             Ok(Ok(resp)) => {
                 // Success (200/207/424)
                 let pool_s = Arc::clone(&pool);
                 let sc = resp.status_code as i64;
-                let (rid, sev, host) = (rule_id.clone(), severity.clone(), hostname.clone());
+                let (rid, sev, host, dk) = (rule_id.clone(), severity.clone(), hostname.clone(), dedup_key.clone());
                 tokio::task::spawn_blocking(move || -> Result<()> {
                     let conn = pool_s.get()?;
                     outbox_mark_sent(&conn, row_id, Some(sc))?;
-                    firings_insert(&conn, row_id, &rid, &sev, &host, Some(sc), None)?;
+                    firings_insert(&conn, FiringInsertParams {
+                        outbox_id: row_id,
+                        rule_id: &rid,
+                        severity: &sev,
+                        hostname: &host,
+                        status_code: Some(sc),
+                        notes: None,
+                        dedup_key: &dk,
+                    })?;
                     Ok(())
                 })
                 .await??;
+                drop(permit3);
                 dispatched += 1;
                 tracing::info!(
                     rule_id = %rule_id,
@@ -195,22 +236,23 @@ pub(crate) async fn run_dispatch_cycle(
                 // 4xx — dead-letter immediately
                 let pool_dl = Arc::clone(&pool);
                 let error_msg = format!("permanent HTTP {code}");
-                let (rid, sev, host) = (rule_id.clone(), severity.clone(), hostname.clone());
+                let (rid, sev, host, dk) = (rule_id.clone(), severity.clone(), hostname.clone(), dedup_key.clone());
                 tokio::task::spawn_blocking(move || -> Result<()> {
                     let conn = pool_dl.get()?;
                     outbox_mark_dead(&conn, row_id, Some(code as i64), &error_msg)?;
-                    firings_insert(
-                        &conn,
-                        row_id,
-                        &rid,
-                        &sev,
-                        &host,
-                        Some(code as i64),
-                        Some(&error_msg),
-                    )?;
+                    firings_insert(&conn, FiringInsertParams {
+                        outbox_id: row_id,
+                        rule_id: &rid,
+                        severity: &sev,
+                        hostname: &host,
+                        status_code: Some(code as i64),
+                        notes: Some(&error_msg),
+                        dedup_key: &dk,
+                    })?;
                     Ok(())
                 })
                 .await??;
+                drop(permit3);
                 tracing::warn!(
                     rule_id = %rule_id,
                     hostname = %hostname,
@@ -230,14 +272,23 @@ pub(crate) async fn run_dispatch_cycle(
                     // Exhausted retries — dead-letter
                     let dead_msg = format!("max retries: {error_msg}");
                     let pool_dl = Arc::clone(&pool);
-                    let (rid, sev, host) = (rule_id.clone(), severity.clone(), hostname.clone());
+                    let (rid, sev, host, dk) = (rule_id.clone(), severity.clone(), hostname.clone(), dedup_key.clone());
                     tokio::task::spawn_blocking(move || -> Result<()> {
                         let conn = pool_dl.get()?;
                         outbox_mark_dead(&conn, row_id, None, &dead_msg)?;
-                        firings_insert(&conn, row_id, &rid, &sev, &host, None, Some(&dead_msg))?;
+                        firings_insert(&conn, FiringInsertParams {
+                            outbox_id: row_id,
+                            rule_id: &rid,
+                            severity: &sev,
+                            hostname: &host,
+                            status_code: None,
+                            notes: Some(&dead_msg),
+                            dedup_key: &dk,
+                        })?;
                         Ok(())
                     })
                     .await??;
+                    drop(permit3);
                     tracing::warn!(
                         rule_id = %rule_id,
                         hostname = %hostname,
@@ -245,7 +296,7 @@ pub(crate) async fn run_dispatch_cycle(
                         "dispatcher: dead-lettered after max retries"
                     );
                 } else {
-                    // Transient — schedule retry with backoff
+                    // Transient — schedule retry with backoff (no firing inserted)
                     let next_at = backoff_next_attempt_at(attempt_count + 1);
                     let next_at_log = next_at.clone();
                     let pool_r = Arc::clone(&pool);
@@ -256,6 +307,7 @@ pub(crate) async fn run_dispatch_cycle(
                         Ok(())
                     })
                     .await??;
+                    drop(permit3);
                     tracing::debug!(
                         rule_id = %rule_id,
                         hostname = %hostname,
@@ -266,8 +318,6 @@ pub(crate) async fn run_dispatch_cycle(
                 }
             }
         }
-
-        drop(permit);
     }
 
     Ok(dispatched)
@@ -337,6 +387,8 @@ mod tests {
                  status TEXT NOT NULL DEFAULT 'pending'
                      CHECK (status IN ('pending','sent','dead','dropped'))
              );
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_dedup_pending
+                 ON notifications_outbox(dedup_key) WHERE status = 'pending';
              CREATE TABLE notification_firings (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  outbox_id INTEGER NOT NULL,
@@ -345,7 +397,8 @@ mod tests {
                  hostname TEXT NOT NULL,
                  fired_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
                  status_code INTEGER,
-                 notes TEXT
+                 notes TEXT,
+                 dedup_key TEXT NOT NULL DEFAULT ''
              );
              CREATE TABLE error_signatures (
                  signature_hash TEXT NOT NULL,
@@ -416,9 +469,23 @@ mod tests {
             })
             .unwrap();
         // Insert a firing within the dedup window
-        firings_insert(&conn, id, "oom_kill", "critical", "host1", Some(200), None).unwrap();
+        firings_insert(
+            &conn,
+            FiringInsertParams {
+                outbox_id: id,
+                rule_id: "oom_kill",
+                severity: "critical",
+                hostname: "host1",
+                status_code: Some(200),
+                notes: None,
+                dedup_key: "oom_kill:host1:ts",
+            },
+        )
+        .unwrap();
 
-        let is_dedup = firings_recent_dedup_check(&conn, "oom_kill", "host1", 3600).unwrap();
+        let is_dedup =
+            firings_recent_dedup_check(&conn, "oom_kill", "host1", "oom_kill:host1:ts", 3600)
+                .unwrap();
         assert!(
             is_dedup,
             "should detect existing firing within dedup window"

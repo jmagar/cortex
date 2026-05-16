@@ -1217,8 +1217,10 @@ impl SyslogService {
         {
             let mut map = limiter.lock().unwrap_or_else(|e| e.into_inner());
             let now = Instant::now();
+            // Evict stale entries (window elapsed) to prevent unbounded map growth.
+            map.retain(|_, entry| entry.1.elapsed().as_secs() < 60);
             let entry = map.entry(actor.clone()).or_insert((0, now));
-            // Reset window if > 60s has elapsed
+            // Reset window if > 60s has elapsed (belt-and-suspenders after retain)
             if entry.1.elapsed().as_secs() >= 60 {
                 *entry = (0, now);
             }

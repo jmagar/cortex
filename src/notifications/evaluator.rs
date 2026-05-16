@@ -20,8 +20,11 @@ use crate::notifications::rules::{
 
 /// Run one evaluation cycle.
 ///
-/// Fetches recent logs from the last `window_secs` seconds and applies all
-/// enabled rules. Inserts matching rows into the notifications outbox.
+/// Phase 1 (no permit): fetch recent logs and evaluate rules in memory.
+/// Phase 2 (permit held): insert matched rows into the notifications outbox.
+///
+/// Separating the two phases prevents the evaluator's DB read (fetching up to
+/// 5000 rows) from blocking the maintenance semaphore across the entire cycle.
 pub(crate) async fn run_evaluation_cycle(
     pool: Arc<DbPool>,
     permit_sem: Arc<Semaphore>,
@@ -30,39 +33,47 @@ pub(crate) async fn run_evaluation_cycle(
     let apprise_urls_json = build_urls_json(&cfg);
     let window_secs = cfg.evaluators.evaluator_interval_secs * 2; // look back 2x interval
 
-    let Ok(_permit) = Arc::clone(&permit_sem).acquire_owned().await else {
-        tracing::error!("evaluator: maintenance semaphore closed, skipping cycle");
-        return Ok(0);
-    };
-
-    let pool_clone = Arc::clone(&pool);
-    let (count, pool_clone) = tokio::task::spawn_blocking(move || -> Result<(u64, Arc<DbPool>)> {
-        let conn = pool_clone.get()?;
+    // --- Phase 1: fetch + evaluate (NO permit needed — read-only DB access) ---
+    let pool_r = Arc::clone(&pool);
+    let all_params = tokio::task::spawn_blocking(move || -> Result<Vec<crate::db::notifications::OutboxInsertParams>> {
+        let conn = pool_r.get()?;
         let rows = fetch_recent_logs(&conn, window_secs)?;
         drop(conn);
 
+        let mut out = Vec::new();
+        if cfg.evaluators.oom_kill {
+            out.extend(evaluate_oom_kill(&rows, &apprise_urls_json));
+        }
+        if cfg.evaluators.container_die_nonzero {
+            out.extend(evaluate_container_die_nonzero(&rows, &apprise_urls_json));
+        }
+        if cfg.evaluators.fail2ban_ban {
+            out.extend(evaluate_fail2ban_ban(&rows, &apprise_urls_json));
+        }
+        if cfg.evaluators.authelia_mfa_fail {
+            out.extend(evaluate_authelia_mfa_fail(&rows, &apprise_urls_json));
+        }
+        Ok(out)
+    })
+    .await??;
+
+    if all_params.is_empty() {
+        return Ok(0);
+    }
+
+    // --- Phase 2: insert into outbox (permit held only during DB writes) ---
+    let Ok(_permit) = Arc::clone(&permit_sem).acquire_owned().await else {
+        tracing::error!("evaluator: maintenance semaphore closed, skipping inserts");
+        return Ok(0);
+    };
+
+    let pool_w = Arc::clone(&pool);
+    let count = tokio::task::spawn_blocking(move || -> Result<u64> {
+        let _permit = _permit; // keep permit alive for the duration of the write block
+        let conn = pool_w.get()?;
         let mut total = 0u64;
-
-        let all_params: Vec<_> = {
-            let mut out = Vec::new();
-            if cfg.evaluators.oom_kill {
-                out.extend(evaluate_oom_kill(&rows, &apprise_urls_json));
-            }
-            if cfg.evaluators.container_die_nonzero {
-                out.extend(evaluate_container_die_nonzero(&rows, &apprise_urls_json));
-            }
-            if cfg.evaluators.fail2ban_ban {
-                out.extend(evaluate_fail2ban_ban(&rows, &apprise_urls_json));
-            }
-            if cfg.evaluators.authelia_mfa_fail {
-                out.extend(evaluate_authelia_mfa_fail(&rows, &apprise_urls_json));
-            }
-            out
-        };
-
-        let conn2 = pool_clone.get()?;
         for params in &all_params {
-            match crate::db::notifications::outbox_insert(&conn2, params) {
+            match crate::db::notifications::outbox_insert(&conn, params) {
                 Ok(()) => total += 1,
                 Err(e) => tracing::warn!(
                     rule_id = %params.rule_id,
@@ -72,11 +83,9 @@ pub(crate) async fn run_evaluation_cycle(
                 ),
             }
         }
-        Ok((total, pool_clone))
+        Ok(total)
     })
     .await??;
-
-    let _ = pool_clone; // returned from closure but we already have Arc
 
     Ok(count)
 }

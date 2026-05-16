@@ -5,7 +5,7 @@ mod notifications_db_tests {
     use crate::db::notifications::{
         backoff_next_attempt_at, firings_insert, firings_recent, firings_recent_dedup_check,
         outbox_claim_pending, outbox_insert, outbox_mark_dead, outbox_mark_dropped,
-        outbox_mark_sent, outbox_schedule_retry, OutboxInsertParams,
+        outbox_mark_sent, outbox_schedule_retry, FiringInsertParams, OutboxInsertParams,
     };
 
     fn in_memory_conn() -> Connection {
@@ -29,6 +29,8 @@ mod notifications_db_tests {
                  status TEXT NOT NULL DEFAULT 'pending'
                      CHECK (status IN ('pending','sent','dead','dropped'))
              );
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_dedup_pending
+                 ON notifications_outbox(dedup_key) WHERE status = 'pending';
              CREATE TABLE notification_firings (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  outbox_id INTEGER NOT NULL,
@@ -37,7 +39,8 @@ mod notifications_db_tests {
                  hostname TEXT NOT NULL,
                  fired_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
                  status_code INTEGER,
-                 notes TEXT
+                 notes TEXT,
+                 dedup_key TEXT NOT NULL DEFAULT ''
              );",
         )
         .expect("schema");
@@ -209,18 +212,37 @@ mod notifications_db_tests {
             })
             .unwrap();
 
-        firings_insert(&conn, id, "oom_kill", "critical", "host1", Some(200), None)
-            .expect("firings insert");
+        firings_insert(
+            &conn,
+            FiringInsertParams {
+                outbox_id: id,
+                rule_id: "oom_kill",
+                severity: "critical",
+                hostname: "host1",
+                status_code: Some(200),
+                notes: None,
+                dedup_key: "oom_kill:host1:key-h",
+            },
+        )
+        .expect("firings insert");
 
-        // Within window (large window) -> should dedup
+        // Within window, same dedup_key -> should dedup
         let should_dedup =
-            firings_recent_dedup_check(&conn, "oom_kill", "host1", 3600).expect("dedup check");
+            firings_recent_dedup_check(&conn, "oom_kill", "host1", "oom_kill:host1:key-h", 3600)
+                .expect("dedup check");
         assert!(should_dedup, "should suppress within dedup window");
 
         // Different hostname -> no dedup
         let no_dedup =
-            firings_recent_dedup_check(&conn, "oom_kill", "host2", 3600).expect("dedup check 2");
+            firings_recent_dedup_check(&conn, "oom_kill", "host2", "oom_kill:host1:key-h", 3600)
+                .expect("dedup check 2");
         assert!(!no_dedup, "different host should not dedup");
+
+        // Different dedup_key -> no dedup (this is the key fix: per-signature isolation)
+        let no_dedup_dk =
+            firings_recent_dedup_check(&conn, "oom_kill", "host1", "oom_kill:host1:other-key", 3600)
+                .expect("dedup check 3");
+        assert!(!no_dedup_dk, "different dedup_key should not dedup");
     }
 
     #[test]
@@ -232,15 +254,30 @@ mod notifications_db_tests {
                 r.get(0)
             })
             .unwrap();
-        firings_insert(&conn, id, "oom_kill", "critical", "host1", Some(200), None).unwrap();
         firings_insert(
             &conn,
-            id,
-            "fail2ban_ban",
-            "notice",
-            "host2",
-            Some(200),
-            None,
+            FiringInsertParams {
+                outbox_id: id,
+                rule_id: "oom_kill",
+                severity: "critical",
+                hostname: "host1",
+                status_code: Some(200),
+                notes: None,
+                dedup_key: "key-oom",
+            },
+        )
+        .unwrap();
+        firings_insert(
+            &conn,
+            FiringInsertParams {
+                outbox_id: id,
+                rule_id: "fail2ban_ban",
+                severity: "notice",
+                hostname: "host2",
+                status_code: Some(200),
+                notes: None,
+                dedup_key: "key-fail2ban",
+            },
         )
         .unwrap();
 

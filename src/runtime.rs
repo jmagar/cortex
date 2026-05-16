@@ -21,7 +21,13 @@ pub struct RuntimeCore {
     pool: Arc<DbPool>,
     storage_state: Arc<Mutex<Option<StorageBudgetState>>>,
     service: SyslogService,
+    /// Semaphore for DB-heavy maintenance tasks: retention purge, storage
+    /// guardrail enforcement, error scan, notification evaluator.
     maintenance_permit: Arc<Semaphore>,
+    /// Separate semaphore for the notification dispatcher. The dispatcher
+    /// makes outbound HTTP calls (5s timeout); keeping it separate prevents
+    /// HTTP back-pressure from starving the DB maintenance tasks.
+    dispatcher_permit: Arc<Semaphore>,
     ingest: IngestTx,
     otlp_counters: Arc<OtlpCounters>,
     auth_policy: AuthPolicy,
@@ -148,6 +154,7 @@ impl RuntimeCore {
             storage_state,
             service,
             maintenance_permit: Arc::new(Semaphore::new(1)),
+            dispatcher_permit: Arc::new(Semaphore::new(1)),
             ingest,
             otlp_counters: Arc::new(OtlpCounters::default()),
             auth_policy,
@@ -173,6 +180,7 @@ impl RuntimeCore {
         mcp::AppState {
             service: self.service(),
             config: self.config.mcp.clone(),
+            notifications_config: self.config.notifications.clone(),
             otlp_counters: Arc::clone(&self.otlp_counters),
             auth_policy: self.auth_policy.clone(),
             observability: Arc::clone(&self.observability),
@@ -215,7 +223,7 @@ impl RuntimeCore {
     fn spawn_notification_dispatcher(&self) -> Option<JoinHandle<()>> {
         crate::notifications::dispatcher::spawn_dispatcher(
             Arc::clone(&self.pool),
-            Arc::clone(&self.maintenance_permit),
+            Arc::clone(&self.dispatcher_permit),
             self.config.notifications.clone(),
         )
     }
