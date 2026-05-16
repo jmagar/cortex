@@ -55,6 +55,11 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "compare" => tool_compare(state, args).await,
         "compose_status" => tool_compose_status(args).await,
         "compose_doctor" => tool_compose_doctor(args).await,
+        "unaddressed_errors" => tool_unaddressed_errors(state, args).await,
+        "ack_error" => tool_ack_error(state, args).await,
+        "unack_error" => tool_unack_error(state, args).await,
+        "notifications_recent" => tool_notifications_recent(state, args).await,
+        "notifications_test" => tool_notifications_test(state, args).await,
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
             "unknown syslog action: {action}; expected one of {}",
@@ -517,6 +522,25 @@ fn string_arg(args: &Value, name: &str) -> Option<String> {
     args.get(name).and_then(|v| v.as_str()).map(String::from)
 }
 
+/// Return a stable actor identifier from the app state's auth policy.
+///
+/// Full per-request OAuth claim extraction requires threading the `AuthContext`
+/// extension through the tool dispatch call chain. Until that plumbing is in
+/// place, this helper at least distinguishes between the three auth modes so
+/// audit logs aren't uniformly `"mcp:bearer"`.
+///
+/// TODO: thread `AuthContext` from routes/rmcp_server into tool handlers and
+/// use `auth_ctx.subject()` here instead.
+fn extract_actor(state: &AppState) -> &'static str {
+    match &state.auth_policy {
+        super::AuthPolicy::LoopbackDev => "mcp:loopback",
+        super::AuthPolicy::Mounted {
+            auth_state: Some(_),
+        } => "mcp:oauth",
+        super::AuthPolicy::Mounted { auth_state: None } => "mcp:bearer",
+    }
+}
+
 fn u32_arg(args: &Value, name: &str) -> anyhow::Result<Option<u32>> {
     let Some(value) = args.get(name) else {
         return Ok(None);
@@ -546,6 +570,77 @@ fn i64_arg(args: &Value, name: &str) -> anyhow::Result<Option<i64>> {
 
 fn bool_arg(args: &Value, name: &str) -> Option<bool> {
     args.get(name).and_then(|v| v.as_bool())
+}
+
+// ---------------------------------------------------------------------------
+// Error detection actions
+
+async fn tool_unaddressed_errors(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    use crate::app::UnaddressedErrorsRequest;
+    let req = UnaddressedErrorsRequest {
+        limit: u32_arg(&args, "limit")?,
+        include_acknowledged: bool_arg(&args, "include_acknowledged"),
+    };
+    let resp = state.service.unaddressed_errors(req).await?;
+    Ok(serde_json::to_value(resp)?)
+}
+
+async fn tool_ack_error(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    use crate::app::AckErrorRequest;
+    let hash = string_arg(&args, "signature_hash")
+        .ok_or_else(|| anyhow::anyhow!("signature_hash is required"))?;
+    let req = AckErrorRequest {
+        signature_hash: hash,
+        notes: string_arg(&args, "notes"),
+    };
+    let actor = extract_actor(state);
+    let resp = state.service.ack_error(req, actor).await?;
+    Ok(serde_json::to_value(resp)?)
+}
+
+async fn tool_unack_error(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    use crate::app::UnackErrorRequest;
+    let hash = string_arg(&args, "signature_hash")
+        .ok_or_else(|| anyhow::anyhow!("signature_hash is required"))?;
+    let req = UnackErrorRequest {
+        signature_hash: hash,
+        reason: string_arg(&args, "reason"),
+    };
+    let actor = extract_actor(state);
+    let resp = state.service.unack_error(req, actor).await?;
+    Ok(serde_json::to_value(resp)?)
+}
+
+async fn tool_notifications_recent(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(50)
+        .clamp(1, 500);
+    let rule_id = string_arg(&args, "rule_id");
+    let since = string_arg(&args, "since");
+    let firings = state
+        .service
+        .notifications_recent(limit, rule_id, since)
+        .await?;
+    Ok(serde_json::to_value(firings)?)
+}
+
+async fn tool_notifications_test(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let body = string_arg(&args, "body")
+        .unwrap_or_else(|| "Test notification from syslog-mcp".to_string());
+    // Actor is derived from the auth policy, not from caller-supplied args.
+    let actor = extract_actor(state).to_string();
+    // Apprise URLs come exclusively from server config to prevent SSRF.
+    // Caller-supplied apprise_url / apprise_urls are intentionally ignored.
+    let apprise_url = state.notifications_config.apprise_url.clone();
+    let apprise_urls = state.notifications_config.apprise_urls.clone();
+
+    let result = state
+        .service
+        .notifications_test(body, actor, apprise_url, apprise_urls)
+        .await?;
+    Ok(serde_json::json!({ "result": result }))
 }
 
 async fn tool_syslog_help() -> anyhow::Result<Value> {
@@ -869,6 +964,61 @@ returns a tool error when Docker/Compose ownership or runtime checks are not
 ready for lifecycle work. Lifecycle mutations remain CLI-only.
 
 **Parameters:** none. Target override fields are rejected.
+
+---
+
+## syslog unaddressed_errors
+List the top unacknowledged repeating error signatures — log message patterns
+that have been firing repeatedly without acknowledgement. Motivating case: an
+OTLP exporter POSTing to `/v1/metrics` every 10s, getting 404d, for 7 days
+unnoticed.
+
+Returns signatures sorted by `last_seen_at` descending. Each entry includes a
+normalized template, sample message, severity, counts, and acknowledgement state.
+
+**Parameters:**
+- `limit` (integer, optional) — max signatures to return (default 50)
+- `include_acknowledged` (boolean, optional) — include already-acked sigs (default false)
+
+---
+
+## syslog ack_error
+Acknowledge an error signature so it is suppressed from future `unaddressed_errors`
+results. Writes an audit event and updates the acknowledgement projection. Use
+`unack_error` to revoke.
+
+**Parameters:**
+- `signature_hash` (string, **required**) — the SHA-256 hash from `unaddressed_errors`
+- `notes` (string, optional) — acknowledgement notes (max 4096 chars)
+
+---
+
+## syslog unack_error
+Revoke an existing acknowledgement on an error signature so it reappears in
+`unaddressed_errors`. Writes an unack audit event; does NOT delete the ack history.
+
+**Parameters:**
+- `signature_hash` (string, **required**) — the SHA-256 hash of the signature
+- `reason` (string, optional) — reason for removing the acknowledgement (max 4096 chars)
+
+---
+
+## syslog notifications_recent
+List recent notification firings from the `notification_firings` table.
+
+**Parameters:**
+- `limit` (integer, optional) — max rows to return (default 50, max 500)
+- `rule_id` (string, optional) — filter by rule ID (e.g. `oom_kill`, `daily_digest`)
+- `since` (string, optional) — ISO8601 lower bound for `fired_at`
+
+---
+
+## syslog notifications_test
+Send a test notification via the server-configured Apprise URLs. Rate-limited to 10 per minute per actor.
+Caller-supplied Apprise URLs are ignored for security; the server uses its own configured URLs.
+
+**Parameters:**
+- `body` (string, optional) — notification body text (default: test message)
 
 ---
 

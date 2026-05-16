@@ -26,6 +26,7 @@ fn test_state_no_auth() -> (AppState, tempfile::TempDir) {
                 allowed_origins: Vec::new(),
                 auth: Default::default(),
             },
+            notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
             auth_policy: AuthPolicy::LoopbackDev,
             observability: Arc::new(crate::observability::RuntimeObservability::default()),
@@ -52,6 +53,7 @@ fn test_state_with_token(token: String) -> (AppState, tempfile::TempDir) {
                 allowed_origins: Vec::new(),
                 auth: Default::default(),
             },
+            notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
             // Mounted { auth_state: None } = static-bearer only; AuthLayer IS applied.
             auth_policy: AuthPolicy::Mounted { auth_state: None },
@@ -591,6 +593,7 @@ async fn test_state_with_oauth() -> (AppState, tempfile::TempDir) {
                 ..Default::default()
             },
         },
+        notifications_config: crate::config::NotificationsConfig::default(),
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
         auth_policy: AuthPolicy::Mounted {
             auth_state: Some(Arc::new(auth_state)),

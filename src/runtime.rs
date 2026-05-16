@@ -21,7 +21,13 @@ pub struct RuntimeCore {
     pool: Arc<DbPool>,
     storage_state: Arc<Mutex<Option<StorageBudgetState>>>,
     service: SyslogService,
+    /// Semaphore for DB-heavy maintenance tasks: retention purge, storage
+    /// guardrail enforcement, error scan, notification evaluator.
     maintenance_permit: Arc<Semaphore>,
+    /// Separate semaphore for the notification dispatcher. The dispatcher
+    /// makes outbound HTTP calls (5s timeout); keeping it separate prevents
+    /// HTTP back-pressure from starving the DB maintenance tasks.
+    dispatcher_permit: Arc<Semaphore>,
     ingest: IngestTx,
     otlp_counters: Arc<OtlpCounters>,
     auth_policy: AuthPolicy,
@@ -32,6 +38,10 @@ pub struct MaintenanceHandles {
     purge: Option<JoinHandle<()>>,
     storage: Option<JoinHandle<()>>,
     docker_ingest: Vec<JoinHandle<()>>,
+    error_scan: Option<JoinHandle<()>>,
+    notification_dispatcher: Option<JoinHandle<()>>,
+    notification_evaluator: Option<JoinHandle<()>>,
+    notification_digest: Option<JoinHandle<()>>,
 }
 
 impl Drop for MaintenanceHandles {
@@ -43,6 +53,18 @@ impl Drop for MaintenanceHandles {
             handle.abort();
         }
         for handle in &self.docker_ingest {
+            handle.abort();
+        }
+        if let Some(handle) = &self.error_scan {
+            handle.abort();
+        }
+        if let Some(handle) = &self.notification_dispatcher {
+            handle.abort();
+        }
+        if let Some(handle) = &self.notification_evaluator {
+            handle.abort();
+        }
+        if let Some(handle) = &self.notification_digest {
             handle.abort();
         }
     }
@@ -132,6 +154,7 @@ impl RuntimeCore {
             storage_state,
             service,
             maintenance_permit: Arc::new(Semaphore::new(1)),
+            dispatcher_permit: Arc::new(Semaphore::new(1)),
             ingest,
             otlp_counters: Arc::new(OtlpCounters::default()),
             auth_policy,
@@ -157,6 +180,7 @@ impl RuntimeCore {
         mcp::AppState {
             service: self.service(),
             config: self.config.mcp.clone(),
+            notifications_config: self.config.notifications.clone(),
             otlp_counters: Arc::clone(&self.otlp_counters),
             auth_policy: self.auth_policy.clone(),
             observability: Arc::clone(&self.observability),
@@ -181,11 +205,71 @@ impl RuntimeCore {
             Arc::clone(&self.pool),
             self.ingest.clone(),
         );
+        let error_scan = self.spawn_error_scan_task();
+        let notification_dispatcher = self.spawn_notification_dispatcher();
+        let notification_evaluator = self.spawn_notification_evaluator();
+        let notification_digest = self.spawn_notification_digest();
         MaintenanceHandles {
             purge,
             storage,
             docker_ingest,
+            error_scan,
+            notification_dispatcher,
+            notification_evaluator,
+            notification_digest,
         }
+    }
+
+    fn spawn_notification_dispatcher(&self) -> Option<JoinHandle<()>> {
+        crate::notifications::dispatcher::spawn_dispatcher(
+            Arc::clone(&self.pool),
+            Arc::clone(&self.dispatcher_permit),
+            self.config.notifications.clone(),
+        )
+    }
+
+    fn spawn_notification_evaluator(&self) -> Option<JoinHandle<()>> {
+        crate::notifications::evaluator::spawn_evaluator(
+            Arc::clone(&self.pool),
+            Arc::clone(&self.maintenance_permit),
+            self.config.notifications.clone(),
+        )
+    }
+
+    fn spawn_notification_digest(&self) -> Option<JoinHandle<()>> {
+        crate::notifications::digest::spawn_digest(
+            Arc::clone(&self.pool),
+            Arc::clone(&self.maintenance_permit),
+            self.config.notifications.clone(),
+        )
+    }
+
+    fn spawn_error_scan_task(&self) -> Option<JoinHandle<()>> {
+        let cfg = self.config.error_detection.clone();
+        if !cfg.enabled {
+            return None;
+        }
+        let pool = Arc::clone(&self.pool);
+        let limiter = Arc::clone(&self.maintenance_permit);
+        let interval_secs = cfg.scan_interval_secs.max(1);
+        let handle = tokio::spawn(async move {
+            let mut interval = background_interval(tokio::time::Duration::from_secs(interval_secs));
+            loop {
+                interval.tick().await;
+                tracing::debug!("error_scan: scan cycle starting");
+                match crate::app::error_detection::run_error_scan(
+                    Arc::clone(&pool),
+                    Arc::clone(&limiter),
+                    cfg.clone(),
+                )
+                .await
+                {
+                    Ok(n) => tracing::info!(rows_processed = n, "error_scan: cycle complete"),
+                    Err(e) => tracing::error!(error = %e, "error_scan: cycle failed"),
+                }
+            }
+        });
+        Some(handle)
     }
 
     fn spawn_retention_task(&self) -> Option<JoinHandle<()>> {

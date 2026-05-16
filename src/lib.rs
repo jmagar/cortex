@@ -7,6 +7,7 @@ pub mod compose;
 pub mod config;
 pub mod logging;
 pub mod mcp;
+pub(crate) mod notifications;
 pub mod observability;
 pub mod otlp;
 pub mod runtime;
@@ -101,6 +102,7 @@ pub mod testing {
         AppState {
             service: SyslogService::new(pool, storage),
             config: base_config(None, token),
+            notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(OtlpCounters::default()),
             auth_policy: policy,
             observability: Arc::new(crate::observability::RuntimeObservability::default()),
@@ -117,6 +119,7 @@ pub mod testing {
         AppState {
             service: SyslogService::new(pool, storage),
             config: base_config(Some("https://syslog.example.com"), token),
+            notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(OtlpCounters::default()),
             auth_policy: AuthPolicy::Mounted {
                 auth_state: Some(auth_state),

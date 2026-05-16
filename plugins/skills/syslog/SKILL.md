@@ -41,6 +41,11 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `compare` | Compare two time ranges |
 | `compose_status` | Redacted read-only Compose deployment diagnostics |
 | `compose_doctor` | Alias for Compose deployment health diagnostics |
+| `unaddressed_errors` | List unacknowledged repeating error signatures |
+| `ack_error` | Acknowledge an error signature |
+| `unack_error` | Revoke an existing acknowledgement |
+| `notifications_recent` | List recent notification firings |
+| `notifications_test` | Send a test notification via Apprise |
 | `help` | Canonical in-tree action reference (use as ground truth if this doc drifts) |
 
 **Always prefer the MCP tool**. Fall back to HTTP only when MCP is unavailable.

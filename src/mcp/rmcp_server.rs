@@ -26,6 +26,7 @@ pub struct SyslogRmcpServer {
 }
 
 const READ_SCOPE: &str = "syslog:read";
+const ADMIN_SCOPE: &str = "syslog:admin";
 const DENY_SCOPE: &str = "syslog:__deny__";
 /// Public read-only MCP actions. Must mirror non-`help` entries in
 /// [`crate::mcp::schemas::SYSLOG_ACTIONS`]; drift is covered by
@@ -59,7 +60,13 @@ const READ_ONLY_ACTIONS: &[&str] = &[
     "compare",
     "compose_status",
     "compose_doctor",
+    "unaddressed_errors",
+    "notifications_recent",
 ];
+
+/// Admin/write actions that mutate state or send outbound notifications.
+/// These require `syslog:admin` scope.
+const ADMIN_ACTIONS: &[&str] = &["ack_error", "unack_error", "notifications_test"];
 
 impl SyslogRmcpServer {
     pub fn new(state: AppState) -> Self {
@@ -384,8 +391,10 @@ fn required_scope_for(action: &str) -> Option<&'static str> {
         None
     } else if READ_ONLY_ACTIONS.contains(&action) {
         Some(READ_SCOPE)
+    } else if ADMIN_ACTIONS.contains(&action) {
+        // State-mutating or outbound-notification actions require admin scope.
+        Some(ADMIN_SCOPE)
     } else {
-        // Future write/admin actions would map to syslog:admin here.
         // Default: unknown actions use an ungrantable sentinel scope so they
         // are denied at the auth layer rather than falling through to dispatch.
         Some(DENY_SCOPE)
