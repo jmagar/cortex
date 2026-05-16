@@ -1837,7 +1837,14 @@ fn parse_config(args: &[String]) -> Result<CliCommand> {
 fn parse_config_get(args: &[String]) -> Result<ConfigGetArgs> {
     let mut parsed = ConfigGetArgs::default();
     let mut positionals = Vec::new();
-    parse_config_flags(args, &mut parsed.target, &mut parsed.toml_path, &mut parsed.json, &mut positionals, "get")?;
+    parse_config_flags(
+        args,
+        &mut parsed.target,
+        &mut parsed.toml_path,
+        &mut parsed.json,
+        &mut positionals,
+        "get",
+    )?;
     match positionals.len() {
         1 => parsed.key = positionals.into_iter().next().unwrap(),
         0 => bail!("config get requires a KEY"),
@@ -1849,7 +1856,14 @@ fn parse_config_get(args: &[String]) -> Result<ConfigGetArgs> {
 fn parse_config_set(args: &[String]) -> Result<ConfigSetArgs> {
     let mut parsed = ConfigSetArgs::default();
     let mut positionals = Vec::new();
-    parse_config_flags(args, &mut parsed.target, &mut parsed.toml_path, &mut parsed.json, &mut positionals, "set")?;
+    parse_config_flags(
+        args,
+        &mut parsed.target,
+        &mut parsed.toml_path,
+        &mut parsed.json,
+        &mut positionals,
+        "set",
+    )?;
     match positionals.len() {
         2 => {
             let mut iter = positionals.into_iter();
@@ -1876,7 +1890,14 @@ fn parse_config_set(args: &[String]) -> Result<ConfigSetArgs> {
 fn parse_config_unset(args: &[String]) -> Result<ConfigUnsetArgs> {
     let mut parsed = ConfigUnsetArgs::default();
     let mut positionals = Vec::new();
-    parse_config_flags(args, &mut parsed.target, &mut parsed.toml_path, &mut parsed.json, &mut positionals, "unset")?;
+    parse_config_flags(
+        args,
+        &mut parsed.target,
+        &mut parsed.toml_path,
+        &mut parsed.json,
+        &mut positionals,
+        "unset",
+    )?;
     match positionals.len() {
         1 => parsed.key = positionals.into_iter().next().unwrap(),
         0 => bail!("config unset requires a KEY"),
@@ -1888,7 +1909,14 @@ fn parse_config_unset(args: &[String]) -> Result<ConfigUnsetArgs> {
 fn parse_config_list(args: &[String]) -> Result<ConfigListArgs> {
     let mut parsed = ConfigListArgs::default();
     let mut positionals = Vec::new();
-    parse_config_flags(args, &mut parsed.target, &mut parsed.toml_path, &mut parsed.json, &mut positionals, "list")?;
+    parse_config_flags(
+        args,
+        &mut parsed.target,
+        &mut parsed.toml_path,
+        &mut parsed.json,
+        &mut positionals,
+        "list",
+    )?;
     if !positionals.is_empty() {
         bail!("config list does not take positional arguments");
     }
@@ -3377,13 +3405,27 @@ fn run_config_set(args: ConfigSetArgs) -> Result<()> {
             let path = env_file_path()?;
             let previous = read_env_kv(&path, &args.key)?;
             write_env_value(&path, &args.key, &args.value)?;
-            print_config_set(&args.key, previous.as_deref(), &args.value, "env", &path, args.json)
+            print_config_set(
+                &args.key,
+                previous.as_deref(),
+                &args.value,
+                "env",
+                &path,
+                args.json,
+            )
         }
         ConfigTarget::Toml => {
             let path = toml_file_path(args.toml_path.as_deref());
             let previous = read_toml_value(&path, &args.key)?;
             let stored = write_toml_value(&path, &args.key, &args.value)?;
-            print_config_set(&args.key, previous.as_deref(), &stored, "toml", &path, args.json)
+            print_config_set(
+                &args.key,
+                previous.as_deref(),
+                &stored,
+                "toml",
+                &path,
+                args.json,
+            )
         }
         ConfigTarget::Auto => unreachable!("resolve_target never returns Auto"),
     }
@@ -3498,14 +3540,15 @@ fn looks_like_env_key(key: &str) -> bool {
         && key
             .chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
-        && key.chars().next().is_some_and(|c| c.is_ascii_uppercase() || c == '_')
+        && key
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
 }
 
 fn validate_env_key(key: &str) -> Result<()> {
     if !looks_like_env_key(key) {
-        bail!(
-            "invalid env key `{key}`: expected UPPER_CASE letters, digits, and underscores"
-        );
+        bail!("invalid env key `{key}`: expected UPPER_CASE letters, digits, and underscores");
     }
     Ok(())
 }
@@ -3696,11 +3739,7 @@ fn read_toml_value(path: &std::path::Path, key: &str) -> Result<Option<String>> 
     Ok(Some(format_toml_item(item)))
 }
 
-fn write_toml_value(
-    path: &std::path::Path,
-    key: &str,
-    raw_value: &str,
-) -> Result<String> {
+fn write_toml_value(path: &std::path::Path, key: &str, raw_value: &str) -> Result<String> {
     let segments = parse_toml_key(key)?;
     let mut doc = load_toml_document(path)?;
     let value = parse_user_value(raw_value);
@@ -3971,8 +4010,14 @@ fn print_config_set(
         return Ok(());
     }
     match previous {
-        Some(prev) if prev != value => println!("{key} = {value}  (was {prev}) [{target}: {}]", path.display()),
-        Some(_) => println!("{key} = {value}  (unchanged) [{target}: {}]", path.display()),
+        Some(prev) if prev != value => println!(
+            "{key} = {value}  (was {prev}) [{target}: {}]",
+            path.display()
+        ),
+        Some(_) => println!(
+            "{key} = {value}  (unchanged) [{target}: {}]",
+            path.display()
+        ),
         None => println!("{key} = {value}  (new) [{target}: {}]", path.display()),
     }
     Ok(())
