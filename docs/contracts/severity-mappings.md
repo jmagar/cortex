@@ -83,8 +83,8 @@ enrichment-framework spec §13 open question 2) requires:
 typically `info`, a `failure` is `notice` or `warning`, a `denied` is
 `warning`, and a `challenge` is `info` — but these are conventions of
 the parsing source, not a normative mapping. Rule writers who care
-about both filter on both: `field_eq = { auth_outcome = "failure",
-severity_min = "warn" }`.
+about both filter on both: `field_eq = { auth_outcome = "failure" }` and
+`severity_min = "warn"` (both as top-level rule properties).
 
 ---
 

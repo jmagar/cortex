@@ -58,7 +58,7 @@ What the listener accepts on `:1514` (UDP and TCP):
 | --------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **RFC 3164** (legacy BSD syslog)        | yes      | No millisecond precision. Network gear and old rsyslog defaults emit this. Severity/facility decoded from the `<pri>` byte.                          |
 | **RFC 5424** (modern, with structured data) | yes  | Preferred. `STRUCTURED-DATA` slot is parsed into the row's `metadata` JSON. Use this from rsyslog with `template(name="..." type="list" option.stdsql="off")` + `RSYSLOG_SyslogProtocol23Format`. |
-| **CEF (Common Event Format)**           | partial  | UniFi gear emits CEF. The CEF header (`CEF:0|vendor|product|...`) is parsed where we can; the extension key/value pairs land in `message`. Treat as best-effort until the UniFi poller (Epic `syslog-mcp-awvr`) lands. |
+| **CEF (Common Event Format)**           | partial  | UniFi gear emits CEF. The CEF header (`CEF:0\|vendor\|product\|...`) is parsed where we can; the extension key/value pairs land in `message`. Treat as best-effort until the UniFi poller (Epic `syslog-mcp-awvr`) lands. |
 | **Plaintext / non-RFC**                 | yes      | Stored raw. Severity defaults to `info` (facility `user`). `app_name` is extracted heuristically from a leading `tag:` if present.                  |
 | **TLS-wrapped syslog** (RFC 5425)       | **no**   | V1 syslog listener is TCP/UDP only. Tracked as deferred future work. Use the WSS agent (§8) when transport security matters.                          |
 
@@ -334,7 +334,8 @@ logger -t deploy-test "hello from $(hostname)"
 **On the server (within ~5 seconds):**
 
 ```bash
-syslog tail --hostname=$(hostname-of-target) --limit=5
+# replace <target-host> with the actual hostname
+syslog tail --hostname=<target-host> --limit=5
 # OR via MCP:
 mcporter call --config config/mcporter.json syslog-mcp.search query=deploy-test limit=5
 ```

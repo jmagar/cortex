@@ -121,7 +121,7 @@ number; with a string, compares as string.
 | Boolean | JSON `true` / `false` | `dns_blocked`, `cached`, `is_filtered`. |
 | String | JSON string ≤ 4 KiB | Free-form text fields. Use sparingly. |
 | Array of primitives | JSON array of int / float / bool / string | E.g. `unifi.aps: ["Office", "Garage"]`, `fail2ban.all_ips: ["1.2.3.4", "5.6.7.8"]`. |
-| Object (nested) | JSON object up to depth 4 | E.g. `adguard.parsed.rule: {"filter_list_id": 1, "text": "||x^"}` (depth 3). |
+| Object (nested) | JSON object up to depth 4 | E.g. `adguard.parsed.rule: {"filter_list_id": 1, "text": "\|\|x^"}` (depth 3). |
 
 **Forbidden:** `null` values at any leaf. If a field is absent, omit the
 key. The rule engine treats `missing key` and `present-but-null` as the
@@ -243,7 +243,7 @@ A field path is a string with the form
 fn resolve(row: &Row, path: &str) -> Option<JsonValue>:
     if path starts with "metadata_json.":
         let segments = path[14..].split('.').collect()
-        if segments.len() > 5: return None
+        if segments.len() > 4: return None
         let mut node = parse(row.metadata_json)?
         for seg in segments:
             node = node.get(seg)?     // None propagates → "not found"
