@@ -188,7 +188,7 @@ pub(crate) async fn run_dispatch_cycle(
         .await;
 
         let row_id = row.id;
-        let attempt_count = row.attempt_count as u8;
+        let attempt_count = u8::try_from(row.attempt_count).unwrap_or(u8::MAX);
         let rule_id = row.rule_id.clone();
         let severity = row.severity.clone();
         let hostname = row.hostname.clone();
@@ -214,10 +214,11 @@ pub(crate) async fn run_dispatch_cycle(
                     dedup_key.clone(),
                 );
                 tokio::task::spawn_blocking(move || -> Result<()> {
-                    let conn = pool_s.get()?;
-                    outbox_mark_sent(&conn, row_id, Some(sc))?;
+                    let mut conn = pool_s.get()?;
+                    let tx = conn.transaction()?;
+                    outbox_mark_sent(&tx, row_id, Some(sc))?;
                     firings_insert(
-                        &conn,
+                        &tx,
                         FiringInsertParams {
                             outbox_id: row_id,
                             rule_id: &rid,
@@ -228,6 +229,7 @@ pub(crate) async fn run_dispatch_cycle(
                             dedup_key: &dk,
                         },
                     )?;
+                    tx.commit()?;
                     Ok(())
                 })
                 .await??;
@@ -251,10 +253,11 @@ pub(crate) async fn run_dispatch_cycle(
                     dedup_key.clone(),
                 );
                 tokio::task::spawn_blocking(move || -> Result<()> {
-                    let conn = pool_dl.get()?;
-                    outbox_mark_dead(&conn, row_id, Some(code as i64), &error_msg)?;
+                    let mut conn = pool_dl.get()?;
+                    let tx = conn.transaction()?;
+                    outbox_mark_dead(&tx, row_id, Some(code as i64), &error_msg)?;
                     firings_insert(
-                        &conn,
+                        &tx,
                         FiringInsertParams {
                             outbox_id: row_id,
                             rule_id: &rid,
@@ -265,6 +268,7 @@ pub(crate) async fn run_dispatch_cycle(
                             dedup_key: &dk,
                         },
                     )?;
+                    tx.commit()?;
                     Ok(())
                 })
                 .await??;
@@ -295,10 +299,11 @@ pub(crate) async fn run_dispatch_cycle(
                         dedup_key.clone(),
                     );
                     tokio::task::spawn_blocking(move || -> Result<()> {
-                        let conn = pool_dl.get()?;
-                        outbox_mark_dead(&conn, row_id, None, &dead_msg)?;
+                        let mut conn = pool_dl.get()?;
+                        let tx = conn.transaction()?;
+                        outbox_mark_dead(&tx, row_id, None, &dead_msg)?;
                         firings_insert(
-                            &conn,
+                            &tx,
                             FiringInsertParams {
                                 outbox_id: row_id,
                                 rule_id: &rid,
@@ -309,6 +314,7 @@ pub(crate) async fn run_dispatch_cycle(
                                 dedup_key: &dk,
                             },
                         )?;
+                        tx.commit()?;
                         Ok(())
                     })
                     .await??;

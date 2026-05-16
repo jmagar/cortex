@@ -124,18 +124,19 @@ impl AppriseClient {
             if e.is_timeout() {
                 AppriseError::Timeout
             } else {
-                AppriseError::Transient("send error: request failed".to_string())
+                AppriseError::Transient(format!("send error: {e}"))
             }
         })?;
 
         let status = resp.status().as_u16();
 
         match status {
-            200 | 201 => Ok(NotifyResponse {
+            200 | 201 | 202 | 204 => Ok(NotifyResponse {
                 status_code: status,
                 success: true,
             }),
             // 207 = partial success — mark sent, do NOT retry
+            // 424 = failed dependency (Apprise partial delivery) — treat as sent
             207 | 424 => Ok(NotifyResponse {
                 status_code: status,
                 success: true,
@@ -144,7 +145,8 @@ impl AppriseClient {
                 // Transient — safe to retry
                 Err(AppriseError::Transient(format!("HTTP {status}")))
             }
-            _ => {
+            300..=399 => Err(AppriseError::Transient(format!("redirect HTTP {status}"))),
+            other => {
                 // 4xx (excluding 429) = permanent
                 let body_text = resp
                     .text()
@@ -153,7 +155,7 @@ impl AppriseClient {
                 // Truncate body to avoid logging sensitive content
                 let truncated = body_text.chars().take(200).collect::<String>();
                 Err(AppriseError::Permanent {
-                    code: status,
+                    code: other,
                     body: truncated,
                 })
             }

@@ -99,14 +99,14 @@ pub(crate) async fn run_error_scan(
     Ok(total_processed as u64)
 }
 
-struct ChunkResult {
-    rows_in_chunk: i64,
-    new_cursor: i64,
+pub(crate) struct ChunkResult {
+    pub(crate) rows_in_chunk: i64,
+    pub(crate) new_cursor: i64,
 }
 
 /// Process one chunk of log rows inside a single rusqlite transaction.
 /// Returns the number of rows processed and the new cursor position.
-fn process_chunk(
+pub(crate) fn process_chunk(
     pool: &DbPool,
     last_id: i64,
     chunk_size: i64,
@@ -235,7 +235,14 @@ fn process_chunk(
                 Ok((total_count, acknowledged_at)) => {
                     acknowledged_at.is_none() && total_count >= frequency_threshold as i64
                 }
-                Err(_) => false,
+                Err(e) => {
+                    tracing::warn!(
+                        signature_hash = %hash,
+                        error = %e,
+                        "error_scan: ack-check query failed; treating as unacked (fail-open)"
+                    );
+                    true  // fail open: duplicate notification is recoverable, missed one is not
+                }
             }
         };
 
@@ -289,3 +296,7 @@ fn process_chunk(
         new_cursor: max_id,
     })
 }
+
+#[cfg(test)]
+#[path = "scanner_tests.rs"]
+mod tests;

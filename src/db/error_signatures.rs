@@ -393,4 +393,120 @@ mod tests {
             "sample_hostname should not be overwritten on update"
         );
     }
+
+    #[test]
+    fn test_ack_event_appends_to_audit_chain() {
+        let (pool, _dir) = test_pool();
+        let conn = pool.get().unwrap();
+
+        // First insert a signature to satisfy the ack_events foreign-key-style constraints
+        upsert_signature(
+            &conn,
+            UpsertSignatureParams {
+                hash: "deadbeef",
+                normalizer_version: 1,
+                template: "template",
+                sample_message: "sample",
+                sample_hostname: "host1",
+                sample_app_name: None,
+                severity: "err",
+                first_seen_at: "2024-01-01T00:00:00.000Z",
+                last_seen_at: "2024-01-01T00:00:00.000Z",
+                delta: 1,
+            },
+        )
+        .unwrap();
+
+        // Record ack then unack
+        record_ack_event(&conn, "deadbeef", 1, "ack", "admin", None).unwrap();
+        record_ack_event(&conn, "deadbeef", 1, "unack", "admin", Some("reopening")).unwrap();
+
+        // Both events should be present (audit chain — no row deleted)
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM error_signature_ack_events
+                 WHERE signature_hash = 'deadbeef'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2, "audit chain should have 2 events, not 1");
+
+        // Both event types present
+        let ack_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM error_signature_ack_events
+                 WHERE signature_hash = 'deadbeef' AND event_type = 'ack'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap();
+        let unack_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM error_signature_ack_events
+                 WHERE signature_hash = 'deadbeef' AND event_type = 'unack'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(ack_count, 1, "one 'ack' event");
+        assert_eq!(unack_count, 1, "one 'unack' event");
+    }
+
+    #[test]
+    fn test_update_ack_projection_sets_and_clears() {
+        let (pool, _dir) = test_pool();
+        let conn = pool.get().unwrap();
+
+        upsert_signature(
+            &conn,
+            UpsertSignatureParams {
+                hash: "cafebabe",
+                normalizer_version: 1,
+                template: "template",
+                sample_message: "sample",
+                sample_hostname: "host1",
+                sample_app_name: None,
+                severity: "err",
+                first_seen_at: "2024-01-01T00:00:00.000Z",
+                last_seen_at: "2024-01-01T00:00:00.000Z",
+                delta: 1,
+            },
+        )
+        .unwrap();
+
+        // Acknowledge: set acknowledged_at and acknowledged_by
+        update_ack_projection(
+            &conn,
+            "cafebabe",
+            1,
+            Some("2024-06-01T12:00:00.000Z"),
+            Some("admin"),
+        )
+        .unwrap();
+
+        let acked_at: Option<String> = conn
+            .query_row(
+                "SELECT acknowledged_at FROM error_signatures WHERE signature_hash = 'cafebabe'",
+                [],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .unwrap();
+        assert!(acked_at.is_some(), "acknowledged_at should be set after ack");
+
+        // Unacknowledge: clear both columns
+        update_ack_projection(&conn, "cafebabe", 1, None, None).unwrap();
+
+        let acked_at_after: Option<String> = conn
+            .query_row(
+                "SELECT acknowledged_at FROM error_signatures WHERE signature_hash = 'cafebabe'",
+                [],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .unwrap();
+        assert!(
+            acked_at_after.is_none(),
+            "acknowledged_at should be NULL after unack"
+        );
+    }
 }

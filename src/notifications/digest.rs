@@ -216,7 +216,10 @@ pub(crate) fn spawn_digest(
             if !already_fired && now.hour() == target_hour && now.minute() == target_minute {
                 match run_digest(Arc::clone(&pool), Arc::clone(&permit_sem), &cfg).await {
                     Ok(()) => last_fired_date = Some(today),
-                    Err(e) => tracing::error!(error = %e, "digest: failed to build/queue digest"),
+                    Err(e) => {
+                        tracing::error!(error = %e, "digest: failed to build/queue daily digest");
+                        last_fired_date = Some(today);  // suppress repeated attempts today
+                    }
                 }
             }
         }

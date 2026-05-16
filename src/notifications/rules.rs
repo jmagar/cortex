@@ -34,7 +34,7 @@ pub fn evaluate_oom_kill(rows: &[LogRow], apprise_urls_json: &str) -> Vec<Outbox
                 r.hostname, r.timestamp, r.message
             ));
             OutboxInsertParams {
-                dedup_key: format!("oom_kill:{}:{}", r.hostname, &r.timestamp),
+                dedup_key: format!("oom_kill:{}", r.hostname),
                 rule_id: "oom_kill".to_string(),
                 severity: "critical".to_string(),
                 hostname: r.hostname.clone(),
@@ -96,7 +96,7 @@ pub fn evaluate_container_die_nonzero(
                 container, exit_code, r.hostname, r.timestamp
             ));
             OutboxInsertParams {
-                dedup_key: format!("container_die:{}:{}:{}", r.hostname, container, r.timestamp),
+                dedup_key: format!("container_die:{}:{}", r.hostname, container),
                 rule_id: "container_die_nonzero".to_string(),
                 severity: "warning".to_string(),
                 hostname: r.hostname.clone(),
@@ -123,7 +123,7 @@ pub fn evaluate_fail2ban_ban(rows: &[LogRow], apprise_urls_json: &str) -> Vec<Ou
                 r.hostname, r.timestamp, r.message
             ));
             OutboxInsertParams {
-                dedup_key: format!("fail2ban_ban:{}:{}", r.hostname, r.timestamp),
+                dedup_key: format!("fail2ban_ban:{}", r.hostname),
                 rule_id: "fail2ban_ban".to_string(),
                 severity: "notice".to_string(),
                 hostname: r.hostname.clone(),
@@ -157,7 +157,7 @@ pub fn evaluate_authelia_mfa_fail(
                 r.hostname, r.timestamp, r.message
             ));
             OutboxInsertParams {
-                dedup_key: format!("authelia_mfa:{}:{}", r.hostname, r.timestamp),
+                dedup_key: format!("authelia_mfa:{}", r.hostname),
                 rule_id: "authelia_mfa_fail".to_string(),
                 severity: "warning".to_string(),
                 hostname: r.hostname.clone(),
