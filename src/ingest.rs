@@ -4,6 +4,7 @@ use tokio::sync::mpsc;
 
 use crate::config::{StorageConfig, SyslogConfig};
 use crate::db::{self, DbPool};
+use crate::enrich::EnrichmentPipeline;
 use crate::observability::RuntimeObservability;
 use crate::syslog;
 use crate::syslog::enrichment::EnrichmentConfig;
@@ -130,6 +131,7 @@ fn start_writer(
             storage,
             storage_state,
             enrichment,
+            Arc::new(EnrichmentPipeline::new()),
             writer_observability,
         );
         syslog::writer::batch_writer(

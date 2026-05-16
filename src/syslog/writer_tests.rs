@@ -72,6 +72,7 @@ async fn flush_batch_retains_entries_while_storage_is_write_blocked() {
         storage.clone(),
         Arc::clone(&storage_state),
         crate::syslog::enrichment::EnrichmentConfig::default(),
+        Arc::new(crate::enrich::EnrichmentPipeline::new()),
         Arc::clone(&observability),
     );
 
@@ -98,6 +99,7 @@ async fn flush_batch_resumes_after_storage_recovers() {
         storage.clone(),
         Arc::clone(&storage_state),
         crate::syslog::enrichment::EnrichmentConfig::default(),
+        Arc::new(crate::enrich::EnrichmentPipeline::new()),
         Arc::clone(&observability),
     );
 
@@ -140,6 +142,7 @@ async fn flush_batch_isolates_bad_rows_and_writes_remaining_entries() {
         storage.clone(),
         Arc::clone(&storage_state),
         crate::syslog::enrichment::EnrichmentConfig::default(),
+        Arc::new(crate::enrich::EnrichmentPipeline::new()),
         Arc::clone(&observability),
     );
 
@@ -173,6 +176,7 @@ async fn flush_batch_retains_bounded_entries_for_large_retryable_failures() {
         storage.clone(),
         Arc::clone(&storage_state),
         crate::syslog::enrichment::EnrichmentConfig::default(),
+        Arc::new(crate::enrich::EnrichmentPipeline::new()),
         Arc::clone(&observability),
     );
 
