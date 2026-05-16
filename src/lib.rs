@@ -5,6 +5,7 @@ pub mod api;
 pub mod app;
 pub mod compose;
 pub mod config;
+pub mod enrich;
 pub mod logging;
 pub mod mcp;
 pub(crate) mod notifications;
@@ -42,6 +43,9 @@ pub mod testing {
         mcp::{AppState, AuthPolicy},
         otlp::OtlpCounters,
     };
+
+    // Re-export db internals for integration tests (behind test-support feature).
+    pub use crate::db::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
 
     /// Build an [`AppState`] with [`AuthPolicy::LoopbackDev`].
     /// `data_dir` must remain alive for the duration of the test.

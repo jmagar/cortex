@@ -38,6 +38,11 @@ fn entry_with_source_ip(
         ai_session_id: None,
         ai_transcript_path: None,
         metadata_json: None,
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
     }
 }
 
@@ -257,6 +262,11 @@ fn ai_entry(ts: &str, tool: &str, project: &str, session_id: &str, message: &str
         ai_session_id: Some(session_id.to_string()),
         ai_transcript_path: Some(format!("{project}/{session_id}.jsonl")),
         metadata_json: None,
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
     }
 }
 

@@ -30,6 +30,23 @@ pub struct LogBatchEntry {
     pub ai_session_id: Option<String>,
     pub ai_transcript_path: Option<String>,
     pub metadata_json: Option<String>,
+    /// HTTP status code (3 digits). Indexed column. Set by `swag` parser.
+    pub http_status: Option<i32>,
+
+    /// Authentication outcome ("success" | "failure" | "denied" | "challenge").
+    /// Indexed column. Set by `authelia` parser.
+    pub auth_outcome: Option<&'static str>,
+
+    /// DNS block decision. `Some(true)` = filtered/blocked, `Some(false)` = explicit
+    /// allow, `None` = N/A (rewrites and non-DNS rows). Indexed column.
+    pub dns_blocked: Option<bool>,
+
+    /// Normalised event verb (closed enum per parser). Indexed column.
+    pub event_action: Option<String>,
+
+    /// Per-row parser diagnostic: "{parser_name}: {ParserError::Display}",
+    /// truncated to 512 bytes. No index — diagnostic only.
+    pub parse_error: Option<String>,
 }
 
 #[derive(Debug, Clone)]

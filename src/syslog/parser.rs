@@ -263,6 +263,11 @@ pub(super) fn parse_syslog(raw: &str, source_ip: String) -> db::LogBatchEntry {
         ai_session_id: None,
         ai_transcript_path: None,
         metadata_json: Some(metadata_json),
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
     }
 }
 
