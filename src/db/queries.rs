@@ -5,7 +5,7 @@ use crate::config::StorageConfig;
 
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
 use super::models::{
-    AiCorrelateParams, AiCussMatch, AiCussParams, AiCussResult, AiProjectInventoryEntry,
+    AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiProjectInventoryEntry,
     AiSessionEntry, AiToolInventoryEntry, DbStats, ErrorSummaryEntry, HostEntry,
     ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams,
     ListAiToolsResult, LogEntry, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams,
@@ -476,17 +476,17 @@ pub fn search_ai_anchors(pool: &DbPool, params: &AiCorrelateParams) -> Result<Ve
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-const DEFAULT_AI_CUSS_TERMS: &[&str] = &[
+const DEFAULT_AI_ABUSE_TERMS: &[&str] = &[
     "asshole", "bastard", "bitch", "biznitch", "bullshit", "crap", "damn", "dick", "fuck",
     "fucked", "fucker", "fucking", "hell", "piss", "shit", "shitty",
 ];
 
-pub fn search_ai_cusses(pool: &DbPool, params: &AiCussParams) -> Result<AiCussResult> {
+pub fn search_ai_abuse(pool: &DbPool, params: &AiAbuseParams) -> Result<AiAbuseResult> {
     let conn = pool.get()?;
     let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
     let before = params.before.unwrap_or(2).min(20);
     let after = params.after.unwrap_or(2).min(20);
-    let terms = normalized_cuss_terms(&params.terms);
+    let terms = normalized_abuse_terms(&params.terms);
     const CANDIDATE_CAP: usize = 10_000;
 
     let mut sql = String::from(
@@ -500,7 +500,7 @@ pub fn search_ai_cusses(pool: &DbPool, params: &AiCussParams) -> Result<AiCussRe
            AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
            AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
     );
-    let mut bindings = vec![rusqlite::types::Value::Text(cuss_fts_query(&terms))];
+    let mut bindings = vec![rusqlite::types::Value::Text(abuse_fts_query(&terms))];
     let mut idx = 2usize;
 
     if let Some(project) = &params.ai_project {
@@ -536,13 +536,13 @@ pub fn search_ai_cusses(pool: &DbPool, params: &AiCussParams) -> Result<AiCussRe
     let mut matches = Vec::new();
     let mut result_limit_truncated = false;
     for entry in candidate_rows.iter().take(CANDIDATE_CAP) {
-        if let Some(term) = first_cuss_term(&entry.message, &terms) {
+        if let Some(term) = first_abuse_term(&entry.message, &terms) {
             if matches.len() == limit {
                 result_limit_truncated = true;
                 break;
             }
             let (before_rows, after_rows) = ai_session_context(&conn, entry, before, after)?;
-            matches.push(AiCussMatch {
+            matches.push(AiAbuseMatch {
                 term,
                 entry: entry.clone(),
                 before: before_rows,
@@ -551,7 +551,7 @@ pub fn search_ai_cusses(pool: &DbPool, params: &AiCussParams) -> Result<AiCussRe
         }
     }
 
-    Ok(AiCussResult {
+    Ok(AiAbuseResult {
         terms,
         candidate_rows: candidate_rows.len().min(CANDIDATE_CAP),
         candidate_cap: CANDIDATE_CAP,
@@ -707,9 +707,9 @@ fn truncate_to_limit<T>(values: &mut Vec<T>, limit: usize) -> bool {
     truncated
 }
 
-fn normalized_cuss_terms(custom_terms: &[String]) -> Vec<String> {
+fn normalized_abuse_terms(custom_terms: &[String]) -> Vec<String> {
     let source: Vec<String> = if custom_terms.is_empty() {
-        DEFAULT_AI_CUSS_TERMS
+        DEFAULT_AI_ABUSE_TERMS
             .iter()
             .map(|term| (*term).to_string())
             .collect()
@@ -731,7 +731,7 @@ fn normalized_cuss_terms(custom_terms: &[String]) -> Vec<String> {
     terms.sort();
     terms.dedup();
     if terms.is_empty() {
-        DEFAULT_AI_CUSS_TERMS
+        DEFAULT_AI_ABUSE_TERMS
             .iter()
             .map(|term| (*term).to_string())
             .collect()
@@ -740,7 +740,7 @@ fn normalized_cuss_terms(custom_terms: &[String]) -> Vec<String> {
     }
 }
 
-fn cuss_fts_query(terms: &[String]) -> String {
+fn abuse_fts_query(terms: &[String]) -> String {
     terms
         .iter()
         .map(|term| format!("\"{term}\""))
@@ -748,7 +748,7 @@ fn cuss_fts_query(terms: &[String]) -> String {
         .join(" OR ")
 }
 
-fn first_cuss_term(message: &str, terms: &[String]) -> Option<String> {
+fn first_abuse_term(message: &str, terms: &[String]) -> Option<String> {
     let lower = message.to_ascii_lowercase();
     terms
         .iter()
@@ -762,8 +762,8 @@ fn first_term_index(message: &str, term: &str) -> Option<usize> {
     while let Some(relative) = message[offset..].find(term) {
         let start = offset + relative;
         let end = start + term.len();
-        if is_cuss_boundary(message[..start].chars().next_back())
-            && is_cuss_boundary(message[end..].chars().next())
+        if is_abuse_boundary(message[..start].chars().next_back())
+            && is_abuse_boundary(message[end..].chars().next())
         {
             return Some(start);
         }
@@ -772,7 +772,7 @@ fn first_term_index(message: &str, term: &str) -> Option<usize> {
     None
 }
 
-fn is_cuss_boundary(ch: Option<char>) -> bool {
+fn is_abuse_boundary(ch: Option<char>) -> bool {
     ch.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_')
 }
 

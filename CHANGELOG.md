@@ -7,15 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-05-16
+
+### Changed
+
+- **AI abuse detector terminology**: Renamed the AI transcript detector surface
+  from the legacy wording to abuse across the CLI, MCP action, docs, smoke
+  tests, and plugin skill reference.
+
 ## [0.25.1] - 2026-05-15
 
 ### Fixed
 
-- **AI cuss detector CLI responsiveness**: `syslog ai cuss` now uses the
-  existing FTS5 index to find profanity candidates before applying the
+- **AI abuse detector CLI responsiveness**: `syslog ai abuse` now uses the
+  existing FTS5 index to find abuse candidates before applying the
   boundary-aware detector, making unfiltered local scans return quickly.
 - **Query-only CLI noise**: CLI commands now suppress serve-mode config
-  warnings so `syslog ai cuss` output starts with detector results instead of
+  warnings so `syslog ai abuse` output starts with detector results instead of
   Docker/OAuth startup warnings.
 
 ## [0.25.0] - 2026-05-15
@@ -83,8 +91,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **AI cuss detector**: Added `syslog ai cuss` and MCP `action="cuss"` to
-  detect profanity in AI transcript rows and return surrounding rows from the
+- **AI abuse detector**: Added `syslog ai abuse` and MCP `action="abuse"` to
+  detect abuse in AI transcript rows and return surrounding rows from the
   same AI session.
 
 ## [0.21.9] - 2026-05-14
@@ -1240,7 +1248,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.25.1...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.25.2...HEAD
+[0.25.2]: https://github.com/jmagar/syslog-mcp/compare/v0.25.1...v0.25.2
 [0.25.1]: https://github.com/jmagar/syslog-mcp/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/jmagar/syslog-mcp/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/jmagar/syslog-mcp/compare/v0.24.0...v0.24.1

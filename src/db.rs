@@ -23,7 +23,7 @@ pub use maintenance::{
 };
 pub(crate) use maintenance::{db_pragma_i64, db_pragma_string};
 pub use models::{
-    AiCorrelateParams, AiCussMatch, AiCussParams, AiCussResult, AiProjectContext,
+    AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiProjectContext,
     AiProjectContextParams, AiProjectInventoryEntry, AiSessionEntry, AiToolInventoryEntry,
     AiUsageBlock, AiUsageBlocksParams, AiUsageBlocksResult, DbStats, DockerCheckpoint,
     ErrorSummaryEntry, HostEntry, ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams,
@@ -34,6 +34,6 @@ pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, 
 pub use pool::{init_pool, DbPool};
 pub use queries::{
     get_error_summary, get_stats, list_ai_projects, list_ai_sessions, list_ai_tools, list_hosts,
-    search_ai_anchors, search_ai_cusses, search_ai_sessions, search_logs, severity_to_num,
+    search_ai_abuse, search_ai_anchors, search_ai_sessions, search_logs, severity_to_num,
     tail_logs, validate_fts_query, SEVERITY_LEVELS,
 };

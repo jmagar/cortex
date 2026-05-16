@@ -1738,10 +1738,7 @@ fn systemctl_user_named_phase(name: &'static str, args: &[&str]) -> SetupPhase {
                 .unwrap_or("ok")
                 .to_string(),
         ),
-        Ok(output) => timer.finish(
-            SetupStatus::Warn,
-            systemctl_error_message(&output),
-        ),
+        Ok(output) => timer.finish(SetupStatus::Warn, systemctl_error_message(&output)),
         Err(error) if error.kind() == ErrorKind::NotFound => {
             timer.finish(SetupStatus::Warn, "systemctl not found")
         }
@@ -1764,10 +1761,7 @@ fn systemctl_user_required_named_phase(name: &'static str, args: &[&str]) -> Set
                 .unwrap_or("ok")
                 .to_string(),
         ),
-        Ok(output) => timer.finish(
-            SetupStatus::Error,
-            systemctl_error_message(&output),
-        ),
+        Ok(output) => timer.finish(SetupStatus::Error, systemctl_error_message(&output)),
         Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
     }
 }

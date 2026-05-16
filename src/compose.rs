@@ -314,6 +314,19 @@ fn compose_base_args(target: &ResolvedComposeTarget) -> Vec<String> {
     if let Some(project_dir) = &target.compose_working_dir {
         args.push("--project-directory".into());
         args.push(project_dir.display().to_string());
+        // Docker Compose only looks for .env in the project directory for YAML
+        // variable substitution. The syslog-mcp setup places .env one level up
+        // (e.g. ~/.syslog-mcp/.env with compose files under ~/.syslog-mcp/compose/).
+        // Pass --env-file explicitly so SYSLOG_MCP_DATA_VOLUME and similar vars
+        // are substituted correctly (bind-mount vs named-volume fallback).
+        if let Some(env_path) = project_dir
+            .parent()
+            .map(|p| p.join(".env"))
+            .filter(|p| p.is_file())
+        {
+            args.push("--env-file".into());
+            args.push(env_path.display().to_string());
+        }
     }
     for file in &target.compose_files {
         args.push("-f".into());

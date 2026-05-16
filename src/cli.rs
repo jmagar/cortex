@@ -3,13 +3,14 @@ use serde::Serialize;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use syslog_mcp::app::{
-    AiCorrelateRequest, AiCorrelateResponse, CorrelateEventsRequest, CorrelateEventsResponse,
-    CussSearchRequest, CussSearchResponse, DbBackupResult, DbCheckpointResult, DbIntegrityResult,
-    DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest, GetErrorsResponse,
-    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
-    ListHostsResponse, LogEntry, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
-    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SyslogService,
-    TailLogsRequest, UsageBlocksRequest, UsageBlocksResponse,
+    AbuseSearchRequest, AbuseSearchResponse, AiCorrelateRequest, AiCorrelateResponse,
+    CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
+    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest,
+    GetErrorsResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
+    ListAiToolsResponse, ListHostsResponse, LogEntry, ProjectContextRequest,
+    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
+    SearchSessionsResponse, SyslogService, TailLogsRequest, UsageBlocksRequest,
+    UsageBlocksResponse,
 };
 use syslog_mcp::compose::{
     CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
@@ -37,7 +38,7 @@ pub(crate) enum CliCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AiCommand {
     Search(AiSearchArgs),
-    Cuss(AiCussArgs),
+    Abuse(AiAbuseArgs),
     Correlate(AiCorrelateArgs),
     Blocks(AiBlocksArgs),
     Context(AiContextArgs),
@@ -225,7 +226,7 @@ pub(crate) struct AiSearchArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiCussArgs {
+pub(crate) struct AiAbuseArgs {
     pub project: Option<String>,
     pub tool: Option<String>,
     pub from: Option<String>,
@@ -457,10 +458,10 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                     .await?;
                 print_search_sessions_response(&response, json)?;
             }
-            AiCommand::Cuss(args) => {
+            AiCommand::Abuse(args) => {
                 let json = args.json;
                 let response = service
-                    .search_cusses(CussSearchRequest {
+                    .search_abuse(AbuseSearchRequest {
                         project: args.project,
                         tool: args.tool,
                         from: args.from,
@@ -471,7 +472,7 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                         terms: args.terms,
                     })
                     .await?;
-                print_cuss_search_response(&response, json)?;
+                print_abuse_search_response(&response, json)?;
             }
             AiCommand::Correlate(args) => {
                 let json = args.json;
@@ -837,7 +838,7 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
         .ok_or_else(|| anyhow!("ai requires a subcommand"))?;
     match subcommand.as_str() {
         "search" => parse_ai_search(rest),
-        "cuss" => parse_ai_cuss(rest),
+        "abuse" => parse_ai_abuse(rest),
         "correlate" => parse_ai_correlate(rest),
         "blocks" => parse_ai_blocks(rest),
         "context" => parse_ai_context(rest),
@@ -901,8 +902,8 @@ fn parse_ai_search(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Ai(AiCommand::Search(parsed)))
 }
 
-fn parse_ai_cuss(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiCussArgs::default();
+fn parse_ai_abuse(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiAbuseArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
@@ -948,11 +949,11 @@ fn parse_ai_cuss(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--term=") => {
                 parsed.terms.push(value_after_equals(arg, "--term")?)
             }
-            _ if arg.starts_with('-') => bail!("unknown ai cuss option: {arg}"),
-            _ => bail!("unexpected ai cuss argument: {arg}"),
+            _ if arg.starts_with('-') => bail!("unknown ai abuse option: {arg}"),
+            _ => bail!("unexpected ai abuse argument: {arg}"),
         }
     }
-    Ok(CliCommand::Ai(AiCommand::Cuss(parsed)))
+    Ok(CliCommand::Ai(AiCommand::Abuse(parsed)))
 }
 
 fn parse_ai_correlate(args: &[String]) -> Result<CliCommand> {
@@ -2385,12 +2386,12 @@ fn print_search_sessions_response(response: &SearchSessionsResponse, json: bool)
     Ok(())
 }
 
-fn print_cuss_search_response(response: &CussSearchResponse, json: bool) -> Result<()> {
+fn print_abuse_search_response(response: &AbuseSearchResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
     println!(
-        "{} cuss match(es) from {} candidate row(s){}",
+        "{} abuse match(es) from {} candidate row(s){}",
         response.matches.len(),
         response.candidate_rows,
         if response.truncated {
@@ -2401,7 +2402,7 @@ fn print_cuss_search_response(response: &CussSearchResponse, json: bool) -> Resu
     );
     if response.candidate_window_truncated {
         println!(
-            "cuss scan capped at {} candidate rows; use --project, --tool, --from, or --to to narrow it",
+            "abuse scan capped at {} candidate rows; use --project, --tool, --from, or --to to narrow it",
             response.candidate_cap
         );
     }

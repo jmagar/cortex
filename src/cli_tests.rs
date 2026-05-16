@@ -125,10 +125,10 @@ fn parse_ai_search_collects_filters() {
 }
 
 #[test]
-fn parse_ai_cuss_collects_filters_and_context_options() {
+fn parse_ai_abuse_collects_filters_and_context_options() {
     let parsed = CliCommand::parse(strings(&[
         "ai",
-        "cuss",
+        "abuse",
         "--project=/tmp/project",
         "--tool",
         "codex",
@@ -145,7 +145,7 @@ fn parse_ai_cuss_collects_filters_and_context_options() {
 
     assert_eq!(
         parsed,
-        CliCommand::Ai(AiCommand::Cuss(AiCussArgs {
+        CliCommand::Ai(AiCommand::Abuse(AiAbuseArgs {
             project: Some("/tmp/project".into()),
             tool: Some("codex".into()),
             limit: Some(5),

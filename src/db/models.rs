@@ -136,7 +136,7 @@ pub struct SearchAiSessionsResult {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct AiCussParams {
+pub struct AiAbuseParams {
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
     pub from: Option<String>,
@@ -148,7 +148,7 @@ pub struct AiCussParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiCussMatch {
+pub struct AiAbuseMatch {
     pub term: String,
     pub entry: LogEntry,
     pub before: Vec<LogEntry>,
@@ -156,13 +156,13 @@ pub struct AiCussMatch {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiCussResult {
+pub struct AiAbuseResult {
     pub terms: Vec<String>,
     pub candidate_rows: usize,
     pub candidate_cap: usize,
     pub candidate_window_truncated: bool,
     pub truncated: bool,
-    pub matches: Vec<AiCussMatch>,
+    pub matches: Vec<AiAbuseMatch>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

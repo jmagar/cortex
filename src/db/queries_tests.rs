@@ -498,7 +498,7 @@ fn search_ai_sessions_zero_limit_clamps_to_one_with_metadata() {
 }
 
 #[test]
-fn search_ai_cusses_returns_same_session_context() {
+fn search_ai_abuse_returns_same_session_context() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(
         &pool,
@@ -541,15 +541,15 @@ fn search_ai_cusses_returns_same_session_context() {
                 "codex",
                 "/tmp/project",
                 "sess-1",
-                "assistant is not a cuss false positive",
+                "assistant is not a abuse false positive",
             ),
         ],
     )
     .unwrap();
 
-    let result = search_ai_cusses(
+    let result = search_ai_abuse(
         &pool,
-        &AiCussParams {
+        &AiAbuseParams {
             ai_project: Some("/tmp/project".into()),
             ai_tool: Some("codex".into()),
             limit: Some(10),
@@ -571,7 +571,7 @@ fn search_ai_cusses_returns_same_session_context() {
 }
 
 #[test]
-fn search_ai_cusses_truncates_only_when_additional_match_exists() {
+fn search_ai_abuse_truncates_only_when_additional_match_exists() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(
         &pool,
@@ -596,9 +596,9 @@ fn search_ai_cusses_truncates_only_when_additional_match_exists() {
     )
     .unwrap();
 
-    let exact = search_ai_cusses(
+    let exact = search_ai_abuse(
         &pool,
-        &AiCussParams {
+        &AiAbuseParams {
             ai_project: Some("/tmp/project".into()),
             ai_tool: Some("codex".into()),
             limit: Some(1),
@@ -621,9 +621,9 @@ fn search_ai_cusses_truncates_only_when_additional_match_exists() {
         )],
     )
     .unwrap();
-    let truncated = search_ai_cusses(
+    let truncated = search_ai_abuse(
         &pool,
-        &AiCussParams {
+        &AiAbuseParams {
             ai_project: Some("/tmp/project".into()),
             ai_tool: Some("codex".into()),
             limit: Some(1),

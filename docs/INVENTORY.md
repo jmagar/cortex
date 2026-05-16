@@ -17,7 +17,7 @@ argument selects the operation. The authoritative action list lives in
 | `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |
 | `stats` | Database statistics: total logs, hosts, time range, DB size, free disk, write-block status | no |
 | `status` | Lightweight runtime status: DB health, queue/backpressure state, listener/writer counters, OTLP counters | no |
-| `sessions` / `search_sessions` / `cuss` / `ai_correlate` / `usage_blocks` / `project_context` / `list_ai_tools` / `list_ai_projects` | AI transcript session, detector, and cross-corpus analytics | no |
+| `sessions` / `search_sessions` / `abuse` / `ai_correlate` / `usage_blocks` / `project_context` / `list_ai_tools` / `list_ai_projects` | AI transcript session, detector, and cross-corpus analytics | no |
 | `apps` / `source_ips` / `timeline` / `patterns` / `context` / `get` / `ingest_rate` / `silent_hosts` / `clock_skew` / `anomalies` / `compare` | Extended log analytics and diagnostics | no |
 | `compose_status` / `compose_doctor` | Redacted Docker Compose runtime projections | no |
 | `help` | Returns markdown documentation for all actions | no |

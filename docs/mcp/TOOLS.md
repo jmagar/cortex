@@ -13,7 +13,7 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `hosts` | Host registry with first/last seen |
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
-| `cuss` | Profanity hits in AI transcripts with same-session context |
+| `abuse` | Abuse hits in AI transcripts with same-session context |
 | `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
 | `usage_blocks` | AI activity in deterministic 5-hour windows |
 | `project_context` | Summary for one AI project path |
@@ -85,16 +85,16 @@ Required arguments: `action = "search_sessions"`, `query`
 
 Optional arguments: `project`, `tool`, `from`, `to`, `limit`.
 
-## syslog cuss
+## syslog abuse
 
-Detect profanity in AI transcript rows and return the hit plus surrounding rows
+Detect abuse in AI transcript rows and return the hit plus surrounding rows
 from the same AI session.
 
-Required argument: `action = "cuss"`
+Required argument: `action = "abuse"`
 
 Optional arguments: `project`, `tool`, `from`, `to`, `limit`, `before`, `after`, `terms`.
 
-`terms` replaces the built-in profanity detector list when provided. `before`
+`terms` replaces the built-in abuse detector list when provided. `before`
 and `after` default to 2 and are capped at 20.
 
 ## syslog ai_correlate
