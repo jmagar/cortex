@@ -29,6 +29,7 @@ async fn main() -> Result<()> {
         Mode::Cli(command) => run_cli(*command).await,
         Mode::Setup(command) => run_setup(command).await,
         Mode::DoctorBinary(command) => run_binary_doctor(command).await,
+        Mode::DoctorFull(command) => run_doctor_full(command).await,
         Mode::Help => unreachable!("handled before logging initialization"),
         Mode::Version => unreachable!("handled before logging initialization"),
     }
@@ -124,6 +125,291 @@ async fn run_binary_doctor(command: DoctorBinaryCommand) -> Result<()> {
     Ok(())
 }
 
+fn parse_doctor_full_command(args: &[String]) -> Result<DoctorFullCommand> {
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--help" | "-h" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            other => anyhow::bail!("unknown doctor argument: {other}"),
+        }
+    }
+    Ok(DoctorFullCommand { json })
+}
+
+async fn run_doctor_full(command: DoctorFullCommand) -> Result<()> {
+    use syslog_mcp::compose::{
+        CliDockerInspect, ComposeDefaults, ComposeService, ComposeTarget, DiagnosticSeverity,
+        ProcessRunner,
+    };
+    use syslog_mcp::setup::SetupStatus;
+
+    // Tracks exit code; each section appends its error count.
+    let mut total_errors: usize = 0;
+
+    // ── helpers ─────────────────────────────────────────────────────────────
+    fn status_tag(s: &SetupStatus) -> &'static str {
+        match s {
+            SetupStatus::Ok => "Ok     ",
+            SetupStatus::Warn => "Warn   ",
+            SetupStatus::Error => "Error  ",
+            SetupStatus::Skipped => "Skip   ",
+        }
+    }
+
+    fn diag_status(sev: &DiagnosticSeverity) -> SetupStatus {
+        match sev {
+            DiagnosticSeverity::Error | DiagnosticSeverity::Unsafe => SetupStatus::Error,
+            DiagnosticSeverity::Warning => SetupStatus::Warn,
+            DiagnosticSeverity::Info => SetupStatus::Ok,
+        }
+    }
+
+    fn print_phase(status: &SetupStatus, name: &str, elapsed_ms: u128, detail: &str) {
+        // Multi-line detail (e.g. script output from runtime_current_error) is
+        // truncated to the first non-empty line to keep the table readable.
+        let first = detail.lines().find(|l| !l.trim().is_empty()).unwrap_or(detail);
+        println!(
+            "  {}  {:<28} {:>4}ms  {}",
+            status_tag(status),
+            name,
+            elapsed_ms,
+            first
+        );
+    }
+
+    if command.json {
+        // ── JSON mode: aggregate all sub-reports ────────────────────────────
+        let setup = syslog_mcp::setup::run_setup_doctor()
+            .await
+            .map(|r| serde_json::to_value(&r).unwrap_or_default())
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
+
+        let compose_svc =
+            ComposeService::new(CliDockerInspect, ProcessRunner, ComposeDefaults::default());
+        let compose = compose_svc
+            .status(&ComposeTarget::default())
+            .map(|r| serde_json::to_value(&r).unwrap_or_default())
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
+
+        let binary = BinaryDoctorReport::collect();
+
+        let ai = match RuntimeCore::load_query_only().await {
+            Ok(runtime) => runtime
+                .service()
+                .ai_doctor()
+                .await
+                .map(|r| serde_json::to_value(&r).unwrap_or_default())
+                .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
+            Err(e) => serde_json::json!({"error": e.to_string()}),
+        };
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "setup":   setup,
+                "compose": compose,
+                "binary":  binary,
+                "ai":      ai,
+            }))?
+        );
+
+        // Determine exit code from each section's has_errors / diagnostics.
+        let setup_err = setup.get("has_errors").and_then(|v| v.as_bool()).unwrap_or(false);
+        let compose_err = compose
+            .get("diagnostics")
+            .and_then(|v| v.as_array())
+            .map(|diags| {
+                diags.iter().any(|d| {
+                    matches!(
+                        d.get("severity").and_then(|s| s.as_str()),
+                        Some("error") | Some("unsafe")
+                    )
+                })
+            })
+            .unwrap_or(false);
+        let binary_err = binary.runtime_current == Some(false);
+        if setup_err || compose_err || binary_err {
+            anyhow::bail!("doctor found issues");
+        }
+        return Ok(());
+    }
+
+    // ── Text mode ────────────────────────────────────────────────────────────
+
+    // 1. Setup ----------------------------------------------------------------
+    println!("Setup");
+    match syslog_mcp::setup::run_setup_doctor().await {
+        Ok(report) => {
+            for phase in &report.phases {
+                print_phase(&phase.status, phase.name, phase.elapsed_ms, &phase.detail);
+                if matches!(phase.status, SetupStatus::Error) {
+                    total_errors += 1;
+                }
+            }
+        }
+        Err(e) => {
+            total_errors += 1;
+            print_phase(&SetupStatus::Error, "setup_doctor", 0, &e.to_string());
+        }
+    }
+
+    // 2. Compose --------------------------------------------------------------
+    println!("\nCompose");
+    let compose_svc =
+        ComposeService::new(CliDockerInspect, ProcessRunner, ComposeDefaults::default());
+    match compose_svc.status(&ComposeTarget::default()) {
+        Ok(status) => {
+            let running = status
+                .status
+                .as_deref()
+                .is_some_and(|s| !s.to_ascii_lowercase().contains("exit") && s != "stopped");
+            let health_detail = format!(
+                "{} ({})",
+                status.status.as_deref().unwrap_or("unknown"),
+                status.health.as_deref().unwrap_or("no healthcheck")
+            );
+            print_phase(
+                if running {
+                    &SetupStatus::Ok
+                } else {
+                    &SetupStatus::Error
+                },
+                "status",
+                0,
+                &health_detail,
+            );
+            if !running {
+                total_errors += 1;
+            }
+            // Show data volume mount (bind vs named-volume drift).
+            let data_mount = status.data_mounts.iter().find(|m| m.target == "/data");
+            match data_mount {
+                Some(m) => {
+                    let src = m
+                        .source
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
+                    let detail = format!("{} {} → /data", m.kind, src);
+                    let s = if m.kind == "bind" {
+                        SetupStatus::Ok
+                    } else {
+                        total_errors += 1;
+                        SetupStatus::Error
+                    };
+                    print_phase(&s, "data_volume", 0, &detail);
+                }
+                None => {
+                    // Not an error when container is stopped; already reported above.
+                    if running {
+                        total_errors += 1;
+                        print_phase(&SetupStatus::Error, "data_volume", 0, "no /data mount");
+                    }
+                }
+            }
+            for diag in &status.diagnostics {
+                let s = diag_status(&diag.severity);
+                if matches!(s, SetupStatus::Error) {
+                    total_errors += 1;
+                }
+                print_phase(&s, &diag.code, 0, &diag.message);
+            }
+        }
+        Err(e) => {
+            total_errors += 1;
+            print_phase(&SetupStatus::Error, "compose_status", 0, &e.to_string());
+        }
+    }
+
+    // 3. Binary ---------------------------------------------------------------
+    println!("\nBinary");
+    let binary = BinaryDoctorReport::collect();
+    let version_detail = format!(
+        "container={} repo={}",
+        binary.container_version.as_deref().unwrap_or("-"),
+        binary.repo_version
+    );
+    let version_status = match binary.runtime_current {
+        Some(true) => SetupStatus::Ok,
+        Some(false) => {
+            total_errors += 1;
+            SetupStatus::Error
+        }
+        None => SetupStatus::Warn,
+    };
+    print_phase(&version_status, "runtime_current", 0, &version_detail);
+    if let Some(err) = &binary.runtime_current_error {
+        print_phase(&SetupStatus::Warn, "runtime_current_error", 0, err);
+    }
+
+    // 4. AI Transcripts -------------------------------------------------------
+    println!("\nAI Transcripts");
+    match RuntimeCore::load_query_only().await {
+        Ok(runtime) => match runtime.service().ai_doctor().await {
+            Ok(ai) => {
+                for (name, root) in [("claude_root", &ai.claude_root), ("codex_root", &ai.codex_root)] {
+                    let s = if root.exists && root.readable {
+                        SetupStatus::Ok
+                    } else {
+                        SetupStatus::Warn
+                    };
+                    let detail = format!(
+                        "{} (exists={} readable={} writable={})",
+                        root.path, root.exists, root.readable, root.writable
+                    );
+                    print_phase(&s, name, 0, &detail);
+                }
+                let cp_status = if ai.checkpoint_error_count > 0 || ai.missing_checkpoint_count > 0 {
+                    SetupStatus::Warn
+                } else {
+                    SetupStatus::Ok
+                };
+                print_phase(
+                    &cp_status,
+                    "checkpoints",
+                    0,
+                    &format!(
+                        "{} indexed  {} errors  {} missing",
+                        ai.checkpoint_count, ai.checkpoint_error_count, ai.missing_checkpoint_count
+                    ),
+                );
+                let parse_status = if ai.parse_error_count > 0 {
+                    SetupStatus::Warn
+                } else {
+                    SetupStatus::Ok
+                };
+                print_phase(
+                    &parse_status,
+                    "parse_errors",
+                    0,
+                    &format!("{} parse errors", ai.parse_error_count),
+                );
+            }
+            Err(e) => {
+                total_errors += 1;
+                print_phase(&SetupStatus::Error, "ai_doctor", 0, &e.to_string());
+            }
+        },
+        Err(e) => {
+            total_errors += 1;
+            print_phase(&SetupStatus::Error, "db_connect", 0, &e.to_string());
+        }
+    }
+
+    // ── Summary ──────────────────────────────────────────────────────────────
+    println!();
+    if total_errors == 0 {
+        println!("All checks passed");
+    } else {
+        anyhow::bail!("{total_errors} error(s) found");
+    }
+    Ok(())
+}
+
 async fn serve_mcp() -> Result<()> {
     let runtime = RuntimeCore::load().await?;
     info!(
@@ -192,8 +478,14 @@ enum Mode {
     Cli(Box<cli::CliCommand>),
     Setup(SetupCommand),
     DoctorBinary(DoctorBinaryCommand),
+    DoctorFull(DoctorFullCommand),
     Help,
     Version,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DoctorFullCommand {
+    json: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,7 +524,11 @@ impl Mode {
                 Ok(Self::Setup(parse_setup_command(rest)?))
             }
             [command, rest @ ..] if command == "doctor" => {
-                Ok(Self::DoctorBinary(parse_doctor_command(rest)?))
+                if rest.first().map(String::as_str) == Some("binary") {
+                    Ok(Self::DoctorBinary(parse_doctor_command(rest)?))
+                } else {
+                    Ok(Self::DoctorFull(parse_doctor_full_command(rest)?))
+                }
             }
             [command, rest @ ..]
                 if matches!(
@@ -269,6 +565,7 @@ impl Mode {
             Self::Cli(_) => "error",
             Self::Setup(_) => "warn",
             Self::DoctorBinary(_) => "warn",
+            Self::DoctorFull(_) => "warn",
             Self::Help => "info",
             Self::Version => "info",
         }
@@ -518,6 +815,7 @@ fn print_usage() {
   syslog setup debug-wrapper install|remove|check [--json]
   syslog setup debug-compose install|remove|check [--json]
   syslog setup doctor [--json]
+  syslog doctor [--json]          Run all health checks (setup, compose, binary, AI)
   syslog doctor binary [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
