@@ -29,7 +29,7 @@ The table reflects the current struct in `src/db/models.rs` *plus* the four inde
 | Field | Rust type | Null? | Source / semantics |
 |---|---|---|---|
 | `timestamp` | `String` | no | ISO 8601 timestamp of the event. RFC syslog timestamp when available; Docker / OTLP / poller-provided otherwise. |
-| `received_at` | `i64` (`INTEGER`, unix epoch millis) | no | Server-side wall-clock when the row was accepted at the ingest path. Differs from `timestamp` (event-time, as claimed by the source). Used by `clock_skew` MCP action, RAG retrieval recency boost (Epic F), and Epic E windowed rules. Indexed for time-range queries. |
+| `received_at` | `INTEGER` (unix epoch millis, DB-only) | no | Server-side wall-clock when the row was accepted at the ingest path. **Not a field on `LogBatchEntry`** — populated by SQLite `DEFAULT (unixepoch('now','subsec') * 1000)` at insert time. Differs from `timestamp` (event-time, as claimed by the source). Used by `clock_skew` MCP action, RAG retrieval recency boost (Epic F), and Epic E windowed rules. Indexed for time-range queries. |
 | `hostname` | `String` | no | Sender-claimed hostname. Trust boundary — operators may forge this. For poller sources, the polled endpoint's host. |
 | `facility` | `Option<String>` | yes | Syslog facility name (`kern`, `auth`, `daemon`, …). `None` for non-syslog sources unless the source synthesises one. |
 | `severity` | `String` | no | Canonical syslog severity (`emerg` / `alert` / `crit` / `err` / `warning` / `notice` / `info` / `debug`). Parsers MAY overwrite via `ParserOutput::severity`. |
@@ -45,7 +45,7 @@ The table reflects the current struct in `src/db/models.rs` *plus* the four inde
 | `ai_transcript_path` | `Option<String>` | yes | AI ingest only — absolute path to the source transcript file. |
 | `metadata_json` | `Option<String>` | yes | Serialised JSON object. Top-level keys are reserved per parser / source — see §5. |
 | `http_status` | `Option<i32>` | yes | **(added by enrichment migration 10.)** Three-digit HTTP status. Indexed (partial). |
-| `auth_outcome` | `Option<String>` | yes | **(added by enrichment migration 10.)** One of `success` / `failure` / `denied` / `challenge`. Indexed (partial). |
+| `auth_outcome` | `Option<&'static str>` | yes | **(added by enrichment migration 10.)** One of `success` / `failure` / `denied` / `challenge`. Indexed (partial). |
 | `dns_blocked` | `Option<bool>` | yes | **(added by enrichment migration 10.)** `Some(true)` = filtered, `Some(false)` = explicit allow, `None` = N/A (rewrites + non-DNS rows). Indexed (partial). |
 | `event_action` | `Option<String>` | yes | **(added by enrichment migration 10.)** Normalised event verb (`oom_kill`, `link_up`, `die`, `ban`, …). Indexed (partial). |
 | `parse_error` | `Option<String>` | yes | **(added by enrichment migration 10.)** `"{parser_name}: {ParserError::Display}"`, truncated to 512 bytes. Not indexed. |
@@ -66,7 +66,7 @@ The enrichment fields (`http_status`, `auth_outcome`, `dns_blocked`, `event_acti
 | Docker stream | `docker-stream` | `src/docker_ingest/` `log_output_to_entry` | `docker://rkx/postgres/stdout` |
 | Docker event | `docker-event` | `src/docker_ingest/` `docker_event_to_entry` | `docker-event://rkx/postgres/die` |
 | OTLP | `otlp` | `src/otlp.rs` | `otlp://10.0.0.5/<service.name>` |
-| UniFi API | `unifi-api` | UniFi poller (`syslog-mcp-awvr` UniFi half) | `unifi://controller.lan/site/default` |
+| UniFi API | `unifi-api` | UniFi poller (`syslog-mcp-awvr` UniFi half) | `unifi://controller.lan/` |
 | AdGuard API | `adguard-api` | AdGuard poller (`syslog-mcp-awvr` AdGuard half) | `adguard://adguard.lan/192.168.10.55` |
 
 Adding a new ingest source requires registering a new `source_kind` here **and** a new URI scheme in §4 — pick a name that does not collide.
@@ -162,9 +162,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub struct LogBatchEntry {
     pub timestamp: String,
-    /// Server-side wall-clock when ingest accepted this row (unix epoch millis).
-    /// See docs/contracts/log-row-shape.md §2.
-    pub received_at: i64,
+    // NOTE: `received_at` is NOT a field on this struct. It is a DB-only column
+    // populated by SQLite DEFAULT at insert time (unix epoch millis).
+    // See docs/contracts/log-row-shape.md §2.
     pub hostname: String,
     pub facility: Option<String>,
     pub severity: String,
@@ -183,7 +183,7 @@ pub struct LogBatchEntry {
 
     // --- added by enrichment migration 10 (epic syslog-mcp-1wjr) -----------
     pub http_status: Option<i32>,
-    pub auth_outcome: Option<String>,
+    pub auth_outcome: Option<&'static str>,
     pub dns_blocked: Option<bool>,
     pub event_action: Option<String>,
     pub parse_error: Option<String>,

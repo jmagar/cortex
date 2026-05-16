@@ -61,8 +61,8 @@ One row per distinct secret. **Sensitivity tiers:**
 | 4 | **JWT signing private key** | RSA/Ed25519 PEM used to sign JWT access + refresh tokens. Verifying party is also us; this is symmetric trust on a per-process basis. | none — file-only | `<data_dir>/auth-jwt.pem` (relative path resolved against `[storage].db_path` dir) | `0600` | Existing (`src/config.rs::AuthConfig::key_path`) | `high` | `rm auth-jwt.pem`, restart (regenerates on first boot). **Side effect:** every issued access + refresh token is invalidated; all OAuth users must re-login. This is the documented "kill all sessions" effect — see §5. | Key material never logged. Path is logged at INFO. |
 | 5 | **Non-MCP API token** | Bearer for the optional `[api]` JSON API (separate from `/mcp`). Required when `SYSLOG_API_ENABLED=true`. | `SYSLOG_API_TOKEN` | none | n/a | Existing (`src/config.rs::ApiConfig::api_token`) | `high` | Same as MCP token — env edit + restart. Validation rejects empty tokens at startup. | Never logged; same prefix-only redaction discipline as the MCP token. |
 | 6 | **OTLP token (logical alias of MCP token)** | Authenticates `/v1/logs` OTLP HTTP ingestion. **In V1, this is the same token as `SYSLOG_MCP_TOKEN`.** The OTLP path only honors the static bearer; the OAuth path does not gate OTLP. The non-loopback safety gate in `validate_auth_config` enforces this explicitly. | `SYSLOG_MCP_TOKEN` (same var) | none | n/a | Existing | `high` | Same as MCP token. If split into a dedicated `SYSLOG_OTLP_TOKEN` later, add a new row here and bump this contract. | Never logged. |
-| 7 | **Agent enrollment token (one-time)** | One-shot bearer printed by `syslog agent issue --hostname <h>`. Operator pastes it into the agent host's `/etc/syslog-agent/token`. Server stores only `BLAKE3(token)` in `agents.token_hash` and never the raw value. | none — printed once to stdout by admin CLI | (ephemeral; never persisted server-side in plaintext) | n/a | Epic A — agent mode (`docs/superpowers/specs/2026-05-16-agent-mode-design.md` §6.2) | `medium` | Single use. If the operator loses it before the agent enrolls, revoke (`syslog admin agent revoke --host-id <uuid>`) and re-issue. | Server: token hash only; raw token never written to disk or logs. Printed once on the admin CLI stdout — operator owns transport (typically scp/paste). |
-| 8 | **Agent long-lived token** | After successful enrollment, the agent's persistent bearer used on every reconnect. Sent in the first JSON-RPC `agent.hello.params.token` message; never in URL params or headers. | none — file-only | `/etc/syslog-agent/token` on the agent host (or `~/.config/syslog-mcp/agent-token` for user installs) | `0600` | Epic A — agent mode (§6.2) | `medium` | `syslog admin agent rotate --host-id <uuid>` issues a new token. Server keeps both `token_hash` (new) and `token_hash_prev` (old) for `rotation_grace_secs = 300` seconds (5 min, from spec §6.2). The agent receives the new token on its next reconnect (delivered via `agent.shutdown` payload); after the grace window the old hash is dropped. | Never logged. `HelloParams` overrides `Display`/`Debug` to redact `token`; test-verified per spec §10. |
+| 7 | **Agent enrollment token (one-time)** | One-shot bearer printed by `syslog agent issue --hostname <h>`. Operator pastes it into the agent host's `/etc/syslog-agent/token`. Server stores only `BLAKE3(token)` in `agents.token_hash` and never the raw value. | none — printed once to stdout by admin CLI | (ephemeral; never persisted server-side in plaintext) | n/a | Epic A — agent mode (`docs/superpowers/specs/2026-05-16-agent-mode-design.md` §6.2) | `medium` | Single use. If the operator loses it before the agent enrolls, revoke (`syslog agent revoke --host-id <uuid>`) and re-issue. | Server: token hash only; raw token never written to disk or logs. Printed once on the admin CLI stdout — operator owns transport (typically scp/paste). |
+| 8 | **Agent long-lived token** | After successful enrollment, the agent's persistent bearer used on every reconnect. Sent in the first JSON-RPC `agent.hello.params.token` message; never in URL params or headers. | none — file-only | `/etc/syslog-agent/token` on the agent host (or `~/.config/syslog-mcp/agent-token` for user installs) | `0600` | Epic A — agent mode (§6.2) | `medium` | `syslog agent rotate --host-id <uuid>` issues a new token. Server keeps both `token_hash` (new) and `token_hash_prev` (old) for `rotation_grace_secs = 300` seconds (5 min, from spec §6.2). The agent receives the new token on its next reconnect (delivered via `agent.shutdown` payload); after the grace window the old hash is dropped. | Never logged. `HelloParams` overrides `Display`/`Debug` to redact `token`; test-verified per spec §10. |
 | 9 | **UniFi controller API key** | `X-API-KEY` header for read-only access to `/proxy/network/api/s/<site>/{stat/event,stat/alarm}`. Issued in the UniFi OS console UI. | `SYSLOG_MCP_POLLERS_UNIFI_API_KEY` | `~/.syslog-mcp/.env` line `SYSLOG_MCP_POLLERS_UNIFI_API_KEY=…` (loaded by `load_setup_env_file` if not already in process env; symlinks rejected) | `0600` on the env file | Epic C — API pollers (`docs/superpowers/specs/2026-05-16-api-pollers-design.md` §4) | `medium` | Revoke in UniFi OS admin → System → Application UI → Admins → API keys; issue replacement; update env; restart (or send `SIGHUP` once dynamic reload lands — currently restart-only). | Never logged. UniFi poller `Debug` impls redact the key. |
 | 10 | **AdGuard Home credentials** | HTTP Basic auth for `/control/querylog`. Token-based auth is not exposed by AdGuard. | `SYSLOG_MCP_POLLERS_ADGUARD_USERNAME` + `SYSLOG_MCP_POLLERS_ADGUARD_PASSWORD` (separate vars, not the `user:pass` form the original draft contemplated — verified against `api-pollers-design.md` §5 lines 243–244) | `~/.syslog-mcp/.env` | `0600` on the env file | Epic C — API pollers (§5) | `medium` | Change in AdGuard Home admin UI; update env; restart. AdGuard does not support overlapping credentials, so rotation is a hard cutover — operator should expect one missed poll cycle. | Username may be logged at debug; password never logged. |
 | 11 | **Apprise API token** | Optional `X-Apprise-Token` header on outbound POSTs to `apprise-api`'s `/notify/{config_key}` endpoint. Only needed when the operator's apprise-api is auth-protected. | `SYSLOG_MCP_APPRISE_TOKEN` | none — env-only | n/a | Epic E — digest + notifications (`docs/superpowers/specs/2026-05-16-digest-notifications-design.md` §3) | `low` | Rotate in the apprise-api admin; update env; restart. Loss only affects outbound notification delivery — no read access to logs. | Never logged. |
@@ -150,10 +150,10 @@ the redaction helper (spec §10 of the RAG epic).
    (The agent-side token file is checked by `syslog-agent`, not this
    process.) See §10 of `docs/superpowers/specs/2026-05-16-agent-mode-design.md`.
 4. **No secrets in `config.toml`.** The operator may commit `config.toml`
-   to git for non-secret deployment config. The TOML parser rejects any
-   value for the known secret keys listed in §2 — those MUST come from env
-   or env-file. (Validation pass to be added in the secrets-hardening lane;
-   for V1 the rejection is by code review + this contract.)
+   to git for non-secret deployment config. Secret keys listed in §2 MUST
+   come from env or env-file, not from `config.toml`. Enforcement is by code
+   review + this contract in V1; a TOML-level validation pass that rejects
+   known secret keys is planned for V1.1 (secrets-hardening lane).
 5. **No secrets in compose `environment:` blocks committed to git.** Operators
    who commit `docker-compose.yml` must use `env_file: ~/.syslog-mcp/.env`,
    not inline `environment:` entries. The plugin setup hook honors this.
@@ -196,20 +196,21 @@ two-token blue/green primitive in V1.
 
 ### Agent long-lived token
 
-1. `syslog admin agent rotate --host-id <uuid>` on the server. This sets
-   `token_hash_prev = token_hash` and writes a new `token_hash`.
-2. The next time the agent reconnects (or by polling), the agent receives
-   the new token via the `agent.shutdown { reason: rotated, token: <new> }`
-   payload — the agent updates `/etc/syslog-agent/token` and reconnects
-   with the new value.
+1. `syslog agent rotate <host_id>` on the server. This sets
+   `token_hash_prev = token_hash` and writes a new `token_hash`. The new
+   raw token is printed once to stdout — the operator delivers it to the
+   agent host (e.g. via scp or paste) and writes it to `/etc/syslog-agent/token`.
+2. The agent picks up the new token on its next reconnect by reading the
+   updated token file. The server accepts both the old and new hashes during
+   the grace window.
 3. **Grace window:** `rotation_grace_secs = 300` (5 min, from agent-mode
    spec §6.2). For 5 minutes both the old and the new `token_hash` are
    accepted; after that, the old is dropped.
 
 ### Agent enrollment token (one-time)
 
-Single use. There is no rotation — only revocation (`syslog admin agent
-revoke --host-id <uuid>`) and re-issuance (`syslog admin agent issue
+Single use. There is no rotation — only revocation (`syslog agent
+revoke <host_id>`) and re-issuance (`syslog agent issue
 --hostname <h>`). If a token is exposed before the agent enrolls, revoke
 the row and issue a new one.
 
@@ -274,7 +275,7 @@ INFO and below, only the binary outcome (`ok|bad_token|version`) is logged
 
 If a secret leaks, the response depends on tier.
 
-### `high` tier (MCP/API token, JWT key, OAuth client secret, agent enrollment, LLM API key)
+### `high` tier (MCP/API token, JWT key, OAuth client secret, LLM API key)
 
 1. **Rotate immediately** per §5.
 2. **Audit log corpus** for the rotated period: query for unexpected MCP
@@ -290,13 +291,14 @@ If a secret leaks, the response depends on tier.
    does not grant access to syslog-mcp data; it only grants the ability to
    bill the operator's LLM account.
 
-### `medium` tier (agent long-lived token, UniFi key, AdGuard creds)
+### `medium` tier (agent enrollment token, agent long-lived token, UniFi key, AdGuard creds)
 
 1. **Revoke + re-issue** per §5.
-2. For agent tokens: `syslog admin agent revoke --host-id <uuid>` immediately
-   evicts the agent's session via `agent.shutdown { Revoked }`. Any
-   in-flight RPC fails with `-32002`. The agent will delete its token file
-   per Epic A spec §7.
+2. For agent long-lived tokens: `syslog agent revoke <host_id>` immediately
+   evicts the agent's active session and NULLs both token hashes. The agent
+   will need to re-enroll.
+   For agent enrollment tokens (one-time, pre-use): revoke the pending row
+   with `syslog agent revoke <host_id>` and re-issue a fresh one-time token.
 3. For poller credentials: rotate at the external service; there is no
    harm beyond loss of polling continuity.
 

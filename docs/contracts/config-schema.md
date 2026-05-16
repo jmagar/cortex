@@ -4,7 +4,7 @@
 
 Contract derived from `src/config.rs` (the source-of-truth `Config`/`ConfigSchema` types and their `load` / `validate_*` functions). It also consolidates plugin-exposed knobs from `.claude-plugin/plugin.json::userConfig` and pins the operator-visible TOML schema currently scattered across `docs/CONFIG.md` and `docs/SETUP.md`.
 
-This document is normative for every config knob the V1 server respects. Any change to a TOML key name, env var, default, or validation rule MUST be made in `src/config.rs` first; this contract is then re-derived. Specs that add new config blocks (`docs/superpowers/specs/2026-05-16-agent-mode-design.md`, `…-api-pollers-design.md`, `…-digest-notifications-design.md`, `…-probe-registry-design.md`, `…-rag-incidents-design.md`) are pinned in §5 as **planned** rows — none of these blocks are honored by the V1 loader yet, and `src/config.rs::Config::load` will error if you put them in `config.toml` under the current `#[serde(default)]` struct layout. They are listed here so operators can write forward-compatible configs.
+This document is normative for every config knob the V1 server respects. Any change to a TOML key name, env var, default, or validation rule MUST be made in `src/config.rs` first; this contract is then re-derived. Specs that add new config blocks (`docs/superpowers/specs/2026-05-16-agent-mode-design.md`, `…-api-pollers-design.md`, `…-digest-notifications-design.md`, `…-probe-registry-design.md`, `…-rag-incidents-design.md`) are pinned in §5 as **planned** rows — none of these blocks are honored by the V1 loader yet. Unknown top-level keys in `config.toml` are silently ignored (the `Config` struct uses `#[serde(default)]` without `deny_unknown_fields`), so operators can include planned blocks for forward compatibility without causing startup errors. They are listed here so operators can write forward-compatible configs.
 
 Companion contracts: `docs/contracts/runtime-lifecycle.md` (process behavior), `docs/contracts/data-layout.md` (filesystem layout for the values referenced here).
 
@@ -52,7 +52,7 @@ For every row in §4:
 | TOML key | Env var | Type | Default | Sens. | Reload | Validation | plugin.json | Notes |
 |---|---|---|---|---|---|---|---|---|
 | `db_path` | `SYSLOG_MCP_DB_PATH` | path | `/data/syslog.db` | public | restart-only | parent dir must exist when env is set | `data_dir` (parent) | See §2 for `/data/` rewrite rule |
-| `pool_size` | `SYSLOG_MCP_POOL_SIZE` | u32 | `4` | tuning | restart-only | `> 0` | — | SQLx pool size |
+| `pool_size` | `SYSLOG_MCP_POOL_SIZE` | u32 | `4` | tuning | restart-only | `> 0` | — | r2d2 pool size |
 | `retention_days` | `SYSLOG_MCP_RETENTION_DAYS` | u32 | `90` | tuning | restart-only | `0` disables age purge | `retention_days` | Hourly purge task |
 | `wal_mode` | — | bool | `true` | tuning | restart-only | — | — | WAL is effectively mandatory |
 | `max_db_size_mb` | `SYSLOG_MCP_MAX_DB_SIZE_MB` | u64 | `1024` | tuning | restart-only | see §6 | `max_db_size_mb` | `0` disables soft cap |

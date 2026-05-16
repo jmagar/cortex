@@ -87,7 +87,7 @@ Exit codes: `0`, `3` (hostname conflict).
 ### syslog agent revoke
 
 ```
-syslog agent revoke <host_id> [--reason <text>] [--json]
+syslog agent revoke <host_id> [--reason <text>] [--confirm] [--json]
 ```
 
 Revoke a host's tokens. Sets `connection_state=Revoked`, NULLs both `token_hash` columns, and — if the agent is currently `Active` — sends `agent.shutdown { reason: Revoked }` and closes the WS.
@@ -140,7 +140,7 @@ Long-lived agent daemon (client side). The existing wire protocol entry point.
 - `--config <path>`: agent config file; default `/etc/syslog-agent/config.toml`.
 - `--token-file <path>`: override token location; default `/etc/syslog-agent/token`.
 
-Exit codes: never returns on success. `1` on config error; `2` if token file missing and `--token` not provided.
+Exit codes: never returns on success. `1` on config error; `2` if token file missing or unreadable.
 
 ### syslog agent enroll
 
@@ -190,7 +190,7 @@ Per epic C §14.4. Deletes the `(poller, instance)` row from `poller_checkpoints
 - `--source <name>`: one of `unifi` (covers both events + alarms), `adguard`. Exactly one of `--source` or `--all` is required.
 - `--all`: reset every poller.
 
-Exit codes: `0`, `1` (no `--source` or `--all`; or unknown source name).
+Exit codes: `0`, `1` (no `--source` or `--all` provided), `3` (unknown source name — matches the global "state error" definition).
 
 ### syslog pollers status
 
@@ -258,7 +258,7 @@ Exit codes: `0`, `2` (apprise unreachable; HTTP error code in JSON output).
 
 ## 5. Conventions
 
-- **`--json` flag**: every subcommand listed here accepts `--json`. JSON output is a single object per command (never a stream). Errors in JSON mode still set the exit code and emit `{"ok": false, "error": {"code": "...", "message": "..."}}` on stdout.
+- **`--json` flag**: most subcommands listed here accept `--json`; see individual entries. JSON output is a single object per command (never a stream). Errors in JSON mode still set the exit code and emit `{"ok": false, "error": {"code": "...", "message": "..."}}` on stdout.
 - **Exit codes**: `0` = success, `1` = invocation/usage error (bad flag, conflict between flags, file unreadable), `2` = remote/server error (server unreachable, MCP `ok:false`, apprise non-2xx), `3` = state error (unknown host_id, hostname conflict, source unknown).
 - **Env precedence**: `SYSLOG_MCP_*` env vars override config.toml for credentials only; CLI flags override env for everything else. This matches the existing `src/config.rs:load_*` ordering.
 - **Confirmation prompts**: destructive commands (`agent revoke`, `digest send-now`) accept `--confirm` to bypass; without it, the command prints a preview and exits 0.
@@ -271,7 +271,7 @@ Exit codes: `0`, `2` (apprise unreachable; HTTP error code in JSON output).
 - `syslog pollers status` / `pollers reset` consume the `poller_checkpoints` table from epic C §4.
 - `syslog rules list` / `rules history` / `digest preview` consume the rule TOML defined by `docs/contracts/notification-rules.schema.json` and the `alert_state` table from epic E §6.
 - `syslog rules list` and the alert subcommands wrap MCP actions specified in `docs/contracts/mcp-actions.md` (`rules_list`, `rules_fire_history`, `alerts_active`, `alerts_ack`, `digest_preview`).
-- `syslog agent run` (client-side) implements the wire protocol defined by `docs/superpowers/specs/agent-protocol.md`.
+- `syslog agent run` (client-side) implements the wire protocol defined by `docs/contracts/agent-protocol.md`.
 
 ## 7. Locked Ambiguities
 

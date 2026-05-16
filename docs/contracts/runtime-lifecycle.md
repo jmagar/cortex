@@ -42,8 +42,8 @@ Signal handler installed by `src/main.rs::shutdown_signal`. Unix-only signals ar
 
 | Signal | Number | V1 behavior | Notes |
 |---|---|---|---|
-| `SIGINT`  | 2  | Graceful shutdown | `ctrl_c` future in `shutdown_signal`. Exit 130 per convention. |
-| `SIGTERM` | 15 | Graceful shutdown | `SignalKind::terminate()` future. Identical handling to SIGINT. Exit 143. |
+| `SIGINT`  | 2  | Graceful shutdown | `ctrl_c` future in `shutdown_signal`. Exits **0** — `tokio::main` returns `Ok(())` after the graceful shutdown sequence. (Unix convention `128+2=130` does not apply here because the Rust runtime catches the signal internally rather than re-raising it.) |
+| `SIGTERM` | 15 | Graceful shutdown | `SignalKind::terminate()` future. Identical handling to SIGINT. Exits **0**. |
 | `SIGHUP`  | 1  | **No-op (not installed).** The default-disposition `SIGHUP` terminates the process. There is no config-reload semantics. | Unix daemon convention says SIGHUP reloads config; we **do not** support that. Adding it later is a feature, not an expectation. |
 | `SIGUSR1` | 10 | Unused | Default disposition (terminate). Reserved; do not rely on. |
 | `SIGUSR2` | 12 | Unused | Same. |
@@ -168,15 +168,13 @@ healthcheck:
 
 | Code | Cause | Reachable from |
 |---|---|---|
-| `0`   | Graceful shutdown, or any one-shot CLI/setup/doctor command that completed successfully. | All modes. |
+| `0`   | Graceful shutdown (SIGINT or SIGTERM) — `tokio::main` returns `Ok(())` after the graceful shutdown sequence. Also emitted by any one-shot CLI/setup/doctor command that completed successfully. Note: Unix convention `128+N` does **not** apply because the signal is caught by `tokio::signal` rather than re-raised. | All modes. |
 | `1`   | Config error: any `validate_*` failure in `src/config.rs`, missing required OAuth fields, blank tokens, parent-of-`SYSLOG_MCP_DB_PATH` missing, unknown CLI flag, unknown setup subcommand. | `anyhow::bail!` from `Config::load` or `Mode::parse`. |
 | `2`   | DB initialization failure: `db::init_pool` cannot open the SQLite file, cannot apply schema migrations, or cannot enable WAL. | `serve_mcp`, `RuntimeCore::load*`. |
 | `3`   | Bind error: `TcpListener::bind(mcp_bind)` failed (port in use, address not configured). Also covers UDP/TCP syslog bind failures via `start_syslog`. | `serve_mcp`. |
-| `130` | `SIGINT` (Unix convention: `128 + 2`). | ServeMcp graceful shutdown via Ctrl-C. |
-| `143` | `SIGTERM` (Unix convention: `128 + 15`). | ServeMcp graceful shutdown via orchestrator. |
 | other (typically `101`) | Uncaught panic. Treat as crash; container/unit should restart. | Any mode. |
 
-**Note**: V1 does not currently `std::process::exit(N)` to distinguish (1)/(2)/(3) — they all surface as `Err` from `tokio::main`, which Rust maps to a generic non-zero exit (commonly `1`). The matrix above is the **intended** semantics and the target for a planned `ExitCode` cleanup. Operators writing systemd `Restart=` policies should treat any non-zero, non-{130,143} code as a fatal startup error for now.
+**Note**: V1 does not currently `std::process::exit(N)` to distinguish (1)/(2)/(3) — they all surface as `Err` from `tokio::main`, which Rust maps to a generic non-zero exit (commonly `1`). The matrix above is the **intended** semantics and the target for a planned `ExitCode` cleanup. Operators writing systemd `Restart=` policies should treat any non-zero exit code (except panic) as a fatal startup error for now.
 
 ## 7. Startup invariants (operator preconditions)
 

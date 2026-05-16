@@ -230,7 +230,7 @@ deletes; it does not transform.
 The envelope is the interaction between time-based retention and the
 disk-budget guardrails:
 
-```
+```text
                   cleanup_interval_secs (60s)
                   ┌─────────────────────────┐
    db_size  ──────│                          │── guardrail forceful prune
@@ -288,15 +288,18 @@ guardrails the DB will grow without bound.
 
 ### Trigger a manual prune
 
-```sh
-syslog maintain prune                   # one-shot global prune
-syslog maintain prune --tag adguard-allowed --days 1
-```
+There is no `syslog maintain prune` CLI command in V1. Retention runs
+automatically on its hourly tick. The operator levers are:
 
-`syslog maintain prune` is the **CLI command** (not an MCP action — pinning
-this here per the operator-levers requirement: prune is destructive, so it
-lives in the CLI where it requires shell access, not in MCP where an LLM
-could trigger it). MCP exposes only `storage_stats` (read-only).
+- **Reduce `SYSLOG_MCP_RETENTION_DAYS`** and restart — the next hourly
+  tick will prune according to the new value.
+- **Reduce `storage.max_db_size_mb`** — the storage guardrail task will
+  evict oldest rows until the budget is satisfied within one 60-second tick.
+- **AdGuard tag retention** is hardcoded at 7 days (see §6); there is no
+  operator CLI to force an immediate AdGuard prune.
+
+MCP exposes only `stats` (read-only) for the storage budget state — destructive
+operations are not accessible from the MCP tool surface.
 
 ---
 

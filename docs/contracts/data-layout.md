@@ -99,13 +99,21 @@ The bundled CLI exposes the same operation: `syslog db backup --output /backup/s
 After a graceful `syslog compose down` (or `systemctl stop`):
 
 ```bash
-tar -C / -czf /backup/syslog-mcp-$(date +%F).tar.gz \
-  data/syslog.db data/syslog.db-wal data/syslog.db-shm \
-  data/auth.db   data/auth.db-wal   data/auth.db-shm \
-  data/auth-jwt.pem
+# WAL/SHM sidecars may be absent after a clean shutdown — use cp with fallback
+BACKUP=/backup/syslog-mcp-$(date +%F)
+mkdir -p "$BACKUP"
+cp /data/syslog.db "$BACKUP/syslog.db"
+cp /data/auth-jwt.pem "$BACKUP/auth-jwt.pem" 2>/dev/null || true
+cp /data/auth.db "$BACKUP/auth.db" 2>/dev/null || true
+(cp /data/syslog.db-wal "$BACKUP/syslog.db-wal" 2>/dev/null || true)
+(cp /data/syslog.db-shm "$BACKUP/syslog.db-shm" 2>/dev/null || true)
+(cp /data/auth.db-wal   "$BACKUP/auth.db-wal"   2>/dev/null || true)
+(cp /data/auth.db-shm   "$BACKUP/auth.db-shm"   2>/dev/null || true)
+tar -czf "$BACKUP.tar.gz" -C "$(dirname "$BACKUP")" "$(basename "$BACKUP")"
+rm -rf "$BACKUP"
 ```
 
-Include the `-wal` and `-shm` sidecars when offline — together they form one consistent snapshot.
+Include the `-wal` and `-shm` sidecars when offline — together they form one consistent snapshot. The fallback `|| true` handles the case where the DB was shut down cleanly and the sidecars do not exist.
 
 ### What to back up if OAuth is configured
 
@@ -117,7 +125,7 @@ Include the `-wal` and `-shm` sidecars when offline — together they form one c
 2. **Place files** into `<DATA_DIR>` at the same names. For an online-backup restore, only `syslog.db` (and `auth.db` if applicable) need be present — the WAL/SHM sidecars are auto-rebuilt on first connection.
 3. **Verify ownership and modes**:
    ```bash
-   chown -R 1000:1000 /data
+   chown -R ${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000} /data
    chmod 0600 /data/auth.db   /data/auth-jwt.pem  # if OAuth
    ```
 4. **Start the server.** It will replay any WAL present, rebuild SHM, and apply pending schema migrations.

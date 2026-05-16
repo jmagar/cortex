@@ -100,7 +100,7 @@ the non-loopback safety gate (§9) bars this combo at startup.
 | `GET /api/hosts`                                         | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::hosts`                 | Same condition. Known-hosts list.                                                                |
 | `GET /api/correlate`                                     | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::correlate`             | Same condition. Window-based event correlation.                                                  |
 | `GET /api/stats`                                         | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::stats`                 | Same condition. Aggregate counts.                                                                |
-| `WS /ws/agent` (Upgrade)                                 | `internal`     | first-message token ¶ | 1 KiB pre-hello / 1 MiB per frame post-hello | n/a (subprotocol-gated) | per-agent leaky bucket (`-32030 QuotaExceeded`) | Epic A (`syslog-mcp-qgnx`) | `mcp/ws_agent.rs` (planned) | JSON-RPC 2.0 over WebSocket carrying `agent.hello`, `logs.push`, `metrics.push`, `agent.heartbeat`, `probe.request/response`, `config.update`, `agent.shutdown`. See `agent-protocol.md` for envelopes, methods, error codes. |
+| `WS /ws/agent` (Upgrade)                                 | `deferred`     | first-message token ¶ | 1 KiB pre-hello / 1 MiB per frame post-hello | n/a (subprotocol-gated) | per-agent leaky bucket (`-32030 QuotaExceeded`) | Epic A (`syslog-mcp-qgnx`) | `mcp/ws_agent.rs` (planned — **not yet mounted**) | Path reserved. Currently returns `404`. Will carry JSON-RPC 2.0 over WebSocket (`agent.hello`, `logs.push`, `metrics.push`, `agent.heartbeat`, `probe.request/response`, `config.update`, `agent.shutdown`) when Epic A lands. See `agent-protocol.md` for envelopes, methods, error codes. |
 | `* /*` (fallback)                                        | `stable`       | none                  | 64 KiB     | configured allowlist       | —                   | 0.1.x      | `mcp/routes.rs::router` (fallback) | Returns `404 {"error":"not_found"}` for any unmatched path. The 64 KiB body limit applies to the merged MCP router. |
 
 Footnotes:
@@ -262,11 +262,12 @@ quick read:
   public bind without `SYSLOG_MCP_NO_AUTH=true`. The combination
   "unauthenticated `/v1/logs` on `0.0.0.0`" is therefore an explicit operator
   choice, not an oversight.
-- `/api/*` reuses the **same** auth layer as `/mcp` (see `api.rs::router`).
-  Operators setting up monitoring against `/api/stats` should provision the
-  same bearer/JWT they use for `/mcp`. The "API token" name in
-  `SYSLOG_API_TOKEN` is the `/api/*` gate inside the auth layer; the
-  underlying check is the same `AuthLayer`.
+- `/api/*` uses a **separate** bearer token from `/mcp`. The `/api/*` gate
+  is `SYSLOG_API_TOKEN` (env var for `[api].api_token`), which is distinct
+  from `SYSLOG_MCP_TOKEN` (the MCP + OTLP token). Operators setting up
+  monitoring against `/api/stats` must provision `SYSLOG_API_TOKEN`; the
+  MCP token alone is not sufficient. Both tokens pass through the same
+  `AuthLayer` construction mechanism, but they are distinct secrets.
 - `/register` is a public, unauthenticated endpoint **by design** — OAuth
   2.0 Dynamic Client Registration is how MCP clients self-onboard. The
   `register_rpm` knob is the mitigation against abuse.
