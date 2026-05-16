@@ -95,7 +95,11 @@ fn labelled_container() -> ContainerInfo {
         image: Some("ghcr.io/jmagar/syslog-mcp:latest".into()),
         image_id: Some("sha256:abc".into()),
         labels,
-        mounts: Vec::new(),
+        mounts: vec![MountInfo {
+            source: Some(PathBuf::from("/home/jmagar/.claude/plugins/data/syslog-jmagar-lab")),
+            target: "/data".into(),
+            kind: "bind".into(),
+        }],
         ports: vec![PortInfo {
             private_port: 3100,
             public_port: Some(3100),
@@ -425,6 +429,56 @@ fn status_reports_systemd_check_failures_as_diagnostics() {
 
     assert_eq!(status.diagnostics[0].code, DIAG_SYSTEMD_CHECK_FAILED);
     assert_eq!(status.diagnostics[0].severity, DiagnosticSeverity::Error);
+}
+
+#[test]
+fn status_errors_when_data_volume_is_named_not_bind() {
+    // Regression guard: if SYSLOG_MCP_DATA_VOLUME is not substituted in the
+    // compose invocation (missing --env-file), Docker creates a named volume
+    // instead of a bind mount and the container writes to a separate database
+    // from the CLI. The status check must detect and surface this as an Error.
+    let mut container = labelled_container();
+    container.mounts[0].kind = "volume".into(); // simulate named-volume drift
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(container),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+
+    let status = service.status(&ComposeTarget::default()).unwrap();
+
+    let drift = status
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "data_volume_not_bind")
+        .expect("drift diagnostic must be present");
+    assert_eq!(drift.severity, DiagnosticSeverity::Error);
+}
+
+#[test]
+fn status_errors_when_data_volume_is_missing() {
+    let mut container = labelled_container();
+    container.mounts.clear(); // no /data mount at all
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(container),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+
+    let status = service.status(&ComposeTarget::default()).unwrap();
+
+    let missing = status
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "data_volume_missing")
+        .expect("missing-volume diagnostic must be present");
+    assert_eq!(missing.severity, DiagnosticSeverity::Error);
 }
 
 #[test]
