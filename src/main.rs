@@ -49,6 +49,9 @@ async fn run_cli(command: cli::CliCommand) -> Result<()> {
     if let cli::CliCommand::Setup(command) = command {
         return cli::run_setup(command);
     }
+    if let cli::CliCommand::Config(command) = command {
+        return cli::run_config(command);
+    }
     let runtime = RuntimeCore::load_query_only().await?;
     cli::run(runtime.service(), command).await
 }
@@ -629,6 +632,7 @@ impl Mode {
                         | "db"
                         | "compose"
                         | "setup"
+                        | "config"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
@@ -937,6 +941,10 @@ fn print_usage() {
   syslog compose logs [--tail N] [--json]
   syslog setup check|repair [--json]
   syslog setup plugin-hook [--no-repair] [--json]
+  syslog config get KEY [--env|--toml] [--toml-path PATH] [--json]
+  syslog config set KEY VALUE [--env|--toml] [--toml-path PATH] [--json]
+  syslog config unset KEY [--env|--toml] [--toml-path PATH] [--json]
+  syslog config list [--env|--toml] [--toml-path PATH] [--json]
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
   syslog stats [--json]
 
