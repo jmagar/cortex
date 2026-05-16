@@ -19,7 +19,7 @@
 #
 # Action inventory reference (not every action is exercised by this live test):
 #   syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions,
-#   syslog search_sessions, syslog cuss, syslog ai_correlate, syslog usage_blocks, syslog project_context,
+#   syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context,
 #   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,
 #   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
@@ -534,12 +534,12 @@ phase_tools() {
     assert_jq "syslog search_sessions — seeded fixture is searchable" "${search_sessions_result}" '.total_candidates >= 1' "true"
   fi
 
-  local cuss_result
-  cuss_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"action":"cuss","project":$project,"terms":$term,"limit":5,"before":1,"after":1}')")" || cuss_result=""
-  assert_jq "syslog cuss — terms field is array" "${cuss_result}" '.terms | type' "array"
-  assert_jq "syslog cuss — matches field is array" "${cuss_result}" '.matches | type' "array"
+  local abuse_result
+  abuse_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"action":"abuse","project":$project,"terms":$term,"limit":5,"before":1,"after":1}')")" || abuse_result=""
+  assert_jq "syslog abuse — terms field is array" "${abuse_result}" '.terms | type' "array"
+  assert_jq "syslog abuse — matches field is array" "${abuse_result}" '.matches | type' "array"
   if [[ "${AI_SEEDED}" == true ]]; then
-    assert_jq "syslog cuss — custom detector finds seeded fixture" "${cuss_result}" '.matches | length >= 1' "true"
+    assert_jq "syslog abuse — custom detector finds seeded fixture" "${abuse_result}" '.matches | length >= 1' "true"
   fi
 
   local ai_correlate_result

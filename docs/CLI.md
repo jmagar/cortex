@@ -143,17 +143,17 @@ candidate window. JSON includes `total_candidates`, `candidate_rows`,
 candidate window is truncated, narrow with `--project`, `--tool`, `--from`, or
 `--to` for exact grouping within that filter.
 
-### `syslog ai cuss`
+### `syslog ai abuse`
 
-Detect profanity in AI transcript rows and return surrounding rows from the same
+Detect abuse in AI transcript rows and return surrounding rows from the same
 AI session.
 
 ```bash
-syslog ai cuss --project /home/jmagar/workspace/syslog-mcp --limit 10 --before 3 --after 3
-syslog ai cuss --tool codex --term dang --term heck --json
+syslog ai abuse --project /home/jmagar/workspace/syslog-mcp --limit 10 --before 3 --after 3
+syslog ai abuse --tool codex --term dang --term heck --json
 ```
 
-By default this uses the built-in profanity list and returns 2 rows before and
+By default this uses the built-in abuse list and returns 2 rows before and
 after each hit. Use repeated `--term WORD` flags to replace the built-in list
 with a custom detector. JSON includes `candidate_rows`, `candidate_cap`,
 `candidate_window_truncated`, `truncated`, and `matches[].{term,entry,before,after}`.
@@ -647,7 +647,7 @@ The direct CLI and MCP tool share the same business layer:
 | `syslog hosts` | `syslog` with `action="hosts"` |
 | `syslog sessions` | `syslog` with `action="sessions"` |
 | `syslog ai search` | `syslog` with `action="search_sessions"` |
-| `syslog ai cuss` | `syslog` with `action="cuss"` |
+| `syslog ai abuse` | `syslog` with `action="abuse"` |
 | `syslog ai correlate` | `syslog` with `action="ai_correlate"` |
 | `syslog ai blocks` | `syslog` with `action="usage_blocks"` |
 | `syslog ai context` | `syslog` with `action="project_context"` |

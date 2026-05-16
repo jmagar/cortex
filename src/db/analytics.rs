@@ -206,7 +206,7 @@ pub fn get_ai_usage_blocks(
     ));
 
     let mut stmt = conn.prepare(&sql)?;
-    let blocks = stmt
+    let mut blocks = stmt
         .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
             Ok(AiUsageBlock {
                 bucket_start: row.get(0)?,
@@ -218,7 +218,6 @@ pub fn get_ai_usage_blocks(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut blocks = blocks;
     let truncated = truncate_to_limit(&mut blocks, LIMIT);
     Ok(AiUsageBlocksResult {
         total_blocks,

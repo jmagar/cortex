@@ -9,7 +9,7 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
     "apps",
     "sessions",
     "search_sessions",
-    "cuss",
+    "abuse",
     "ai_correlate",
     "usage_blocks",
     "project_context",
@@ -37,7 +37,7 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
 pub(super) fn tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "syslog",
-        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog search_sessions, syslog cuss, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, syslog compose_status, syslog compose_doctor, and syslog help.",
+        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, syslog compose_status, syslog compose_doctor, and syslog help.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -56,12 +56,12 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "project": {
                     "type": "string",
-                    "description": "For action=sessions, search_sessions, cuss, ai_correlate, usage_blocks, project_context, or list_ai_tools: exact project path, e.g. /home/jmagar/workspace/syslog-mcp."
+                    "description": "For action=sessions, search_sessions, abuse, ai_correlate, usage_blocks, project_context, or list_ai_tools: exact project path, e.g. /home/jmagar/workspace/syslog-mcp."
                 },
                 "tool": {
                     "type": "string",
                     "enum": ["claude", "codex", "gemini"],
-                    "description": "For action=sessions, search_sessions, cuss, ai_correlate, usage_blocks, project_context, or list_ai_projects: AI tool filter."
+                    "description": "For action=sessions, search_sessions, abuse, ai_correlate, usage_blocks, project_context, or list_ai_projects: AI tool filter."
                 },
                 "source_ip": {
                     "type": "string",
@@ -103,15 +103,15 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "from": {
                     "type": "string",
-                    "description": "For action=search, sessions, search_sessions, cuss, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, or patterns: start of time range as ISO 8601/RFC3339."
+                    "description": "For action=search, sessions, search_sessions, abuse, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, or patterns: start of time range as ISO 8601/RFC3339."
                 },
                 "to": {
                     "type": "string",
-                    "description": "For action=search, sessions, search_sessions, cuss, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, or patterns: end of time range as ISO 8601/RFC3339."
+                    "description": "For action=search, sessions, search_sessions, abuse, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, or patterns: end of time range as ISO 8601/RFC3339."
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=cuss: max matches, default 20, max 100, each with same-session context. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999."
+                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999."
                 },
                 "n": {
                     "type": "integer",
@@ -153,18 +153,18 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "before": {
                     "type": "integer",
-                    "description": "For action=context: entries before the reference, default 10, max 500. For action=cuss: same-session entries before each hit, default 2, max 20."
+                    "description": "For action=context: entries before the reference, default 10, max 500. For action=abuse: same-session entries before each hit, default 2, max 20."
                 },
                 "after": {
                     "type": "integer",
-                    "description": "For action=context: entries after the reference, default 10, max 500. For action=cuss: same-session entries after each hit, default 2, max 20."
+                    "description": "For action=context: entries after the reference, default 10, max 500. For action=abuse: same-session entries after each hit, default 2, max 20."
                 },
                 "terms": {
                     "oneOf": [
                         {"type": "array", "items": {"type": "string"}},
                         {"type": "string"}
                     ],
-                    "description": "For action=cuss: optional custom cuss terms. Defaults to the built-in profanity list. String form is accepted for CLI bridges that cannot send arrays."
+                    "description": "For action=abuse: optional custom abuse terms. Defaults to the built-in abuse list. String form is accepted for CLI bridges that cannot send arrays."
                 },
                 "events_per_anchor": {
                     "type": "integer",

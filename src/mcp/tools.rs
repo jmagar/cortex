@@ -1,8 +1,8 @@
 use serde_json::{json, Value};
 
 use crate::app::{
-    AiCorrelateRequest, AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest,
-    CorrelateEventsRequest, CussSearchRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest,
+    AbuseSearchRequest, AiCorrelateRequest, AnomaliesRequest, ClockSkewRequest, CompareRequest,
+    ContextRequest, CorrelateEventsRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest,
     ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
     PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
     SilentHostsRequest, TailLogsRequest, TimelineRequest, UsageBlocksRequest,
@@ -37,7 +37,7 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "apps" => tool_list_apps(state, args).await,
         "sessions" => tool_list_sessions(state, args).await,
         "search_sessions" => tool_search_sessions(state, args).await,
-        "cuss" => tool_search_cusses(state, args).await,
+        "abuse" => tool_search_abuse(state, args).await,
         "ai_correlate" => tool_ai_correlate(state, args).await,
         "usage_blocks" => tool_usage_blocks(state, args).await,
         "project_context" => tool_project_context(state, args).await,
@@ -157,7 +157,7 @@ async fn tool_search_sessions(state: &AppState, args: Value) -> anyhow::Result<V
     Ok(serde_json::to_value(response)?)
 }
 
-async fn tool_search_cusses(state: &AppState, args: Value) -> anyhow::Result<Value> {
+async fn tool_search_abuse(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let terms = args
         .get("terms")
         .map(|value| {
@@ -176,7 +176,7 @@ async fn tool_search_cusses(state: &AppState, args: Value) -> anyhow::Result<Val
         .unwrap_or_default();
     let response = state
         .service
-        .search_cusses(CussSearchRequest {
+        .search_abuse(AbuseSearchRequest {
             project: string_arg(&args, "project"),
             tool: string_arg(&args, "tool"),
             from: string_arg(&args, "from"),
@@ -637,8 +637,8 @@ Session-ranked full-text search across AI transcript rows. Returns grouped sessi
 
 ---
 
-## syslog cuss
-Detects profanity in AI transcript rows and returns each hit with surrounding rows from the same AI session.
+## syslog abuse
+Detects abuse in AI transcript rows and returns each hit with surrounding rows from the same AI session.
 
 **Parameters:**
 - `project` (string, optional) — exact project path filter

@@ -10,7 +10,7 @@ syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument s
 - `hosts`
 - `sessions`
 - `search_sessions`
-- `cuss`
+- `abuse`
 - `ai_correlate`
 - `usage_blocks`
 - `project_context`
@@ -54,7 +54,7 @@ json!({
                     "hosts",
                     "sessions",
                     "search_sessions",
-                    "cuss",
+                    "abuse",
                     "ai_correlate",
                     "usage_blocks",
                     "project_context",
@@ -135,7 +135,7 @@ json!({
                     { "type": "array", "items": { "type": "string" } },
                     { "type": "string" }
                 ],
-                "description": "For action=cuss: optional custom detector terms."
+                "description": "For action=abuse: optional custom detector terms."
             },
             "id": {
                 "type": "integer",

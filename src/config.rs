@@ -537,6 +537,23 @@ impl Config {
             }
         }
         env_override_path("SYSLOG_MCP_DB_PATH", &mut config.storage.db_path);
+        // Fail fast when SYSLOG_MCP_DB_PATH is explicitly set but its parent
+        // directory doesn't exist. This catches the common Docker misconfiguration
+        // where the variable is set to a host filesystem path that was never
+        // bind-mounted into the container, producing a cryptic "Permission denied"
+        // error deep in SQLite pool initialisation.
+        if std::env::var_os("SYSLOG_MCP_DB_PATH").is_some() {
+            if let Some(parent) = config.storage.db_path.parent() {
+                if !parent.as_os_str().is_empty() && !parent.exists() {
+                    anyhow::bail!(
+                        "SYSLOG_MCP_DB_PATH parent directory does not exist: {}\n\
+                         In Docker: mount the data directory at /data and set\n\
+                         SYSLOG_MCP_DB_PATH=/data/syslog.db",
+                        parent.display()
+                    );
+                }
+            }
+        }
         env_override_parse("SYSLOG_MCP_POOL_SIZE", &mut config.storage.pool_size)?;
         env_override_parse(
             "SYSLOG_MCP_RETENTION_DAYS",

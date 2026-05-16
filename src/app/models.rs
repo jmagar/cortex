@@ -223,7 +223,7 @@ impl From<db::SearchAiSessionsResult> for SearchSessionsResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct CussSearchRequest {
+pub struct AbuseSearchRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
     pub from: Option<String>,
@@ -236,15 +236,15 @@ pub struct CussSearchRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CussMatch {
+pub struct AbuseMatch {
     pub term: String,
     pub entry: LogEntry,
     pub before: Vec<LogEntry>,
     pub after: Vec<LogEntry>,
 }
 
-impl From<db::AiCussMatch> for CussMatch {
-    fn from(value: db::AiCussMatch) -> Self {
+impl From<db::AiAbuseMatch> for AbuseMatch {
+    fn from(value: db::AiAbuseMatch) -> Self {
         Self {
             term: value.term,
             entry: value.entry.into(),
@@ -255,17 +255,17 @@ impl From<db::AiCussMatch> for CussMatch {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CussSearchResponse {
+pub struct AbuseSearchResponse {
     pub terms: Vec<String>,
     pub candidate_rows: usize,
     pub candidate_cap: usize,
     pub candidate_window_truncated: bool,
     pub truncated: bool,
-    pub matches: Vec<CussMatch>,
+    pub matches: Vec<AbuseMatch>,
 }
 
-impl From<db::AiCussResult> for CussSearchResponse {
-    fn from(value: db::AiCussResult) -> Self {
+impl From<db::AiAbuseResult> for AbuseSearchResponse {
+    fn from(value: db::AiAbuseResult) -> Self {
         Self {
             terms: value.terms,
             candidate_rows: value.candidate_rows,

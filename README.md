@@ -24,7 +24,7 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `cuss`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md).
 
@@ -36,7 +36,7 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `hosts` | Host registry with first/last seen |
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
-| `cuss` | Profanity hits in AI transcripts with same-session context |
+| `abuse` | Abuse hits in AI transcripts with same-session context |
 | `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
 | `usage_blocks` | AI activity in 5-hour UTC windows |
 | `project_context` | Summary for one AI project path |
@@ -463,7 +463,7 @@ Useful installer controls:
 ```bash
 SYSLOG_INSTALL_DRY_RUN=1 ./install.sh
 SYSLOG_INSTALL_PREFIX=/opt/syslog-mcp ./install.sh
-SYSLOG_VERSION=0.25.1 ./install.sh
+SYSLOG_VERSION=0.25.2 ./install.sh
 SYSLOG_INSTALL_SKIP_SETUP=1 ./install.sh
 ```
 
