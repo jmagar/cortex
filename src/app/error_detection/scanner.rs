@@ -221,7 +221,7 @@ pub(crate) fn process_chunk(
                      SELECT SUM(count_in_window)
                      FROM error_signature_windows
                      WHERE signature_hash = ?1 AND normalizer_version = ?2
-                       AND window_start >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
+                       AND window_end >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
                  ), 0),
                  acknowledged_at
              FROM error_signatures

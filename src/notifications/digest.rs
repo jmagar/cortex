@@ -175,13 +175,27 @@ pub(crate) async fn run_digest(
 /// Only the first two fields of a 5-field cron expression are used.
 fn parse_cron_hour_minute(cron: &str) -> (u32, u32) {
     let mut parts = cron.split_whitespace();
-    let minute_res = parts.next().map(|s| s.parse::<u32>());
-    let hour_res = parts.next().map(|s| s.parse::<u32>());
-    if !matches!((&minute_res, &hour_res), (Some(Ok(_)), Some(Ok(_)))) {
-        tracing::warn!(input = %cron, "Failed to parse digest_cron_local as cron expression; defaulting to 08:00");
+    let minute_field = parts.next();
+    let hour_field = parts.next();
+
+    let minute_parsed = minute_field.and_then(|s| s.parse::<u32>().ok());
+    let hour_parsed = hour_field.and_then(|s| s.parse::<u32>().ok());
+
+    if minute_parsed.is_none() {
+        tracing::warn!(
+            input = %cron,
+            "digest_cron_local minute field missing or unparseable; defaulting to 0"
+        );
     }
-    let minute = minute_res.and_then(Result::ok).unwrap_or(0).min(59);
-    let hour = hour_res.and_then(Result::ok).unwrap_or(8).min(23);
+    if hour_parsed.is_none() {
+        tracing::warn!(
+            input = %cron,
+            "digest_cron_local hour field missing or unparseable; defaulting to 8"
+        );
+    }
+
+    let minute = minute_parsed.unwrap_or(0).min(59);
+    let hour = hour_parsed.unwrap_or(8).min(23);
     (hour, minute)
 }
 
@@ -216,10 +230,10 @@ pub(crate) fn spawn_digest(
             let now = chrono::Local::now();
             let today = now.date_naive();
             let already_fired = last_fired_date == Some(today);
-            // Use a 2-minute window to handle slight timing drift.
-            let minutes_diff =
-                (now.hour() * 60 + now.minute()).abs_diff(target_hour * 60 + target_minute);
-            if !already_fired && minutes_diff <= 1 {
+            // Exact match: the sleep aligns to minute boundaries, so
+            // now.minute() == target_minute is reliable. A 1-minute tolerance
+            // fired 1 minute early, causing consistent early delivery.
+            if !already_fired && now.hour() == target_hour && now.minute() == target_minute {
                 match run_digest(Arc::clone(&pool), Arc::clone(&permit_sem), &cfg).await {
                     Ok(()) => last_fired_date = Some(today),
                     Err(e) => {
@@ -308,5 +322,19 @@ mod tests {
     fn parse_cron_hour_minute_defaults_on_bad_input() {
         assert_eq!(parse_cron_hour_minute(""), (8, 0));
         assert_eq!(parse_cron_hour_minute("bad input"), (8, 0));
+    }
+
+    #[test]
+    fn parse_cron_hour_minute_partial_failure_uses_per_field_defaults() {
+        // minute parses (0), hour fails ("*") -> hour defaults to 8
+        assert_eq!(parse_cron_hour_minute("0 * * * *"), (8, 0));
+        // minute fails ("*"), hour parses (14) -> minute defaults to 0
+        assert_eq!(parse_cron_hour_minute("* 14 * * *"), (14, 0));
+    }
+
+    #[test]
+    fn parse_cron_hour_minute_clamps_range() {
+        // Out-of-range values should be clamped, not wrapped
+        assert_eq!(parse_cron_hour_minute("99 25 * * *"), (23, 59));
     }
 }

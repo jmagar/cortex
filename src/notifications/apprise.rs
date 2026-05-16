@@ -124,16 +124,18 @@ impl AppriseClient {
             if e.is_timeout() {
                 AppriseError::Timeout
             } else {
-                AppriseError::Transient(format!("send error: {e}"))
+                // Use without_url() to avoid leaking Apprise base URLs
+                // (which may contain credentials) in tracing/error output.
+                AppriseError::Transient(format!("send error: {}", e.without_url()))
             }
         })?;
 
         let status = resp.status().as_u16();
 
         match status {
-            // 200/201/202/204 = success
-            // 207 = partial success — mark sent, do NOT retry
-            200 | 201 | 202 | 204 | 207 => Ok(NotifyResponse {
+            // 200/201/202 = success; 207 = partial success — mark sent, do NOT retry
+            // 204 = No Content: nothing was sent (no targets / empty body) — permanent failure
+            200 | 201 | 202 | 207 => Ok(NotifyResponse {
                 status_code: status,
                 success: true,
             }),
@@ -231,6 +233,24 @@ mod tests {
             .await;
         assert!(result.is_ok(), "207 should be treated as success");
         assert!(result.unwrap().success);
+    }
+
+    #[tokio::test]
+    async fn mock_server_204_permanent() {
+        // 204 No Content means Apprise had no targets / nothing was sent.
+        // It must NOT be treated as a success — it is a permanent failure.
+        let (client, _server) = make_mock_server(axum::http::StatusCode::NO_CONTENT).await;
+        let result = client
+            .notify(&["test://".to_string()], "Test", "Body", NotifyType::Info)
+            .await;
+        assert!(
+            result.is_err(),
+            "204 should be treated as permanent failure"
+        );
+        match result.unwrap_err() {
+            AppriseError::Permanent { code, .. } => assert_eq!(code, 204),
+            other => panic!("expected Permanent, got {other}"),
+        }
     }
 
     #[tokio::test]
