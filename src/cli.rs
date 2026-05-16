@@ -3742,25 +3742,29 @@ fn read_toml_value(path: &std::path::Path, key: &str) -> Result<Option<String>> 
 fn write_toml_value(path: &std::path::Path, key: &str, raw_value: &str) -> Result<String> {
     let segments = parse_toml_key(key)?;
     let mut doc = load_toml_document(path)?;
-    let value = parse_user_value(raw_value);
+    let value = parse_user_value(raw_value)?;
 
     {
         let (last, parents) = segments.split_last().expect("non-empty segments");
         let mut current: &mut toml_edit::Item = doc.as_item_mut();
         for segment in parents {
-            let kind = current.get(segment).map(classify_toml_item);
-            let needs_init = !matches!(
-                kind,
-                Some(TomlItemKind::Table) | Some(TomlItemKind::InlineTable)
-            );
-            if needs_init {
-                if current.is_table() {
-                    current
-                        .as_table_mut()
-                        .expect("checked")
-                        .insert(segment, toml_edit::Item::Table(toml_edit::Table::new()));
-                } else {
-                    bail!("cannot create `{key}`: parent is not a table");
+            match current.get(segment).map(classify_toml_item) {
+                Some(TomlItemKind::Table) | Some(TomlItemKind::InlineTable) => {}
+                Some(TomlItemKind::Other) => {
+                    bail!(
+                        "cannot set `{key}`: `{segment}` already exists as a non-table value \
+                         (set or unset it directly first)"
+                    );
+                }
+                None => {
+                    if current.is_table() {
+                        current
+                            .as_table_mut()
+                            .expect("checked")
+                            .insert(segment, toml_edit::Item::Table(toml_edit::Table::new()));
+                    } else {
+                        bail!("cannot create `{key}`: parent is not a table");
+                    }
                 }
             }
             current = current
@@ -3899,27 +3903,38 @@ fn parse_toml_key(key: &str) -> Result<Vec<String>> {
     Ok(segments)
 }
 
-fn parse_user_value(raw: &str) -> toml_edit::Value {
+fn parse_user_value(raw: &str) -> Result<toml_edit::Value> {
     if let Ok(item) = format!("__x = {raw}").parse::<toml_edit::DocumentMut>() {
         if let Some(value) = item.get("__x").and_then(|i| i.as_value()).cloned() {
-            return value;
+            return Ok(value);
         }
     }
     let trimmed = raw.trim();
+    // Bracket/brace shorthand must be valid TOML — refuse to silently coerce
+    // `[a, b]` or `{ a = 1 }` to a string when the user clearly intended an
+    // array or inline table.
+    if let Some(first) = trimmed.chars().next() {
+        if matches!(first, '[' | '{') {
+            bail!(
+                "value `{raw}` looks like a TOML array/inline-table but failed to parse; \
+                 quote each element (e.g. `[\"a\", \"b\"]`) or pass it as a quoted string"
+            );
+        }
+    }
     match trimmed.to_ascii_lowercase().as_str() {
-        "true" => return toml_edit::Value::from(true),
-        "false" => return toml_edit::Value::from(false),
+        "true" => return Ok(toml_edit::Value::from(true)),
+        "false" => return Ok(toml_edit::Value::from(false)),
         _ => {}
     }
     if let Ok(n) = trimmed.parse::<i64>() {
-        return toml_edit::Value::from(n);
+        return Ok(toml_edit::Value::from(n));
     }
     if let Ok(n) = trimmed.parse::<f64>() {
         if n.is_finite() {
-            return toml_edit::Value::from(n);
+            return Ok(toml_edit::Value::from(n));
         }
     }
-    toml_edit::Value::from(raw)
+    Ok(toml_edit::Value::from(raw))
 }
 
 fn format_toml_item(item: &toml_edit::Item) -> String {
