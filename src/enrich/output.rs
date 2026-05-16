@@ -56,7 +56,12 @@ fn merge_metadata(
 pub fn record_error(entry: &mut LogBatchEntry, parser_name: &str, error: &str) {
     let mut s = format!("{parser_name}: {error}");
     if s.len() > PARSE_ERROR_MAX_BYTES {
-        s.truncate(PARSE_ERROR_MAX_BYTES);
+        // Back up to a valid UTF-8 char boundary to avoid truncate() panic.
+        let mut n = PARSE_ERROR_MAX_BYTES;
+        while !s.is_char_boundary(n) {
+            n -= 1;
+        }
+        s.truncate(n);
     }
     entry.parse_error = Some(s);
 }
@@ -70,7 +75,10 @@ pub fn stamp_source_kind(entry: &mut LogBatchEntry, kind: crate::enrich::SourceK
         None => serde_json::Map::new(),
     };
     if !root.contains_key("source_kind") {
-        root.insert("source_kind".to_string(), Value::String(kind.as_str().to_string()));
+        root.insert(
+            "source_kind".to_string(),
+            Value::String(kind.as_str().to_string()),
+        );
         entry.metadata_json = Some(Value::Object(root).to_string());
     }
 }
