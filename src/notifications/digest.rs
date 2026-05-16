@@ -217,8 +217,8 @@ pub(crate) fn spawn_digest(
             let today = now.date_naive();
             let already_fired = last_fired_date == Some(today);
             // Use a 2-minute window to handle slight timing drift.
-            let minutes_diff = (now.hour() * 60 + now.minute())
-                .abs_diff(target_hour * 60 + target_minute);
+            let minutes_diff =
+                (now.hour() * 60 + now.minute()).abs_diff(target_hour * 60 + target_minute);
             if !already_fired && minutes_diff <= 1 {
                 match run_digest(Arc::clone(&pool), Arc::clone(&permit_sem), &cfg).await {
                     Ok(()) => last_fired_date = Some(today),

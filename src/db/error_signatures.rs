@@ -289,22 +289,25 @@ pub(crate) fn read_signature_by_hash(
          LIMIT 1",
     )?;
 
-    let mut rows = stmt.query_map(params![signature_hash, normalizer_version, cutoff_1h], |row| {
-        Ok(SignatureRow {
-            signature_hash: row.get(0)?,
-            normalizer_version: row.get(1)?,
-            template: row.get(2)?,
-            sample_message: row.get(3)?,
-            sample_hostname: row.get(4)?,
-            sample_app_name: row.get(5)?,
-            severity: row.get(6)?,
-            first_seen_at: row.get(7)?,
-            last_seen_at: row.get(8)?,
-            total_count: row.get(9)?,
-            count_last_1h: row.get(10)?,
-            acknowledged_at: row.get(11)?,
-        })
-    })?;
+    let mut rows = stmt.query_map(
+        params![signature_hash, normalizer_version, cutoff_1h],
+        |row| {
+            Ok(SignatureRow {
+                signature_hash: row.get(0)?,
+                normalizer_version: row.get(1)?,
+                template: row.get(2)?,
+                sample_message: row.get(3)?,
+                sample_hostname: row.get(4)?,
+                sample_app_name: row.get(5)?,
+                severity: row.get(6)?,
+                first_seen_at: row.get(7)?,
+                last_seen_at: row.get(8)?,
+                total_count: row.get(9)?,
+                count_last_1h: row.get(10)?,
+                acknowledged_at: row.get(11)?,
+            })
+        },
+    )?;
 
     rows.next().transpose().map_err(Into::into)
 }

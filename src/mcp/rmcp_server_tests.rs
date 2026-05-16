@@ -21,7 +21,9 @@ use crate::{
     },
 };
 
-use super::{allowed_hosts, allowed_origins, is_validation_error, required_scope_for, ADMIN_ACTIONS};
+use super::{
+    allowed_hosts, allowed_origins, is_validation_error, required_scope_for, ADMIN_ACTIONS,
+};
 
 fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();

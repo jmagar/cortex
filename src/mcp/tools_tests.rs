@@ -165,9 +165,9 @@ async fn schema_actions_are_dispatchable() {
                         "action={action} returned unexpected error: {error}"
                     );
                 }
-                Ok(_) => panic!(
-                    "action={action} with non-existent hash should return NotFound, got Ok"
-                ),
+                Ok(_) => {
+                    panic!("action={action} with non-existent hash should return NotFound, got Ok")
+                }
             }
         } else if *action == "notifications_test" {
             // notifications_test requires a live Apprise server; transient/delivery

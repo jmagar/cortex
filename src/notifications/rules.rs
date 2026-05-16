@@ -286,11 +286,7 @@ mod tests {
             container_die_row_numeric("host1", 0), // exit 0 should not match
         ];
         let results = evaluate_container_die_nonzero(&rows, "[]");
-        assert_eq!(
-            results.len(),
-            1,
-            "numeric non-zero exit_code should match"
-        );
+        assert_eq!(results.len(), 1, "numeric non-zero exit_code should match");
         assert_eq!(results[0].rule_id, "container_die_nonzero");
     }
 
