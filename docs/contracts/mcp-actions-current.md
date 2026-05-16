@@ -99,18 +99,20 @@ The `tool` parameter accepts: `"claude"`, `"codex"`, `"gemini"`.
 ### 3.3 `group_by` enum (cross-action union)
 Declared in the union schema: `["app_name", "hostname", "host", "severity", "sev", "app"]`.
 Per-action interpretation:
-- `errors`: only `app_name` is supported (anything else is ignored as the default host+severity grouping).
+- `errors`: only `app_name` is supported; any other value raises an `InvalidInput` error ("Invalid group_by '…'. Supported: app_name").
 - `timeline`: `hostname`, `severity`, or `app_name`; aliases `host` → `hostname`, `sev` → `severity`, `app` → `app_name`.
 
 ### 3.4 `bucket` enum (`timeline` only)
 `["minute", "min", "m", "hour", "h", "day", "d"]`. Default: `hour`.
 
 ### 3.5 `source_ip` semantics
-Network-verified identity:
-- Syslog: `IP:port` (verified from the UDP/TCP socket peer).
-- OTLP: peer IP.
-- Docker stream: `docker://host/container/stream`.
-- Docker lifecycle event: `docker-event://host/container/action`.
+`source_ip` is a URI-style source identifier, not a raw IP address. Every stored value MUST be parseable with `url::Url::parse`. See `docs/contracts/log-row-shape.md` §4 for the full URI scheme table; summary:
+- Syslog UDP: `udp://<sender_ip>:<sender_port>`
+- Syslog TCP: `tcp://<sender_ip>:<sender_port>`
+- Agent WS: `agent://<host_id>`
+- Docker stream: `docker://<docker_host>/<container_name>/<stream>`
+- Docker lifecycle event: `docker-event://<docker_host>/<container_name>/<action>`
+- OTLP: `otlp://<peer_ip>/<service.name>`
 
 ### 3.6 `LogEntry` shape (used by every action that returns log rows)
 
