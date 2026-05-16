@@ -43,7 +43,7 @@ caught at write time (see §5).
 | Top-level key | Owner (writer) | Source spec | Notes |
 |---|---|---|---|
 | `kernel` | `kernel` parser (Epic B §7.1) | spec B | OOM, link-state, MAC collision details. |
-| `docker` | `docker_event` parser (Epic B §7.2) AND `docker_stream` ingest envelope | spec B, log-row-shape.md §5 sketch | Both write — the ingester adds `container_name`, `image`, `compose_project`, `compose_service` BEFORE the parser; the parser adds `event_action`, `exit_code`. Both touch the same namespace but disjoint key sets; collisions are a bug. |
+| `docker` | `docker_event` parser (Epic B §7.2) AND `docker-stream` / `docker-event` ingest envelopes | spec B, log-row-shape.md §5 sketch | Both write — the ingester adds `container_name`, `image`, `compose_project`, `compose_service` BEFORE the parser; the parser adds `event_action`, `exit_code`. Both touch the same namespace but disjoint key sets; collisions are a bug. (Parser-id `docker_event` is snake_case per `parser-trait.rs::ParserId`; the source_kind values it consumes are kebab-case `docker-stream` / `docker-event`.) |
 | `authelia` | `authelia` parser (Epic B §7.3) | spec B | Auth fields: `username`, `mfa_method`, `src_ip`, `path`, `method`. |
 | `swag` | `swag` parser (Epic B §7.4) | spec B | nginx access + error fields. |
 | `adguard` | `adguard` parser (Epic B §7.5) AND `adguard-api` poller (Epic C §5) | spec B, spec C | Dual writer — see §3 for the merge convention (`adguard.raw` poller, `adguard.parsed` parser). |

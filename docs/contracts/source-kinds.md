@@ -211,17 +211,18 @@ scheme reconstruction):
 
 **Downstream contract files that need updating to match this contract:**
 
-| File | Drift | Required change |
+| File | Drift | Status |
 |---|---|---|
-| `docs/contracts/parser-trait.rs` line 52 | `#[serde(rename_all = "snake_case")]` on `SourceKind` | Change to `#[serde(rename_all = "kebab-case")]` |
-| `docs/contracts/parser-trait.rs` lines 40–60 | Comment lists snake_case forms (`"docker_stream"`, `"adguard_api"`, etc.) | Update the doc comments to kebab-case (`"docker-stream"`, `"adguard-api"`, etc.) |
-| `docs/contracts/parser-trait.rs` line 53 | Enum variant `Syslog` (no UDP/TCP distinction) | Split into `SyslogUdp` and `SyslogTcp`. The variant `Syslog` is removed. |
-| `docs/superpowers/specs/2026-05-16-agent-mode-design.md` §12 line 593 | Lists `docker-ingest` as a member | Replace with `docker-stream` (and add `docker-event`). |
-| `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` §3 line 78, §4 line 128–134 | Uses bare `syslog` and `_`-style names | Either keep snake_case **only inside the parser dispatch matrix** as an internal grouping ("syslog" = both UDP and TCP), or rewrite to kebab-case. Recommended: rewrite to kebab-case and merge UDP+TCP rows in the matrix (both still hit the same parser by app_name). |
-| `docs/contracts/log-row-shape.md` §4 line 87 | `unifi://<controller_host>/site/<site_id>` | Drop `/site/<site_id>`; v1 is single-site. |
-| `docs/contracts/log-row-shape.md` §4 line 88 | `adguard://<adguard_host>/<client_ip_or_name>` | Drop the client-IP path; per-client filtering uses `metadata_json.adguard.client`. |
-| `src/syslog/listener.rs` | Today's UDP/TCP listener may not yet write the kebab-case `source_kind` to `metadata_json` | When implementing enrichment migration 10, populate `metadata_json.source_kind` to `"syslog-udp"` or `"syslog-tcp"` based on transport. |
-| `src/db/models.rs` | `LogBatchEntry` doc comment lists URI patterns | Already lists `docker://` and `docker-event://`; no rename needed — the kebab-case scheme matches. |
+| `docs/contracts/parser-trait.rs` line 52 | `#[serde(rename_all = "snake_case")]` on `SourceKind` | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — `rename_all = "kebab-case"` |
+| `docs/contracts/parser-trait.rs` lines 40–60 | Comment lists snake_case forms | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — doc comments updated to kebab-case |
+| `docs/contracts/parser-trait.rs` line 53 | Enum variant `Syslog` (no UDP/TCP distinction) | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — split into `SyslogUdp` and `SyslogTcp` + `is_syslog()` helper + `as_str()` method |
+| `docs/superpowers/specs/2026-05-16-agent-mode-design.md` §12 | Lists `docker-ingest` as a member | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — replaced with `docker-stream` + `docker-event`; `unifi-api` and `adguard-api` added |
+| `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` §3 / §4 | Uses bare `syslog` and `_`-style names | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — dispatch matrix rewritten in kebab-case with UDP/TCP rows merged via `app_name`-only dispatch (transport tag lives in `source_kind`/`source_ip`) |
+| `docs/contracts/log-row-shape.md` §4 line 88 | `unifi://<controller_host>/site/<site_id>` | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — path dropped; v1 single-site |
+| `docs/contracts/log-row-shape.md` §4 line 89 | `adguard://<adguard_host>/<client_ip_or_name>` | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — path dropped; per-client filtering uses `metadata_json.adguard.client` |
+| `docs/contracts/metadata-json-shape.md` §3 line 46 | Used `docker_stream` (snake_case) for ingest envelope | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — rewritten to `docker-stream` / `docker-event` kebab forms |
+| `src/syslog/listener.rs` | Today's UDP/TCP listener may not yet write the kebab-case `source_kind` to `metadata_json` | ⏳ **DEFERRED** — implementation work for epic B (`syslog-mcp-1wjr`). When migration 10 lands, listener populates `metadata_json.source_kind` to `"syslog-udp"` or `"syslog-tcp"` based on transport. |
+| `src/db/models.rs` | `LogBatchEntry` doc comment lists URI patterns | ✅ No change needed — already kebab. |
 
 Per agent-mode spec §12, a `source_kind` column on `logs` is proposed
 (`source_kind TEXT NOT NULL DEFAULT 'syslog-udp'`) — but `log-row-shape.md`

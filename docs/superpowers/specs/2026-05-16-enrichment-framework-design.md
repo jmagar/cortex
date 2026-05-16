@@ -75,7 +75,9 @@ pub struct ParserInput<'a> {
     pub message: &'a str,
     /// Raw line as received, for fallback regex on multi-segment events.
     pub raw: &'a str,
-    /// `docker_stream`, `docker_event`, `syslog`, `adguard_api`, `otlp`.
+    /// Closed enum per `docs/contracts/source-kinds.md`. Wire-form strings
+    /// are kebab-case: `syslog-udp`, `syslog-tcp`, `docker-stream`,
+    /// `docker-event`, `otlp`, `adguard-api`, `unifi-api`, `agent`.
     pub source_kind: SourceKind,
     /// Existing severity (parsers MAY overwrite via ParserOutput.severity).
     pub severity: &'a str,
@@ -124,13 +126,15 @@ Parsers are zero-state singletons (compiled regexes are `LazyLock<Regex>` at mod
 
 Two identifiers can point at a parser: `app_name` (the syslog APP-NAME or the Docker `app_name()` derived from container metadata in `docker_ingest::models::ContainerMeta::app_name`) and `container_name` (only populated for Docker sources). The matrix:
 
-| `source_kind`   | Lookup key (in order)                                | Notes |
-|-----------------|------------------------------------------------------|-------|
-| `docker_stream` | (1) `container_name` exact, (2) `app_name` exact, (3) `compose_service` exact | Docker is authoritative — operators rename containers, the parser must follow. |
-| `docker_event`  | always `docker_event` parser, regardless of container | Lifecycle events are uniform; the per-container parser does not apply to "die" / "oom". |
-| `syslog`        | `app_name` exact, case-insensitive                   | Most homelab syslog senders set APP-NAME; for the few that don't, no parser runs. |
-| `adguard_api`   | always `adguard` parser                              | Bypasses dispatch — the API poller writes `app_name=adguard-query` and we route directly. |
-| `otlp`          | `app_name` (which is OTLP `service.name`)            | Same lookup as syslog. |
+| `source_kind`               | Lookup key (in order)                                | Notes |
+|-----------------------------|------------------------------------------------------|-------|
+| `docker-stream`             | (1) `container_name` exact, (2) `app_name` exact, (3) `compose_service` exact | Docker is authoritative — operators rename containers, the parser must follow. |
+| `docker-event`              | always `docker_event` parser, regardless of container | Lifecycle events are uniform; the per-container parser does not apply to "die" / "oom". The `docker_event` token here is the parser name (snake_case parser-id, see `parser-trait.rs::ParserId`), not the source_kind. |
+| `syslog-udp` / `syslog-tcp` | `app_name` exact, case-insensitive                   | Most homelab syslog senders set APP-NAME; for the few that don't, no parser runs. UDP and TCP go through the same dispatch — transport distinction lives only in `source_kind` / `source_ip` for observability. |
+| `adguard-api`               | always `adguard` parser                              | Bypasses dispatch — the API poller writes `app_name=adguard-query` and we route directly. |
+| `unifi-api`                 | always `unifi` parser (epic C)                       | Same pattern as adguard-api — poller-tagged, single parser. |
+| `otlp`                      | `app_name` (which is OTLP `service.name`)            | Same lookup as syslog. |
+| `agent`                     | `app_name` exact                                     | Agent-streamed rows follow the same app_name dispatch as syslog. |
 
 **Precedence within a source:** more specific key wins. For Docker, `container_name == "authelia-main"` beats a generic `app_name == "authelia"` only if both are registered — in practice, parsers register under canonical names (`authelia`, `swag`, `adguard`, `fail2ban`), and a `container_to_canonical` lookup folds operator-specific names (`authelia-main`, `authelia-prod`, `swag`) onto canonical keys. Unknown container/app → no parser runs, row is written unchanged, no error. The dispatcher emits a `tracing::debug!` once per never-seen `app_name` (bounded by an LRU of 256 entries) so operators can see what's slipping through without log spam.
 
@@ -216,7 +220,7 @@ Format: `"{parser_name}: {ParserError::Display}"`, truncated to 512 bytes. Mirro
 
 ### 7.2 `docker_event` parser
 
-**Triggers on:** `source_kind == docker_event`. Bypasses app_name dispatch — Docker events are routed by source kind, not name.
+**Triggers on:** `source_kind == "docker-event"` (kebab-case wire form, per `docs/contracts/source-kinds.md`). Bypasses app_name dispatch — Docker events are routed by source kind, not name.
 
 **Real input examples (already shaped by `src/docker_ingest/parser.rs::docker_event_to_entry`):**
 - Message: `docker container event: die container=postgres image=postgres:16 compose_project=stack compose_service=db exit_code=137`
@@ -391,7 +395,7 @@ The 4.9M existing rows stay as-is. No backfill script in V1.
 - Push fixture rows through `enrich_entry` + parser dispatch.
 - Insert via the real `insert_logs_batch`.
 - Assert: column values match, `metadata_json` parses and contains expected namespace.
-- One test per source that goes through both `source_kind=syslog` and `source_kind=docker_stream` to verify dispatch precedence.
+- One test per source that goes through both `source_kind="syslog-tcp"` and `source_kind="docker-stream"` to verify dispatch precedence.
 
 **Golden-file fixtures.** Under `tests/fixtures/parsers/<source>/`. Each fixture is the literal `message` string (no envelope), so the fixture loader can drive every parser without knowing which one will match. A `metadata.json` per directory pins the expected `ParserOutput`.
 

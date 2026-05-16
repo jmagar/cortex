@@ -586,13 +586,18 @@ A new MCP action `agent.probe` (separate spec) calls `ProbeRouter::invoke`. Insi
 
 Add a `source_kind TEXT NOT NULL DEFAULT 'syslog-udp'` column via migration. Values:
 
-| Value           | Producer                          |
-| --------------- | --------------------------------- |
-| `syslog-udp`    | UDP listener (default for legacy) |
-| `syslog-tcp`    | TCP listener                      |
-| `agent`         | WS agent path                     |
-| `docker-ingest` | Docker remote ingest (existing)   |
-| `otlp`          | OTLP HTTP ingest (existing)       |
+| Value            | Producer                                |
+| ---------------- | --------------------------------------- |
+| `syslog-udp`     | UDP listener (default for legacy)       |
+| `syslog-tcp`     | TCP listener                            |
+| `agent`          | WS agent path                           |
+| `docker-stream`  | Docker container stdout/stderr ingester |
+| `docker-event`   | Docker lifecycle event ingester         |
+| `otlp`           | OTLP HTTP ingest (existing)             |
+| `unifi-api`      | UniFi poller (epic C)                   |
+| `adguard-api`    | AdGuard poller (epic C)                 |
+
+Closed enumeration pinned in `docs/contracts/source-kinds.md`. Splits `docker-ingest` (used in this spec's earlier draft) into the two-way `docker-stream` / `docker-event` per the source-kinds contract.
 
 Both listeners and the agent path tag their rows; index added: `CREATE INDEX idx_logs_source_kind_received_at ON logs(source_kind, received_at)`.
 

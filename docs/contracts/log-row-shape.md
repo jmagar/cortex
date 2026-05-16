@@ -85,8 +85,8 @@ The string form is opinionated. Every value MUST be parseable with `url::Url::pa
 | `docker://` | `<docker_host>` | `/<container_name>/<stream>` where `stream ∈ {stdout, stderr}` | Docker stream ingester. |
 | `docker-event://` | `<docker_host>` | `/<container_name>/<action>` (e.g. `/postgres/die`) | Docker event ingester. |
 | `otlp://` | `<peer_ip>` | `/<service.name>` | OTLP receiver. Peer IP omits the ephemeral port (one OTLP exporter, many records). |
-| `unifi://` | `<controller_host>` | `/site/<site_id>` | UniFi poller. Per-site granularity so MCP filters can scope by site. |
-| `adguard://` | `<adguard_host>` | `/<client_ip_or_name>` | AdGuard poller. The path segment is the client whose query produced the row, so a fleet-wide AdGuard view can per-client filter. |
+| `unifi://` | `<controller_host>` | empty | UniFi poller. V1 is single-site (per `api-pollers-design.md` §11.1) so no site segment. |
+| `adguard://` | `<adguard_host>` | empty | AdGuard poller. Per-client filtering uses `metadata_json.adguard.client` rather than baking it into the URI. |
 
 Legacy rows inserted before this convention existed carry empty-string `source_ip`. The MCP `source_ip` filter treats `""` as "no constraint" on read; new writes MUST set a non-empty value.
 

@@ -34,30 +34,66 @@ use thiserror::Error;
 // ---------------------------------------------------------------------------
 
 /// The transport the row arrived on. Parsers use this to decide whether to
-/// run (e.g. the kernel parser only applies to `Syslog` sources, the
-/// docker-event parser only to `DockerEvent`).
+/// run (e.g. the kernel parser only applies to `SyslogUdp`/`SyslogTcp` sources,
+/// the docker-event parser only to `DockerEvent`).
 ///
-/// String forms (used in `metadata_json.source_kind` and in the dispatch
-/// matrix in the enrichment-framework spec):
+/// **Casing convention:** kebab-case on the wire, per
+/// `docs/contracts/source-kinds.md`. Locked so the same string appears in
+/// `metadata_json.source_kind`, in spec B's dispatch matrix, in
+/// `agent-protocol.md`, and in the URI scheme used by `log-row-shape.md` §4
+/// (`syslog-udp://`, `docker-stream://`, etc.).
 ///
-/// - `Syslog` → `"syslog"` (covers UDP and TCP listeners; the listener kind
-///   is encoded in `source_ip` scheme, not here)
-/// - `DockerStream` → `"docker_stream"` (per-container stdout/stderr)
-/// - `DockerEvent` → `"docker_event"` (Docker lifecycle events)
+/// String forms:
+///
+/// - `SyslogUdp` → `"syslog-udp"` (RFC 3164/5424 on UDP :1514)
+/// - `SyslogTcp` → `"syslog-tcp"` (RFC 3164/5424 on TCP :1514)
+/// - `DockerStream` → `"docker-stream"` (per-container stdout/stderr)
+/// - `DockerEvent` → `"docker-event"` (Docker lifecycle events)
 /// - `Otlp` → `"otlp"`
-/// - `AdguardApi` → `"adguard_api"`
-/// - `UnifiApi` → `"unifi_api"`
+/// - `AdguardApi` → `"adguard-api"`
+/// - `UnifiApi` → `"unifi-api"`
 /// - `Agent` → `"agent"` (per-host agent WebSocket)
+///
+/// **History:** prior versions of this contract used `snake_case` with a
+/// bare `Syslog` variant. Both were corrected during the cross-cutting audit
+/// (bead `syslog-mcp-s6et`); kebab-case matches the existing production data
+/// that already carries kebab forms in `source_ip` schemes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum SourceKind {
-    Syslog,
+    SyslogUdp,
+    SyslogTcp,
     DockerStream,
     DockerEvent,
     Otlp,
     AdguardApi,
     UnifiApi,
     Agent,
+}
+
+impl SourceKind {
+    /// Stable string form (kebab-case). Use this when comparing against
+    /// values read from `metadata_json.source_kind` or written by the
+    /// dispatcher.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            SourceKind::SyslogUdp => "syslog-udp",
+            SourceKind::SyslogTcp => "syslog-tcp",
+            SourceKind::DockerStream => "docker-stream",
+            SourceKind::DockerEvent => "docker-event",
+            SourceKind::Otlp => "otlp",
+            SourceKind::AdguardApi => "adguard-api",
+            SourceKind::UnifiApi => "unifi-api",
+            SourceKind::Agent => "agent",
+        }
+    }
+
+    /// True when the source is one of the two syslog listeners — convenient
+    /// for parsers like `kernel` that gate on syslog ingest regardless of
+    /// transport.
+    pub const fn is_syslog(self) -> bool {
+        matches!(self, SourceKind::SyslogUdp | SourceKind::SyslogTcp)
+    }
 }
 
 // ---------------------------------------------------------------------------
