@@ -73,10 +73,11 @@ MCP `error.data` MAY include the underlying JSON-RPC code in `agent_rpc_code` fo
 | `rules_fire_history` | E | Per-rule fire history (rule_id, fingerprint, when, log excerpt) | Additive only |
 | `rules_list` | E | List configured alert rules with their last-fired stats | Additive only |
 | `service_health` | D | Combined systemd-failed + docker-health view | Additive only |
+| `mark_incident_resolved` | F | Tag an incident as resolved with optional session_id + notes; triggers re-embed | Additive only |
 | `similar_incidents` | F | Rank past incidents structurally similar to a seed (log/window/text) | Additive only |
 | `suggest_fix` | F | Surface resolution narrative from past resolved priors | Additive only |
 
-15 new actions total.
+16 new actions total.
 
 ## 3. Common Schemas
 
@@ -1385,6 +1386,79 @@ If no resolved priors exist:
 **Error modes:** `not_found`, `synthesis_unavailable`, `invalid_params`, `embed_pending`.
 
 **Freshness:** synthesis uses live LLM call; retrieval uses Qdrant. Resolution edits via `mark_incident_resolved` propagate within one re-embed cycle (typically ~minutes).
+
+---
+
+### mark_incident_resolved
+
+**Source:** epic F §8.4 (and §13.2 freshness note). Resolves audit bead `syslog-mcp-q22k` by promoting the spec-body reference into a first-class action.
+
+**Purpose:** Operator (or an AI agent on the operator's behalf) marks an incident as fixed and optionally pins the AI session where the fix happened. Updates the `incidents` row (`resolution_session_id`, `resolution_notes`, `resolution_present = 1`), then enqueues a re-embed of the incident card so the new resolution boost (epic F §7.4) takes effect on future retrieval.
+
+**Params:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["incident_id"],
+  "additionalProperties": false,
+  "properties": {
+    "incident_id":   { "type": "string", "description": "Stable incident identifier (e.g. inc_2026-05-16T10:42Z_jenny_a4f9)." },
+    "session_id":    { "type": ["string", "null"], "description": "AI session that captured the fix; surfaces in suggest_fix.based_on[].resolution_session_id." },
+    "notes":         { "type": ["string", "null"], "maxLength": 4096, "description": "Free-form operator note. Embedded into the next card render." },
+    "reopen":        { "type": "boolean", "default": false, "description": "When true, clears resolution_present + resolution_session_id + resolution_notes. Use when a 'fixed' incident reappears." }
+  }
+}
+```
+
+**Result:**
+
+```json
+{
+  "type": "object",
+  "required": ["ok"],
+  "properties": {
+    "ok":              { "type": "boolean" },
+    "incident_id":     { "type": "string" },
+    "resolution_present": { "type": "boolean" },
+    "reembed_queued":  { "type": "boolean", "description": "True when the incident card is queued for re-embedding (see incident-card.md §7)." }
+  }
+}
+```
+
+**Example — mark resolved:**
+
+```json
+{ "action": "mark_incident_resolved",
+  "incident_id": "inc_2026-05-16T10:42Z_jenny_a4f9",
+  "session_id": "sess_2026-05-16T10:50Z_jmagar",
+  "notes": "increased docker mem limit to 4G; added oom_score_adj=-500" }
+```
+
+```json
+{ "ok": true,
+  "result": { "ok": true,
+              "incident_id": "inc_2026-05-16T10:42Z_jenny_a4f9",
+              "resolution_present": true,
+              "reembed_queued": true } }
+```
+
+**Example — reopen:**
+
+```json
+{ "action": "mark_incident_resolved",
+  "incident_id": "inc_2026-05-16T10:42Z_jenny_a4f9",
+  "reopen": true }
+```
+
+**Error modes:** `not_found` (no incidents row matches `incident_id`), `invalid_params` (e.g. both `reopen=true` AND non-null `session_id`).
+
+**Freshness:** the row is updated synchronously; the re-embed runs in the next on-close finalizer pass (~5 min latency per epic F §5). The result's `reembed_queued: true` confirms the queue insertion, not the embed completion.
+
+**Side effects:**
+- Increments `incidents.schema_version_change_count` (per incident-card.md §7) implicit re-embed trigger.
+- No notification fires (this action is the user closing the loop, not opening one).
 
 ---
 

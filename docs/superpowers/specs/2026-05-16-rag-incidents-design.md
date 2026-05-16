@@ -469,15 +469,21 @@ Implementation: build the retrieval ourselves (we trust our rerank more than axo
 
 If no resolved priors exist, return `synthesized: false` with the raw ranked-hits payload, so the caller can still see *something*.
 
-### Closing the loop: marking resolutions
+### 8.4 `mark_incident_resolved` — closing the loop
 
-Add a fourth, smaller action `mark_incident_resolved`:
+Promoted to a first-class action (bead `syslog-mcp-q22k`). Pinned in `docs/contracts/mcp-actions.md` alongside the other 3 F-epic actions.
 
 ```json
-{"action": "mark_incident_resolved", "incident_id": "...", "session_id": "...", "notes": "increased mem limit"}
+{"action": "mark_incident_resolved",
+ "incident_id": "...",
+ "session_id": "...",
+ "notes": "increased mem limit",
+ "reopen": false}
 ```
 
-Sets `resolution_session_id` and `resolution_notes` on the incident row, then triggers a re-embed so the new resolution lives in the Qdrant payload too. This is what makes `suggest_fix` get smarter over time — without it, the corpus only contains problems, not solutions.
+Sets `resolution_session_id` and `resolution_notes` on the `incidents` row, flips `resolution_present` to `1`, and enqueues a re-embed so the new resolution lives in the Qdrant payload too. `reopen: true` clears the resolution state when a "fixed" incident reappears. This is what makes `suggest_fix` get smarter over time — without it, the corpus only contains problems, not solutions.
+
+Action surface = **4 total**: `similar_incidents`, `ask_history`, `suggest_fix`, `mark_incident_resolved`.
 
 ## 9. Privacy & Redaction
 

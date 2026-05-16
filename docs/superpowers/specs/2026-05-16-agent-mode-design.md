@@ -686,18 +686,7 @@ If duplicates do appear, downstream search queries can filter `source_kind = 'ag
 1. **TLS termination location.** Locked answer is "SWAG terminates `wss://`." Should the server *also* support native TLS (rustls) for deployments without SWAG? Probably yes in v1.1; v1 ships proxy-only to limit scope.
 2. **Multi-tenant scope.** Spec assumes one trust domain per server. If we ever add Anthropic-issued homelab fleets sharing a server, we need an `agent_group` column and per-group probe whitelists. **Out of scope.**
 3. **Agent → MCP feature parity.** Should agent be able to subscribe to log streams *back* from the server (for cross-host correlation queries)? Tempting but bloats v1. Flag for v2.
-4. ~~**`metrics.push` storage.**~~ **RESOLVED:** v1 pre-creates an empty `host_metrics` table in the migration so the writer can land in epic D (Probe Registry) without a schema bump. v1 still drops incoming `metrics.push` payloads. Schema:
-   ```sql
-   CREATE TABLE host_metrics (
-     host_id      TEXT NOT NULL,
-     metric_name  TEXT NOT NULL,
-     labels       TEXT,            -- JSON object, may be NULL
-     value        REAL NOT NULL,
-     ts           INTEGER NOT NULL -- unix epoch millis
-   );
-   CREATE INDEX idx_host_metrics_lookup ON host_metrics (host_id, metric_name, ts DESC);
-   -- Retention configured by epic D.
-   ```
+4. ~~**`metrics.push` storage.**~~ **RESOLVED 2026-05-16 (bead `syslog-mcp-swv9`):** Earlier resolution pre-created a `host_metrics` table here so Epic D would avoid a schema bump. On cross-cutting review we found that table redundant with Epic D's `metrics_gauge` (same purpose: scalar samples per `(host_id, metric_name)` over time). Final decision: **no Epic A migration creates a metrics table**. Epic D's `metrics_gauge` is the canonical target for probe gauges AND any future `metrics.push` writes. V1 still drops incoming `metrics.push` payloads on the floor (see §4 of this spec). When a future v2 wants to wire `metrics.push` to storage, it routes the payload into `metrics_gauge` directly — no migration needed because Epic D already creates the table. Contract: `docs/contracts/db-additions.sql` (Epic D section).
 5. **Compression.** `Capabilities.compression: ["zstd"]` declared but unused in v1. Worth wiring through if any agent host produces > 10 MiB/min steady-state — `dookie`'s Plex logs might. **Decision deferred** until we measure.
 6. **Bootstrap UX.** One-time tokens via copy-paste vs. printing a `wireguard-style` invite URL the agent can read. Lean toward QR/URL for the next epic.
 7. ~~**`syslog agent` CLI subcommand surface.**~~ **RESOLVED — IN SCOPE.** Server-side CLI subcommands (run on `tootie`, operate on the central DB):

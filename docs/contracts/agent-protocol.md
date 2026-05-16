@@ -26,7 +26,7 @@ Byte-level flow for a fresh connection:
    - `protocol_version == 1` (otherwise `-32003`).
    - `agent_version >= min_agent_version` from server config (`-32003`).
    - Token: BLAKE3-hashes the supplied `token`, compares against `agents.token_hash` and `agents.token_hash_prev` for the supplied `host_id`. No match → `-32001`. Match against a row with `connection_state = 'Revoked'` or NULL hashes → `-32002`.
-5. On success, server responds with `HelloResult` (see §4) and the connection transitions to **Active**. `agents.connection_state` is set to `Active`, `last_handshake = now`, `session_id` is set to a new UUID.
+5. On success, server responds with `HelloResult` (see §4) and the connection transitions to **Active**. `agents.connection_state` is set to `Active`, `last_handshake = now`, `session_id` is set to a new UUID. **Token rotation**: when the inbound `token` was a one-time enrollment token (`agents.token_hash` matched a row whose `connection_state = NeverConnected`), the server generates a new long-lived token, sets `agents.token_hash = BLAKE3(new_token)`, clears `agents.token_hash_prev` (no grace window on first enroll), flips `connection_state` to `Active`, and ships `new_token` back in `HelloResult.rotated_token`. The agent MUST atomically persist `rotated_token` to its token file before sending any further RPCs — losing the rotated token mid-handshake means the agent cannot reconnect. For subsequent reconnects with an already-long-lived token, `rotated_token` is absent (or null) and the existing `agents.token_hash` is retained.
 6. On any auth failure, server sends a JSON-RPC error response with the appropriate `-32000..-32003` code and closes the WebSocket with code `4001` (auth failed) or `4002` (revoked). On handshake timeout the server sends no message and closes with `4000` (handshake timeout).
 7. The agent on receiving a fatal auth error transitions to `FatalAuth`. On `-32002 TokenRevoked` it deletes `/etc/syslog-agent/token` and stops reconnecting permanently. On other fatal codes it logs and alerts but stops retrying.
 
@@ -105,6 +105,12 @@ Shared `$defs` are inlined into each method schema for self-containment. Where `
     "server_time":    { "type": "string", "format": "date-time" },
     "accepted_seq":   { "type": "integer", "minimum": 0 },
     "session_id":     { "type": "string", "format": "uuid" },
+    "rotated_token":  {
+      "description": "Set when the server has rotated the agent's token (typically: first enroll, where the agent sent a one-time enrollment token and the server replaces it with a long-lived token). When present, the agent MUST atomically persist this as its new long-lived credential, overwriting whatever it sent in agent.hello.params.token. Server-side, agents.token_hash is updated to BLAKE3(rotated_token); the previous one-time token becomes invalid immediately (no grace window for first-enroll rotation). Absent when the server determined no rotation was needed.",
+      "type": ["string", "null"],
+      "minLength": 32,
+      "maxLength": 256
+    },
     "config": { "$ref": "#/$defs/AgentConfig" }
   },
   "$defs": {

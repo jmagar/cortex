@@ -273,7 +273,7 @@ Pure periodic evaluation of `instant` rules is wasteful and adds latency the use
 ### Performance at 4.9M-row scale
 
 - Stream path is O(rules × per-event-checks); at ~50 rules and ~5µs/check that's 250µs per log line. Current peak ingest is single-digit kLPS — well within budget.
-- Periodic path: each windowed rule does one `WHERE ts > now() - window AND tag = ? AND <field predicates> GROUP BY ...`. With the existing `idx_logs_ts_tag` plus the new enrichment indices from Epic B, these are sub-100ms queries. Bounded to ~20 windowed rules in V1; total eval cost < 2s per 30s tick.
+- Periodic path: each windowed rule does one `WHERE received_at > now() - window AND app_name = ? AND <field predicates> GROUP BY ...`. The query uses the existing `idx_logs_app_name_received_at` composite index (`docs/contracts/current-schema.sql` §4.2, migration 3 — `(app_name, received_at)`), augmented by the new enrichment partial indices from Epic B (`idx_logs_http_status_time`, `idx_logs_auth_outcome_time`, `idx_logs_dns_blocked_time`, `idx_logs_event_action_time`). Targeting sub-100ms per query at 4.9M-row prod scale. Bounded to ~20 windowed rules in V1; total eval cost < 2s per 30s tick.
 
 ---
 

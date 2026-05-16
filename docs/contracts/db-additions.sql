@@ -52,7 +52,11 @@
 -- ====== Epic A: Agent Mode — WebSocket + JSON-RPC 2.0 (syslog-mcp-qgnx) ======
 -- Source: docs/superpowers/specs/2026-05-16-agent-mode-design.md
 --   §9 (`agents` table + indices)
---   §16 open-question #4 (`host_metrics` pre-created empty for Epic D writer)
+-- NOTE: spec A §16 open-question #4 originally pre-created a `host_metrics`
+-- table for Epic D's writer. Resolved (bead syslog-mcp-swv9): the table is
+-- removed from Epic A entirely; Epic D's `metrics_gauge` is the canonical
+-- target for both probe results AND any future `metrics.push` payloads.
+-- V1 still drops incoming `metrics.push` on the floor.
 
 -- Per-host agent identity, token state, and connection lifecycle.
 -- (Source: §9 — "agents Table")
@@ -88,20 +92,9 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(connection_state);
 -- Sort agents by recency for dashboards / silent-host detection. (Source: §9)
 CREATE INDEX IF NOT EXISTS idx_agents_lastseen ON agents(last_seen);
 
--- Empty bucket for `metrics.push` payloads. v1 ingest drops these on the floor;
--- Epic D (Probe Registry) is the first writer. Pre-created here so Epic D does
--- not require a schema bump. (Source: §16 open-question #4 — RESOLVED)
-CREATE TABLE IF NOT EXISTS host_metrics (
-    host_id      TEXT NOT NULL,
-    metric_name  TEXT NOT NULL,
-    labels       TEXT,                -- JSON object, may be NULL
-    value        REAL NOT NULL,
-    ts           INTEGER NOT NULL     -- unix epoch millis
-);
-
--- Time-series lookup: latest-N for a (host, metric). (Source: §16 #4)
-CREATE INDEX IF NOT EXISTS idx_host_metrics_lookup
-    ON host_metrics(host_id, metric_name, ts DESC);
+-- (host_metrics table removed per bead syslog-mcp-swv9 — see header note above.
+-- Epic D's metrics_gauge replaces it. If a future Epic A v2 wires the agent's
+-- metrics.push path to a writer, it lands rows in metrics_gauge directly.)
 
 
 -- ====== Epic B: Enrichment / Parser Framework (syslog-mcp-1wjr) ==============
