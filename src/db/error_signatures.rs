@@ -245,11 +245,7 @@ pub(crate) fn read_unaddressed(
         })
     })?;
 
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r?);
-    }
-    Ok(out)
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 /// Look up a single signature by hash. Returns `None` if not found.
@@ -305,17 +301,13 @@ pub(crate) fn read_signature_by_hash(
         })
     })?;
 
-    match rows.next() {
-        Some(r) => Ok(Some(r?)),
-        None => Ok(None),
-    }
+    rows.next().transpose().map_err(Into::into)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::StorageConfig;
-    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn test_pool() -> (DbPool, TempDir) {

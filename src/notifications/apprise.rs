@@ -131,13 +131,10 @@ impl AppriseClient {
         let status = resp.status().as_u16();
 
         match status {
-            200 | 201 | 202 | 204 => Ok(NotifyResponse {
-                status_code: status,
-                success: true,
-            }),
+            // 200/201/202/204 = success
             // 207 = partial success — mark sent, do NOT retry
             // 424 = failed dependency (Apprise partial delivery) — treat as sent
-            207 | 424 => Ok(NotifyResponse {
+            200 | 201 | 202 | 204 | 207 | 424 => Ok(NotifyResponse {
                 status_code: status,
                 success: true,
             }),

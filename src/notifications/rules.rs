@@ -55,37 +55,20 @@ pub fn evaluate_container_die_nonzero(
     apprise_urls_json: &str,
 ) -> Vec<OutboxInsertParams> {
     rows.iter()
-        .filter(|r| {
-            if let Some(ref meta) = r.metadata_json {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(meta) {
-                    let action_match = v.get("action").and_then(|a| a.as_str()) == Some("die");
-                    let exit_code = v.get("exit_code").and_then(|e| e.as_str()).unwrap_or("0");
-                    return action_match && exit_code != "0";
-                }
+        .filter_map(|r| {
+            let meta = r.metadata_json.as_deref()?;
+            let v = serde_json::from_str::<serde_json::Value>(meta).ok()?;
+            if v.get("action").and_then(|a| a.as_str()) != Some("die") {
+                return None;
             }
-            false
-        })
-        .map(|r| {
-            let container = r
-                .metadata_json
-                .as_ref()
-                .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
-                .and_then(|v| {
-                    v.get("container_name")
-                        .and_then(|c| c.as_str())
-                        .map(|s| s.to_string())
-                })
-                .unwrap_or_else(|| "unknown".to_string());
-            let exit_code = r
-                .metadata_json
-                .as_ref()
-                .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
-                .and_then(|v| {
-                    v.get("exit_code")
-                        .and_then(|e| e.as_str())
-                        .map(|s| s.to_string())
-                })
-                .unwrap_or_else(|| "?".to_string());
+            let exit_code = v.get("exit_code").and_then(|e| e.as_str()).unwrap_or("0");
+            if exit_code == "0" {
+                return None;
+            }
+            let container = v
+                .get("container_name")
+                .and_then(|c| c.as_str())
+                .unwrap_or("unknown");
 
             let title = escape_for_notification(&format!(
                 "[WARNING] Container {} died (exit {}) on {}",
@@ -95,7 +78,7 @@ pub fn evaluate_container_die_nonzero(
                 "Container **{}** exited with code `{}` on **{}** at {}",
                 container, exit_code, r.hostname, r.timestamp
             ));
-            OutboxInsertParams {
+            Some(OutboxInsertParams {
                 dedup_key: format!("container_die:{}:{}", r.hostname, container),
                 rule_id: "container_die_nonzero".to_string(),
                 severity: "warning".to_string(),
@@ -104,7 +87,7 @@ pub fn evaluate_container_die_nonzero(
                 body,
                 apprise_urls_json: apprise_urls_json.to_string(),
                 next_attempt_at: backoff_next_attempt_at(0),
-            }
+            })
         })
         .collect()
 }

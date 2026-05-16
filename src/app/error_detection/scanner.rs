@@ -67,30 +67,20 @@ pub(crate) async fn run_error_scan(
         };
 
         let pool_chunk = Arc::clone(&pool);
-        let current_last_id = last_id;
-
         let frequency_threshold = cfg.frequency_threshold;
         let result = tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            process_chunk(
-                &pool_chunk,
-                current_last_id,
-                chunk_size,
-                frequency_threshold,
-            )
+            process_chunk(&pool_chunk, last_id, chunk_size, frequency_threshold)
         })
         .await??;
 
-        let rows_processed = result.rows_in_chunk;
-        let new_last_id = result.new_cursor;
-
-        if rows_processed == 0 {
+        if result.rows_in_chunk == 0 {
             // No more rows to scan.
             break;
         }
 
-        last_id = new_last_id;
-        total_processed += rows_processed;
+        last_id = result.new_cursor;
+        total_processed += result.rows_in_chunk;
 
         // Yield between chunks to avoid starving the ingest writer.
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -124,19 +114,17 @@ pub(crate) fn process_chunk(
              ORDER BY id ASC
              LIMIT ?2",
         )?;
-        let collected = stmt
-            .query_map(rusqlite::params![last_id, chunk_size], |row| {
-                Ok(ScanRow {
-                    id: row.get(0)?,
-                    severity: row.get(1)?,
-                    message: row.get(2)?,
-                    timestamp: row.get(3)?,
-                    hostname: row.get(4)?,
-                    app_name: row.get(5)?,
-                })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        collected
+        stmt.query_map(rusqlite::params![last_id, chunk_size], |row| {
+            Ok(ScanRow {
+                id: row.get(0)?,
+                severity: row.get(1)?,
+                message: row.get(2)?,
+                timestamp: row.get(3)?,
+                hostname: row.get(4)?,
+                app_name: row.get(5)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?
     };
 
     if rows.is_empty() {
@@ -146,7 +134,8 @@ pub(crate) fn process_chunk(
         });
     }
 
-    let max_id = rows.last().map(|r| r.id).unwrap_or(last_id);
+    // Safe: `rows.is_empty()` was just checked above.
+    let max_id = rows.last().expect("rows non-empty").id;
 
     // --- Group rows by (signature_hash, normalizer_version) ---
     // Key: (hash, template, sample_message, sample_hostname, sample_app_name, severity,
@@ -223,52 +212,47 @@ pub(crate) fn process_chunk(
         // Insert into outbox if the signature is unaddressed and above
         // the frequency threshold. The dispatcher's dedup_window_secs
         // prevents duplicate notifications.
-        let should_notify = {
-            let result: rusqlite::Result<(i64, Option<String>)> = tx.query_row(
-                "SELECT total_count, acknowledged_at
-                 FROM error_signatures
-                 WHERE signature_hash = ?1 AND normalizer_version = ?2",
-                rusqlite::params![hash, NORMALIZER_VERSION],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            );
-            match result {
-                Ok((total_count, acknowledged_at)) => {
-                    acknowledged_at.is_none() && total_count >= frequency_threshold as i64
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        signature_hash = %hash,
-                        error = %e,
-                        "error_scan: ack-check query failed; treating as unacked (fail-open)"
-                    );
-                    true  // fail open: duplicate notification is recoverable, missed one is not
-                }
+        let ack_check: rusqlite::Result<(i64, Option<String>)> = tx.query_row(
+            "SELECT total_count, acknowledged_at
+             FROM error_signatures
+             WHERE signature_hash = ?1 AND normalizer_version = ?2",
+            rusqlite::params![hash, NORMALIZER_VERSION],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        );
+        let should_notify = match ack_check {
+            Ok((total_count, acknowledged_at)) => {
+                acknowledged_at.is_none() && total_count >= frequency_threshold as i64
+            }
+            Err(e) => {
+                tracing::warn!(
+                    signature_hash = %hash,
+                    error = %e,
+                    "error_scan: ack-check query failed; treating as unacked (fail-open)"
+                );
+                // fail open: duplicate notification is recoverable, missed one is not
+                true
             }
         };
 
         if should_notify {
-            let title = format!(
-                "[{}] Recurring error on {}",
-                group.severity.to_uppercase(),
-                group.sample_hostname
-            );
-            let body = format!(
-                "Signature: {}\nSample: {}\nOccurrences: {}",
-                group.template, group.sample_message, group.count
-            );
-            let dedup_key = format!("error_sig:{hash}");
             let outbox_params = crate::db::notifications::OutboxInsertParams {
-                dedup_key,
+                dedup_key: format!("error_sig:{hash}"),
                 rule_id: "unaddressed_error_signature".to_string(),
                 severity: group.severity.clone(),
                 hostname: group.sample_hostname.clone(),
-                title,
-                body,
+                title: format!(
+                    "[{}] Recurring error on {}",
+                    group.severity.to_uppercase(),
+                    group.sample_hostname
+                ),
+                body: format!(
+                    "Signature: {}\nSample: {}\nOccurrences: {}",
+                    group.template, group.sample_message, group.count
+                ),
                 apprise_urls_json: "[]".to_string(), // overridden by dispatcher config
-                next_attempt_at: {
-                    let now = chrono::Utc::now();
-                    now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
-                },
+                next_attempt_at: chrono::Utc::now()
+                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                    .to_string(),
             };
             if let Err(e) = crate::db::notifications::outbox_insert(&tx, &outbox_params) {
                 tracing::warn!(

@@ -334,24 +334,21 @@ static MONTHS: &[&[u8]] = &[
 // Shared helpers
 
 fn is_hex(b: u8) -> bool {
-    b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || (b'A'..=b'F').contains(&b)
+    b.is_ascii_hexdigit()
 }
 
 fn looks_like_uuid_at(bytes: &[u8], i: usize) -> bool {
     if i + 36 > bytes.len() {
         return false;
     }
-    let positions = [8usize, 13, 18, 23];
-    for (k, b) in bytes[i..i + 36].iter().enumerate() {
-        if positions.contains(&k) {
-            if *b != b'-' {
-                return false;
-            }
-        } else if !is_hex(*b) {
-            return false;
+    const DASH_POSITIONS: [usize; 4] = [8, 13, 18, 23];
+    bytes[i..i + 36].iter().enumerate().all(|(k, &b)| {
+        if DASH_POSITIONS.contains(&k) {
+            b == b'-'
+        } else {
+            b.is_ascii_hexdigit()
         }
-    }
-    true
+    })
 }
 
 fn ipv4_end(bytes: &[u8], start: usize) -> Option<usize> {
