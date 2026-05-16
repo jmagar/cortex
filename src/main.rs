@@ -141,22 +141,22 @@ fn parse_doctor_full_command(args: &[String]) -> Result<DoctorFullCommand> {
 }
 
 async fn run_doctor_full(command: DoctorFullCommand) -> Result<()> {
+    use std::collections::HashSet;
     use syslog_mcp::compose::{
         CliDockerInspect, ComposeDefaults, ComposeService, ComposeTarget, DiagnosticSeverity,
         ProcessRunner,
     };
     use syslog_mcp::setup::SetupStatus;
 
-    // Tracks exit code; each section appends its error count.
-    let mut total_errors: usize = 0;
+    // (status, name, detail) — elapsed omitted from display for cleanliness.
+    type Phase = (SetupStatus, String, String);
 
-    // ── helpers ─────────────────────────────────────────────────────────────
-    fn status_tag(s: &SetupStatus) -> &'static str {
+    fn status_label(s: &SetupStatus) -> &'static str {
         match s {
-            SetupStatus::Ok => "Ok     ",
-            SetupStatus::Warn => "Warn   ",
-            SetupStatus::Error => "Error  ",
-            SetupStatus::Skipped => "Skip   ",
+            SetupStatus::Ok => "Ok   ",
+            SetupStatus::Warn => "Warn ",
+            SetupStatus::Error => "Error",
+            SetupStatus::Skipped => "Skip ",
         }
     }
 
@@ -168,21 +168,52 @@ async fn run_doctor_full(command: DoctorFullCommand) -> Result<()> {
         }
     }
 
-    fn print_phase(status: &SetupStatus, name: &str, elapsed_ms: u128, detail: &str) {
-        // Multi-line detail (e.g. script output from runtime_current_error) is
-        // truncated to the first non-empty line to keep the table readable.
-        let first = detail.lines().find(|l| !l.trim().is_empty()).unwrap_or(detail);
-        println!(
-            "  {}  {:<28} {:>4}ms  {}",
-            status_tag(status),
-            name,
-            elapsed_ms,
-            first
-        );
+    /// Truncate multi-line text to the most meaningful single line.
+    fn first_meaningful_line(text: &str) -> &str {
+        text.lines().find(|l| !l.trim().is_empty()).unwrap_or(text)
+    }
+
+    /// Print a section: header with pass/warn/error counts, then only non-Ok phases.
+    fn print_section(header: &str, phases: &[Phase]) -> usize {
+        let errors = phases
+            .iter()
+            .filter(|(s, ..)| matches!(s, SetupStatus::Error))
+            .count();
+        let warnings = phases
+            .iter()
+            .filter(|(s, ..)| matches!(s, SetupStatus::Warn))
+            .count();
+        let passed = phases
+            .iter()
+            .filter(|(s, ..)| matches!(s, SetupStatus::Ok | SetupStatus::Skipped))
+            .count();
+
+        let counts = match (passed, errors, warnings) {
+            (_, 0, 0) => format!("{passed} passed"),
+            (0, e, 0) => format!("{e} error"),
+            (0, 0, w) => format!("{w} warning"),
+            (0, e, w) => format!("{e} error, {w} warning"),
+            (_, e, 0) => format!("{passed} passed · {e} error"),
+            (_, 0, w) => format!("{passed} passed · {w} warning"),
+            (_, e, w) => format!("{passed} passed · {e} error, {w} warning"),
+        };
+        println!("{:<18} {}", header, counts);
+        for (status, name, detail) in phases {
+            if matches!(status, SetupStatus::Ok | SetupStatus::Skipped) {
+                continue;
+            }
+            println!(
+                "  {}  {:<26}  {}",
+                status_label(status),
+                name,
+                first_meaningful_line(detail)
+            );
+        }
+        errors
     }
 
     if command.json {
-        // ── JSON mode: aggregate all sub-reports ────────────────────────────
+        // JSON: aggregate raw sub-reports; don't apply the text-mode fixups.
         let setup = syslog_mcp::setup::run_setup_doctor()
             .await
             .map(|r| serde_json::to_value(&r).unwrap_or_default())
@@ -217,48 +248,99 @@ async fn run_doctor_full(command: DoctorFullCommand) -> Result<()> {
             }))?
         );
 
-        // Determine exit code from each section's has_errors / diagnostics.
-        let setup_err = setup.get("has_errors").and_then(|v| v.as_bool()).unwrap_or(false);
-        let compose_err = compose
+        let setup_errors = setup
+            .get("blocking_errors")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        // Dev-mode checks don't count as real errors in the JSON exit code either.
+        let setup_dev_errors = ["debug-wrapper-content", "debug-compose-content"]
+            .iter()
+            .filter(|name| {
+                setup
+                    .get("phases")
+                    .and_then(|p| p.as_array())
+                    .is_some_and(|phases| {
+                        phases.iter().any(|ph| {
+                            ph.get("name").and_then(|n| n.as_str()) == Some(name)
+                                && matches!(
+                                    ph.get("status").and_then(|s| s.as_str()),
+                                    Some("error")
+                                )
+                        })
+                    })
+            })
+            .count() as u64;
+        let compose_errors = compose
             .get("diagnostics")
             .and_then(|v| v.as_array())
-            .map(|diags| {
-                diags.iter().any(|d| {
-                    matches!(
-                        d.get("severity").and_then(|s| s.as_str()),
-                        Some("error") | Some("unsafe")
-                    )
-                })
+            .map(|d| {
+                d.iter()
+                    .filter(|diag| {
+                        matches!(
+                            diag.get("severity").and_then(|s| s.as_str()),
+                            Some("error") | Some("unsafe")
+                        )
+                    })
+                    .count() as u64
             })
-            .unwrap_or(false);
-        let binary_err = binary.runtime_current == Some(false);
-        if setup_err || compose_err || binary_err {
-            anyhow::bail!("doctor found issues");
+            .unwrap_or(0);
+        let binary_errors = if binary.runtime_current == Some(false) {
+            1u64
+        } else {
+            0
+        };
+        let total = setup_errors.saturating_sub(setup_dev_errors) + compose_errors + binary_errors;
+        if total > 0 {
+            anyhow::bail!("doctor found {total} error(s)");
         }
         return Ok(());
     }
 
-    // ── Text mode ────────────────────────────────────────────────────────────
+    // ── Text mode ─────────────────────────────────────────────────────────────
+    let mut total_errors: usize = 0;
 
-    // 1. Setup ----------------------------------------------------------------
-    println!("Setup");
+    // 1. Setup -----------------------------------------------------------------
+    let mut setup_phases: Vec<Phase> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     match syslog_mcp::setup::run_setup_doctor().await {
         Ok(report) => {
             for phase in &report.phases {
-                print_phase(&phase.status, phase.name, phase.elapsed_ms, &phase.detail);
-                if matches!(phase.status, SetupStatus::Error) {
-                    total_errors += 1;
+                // Skip runtime-current — the Binary section covers it more clearly.
+                if phase.name == "runtime-current" {
+                    continue;
                 }
+                // Skip duplicates (setup doctor embeds ai-watch-service phases which
+                // repeat some top-level phases like ai-transcript-root-permissions).
+                if !seen.insert(phase.name.to_string()) {
+                    continue;
+                }
+                // Dev-mode checks always fail when the production binary is
+                // installed instead of the debug wrapper. Downgrade to Warn and
+                // replace the cryptic file-content error with a clearer message.
+                let (status, detail) = match phase.name {
+                    "debug-wrapper-content" if matches!(phase.status, SetupStatus::Error) => (
+                        SetupStatus::Warn,
+                        "production binary installed (not the dev wrapper — expected in production)"
+                            .to_string(),
+                    ),
+                    "debug-compose-content" if matches!(phase.status, SetupStatus::Error) => (
+                        SetupStatus::Warn,
+                        "override uses production config (not the debug build override — expected in production)"
+                            .to_string(),
+                    ),
+                    _ => (phase.status.clone(), phase.detail.clone()),
+                };
+                setup_phases.push((status, phase.name.to_string(), detail));
             }
         }
         Err(e) => {
-            total_errors += 1;
-            print_phase(&SetupStatus::Error, "setup_doctor", 0, &e.to_string());
+            setup_phases.push((SetupStatus::Error, "setup_doctor".into(), e.to_string()));
         }
     }
+    total_errors += print_section("Setup", &setup_phases);
 
-    // 2. Compose --------------------------------------------------------------
-    println!("\nCompose");
+    // 2. Compose ---------------------------------------------------------------
+    let mut compose_phases: Vec<Phase> = Vec::new();
     let compose_svc =
         ComposeService::new(CliDockerInspect, ProcessRunner, ComposeDefaults::default());
     match compose_svc.status(&ComposeTarget::default()) {
@@ -267,143 +349,146 @@ async fn run_doctor_full(command: DoctorFullCommand) -> Result<()> {
                 .status
                 .as_deref()
                 .is_some_and(|s| !s.to_ascii_lowercase().contains("exit") && s != "stopped");
-            let health_detail = format!(
-                "{} ({})",
-                status.status.as_deref().unwrap_or("unknown"),
-                status.health.as_deref().unwrap_or("no healthcheck")
-            );
-            print_phase(
+            compose_phases.push((
                 if running {
-                    &SetupStatus::Ok
+                    SetupStatus::Ok
                 } else {
-                    &SetupStatus::Error
+                    SetupStatus::Error
                 },
-                "status",
-                0,
-                &health_detail,
-            );
-            if !running {
-                total_errors += 1;
-            }
-            // Show data volume mount (bind vs named-volume drift).
-            let data_mount = status.data_mounts.iter().find(|m| m.target == "/data");
-            match data_mount {
+                "status".into(),
+                format!(
+                    "{} ({})",
+                    status.status.as_deref().unwrap_or("unknown"),
+                    status.health.as_deref().unwrap_or("no healthcheck")
+                ),
+            ));
+            // data_volume bind-mount check.
+            match status.data_mounts.iter().find(|m| m.target == "/data") {
                 Some(m) => {
                     let src = m
                         .source
                         .as_ref()
                         .map(|p| p.display().to_string())
                         .unwrap_or_default();
-                    let detail = format!("{} {} → /data", m.kind, src);
-                    let s = if m.kind == "bind" {
-                        SetupStatus::Ok
-                    } else {
-                        total_errors += 1;
-                        SetupStatus::Error
-                    };
-                    print_phase(&s, "data_volume", 0, &detail);
+                    compose_phases.push((
+                        if m.kind == "bind" {
+                            SetupStatus::Ok
+                        } else {
+                            SetupStatus::Error
+                        },
+                        "data_volume".into(),
+                        format!("{} {} → /data", m.kind, src),
+                    ));
                 }
-                None => {
-                    // Not an error when container is stopped; already reported above.
-                    if running {
-                        total_errors += 1;
-                        print_phase(&SetupStatus::Error, "data_volume", 0, "no /data mount");
-                    }
+                None if running => {
+                    compose_phases.push((
+                        SetupStatus::Error,
+                        "data_volume".into(),
+                        "no /data mount".into(),
+                    ));
                 }
+                None => {}
             }
             for diag in &status.diagnostics {
-                let s = diag_status(&diag.severity);
-                if matches!(s, SetupStatus::Error) {
-                    total_errors += 1;
-                }
-                print_phase(&s, &diag.code, 0, &diag.message);
+                compose_phases.push((
+                    diag_status(&diag.severity),
+                    diag.code.clone(),
+                    diag.message.clone(),
+                ));
             }
         }
         Err(e) => {
-            total_errors += 1;
-            print_phase(&SetupStatus::Error, "compose_status", 0, &e.to_string());
+            compose_phases.push((SetupStatus::Error, "compose_status".into(), e.to_string()));
         }
     }
+    total_errors += print_section("Compose", &compose_phases);
 
-    // 3. Binary ---------------------------------------------------------------
-    println!("\nBinary");
+    // 3. Binary ----------------------------------------------------------------
     let binary = BinaryDoctorReport::collect();
-    let version_detail = format!(
-        "container={} repo={}",
-        binary.container_version.as_deref().unwrap_or("-"),
-        binary.repo_version
-    );
-    let version_status = match binary.runtime_current {
-        Some(true) => SetupStatus::Ok,
-        Some(false) => {
-            total_errors += 1;
-            SetupStatus::Error
-        }
-        None => SetupStatus::Warn,
+    let (bin_status, bin_detail) = match binary.runtime_current {
+        Some(true) => (
+            SetupStatus::Ok,
+            format!(
+                "container {} == repo {}",
+                binary.container_version.as_deref().unwrap_or("-"),
+                binary.repo_version
+            ),
+        ),
+        Some(false) => (
+            SetupStatus::Error,
+            format!(
+                "container {} != repo {} — run: syslog compose up",
+                binary.container_version.as_deref().unwrap_or("-"),
+                binary.repo_version
+            ),
+        ),
+        None => (
+            SetupStatus::Warn,
+            binary
+                .runtime_current_error
+                .as_deref()
+                .map(first_meaningful_line)
+                .unwrap_or("could not determine container version")
+                .to_string(),
+        ),
     };
-    print_phase(&version_status, "runtime_current", 0, &version_detail);
-    if let Some(err) = &binary.runtime_current_error {
-        print_phase(&SetupStatus::Warn, "runtime_current_error", 0, err);
-    }
+    total_errors += print_section(
+        "Binary",
+        &[(bin_status, "runtime_current".into(), bin_detail)],
+    );
 
-    // 4. AI Transcripts -------------------------------------------------------
-    println!("\nAI Transcripts");
+    // 4. AI Transcripts --------------------------------------------------------
+    let mut ai_phases: Vec<Phase> = Vec::new();
     match RuntimeCore::load_query_only().await {
         Ok(runtime) => match runtime.service().ai_doctor().await {
             Ok(ai) => {
-                for (name, root) in [("claude_root", &ai.claude_root), ("codex_root", &ai.codex_root)] {
-                    let s = if root.exists && root.readable {
-                        SetupStatus::Ok
+                for (name, root) in [
+                    ("claude_root", &ai.claude_root),
+                    ("codex_root", &ai.codex_root),
+                ] {
+                    let (s, detail) = if root.exists && root.readable {
+                        (SetupStatus::Ok, root.path.clone())
+                    } else if !root.exists {
+                        (SetupStatus::Warn, format!("{} (missing)", root.path))
                     } else {
-                        SetupStatus::Warn
+                        (SetupStatus::Warn, format!("{} (not readable)", root.path))
                     };
-                    let detail = format!(
-                        "{} (exists={} readable={} writable={})",
-                        root.path, root.exists, root.readable, root.writable
-                    );
-                    print_phase(&s, name, 0, &detail);
+                    ai_phases.push((s, name.into(), detail));
                 }
-                let cp_status = if ai.checkpoint_error_count > 0 || ai.missing_checkpoint_count > 0 {
-                    SetupStatus::Warn
-                } else {
-                    SetupStatus::Ok
-                };
-                print_phase(
-                    &cp_status,
-                    "checkpoints",
-                    0,
-                    &format!(
-                        "{} indexed  {} errors  {} missing",
+                ai_phases.push((
+                    if ai.checkpoint_error_count > 0 || ai.missing_checkpoint_count > 0 {
+                        SetupStatus::Warn
+                    } else {
+                        SetupStatus::Ok
+                    },
+                    "checkpoints".into(),
+                    format!(
+                        "{} indexed, {} errors, {} missing",
                         ai.checkpoint_count, ai.checkpoint_error_count, ai.missing_checkpoint_count
                     ),
-                );
-                let parse_status = if ai.parse_error_count > 0 {
-                    SetupStatus::Warn
-                } else {
-                    SetupStatus::Ok
-                };
-                print_phase(
-                    &parse_status,
-                    "parse_errors",
-                    0,
-                    &format!("{} parse errors", ai.parse_error_count),
-                );
+                ));
+                if ai.parse_error_count > 0 {
+                    ai_phases.push((
+                        SetupStatus::Warn,
+                        "parse_errors".into(),
+                        format!("{} parse errors", ai.parse_error_count),
+                    ));
+                }
             }
             Err(e) => {
-                total_errors += 1;
-                print_phase(&SetupStatus::Error, "ai_doctor", 0, &e.to_string());
+                ai_phases.push((SetupStatus::Error, "ai_doctor".into(), e.to_string()));
             }
         },
         Err(e) => {
-            total_errors += 1;
-            print_phase(&SetupStatus::Error, "db_connect", 0, &e.to_string());
+            ai_phases.push((SetupStatus::Error, "db_connect".into(), e.to_string()));
         }
     }
+    total_errors += print_section("AI Transcripts", &ai_phases);
 
-    // ── Summary ──────────────────────────────────────────────────────────────
+    // ── Summary ───────────────────────────────────────────────────────────────
     println!();
     if total_errors == 0 {
-        println!("All checks passed");
+        println!("All checks passed.");
     } else {
         anyhow::bail!("{total_errors} error(s) found");
     }
