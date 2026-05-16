@@ -1,7 +1,7 @@
 <!--
 plugin: syslog-mcp
 surface: marketplace-publishing
-version: 0.25.0
+version: 0.25.1
 author: Jacob Magar
 license: MIT
 description: Marketplace publishing and registry package reference for syslog-mcp.
@@ -51,7 +51,7 @@ Example registry entry:
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/syslog-mcp:v0.25.0"
+      "identifier": "ghcr.io/jmagar/syslog-mcp:v0.25.1"
     }
   ]
 }
@@ -64,7 +64,7 @@ syslog-mcp uses OCI (Docker) images as the primary distribution package, not PyP
 | Registry | Image |
 | --- | --- |
 | GHCR | `ghcr.io/jmagar/syslog-mcp:latest` |
-| GHCR (versioned) | `ghcr.io/jmagar/syslog-mcp:v0.25.0` |
+| GHCR (versioned) | `ghcr.io/jmagar/syslog-mcp:v0.25.1` |
 
 Additionally published to crates.io for `cargo install` usage.
 

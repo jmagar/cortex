@@ -266,7 +266,7 @@ impl Mode {
         match self {
             Self::ServeMcp => "info",
             Self::StdioMcp => "warn",
-            Self::Cli(_) => "warn",
+            Self::Cli(_) => "error",
             Self::Setup(_) => "warn",
             Self::DoctorBinary(_) => "warn",
             Self::Help => "info",
