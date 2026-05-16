@@ -40,7 +40,7 @@ fn make_entry(
 ) -> LogBatchEntry {
     let metadata = if let Some(c) = container {
         format!(
-            r#"{{"source_kind":"{}","docker":{{"container_name":"{}"}}}}"#,
+            r#"{{"source_kind":"{}","container_name":"{}"}}"#,
             source_kind.as_str(),
             c
         )
