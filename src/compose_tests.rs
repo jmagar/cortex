@@ -96,7 +96,9 @@ fn labelled_container() -> ContainerInfo {
         image_id: Some("sha256:abc".into()),
         labels,
         mounts: vec![MountInfo {
-            source: Some(PathBuf::from("/home/jmagar/.claude/plugins/data/syslog-jmagar-lab")),
+            source: Some(PathBuf::from(
+                "/home/jmagar/.claude/plugins/data/syslog-jmagar-lab",
+            )),
             target: "/data".into(),
             kind: "bind".into(),
         }],
