@@ -362,7 +362,7 @@ async fn rmcp_search_rejects_bad_severity_as_invalid_params() {
                 "name": "syslog",
                 "arguments": {
                     "action": "search",
-                    "severity": "critical"
+                    "severity": "bogus"
                 }
             })),
         ),

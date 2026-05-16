@@ -198,12 +198,20 @@ fn test_severity_to_num() {
     assert_eq!(severity_to_num("debug"), Some(7));
     // Edge cases
     assert_eq!(severity_to_num(""), None);
-    assert_eq!(severity_to_num("ERROR"), None, "case sensitive");
-    assert_eq!(severity_to_num("critical"), None, "not a valid syslog name");
+    // Aliases (case-insensitive)
+    assert_eq!(severity_to_num("ERROR"), Some(3), "case-insensitive alias");
+    assert_eq!(severity_to_num("Error"), Some(3), "mixed-case alias");
+    assert_eq!(severity_to_num("critical"), Some(2), "alias for 'crit'");
+    assert_eq!(severity_to_num("warn"), Some(4), "alias for 'warning'");
+    assert_eq!(severity_to_num("emergency"), Some(0), "alias for 'emerg'");
+    assert_eq!(severity_to_num("fatal"), Some(3), "alias for 'err'");
+    assert_eq!(severity_to_num("panic"), Some(3), "alias for 'err'");
+    // Truly invalid
+    assert_eq!(severity_to_num("bogus"), None);
     assert_eq!(
-        severity_to_num("warn"),
+        severity_to_num("trace"),
         None,
-        "must be 'warning' not 'warn'"
+        "syslog has no 'trace' level"
     );
 }
 

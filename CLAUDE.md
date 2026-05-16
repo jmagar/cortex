@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-11 | Updated: 2026-05-11 -->
+<!-- Generated: 2026-05-11 | Updated: 2026-05-16 -->
 
 # syslog-mcp
 
@@ -8,7 +8,7 @@
 **Syslog Intelligence for Homelabs** — Receives RFC 3164/5424 syslog from all homelab hosts (UDP/TCP), ingests Docker logs via socket proxy, stores everything in SQLite with FTS5, and exposes a comprehensive `syslog` MCP tool for AI agents.
 
 **Status**: Active development, Production-ready
-**Version**: 0.20.0
+**Version**: 0.25.3
 
 ## Key Files
 
@@ -29,20 +29,25 @@
 ```
 syslog-mcp/
 ├── src/
-│   ├── main.rs                  # CLI Entrypoint (serve mcp / mcp stdio)
+│   ├── main.rs                  # CLI entrypoint (serve mcp / mcp stdio)
 │   ├── lib.rs                   # Library root, module declarations
-│   ├── cli.rs                   # Standalone CLI binary (~1300 lines)
-│   ├── compose.rs               # Docker Compose lifecycle CLI (~1500 lines)
+│   ├── cli.rs                   # Standalone CLI binary
+│   ├── compose.rs               # Docker Compose lifecycle CLI
 │   ├── scanner.rs               # AI transcript indexer (Claude/Codex/Gemini)
+│   ├── setup.rs                 # First-run setup + plugin bootstrap
 │   ├── runtime.rs               # RuntimeCore — wiring and lifecycle
-│   ├── config.rs                # Configuration (Toml + Env)
+│   ├── config.rs                # Configuration (TOML + env)
 │   ├── api.rs                   # HTTP API surface
 │   ├── otlp.rs                  # OpenTelemetry/OTLP ingestion
 │   ├── ingest.rs                # Log ingestion coordinator
+│   ├── ingest_metadata.rs       # Ingestion metadata helpers
+│   ├── ai_watch.rs              # AI transcript watcher (live indexing)
 │   ├── observability.rs         # Tracing and metrics
-│   ├── app/                     # Service Layer (Business Logic)
+│   ├── logging.rs               # Service log setup
+│   ├── app.rs / db.rs / mcp.rs / syslog.rs / docker_ingest.rs   # Module entrypoints
+│   ├── app/                     # Service Layer (business logic)
 │   │   ├── service.rs           # SyslogService implementation
-│   │   ├── models.rs            # Request/Response types
+│   │   ├── models.rs            # Request/response types
 │   │   ├── correlate.rs         # Event correlation logic
 │   │   ├── error.rs             # Error types
 │   │   └── time.rs              # Time utilities
@@ -52,6 +57,9 @@ syslog-mcp/
 │   │   ├── analytics.rs         # Stats and timeline logic
 │   │   ├── ingest.rs            # Log insertion logic
 │   │   ├── maintenance.rs       # Retention and storage guardrails
+│   │   ├── notifications.rs     # Push notification persistence
+│   │   ├── error_signatures.rs  # Error pattern signatures
+│   │   ├── error_detection/     # Error detection rules + scoring
 │   │   └── models.rs            # DB model types
 │   ├── mcp/                     # MCP Server Layer
 │   │   ├── tools.rs             # syslog tool action dispatch
@@ -62,18 +70,21 @@ syslog-mcp/
 │   │   ├── parser.rs            # RFC 3164/5424 parsing
 │   │   ├── listener.rs          # UDP/TCP listeners
 │   │   ├── writer.rs            # Batch writer
-│   │   └── enrichment.rs        # Log enrichment
+│   │   └── enrichment.rs        # Log enrichment (legacy path)
+│   ├── enrich/                  # Enrichment framework — structured field extraction at ingest (PR #26)
+│   ├── notifications/           # Push notification dispatch (PR #25)
+│   ├── logging/                 # Structured service logging
 │   ├── scanner/                 # AI transcript scanner
 │   │   ├── claude.rs            # Claude transcript parsing
 │   │   └── codex.rs             # Codex transcript parsing
-│   └── docker_ingest/           # Docker Remote Ingestion
+│   └── docker_ingest/           # Docker remote ingestion
 ├── bin/                         # Installed binaries (syslog)
 ├── config/                      # Deployment config templates
 ├── deploy/                      # Host-side manifests (rsyslog, otel)
 ├── docs/                        # Deep-dive documentation
 ├── plugins/                     # Claude Code skills and hooks
 ├── scripts/                     # Maintenance and CI scripts
-└── tests/                       # Integration and smoke tests
+└── tests/                       # Integration tests + tests/test_live.sh smoke runner
 ```
 
 ## For AI Agents
@@ -132,7 +143,8 @@ tx.commit().await?;
 
 ```bash
 just test               # Run all unit and integration tests
-bash scripts/smoke-test.sh  # Run live smoke test against a running server
+just test-live          # Live smoke test against a running server (tests/test_live.sh)
+bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of test-live)
 ```
 
 ## CLI Commands

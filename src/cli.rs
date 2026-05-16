@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 use std::net::TcpListener;
 use std::path::PathBuf;
+use std::process::Command;
 use syslog_mcp::app::{
     AbuseSearchRequest, AbuseSearchResponse, AiCorrelateRequest, AiCorrelateResponse,
     CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
@@ -87,10 +88,16 @@ pub(crate) struct PluginHookArgs {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DbCommand {
     Status(OutputArgs),
-    Integrity(OutputArgs),
+    Integrity(DbIntegrityArgs),
     Checkpoint(DbCheckpointArgs),
     Vacuum(DbVacuumArgs),
     Backup(DbBackupArgs),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct DbIntegrityArgs {
+    pub quick: bool,
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -622,7 +629,7 @@ pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<(
                 print_db_status_response(&response, args.json)?;
             }
             DbCommand::Integrity(args) => {
-                let response = service.db_integrity().await?;
+                let response = service.db_integrity(args.quick).await?;
                 print_db_integrity_response(&response, args.json)?;
                 if !response.ok {
                     bail!("database integrity check failed");
@@ -1603,15 +1610,25 @@ fn parse_db(args: &[String]) -> Result<CliCommand> {
             "db status",
             rest,
         )?))),
-        "integrity" => Ok(CliCommand::Db(DbCommand::Integrity(parse_output_args(
-            "db integrity",
-            rest,
-        )?))),
+        "integrity" => parse_db_integrity(rest),
         "checkpoint" => parse_db_checkpoint(rest),
         "vacuum" => parse_db_vacuum(rest),
         "backup" => parse_db_backup(rest),
         _ => bail!("unknown db subcommand: {subcommand}"),
     }
+}
+
+fn parse_db_integrity(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = DbIntegrityArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--quick" => parsed.quick = true,
+            _ => bail!("unknown db integrity option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Db(DbCommand::Integrity(parsed)))
 }
 
 fn parse_db_checkpoint(args: &[String]) -> Result<CliCommand> {
@@ -2004,6 +2021,7 @@ enum SetupStatus {
     Ok,
     Warn,
     Error,
+    Skipped,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -2141,6 +2159,7 @@ fn setup_report(mode: SetupMode) -> Result<SetupReport> {
         },
     );
     phases.push(mcp_port_phase());
+    phases.push(data_mount_phase(data_dir.as_path(), env_path.as_path()));
 
     let has_errors = phases
         .iter()
@@ -2152,6 +2171,147 @@ fn setup_report(mode: SetupMode) -> Result<SetupReport> {
         phases,
         has_errors,
     })
+}
+
+/// Verify the running syslog-mcp container's `/data` mount points at the same
+/// directory the CLI uses (`setup_data_dir()`). When the two diverge, every
+/// host-side `syslog` query reads a different SQLite file than the container
+/// writes to. This regressed once because `docker compose up` was invoked
+/// without `--env-file`, so `${SYSLOG_MCP_DATA_VOLUME}` defaulted to a named
+/// volume; this check exists so that footgun fails loudly at session start.
+///
+/// Status semantics:
+/// - **Skipped**: docker missing/unreachable, or container not present/running.
+/// - **Ok**: bind mount source matches `data_dir` (canonicalized).
+/// - **Error**: container is running with a mount that doesn't match — every
+///   CLI query is reading the wrong DB. Repair: `syslog compose up`.
+fn data_mount_phase(data_dir: &std::path::Path, env_path: &std::path::Path) -> SetupPhase {
+    let name = "data-mount";
+    let container =
+        std::env::var("SYSLOG_MCP_CONTAINER_NAME").unwrap_or_else(|_| "syslog-mcp".to_string());
+
+    // Resolve what the CLI thinks the host-side DB directory is:
+    //  1. SYSLOG_MCP_DATA_VOLUME from process env (set by direnv/shell)
+    //  2. SYSLOG_MCP_DATA_VOLUME parsed from the plugin .env file
+    //  3. fall back to the plugin data_dir
+    let expected_dir = std::env::var("SYSLOG_MCP_DATA_VOLUME")
+        .ok()
+        .or_else(|| read_env_value(env_path, "SYSLOG_MCP_DATA_VOLUME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| data_dir.to_path_buf());
+
+    let output = match Command::new("docker")
+        .args([
+            "inspect",
+            "--format",
+            "{{range .Mounts}}{{if eq .Destination \"/data\"}}{{.Type}}|{{.Source}}{{end}}{{end}}|{{.State.Running}}",
+            &container,
+        ])
+        .output()
+    {
+        Ok(o) => o,
+        Err(error) => {
+            return SetupPhase {
+                name,
+                status: SetupStatus::Skipped,
+                detail: format!("docker not available: {error}"),
+            };
+        }
+    };
+    if !output.status.success() {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Skipped,
+            detail: format!("container '{container}' not present (docker inspect failed)"),
+        };
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    // Format: "<type>|<source>|<running>" or "|<running>" if no /data mount.
+    let parts: Vec<&str> = stdout.split('|').collect();
+    let running = parts.last().is_some_and(|s| *s == "true");
+    if !running {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Skipped,
+            detail: format!("container '{container}' not running"),
+        };
+    }
+    if parts.len() < 3 || parts[0].is_empty() {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Error,
+            detail: format!("container '{container}' has no /data mount — run `syslog compose up`"),
+        };
+    }
+    let mount_type = parts[0];
+    let mount_source = parts[1];
+    let expected = expected_dir
+        .canonicalize()
+        .unwrap_or_else(|_| expected_dir.clone());
+    let actual = PathBuf::from(mount_source)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(mount_source));
+    if mount_type != "bind" {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Error,
+            detail: format!(
+                "container /data is a {} (expected bind to {}). \
+                 CLI and container are writing different DBs. \
+                 Repair: `syslog compose up` (recreates with --env-file)",
+                mount_type,
+                expected_dir.display()
+            ),
+        };
+    }
+    if actual != expected {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Error,
+            detail: format!(
+                "container /data bind source ({}) does not match SYSLOG_MCP_DATA_VOLUME ({}). \
+                 CLI and container are writing different DBs. Repair: `syslog compose up`",
+                mount_source,
+                expected_dir.display()
+            ),
+        };
+    }
+    SetupPhase {
+        name,
+        status: SetupStatus::Ok,
+        detail: format!(
+            "bind {} -> /data matches SYSLOG_MCP_DATA_VOLUME",
+            mount_source
+        ),
+    }
+}
+
+/// Minimal `.env` parser: reads KEY=VALUE lines, ignores comments and quotes.
+/// Returns the unquoted value if `key` is present.
+fn read_env_value(path: &std::path::Path, key: &str) -> Option<String> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        if k.trim() == key {
+            let v = v.trim();
+            let v = v
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .unwrap_or(v);
+            let v = v
+                .strip_prefix('\'')
+                .and_then(|s| s.strip_suffix('\''))
+                .unwrap_or(v);
+            return Some(v.to_string());
+        }
+    }
+    None
 }
 
 fn setup_data_dir() -> PathBuf {

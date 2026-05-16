@@ -882,11 +882,26 @@ pub const SEVERITY_LEVELS: &[&str] = &[
 ];
 
 /// Convert a severity name to its numeric syslog level (0=emerg, 7=debug).
+/// Accepts the canonical RFC 5424 keywords (case-insensitive) plus common
+/// aliases: `error`/`fatal`/`panic` for `err`, `warn` for `warning`,
+/// `critical` for `crit`, `emergency` for `emerg`.
 /// Returns `None` for unrecognised names.
 pub fn severity_to_num(s: &str) -> Option<u8> {
+    let canonical = match s.to_ascii_lowercase().as_str() {
+        "emergency" => "emerg",
+        "critical" => "crit",
+        "error" | "fatal" | "panic" => "err",
+        "warn" => "warning",
+        other => {
+            return SEVERITY_LEVELS
+                .iter()
+                .position(|&l| l == other)
+                .map(|i| i as u8)
+        }
+    };
     SEVERITY_LEVELS
         .iter()
-        .position(|&l| l == s)
+        .position(|&l| l == canonical)
         .map(|i| i as u8)
 }
 
