@@ -734,6 +734,23 @@ impl Config {
         }
 
         env_override_bool(
+            "SYSLOG_MCP_ERROR_DETECTION_ENABLED",
+            &mut config.error_detection.enabled,
+        )?;
+        env_override_parse(
+            "SYSLOG_MCP_ERROR_DETECTION_SCAN_INTERVAL_SECS",
+            &mut config.error_detection.scan_interval_secs,
+        )?;
+        env_override_bool(
+            "SYSLOG_MCP_NOTIFICATIONS_ENABLED",
+            &mut config.notifications.enabled,
+        )?;
+        env_override_str(
+            "SYSLOG_MCP_NOTIFICATIONS_APPRISE_URL",
+            &mut config.notifications.apprise_url,
+        );
+
+        env_override_bool(
             "SYSLOG_DOCKER_INGEST_ENABLED",
             &mut config.docker_ingest.enabled,
         )?;
@@ -802,6 +819,7 @@ impl Config {
         validate_syslog_config(&config.syslog)?;
         validate_storage_config(&config.storage)?;
         validate_notifications_config(&config.notifications)?;
+        validate_error_detection_config(&config.error_detection)?;
         validate_host(&config.syslog.host)?;
         validate_host(&config.mcp.host)?;
         validate_auth_config(&config, check_bind)?;
@@ -1240,6 +1258,14 @@ fn validate_storage_config(storage: &StorageConfig) -> anyhow::Result<()> {
         ));
     }
 
+    Ok(())
+}
+
+/// Validate the error detection configuration.
+fn validate_error_detection_config(cfg: &ErrorDetectionConfig) -> anyhow::Result<()> {
+    if cfg.scan_interval_secs == 0 {
+        anyhow::bail!("[error_detection] scan_interval_secs must be > 0");
+    }
     Ok(())
 }
 

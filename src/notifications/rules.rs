@@ -137,7 +137,11 @@ pub fn evaluate_authelia_mfa_fail(
 ) -> Vec<OutboxInsertParams> {
     rows.iter()
         .filter(|r| {
-            r.app_name.as_deref() == Some("authelia") && r.message.contains("second_factor")
+            r.app_name.as_deref() == Some("authelia")
+                && r.message.contains("second_factor")
+                && (r.message.to_lowercase().contains("failed")
+                    || r.message.to_lowercase().contains("error")
+                    || r.message.to_lowercase().contains("invalid"))
         })
         .map(|r| {
             let title = escape_for_notification(&format!(
@@ -225,7 +229,7 @@ mod tests {
     fn authelia_row(hostname: &str) -> LogRow {
         LogRow {
             app_name: Some("authelia".to_string()),
-            message: "second_factor authentication failed".to_string(),
+            message: "second_factor authentication failed for user".to_string(),
             hostname: hostname.to_string(),
             severity: "warning".to_string(),
             metadata_json: None,
@@ -324,6 +328,25 @@ mod tests {
         let results = evaluate_authelia_mfa_fail(&rows, "[]");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].rule_id, "authelia_mfa_fail");
+    }
+
+    #[test]
+    fn authelia_mfa_successful_second_factor_does_not_match() {
+        // A successful second_factor event should NOT trigger an alert.
+        let rows = vec![LogRow {
+            app_name: Some("authelia".to_string()),
+            message: "second_factor authentication successful for user".to_string(),
+            hostname: "authhost".to_string(),
+            severity: "info".to_string(),
+            metadata_json: None,
+            timestamp: "2026-01-01T00:00:00.000Z".to_string(),
+        }];
+        let results = evaluate_authelia_mfa_fail(&rows, "[]");
+        assert_eq!(
+            results.len(),
+            0,
+            "successful second_factor should not match"
+        );
     }
 
     #[test]

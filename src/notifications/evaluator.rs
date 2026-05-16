@@ -34,26 +34,40 @@ pub(crate) async fn run_evaluation_cycle(
     let window_secs = cfg.evaluators.evaluator_interval_secs * 2; // look back 2x interval
 
     // --- Phase 1: fetch + evaluate (NO permit needed — read-only DB access) ---
+    // Paginate in batches of 1,000 rows up to a 50,000 row total cap to avoid
+    // truncating high-volume cycles at 5,000.
+    const BATCH_SIZE: u64 = 1_000;
+    const MAX_ROWS: u64 = 50_000;
     let pool_r = Arc::clone(&pool);
     let all_params = tokio::task::spawn_blocking(
         move || -> Result<Vec<crate::db::notifications::OutboxInsertParams>> {
             let conn = pool_r.get()?;
-            let rows = fetch_recent_logs(&conn, window_secs)?;
-            drop(conn);
 
             let mut out = Vec::new();
-            if cfg.evaluators.oom_kill {
-                out.extend(evaluate_oom_kill(&rows, &apprise_urls_json));
+            let mut offset: u64 = 0;
+            loop {
+                let rows = fetch_recent_logs(&conn, window_secs, BATCH_SIZE, offset)?;
+                let is_last = rows.len() < BATCH_SIZE as usize;
+
+                if cfg.evaluators.oom_kill {
+                    out.extend(evaluate_oom_kill(&rows, &apprise_urls_json));
+                }
+                if cfg.evaluators.container_die_nonzero {
+                    out.extend(evaluate_container_die_nonzero(&rows, &apprise_urls_json));
+                }
+                if cfg.evaluators.fail2ban_ban {
+                    out.extend(evaluate_fail2ban_ban(&rows, &apprise_urls_json));
+                }
+                if cfg.evaluators.authelia_mfa_fail {
+                    out.extend(evaluate_authelia_mfa_fail(&rows, &apprise_urls_json));
+                }
+
+                offset += BATCH_SIZE;
+                if is_last || offset >= MAX_ROWS {
+                    break;
+                }
             }
-            if cfg.evaluators.container_die_nonzero {
-                out.extend(evaluate_container_die_nonzero(&rows, &apprise_urls_json));
-            }
-            if cfg.evaluators.fail2ban_ban {
-                out.extend(evaluate_fail2ban_ban(&rows, &apprise_urls_json));
-            }
-            if cfg.evaluators.authelia_mfa_fail {
-                out.extend(evaluate_authelia_mfa_fail(&rows, &apprise_urls_json));
-            }
+            drop(conn);
             Ok(out)
         },
     )
@@ -102,28 +116,36 @@ fn build_urls_json(cfg: &NotificationsConfig) -> String {
 }
 
 /// Fetch log rows from the last `window_secs` seconds for rule evaluation.
+///
+/// `limit` and `offset` enable pagination — callers should iterate until a
+/// batch smaller than `limit` is returned (or a total row cap is reached).
 fn fetch_recent_logs(
     conn: &rusqlite::Connection,
     window_secs: u64,
+    limit: u64,
+    offset: u64,
 ) -> rusqlite::Result<Vec<LogRow>> {
     let mut stmt = conn.prepare(
         "SELECT app_name, message, hostname, severity, metadata_json, timestamp
          FROM logs
          WHERE received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('-%d seconds', ?1))
          ORDER BY id DESC
-         LIMIT 5000",
+         LIMIT ?2 OFFSET ?3",
     )?;
     let rows = stmt
-        .query_map(rusqlite::params![window_secs as i64], |row| {
-            Ok(LogRow {
-                app_name: row.get(0)?,
-                message: row.get(1)?,
-                hostname: row.get(2)?,
-                severity: row.get(3)?,
-                metadata_json: row.get(4)?,
-                timestamp: row.get(5)?,
-            })
-        })?
+        .query_map(
+            rusqlite::params![window_secs as i64, limit as i64, offset as i64],
+            |row| {
+                Ok(LogRow {
+                    app_name: row.get(0)?,
+                    message: row.get(1)?,
+                    hostname: row.get(2)?,
+                    severity: row.get(3)?,
+                    metadata_json: row.get(4)?,
+                    timestamp: row.get(5)?,
+                })
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }

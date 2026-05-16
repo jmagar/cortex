@@ -97,27 +97,13 @@ pub(crate) async fn run_dispatch_cycle(
         if row.rule_id == "unaddressed_error_signature" {
             // dedup_key = "error_sig:{hash}"
             if let Some(hash) = row.dedup_key.strip_prefix("error_sig:") {
-                use rusqlite::OptionalExtension;
                 let hash_owned = hash.to_string();
                 let normalizer_version = crate::app::error_detection::NORMALIZER_VERSION;
                 let pool_ack = Arc::clone(&pool);
                 let is_acked = tokio::task::spawn_blocking(move || -> Result<bool> {
                     let conn = pool_ack.get()?;
-                    // .optional() converts "no rows" into None (as opposed to
-                    // Err(QueryReturnedNoRows)). The row's acknowledged_at column
-                    // is itself nullable, so we get Option<Option<String>>:
-                    // - None          → signature not found → not acked
-                    // - Some(None)    → found but acknowledged_at IS NULL → not acked
-                    // - Some(Some(_)) → found and acknowledged_at is set → acked
-                    let acked: Option<Option<String>> = conn
-                        .query_row(
-                            "SELECT acknowledged_at FROM error_signatures
-                             WHERE signature_hash = ?1 AND normalizer_version = ?2 LIMIT 1",
-                            rusqlite::params![hash_owned, normalizer_version],
-                            |row| row.get(0),
-                        )
-                        .optional()?;
-                    Ok(matches!(acked, Some(Some(_))))
+                    is_signature_acked(&conn, &hash_owned, normalizer_version)
+                        .map_err(anyhow::Error::from)
                 })
                 .await??;
 
@@ -352,6 +338,33 @@ pub(crate) async fn run_dispatch_cycle(
     }
 
     Ok(dispatched)
+}
+
+/// Check whether an error signature has been acknowledged in the database.
+///
+/// Returns `true` when the signature is found with a non-NULL `acknowledged_at`.
+/// Returns `false` for not-found or un-acknowledged signatures.
+fn is_signature_acked(
+    conn: &rusqlite::Connection,
+    dedup_key: &str,
+    normalizer_version: i64,
+) -> rusqlite::Result<bool> {
+    use rusqlite::OptionalExtension;
+    // .optional() converts "no rows" into None (as opposed to
+    // Err(QueryReturnedNoRows)). The row's acknowledged_at column
+    // is itself nullable, so we get Option<Option<String>>:
+    // - None          → signature not found → not acked
+    // - Some(None)    → found but acknowledged_at IS NULL → not acked
+    // - Some(Some(_)) → found and acknowledged_at is set → acked
+    let acked: Option<Option<String>> = conn
+        .query_row(
+            "SELECT acknowledged_at FROM error_signatures
+             WHERE signature_hash = ?1 AND normalizer_version = ?2 LIMIT 1",
+            rusqlite::params![dedup_key, normalizer_version],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(matches!(acked, Some(Some(_))))
 }
 
 fn severity_to_notify_type(severity: &str) -> NotifyType {

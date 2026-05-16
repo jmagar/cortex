@@ -84,6 +84,7 @@ pub fn fetch_host_stats(
          WHERE received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('-%d seconds', ?1))
          GROUP BY hostname
          ORDER BY total DESC
+         -- Top 50 hosts by log volume. Sufficient for homelab scale.
          LIMIT 50",
     )?;
     let mut entries: Vec<HostDigestEntry> = stmt
@@ -224,16 +225,20 @@ pub(crate) fn spawn_digest(
             let now = chrono::Local::now();
             let seconds_into_minute = now.second() as u64;
             let millis_into_second = now.timestamp_subsec_millis() as u64;
-            let sleep_ms = (60 - seconds_into_minute) * 1000 - millis_into_second;
+            let sleep_ms = if seconds_into_minute == 0 && millis_into_second == 0 {
+                60_000u64
+            } else {
+                (60 - seconds_into_minute) * 1000 - millis_into_second
+            };
             tokio::time::sleep(tokio::time::Duration::from_millis(sleep_ms.max(100))).await;
 
             let now = chrono::Local::now();
             let today = now.date_naive();
             let already_fired = last_fired_date == Some(today);
-            // Exact match: the sleep aligns to minute boundaries, so
-            // now.minute() == target_minute is reliable. A 1-minute tolerance
-            // fired 1 minute early, causing consistent early delivery.
-            if !already_fired && now.hour() == target_hour && now.minute() == target_minute {
+            let minutes_now = now.hour() * 60 + now.minute();
+            let minutes_target = target_hour * 60 + target_minute;
+            let minutes_diff = minutes_now.abs_diff(minutes_target);
+            if !already_fired && minutes_diff <= 2 {
                 match run_digest(Arc::clone(&pool), Arc::clone(&permit_sem), &cfg).await {
                     Ok(()) => last_fired_date = Some(today),
                     Err(e) => {

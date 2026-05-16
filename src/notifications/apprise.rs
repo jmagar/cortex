@@ -115,8 +115,7 @@ impl AppriseClient {
         let request = self
             .client
             .post(&endpoint)
-            .header("Content-Type", "application/json")
-            // Note: do NOT log this header value
+            // .json() already sets Content-Type: application/json
             .json(&payload)
             .timeout(self.timeout);
 
