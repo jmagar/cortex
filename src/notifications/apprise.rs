@@ -32,7 +32,7 @@ impl NotifyType {
 #[derive(Debug, Clone)]
 pub struct NotifyResponse {
     pub status_code: u16,
-    /// True when all urls succeeded (200) or partial success (207).
+    /// True when all urls succeeded (200/207); 424 is treated as permanent failure.
     #[allow(dead_code)]
     pub success: bool,
 }
@@ -133,8 +133,7 @@ impl AppriseClient {
         match status {
             // 200/201/202/204 = success
             // 207 = partial success — mark sent, do NOT retry
-            // 424 = failed dependency (Apprise partial delivery) — treat as sent
-            200 | 201 | 202 | 204 | 207 | 424 => Ok(NotifyResponse {
+            200 | 201 | 202 | 204 | 207 => Ok(NotifyResponse {
                 status_code: status,
                 success: true,
             }),

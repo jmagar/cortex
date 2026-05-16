@@ -581,11 +581,7 @@ async fn tool_unaddressed_errors(state: &AppState, args: Value) -> anyhow::Resul
         limit: u32_arg(&args, "limit")?,
         include_acknowledged: bool_arg(&args, "include_acknowledged"),
     };
-    let resp = state
-        .service
-        .unaddressed_errors(req)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resp = state.service.unaddressed_errors(req).await?;
     Ok(serde_json::to_value(resp)?)
 }
 
@@ -598,11 +594,7 @@ async fn tool_ack_error(state: &AppState, args: Value) -> anyhow::Result<Value> 
         notes: string_arg(&args, "notes"),
     };
     let actor = extract_actor(state);
-    let resp = state
-        .service
-        .ack_error(req, actor)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resp = state.service.ack_error(req, actor).await?;
     Ok(serde_json::to_value(resp)?)
 }
 
@@ -615,11 +607,7 @@ async fn tool_unack_error(state: &AppState, args: Value) -> anyhow::Result<Value
         reason: string_arg(&args, "reason"),
     };
     let actor = extract_actor(state);
-    let resp = state
-        .service
-        .unack_error(req, actor)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resp = state.service.unack_error(req, actor).await?;
     Ok(serde_json::to_value(resp)?)
 }
 
@@ -628,14 +616,13 @@ async fn tool_notifications_recent(state: &AppState, args: Value) -> anyhow::Res
         .get("limit")
         .and_then(|v| v.as_i64())
         .unwrap_or(50)
-        .min(500);
+        .clamp(1, 500);
     let rule_id = string_arg(&args, "rule_id");
     let since = string_arg(&args, "since");
     let firings = state
         .service
         .notifications_recent(limit, rule_id, since)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .await?;
     Ok(serde_json::to_value(firings)?)
 }
 
@@ -652,8 +639,7 @@ async fn tool_notifications_test(state: &AppState, args: Value) -> anyhow::Resul
     let result = state
         .service
         .notifications_test(body, actor, apprise_url, apprise_urls)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .await?;
     Ok(serde_json::json!({ "result": result }))
 }
 
@@ -1028,13 +1014,11 @@ List recent notification firings from the `notification_firings` table.
 ---
 
 ## syslog notifications_test
-Send a test notification via Apprise. Rate-limited to 10 per minute per actor.
+Send a test notification via the server-configured Apprise URLs. Rate-limited to 10 per minute per actor.
+Caller-supplied Apprise URLs are ignored for security; the server uses its own configured URLs.
 
 **Parameters:**
 - `body` (string, optional) — notification body text (default: test message)
-- `actor` (string, optional) — identifier for rate-limit tracking (default: `mcp:anon`)
-- `apprise_url` (string, optional) — Apprise API base URL
-- `apprise_urls` (array of strings, optional) — notification target URLs
 
 ---
 

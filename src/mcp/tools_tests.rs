@@ -155,14 +155,19 @@ async fn schema_actions_are_dispatchable() {
                 );
             }
         } else if matches!(*action, "ack_error" | "unack_error") {
-            // These require an existing signature. NotFound is the expected
-            // domain error when the hash doesn't exist — the action dispatched.
-            if let Err(ref error) = result {
-                assert!(
-                    error.to_string().contains("not found")
-                        || error.to_string().contains("Signature"),
-                    "action={action} failed before dispatching: {error}"
-                );
+            // These require an existing signature. When given a non-existent hash,
+            // they must return Err (ServiceError::NotFound propagates via ?).
+            match result {
+                Err(ref error) => {
+                    assert!(
+                        error.to_string().to_lowercase().contains("not found")
+                            || error.to_string().contains("Signature"),
+                        "action={action} returned unexpected error: {error}"
+                    );
+                }
+                Ok(_) => panic!(
+                    "action={action} with non-existent hash should return NotFound, got Ok"
+                ),
             }
         } else if *action == "notifications_test" {
             // notifications_test requires a live Apprise server; transient/delivery

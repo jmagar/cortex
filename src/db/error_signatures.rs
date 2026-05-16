@@ -245,13 +245,18 @@ pub(crate) fn read_unaddressed(
         })
     })?;
 
-    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Into::into)
 }
 
-/// Look up a single signature by hash. Returns `None` if not found.
+/// Look up a single signature by hash and normalizer version. Returns `None` if not found.
+///
+/// The table PK is `(signature_hash, normalizer_version)`, so both parameters are
+/// required to uniquely identify a row.
 pub(crate) fn read_signature_by_hash(
     pool: &DbPool,
     signature_hash: &str,
+    normalizer_version: i64,
 ) -> Result<Option<SignatureRow>> {
     let conn = pool.get()?;
     let cutoff_1h = chrono::Utc::now()
@@ -276,15 +281,15 @@ pub(crate) fn read_signature_by_hash(
                  FROM error_signature_windows w
                  WHERE w.signature_hash = s.signature_hash
                    AND w.normalizer_version = s.normalizer_version
-                   AND w.window_end >= ?2
+                   AND w.window_end >= ?3
              ), 0) AS count_last_1h,
              s.acknowledged_at
          FROM error_signatures s
-         WHERE s.signature_hash = ?1
+         WHERE s.signature_hash = ?1 AND s.normalizer_version = ?2
          LIMIT 1",
     )?;
 
-    let mut rows = stmt.query_map(params![signature_hash, cutoff_1h], |row| {
+    let mut rows = stmt.query_map(params![signature_hash, normalizer_version, cutoff_1h], |row| {
         Ok(SignatureRow {
             signature_hash: row.get(0)?,
             normalizer_version: row.get(1)?,
@@ -484,7 +489,10 @@ mod tests {
                 |r| r.get::<_, Option<String>>(0),
             )
             .unwrap();
-        assert!(acked_at.is_some(), "acknowledged_at should be set after ack");
+        assert!(
+            acked_at.is_some(),
+            "acknowledged_at should be set after ack"
+        );
 
         // Unacknowledge: clear both columns
         update_ack_projection(&conn, "cafebabe", 1, None, None).unwrap();

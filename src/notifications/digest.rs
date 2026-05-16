@@ -204,16 +204,27 @@ pub(crate) fn spawn_digest(
     let handle = tokio::spawn(async move {
         let mut last_fired_date: Option<chrono::NaiveDate> = None;
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            // Align sleep to the next minute boundary to avoid slowly drifting
+            // away from the configured time. Uses a minimum of 100ms to prevent
+            // tight loops near the boundary.
+            let now = chrono::Local::now();
+            let seconds_into_minute = now.second() as u64;
+            let millis_into_second = now.timestamp_subsec_millis() as u64;
+            let sleep_ms = (60 - seconds_into_minute) * 1000 - millis_into_second;
+            tokio::time::sleep(tokio::time::Duration::from_millis(sleep_ms.max(100))).await;
+
             let now = chrono::Local::now();
             let today = now.date_naive();
             let already_fired = last_fired_date == Some(today);
-            if !already_fired && now.hour() == target_hour && now.minute() == target_minute {
+            // Use a 2-minute window to handle slight timing drift.
+            let minutes_diff = (now.hour() * 60 + now.minute())
+                .abs_diff(target_hour * 60 + target_minute);
+            if !already_fired && minutes_diff <= 1 {
                 match run_digest(Arc::clone(&pool), Arc::clone(&permit_sem), &cfg).await {
                     Ok(()) => last_fired_date = Some(today),
                     Err(e) => {
                         tracing::error!(error = %e, "digest: failed to build/queue daily digest");
-                        last_fired_date = Some(today);  // suppress repeated attempts today
+                        last_fired_date = Some(today); // suppress repeated attempts today
                     }
                 }
             }

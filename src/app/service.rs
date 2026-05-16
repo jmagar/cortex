@@ -1020,6 +1020,13 @@ impl SyslogService {
         req: super::models::AckErrorRequest,
         actor: &str,
     ) -> ServiceResult<super::models::AckErrorResponse> {
+        if let Some(ref n) = req.notes {
+            if n.len() > 4096 {
+                return Err(ServiceError::InvalidInput(
+                    "notes exceeds 4096 chars".into(),
+                ));
+            }
+        }
         let hash = req.signature_hash.clone();
         let notes = req.notes.clone();
         let actor_owned = actor.to_string();
@@ -1027,7 +1034,12 @@ impl SyslogService {
         let h = hash.clone();
         let exists = self
             .run_db(move |pool| {
-                Ok(crate::db::error_signatures::read_signature_by_hash(pool, &h)?.is_some())
+                Ok(crate::db::error_signatures::read_signature_by_hash(
+                    pool,
+                    &h,
+                    crate::app::error_detection::NORMALIZER_VERSION,
+                )?
+                .is_some())
             })
             .await?;
         if !exists {
@@ -1076,6 +1088,13 @@ impl SyslogService {
         req: super::models::UnackErrorRequest,
         actor: &str,
     ) -> ServiceResult<super::models::UnackErrorResponse> {
+        if let Some(ref r) = req.reason {
+            if r.len() > 4096 {
+                return Err(ServiceError::InvalidInput(
+                    "reason exceeds 4096 chars".into(),
+                ));
+            }
+        }
         let hash = req.signature_hash.clone();
         let reason = req.reason.clone();
         let actor_owned = actor.to_string();
@@ -1083,7 +1102,12 @@ impl SyslogService {
         let h = hash.clone();
         let exists = self
             .run_db(move |pool| {
-                Ok(crate::db::error_signatures::read_signature_by_hash(pool, &h)?.is_some())
+                Ok(crate::db::error_signatures::read_signature_by_hash(
+                    pool,
+                    &h,
+                    crate::app::error_detection::NORMALIZER_VERSION,
+                )?
+                .is_some())
             })
             .await?;
         if !exists {

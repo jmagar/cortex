@@ -296,18 +296,18 @@ mod notifications_db_tests {
 
     #[test]
     fn backoff_delays_are_increasing() {
-        // Just verify the strings parse to valid datetimes and are in the future
-        for attempt in 0u8..5 {
-            let s = backoff_next_attempt_at(attempt);
-            let parsed = chrono::DateTime::parse_from_rfc3339(&s);
+        // Verify the specific backoff schedule: 1s, 5s, 30s, 5min, 30min cap.
+        let expected_secs: &[u64] = &[1, 5, 30, 300, 1800, 1800, 1800, 1800];
+        let now = chrono::Utc::now();
+        for (i, &expected) in expected_secs.iter().enumerate() {
+            let s = backoff_next_attempt_at(i as u8);
+            let parsed = chrono::DateTime::parse_from_rfc3339(&s)
+                .unwrap_or_else(|_| panic!("attempt {i}: invalid ISO8601: {s}"));
+            let actual_delay = (parsed.with_timezone(&chrono::Utc) - now).num_seconds();
+            // Allow ±2s tolerance for test execution time.
             assert!(
-                parsed.is_ok(),
-                "attempt {attempt}: backoff_next_attempt_at returned invalid ISO8601: {s}"
-            );
-            let dt = parsed.unwrap();
-            assert!(
-                dt > chrono::Utc::now(),
-                "attempt {attempt}: next_attempt_at should be in the future"
+                (actual_delay - expected as i64).abs() <= 2,
+                "attempt {i}: expected ~{expected}s delay, got {actual_delay}s"
             );
         }
     }

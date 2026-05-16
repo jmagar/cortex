@@ -251,7 +251,7 @@ impl RuntimeCore {
         }
         let pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
-        let interval_secs = cfg.scan_interval_secs;
+        let interval_secs = cfg.scan_interval_secs.max(1);
         let handle = tokio::spawn(async move {
             let mut interval = background_interval(tokio::time::Duration::from_secs(interval_secs));
             loop {

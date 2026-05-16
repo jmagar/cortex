@@ -61,10 +61,19 @@ pub fn evaluate_container_die_nonzero(
             if v.get("action").and_then(|a| a.as_str()) != Some("die") {
                 return None;
             }
-            let exit_code = v.get("exit_code").and_then(|e| e.as_str()).unwrap_or("0");
-            if exit_code == "0" {
+            // Handle both string ("1") and numeric (1) exit_code values.
+            let exit_code_val: Option<i64> = match v.get("exit_code") {
+                Some(serde_json::Value::String(s)) => s.parse::<i64>().ok(),
+                Some(serde_json::Value::Number(n)) => n.as_i64(),
+                _ => None,
+            };
+            let is_nonzero = exit_code_val.map(|c| c != 0).unwrap_or(false);
+            if !is_nonzero {
                 return None;
             }
+            let exit_code_str = exit_code_val
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
             let container = v
                 .get("container_name")
                 .and_then(|c| c.as_str())
@@ -72,11 +81,11 @@ pub fn evaluate_container_die_nonzero(
 
             let title = escape_for_notification(&format!(
                 "[WARNING] Container {} died (exit {}) on {}",
-                container, exit_code, r.hostname
+                container, exit_code_str, r.hostname
             ));
             let body = escape_for_notification(&format!(
                 "Container **{}** exited with code `{}` on **{}** at {}",
-                container, exit_code, r.hostname, r.timestamp
+                container, exit_code_str, r.hostname, r.timestamp
             ));
             Some(OutboxInsertParams {
                 dedup_key: format!("container_die:{}:{}", r.hostname, container),
@@ -185,6 +194,23 @@ mod tests {
         }
     }
 
+    fn container_die_row_numeric(hostname: &str, exit_code: i64) -> LogRow {
+        let meta = serde_json::json!({
+            "action": "die",
+            "container_name": "nginx",
+            "exit_code": exit_code,
+        })
+        .to_string();
+        LogRow {
+            app_name: Some("dockerd".to_string()),
+            message: format!("Container nginx died with exit code {exit_code}"),
+            hostname: hostname.to_string(),
+            severity: "warning".to_string(),
+            metadata_json: Some(meta),
+            timestamp: "2026-01-01T00:00:00.000Z".to_string(),
+        }
+    }
+
     fn fail2ban_row(hostname: &str, msg: &str) -> LogRow {
         LogRow {
             app_name: Some("fail2ban".to_string()),
@@ -250,6 +276,22 @@ mod tests {
         let rows = vec![container_die_row("host1", "0")];
         let results = evaluate_container_die_nonzero(&rows, "[]");
         assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn container_die_numeric_exit_code_matches() {
+        // exit_code as a JSON number (not string) should still be detected
+        let rows = vec![
+            container_die_row_numeric("host1", 1),
+            container_die_row_numeric("host1", 0), // exit 0 should not match
+        ];
+        let results = evaluate_container_die_nonzero(&rows, "[]");
+        assert_eq!(
+            results.len(),
+            1,
+            "numeric non-zero exit_code should match"
+        );
+        assert_eq!(results[0].rule_id, "container_die_nonzero");
     }
 
     #[test]

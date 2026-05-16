@@ -1248,7 +1248,16 @@ fn validate_storage_config(storage: &StorageConfig) -> anyhow::Result<()> {
 /// Fails at startup if notifications are enabled but no Apprise URLs are
 /// configured — without URLs all notifications would be silently dropped.
 fn validate_notifications_config(cfg: &NotificationsConfig) -> anyhow::Result<()> {
-    if cfg.enabled && cfg.apprise_urls.is_empty() && cfg.apprise_url.is_empty() {
+    if cfg.dispatcher_interval_secs == 0 {
+        anyhow::bail!("[notifications] dispatcher_interval_secs must be > 0");
+    }
+    if cfg.evaluators.evaluator_interval_secs == 0 {
+        anyhow::bail!("[notifications] evaluator_interval_secs must be > 0");
+    }
+    // Trim whitespace before checking emptiness to catch " " entries.
+    let has_apprise_url = !cfg.apprise_url.trim().is_empty();
+    let has_apprise_urls = cfg.apprise_urls.iter().any(|u| !u.trim().is_empty());
+    if cfg.enabled && !has_apprise_url && !has_apprise_urls {
         anyhow::bail!(
             "[notifications] enabled = true but no apprise_urls configured; \
              all notifications will be silently dropped. \

@@ -10,7 +10,8 @@
 //!
 //! Backoff: 1s → 5s → 30s → 5min → 30min cap.
 //! Dead-letter after 8 attempts.
-//! 207/424 = partial success, mark sent, do NOT retry.
+//! 207 = partial success, mark sent, do NOT retry.
+//! 424 = delivery failed, treat as permanent error (dead-letter).
 //!
 //! Security: NEVER log Apprise URLs.
 
@@ -28,7 +29,6 @@ use crate::db::notifications::{
 use crate::db::DbPool;
 use crate::notifications::apprise::{AppriseClient, AppriseError, NotifyType};
 
-const MAX_RETRY_ATTEMPTS: u8 = 8;
 const CLAIM_LIMIT: i64 = 50;
 
 /// Run one dispatcher cycle.
@@ -203,7 +203,7 @@ pub(crate) async fn run_dispatch_cycle(
 
         match delivery_result {
             Ok(Ok(resp)) => {
-                // Success (200/207/424)
+                // Success (200/207)
                 let pool_s = Arc::clone(&pool);
                 let sc = resp.status_code as i64;
                 let (rid, sev, host, dk) = (
@@ -287,7 +287,7 @@ pub(crate) async fn run_dispatch_cycle(
                     Ok(Ok(_)) => unreachable!("handled above"),
                 };
 
-                if attempt_count + 1 >= MAX_RETRY_ATTEMPTS {
+                if attempt_count + 1 >= cfg.max_retry_attempts {
                     // Exhausted retries — dead-letter
                     let dead_msg = format!("max retries: {error_msg}");
                     let pool_dl = Arc::clone(&pool);
@@ -325,8 +325,10 @@ pub(crate) async fn run_dispatch_cycle(
                         "dispatcher: dead-lettered after max retries"
                     );
                 } else {
-                    // Transient — schedule retry with backoff (no firing inserted)
-                    let next_at = backoff_next_attempt_at(attempt_count + 1);
+                    // Transient — schedule retry with backoff (no firing inserted).
+                    // Use attempt_count (pre-increment) so the first retry uses the
+                    // 1s tier, not 5s.
+                    let next_at = backoff_next_attempt_at(attempt_count);
                     let next_at_log = next_at.clone();
                     let pool_r = Arc::clone(&pool);
                     let err_clone = error_msg.clone();
@@ -542,7 +544,8 @@ mod tests {
             .unwrap();
 
         // Simulate 8 failed retries
-        for attempt in 0u8..MAX_RETRY_ATTEMPTS {
+        let max_retries: u8 = 8;
+        for attempt in 0u8..max_retries {
             let next_at = backoff_next_attempt_at(attempt);
             outbox_schedule_retry(&conn, id, &next_at, "timeout", None).unwrap();
         }
@@ -556,8 +559,8 @@ mod tests {
             .unwrap();
 
         assert!(
-            attempt_count >= MAX_RETRY_ATTEMPTS as i64,
-            "attempt_count={attempt_count} should be >= MAX_RETRY_ATTEMPTS={MAX_RETRY_ATTEMPTS}"
+            attempt_count >= max_retries as i64,
+            "attempt_count={attempt_count} should be >= max_retries={max_retries}"
         );
 
         // Mark dead

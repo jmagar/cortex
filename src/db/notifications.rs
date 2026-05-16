@@ -262,6 +262,7 @@ pub fn firings_recent(
     rule_id: Option<&str>,
     since: Option<&str>,
 ) -> rusqlite::Result<Vec<FiringRow>> {
+    let clamped_limit = limit.clamp(1, 500);
     let mut stmt = conn.prepare(
         "SELECT id, outbox_id, rule_id, hostname, fired_at, status_code
          FROM notification_firings
@@ -271,7 +272,7 @@ pub fn firings_recent(
          LIMIT ?3",
     )?;
     let rows = stmt
-        .query_map(params![rule_id, since, limit], |row| {
+        .query_map(params![rule_id, since, clamped_limit], |row| {
             Ok(FiringRow {
                 id: row.get(0)?,
                 outbox_id: row.get(1)?,

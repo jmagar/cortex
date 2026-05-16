@@ -212,18 +212,26 @@ pub(crate) fn process_chunk(
         )?;
 
         // Insert into outbox if the signature is unaddressed and above
-        // the frequency threshold. The dispatcher's dedup_window_secs
-        // prevents duplicate notifications.
+        // the frequency threshold. Use the 1-hour window count (not the
+        // lifetime total_count) to avoid alerting on long-ago bursts.
+        // The dispatcher's dedup_window_secs prevents duplicate notifications.
         let ack_check: rusqlite::Result<(i64, Option<String>)> = tx.query_row(
-            "SELECT total_count, acknowledged_at
+            "SELECT
+                 COALESCE((
+                     SELECT SUM(count_in_window)
+                     FROM error_signature_windows
+                     WHERE signature_hash = ?1 AND normalizer_version = ?2
+                       AND window_start >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
+                 ), 0),
+                 acknowledged_at
              FROM error_signatures
              WHERE signature_hash = ?1 AND normalizer_version = ?2",
             rusqlite::params![hash, NORMALIZER_VERSION],
             |row| Ok((row.get(0)?, row.get(1)?)),
         );
         let should_notify = match ack_check {
-            Ok((total_count, acknowledged_at)) => {
-                acknowledged_at.is_none() && total_count >= frequency_threshold as i64
+            Ok((count_last_1h, acknowledged_at)) => {
+                acknowledged_at.is_none() && count_last_1h >= frequency_threshold as i64
             }
             Err(e) => {
                 tracing::warn!(

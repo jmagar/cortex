@@ -76,7 +76,12 @@ pub(crate) async fn run_evaluation_cycle(
         let mut total = 0u64;
         for params in &all_params {
             match crate::db::notifications::outbox_insert(&conn, params) {
-                Ok(()) => total += 1,
+                Ok(()) => {
+                    // INSERT OR IGNORE: only count actual inserts, not silent no-ops.
+                    if conn.changes() > 0 {
+                        total += 1;
+                    }
+                }
                 Err(e) => tracing::warn!(
                     rule_id = %params.rule_id,
                     hostname = %params.hostname,

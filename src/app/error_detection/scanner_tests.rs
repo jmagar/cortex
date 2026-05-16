@@ -16,12 +16,15 @@ fn test_pool() -> (DbPool, TempDir) {
     (pool, dir)
 }
 
-/// Insert a log row with a given message and severity. Returns the inserted id.
+/// Insert a log row with the current timestamp (so it falls in the 1-hour window).
 fn insert_log(conn: &rusqlite::Connection, message: &str, severity: &str, hostname: &str) -> i64 {
+    let now = chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
     conn.execute(
         "INSERT INTO logs (timestamp, hostname, severity, message, raw, received_at)
-         VALUES ('2026-01-01T00:00:00.000Z', ?1, ?2, ?3, ?3, '2026-01-01T00:00:00.000Z')",
-        rusqlite::params![hostname, severity, message],
+         VALUES (?4, ?1, ?2, ?3, ?3, ?4)",
+        rusqlite::params![hostname, severity, message, now],
     )
     .unwrap();
     conn.last_insert_rowid()
@@ -67,16 +70,11 @@ fn test_process_chunk_does_not_notify_below_threshold() {
     // No outbox row should have been inserted
     let conn = pool.get().unwrap();
     let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM notifications_outbox",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
+        .query_row("SELECT COUNT(*) FROM notifications_outbox", [], |r| {
+            r.get::<_, i64>(0)
+        })
         .unwrap();
-    assert_eq!(
-        count, 0,
-        "no outbox notification below frequency_threshold"
-    );
+    assert_eq!(count, 0, "no outbox notification below frequency_threshold");
 }
 
 #[test]
@@ -87,7 +85,12 @@ fn test_process_chunk_notifies_above_threshold() {
         // Insert frequency_threshold+1 rows with the SAME message pattern
         // so they all land in the same signature group
         for _ in 0..6 {
-            insert_log(&conn, "connection refused to 127.0.0.1:5432", "err", "host1");
+            insert_log(
+                &conn,
+                "connection refused to 127.0.0.1:5432",
+                "err",
+                "host1",
+            );
         }
     }
 
@@ -103,7 +106,10 @@ fn test_process_chunk_notifies_above_threshold() {
             |r| r.get::<_, i64>(0),
         )
         .unwrap();
-    assert_eq!(count, 1, "one outbox notification above frequency_threshold");
+    assert_eq!(
+        count, 1,
+        "one outbox notification above frequency_threshold"
+    );
 }
 
 #[test]
@@ -134,7 +140,8 @@ fn test_process_chunk_suppressed_when_acked() {
             .unwrap();
 
         // Clear previous outbox entries so we can check fresh state
-        conn.execute("DELETE FROM notifications_outbox", []).unwrap();
+        conn.execute("DELETE FROM notifications_outbox", [])
+            .unwrap();
 
         // Set acknowledged_at on the signature
         conn.execute(
@@ -168,8 +175,5 @@ fn test_process_chunk_suppressed_when_acked() {
             |r| r.get::<_, i64>(0),
         )
         .unwrap();
-    assert_eq!(
-        count, 0,
-        "no notification when signature is acknowledged"
-    );
+    assert_eq!(count, 0, "no notification when signature is acknowledged");
 }
