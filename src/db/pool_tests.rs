@@ -265,8 +265,17 @@ fn migration_13_adds_enrichment_columns() {
         .filter_map(Result::ok)
         .collect();
 
-    for expected in ["http_status", "auth_outcome", "dns_blocked", "event_action", "parse_error"] {
-        assert!(cols.contains(&expected.to_string()), "missing column {expected}");
+    for expected in [
+        "http_status",
+        "auth_outcome",
+        "dns_blocked",
+        "event_action",
+        "parse_error",
+    ] {
+        assert!(
+            cols.contains(&expected.to_string()),
+            "missing column {expected}"
+        );
     }
 
     let indices: Vec<String> = conn
@@ -283,7 +292,10 @@ fn migration_13_adds_enrichment_columns() {
         "idx_logs_dns_blocked_time",
         "idx_logs_event_action_time",
     ] {
-        assert!(indices.contains(&expected.to_string()), "missing index {expected}");
+        assert!(
+            indices.contains(&expected.to_string()),
+            "missing index {expected}"
+        );
     }
 
     let version_count: i64 = conn

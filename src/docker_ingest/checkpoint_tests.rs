@@ -70,5 +70,10 @@ fn entry_with_checkpoint(host_name: &str, container_id: &str, timestamp: &str) -
         ai_session_id: None,
         ai_transcript_path: None,
         metadata_json: None,
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
     }
 }

@@ -537,6 +537,11 @@ pub fn index_file_with_options(
                     ai_session_id: session_id,
                     ai_transcript_path: transcript_path,
                     metadata_json: Some(metadata_json),
+                    http_status: None,
+                    auth_outcome: None,
+                    dns_blocked: None,
+                    event_action: None,
+                    parse_error: None,
                 };
                 chunk_bytes = chunk_bytes.saturating_add(log_entry_string_bytes(&entry));
                 batch.push(entry);

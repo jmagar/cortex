@@ -61,6 +61,11 @@ pub(super) fn log_output_to_entry(
         ai_session_id: None,
         ai_transcript_path: None,
         metadata_json: Some(metadata_json),
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
     }))
 }
 
@@ -119,6 +124,11 @@ pub(super) fn docker_event_to_entry(
         ai_session_id: None,
         ai_transcript_path: None,
         metadata_json: Some(metadata_json),
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
     }))
 }
 
