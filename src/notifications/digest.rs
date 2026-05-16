@@ -138,10 +138,9 @@ pub(crate) async fn run_digest(
 
     let apprise_urls_json =
         serde_json::to_string(&cfg.apprise_urls).unwrap_or_else(|_| "[]".to_string());
-    let pool_d = Arc::clone(&pool);
 
     tokio::task::spawn_blocking(move || -> Result<()> {
-        let conn = pool_d.get()?;
+        let conn = pool.get()?;
         let entries = fetch_host_stats(&conn, 24).map_err(anyhow::Error::from)?;
         let body = build_digest_body(&entries, 24);
         let title = format!(
@@ -175,18 +174,14 @@ pub(crate) async fn run_digest(
 ///
 /// Only the first two fields of a 5-field cron expression are used.
 fn parse_cron_hour_minute(cron: &str) -> (u32, u32) {
-    let parts: Vec<&str> = cron.split_whitespace().collect();
-    if parts.len() < 2 {
-        tracing::warn!(input = %cron, "Failed to parse digest_cron_local as cron expression; defaulting to 08:00");
-        return (8, 0);
-    }
-    let minute_res = parts[0].parse::<u32>();
-    let hour_res = parts[1].parse::<u32>();
-    if minute_res.is_err() || hour_res.is_err() {
+    let mut parts = cron.split_whitespace();
+    let minute_res = parts.next().map(|s| s.parse::<u32>());
+    let hour_res = parts.next().map(|s| s.parse::<u32>());
+    if !matches!((&minute_res, &hour_res), (Some(Ok(_)), Some(Ok(_)))) {
         tracing::warn!(input = %cron, "Failed to parse digest_cron_local as cron expression; defaulting to 08:00");
     }
-    let minute = minute_res.unwrap_or(0).min(59);
-    let hour = hour_res.unwrap_or(8).min(23);
+    let minute = minute_res.and_then(Result::ok).unwrap_or(0).min(59);
+    let hour = hour_res.and_then(Result::ok).unwrap_or(8).min(23);
     (hour, minute)
 }
 

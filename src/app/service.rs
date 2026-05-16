@@ -992,30 +992,27 @@ impl SyslogService {
     ) -> ServiceResult<super::models::UnaddressedErrorsResponse> {
         let limit = req.limit.unwrap_or(50) as i64;
         let include_acked = req.include_acknowledged.unwrap_or(false);
-        let response = self
-            .run_db(move |pool| {
-                let rows =
-                    crate::db::error_signatures::read_unaddressed(pool, limit, include_acked)?;
-                let signatures = rows
-                    .into_iter()
-                    .map(|r| super::models::ErrorSignatureEntry {
-                        signature_hash: r.signature_hash,
-                        template: r.template,
-                        sample_message: r.sample_message,
-                        severity: r.severity,
-                        sample_hostname: r.sample_hostname,
-                        sample_app_name: r.sample_app_name,
-                        first_seen_at: r.first_seen_at,
-                        last_seen_at: r.last_seen_at,
-                        total_count: r.total_count,
-                        count_last_1h: r.count_last_1h,
-                        acknowledged_at: r.acknowledged_at,
-                    })
-                    .collect();
-                Ok(super::models::UnaddressedErrorsResponse { signatures })
-            })
-            .await?;
-        Ok(response)
+        self.run_db(move |pool| {
+            let rows = crate::db::error_signatures::read_unaddressed(pool, limit, include_acked)?;
+            let signatures = rows
+                .into_iter()
+                .map(|r| super::models::ErrorSignatureEntry {
+                    signature_hash: r.signature_hash,
+                    template: r.template,
+                    sample_message: r.sample_message,
+                    severity: r.severity,
+                    sample_hostname: r.sample_hostname,
+                    sample_app_name: r.sample_app_name,
+                    first_seen_at: r.first_seen_at,
+                    last_seen_at: r.last_seen_at,
+                    total_count: r.total_count,
+                    count_last_1h: r.count_last_1h,
+                    acknowledged_at: r.acknowledged_at,
+                })
+                .collect();
+            Ok(super::models::UnaddressedErrorsResponse { signatures })
+        })
+        .await
     }
 
     pub async fn ack_error(
@@ -1027,19 +1024,17 @@ impl SyslogService {
         let notes = req.notes.clone();
         let actor_owned = actor.to_string();
         // Check it exists first
-        {
-            let h = hash.clone();
-            let exists = self
-                .run_db(move |pool| {
-                    Ok(crate::db::error_signatures::read_signature_by_hash(pool, &h)?.is_some())
-                })
-                .await?;
-            if !exists {
-                return Err(ServiceError::NotFound(format!(
-                    "Signature '{}' not found",
-                    hash
-                )));
-            }
+        let h = hash.clone();
+        let exists = self
+            .run_db(move |pool| {
+                Ok(crate::db::error_signatures::read_signature_by_hash(pool, &h)?.is_some())
+            })
+            .await?;
+        if !exists {
+            return Err(ServiceError::NotFound(format!(
+                "Signature '{}' not found",
+                hash
+            )));
         }
         let now = chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
@@ -1085,19 +1080,17 @@ impl SyslogService {
         let reason = req.reason.clone();
         let actor_owned = actor.to_string();
         // Check it exists first
-        {
-            let h = hash.clone();
-            let exists = self
-                .run_db(move |pool| {
-                    Ok(crate::db::error_signatures::read_signature_by_hash(pool, &h)?.is_some())
-                })
-                .await?;
-            if !exists {
-                return Err(ServiceError::NotFound(format!(
-                    "Signature '{}' not found",
-                    hash
-                )));
-            }
+        let h = hash.clone();
+        let exists = self
+            .run_db(move |pool| {
+                Ok(crate::db::error_signatures::read_signature_by_hash(pool, &h)?.is_some())
+            })
+            .await?;
+        if !exists {
+            return Err(ServiceError::NotFound(format!(
+                "Signature '{}' not found",
+                hash
+            )));
         }
         let now = chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")

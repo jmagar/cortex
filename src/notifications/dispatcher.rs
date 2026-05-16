@@ -61,7 +61,6 @@ pub(crate) async fn run_dispatch_cycle(
         };
 
         // --- Dedup check (within permit) ---
-        let dedup_key_clone = row.dedup_key.clone();
         let is_dedup = {
             let pool_d = Arc::clone(&pool);
             let rule_id = row.rule_id.clone();
@@ -192,7 +191,7 @@ pub(crate) async fn run_dispatch_cycle(
         let rule_id = row.rule_id.clone();
         let severity = row.severity.clone();
         let hostname = row.hostname.clone();
-        let dedup_key = dedup_key_clone;
+        let dedup_key = row.dedup_key.clone();
 
         // ----------------------------------------------------------------
         // Phase 3: re-acquire permit → write outbox status + firing → drop.
