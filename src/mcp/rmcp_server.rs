@@ -59,6 +59,9 @@ const READ_ONLY_ACTIONS: &[&str] = &[
     "compare",
     "compose_status",
     "compose_doctor",
+    "unaddressed_errors",
+    "ack_error",
+    "unack_error",
 ];
 
 impl SyslogRmcpServer {

@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 
 mod analytics;
+pub(crate) mod error_signatures;
 mod ingest;
 mod maintenance;
 mod models;

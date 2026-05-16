@@ -15,6 +15,34 @@ pub struct Config {
     pub api: ApiConfig,
     pub docker_ingest: DockerIngestConfig,
     pub enrichment: EnrichmentConfigToml,
+    pub error_detection: ErrorDetectionConfig,
+}
+
+/// Configuration for the background error signature scan job.
+/// Loaded from `[error_detection]` in `config.toml` or env vars.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ErrorDetectionConfig {
+    /// Enable the background scan job.
+    pub enabled: bool,
+    /// How often to run the scan cycle (seconds). Default: 3600 (1 hour).
+    pub scan_interval_secs: u64,
+    /// Maximum log rows to scan per cycle. Default: 50_000.
+    pub max_rows_per_cycle: u32,
+    /// Minimum count of firings in a 1h window before a signature is
+    /// considered "notable". Default: 30.
+    pub frequency_threshold: u32,
+}
+
+impl Default for ErrorDetectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            scan_interval_secs: 3600,
+            max_rows_per_cycle: 50_000,
+            frequency_threshold: 30,
+        }
+    }
 }
 
 /// Enrichment + scrubbing knobs. Loaded from `[enrichment]` in `config.toml`

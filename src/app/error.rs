@@ -4,13 +4,14 @@ use std::fmt;
 pub enum ServiceError {
     InvalidInput(String),
     Busy(String),
+    NotFound(String),
     Internal(anyhow::Error),
 }
 
 impl fmt::Display for ServiceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidInput(msg) | Self::Busy(msg) => f.write_str(msg),
+            Self::InvalidInput(msg) | Self::Busy(msg) | Self::NotFound(msg) => f.write_str(msg),
             Self::Internal(err) => write!(f, "{err}"),
         }
     }

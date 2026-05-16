@@ -377,6 +377,71 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 9: added logs.metadata_json");
     }
 
+    // Migration 10: error signature detection tables.
+    let migration_10_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 10",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_10_applied {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS error_signatures (
+                 signature_hash      TEXT NOT NULL,
+                 normalizer_version  INTEGER NOT NULL,
+                 template            TEXT NOT NULL,
+                 sample_message      TEXT NOT NULL,
+                 sample_hostname     TEXT NOT NULL,
+                 sample_app_name     TEXT,
+                 severity            TEXT NOT NULL,
+                 first_seen_at       TEXT NOT NULL,
+                 last_seen_at        TEXT NOT NULL,
+                 total_count         INTEGER NOT NULL DEFAULT 0,
+                 acknowledged_at     TEXT,
+                 acknowledged_by     TEXT,
+                 PRIMARY KEY (signature_hash, normalizer_version)
+             );
+             CREATE INDEX IF NOT EXISTS idx_error_sigs_last_seen
+                 ON error_signatures(last_seen_at DESC);
+             CREATE INDEX IF NOT EXISTS idx_error_sigs_ack
+                 ON error_signatures(acknowledged_at)
+                 WHERE acknowledged_at IS NULL;
+
+             CREATE TABLE IF NOT EXISTS error_signature_windows (
+                 signature_hash      TEXT NOT NULL,
+                 normalizer_version  INTEGER NOT NULL,
+                 window_start        TEXT NOT NULL,
+                 window_end          TEXT NOT NULL,
+                 count_in_window     INTEGER NOT NULL,
+                 PRIMARY KEY (signature_hash, normalizer_version, window_start, window_end)
+             );
+
+             CREATE TABLE IF NOT EXISTS error_signature_ack_events (
+                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                 signature_hash      TEXT NOT NULL,
+                 normalizer_version  INTEGER NOT NULL,
+                 event_type          TEXT NOT NULL CHECK (event_type IN ('ack','unack')),
+                 actor               TEXT NOT NULL,
+                 notes               TEXT CHECK (notes IS NULL OR length(notes) <= 4096),
+                 created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+             );
+             CREATE INDEX IF NOT EXISTS idx_ack_events_sig
+                 ON error_signature_ack_events(signature_hash, created_at DESC);
+
+             CREATE TABLE IF NOT EXISTS error_scan_cursor (
+                 id                      INTEGER PRIMARY KEY CHECK (id = 1),
+                 last_scanned_log_id     INTEGER NOT NULL DEFAULT 0,
+                 last_scan_completed_at  TEXT
+             );
+             INSERT OR IGNORE INTO error_scan_cursor (id, last_scanned_log_id) VALUES (1, 0);
+
+             INSERT INTO schema_migrations (version) VALUES (10);",
+        )?;
+        tracing::info!("Migration 10: created error signature detection tables");
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)

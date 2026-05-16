@@ -1,4 +1,5 @@
 mod correlate;
+pub(crate) mod error_detection;
 mod error;
 mod models;
 mod service;
@@ -21,6 +22,9 @@ pub use models::{
     SearchSessionsResponse, SearchedSessionEntry, SilentHostsRequest, SilentHostsResponse,
     TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlock, UsageBlocksRequest,
     UsageBlocksResponse,
+    // Error detection
+    AckErrorRequest, AckErrorResponse, ErrorSignatureEntry, UnackErrorRequest, UnackErrorResponse,
+    UnaddressedErrorsRequest, UnaddressedErrorsResponse,
 };
 pub use service::SyslogService;
 pub use time::parse_optional_timestamp;

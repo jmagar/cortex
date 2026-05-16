@@ -55,6 +55,9 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "compare" => tool_compare(state, args).await,
         "compose_status" => tool_compose_status(args).await,
         "compose_doctor" => tool_compose_doctor(args).await,
+        "unaddressed_errors" => tool_unaddressed_errors(state, args).await,
+        "ack_error" => tool_ack_error(state, args).await,
+        "unack_error" => tool_unack_error(state, args).await,
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
             "unknown syslog action: {action}; expected one of {}",
@@ -548,6 +551,51 @@ fn bool_arg(args: &Value, name: &str) -> Option<bool> {
     args.get(name).and_then(|v| v.as_bool())
 }
 
+// ---------------------------------------------------------------------------
+// Error detection actions
+
+async fn tool_unaddressed_errors(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    use crate::app::UnaddressedErrorsRequest;
+    let req = UnaddressedErrorsRequest {
+        limit: u32_arg(&args, "limit")?,
+        include_acknowledged: bool_arg(&args, "include_acknowledged"),
+    };
+    let resp = state.service.unaddressed_errors(req).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(serde_json::to_value(resp)?)
+}
+
+async fn tool_ack_error(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    use crate::app::AckErrorRequest;
+    let hash = string_arg(&args, "signature_hash")
+        .ok_or_else(|| anyhow::anyhow!("signature_hash is required"))?;
+    let req = AckErrorRequest {
+        signature_hash: hash,
+        notes: string_arg(&args, "notes"),
+    };
+    let resp = state
+        .service
+        .ack_error(req, "mcp:bearer")
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(serde_json::to_value(resp)?)
+}
+
+async fn tool_unack_error(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    use crate::app::UnackErrorRequest;
+    let hash = string_arg(&args, "signature_hash")
+        .ok_or_else(|| anyhow::anyhow!("signature_hash is required"))?;
+    let req = UnackErrorRequest {
+        signature_hash: hash,
+        reason: string_arg(&args, "reason"),
+    };
+    let resp = state
+        .service
+        .unack_error(req, "mcp:bearer")
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(serde_json::to_value(resp)?)
+}
+
 async fn tool_syslog_help() -> anyhow::Result<Value> {
     let help = r#"# syslog-mcp Tool Reference
 
@@ -869,6 +917,42 @@ returns a tool error when Docker/Compose ownership or runtime checks are not
 ready for lifecycle work. Lifecycle mutations remain CLI-only.
 
 **Parameters:** none. Target override fields are rejected.
+
+---
+
+## syslog unaddressed_errors
+List the top unacknowledged repeating error signatures — log message patterns
+that have been firing repeatedly without acknowledgement. Motivating case: an
+OTLP exporter POSTing to `/v1/metrics` every 10s, getting 404d, for 7 days
+unnoticed.
+
+Returns signatures sorted by `last_seen_at` descending. Each entry includes a
+normalized template, sample message, severity, counts, and acknowledgement state.
+
+**Parameters:**
+- `limit` (integer, optional) — max signatures to return (default 50)
+- `include_acknowledged` (boolean, optional) — include already-acked sigs (default false)
+
+---
+
+## syslog ack_error
+Acknowledge an error signature so it is suppressed from future `unaddressed_errors`
+results. Writes an audit event and updates the acknowledgement projection. Use
+`unack_error` to revoke.
+
+**Parameters:**
+- `signature_hash` (string, **required**) — the SHA-256 hash from `unaddressed_errors`
+- `notes` (string, optional) — acknowledgement notes (max 4096 chars)
+
+---
+
+## syslog unack_error
+Revoke an existing acknowledgement on an error signature so it reappears in
+`unaddressed_errors`. Writes an unack audit event; does NOT delete the ack history.
+
+**Parameters:**
+- `signature_hash` (string, **required**) — the SHA-256 hash of the signature
+- `reason` (string, optional) — reason for removing the acknowledgement (max 4096 chars)
 
 ---
 

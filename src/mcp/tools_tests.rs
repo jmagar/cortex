@@ -138,6 +138,11 @@ async fn schema_actions_are_dispatchable() {
             "compare" => {
                 json!({"action": action, "a_from": "2026-01-01T00:00:00Z", "a_to": "2026-01-01T00:01:00Z", "b_from": "2026-01-01T00:01:00Z", "b_to": "2026-01-01T00:02:00Z"})
             }
+            // ack_error / unack_error require signature_hash; provide a non-existent one
+            // so they dispatch and return NotFound (not "required parameter" error).
+            "ack_error" | "unack_error" => {
+                json!({"action": action, "signature_hash": "0000000000000000000000000000000000000000000000000000000000000000"})
+            }
             _ => json!({"action": action}),
         };
         let result = execute_tool(&h.state, "syslog", args).await;
@@ -146,6 +151,15 @@ async fn schema_actions_are_dispatchable() {
                 assert!(
                     error.to_string().contains("compose doctor failed"),
                     "compose_doctor failed before dispatching: {error}"
+                );
+            }
+        } else if matches!(*action, "ack_error" | "unack_error") {
+            // These require an existing signature. NotFound is the expected
+            // domain error when the hash doesn't exist — the action dispatched.
+            if let Err(ref error) = result {
+                assert!(
+                    error.to_string().contains("not found") || error.to_string().contains("Signature"),
+                    "action={action} failed before dispatching: {error}"
                 );
             }
         } else {

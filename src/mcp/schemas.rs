@@ -30,6 +30,9 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
     "compare",
     "compose_status",
     "compose_doctor",
+    "unaddressed_errors",
+    "ack_error",
+    "unack_error",
     "help",
 ];
 
@@ -37,7 +40,7 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
 pub(super) fn tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "syslog",
-        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, syslog compose_status, syslog compose_doctor, and syslog help.",
+        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, syslog compose_status, syslog compose_doctor, syslog unaddressed_errors, syslog ack_error, syslog unack_error, and syslog help.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -209,6 +212,22 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 "b_to": {
                     "type": "string",
                     "description": "For action=compare: second range end as ISO 8601/RFC3339."
+                },
+                "include_acknowledged": {
+                    "type": "boolean",
+                    "description": "For action=unaddressed_errors: include already-acknowledged signatures. Default false."
+                },
+                "signature_hash": {
+                    "type": "string",
+                    "description": "For action=ack_error or unack_error: the SHA-256 signature hash to acknowledge or un-acknowledge."
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "For action=ack_error: optional human-readable acknowledgement notes (max 4096 chars)."
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "For action=unack_error: optional reason for removing acknowledgement (max 4096 chars)."
                 }
             },
             "required": ["action"]

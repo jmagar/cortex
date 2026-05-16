@@ -17,7 +17,9 @@
 #   mcp_call source_ips, mcp_call timeline, mcp_call patterns, mcp_call context,
 #   mcp_call get, mcp_call ingest_rate, mcp_call silent_hosts,
 #   mcp_call clock_skew, mcp_call anomalies, mcp_call compare,
-#   mcp_call compose_status, mcp_call compose_doctor, mcp_call help
+#   mcp_call compose_status, mcp_call compose_doctor,
+#   mcp_call unaddressed_errors, mcp_call ack_error, mcp_call unack_error,
+#   mcp_call help
 
 set -euo pipefail
 

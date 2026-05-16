@@ -58,7 +58,7 @@ Action registry covered by live/script references: `search`, `tail`, `errors`,
 `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`,
 `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`,
 `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`,
-`compose_doctor`, `help`.
+`compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `help`.
 
 ### mcporter-based testing
 

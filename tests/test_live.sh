@@ -24,7 +24,8 @@
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,
 #   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
 #   syslog anomalies, syslog compare, syslog compose_status,
-#   syslog compose_doctor, syslog help
+#   syslog compose_doctor, syslog unaddressed_errors, syslog ack_error,
+#   syslog unack_error, syslog help
 #
 # Exit codes:
 #   0 — all tests passed (SKIPs do not count as failures)

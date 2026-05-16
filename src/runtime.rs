@@ -32,6 +32,7 @@ pub struct MaintenanceHandles {
     purge: Option<JoinHandle<()>>,
     storage: Option<JoinHandle<()>>,
     docker_ingest: Vec<JoinHandle<()>>,
+    error_scan: Option<JoinHandle<()>>,
 }
 
 impl Drop for MaintenanceHandles {
@@ -43,6 +44,9 @@ impl Drop for MaintenanceHandles {
             handle.abort();
         }
         for handle in &self.docker_ingest {
+            handle.abort();
+        }
+        if let Some(handle) = &self.error_scan {
             handle.abort();
         }
     }
@@ -181,11 +185,42 @@ impl RuntimeCore {
             Arc::clone(&self.pool),
             self.ingest.clone(),
         );
+        let error_scan = self.spawn_error_scan_task();
         MaintenanceHandles {
             purge,
             storage,
             docker_ingest,
+            error_scan,
         }
+    }
+
+    fn spawn_error_scan_task(&self) -> Option<JoinHandle<()>> {
+        let cfg = self.config.error_detection.clone();
+        if !cfg.enabled {
+            return None;
+        }
+        let pool = Arc::clone(&self.pool);
+        let limiter = Arc::clone(&self.maintenance_permit);
+        let interval_secs = cfg.scan_interval_secs;
+        let handle = tokio::spawn(async move {
+            let mut interval =
+                background_interval(tokio::time::Duration::from_secs(interval_secs));
+            loop {
+                interval.tick().await;
+                tracing::debug!("error_scan: scan cycle starting");
+                match crate::app::error_detection::run_error_scan(
+                    Arc::clone(&pool),
+                    Arc::clone(&limiter),
+                    cfg.clone(),
+                )
+                .await
+                {
+                    Ok(n) => tracing::info!(rows_processed = n, "error_scan: cycle complete"),
+                    Err(e) => tracing::error!(error = %e, "error_scan: cycle failed"),
+                }
+            }
+        });
+        Some(handle)
     }
 
     fn spawn_retention_task(&self) -> Option<JoinHandle<()>> {
