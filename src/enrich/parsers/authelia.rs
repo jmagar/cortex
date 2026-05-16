@@ -40,11 +40,7 @@ impl Parser for AutheliaParser {
             .get("username")
             .and_then(|v| v.as_str())
             .map(str::to_string)
-            .or_else(|| {
-                USERNAME_QUOTED_RE
-                    .captures(msg)
-                    .map(|c| c[1].to_string())
-            });
+            .or_else(|| USERNAME_QUOTED_RE.captures(msg).map(|c| c[1].to_string()));
 
         let severity = match level {
             "debug" => Some("debug"),

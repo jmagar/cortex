@@ -16,7 +16,7 @@ pub mod parser;
 pub mod parsers;
 
 pub use dispatch::EnrichmentPipeline;
+pub use output::{merge_output, record_error, stamp_source_kind};
 pub use parser::{
     AuthOutcome, Parser, ParserError, ParserId, ParserInput, ParserOutput, SourceKind,
 };
-pub use output::{merge_output, record_error, stamp_source_kind};

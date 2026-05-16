@@ -48,7 +48,8 @@ fn entry_with_source(
     let metadata = if let Some(c) = container_name {
         format!(
             r#"{{"source_kind":"{}","docker":{{"container_name":"{}"}}}}"#,
-            source_kind.as_str(), c
+            source_kind.as_str(),
+            c
         )
     } else {
         format!(r#"{{"source_kind":"{}"}}"#, source_kind.as_str())
@@ -64,7 +65,10 @@ fn entry_with_source(
         raw: message.into(),
         source_ip: "udp://127.0.0.1:5678".into(),
         docker_checkpoint: None,
-        ai_tool: None, ai_project: None, ai_session_id: None, ai_transcript_path: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
         metadata_json: Some(metadata),
         http_status: None,
         auth_outcome: None,
@@ -130,7 +134,12 @@ fn dispatch_adguard_api_to_adguard_parser() {
 #[test]
 fn dispatch_unknown_source_no_op() {
     let pipeline = EnrichmentPipeline::new();
-    let mut entry = entry_with_source(Some("randomapp"), None, "hello world", SourceKind::SyslogTcp);
+    let mut entry = entry_with_source(
+        Some("randomapp"),
+        None,
+        "hello world",
+        SourceKind::SyslogTcp,
+    );
     pipeline.dispatch(&mut entry);
     assert!(entry.event_action.is_none());
     assert!(entry.parse_error.is_none());

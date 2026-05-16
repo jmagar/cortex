@@ -1,15 +1,28 @@
 use crate::db::LogBatchEntry;
-use crate::enrich::{AuthOutcome, SourceKind, ParserOutput};
+use crate::enrich::{AuthOutcome, ParserOutput, SourceKind};
 
 fn blank_entry() -> LogBatchEntry {
     LogBatchEntry {
-        timestamp: String::new(), hostname: String::new(), facility: None,
-        severity: "info".into(), app_name: None, process_id: None,
-        message: String::new(), raw: String::new(), source_ip: String::new(),
-        docker_checkpoint: None, ai_tool: None, ai_project: None,
-        ai_session_id: None, ai_transcript_path: None, metadata_json: None,
-        http_status: None, auth_outcome: None, dns_blocked: None,
-        event_action: None, parse_error: None,
+        timestamp: String::new(),
+        hostname: String::new(),
+        facility: None,
+        severity: "info".into(),
+        app_name: None,
+        process_id: None,
+        message: String::new(),
+        raw: String::new(),
+        source_ip: String::new(),
+        docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
+        metadata_json: None,
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
     }
 }
 
@@ -38,7 +51,10 @@ fn merges_metadata_under_namespace() {
     let mut meta = serde_json::Map::new();
     meta.insert("method".into(), serde_json::json!("GET"));
     meta.insert("path".into(), serde_json::json!("/api"));
-    let out = ParserOutput { metadata: meta, ..Default::default() };
+    let out = ParserOutput {
+        metadata: meta,
+        ..Default::default()
+    };
     super::merge_output(&mut entry, "swag", out);
 
     let parsed: serde_json::Value =
@@ -54,12 +70,18 @@ fn preserves_existing_metadata_namespaces() {
     entry.metadata_json = Some(r#"{"docker":{"container_name":"swag"}}"#.into());
     let mut meta = serde_json::Map::new();
     meta.insert("method".into(), serde_json::json!("GET"));
-    let out = ParserOutput { metadata: meta, ..Default::default() };
+    let out = ParserOutput {
+        metadata: meta,
+        ..Default::default()
+    };
     super::merge_output(&mut entry, "swag", out);
 
     let parsed: serde_json::Value =
         serde_json::from_str(entry.metadata_json.as_deref().unwrap()).unwrap();
-    assert_eq!(parsed["docker"]["container_name"], serde_json::json!("swag"));
+    assert_eq!(
+        parsed["docker"]["container_name"],
+        serde_json::json!("swag")
+    );
     assert_eq!(parsed["swag"]["method"], serde_json::json!("GET"));
 }
 

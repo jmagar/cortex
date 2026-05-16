@@ -22,7 +22,10 @@ fn parse(message: &str) -> Result<crate::enrich::ParserOutput, crate::enrich::Pa
 fn die_extracts_exit_code_and_severity() {
     let out = parse(&input_from("die.txt")).unwrap();
     assert_eq!(out.event_action.as_deref(), Some("die"));
-    assert_eq!(out.metadata["container_name"], serde_json::json!("postgres"));
+    assert_eq!(
+        out.metadata["container_name"],
+        serde_json::json!("postgres")
+    );
     assert_eq!(out.metadata["image"], serde_json::json!("postgres:16"));
     assert_eq!(out.metadata["exit_code"], serde_json::json!(137_i32));
     assert_eq!(out.severity, Some("warning"));

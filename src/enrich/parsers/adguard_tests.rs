@@ -29,8 +29,14 @@ fn block_marks_dns_blocked_true() {
     assert_eq!(out.metadata["query"], serde_json::json!("doubleclick.net"));
     assert_eq!(out.metadata["qtype"], serde_json::json!("A"));
     assert_eq!(out.metadata["client"], serde_json::json!("192.168.10.55"));
-    assert_eq!(out.metadata["reason"], serde_json::json!("FilteredBlackList"));
-    assert_eq!(out.metadata["rule"], serde_json::json!("||doubleclick.net^"));
+    assert_eq!(
+        out.metadata["reason"],
+        serde_json::json!("FilteredBlackList")
+    );
+    assert_eq!(
+        out.metadata["rule"],
+        serde_json::json!("||doubleclick.net^")
+    );
 }
 
 #[test]
@@ -54,7 +60,11 @@ fn cached_hit() {
 
 #[test]
 fn legacy_camelcase_falls_back() {
-    let out = parse(&input_from("legacy_camelcase.json"), SourceKind::DockerStream).unwrap();
+    let out = parse(
+        &input_from("legacy_camelcase.json"),
+        SourceKind::DockerStream,
+    )
+    .unwrap();
     assert_eq!(out.metadata["query"], serde_json::json!("example.com"));
     assert_eq!(out.dns_blocked, Some(false));
 }
@@ -73,6 +83,10 @@ fn api_poller_path_yields_identical_output() {
 
 #[test]
 fn truncated_invalid_returns_json_error() {
-    let err = parse(&input_from("truncated_invalid.txt"), SourceKind::DockerStream).unwrap_err();
+    let err = parse(
+        &input_from("truncated_invalid.txt"),
+        SourceKind::DockerStream,
+    )
+    .unwrap_err();
     assert!(matches!(err, crate::enrich::ParserError::Json(_)));
 }

@@ -2,7 +2,10 @@ use crate::enrich::{Parser, ParserInput, SourceKind};
 
 fn input_from(fixture: &str) -> String {
     let path = format!("tests/fixtures/parsers/kernel/{fixture}");
-    std::fs::read_to_string(&path).expect(&path).trim().to_string()
+    std::fs::read_to_string(&path)
+        .expect(&path)
+        .trim()
+        .to_string()
 }
 
 fn parse(message: &str) -> Result<crate::enrich::ParserOutput, crate::enrich::ParserError> {

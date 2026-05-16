@@ -59,5 +59,8 @@ fn health_probe_no_auth_outcome() {
 #[test]
 fn text_mode_legacy_returns_structural_error() {
     let out = parse(&input_from("text_mode_legacy.txt"));
-    assert!(matches!(out, Err(crate::enrich::ParserError::Structural(_))));
+    assert!(matches!(
+        out,
+        Err(crate::enrich::ParserError::Structural(_))
+    ));
 }

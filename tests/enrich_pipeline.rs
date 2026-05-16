@@ -166,11 +166,9 @@ fn parser_failure_records_parse_error_but_persists_row() {
 
     let conn = pool.get().unwrap();
     let (count, pe): (i64, Option<String>) = conn
-        .query_row(
-            "SELECT COUNT(*), MAX(parse_error) FROM logs",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
+        .query_row("SELECT COUNT(*), MAX(parse_error) FROM logs", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
         .unwrap();
     assert_eq!(count, 1);
     assert!(

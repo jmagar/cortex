@@ -147,7 +147,10 @@ fn parse_source_kind(entry: &LogBatchEntry) -> SourceKind {
 fn read_container_name(entry: &LogBatchEntry) -> Option<String> {
     let raw = entry.metadata_json.as_deref()?;
     let v: Value = serde_json::from_str(raw).ok()?;
-    v.get("docker")?.get("container_name")?.as_str().map(str::to_string)
+    v.get("docker")?
+        .get("container_name")?
+        .as_str()
+        .map(str::to_string)
 }
 
 #[cfg(test)]

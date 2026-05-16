@@ -44,10 +44,7 @@ fn access_combined_upstream_extracts_latency_and_xff() {
 fn access_ipv6_client() {
     let out = parse(&input_from("access_ipv6.txt")).unwrap();
     assert_eq!(out.http_status, Some(200));
-    assert_eq!(
-        out.metadata["client_ip"],
-        serde_json::json!("2001:db8::1")
-    );
+    assert_eq!(out.metadata["client_ip"], serde_json::json!("2001:db8::1"));
 }
 
 #[test]
