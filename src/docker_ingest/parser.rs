@@ -4,6 +4,7 @@ use bollard::models::{EventActor, EventMessage};
 use chrono::TimeZone;
 
 use crate::db;
+use crate::enrich::{stamp_source_kind, SourceKind};
 use crate::ingest_metadata::bounded_metadata_json;
 
 use super::models::ContainerMeta;
@@ -41,7 +42,7 @@ pub(super) fn log_output_to_entry(
         "fallback_severity": fallback_severity,
         "checkpoint_timestamp": checkpoint_timestamp,
     }));
-    Ok(Some(db::LogBatchEntry {
+    let mut entry = db::LogBatchEntry {
         timestamp,
         hostname: host_name.to_string(),
         facility: Some("local0".to_string()),
@@ -66,7 +67,9 @@ pub(super) fn log_output_to_entry(
         dns_blocked: None,
         event_action: None,
         parse_error: None,
-    }))
+    };
+    stamp_source_kind(&mut entry, SourceKind::DockerStream);
+    Ok(Some(entry))
 }
 
 pub(super) fn docker_event_to_entry(
@@ -103,7 +106,7 @@ pub(super) fn docker_event_to_entry(
         "source_action": docker_event_source_action(action),
         "exit_code": docker_event_exit_code(actor),
     }));
-    Ok(Some(db::LogBatchEntry {
+    let mut entry = db::LogBatchEntry {
         timestamp,
         hostname: host_name.to_string(),
         facility: Some("docker".to_string()),
@@ -129,7 +132,9 @@ pub(super) fn docker_event_to_entry(
         dns_blocked: None,
         event_action: None,
         parse_error: None,
-    }))
+    };
+    stamp_source_kind(&mut entry, SourceKind::DockerEvent);
+    Ok(Some(entry))
 }
 
 fn split_docker_timestamp(raw: &str) -> (String, String) {

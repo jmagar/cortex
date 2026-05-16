@@ -29,6 +29,7 @@ use serde_json::json;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::db::LogBatchEntry;
+use crate::enrich::{stamp_source_kind, SourceKind};
 use crate::ingest::IngestTx;
 use crate::ingest_metadata::{attrs_to_metadata_object, bounded_metadata_json};
 use lab_auth::middleware::{parse_bearer_token, tokens_equal};
@@ -313,7 +314,7 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     "resource_attributes": attrs_to_json(&resource_attrs),
                     "log_attributes": attrs_to_json(&log_attrs),
                 }));
-                out.push(LogBatchEntry {
+                let mut entry = LogBatchEntry {
                     timestamp,
                     hostname: hostname.clone(),
                     facility: Some("otlp".to_string()),
@@ -334,7 +335,9 @@ fn build_entries(req: &ExportLogsServiceRequest, peer: SocketAddr) -> Vec<LogBat
                     dns_blocked: None,
                     event_action: None,
                     parse_error: None,
-                });
+                };
+                stamp_source_kind(&mut entry, SourceKind::Otlp);
+                out.push(entry);
             }
         }
     }
