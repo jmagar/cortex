@@ -599,6 +599,37 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             }
         };
         let mut status = status_from_target(target, info, systemd);
+        // Detect DB drift: the container's /data must be a bind mount, not a
+        // Docker named volume. A named volume means --env-file wasn't passed to
+        // compose (SYSLOG_MCP_DATA_VOLUME substitution failed), so the container
+        // writes to an isolated volume while the CLI reads from a different file.
+        // Only check when the container is in a running state (mounts are populated
+        // for stopped containers too but the status field indicates it's running).
+        if status.status.as_deref().map(|s| !is_stopped_status(s)).unwrap_or(false) {
+            let data_mount = status.data_mounts.iter().find(|m| m.target == "/data");
+            match data_mount {
+                None => {
+                    status.diagnostics.push(ComposeDiagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        code: "data_volume_missing".into(),
+                        message: "container has no /data mount — syslog DB is inaccessible"
+                            .into(),
+                    });
+                }
+                Some(mount) if mount.kind != "bind" => {
+                    status.diagnostics.push(ComposeDiagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        code: "data_volume_not_bind".into(),
+                        message: format!(
+                            "/data is a {} (not a bind mount) — container and CLI are \
+                             using separate databases; run `syslog compose up` to recreate",
+                            mount.kind
+                        ),
+                    });
+                }
+                Some(_) => {}
+            }
+        }
         if let Some(error) = systemd_error {
             status.diagnostics.push(ComposeDiagnostic {
                 severity: DiagnosticSeverity::Error,
