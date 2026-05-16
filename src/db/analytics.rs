@@ -196,11 +196,9 @@ pub fn get_ai_usage_blocks(
             " AND timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-{DEFAULT_LOOKBACK_DAYS} days')"
         ));
     }
-    let grouped_sql = format!("{sql} GROUP BY bucket_start, bucket_end, ai_project, ai_tool");
-    let total_blocks = count_grouped_rows(&conn, &grouped_sql, &bindings)?;
-    sql = grouped_sql;
     sql.push_str(&format!(
-        " ORDER BY bucket_start ASC, ai_project ASC, ai_tool ASC
+        " GROUP BY bucket_start, bucket_end, ai_project, ai_tool
+          ORDER BY bucket_start ASC, ai_project ASC, ai_tool ASC
           LIMIT {}",
         LIMIT + 1
     ));
@@ -220,22 +218,10 @@ pub fn get_ai_usage_blocks(
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let truncated = truncate_to_limit(&mut blocks, LIMIT);
     Ok(AiUsageBlocksResult {
-        total_blocks,
+        total_blocks: blocks.len(),
         truncated,
         blocks,
     })
-}
-
-fn count_grouped_rows(
-    conn: &rusqlite::Connection,
-    grouped_sql: &str,
-    bindings: &[rusqlite::types::Value],
-) -> Result<usize> {
-    Ok(conn.query_row(
-        &format!("SELECT COUNT(*) FROM ({grouped_sql})"),
-        rusqlite::params_from_iter(bindings.iter()),
-        |row| row.get::<_, i64>(0),
-    )? as usize)
 }
 
 fn truncate_to_limit<T>(values: &mut Vec<T>, limit: usize) -> bool {

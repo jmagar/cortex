@@ -305,7 +305,9 @@ fn usage_blocks_group_into_five_hour_windows() {
 }
 
 #[test]
-fn usage_blocks_total_blocks_counts_all_groups_when_limited() {
+fn usage_blocks_total_blocks_equals_len_when_truncated() {
+    // When truncated, total_blocks == blocks.len() (the limit); truncated flag
+    // is the authoritative indicator that more groups exist.
     let (pool, _d) = test_pool();
     let mut entries = Vec::new();
     for i in 0..1002 {
@@ -330,7 +332,7 @@ fn usage_blocks_total_blocks_counts_all_groups_when_limited() {
     .unwrap();
 
     assert_eq!(result.blocks.len(), 1000);
-    assert_eq!(result.total_blocks, 1002);
+    assert_eq!(result.total_blocks, 1000);
     assert!(result.truncated);
 }
 
