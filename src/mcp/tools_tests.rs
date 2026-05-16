@@ -158,8 +158,21 @@ async fn schema_actions_are_dispatchable() {
             // domain error when the hash doesn't exist — the action dispatched.
             if let Err(ref error) = result {
                 assert!(
-                    error.to_string().contains("not found") || error.to_string().contains("Signature"),
+                    error.to_string().contains("not found")
+                        || error.to_string().contains("Signature"),
                     "action={action} failed before dispatching: {error}"
+                );
+            }
+        } else if *action == "notifications_test" {
+            // notifications_test requires a live Apprise server; transient/delivery
+            // failures are expected in test environments.
+            if let Err(ref error) = result {
+                assert!(
+                    error.to_string().contains("Apprise")
+                        || error.to_string().contains("delivery")
+                        || error.to_string().contains("Rate limit")
+                        || error.to_string().contains("no_apprise"),
+                    "action={action} failed unexpectedly: {error}"
                 );
             }
         } else {

@@ -38,6 +38,8 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `unaddressed_errors` | List unacknowledged repeating error signatures |
 | `ack_error` | Acknowledge an error signature to suppress it from future reports |
 | `unack_error` | Revoke an acknowledgement so a signature reappears in reports |
+| `notifications_recent` | List recent notification firings |
+| `notifications_test` | Send a test notification via Apprise |
 | `help` | Markdown reference for all actions |
 
 ## syslog search

@@ -7,6 +7,7 @@ pub mod compose;
 pub mod config;
 pub mod logging;
 pub mod mcp;
+pub mod notifications;
 pub mod observability;
 pub mod otlp;
 pub mod runtime;

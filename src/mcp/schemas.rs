@@ -33,6 +33,8 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
     "unaddressed_errors",
     "ack_error",
     "unack_error",
+    "notifications_recent",
+    "notifications_test",
     "help",
 ];
 
@@ -40,7 +42,7 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
 pub(super) fn tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "syslog",
-        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, syslog compose_status, syslog compose_doctor, syslog unaddressed_errors, syslog ack_error, syslog unack_error, and syslog help.",
+        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, syslog compose_status, syslog compose_doctor, syslog unaddressed_errors, syslog ack_error, syslog unack_error, syslog notifications_recent, syslog notifications_test, and syslog help.",
         "inputSchema": {
             "type": "object",
             "properties": {

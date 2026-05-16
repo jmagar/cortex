@@ -33,6 +33,9 @@ pub struct MaintenanceHandles {
     storage: Option<JoinHandle<()>>,
     docker_ingest: Vec<JoinHandle<()>>,
     error_scan: Option<JoinHandle<()>>,
+    notification_dispatcher: Option<JoinHandle<()>>,
+    notification_evaluator: Option<JoinHandle<()>>,
+    notification_digest: Option<JoinHandle<()>>,
 }
 
 impl Drop for MaintenanceHandles {
@@ -47,6 +50,15 @@ impl Drop for MaintenanceHandles {
             handle.abort();
         }
         if let Some(handle) = &self.error_scan {
+            handle.abort();
+        }
+        if let Some(handle) = &self.notification_dispatcher {
+            handle.abort();
+        }
+        if let Some(handle) = &self.notification_evaluator {
+            handle.abort();
+        }
+        if let Some(handle) = &self.notification_digest {
             handle.abort();
         }
     }
@@ -186,12 +198,42 @@ impl RuntimeCore {
             self.ingest.clone(),
         );
         let error_scan = self.spawn_error_scan_task();
+        let notification_dispatcher = self.spawn_notification_dispatcher();
+        let notification_evaluator = self.spawn_notification_evaluator();
+        let notification_digest = self.spawn_notification_digest();
         MaintenanceHandles {
             purge,
             storage,
             docker_ingest,
             error_scan,
+            notification_dispatcher,
+            notification_evaluator,
+            notification_digest,
         }
+    }
+
+    fn spawn_notification_dispatcher(&self) -> Option<JoinHandle<()>> {
+        crate::notifications::dispatcher::spawn_dispatcher(
+            Arc::clone(&self.pool),
+            Arc::clone(&self.maintenance_permit),
+            self.config.notifications.clone(),
+        )
+    }
+
+    fn spawn_notification_evaluator(&self) -> Option<JoinHandle<()>> {
+        crate::notifications::evaluator::spawn_evaluator(
+            Arc::clone(&self.pool),
+            Arc::clone(&self.maintenance_permit),
+            self.config.notifications.clone(),
+        )
+    }
+
+    fn spawn_notification_digest(&self) -> Option<JoinHandle<()>> {
+        crate::notifications::digest::spawn_digest(
+            Arc::clone(&self.pool),
+            Arc::clone(&self.maintenance_permit),
+            self.config.notifications.clone(),
+        )
     }
 
     fn spawn_error_scan_task(&self) -> Option<JoinHandle<()>> {
@@ -203,8 +245,7 @@ impl RuntimeCore {
         let limiter = Arc::clone(&self.maintenance_permit);
         let interval_secs = cfg.scan_interval_secs;
         let handle = tokio::spawn(async move {
-            let mut interval =
-                background_interval(tokio::time::Duration::from_secs(interval_secs));
+            let mut interval = background_interval(tokio::time::Duration::from_secs(interval_secs));
             loop {
                 interval.tick().await;
                 tracing::debug!("error_scan: scan cycle starting");

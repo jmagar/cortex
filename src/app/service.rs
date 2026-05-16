@@ -994,7 +994,8 @@ impl SyslogService {
         let include_acked = req.include_acknowledged.unwrap_or(false);
         let response = self
             .run_db(move |pool| {
-                let rows = crate::db::error_signatures::read_unaddressed(pool, limit, include_acked)?;
+                let rows =
+                    crate::db::error_signatures::read_unaddressed(pool, limit, include_acked)?;
                 let signatures = rows
                     .into_iter()
                     .map(|r| super::models::ErrorSignatureEntry {
@@ -1040,7 +1041,9 @@ impl SyslogService {
                 )));
             }
         }
-        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        let now = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
         let now_clone = now.clone();
         let actor_clone = actor_owned.clone();
         let hash_clone = hash.clone();
@@ -1096,7 +1099,9 @@ impl SyslogService {
                 )));
             }
         }
-        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        let now = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
         let actor_clone = actor_owned.clone();
         let hash_clone = hash.clone();
         self.run_db(move |pool| {
@@ -1160,6 +1165,92 @@ fn backup_path_for(db_path: &std::path::Path, output: Option<PathBuf>) -> anyhow
             .unwrap_or_else(|| std::path::Path::new("."))
             .join("backups")
             .join(format!("syslog-{timestamp}.db"))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Notifications service methods
+
+impl SyslogService {
+    /// List recent notification firings.
+    pub async fn notifications_recent(
+        &self,
+        limit: i64,
+        rule_id: Option<String>,
+        since: Option<String>,
+    ) -> ServiceResult<Vec<crate::db::notifications::FiringRow>> {
+        self.run_db(move |pool| {
+            let conn = pool.get()?;
+            crate::db::notifications::firings_recent(
+                &conn,
+                limit,
+                rule_id.as_deref(),
+                since.as_deref(),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+    }
+
+    /// Send a test notification via Apprise. Rate-limited to 10/min per actor.
+    ///
+    /// # Rate limiting
+    /// Uses an in-memory counter per `actor` string. Resets after 60s of
+    /// inactivity per actor.
+    pub async fn notifications_test(
+        &self,
+        body: String,
+        actor: String,
+        apprise_url: String,
+        apprise_urls: Vec<String>,
+    ) -> ServiceResult<String> {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        use std::time::Instant;
+
+        const MAX_PER_MIN: u32 = 10;
+
+        // In-memory rate limiter: actor -> (count, window_start)
+        static RATE_LIMITER: OnceLock<Mutex<HashMap<String, (u32, Instant)>>> = OnceLock::new();
+        let limiter = RATE_LIMITER.get_or_init(|| Mutex::new(HashMap::new()));
+
+        {
+            let mut map = limiter.lock().unwrap_or_else(|e| e.into_inner());
+            let now = Instant::now();
+            let entry = map.entry(actor.clone()).or_insert((0, now));
+            // Reset window if > 60s has elapsed
+            if entry.1.elapsed().as_secs() >= 60 {
+                *entry = (0, now);
+            }
+            entry.0 += 1;
+            if entry.0 > MAX_PER_MIN {
+                return Err(crate::app::ServiceError::InvalidInput(format!(
+                    "Rate limit exceeded for actor '{actor}': max {MAX_PER_MIN} test notifications per minute"
+                )));
+            }
+        }
+
+        // Send test notification asynchronously
+        let client = crate::notifications::apprise::AppriseClient::new(apprise_url);
+        let escaped_body = crate::notifications::apprise::escape_for_notification(&body);
+        let result = client
+            .notify(
+                &apprise_urls,
+                "Test Notification",
+                &escaped_body,
+                crate::notifications::apprise::NotifyType::Info,
+            )
+            .await;
+
+        match result {
+            Ok(resp) => Ok(format!(
+                "Test notification sent (status {})",
+                resp.status_code
+            )),
+            Err(e) => Err(crate::app::ServiceError::Internal(anyhow::anyhow!(
+                "Apprise delivery failed: {e}"
+            ))),
+        }
     }
 }
 

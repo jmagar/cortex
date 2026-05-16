@@ -19,6 +19,7 @@
 #   mcp_call clock_skew, mcp_call anomalies, mcp_call compare,
 #   mcp_call compose_status, mcp_call compose_doctor,
 #   mcp_call unaddressed_errors, mcp_call ack_error, mcp_call unack_error,
+#   mcp_call notifications_recent, mcp_call notifications_test,
 #   mcp_call help
 
 set -euo pipefail

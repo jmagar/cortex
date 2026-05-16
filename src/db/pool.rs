@@ -442,6 +442,61 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 10: created error signature detection tables");
     }
 
+    // Migration 11: notifications outbox and firings tables.
+    let migration_11_applied: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 11",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !migration_11_applied {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS notifications_outbox (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 dedup_key TEXT NOT NULL,
+                 rule_id TEXT NOT NULL,
+                 severity TEXT NOT NULL,
+                 hostname TEXT NOT NULL,
+                 title TEXT NOT NULL,
+                 body TEXT NOT NULL,
+                 apprise_urls_json TEXT NOT NULL,
+                 apprise_tags TEXT,
+                 enqueued_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                 next_attempt_at TEXT NOT NULL,
+                 attempt_count INTEGER NOT NULL DEFAULT 0,
+                 last_status_code INTEGER,
+                 last_error TEXT,
+                 status TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending','sent','dead','dropped'))
+             );
+             CREATE INDEX IF NOT EXISTS idx_outbox_pending
+                 ON notifications_outbox(status, next_attempt_at)
+                 WHERE status = 'pending';
+             CREATE INDEX IF NOT EXISTS idx_outbox_dedup
+                 ON notifications_outbox(dedup_key, enqueued_at DESC);
+
+             CREATE TABLE IF NOT EXISTS notification_firings (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 outbox_id INTEGER NOT NULL,
+                 rule_id TEXT NOT NULL,
+                 severity TEXT NOT NULL,
+                 hostname TEXT NOT NULL,
+                 fired_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                 status_code INTEGER,
+                 notes TEXT
+             );
+             CREATE INDEX IF NOT EXISTS idx_firings_fired_at
+                 ON notification_firings(fired_at DESC);
+             CREATE INDEX IF NOT EXISTS idx_firings_rule
+                 ON notification_firings(rule_id, fired_at DESC);
+
+             INSERT INTO schema_migrations (version) VALUES (11);",
+        )?;
+        tracing::info!("Migration 11: created notifications outbox and firings tables");
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)

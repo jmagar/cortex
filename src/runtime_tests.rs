@@ -27,6 +27,7 @@ fn test_config(tmp: &std::path::Path, mcp: McpConfig) -> Config {
         docker_ingest: Default::default(),
         enrichment: Default::default(),
         error_detection: Default::default(),
+        notifications: Default::default(),
     }
 }
 

@@ -16,6 +16,77 @@ pub struct Config {
     pub docker_ingest: DockerIngestConfig,
     pub enrichment: EnrichmentConfigToml,
     pub error_detection: ErrorDetectionConfig,
+    pub notifications: NotificationsConfig,
+}
+
+// ---------------------------------------------------------------------------
+// Notifications configuration
+
+/// Configuration for the notifications subsystem.
+/// Loaded from `[notifications]` in `config.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationsConfig {
+    /// Enable push notifications via Apprise. Default: false.
+    pub enabled: bool,
+    /// Primary Apprise API base URL, e.g. "http://apprise:8000".
+    pub apprise_url: String,
+    /// List of Apprise notification URLs (e.g. "gotify://host/token").
+    pub apprise_urls: Vec<String>,
+    /// How often to run the dispatcher loop (seconds). Default: 30.
+    pub dispatcher_interval_secs: u64,
+    /// Dedup window in seconds — suppress duplicate firings within this
+    /// window. Default: 900 (15 minutes).
+    pub dedup_window_secs: u64,
+    /// Local cron expression for daily digest. Default: "0 8 * * *" (8am).
+    pub digest_cron_local: String,
+    /// Maximum retry attempts before dead-lettering. Default: 8.
+    pub max_retry_attempts: u8,
+    /// Per-rule evaluator settings.
+    pub evaluators: NotificationEvaluatorsConfig,
+}
+
+impl Default for NotificationsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            apprise_url: String::new(),
+            apprise_urls: Vec::new(),
+            dispatcher_interval_secs: 30,
+            dedup_window_secs: 900,
+            digest_cron_local: "0 8 * * *".to_string(),
+            max_retry_attempts: 8,
+            evaluators: NotificationEvaluatorsConfig::default(),
+        }
+    }
+}
+
+/// Per-rule toggles for the notification evaluator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationEvaluatorsConfig {
+    /// Enable OOM kill detection. Default: true.
+    pub oom_kill: bool,
+    /// Enable container die non-zero exit detection. Default: true.
+    pub container_die_nonzero: bool,
+    /// Enable fail2ban ban detection. Default: true.
+    pub fail2ban_ban: bool,
+    /// Enable Authelia MFA failure detection. Default: true.
+    pub authelia_mfa_fail: bool,
+    /// How often to run evaluation (seconds). Default: 300 (5 minutes).
+    pub evaluator_interval_secs: u64,
+}
+
+impl Default for NotificationEvaluatorsConfig {
+    fn default() -> Self {
+        Self {
+            oom_kill: true,
+            container_die_nonzero: true,
+            fail2ban_ban: true,
+            authelia_mfa_fail: true,
+            evaluator_interval_secs: 300,
+        }
+    }
 }
 
 /// Configuration for the background error signature scan job.

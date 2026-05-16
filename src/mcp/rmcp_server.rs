@@ -62,6 +62,8 @@ const READ_ONLY_ACTIONS: &[&str] = &[
     "unaddressed_errors",
     "ack_error",
     "unack_error",
+    "notifications_recent",
+    "notifications_test",
 ];
 
 impl SyslogRmcpServer {

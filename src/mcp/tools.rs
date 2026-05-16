@@ -58,6 +58,8 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "unaddressed_errors" => tool_unaddressed_errors(state, args).await,
         "ack_error" => tool_ack_error(state, args).await,
         "unack_error" => tool_unack_error(state, args).await,
+        "notifications_recent" => tool_notifications_recent(state, args).await,
+        "notifications_test" => tool_notifications_test(state, args).await,
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
             "unknown syslog action: {action}; expected one of {}",
@@ -560,7 +562,11 @@ async fn tool_unaddressed_errors(state: &AppState, args: Value) -> anyhow::Resul
         limit: u32_arg(&args, "limit")?,
         include_acknowledged: bool_arg(&args, "include_acknowledged"),
     };
-    let resp = state.service.unaddressed_errors(req).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resp = state
+        .service
+        .unaddressed_errors(req)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(serde_json::to_value(resp)?)
 }
 
@@ -594,6 +600,45 @@ async fn tool_unack_error(state: &AppState, args: Value) -> anyhow::Result<Value
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(serde_json::to_value(resp)?)
+}
+
+async fn tool_notifications_recent(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(50)
+        .min(500);
+    let rule_id = string_arg(&args, "rule_id");
+    let since = string_arg(&args, "since");
+    let firings = state
+        .service
+        .notifications_recent(limit, rule_id, since)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(serde_json::to_value(firings)?)
+}
+
+async fn tool_notifications_test(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let body = string_arg(&args, "body")
+        .unwrap_or_else(|| "Test notification from syslog-mcp".to_string());
+    let actor = string_arg(&args, "actor").unwrap_or_else(|| "mcp:anon".to_string());
+    let apprise_url = string_arg(&args, "apprise_url").unwrap_or_default();
+    let apprise_urls: Vec<String> = args
+        .get("apprise_urls")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let result = state
+        .service
+        .notifications_test(body, actor, apprise_url, apprise_urls)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(serde_json::json!({ "result": result }))
 }
 
 async fn tool_syslog_help() -> anyhow::Result<Value> {
@@ -953,6 +998,27 @@ Revoke an existing acknowledgement on an error signature so it reappears in
 **Parameters:**
 - `signature_hash` (string, **required**) — the SHA-256 hash of the signature
 - `reason` (string, optional) — reason for removing the acknowledgement (max 4096 chars)
+
+---
+
+## syslog notifications_recent
+List recent notification firings from the `notification_firings` table.
+
+**Parameters:**
+- `limit` (integer, optional) — max rows to return (default 50, max 500)
+- `rule_id` (string, optional) — filter by rule ID (e.g. `oom_kill`, `daily_digest`)
+- `since` (string, optional) — ISO8601 lower bound for `fired_at`
+
+---
+
+## syslog notifications_test
+Send a test notification via Apprise. Rate-limited to 10 per minute per actor.
+
+**Parameters:**
+- `body` (string, optional) — notification body text (default: test message)
+- `actor` (string, optional) — identifier for rate-limit tracking (default: `mcp:anon`)
+- `apprise_url` (string, optional) — Apprise API base URL
+- `apprise_urls` (array of strings, optional) — notification target URLs
 
 ---
 

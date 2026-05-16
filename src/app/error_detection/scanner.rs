@@ -15,13 +15,13 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::Semaphore;
 
+use super::normalize::{normalize_template, signature_hash, NORMALIZER_VERSION};
 use crate::config::ErrorDetectionConfig;
-use crate::db::DbPool;
 use crate::db::error_signatures::{
     cursor_advance, cursor_get, insert_window, upsert_signature, UpsertSignatureParams,
 };
+use crate::db::DbPool;
 use crate::syslog::enrichment::scrub_ai_message;
-use super::normalize::{normalize_template, signature_hash, NORMALIZER_VERSION};
 
 /// A minimal log row fetched for scanning.
 #[derive(Debug)]
@@ -69,9 +69,15 @@ pub(crate) async fn run_error_scan(
         let pool_chunk = Arc::clone(&pool);
         let current_last_id = last_id;
 
+        let frequency_threshold = cfg.frequency_threshold;
         let result = tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            process_chunk(&pool_chunk, current_last_id, chunk_size)
+            process_chunk(
+                &pool_chunk,
+                current_last_id,
+                chunk_size,
+                frequency_threshold,
+            )
         })
         .await??;
 
@@ -100,7 +106,12 @@ struct ChunkResult {
 
 /// Process one chunk of log rows inside a single rusqlite transaction.
 /// Returns the number of rows processed and the new cursor position.
-fn process_chunk(pool: &DbPool, last_id: i64, chunk_size: i64) -> Result<ChunkResult> {
+fn process_chunk(
+    pool: &DbPool,
+    last_id: i64,
+    chunk_size: i64,
+    frequency_threshold: u32,
+) -> Result<ChunkResult> {
     let mut conn = pool.get()?;
 
     // --- Fetch rows ---
@@ -129,7 +140,10 @@ fn process_chunk(pool: &DbPool, last_id: i64, chunk_size: i64) -> Result<ChunkRe
     };
 
     if rows.is_empty() {
-        return Ok(ChunkResult { rows_in_chunk: 0, new_cursor: last_id });
+        return Ok(ChunkResult {
+            rows_in_chunk: 0,
+            new_cursor: last_id,
+        });
     }
 
     let max_id = rows.last().map(|r| r.id).unwrap_or(last_id);
@@ -206,8 +220,57 @@ fn process_chunk(pool: &DbPool, last_id: i64, chunk_size: i64) -> Result<ChunkRe
             group.count,
         )?;
 
-        // TODO(h6dg): call crate::db::notifications::outbox_insert inside this tx
-        // when notifications module exists (Wave 2).
+        // Insert into outbox if the signature is unaddressed and above
+        // the frequency threshold. The dispatcher's dedup_window_secs
+        // prevents duplicate notifications.
+        let should_notify = {
+            let result: rusqlite::Result<(i64, Option<String>)> = tx.query_row(
+                "SELECT total_count, acknowledged_at
+                 FROM error_signatures
+                 WHERE signature_hash = ?1 AND normalizer_version = ?2",
+                rusqlite::params![hash, NORMALIZER_VERSION],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            );
+            match result {
+                Ok((total_count, acknowledged_at)) => {
+                    acknowledged_at.is_none() && total_count >= frequency_threshold as i64
+                }
+                Err(_) => false,
+            }
+        };
+
+        if should_notify {
+            let title = format!(
+                "[{}] Recurring error on {}",
+                group.severity.to_uppercase(),
+                group.sample_hostname
+            );
+            let body = format!(
+                "Signature: {}\nSample: {}\nOccurrences: {}",
+                group.template, group.sample_message, group.count
+            );
+            let dedup_key = format!("error_sig:{hash}");
+            let outbox_params = crate::db::notifications::OutboxInsertParams {
+                dedup_key,
+                rule_id: "unaddressed_error_signature".to_string(),
+                severity: group.severity.clone(),
+                hostname: group.sample_hostname.clone(),
+                title,
+                body,
+                apprise_urls_json: "[]".to_string(), // overridden by dispatcher config
+                next_attempt_at: {
+                    let now = chrono::Utc::now();
+                    now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+                },
+            };
+            if let Err(e) = crate::db::notifications::outbox_insert(&tx, &outbox_params) {
+                tracing::warn!(
+                    signature_hash = %hash,
+                    error = %e,
+                    "error_scan: failed to insert outbox notification (non-fatal)"
+                );
+            }
+        }
     }
 
     cursor_advance(&tx, max_id)?;
