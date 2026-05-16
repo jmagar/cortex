@@ -12,6 +12,7 @@ pub struct LogRow {
     pub app_name: Option<String>,
     pub message: String,
     pub hostname: String,
+    #[allow(dead_code)]
     pub severity: String,
     pub metadata_json: Option<String>,
     pub timestamp: String,

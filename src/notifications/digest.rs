@@ -62,11 +62,18 @@ pub fn build_digest_body(entries: &[HostDigestEntry], window_hours: u32) -> Stri
 }
 
 /// Fetch per-host stats for the last `window_hours` hours.
+///
+/// Uses a single query with a window function to find the top app per host,
+/// avoiding the previous N+1 query pattern (one per-host subquery per host).
+/// Requires SQLite 3.25+ (window function support).
 pub fn fetch_host_stats(
     conn: &rusqlite::Connection,
     window_hours: u32,
 ) -> rusqlite::Result<Vec<HostDigestEntry>> {
     let window_secs = window_hours as i64 * 3600;
+
+    // Fetch per-host totals + top_app in two queries (no N+1).
+    // Query 1: per-host aggregate stats.
     let mut stmt = conn.prepare(
         "SELECT
              hostname,
@@ -79,7 +86,7 @@ pub fn fetch_host_stats(
          ORDER BY total DESC
          LIMIT 50",
     )?;
-    let entries = stmt
+    let mut entries: Vec<HostDigestEntry> = stmt
         .query_map(rusqlite::params![window_secs], |row| {
             Ok(HostDigestEntry {
                 hostname: row.get(0)?,
@@ -91,26 +98,31 @@ pub fn fetch_host_stats(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    // For each host, find the most active app
-    let mut out = Vec::with_capacity(entries.len());
-    for mut entry in entries {
-        let top_app: Option<String> = conn
-            .query_row(
-                "SELECT app_name FROM logs
-                 WHERE hostname = ?1
-                   AND app_name IS NOT NULL
-                   AND received_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now', printf('-%d seconds', ?2))
-                 GROUP BY app_name
-                 ORDER BY COUNT(*) DESC
-                 LIMIT 1",
-                rusqlite::params![entry.hostname, window_secs],
-                |row| row.get(0),
-            )
-            .ok();
-        entry.top_app = top_app;
-        out.push(entry);
+    // Query 2: top app per host using a window function (SQLite 3.25+).
+    // Returns one row per hostname with the highest-count app_name.
+    let mut top_app_stmt = conn.prepare(
+        "SELECT hostname, app_name
+         FROM (
+             SELECT hostname, app_name,
+                    ROW_NUMBER() OVER (PARTITION BY hostname ORDER BY COUNT(*) DESC) AS rn
+             FROM logs
+             WHERE received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('-%d seconds', ?1))
+               AND app_name IS NOT NULL
+             GROUP BY hostname, app_name
+         )
+         WHERE rn = 1",
+    )?;
+    // Collect into a HashMap for O(1) lookup when merging.
+    let top_apps: std::collections::HashMap<String, String> = top_app_stmt
+        .query_map(rusqlite::params![window_secs], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?;
+
+    for entry in &mut entries {
+        entry.top_app = top_apps.get(&entry.hostname).cloned();
     }
-    Ok(out)
+    Ok(entries)
 }
 
 /// Build and enqueue a daily digest notification.
@@ -165,10 +177,16 @@ pub(crate) async fn run_digest(
 fn parse_cron_hour_minute(cron: &str) -> (u32, u32) {
     let parts: Vec<&str> = cron.split_whitespace().collect();
     if parts.len() < 2 {
+        tracing::warn!(input = %cron, "Failed to parse digest_cron_local as cron expression; defaulting to 08:00");
         return (8, 0);
     }
-    let minute = parts[0].parse::<u32>().unwrap_or(0).min(59);
-    let hour = parts[1].parse::<u32>().unwrap_or(8).min(23);
+    let minute_res = parts[0].parse::<u32>();
+    let hour_res = parts[1].parse::<u32>();
+    if minute_res.is_err() || hour_res.is_err() {
+        tracing::warn!(input = %cron, "Failed to parse digest_cron_local as cron expression; defaulting to 08:00");
+    }
+    let minute = minute_res.unwrap_or(0).min(59);
+    let hour = hour_res.unwrap_or(8).min(23);
     (hour, minute)
 }
 

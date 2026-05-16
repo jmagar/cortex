@@ -33,6 +33,7 @@ impl NotifyType {
 pub struct NotifyResponse {
     pub status_code: u16,
     /// True when all urls succeeded (200) or partial success (207).
+    #[allow(dead_code)]
     pub success: bool,
 }
 
@@ -82,6 +83,7 @@ impl AppriseClient {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self

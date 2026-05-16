@@ -35,8 +35,10 @@ pub struct OutboxRow {
     pub title: String,
     pub body: String,
     pub apprise_urls_json: String,
+    #[allow(dead_code)]
     pub next_attempt_at: String,
     pub attempt_count: i64,
+    #[allow(dead_code)]
     pub status: String,
 }
 
@@ -160,6 +162,7 @@ pub fn outbox_mark_dropped(
     conn.execute(
         "UPDATE notifications_outbox
          SET status = 'dropped',
+             attempt_count = attempt_count + 1,
              last_error = ?2
          WHERE id = ?1",
         params![id, notes],
@@ -212,7 +215,15 @@ pub fn firings_insert(
         "INSERT INTO notification_firings
              (outbox_id, rule_id, severity, hostname, status_code, notes, dedup_key)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![p.outbox_id, p.rule_id, p.severity, p.hostname, p.status_code, p.notes, p.dedup_key],
+        params![
+            p.outbox_id,
+            p.rule_id,
+            p.severity,
+            p.hostname,
+            p.status_code,
+            p.notes,
+            p.dedup_key
+        ],
     )?;
     Ok(())
 }
