@@ -1,0 +1,1 @@
+docker container event: rename container=swag image=lscr.io/linuxserver/swag:latest compose_project=edge compose_service=proxy old_name=nginx-proxy

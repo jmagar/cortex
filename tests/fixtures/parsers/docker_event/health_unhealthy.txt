@@ -1,0 +1,1 @@
+docker container event: health_status_unhealthy container=adguard image=adguard/adguardhome:latest compose_project=dns compose_service=adguard
