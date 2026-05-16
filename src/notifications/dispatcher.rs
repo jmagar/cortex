@@ -207,19 +207,27 @@ pub(crate) async fn run_dispatch_cycle(
                 // Success (200/207/424)
                 let pool_s = Arc::clone(&pool);
                 let sc = resp.status_code as i64;
-                let (rid, sev, host, dk) = (rule_id.clone(), severity.clone(), hostname.clone(), dedup_key.clone());
+                let (rid, sev, host, dk) = (
+                    rule_id.clone(),
+                    severity.clone(),
+                    hostname.clone(),
+                    dedup_key.clone(),
+                );
                 tokio::task::spawn_blocking(move || -> Result<()> {
                     let conn = pool_s.get()?;
                     outbox_mark_sent(&conn, row_id, Some(sc))?;
-                    firings_insert(&conn, FiringInsertParams {
-                        outbox_id: row_id,
-                        rule_id: &rid,
-                        severity: &sev,
-                        hostname: &host,
-                        status_code: Some(sc),
-                        notes: None,
-                        dedup_key: &dk,
-                    })?;
+                    firings_insert(
+                        &conn,
+                        FiringInsertParams {
+                            outbox_id: row_id,
+                            rule_id: &rid,
+                            severity: &sev,
+                            hostname: &host,
+                            status_code: Some(sc),
+                            notes: None,
+                            dedup_key: &dk,
+                        },
+                    )?;
                     Ok(())
                 })
                 .await??;
@@ -236,19 +244,27 @@ pub(crate) async fn run_dispatch_cycle(
                 // 4xx — dead-letter immediately
                 let pool_dl = Arc::clone(&pool);
                 let error_msg = format!("permanent HTTP {code}");
-                let (rid, sev, host, dk) = (rule_id.clone(), severity.clone(), hostname.clone(), dedup_key.clone());
+                let (rid, sev, host, dk) = (
+                    rule_id.clone(),
+                    severity.clone(),
+                    hostname.clone(),
+                    dedup_key.clone(),
+                );
                 tokio::task::spawn_blocking(move || -> Result<()> {
                     let conn = pool_dl.get()?;
                     outbox_mark_dead(&conn, row_id, Some(code as i64), &error_msg)?;
-                    firings_insert(&conn, FiringInsertParams {
-                        outbox_id: row_id,
-                        rule_id: &rid,
-                        severity: &sev,
-                        hostname: &host,
-                        status_code: Some(code as i64),
-                        notes: Some(&error_msg),
-                        dedup_key: &dk,
-                    })?;
+                    firings_insert(
+                        &conn,
+                        FiringInsertParams {
+                            outbox_id: row_id,
+                            rule_id: &rid,
+                            severity: &sev,
+                            hostname: &host,
+                            status_code: Some(code as i64),
+                            notes: Some(&error_msg),
+                            dedup_key: &dk,
+                        },
+                    )?;
                     Ok(())
                 })
                 .await??;
@@ -272,19 +288,27 @@ pub(crate) async fn run_dispatch_cycle(
                     // Exhausted retries — dead-letter
                     let dead_msg = format!("max retries: {error_msg}");
                     let pool_dl = Arc::clone(&pool);
-                    let (rid, sev, host, dk) = (rule_id.clone(), severity.clone(), hostname.clone(), dedup_key.clone());
+                    let (rid, sev, host, dk) = (
+                        rule_id.clone(),
+                        severity.clone(),
+                        hostname.clone(),
+                        dedup_key.clone(),
+                    );
                     tokio::task::spawn_blocking(move || -> Result<()> {
                         let conn = pool_dl.get()?;
                         outbox_mark_dead(&conn, row_id, None, &dead_msg)?;
-                        firings_insert(&conn, FiringInsertParams {
-                            outbox_id: row_id,
-                            rule_id: &rid,
-                            severity: &sev,
-                            hostname: &host,
-                            status_code: None,
-                            notes: Some(&dead_msg),
-                            dedup_key: &dk,
-                        })?;
+                        firings_insert(
+                            &conn,
+                            FiringInsertParams {
+                                outbox_id: row_id,
+                                rule_id: &rid,
+                                severity: &sev,
+                                hostname: &host,
+                                status_code: None,
+                                notes: Some(&dead_msg),
+                                dedup_key: &dk,
+                            },
+                        )?;
                         Ok(())
                     })
                     .await??;

@@ -605,15 +605,19 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
         // writes to an isolated volume while the CLI reads from a different file.
         // Only check when the container is in a running state (mounts are populated
         // for stopped containers too but the status field indicates it's running).
-        if status.status.as_deref().map(|s| !is_stopped_status(s)).unwrap_or(false) {
+        if status
+            .status
+            .as_deref()
+            .map(|s| !is_stopped_status(s))
+            .unwrap_or(false)
+        {
             let data_mount = status.data_mounts.iter().find(|m| m.target == "/data");
             match data_mount {
                 None => {
                     status.diagnostics.push(ComposeDiagnostic {
                         severity: DiagnosticSeverity::Error,
                         code: "data_volume_missing".into(),
-                        message: "container has no /data mount — syslog DB is inaccessible"
-                            .into(),
+                        message: "container has no /data mount — syslog DB is inaccessible".into(),
                     });
                 }
                 Some(mount) if mount.kind != "bind" => {

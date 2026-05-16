@@ -120,7 +120,10 @@ pub(crate) fn normalize_template(msg: &str) -> String {
         }
 
         // Linux absolute path: starts with / followed by a word-char
-        if b == b'/' && i + 1 < bytes.len() && (bytes[i + 1].is_ascii_alphanumeric() || bytes[i + 1] == b'_') {
+        if b == b'/'
+            && i + 1 < bytes.len()
+            && (bytes[i + 1].is_ascii_alphanumeric() || bytes[i + 1] == b'_')
+        {
             let mut j = i + 1;
             while j < bytes.len() {
                 let c = bytes[j];
@@ -324,8 +327,7 @@ fn rfc3164_ts_end(bytes: &[u8]) -> Option<usize> {
 }
 
 static MONTHS: &[&[u8]] = &[
-    b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov",
-    b"Dec",
+    b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
 ];
 
 // ---------------------------------------------------------------------------
@@ -445,9 +447,16 @@ mod tests {
         // AdGuard emits JSON log lines with varying domain/upstream/timestamp.
         // The JSON pre-pass should collapse them to a small number of templates.
         let domains = [
-            "example.com", "foo.bar", "cdn.cloudflare.com", "ads.google.com",
-            "tracker.example.net", "api.stripe.com", "fonts.googleapis.com",
-            "ssl.gstatic.com", "connect.facebook.net", "analytics.twitter.com",
+            "example.com",
+            "foo.bar",
+            "cdn.cloudflare.com",
+            "ads.google.com",
+            "tracker.example.net",
+            "api.stripe.com",
+            "fonts.googleapis.com",
+            "ssl.gstatic.com",
+            "connect.facebook.net",
+            "analytics.twitter.com",
         ];
         let upstreams = ["8.8.8.8:53", "1.1.1.1:53", "9.9.9.9:53"];
 
@@ -493,19 +502,31 @@ mod tests {
             .iter()
             .map(|m| signature_hash(&normalize_template(m)))
             .collect();
-        assert_eq!(alice_hashes.len(), 1, "alice messages should produce 1 signature");
+        assert_eq!(
+            alice_hashes.len(),
+            1,
+            "alice messages should produce 1 signature"
+        );
 
         let bob_hashes: HashSet<String> = bob_msgs
             .iter()
             .map(|m| signature_hash(&normalize_template(m)))
             .collect();
-        assert_eq!(bob_hashes.len(), 1, "bob messages should produce 1 signature");
+        assert_eq!(
+            bob_hashes.len(),
+            1,
+            "bob messages should produce 1 signature"
+        );
 
         let charlie_hashes: HashSet<String> = invalid_msgs
             .iter()
             .map(|m| signature_hash(&normalize_template(m)))
             .collect();
-        assert_eq!(charlie_hashes.len(), 1, "charlie invalid user messages should produce 1 signature");
+        assert_eq!(
+            charlie_hashes.len(),
+            1,
+            "charlie invalid user messages should produce 1 signature"
+        );
 
         // Different users must NOT share a signature
         let all_hashes: HashSet<String> = alice_msgs
@@ -553,7 +574,10 @@ mod tests {
     fn json_span_replaced() {
         let t = normalize_template(r#"status: {"code":200,"body":"ok"}"#);
         assert!(t.contains("<json>"), "expected <json> in: {t}");
-        assert!(!t.contains("200"), "raw number inside JSON should not be visible: {t}");
+        assert!(
+            !t.contains("200"),
+            "raw number inside JSON should not be visible: {t}"
+        );
     }
 
     #[test]
@@ -566,6 +590,9 @@ mod tests {
     fn linux_path_replaced() {
         let t = normalize_template("failed to open /var/log/syslog: No such file");
         assert!(t.contains("<path>"), "expected <path> in: {t}");
-        assert!(!t.contains("/var/log/syslog"), "path should be replaced: {t}");
+        assert!(
+            !t.contains("/var/log/syslog"),
+            "path should be replaced: {t}"
+        );
     }
 }

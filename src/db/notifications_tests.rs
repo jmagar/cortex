@@ -239,9 +239,14 @@ mod notifications_db_tests {
         assert!(!no_dedup, "different host should not dedup");
 
         // Different dedup_key -> no dedup (this is the key fix: per-signature isolation)
-        let no_dedup_dk =
-            firings_recent_dedup_check(&conn, "oom_kill", "host1", "oom_kill:host1:other-key", 3600)
-                .expect("dedup check 3");
+        let no_dedup_dk = firings_recent_dedup_check(
+            &conn,
+            "oom_kill",
+            "host1",
+            "oom_kill:host1:other-key",
+            3600,
+        )
+        .expect("dedup check 3");
         assert!(!no_dedup_dk, "different dedup_key should not dedup");
     }
 

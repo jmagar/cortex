@@ -35,26 +35,28 @@ pub(crate) async fn run_evaluation_cycle(
 
     // --- Phase 1: fetch + evaluate (NO permit needed — read-only DB access) ---
     let pool_r = Arc::clone(&pool);
-    let all_params = tokio::task::spawn_blocking(move || -> Result<Vec<crate::db::notifications::OutboxInsertParams>> {
-        let conn = pool_r.get()?;
-        let rows = fetch_recent_logs(&conn, window_secs)?;
-        drop(conn);
+    let all_params = tokio::task::spawn_blocking(
+        move || -> Result<Vec<crate::db::notifications::OutboxInsertParams>> {
+            let conn = pool_r.get()?;
+            let rows = fetch_recent_logs(&conn, window_secs)?;
+            drop(conn);
 
-        let mut out = Vec::new();
-        if cfg.evaluators.oom_kill {
-            out.extend(evaluate_oom_kill(&rows, &apprise_urls_json));
-        }
-        if cfg.evaluators.container_die_nonzero {
-            out.extend(evaluate_container_die_nonzero(&rows, &apprise_urls_json));
-        }
-        if cfg.evaluators.fail2ban_ban {
-            out.extend(evaluate_fail2ban_ban(&rows, &apprise_urls_json));
-        }
-        if cfg.evaluators.authelia_mfa_fail {
-            out.extend(evaluate_authelia_mfa_fail(&rows, &apprise_urls_json));
-        }
-        Ok(out)
-    })
+            let mut out = Vec::new();
+            if cfg.evaluators.oom_kill {
+                out.extend(evaluate_oom_kill(&rows, &apprise_urls_json));
+            }
+            if cfg.evaluators.container_die_nonzero {
+                out.extend(evaluate_container_die_nonzero(&rows, &apprise_urls_json));
+            }
+            if cfg.evaluators.fail2ban_ban {
+                out.extend(evaluate_fail2ban_ban(&rows, &apprise_urls_json));
+            }
+            if cfg.evaluators.authelia_mfa_fail {
+                out.extend(evaluate_authelia_mfa_fail(&rows, &apprise_urls_json));
+            }
+            Ok(out)
+        },
+    )
     .await??;
 
     if all_params.is_empty() {

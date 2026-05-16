@@ -106,7 +106,13 @@ pub(crate) fn insert_window(
          VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(signature_hash, normalizer_version, window_start, window_end)
          DO UPDATE SET count_in_window = count_in_window + excluded.count_in_window",
-        params![signature_hash, normalizer_version, window_start, window_end, count],
+        params![
+            signature_hash,
+            normalizer_version,
+            window_start,
+            window_end,
+            count
+        ],
     )?;
     Ok(())
 }
@@ -382,6 +388,9 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(hostname, "host1", "sample_hostname should not be overwritten on update");
+        assert_eq!(
+            hostname, "host1",
+            "sample_hostname should not be overwritten on update"
+        );
     }
 }

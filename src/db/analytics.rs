@@ -502,7 +502,6 @@ fn split_csv(value: Option<String>) -> Vec<String> {
         .collect()
 }
 
-
 #[allow(clippy::too_many_arguments)]
 pub fn patterns(
     pool: &DbPool,
