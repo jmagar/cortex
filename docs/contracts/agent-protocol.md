@@ -11,7 +11,7 @@ This document is the V1 wire contract derived from the agent-mode design spec at
 - **Encoding.** WebSocket **text** frames. Payload is UTF-8 JSON. Binary frames are reserved for a future compressed log-batch transport and MUST be rejected with close code `1003` in V1.
 - **Compression.** No frame-level or payload-level compression in V1 (no `permessage-deflate`, no zstd application-layer compression). Agents may advertise `compression: ["zstd"]` in `capabilities` but the V1 server ignores the hint.
 - **Framing rule.** Exactly **one JSON-RPC 2.0 message per WebSocket frame**. Top-level JSON arrays (JSON-RPC array batching) are rejected with `-32600 Invalid Request`. Batching is performed inside `logs.push.params.entries[]`.
-- **Frame size limit.** Maximum frame size is **1 MiB (1,048,576 bytes)**. Oversized frames close the connection with WS close code `1009 Message Too Big` and the server records `last_disconnect_reason = "1009 oversize"`. A pre-handshake byte cap of **1 KiB** applies before `agent.hello` is accepted.
+- **Frame size limit.** Maximum frame size is **1 MiB (1,048,576 bytes)**. Oversized frames close the connection with WS close code `1009 Message Too Big` and the server records `last_disconnect_reason = "1009 oversize"`. A pre-handshake byte cap of **1 KiB** applies as a connection-level byte counter before the `agent.hello` JSON frame is fully buffered — this limits unauthenticated bytes on the wire, not the serialized size of the `agent.hello` JSON payload itself (which may be larger once the `supported_probes` array is populated).
 - **Liveness.** WebSocket-level ping every 20 s, server-initiated. Three consecutive missed pongs → close `1011`.
 
 ## 3. Auth handshake
@@ -219,7 +219,7 @@ Example failure response:
 - **Direction:** client → server
 - **Kind:** notification (no `id`, no response)
 - **Purpose:** application-level liveness; updates `agents.last_seen` and exposes buffer/push pressure
-- **Errors:** none (notifications cannot produce a JSON-RPC error response). Malformed payloads cause a JSON-RPC error response with a null id and `-32600` and close the connection.
+- **Errors:** none (notifications cannot produce a JSON-RPC error response). Malformed payloads are logged server-side and the frame is dropped; no error is returned.
 
 `params` schema:
 
@@ -702,7 +702,7 @@ stateDiagram-v2
 - **Per-connection monotonic `seq`.** Each `logs.push` carries `seq_start` and `entries[*].seq`. `entries` is contiguous and strictly increasing (`entries[i].seq == seq_start + i`). The agent persists `next_seq` in its redb buffer and never reuses a value across restarts.
 - **Server idempotency key.** `(host_id, seq)` is the dedupe key on the ingest path. The server records `agents.accepted_seq` as the high-water mark. Any entry with `seq <= accepted_seq` is silently discarded by the server; only entries with `seq > accepted_seq` are inserted into `logs`.
 - **Replay on reconnect.** After `agent.hello`, the server returns `accepted_seq`. The agent fast-forwards its local `acked_seq` to `max(local_acked_seq, accepted_seq)`, deletes redb rows `<= acked_seq` in a single transaction, then begins streaming starting at `acked_seq + 1`. Live tailers continue to append to redb with `next_seq++` in parallel.
-- **Ack flush cadence.** The server commits log batches to `IngestTx` and emits the `logs.push` response (or the equivalent `logs.ack` notification, when batching multiple batches) every **K = 100 entries OR T = 200 ms**, whichever comes first. The agent advances `acked_seq` and truncates redb only on ack. A crash between server-side persist and ack delivery is harmless: duplicates on retry are dropped by the `(host_id, seq)` idempotency check.
+- **Ack flush cadence.** The server commits log batches to `IngestTx` and emits the `logs.push` response every **K = 100 entries OR T = 200 ms**, whichever comes first. The agent advances `acked_seq` and truncates redb only on ack. A crash between server-side persist and ack delivery is harmless: duplicates on retry are dropped by the `(host_id, seq)` idempotency check.
 - **Ordering.** Frames on a single WebSocket are processed in order. `logs.push` is dispatched on the reader task itself (not the per-connection worker pool) so log ordering is preserved end-to-end. `probe.request` responses MAY arrive out of order relative to other `probe.request`s — correlation is purely by `id`.
 - **At-least-once delivery.** The contract guarantees at-least-once log delivery from agent to `logs` table. Duplicates are bounded by `K - 1` plus any in-flight batches at crash time, all of which are deduped server-side.
 

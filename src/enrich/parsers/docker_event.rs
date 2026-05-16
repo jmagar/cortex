@@ -48,7 +48,16 @@ impl Parser for DockerEventParser {
         }
         let severity = match action.as_str() {
             "oom" => Some("crit"),
-            "die" | "kill" | "health_status_unhealthy" => Some("warning"),
+            "die" | "kill" => {
+                // Only flag as warning when the container exited non-zero.
+                // A graceful stop (exit_code == 0) or unknown exit is not a warning.
+                let exit_code = metadata.get("exit_code").and_then(|v| v.as_i64());
+                match exit_code {
+                    Some(0) | None => None,
+                    Some(_) => Some("warning"),
+                }
+            }
+            "health_status_unhealthy" => Some("warning"),
             _ => None,
         };
         Ok(ParserOutput {

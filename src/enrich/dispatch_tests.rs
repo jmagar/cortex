@@ -45,9 +45,11 @@ fn entry_with_source(
     message: &str,
     source_kind: SourceKind,
 ) -> LogBatchEntry {
+    // docker_ingest/parser.rs stamps container_name at the ROOT of metadata_json
+    // (not under a "docker" sub-object), so construct the test fixture the same way.
     let metadata = if let Some(c) = container_name {
         format!(
-            r#"{{"source_kind":"{}","docker":{{"container_name":"{}"}}}}"#,
+            r#"{{"source_kind":"{}","container_name":"{}"}}"#,
             source_kind.as_str(),
             c
         )

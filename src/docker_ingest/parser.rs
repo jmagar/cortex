@@ -229,8 +229,12 @@ fn docker_event_source_action(action: &str) -> String {
 }
 
 fn docker_event_message(action: &str, meta: &ContainerMeta, actor: &EventActor) -> String {
+    // Use the normalized (single-token) action so the enrich docker_event regex
+    // captures it as one \S+ token. Raw Docker actions like "health_status: healthy"
+    // contain spaces and colons which would break the capture group.
+    let normalized_action = docker_event_source_action(action);
     let mut parts = vec![
-        format!("docker container event: {action}"),
+        format!("docker container event: {normalized_action}"),
         format!("container={}", meta.name),
     ];
     if !meta.image.is_empty() {

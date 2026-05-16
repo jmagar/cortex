@@ -57,11 +57,14 @@ impl Parser for AutheliaParser {
             || path.starts_with("/api/duo");
 
         let auth_outcome = if is_auth_event {
-            if msg.contains("Unsuccessful") {
+            // Use case-insensitive matching and check unsuccessful BEFORE successful
+            // to avoid "Unsuccessful" matching the "successful" branch first.
+            let msg_lower = msg.to_ascii_lowercase();
+            if msg_lower.contains("unsuccessful") {
                 Some(AuthOutcome::Failure)
-            } else if msg.contains("successful") || msg.contains("Successful") {
+            } else if msg_lower.contains("successful") {
                 Some(AuthOutcome::Success)
-            } else if msg.contains("denied") || msg.contains("Denied") {
+            } else if msg_lower.contains("denied") {
                 Some(AuthOutcome::Denied)
             } else {
                 None

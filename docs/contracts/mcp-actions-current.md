@@ -189,7 +189,7 @@ with `porter unicode61` tokenizer. Supports FTS5 syntax: AND, OR, NOT
 
 Request:
 ```json
-{ "action": "search", "query": "OOM AND killer", "severity_min": "warning", "limit": 50 }
+{ "action": "search", "query": "OOM AND killer", "severity": "warning", "limit": 50 }
 ```
 
 Response:

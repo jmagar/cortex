@@ -101,15 +101,22 @@ impl EnrichmentPipeline {
     }
 
     fn apply(&self, entry: &mut LogBatchEntry, parser: &'static dyn Parser) {
+        // Extract owned copies of the string fields before taking a mutable borrow
+        // of entry in merge_output/record_error, so the borrow checker is satisfied
+        // and the parser receives consistent values (not stale data after mutation).
         let source_kind = parse_source_kind(entry);
         let container = read_container_name(entry);
+        let app_name = entry.app_name.clone();
+        let message = entry.message.clone();
+        let raw = entry.raw.clone();
+        let severity = entry.severity.clone();
         let input = ParserInput {
-            app_name: entry.app_name.as_deref(),
+            app_name: app_name.as_deref(),
             container_name: container.as_deref(),
-            message: &entry.message.clone(),
-            raw: &entry.raw.clone(),
+            message: &message,
+            raw: &raw,
             source_kind,
-            severity: &entry.severity.clone(),
+            severity: &severity,
         };
         match parser.parse(input) {
             Ok(out) => merge_output(entry, parser.namespace(), out),
@@ -147,10 +154,9 @@ fn parse_source_kind(entry: &LogBatchEntry) -> SourceKind {
 fn read_container_name(entry: &LogBatchEntry) -> Option<String> {
     let raw = entry.metadata_json.as_deref()?;
     let v: Value = serde_json::from_str(raw).ok()?;
-    v.get("docker")?
-        .get("container_name")?
-        .as_str()
-        .map(str::to_string)
+    // docker_ingest/parser.rs stamps container_name at the root of metadata_json
+    // (not under a "docker" sub-object), so look for it directly.
+    v.get("container_name")?.as_str().map(str::to_string)
 }
 
 #[cfg(test)]

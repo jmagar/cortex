@@ -18,15 +18,19 @@ static OOM_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static LINK_UP_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(?P<if>\w+): link up,\s*(?P<speed>\d+)Mbps").expect("static regex")
+    // [\w.\-@]+ covers real Linux interface names: br-abc.100, veth-foo, eth0.100, wlan0@phy0
+    Regex::new(r"^(?P<if>[\w.\-@]+): link up,\s*(?P<speed>\d+)Mbps").expect("static regex")
 });
 
-static LINK_DOWN_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(?P<if>\w+): link down").expect("static regex"));
+static LINK_DOWN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    // [\w.\-@]+ covers real Linux interface names: br-abc.100, veth-foo, eth0.100, wlan0@phy0
+    Regex::new(r"^(?P<if>[\w.\-@]+): link down").expect("static regex")
+});
 
 static MAC_COLLISION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    // [\w.\-@]+ covers real Linux interface names: br-abc.100, veth-foo, eth0.100, wlan0@phy0
     Regex::new(
-        r"^(?P<if>\w+): received packet on \S+ with own address as source address \(addr:(?P<mac>[0-9a-f:]+)(?:, vlan:(?P<vlan>\d+))?\)",
+        r"^(?P<if>[\w.\-@]+): received packet on \S+ with own address as source address \(addr:(?P<mac>[0-9a-f:]+)(?:, vlan:(?P<vlan>\d+))?\)",
     )
     .expect("static regex")
 });

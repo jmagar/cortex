@@ -68,12 +68,20 @@ fn parse_access(caps: regex::Captures) -> Result<ParserOutput, ParserError> {
 
     let mut path = caps["path"].to_string();
     if path.len() > PATH_MAX {
-        path.truncate(PATH_MAX);
+        let mut n = PATH_MAX;
+        while !path.is_char_boundary(n) {
+            n -= 1;
+        }
+        path.truncate(n);
     }
 
     let mut ua = caps["ua"].to_string();
     if ua.len() > UA_MAX {
-        ua.truncate(UA_MAX);
+        let mut n = UA_MAX;
+        while !ua.is_char_boundary(n) {
+            n -= 1;
+        }
+        ua.truncate(n);
     }
 
     let mut metadata = Map::new();

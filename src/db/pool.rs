@@ -544,6 +544,13 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         |r| r.get(0),
     )?;
     if already_applied_13 == 0 {
+        // Wrap in an explicit transaction so a partial failure leaves the DB clean.
+        // rusqlite::Connection::execute_batch() calls sqlite3_exec() which runs
+        // each statement in its own implicit auto-commit — it is NOT atomic across
+        // the batch. A failed ALTER or CREATE INDEX mid-batch would leave some
+        // columns present but the version row absent, causing the next startup to
+        // error on duplicate ALTER TABLE. BEGIN IMMEDIATE / COMMIT makes the whole
+        // batch atomic.
         conn.execute_batch(
             "BEGIN IMMEDIATE;
              ALTER TABLE logs ADD COLUMN http_status  INTEGER;

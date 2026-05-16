@@ -568,7 +568,7 @@ Response:
 
 **Locked ambiguity:** spec §13.1 left the per-user scoping question open. **Locked: scan every `/home/*` when agent runs as root, current user otherwise.** Operator can override via agent config.
 
-**Cross-reference:** maps to `ProbeOutput::DiskBlackholes` in `docs/superpowers/specs/probe-trait.rs`.
+**Cross-reference:** maps to `ProbeOutput::DiskBlackholes` in `docs/contracts/probe-trait.rs`.
 
 ---
 
@@ -651,7 +651,7 @@ Response:
 
 **Freshness:** 30s default.
 
-**Cross-reference:** `ProbeOutput::DiskUsage` in `docs/superpowers/specs/probe-trait.rs`.
+**Cross-reference:** `ProbeOutput::DiskUsage` in `docs/contracts/probe-trait.rs`.
 
 ---
 
@@ -1543,9 +1543,9 @@ No API change. `correlate` transparently benefits from epic B's new structured c
 
 ## 7. Cross-Contract Dependencies
 
-- `disk_usage`, `disk_blackholes`, `mem_top`, `service_health`, `dns_status`, `network_neigh`, `agent_status` consume `ProbeOutput::*` variants from `docs/superpowers/specs/probe-trait.rs`.
-- `alerts_active`, `alerts_ack`, `rules_list`, `rules_fire_history` consume the `alert_state` table defined in `docs/superpowers/specs/db-additions.sql`.
-- `similar_incidents`, `ask_history`, `suggest_fix` consume the `incidents` table and the `IncidentCard` template defined in `docs/superpowers/specs/incident-card.md` and `db-additions.sql`.
+- `disk_usage`, `disk_blackholes`, `mem_top`, `service_health`, `dns_status`, `network_neigh`, `agent_status` consume `ProbeOutput::*` variants from `docs/contracts/probe-trait.rs`.
+- `alerts_active`, `alerts_ack`, `rules_list`, `rules_fire_history` consume the `alert_state` table defined in `docs/contracts/db-additions.sql`.
+- `similar_incidents`, `ask_history`, `suggest_fix` consume the `incidents` table and the `IncidentCard` template defined in `docs/contracts/incident-card.md` and `docs/contracts/db-additions.sql`.
 - `search`'s four new filters consume the `http_status`, `auth_outcome`, `dns_blocked`, `event_action` columns defined by epic B migration 10 (`docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` §5).
 - `status.pollers` block consumes the `poller_checkpoints` table defined in epic C §4.
 - `status.agents` block consumes the `agents` table defined in epic A §9.

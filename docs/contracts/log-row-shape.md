@@ -50,7 +50,7 @@ The table reflects the current struct in `src/db/models.rs` *plus* the four inde
 | `event_action` | `Option<String>` | yes | **(added by enrichment migration 10.)** Normalised event verb (`oom_kill`, `link_up`, `die`, `ban`, …). Indexed (partial). |
 | `parse_error` | `Option<String>` | yes | **(added by enrichment migration 10.)** `"{parser_name}: {ParserError::Display}"`, truncated to 512 bytes. Not indexed. |
 
-Note: `LogBatchEntry` in `src/db/models.rs` does **not** yet carry the last five fields — they will be added when epic 1wjr lands. Until then, parsers will need a sibling output struct merged into the row at write time; this contract documents the final post-1wjr shape.
+The enrichment fields (`http_status`, `auth_outcome`, `dns_blocked`, `event_action`, `parse_error`) are present in `LogBatchEntry` as of epic B (syslog-mcp-1wjr). Ingest sources leave them `None`; the enrichment pipeline populates them at flush time.
 
 ---
 
