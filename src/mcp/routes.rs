@@ -4,22 +4,21 @@ use std::time::Instant;
 
 use axum::{
     extract::State,
-    http::{HeaderValue, Method, StatusCode},
+    http::{header, HeaderName, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Json},
     routing::get,
     Router,
 };
 use serde_json::json;
-use tower_http::{
-    cors::{Any, CorsLayer},
-    limit::RequestBodyLimitLayer,
-};
+use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
 
 use super::rmcp_server::allowed_origins;
 use super::{build_auth_layer, streamable_http_config, streamable_http_service};
 use super::{AppState, AuthPolicy};
 
 const MCP_BODY_LIMIT_BYTES: u64 = 65_536;
+const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
+const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
 
 /// Build the MCP router
 pub fn router(state: AppState) -> Router {
@@ -145,7 +144,13 @@ fn cors_layer(config: &crate::config::McpConfig) -> CorsLayer {
     CorsLayer::new()
         .allow_origin(origins)
         .allow_methods([Method::POST, Method::GET])
-        .allow_headers(Any)
+        .allow_headers([
+            header::ACCEPT,
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            HeaderName::from_static(MCP_PROTOCOL_VERSION_HEADER),
+            HeaderName::from_static(MCP_SESSION_ID_HEADER),
+        ])
 }
 
 /// Health check — lightweight probe that verifies DB connectivity without

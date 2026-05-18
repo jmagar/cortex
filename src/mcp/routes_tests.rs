@@ -278,6 +278,51 @@ async fn mcp_cors_allows_configured_origins() {
 }
 
 #[tokio::test]
+async fn mcp_cors_preflight_allows_only_required_request_headers() {
+    let (mut state, _dir) = test_state_no_auth();
+    state.config.allowed_origins = vec!["https://syslog.example.com".into()];
+    let app = router(state);
+    let request = Request::builder()
+        .method(Method::OPTIONS)
+        .uri("/mcp")
+        .header("Origin", "https://syslog.example.com")
+        .header("Access-Control-Request-Method", "POST")
+        .header(
+            "Access-Control-Request-Headers",
+            "authorization,content-type,accept,mcp-protocol-version,mcp-session-id",
+        )
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let allowed = response
+        .headers()
+        .get("access-control-allow-headers")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_ascii_lowercase();
+    let allowed_tokens: Vec<&str> = allowed.split(',').map(str::trim).collect();
+    for header in [
+        "authorization",
+        "content-type",
+        "accept",
+        "mcp-protocol-version",
+        "mcp-session-id",
+    ] {
+        assert!(
+            allowed_tokens.iter().any(|t| *t == header),
+            "missing {header} from allow-headers: {allowed}"
+        );
+    }
+    assert!(
+        !allowed_tokens.iter().any(|t| *t == "x-unexpected-header"),
+        "CORS allow-headers must not reflect arbitrary request headers: {allowed}"
+    );
+}
+
+#[tokio::test]
 async fn mcp_rejects_wrong_token() {
     let h = TestHarness::with_token("secret-token".into());
     let body = jsonrpc_request(9, "tools/list", None);
