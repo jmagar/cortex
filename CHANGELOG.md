@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Doctor orchestration boundaries**: Moved full doctor report collection and
   formatting out of `main.rs` into a dedicated doctor module.
+- **HTTP CORS header allowlists**: MCP and non-MCP API CORS preflights now
+  allow only the request headers required by browser clients instead of
+  reflecting arbitrary headers.
 
 ### Fixed
 
@@ -26,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full-history count per grouped result. `ai_correlate` now batches related-log
   window lookups into one bounded query instead of issuing one database search
   per anchor.
+- **OTLP deferred endpoint auth parity**: `/v1/traces` now checks the same
+  bearer token policy as `/v1/logs` and `/v1/metrics` before returning its
+  deferred 404 response.
+- **MCP action inventory docs**: Updated the README action list to include
+  unaddressed error and notification administration actions.
 
 ## [0.25.2] - 2026-05-16
 
@@ -1268,7 +1276,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.25.2...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.25.4...HEAD
+[0.25.4]: https://github.com/jmagar/syslog-mcp/compare/v0.25.3...v0.25.4
+[0.25.3]: https://github.com/jmagar/syslog-mcp/compare/v0.25.2...v0.25.3
 [0.25.2]: https://github.com/jmagar/syslog-mcp/compare/v0.25.1...v0.25.2
 [0.25.1]: https://github.com/jmagar/syslog-mcp/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/jmagar/syslog-mcp/compare/v0.24.1...v0.25.0

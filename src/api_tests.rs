@@ -151,6 +151,39 @@ async fn api_routes_emit_cors_for_configured_port() {
 }
 
 #[tokio::test]
+async fn api_cors_preflight_allows_only_required_request_headers() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let request = Request::builder()
+        .method("OPTIONS")
+        .uri("/api/stats")
+        .header("Origin", "http://localhost:3100")
+        .header("Access-Control-Request-Method", "GET")
+        .header(
+            "Access-Control-Request-Headers",
+            "authorization,accept,x-unexpected-header",
+        )
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let allowed = response
+        .headers()
+        .get("access-control-allow-headers")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_ascii_lowercase();
+    assert!(allowed.contains("authorization"));
+    assert!(allowed.contains("accept"));
+    assert!(
+        !allowed.contains("x-unexpected-header"),
+        "CORS allow-headers must not reflect arbitrary request headers: {allowed}"
+    );
+}
+
+#[tokio::test]
 async fn correlate_route_returns_plain_api_json() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();

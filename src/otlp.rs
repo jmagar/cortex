@@ -203,13 +203,17 @@ async fn logs_handler(
 async fn metrics_handler(
     State(state): State<OtlpState>,
     headers: HeaderMap,
-    body: Bytes,
 ) -> axum::response::Response {
     if !is_authorized(&state, &headers) {
         return unauthorized();
     }
+    let content_length = headers
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
     tracing::warn!(
-        bytes = body.len(),
+        content_length,
         "OTLP metrics received but metrics ingestion is not supported"
     );
     (
@@ -222,7 +226,22 @@ async fn metrics_handler(
         .into_response()
 }
 
-async fn traces_handler() -> axum::response::Response {
+async fn traces_handler(
+    State(state): State<OtlpState>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    if !is_authorized(&state, &headers) {
+        return unauthorized();
+    }
+    let content_length = headers
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    tracing::warn!(
+        content_length,
+        "OTLP traces received but traces ingestion is not supported"
+    );
     (
         StatusCode::NOT_FOUND,
         Json(json!({
