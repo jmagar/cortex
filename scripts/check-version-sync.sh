@@ -104,13 +104,13 @@ fi
 
 # Check CHANGELOG.md has an entry for the current version
 if [ -f "CHANGELOG.md" ]; then
-  if ! grep -qF "$canonical" CHANGELOG.md; then
+  if ! grep -qE "^## \\[$canonical\\]([[:space:]]|$)" CHANGELOG.md; then
     if [ "$REQUIRE_CHANGELOG" -eq 1 ]; then
-      echo "[version-sync] FAIL — CHANGELOG.md has no entry for version $canonical"
+      echo "[version-sync] FAIL — CHANGELOG.md has no release heading for version $canonical"
       echo "  Add a changelog entry before releasing."
       exit 1
     else
-      echo "[version-sync] WARN — CHANGELOG.md has no entry for version $canonical"
+      echo "[version-sync] WARN — CHANGELOG.md has no release heading for version $canonical"
       echo "  Add a changelog entry before releasing."
     fi
   fi
