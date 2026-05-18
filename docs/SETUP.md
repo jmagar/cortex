@@ -62,7 +62,7 @@ SYSLOG_PORT=1514
 SYSLOG_MCP_HOST=0.0.0.0
 SYSLOG_MCP_PORT=3100
 
-# Optional: enable bearer auth on /mcp endpoint
+# Recommended for non-loopback binds: enable bearer auth on /mcp and OTLP endpoints
 #   openssl rand -hex 32
 SYSLOG_MCP_TOKEN=
 
@@ -193,7 +193,7 @@ For Docker ingest integration testing, keep the default smoke test focused on UD
 ### "401 Unauthorized" on tool calls
 
 - Verify `SYSLOG_MCP_TOKEN` in `.env` matches the token configured in your MCP client
-- If behind a reverse proxy (SWAG), handle auth at the proxy layer and leave `SYSLOG_MCP_TOKEN` unset
+- If behind a reverse proxy (SWAG), either bind `SYSLOG_MCP_HOST` to loopback, keep `SYSLOG_MCP_TOKEN` set, or explicitly set `SYSLOG_MCP_NO_AUTH=true` only when the proxy enforces upstream auth before traffic reaches syslog-mcp.
 
 ### No syslog messages arriving
 
@@ -222,5 +222,5 @@ syslog-mcp supports Google OAuth 2.0 in addition to the static bearer token. See
 
 - Google Console configuration (redirect URI, credentials)
 - Required env vars (`SYSLOG_MCP_AUTH_MODE`, `SYSLOG_MCP_PUBLIC_URL`, Google client ID/secret)
-- `config.toml` fields for allowlist, TTLs, and signing key path
+- `config.toml` fields for `admin_email`, TTLs, and signing key path
 - Operator FAQ (revoking users, rotating the JWT key)
