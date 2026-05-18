@@ -1037,11 +1037,12 @@ fn write_env(path: &Path, env: &BTreeMap<String, String>) -> io::Result<()> {
     // fsync the parent directory so the rename — not just the file
     // content — is durable across a power loss. Without this, the file
     // content (rename target) can survive while the directory entry
-    // pointing at it has not yet hit disk.
+    // pointing at it has not yet hit disk. Propagate the error: ignoring
+    // it would let us return Ok while the rename is not yet on stable
+    // storage, defeating the whole point of the atomic-write contract.
     if let Some(parent) = path.parent() {
-        if let Ok(dir) = std::fs::File::open(parent) {
-            let _ = dir.sync_all();
-        }
+        let dir = std::fs::File::open(parent)?;
+        dir.sync_all()?;
     }
     Ok(())
 }

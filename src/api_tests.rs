@@ -1657,13 +1657,11 @@ async fn db_vacuum_blocks_db_checkpoint_via_shared_permit() {
     drop(permit);
 }
 
-/// Single-flight: while the MAINTENANCE_PERMIT is held, a concurrent
-/// vacuum request must return 409 immediately. Holding the permit
-/// explicitly removes the race window so the test actually enforces the
-/// contention promise made by its name (instead of accepting any
-/// 200/409 outcome and silently passing when both wins).
+/// Single-flight (deterministic): while the MAINTENANCE_PERMIT is held,
+/// a vacuum request must return 409 immediately. Holding the permit
+/// explicitly removes the race window so the assertion is strict.
 #[tokio::test]
-async fn db_vacuum_concurrent_requests_second_returns_409() {
+async fn db_vacuum_request_returns_409_when_permit_held() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let _held = Arc::clone(&state.maintenance_permit)
         .try_acquire_owned()
@@ -1681,6 +1679,49 @@ async fn db_vacuum_concurrent_requests_second_returns_409() {
         status,
         axum::http::StatusCode::CONFLICT,
         "vacuum must 409 while MAINTENANCE_PERMIT is held"
+    );
+}
+
+/// Concurrent vacuum requests against the same ApiState: at least one
+/// must succeed (200) and the other is either 200 (raced wide) or 409
+/// (raced narrow). Neither may 5xx or block. Lossy by design — the
+/// permit-held variant above carries the strict contention check.
+#[tokio::test]
+async fn db_vacuum_concurrent_requests_no_5xx_at_least_one_success() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+
+    let app2 = app.clone();
+    let h1 = tokio::spawn(async move {
+        post_json(
+            app2,
+            "/api/db/vacuum",
+            json!({"full": false, "incremental_pages": 16}),
+            Some("secret"),
+        )
+        .await
+    });
+    let h2 = tokio::spawn(async move {
+        post_json(
+            app,
+            "/api/db/vacuum",
+            json!({"full": false, "incremental_pages": 16}),
+            Some("secret"),
+        )
+        .await
+    });
+    let (r1, r2) = tokio::join!(h1, h2);
+    let (s1, _) = r1.unwrap();
+    let (s2, _) = r2.unwrap();
+    for code in [s1, s2] {
+        assert!(
+            code == axum::http::StatusCode::OK || code == axum::http::StatusCode::CONFLICT,
+            "expected 200 or 409, got {code}"
+        );
+    }
+    assert!(
+        s1 == axum::http::StatusCode::OK || s2 == axum::http::StatusCode::OK,
+        "at least one vacuum should complete"
     );
 }
 

@@ -3236,12 +3236,22 @@ fn data_mount_phase_cached(
     let info = match cache.container_inspect(&container) {
         Ok(info) => info,
         Err(detail) => {
-            // Docker enumeration itself failed (daemon down, permission
-            // denied, etc.); per the doctor spec this is `warn`, not
-            // `skipped`. `skipped` is reserved for "container absent".
+            // Distinguish "container absent" (Skipped per doctor spec —
+            // ai-watch absent style) from "docker enumeration failed"
+            // (Warn — could not enumerate inputs). docker inspect on a
+            // missing container reports "No such object" / "no such
+            // container"; anything else is a probe failure.
+            let lower = detail.to_ascii_lowercase();
+            let status = if lower.contains("no such object")
+                || lower.contains("no such container")
+            {
+                SetupStatus::Skipped
+            } else {
+                SetupStatus::Warn
+            };
             return SetupPhase {
                 name,
-                status: SetupStatus::Warn,
+                status,
                 detail,
             };
         }
