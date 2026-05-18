@@ -69,6 +69,7 @@ Implement Agent 2's assignment from `06-all-issues.md`: CFR-004, CFR-010, and CF
 - `git push -u origin HEAD`: passed; pre-push hook reran `cargo test` successfully.
 - `gh pr create --base main --head work/cfr-mcp-identity`: created PR #32.
 - `gh pr view 32 --json comments,reviews,reviewDecision,statusCheckRollup`: CodeRabbit was rate-limited; no reviews were present; some CI checks were still queued or in progress immediately after PR creation.
+- Final PR status check: cubic and Copilot posted no-issue reviews; CodeRabbit remained rate-limited; GitHub CI was queued after the final note push.
 
 ## Errors Encountered
 
@@ -76,6 +77,7 @@ Implement Agent 2's assignment from `06-all-issues.md`: CFR-004, CFR-010, and CF
 - Initial focused tests without `RUSTC_WRAPPER=` failed in dependency compilation due to `sccache` allocation errors while zipping cache entries.
 - Lab `Agent` review substitutions were attempted for review waves, but the runtime reported `Agent type 'general-purpose' not found. Available agents:` with no usable types listed.
 - CodeRabbit posted a non-actionable rate-limit comment instead of a review; no actionable review findings were available to resolve during the session.
+- cubic and Copilot produced no actionable findings.
 
 ## Behavior Changes
 
@@ -115,5 +117,5 @@ Implement Agent 2's assignment from `06-all-issues.md`: CFR-004, CFR-010, and CF
 ## Next Steps
 
 - Fetch and address external PR comments if reviewers post actionable findings.
-- Wait for queued GitHub CI checks and cubic review to complete.
+- Wait for queued GitHub CI checks to complete.
 - Broader CFR-016 follow-up remains open for a future central action descriptor/schema/help refactor.
