@@ -159,3 +159,136 @@ fn mode_parse_accepts_binary_doctor() {
         Mode::DoctorBinary(_)
     ));
 }
+
+// ─── Bead 0p8r.6: global HTTP flag plumbing ─────────────────────────────────
+
+use serial_test::serial;
+
+/// Restores SYSLOG_API_TOKEN / SYSLOG_USE_HTTP on drop. Tests below use this
+/// to assert `--help` / `--version` work without any token in the env.
+struct EnvVarGuard {
+    name: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn unset(name: &'static str) -> Self {
+        let previous = std::env::var(name).ok();
+        std::env::remove_var(name);
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(v) => std::env::set_var(self.name, v),
+            None => std::env::remove_var(self.name),
+        }
+    }
+}
+
+#[test]
+#[serial]
+fn help_and_version_bypass_mode_resolution_without_token() {
+    // Bead .6 contract: --help and --version must NOT touch env / discovery /
+    // services. Without SYSLOG_API_TOKEN and SYSLOG_USE_HTTP set, they should
+    // still resolve to Help/Version without erroring.
+    let _g1 = EnvVarGuard::unset("SYSLOG_API_TOKEN");
+    let _g2 = EnvVarGuard::unset("SYSLOG_USE_HTTP");
+
+    assert_eq!(Mode::parse(vec!["--help".into()]).unwrap(), Mode::Help);
+    assert_eq!(Mode::parse(vec!["-h".into()]).unwrap(), Mode::Help);
+    assert_eq!(Mode::parse(vec!["help".into()]).unwrap(), Mode::Help);
+    assert_eq!(
+        Mode::parse(vec!["--version".into()]).unwrap(),
+        Mode::Version
+    );
+    assert_eq!(Mode::parse(vec!["-V".into()]).unwrap(), Mode::Version);
+    assert_eq!(Mode::parse(vec!["version".into()]).unwrap(), Mode::Version);
+}
+
+#[test]
+fn mode_parse_strips_http_flag_before_subcommand_dispatch() {
+    // `--http` before the subcommand keyword must not break dispatch.
+    let mode = Mode::parse(vec!["--http".into(), "search".into(), "foo".into()]).unwrap();
+    let invocation = match mode {
+        Mode::Cli(b) => *b,
+        other => panic!("expected Cli, got {other:?}"),
+    };
+    assert!(invocation.flags.force_http);
+}
+
+#[test]
+fn mode_parse_strips_http_flag_after_subcommand_dispatch() {
+    // `--http` after the subcommand keyword also works.
+    let mode = Mode::parse(vec!["search".into(), "--http".into(), "foo".into()]).unwrap();
+    let invocation = match mode {
+        Mode::Cli(b) => *b,
+        other => panic!("expected Cli, got {other:?}"),
+    };
+    assert!(invocation.flags.force_http);
+}
+
+#[test]
+fn mode_parse_server_flag_implies_http_path() {
+    let mode = Mode::parse(vec![
+        "--server".into(),
+        "http://other:3100".into(),
+        "search".into(),
+        "foo".into(),
+    ])
+    .unwrap();
+    let invocation = match mode {
+        Mode::Cli(b) => *b,
+        other => panic!("expected Cli, got {other:?}"),
+    };
+    assert_eq!(
+        invocation.flags.server.as_deref(),
+        Some("http://other:3100")
+    );
+    // --server alone does NOT set force_http; http_trigger() decides.
+    assert!(!invocation.flags.force_http);
+    assert_eq!(invocation.flags.http_trigger(), Some("--server"));
+}
+
+#[test]
+fn mode_parse_token_flag_implies_http_path() {
+    let mode = Mode::parse(vec!["search".into(), "--token=sekret".into(), "foo".into()]).unwrap();
+    let invocation = match mode {
+        Mode::Cli(b) => *b,
+        other => panic!("expected Cli, got {other:?}"),
+    };
+    assert_eq!(invocation.flags.token.as_deref(), Some("sekret"));
+    assert_eq!(invocation.flags.http_trigger(), Some("--token"));
+}
+
+#[test]
+fn mode_parse_routes_http_setup_to_cli_arm() {
+    // `setup` is recognised both by the dedicated Mode::Setup arm AND by the
+    // CLI dispatcher. With global flags present, the dedicated arm is skipped
+    // (because it requires `global == default`) and dispatch falls through
+    // to the CLI arm — run_cli is then responsible for rejecting it.
+    // This test pins that routing so a future refactor doesn't silently
+    // swallow --http on `setup`.
+    let mode = Mode::parse(vec!["--http".into(), "setup".into(), "check".into()]).expect("parses");
+    let invocation = match mode {
+        Mode::Cli(b) => *b,
+        other => panic!("expected Cli (routed to run_cli for the reject), got {other:?}"),
+    };
+    assert!(invocation.flags.force_http);
+    assert!(matches!(
+        invocation.command,
+        super::cli::CliCommand::Setup(_)
+    ));
+}
+
+#[test]
+fn mode_parse_rejects_http_flag_on_serve_mcp() {
+    let err = Mode::parse(vec!["--http".into(), "serve".into(), "mcp".into()]).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("only apply to CLI query commands"),
+        "expected guard message, got: {msg}"
+    );
+}

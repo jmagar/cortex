@@ -12,6 +12,9 @@ Complete documentation for `syslog-mcp` -- a Rust syslog receiver and MCP server
 | `SETUP.md` | Step-by-step setup guide -- clone, build, configure, deploy, verify (at `docs/SETUP.md`) |
 | `CONFIG.md` | Configuration reference -- config.toml, env vars, storage budget |
 | `CLI.md` | Direct CLI reference -- local search, tail, errors, hosts, correlate, and stats commands |
+| `api.md` | REST API endpoint matrix (22 routes), versioning, perf, threat model, response caps, VACUUM caveats |
+| `architecture.md` | Caller → DB diagram (HTTP CLI default + direct-SQLite consumers) |
+| `rollout.md` | Manual v0.26 upgrade playbook for HTTP CLI cutover |
 | `CHECKLIST.md` | Pre-release quality checklist -- version sync, security, CI, registry |
 | `GUARDRAILS.md` | Security guardrails -- credentials, Docker, auth, input handling |
 | `INVENTORY.md` | Component inventory -- tools, env vars, surfaces, dependencies |

@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-05-18
+
+### Breaking
+
+- **`SYSLOG_API_ENABLED` removed**: the REST API at `/api/*` is now
+  unconditionally mounted. Container startup requires a non-empty
+  `SYSLOG_API_TOKEN` and fails fast without one. Run
+  `syslog setup repair` BEFORE upgrading the container so the token is
+  provisioned automatically (see `docs/rollout.md`).
+- **`--local` CLI flag removed**: dropped in the cutover series — its
+  behaviour is now the default unless `SYSLOG_USE_HTTP=true` is set
+  (which `setup repair` writes on first install).
+
+### Behavior change
+
+- **CLI defaults to HTTP transport** via `/api/*` for every command
+  with an HTTP backend (queries, AI, DB status/integrity/checkpoint/
+  vacuum). Drift between the container's view of the database and the
+  CLI's view is no longer possible for these commands. To opt out
+  (e.g., for ad-hoc direct-DB queries during incident response),
+  `unset SYSLOG_USE_HTTP` in the shell or remove the line from
+  `~/.syslog-mcp/.env`. The CLI bails with a descriptive error if
+  `--http` is passed to a local-only command (`db backup`,
+  `ai index`/`add`/`doctor`/`smoke-watch`/`watch-status`/`watch`).
+- **`setup repair`** now writes `SYSLOG_USE_HTTP=true` on first install
+  using the same idempotent `entry().or_insert_with()` pattern as
+  `SYSLOG_API_TOKEN`. Existing operator overrides (including
+  `SYSLOG_USE_HTTP=false` and the empty value) are preserved
+  byte-for-byte.
+
+### Added
+
+- **`docs/rollout.md`**: manual rollout playbook with pre-deploy
+  checklist, deploy order, post-deploy verification windows, token
+  rotation, and rollback procedure.
+- **`scripts/smoke-test-http.sh`**: post-deploy smoke harness that
+  exercises every HTTP-supported CLI command plus the local-only
+  fallbacks. Run against a healthy container to verify the cutover.
+
 ## [0.25.4] - 2026-05-18
 
 ### Changed
@@ -1276,7 +1315,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.25.4...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/jmagar/syslog-mcp/compare/v0.25.4...v0.26.0
 [0.25.4]: https://github.com/jmagar/syslog-mcp/compare/v0.25.3...v0.25.4
 [0.25.3]: https://github.com/jmagar/syslog-mcp/compare/v0.25.2...v0.25.3
 [0.25.2]: https://github.com/jmagar/syslog-mcp/compare/v0.25.1...v0.25.2

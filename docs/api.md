@@ -1,0 +1,303 @@
+# syslog-mcp REST API
+
+> Canonical reference for the always-on `/api/*` surface introduced by
+> epic `syslog-mcp-0p8r` (v0.26). All endpoints require a bearer token
+> (`Authorization: Bearer $SYSLOG_API_TOKEN`); 401 is returned for
+> missing/invalid tokens regardless of bind address.
+>
+> CLI commands route here by default since v0.26 via
+> `SYSLOG_USE_HTTP=true` written to `~/.syslog-mcp/.env` by
+> `syslog setup repair`. See [`docs/architecture.md`](architecture.md)
+> for the caller → DB diagram and [`docs/rollout.md`](rollout.md) for
+> the manual upgrade playbook.
+
+---
+
+## Endpoint matrix
+
+22 routes total. Scope is `read` (mounted via `axum::routing::get`,
+hits read-side `db_permits`) or `admin` (POST + `MAINTENANCE_PERMIT`
+single-flight, audited via `tracing::warn!` before the service call).
+All responses are JSON; error bodies are `{"error": "<message>"}`.
+
+### Syslog queries (7)
+
+These existed before the epic; bead `.1` only added `/api/version`.
+They are documented here for completeness because the CLI now routes
+to them by default.
+
+| Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GET | `/api/search` | read | query params: `query?`, `hostname?`, `source_ip?`, `severity?`, `app_name?`, `facility?`, `process_id?`, `from?`, `to?`, `limit?` (u32) | `SearchLogsResponse { count: usize, logs: [LogEntry] }` | 200, 400, 401, 503, 500 | Y | FTS5 search; `deny_unknown_fields` rejects typos. |
+| GET | `/api/tail` | read | query: `hostname?`, `source_ip?`, `app_name?`, `severity_min?`, `n?` (u32) | `SearchLogsResponse { count: usize, logs: [LogEntry] }` (tail order) | 200, 400, 401, 503, 500 | Y | `severity_min` honoured per RFC severity ordering. |
+| GET | `/api/errors` | read | query: `from?`, `to?`, `group_by?` (`app_name` only) | `GetErrorsResponse { summary: [ErrorSummaryEntry] }` | 200, 400, 401, 503, 500 | Y | Counts by host (and optional secondary key). |
+| GET | `/api/hosts` | read | (none) | `ListHostsResponse { hosts: [HostEntry] }` | 200, 401, 503, 500 | Y | Inventory of seen hostnames. |
+| GET | `/api/correlate` | read | query: `reference_time` (REQUIRED, RFC 3339), `window_minutes?` (u32), `severity_min?`, `hostname?`, `source_ip?`, `query?`, `limit?` (u32) | `CorrelateEventsResponse { reference_time, window_minutes, window_from, window_to, severity_min, total_events, truncated, hosts_count, hosts: [CorrelatedHost] }` | 200, 400, 401, 503, 500 | Y | **Distinct from `/api/ai/correlate`** — see disambiguation below. |
+| GET | `/api/stats` | read | (none) | `DbStats { total_logs, total_hosts, oldest_log?, newest_log?, logical_db_size_mb, physical_db_size_mb, free_disk_mb?, max_db_size_mb, min_free_disk_mb, write_blocked, phantom_fts_rows }` | 200, 401, 503, 500 | Y | Hot path; no PRAGMA per request. |
+| GET | `/api/version` | read | (none) | `VersionInfo { version, git_sha?, schema_version }` | 200, 401 | Y | **Cached at startup** — never touches SQLite per request (eng-review #A3). Returns 404 if older server lacks the route (see Versioning policy). |
+
+### AI session queries (8) — bead `.2`
+
+| Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GET | `/api/sessions` | read | query: `project?`, `tool?`, `hostname?`, `from?`, `to?`, `limit?` | `ListSessionsResponse { count, sessions: [AiSessionEntry] }` | 200, 400, 401, 503, 500 | Y | Inventory of indexed AI transcripts. |
+| GET | `/api/ai/search` | read | query: `query` (REQUIRED), `project?`, `tool?`, `from?`, `to?`, `limit?` (u32) | `SearchSessionsResponse { total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, truncated, sessions: [SearchedSessionEntry], limit_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500** — see Response size caps. |
+| GET | `/api/ai/abuse` | read | query: `project?`, `tool?`, `from?`, `to?`, `limit?`, `before?` (u32), `after?` (u32), **`terms?`** (repeated key: `?terms=foo&terms=bar`) | `AbuseSearchResponse { terms, candidate_rows, candidate_cap, candidate_window_truncated, truncated, matches: [AbuseMatch], limit_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500**. Decoded via `serde_qs::axum::QsQuery`, so `Vec<String>` is supported through repeated `terms=` keys (the CLI's `HttpClient` serializes the shared request type the same way). |
+| GET | `/api/ai/correlate` | read | query: `project?`, `tool?`, `session_id?`, `ai_query?`, `log_query?`, `hostname?`, `source_ip?`, `app_name?`, `from?`, `to?`, `window_minutes?` (u32), `severity_min?`, `limit?` (u32), `events_per_anchor?` (u32) | `AiCorrelateResponse { window_minutes, severity_min, total_anchors, anchor_rows, anchor_limit, anchors_truncated, related_limit_per_anchor, total_related_events, anchors: [AiCorrelationAnchor], events_per_anchor_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `events_per_anchor` clamped at **50** — see Response size caps. Correlates AI transcript anchors against system logs. |
+| GET | `/api/ai/blocks` | read | query: `project?`, `tool?`, `from?`, `to?` | `UsageBlocksResponse { total_blocks, truncated, blocks: [UsageBlock] }` | 200, 400, 401, 503, 500 | Y | Time-bucketed usage. |
+| GET | `/api/ai/context` | read | query: `project` (REQUIRED, non-empty — handler 400s on empty per eng-review #A7), `tool?`, `limit?` | `ProjectContextResponse { project, tools, sessions, hostnames, first_seen?, last_seen?, event_count, recent_entries_truncated, recent_entries: [LogEntry] }` | 200, 400, 401, 503, 500 | Y | Empty `project=` rejected with explicit 400. |
+| GET | `/api/ai/tools` | read | query: `project?`, `from?`, `to?` | `ListAiToolsResponse { total_tools, truncated, tools: [AiToolEntry] }` | 200, 400, 401, 503, 500 | Y | Tool inventory. |
+| GET | `/api/ai/projects` | read | query: `tool?`, `from?`, `to?` | `ListAiProjectsResponse { total_projects, truncated, projects: [AiProjectEntry] }` | 200, 400, 401, 503, 500 | Y | Project inventory. |
+
+### AI diagnostic + admin (3) — bead `.3`
+
+| Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GET | `/api/ai/checkpoints` | read | query: `errors_only?` (bool), `missing_only?` (bool), `limit?` (u32). `deny_unknown_fields`. | service-shaped (list of checkpoint records with parse-error metadata) | 200, 400, 401, 503, 500 | Y | Diagnostic inventory of indexed AI transcript checkpoints. |
+| GET | `/api/ai/errors` | read | query: `limit?`. `deny_unknown_fields`. | service-shaped (list of recent transcript parse errors) | 200, 400, 401, 503, 500 | Y | Surfaces parse failures from the AI indexer. |
+| POST | `/api/ai/prune-checkpoints` | **admin** | body: `{ "dry_run": bool (REQUIRED), "missing_only"?: bool, "limit"?: u32 }`. `deny_unknown_fields`. | service-shaped (count of pruned/would-prune rows) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention with `/api/db/vacuum` or `/api/db/checkpoint`. `dry_run` is **REQUIRED and explicit** — a missing key returns 400 (defends against `POST {}` mass-delete, eng-review C3). `caller_ip` audit-logged via `tracing::warn!` BEFORE the service call. |
+
+### DB ops (4) — bead `.4`
+
+| Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GET | `/api/db/status` | read | (none) | `DbMaintenanceStatus { db_path, page_count, freelist_count, page_size, logical_size_bytes, physical_size_bytes, wal_size_bytes?, shm_size_bytes?, auto_vacuum, journal_mode, integrity_ok?, integrity_messages: [String] }` | 200, 401, 503, 500 | Y | DIFFERENT shape from `/api/stats`: a maintenance-focused PRAGMA snapshot (page/freelist counts, WAL/SHM sizes, journal mode, optional integrity result). Bypasses `MAINTENANCE_PERMIT`. |
+| GET | `/api/db/integrity` | read | query: `quick?` (bool — default `false` runs full `PRAGMA integrity_check`; `true` runs `PRAGMA quick_check`). `deny_unknown_fields`. | `DbIntegrityResult` | 200, 400, 401, 503, 500 | Y | Full check on a multi-GB DB can be slow but does NOT take `MAINTENANCE_PERMIT`. |
+| POST | `/api/db/checkpoint` | **admin** | body: `{ "mode": "passive" \| "full" \| "restart" \| "truncate" }`. Validated handler-side BEFORE the service call (eng-review #A17). | `DbCheckpointResult` | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention. `caller_ip` audit-logged before service call. |
+| POST | `/api/db/vacuum` | **admin** | body: `{ "full": bool, "force"?: bool, "incremental_pages"?: u32 }`. `force` is `Option<bool>` so the size pre-flight only relaxes on explicit `"force": true`. | `DbVacuumResult` (incl. `after_physical_size_bytes`) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`. Size pre-flight: `full && !force` reads the LIVE `page_count * page_size` (no cached snapshot) on every call and returns 409 if logical size > **2 GB**. `caller_ip` audit-logged before service call. See "VACUUM on large DBs" below. |
+
+**Total: 22 routes** (1 added in bead `.1` + 6 pre-existing + 8 in `.2` + 3 in `.3` + 4 in `.4`).
+
+---
+
+## Versioning policy
+
+`/api/version` returns `{ version, git_sha?, schema_version }` cached at
+startup. Two version-skew rules:
+
+- **404 on a known route name = "endpoint not on this server — upgrade."**
+  Newer CLI calling an older container will see Axum's default 404 for
+  routes added in later beads (`/api/db/vacuum`, `/api/ai/prune-checkpoints`,
+  etc.). The CLI maps that to a user-facing "upgrade the container or
+  unset `SYSLOG_USE_HTTP` to use direct DB" message.
+- **`/api/capabilities` is deferred.** No structured capability map ships
+  in v0.26. The version + schema_version pair plus 404 semantics cover the
+  current single-deployer use case; a capabilities endpoint can be added
+  without breaking existing clients when needed.
+
+---
+
+## Performance
+
+The HTTP transport adds roughly **~15-30 ms of round-trip overhead per
+call on loopback** on top of the underlying service work (request parse,
+auth check, response serialise, TCP send/recv). For one-off commands
+this is invisible. For scripted loops it dominates fast queries.
+
+Operators can measure the overhead on their own host by running the same
+query 100× both ways. Direct (default-pre-v0.26 path):
+
+```bash
+# direct SQLite — bypasses /api/*
+unset SYSLOG_USE_HTTP
+time for i in $(seq 1 100); do syslog hosts > /dev/null; done
+```
+
+HTTP:
+
+```bash
+# REST transport — same call, with auth + transport overhead
+export SYSLOG_USE_HTTP=true
+# SYSLOG_MCP_URL + SYSLOG_API_TOKEN must already be set in env
+time for i in $(seq 1 100); do syslog hosts > /dev/null; done
+```
+
+The difference between the two `real` times divided by 100 is the
+per-call transport cost. Expect ~1.5–3.0 s of additional wall time over
+100 invocations on the same host (i.e. 15–30 ms per call).
+
+For batch loops that don't need cross-host coordination (e.g. iterating
+over local hostnames inside a maintenance script on the deploy host),
+operators can opt out of HTTP transport for the duration of the script:
+
+```bash
+( unset SYSLOG_USE_HTTP; \
+  for h in $(syslog hosts --json | jq -r '.hosts[].hostname'); do \
+    syslog tail --hostname "$h" --n 50; \
+  done )
+```
+
+Inside the subshell `SYSLOG_USE_HTTP` is unset so each `syslog` call
+goes straight to SQLite via `RuntimeCore::load_query_only`. The parent
+shell environment is unaffected.
+
+---
+
+## Security / threat model
+
+- **Bearer tokens in env.** `SYSLOG_API_TOKEN` is passed via the
+  container/CLI environment. On a Linux host any process running as the
+  same user can read `/proc/<pid>/environ` and recover the token. The
+  homelab acceptance is: the host is single-owner; nothing untrusted
+  runs as the same user as the syslog-mcp container or the CLI. **Do
+  not share container-host shell access with untrusted users** — this
+  is the documented model, not a future bug to fix.
+- **Token storage.** `setup repair` writes `~/.syslog-mcp/.env` with
+  mode `0600` (`-rw-------`). Verify with `ls -l ~/.syslog-mcp/.env`
+  before reporting a "leaked token" — a `0644` file is a configuration
+  error, not a deliberate design.
+- **TLS termination is external.** The `/api/*` surface speaks plain
+  HTTP. Production deployments terminate TLS at SWAG (or any reverse
+  proxy) and forward to the container over the internal bridge. The
+  API itself **emits a startup warning** when bound to a non-loopback
+  address while `SYSLOG_MCP_PUBLIC_URL` does not begin with `https://`,
+  so a misconfiguration is loud at first boot rather than silent
+  in production.
+- **Single-token model.** `build_auth_layer` accepts exactly one token;
+  `AuthPolicy::Mounted` is enforced for `/api/*` regardless of bind
+  address (eng-review C1). The "scope" column in this matrix
+  (`read`/`admin`) is **documentation only** — there is no per-token
+  scope check today. A multi-token rollout (e.g. read-only viewer
+  token, separate admin token) would slot into `auth_state` without a
+  router rewrite; until then, every valid token can call every route.
+  This is reflected by a code-comment in `build_auth_layer` so future
+  contributors don't assume runtime scope enforcement.
+
+---
+
+## `/api/correlate` vs `/api/ai/correlate`
+
+These are **distinct operations** and the names trip people up. Quick
+disambiguation:
+
+| Aspect | `/api/correlate` | `/api/ai/correlate` |
+| --- | --- | --- |
+| Service method | `correlate_events` | `correlate_ai_logs` |
+| Anchored on | A caller-supplied `reference_time` (RFC 3339) | AI transcript anchors matched by `ai_query`/`session_id`/etc. |
+| Returns | Hosts within a time window around the anchor, grouped by hostname | AI anchor events plus correlated system logs per anchor |
+| Use case | "What was happening across hosts around 03:17 UTC?" | "What syslog activity correlates with this AI session?" |
+| Capped at | Single time window, single anchor | Multiple anchors; **`events_per_anchor` capped at 50** |
+
+The router in `src/api.rs::router()` groups them under
+`// --- syslog queries ---` and `// --- ai session queries ---`
+block comments to keep maintainers oriented (eng-review pattern note).
+
+---
+
+## Response size caps
+
+REST handlers clamp some caller-supplied limits on the way IN and mark
+the clamp in the response. The caps are constants in `src/api.rs`:
+
+| Endpoint | Field | Cap | Surfaced as |
+| --- | --- | --- | --- |
+| `/api/ai/search` | `limit` | **500** (`REST_AI_LIMIT_CAP`) | `limit_clamped_to: 500` + `truncated: true` |
+| `/api/ai/abuse` | `limit` | **500** (`REST_AI_LIMIT_CAP`) | `limit_clamped_to: 500` + `truncated: true` |
+| `/api/ai/correlate` | `events_per_anchor` | **50** (`REST_CORRELATE_EVENTS_PER_ANCHOR_CAP`) | `events_per_anchor_clamped_to: 50` |
+
+The MCP surface uses the service-layer clamps only; these REST caps are
+the second line of defence so a misbehaving client can't tank the
+container with a 100000-row request.
+
+---
+
+## VACUUM on large DBs
+
+`POST /api/db/vacuum` enforces a **live 2 GB size pre-flight** when
+`{"full": true, "force": <not true>}` — `db_logical_size_bytes()` reads
+`page_count * page_size` fresh on every call so a long-running container
+cannot defeat the guard with a stale startup snapshot. Two operational
+caveats:
+
+- The default-reverse-proxy HTTP timeout (Axum upstream / SWAG) is on
+  the order of minutes. A `VACUUM` on a database larger than ~10 GB
+  can exceed it and the client will see a 504 from the proxy even
+  though the VACUUM is still running on the server. The server-side
+  single-flight permit (`MAINTENANCE_PERMIT`) is still held, so
+  retries will 409 until the original VACUUM commits.
+- **Workaround for large DBs:** drop HTTP transport for this one call
+  and run the vacuum through the service layer directly:
+
+  ```bash
+  ( unset SYSLOG_USE_HTTP && syslog db vacuum --full --force )
+  ```
+
+  The subshell scoping keeps `SYSLOG_USE_HTTP` set for everything else.
+  Pair with a downtime/ingest-quiesce window since `full` blocks
+  writers regardless of transport.
+
+---
+
+## Local-only commands
+
+A handful of CLI subcommands intentionally stay on the direct-SQLite or
+host-shell path even with `SYSLOG_USE_HTTP=true`. The per-command
+reasons (no taxonomy):
+
+- `syslog ai watch` — long-running daemon. HTTP would require a
+  streaming bidirectional surface; the daemon is the writer for the
+  same DB the container reads.
+- `syslog ai watch-status` — wraps `systemctl --user show
+  syslog-ai-watch.service` on the host. The container has no view of
+  the host systemd state.
+- `syslog ai index`, `syslog ai add`, `syslog ai doctor`,
+  `syslog ai smoke-watch` — all touch the host filesystem (transcript
+  paths, watcher state). The container can't see them.
+- `syslog db backup` — writes a backup file to a host path. Passing
+  the destination over HTTP would force a container-side filesystem
+  the operator never asked for.
+
+These all keep working when `SYSLOG_USE_HTTP=true` because the CLI
+dispatch table never routes them through the HTTP client.
+
+---
+
+## Operational option: weekly compose-doctor
+
+The `compose doctor` subcommand runs the two drift diagnostics
+(`data-mount`, `ai-watch-coord`) and exits non-zero on a canonical
+mismatch. A simple way to surface ai-watch / data-mount drift without
+manual invocation is a weekly user-systemd timer:
+
+```ini
+[Unit]
+Description=syslog-mcp drift check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/syslog compose doctor --json
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+```
+
+```ini
+[Unit]
+Description=run syslog-mcp drift check weekly
+
+[Timer]
+OnCalendar=Mon *-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Pair with whatever push-notification path the operator already has
+(Gotify, ntfy, email) keyed off `systemctl --user status
+syslog-mcp-doctor.timer` exit codes. The `--json` output is stable
+enough for jq/grep alerting.
+
+---
+
+## See also
+
+- [`docs/architecture.md`](architecture.md) — caller → DB diagram and
+  the three direct-SQLite consumers.
+- [`docs/rollout.md`](rollout.md) — manual upgrade playbook for the
+  v0.26 cutover.
+- [`docs/CLI.md`](CLI.md) — direct CLI command reference.
+- `src/api.rs` — router and handler source of truth.
+- `src/app/models.rs` — typed request/response structs.

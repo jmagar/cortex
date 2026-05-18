@@ -28,6 +28,14 @@ use crate::scanner;
 
 const DB_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Service-layer entry point bridging request structs to SQLite.
+///
+/// `Clone` is cheap — every field is either `Arc`-wrapped or a small `Copy`
+/// scalar — and the type is intentionally Clone-friendly so callers like
+/// `ai_watch::run` can take ownership without forcing a borrow through async
+/// task boundaries (bead 0p8r.24). The other 5 LOCAL-only command dispatchers
+/// take `&SyslogService` because they don't move the service into a spawned
+/// task; both patterns are correct.
 #[derive(Clone)]
 pub struct SyslogService {
     pool: Arc<DbPool>,
@@ -316,6 +324,7 @@ impl SyslogService {
             related_limit_per_anchor: related_limit as usize,
             total_related_events,
             anchors: correlated,
+            events_per_anchor_clamped_to: None,
         })
     }
 
@@ -502,6 +511,20 @@ impl SyslogService {
                 log_frames,
                 checkpointed_frames,
             })
+        })
+        .await
+    }
+
+    /// Read the live `page_count * page_size` (logical size, in bytes) via a
+    /// fresh PRAGMA pair. Used by the `POST /api/db/vacuum` pre-flight in
+    /// `src/api.rs::db_vacuum` so the 2GB guard cannot be defeated by a stale
+    /// startup snapshot (bead 0p8r.17). Cheap enough to call per-request:
+    /// two `PRAGMA` reads on a held connection inside `spawn_blocking`.
+    pub async fn db_logical_size_bytes(&self) -> ServiceResult<u64> {
+        self.run_db(move |pool| {
+            let page_count = db::db_pragma_i64(pool, "page_count")?;
+            let page_size = db::db_pragma_i64(pool, "page_size")?;
+            Ok((page_count.max(0) as u64).saturating_mul(page_size.max(0) as u64))
         })
         .await
     }
