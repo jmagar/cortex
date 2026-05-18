@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::{
     compose::{
-        CliDockerInspect, ComposeDefaults, ComposeService, ComposeTarget, DiagnosticSeverity,
+        self, CliDockerInspect, ComposeDefaults, ComposeService, ComposeTarget, DiagnosticSeverity,
         ProcessRunner,
     },
     runtime::RuntimeCore,
@@ -274,9 +274,25 @@ impl JsonDoctorReport {
             })
             .unwrap_or(0);
 
+        let top_level_errors = u64::from(self.setup.get("error").is_some())
+            + u64::from(self.compose.get("error").is_some())
+            + u64::from(self.ai.get("error").is_some());
+        let ai_failure_errors = self
+            .ai
+            .get("checkpoint_error_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            + self
+                .ai
+                .get("parse_error_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+
         setup_errors.saturating_sub(setup_dev_errors)
             + compose_errors
             + self.binary.runtime_error_count()
+            + top_level_errors
+            + ai_failure_errors
     }
 }
 
@@ -334,16 +350,14 @@ fn collect_compose_section() -> DoctorSection {
         ComposeService::new(CliDockerInspect, ProcessRunner, ComposeDefaults::default());
     match compose_svc.status(&ComposeTarget::default()) {
         Ok(status) => {
-            let running = status
-                .status
-                .as_deref()
-                .is_some_and(|s| !s.to_ascii_lowercase().contains("exit") && s != "stopped");
+            let runtime_state = compose::mcp_projection(&status).runtime_state;
+            let setup_status = match runtime_state {
+                compose::ComposeRuntimeState::Healthy => SetupStatus::Ok,
+                compose::ComposeRuntimeState::Degraded => SetupStatus::Warn,
+                _ => SetupStatus::Error,
+            };
             phases.push(DoctorPhase::new(
-                if running {
-                    SetupStatus::Ok
-                } else {
-                    SetupStatus::Error
-                },
+                setup_status,
                 "status",
                 format!(
                     "{} ({})",
@@ -368,7 +382,7 @@ fn collect_compose_section() -> DoctorSection {
                         format!("{} {} -> /data", m.kind, src),
                     ));
                 }
-                None if running => phases.push(DoctorPhase::new(
+                None if matches!(runtime_state, compose::ComposeRuntimeState::Healthy | compose::ComposeRuntimeState::Degraded) => phases.push(DoctorPhase::new(
                     SetupStatus::Error,
                     "data_volume",
                     "no /data mount",

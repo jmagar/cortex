@@ -581,10 +581,12 @@ fn add_column_if_missing(
     conn: &Connection,
     table: &str,
     column: &str,
-    definition: &str,
+    column_type: &str,
 ) -> rusqlite::Result<()> {
     if !column_exists(conn, table, column)? {
-        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {definition};"))?;
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {column_type};"
+        ))?;
     }
     Ok(())
 }
@@ -595,11 +597,11 @@ fn apply_migration_13(conn: &Connection) -> rusqlite::Result<()> {
     // of failing on duplicate columns with no version row.
     conn.execute_batch("BEGIN IMMEDIATE;")?;
     let result = (|| {
-        add_column_if_missing(conn, "logs", "http_status", "http_status INTEGER")?;
-        add_column_if_missing(conn, "logs", "auth_outcome", "auth_outcome TEXT")?;
-        add_column_if_missing(conn, "logs", "dns_blocked", "dns_blocked INTEGER")?;
-        add_column_if_missing(conn, "logs", "event_action", "event_action TEXT")?;
-        add_column_if_missing(conn, "logs", "parse_error", "parse_error TEXT")?;
+        add_column_if_missing(conn, "logs", "http_status", "INTEGER")?;
+        add_column_if_missing(conn, "logs", "auth_outcome", "TEXT")?;
+        add_column_if_missing(conn, "logs", "dns_blocked", "INTEGER")?;
+        add_column_if_missing(conn, "logs", "event_action", "TEXT")?;
+        add_column_if_missing(conn, "logs", "parse_error", "TEXT")?;
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_logs_http_status_time
                  ON logs(http_status, timestamp) WHERE http_status IS NOT NULL;
