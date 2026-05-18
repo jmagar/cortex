@@ -274,25 +274,20 @@ impl JsonDoctorReport {
             })
             .unwrap_or(0);
 
+        // Counts top-level `{"error": ...}` markers that the collector
+        // emits when a section fails wholesale. Per-counter AI failures
+        // (checkpoint_error_count / parse_error_count) remain warnings in
+        // both renderers — they're inventory signals, not fatal errors,
+        // and text-doctor treats them the same way (see render_text in
+        // collect_ai_section).
         let top_level_errors = u64::from(self.setup.get("error").is_some())
             + u64::from(self.compose.get("error").is_some())
             + u64::from(self.ai.get("error").is_some());
-        let ai_failure_errors = self
-            .ai
-            .get("checkpoint_error_count")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0)
-            + self
-                .ai
-                .get("parse_error_count")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
 
         setup_errors.saturating_sub(setup_dev_errors)
             + compose_errors
             + self.binary.runtime_error_count()
             + top_level_errors
-            + ai_failure_errors
     }
 }
 
@@ -382,11 +377,17 @@ fn collect_compose_section() -> DoctorSection {
                         format!("{} {} -> /data", m.kind, src),
                     ));
                 }
-                None if matches!(runtime_state, compose::ComposeRuntimeState::Healthy | compose::ComposeRuntimeState::Degraded) => phases.push(DoctorPhase::new(
-                    SetupStatus::Error,
-                    "data_volume",
-                    "no /data mount",
-                )),
+                None if matches!(
+                    runtime_state,
+                    compose::ComposeRuntimeState::Healthy | compose::ComposeRuntimeState::Degraded
+                ) =>
+                {
+                    phases.push(DoctorPhase::new(
+                        SetupStatus::Error,
+                        "data_volume",
+                        "no /data mount",
+                    ))
+                }
                 None => {}
             }
             for diag in &status.diagnostics {
