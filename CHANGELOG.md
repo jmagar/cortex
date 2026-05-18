@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.4] - 2026-05-18
+
+### Changed
+
+- **Doctor orchestration boundaries**: Moved full doctor report collection and
+  formatting out of `main.rs` into a dedicated doctor module.
+
+### Fixed
+
+- **Migration 13 drift recovery**: Startup now tolerates enrichment columns
+  that already exist without a matching migration row and restores missing
+  migration indexes/version metadata.
+- **Review artifact preservation**: Copied the consolidated full-review issue
+  register into tracked docs.
+
 ## [0.25.2] - 2026-05-16
 
 ### Changed

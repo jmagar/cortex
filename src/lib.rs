@@ -5,6 +5,7 @@ pub mod api;
 pub mod app;
 pub mod compose;
 pub mod config;
+pub mod doctor;
 pub mod enrich;
 pub mod logging;
 pub mod mcp;
