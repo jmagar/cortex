@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Release enforcement**: Pinned CI and crates publish GitHub Actions to full
+  commit SHAs, added version-sync checks to CI/publish, made release
+  changelog checks fail closed, and routed `just publish` through the repo
+  release scripts plus test/clippy gates.
+
 ## [0.26.0] - 2026-05-18
 
 ### Breaking

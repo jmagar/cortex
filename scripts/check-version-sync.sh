@@ -1,9 +1,32 @@
 #!/usr/bin/env bash
-# check-version-sync.sh — Pre-commit hook to verify all version-bearing files match.
-# Exits non-zero if versions are out of sync or CHANGELOG.md is missing an entry.
+# check-version-sync.sh — verify all version-bearing files match.
+# Exits non-zero if versions are out of sync. With --require-changelog, also
+# exits non-zero if CHANGELOG.md is missing an entry for the canonical version.
 set -euo pipefail
 
-PROJECT_DIR="${1:-.}"
+REQUIRE_CHANGELOG=0
+PROJECT_DIR="."
+
+for arg in "$@"; do
+  case "$arg" in
+    --require-changelog)
+      REQUIRE_CHANGELOG=1
+      ;;
+    --help|-h)
+      echo "Usage: $0 [--require-changelog] [PROJECT_DIR]"
+      exit 0
+      ;;
+    -*)
+      echo "[version-sync] Unknown option: $arg" >&2
+      echo "Usage: $0 [--require-changelog] [PROJECT_DIR]" >&2
+      exit 2
+      ;;
+    *)
+      PROJECT_DIR="$arg"
+      ;;
+  esac
+done
+
 cd "$PROJECT_DIR"
 
 versions=()
@@ -82,10 +105,18 @@ fi
 # Check CHANGELOG.md has an entry for the current version
 if [ -f "CHANGELOG.md" ]; then
   if ! grep -qF "$canonical" CHANGELOG.md; then
-    echo "[version-sync] WARN — CHANGELOG.md has no entry for version $canonical"
-    echo "  Add a changelog entry before pushing."
-    # Warning only, not blocking
+    if [ "$REQUIRE_CHANGELOG" -eq 1 ]; then
+      echo "[version-sync] FAIL — CHANGELOG.md has no entry for version $canonical"
+      echo "  Add a changelog entry before releasing."
+      exit 1
+    else
+      echo "[version-sync] WARN — CHANGELOG.md has no entry for version $canonical"
+      echo "  Add a changelog entry before releasing."
+    fi
   fi
+elif [ "$REQUIRE_CHANGELOG" -eq 1 ]; then
+  echo "[version-sync] FAIL — CHANGELOG.md is required for release checks"
+  exit 1
 fi
 
 echo "[version-sync] OK — all ${#versions[@]} files at v${canonical}"
