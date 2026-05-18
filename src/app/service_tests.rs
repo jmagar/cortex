@@ -164,6 +164,69 @@ async fn correlate_ai_logs_cross_references_non_ai_logs_only() {
 }
 
 #[tokio::test]
+async fn correlate_ai_logs_batches_related_windows_with_per_anchor_caps() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[
+            ai_entry("2026-01-01T00:00:00Z", "deploy failure near host-a"),
+            entry(
+                "2026-01-01T00:00:10Z",
+                "host-a",
+                "err",
+                "deploy failed on host-a",
+                "10.0.0.1:514",
+            ),
+            entry(
+                "2026-01-01T00:00:20Z",
+                "host-a",
+                "warning",
+                "deploy warning on host-a",
+                "10.0.0.1:514",
+            ),
+            ai_entry("2026-01-01T00:10:00Z", "deploy failure near host-b"),
+            entry(
+                "2026-01-01T00:10:10Z",
+                "host-b",
+                "err",
+                "deploy failed on host-b",
+                "10.0.0.2:514",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let response = service
+        .correlate_ai_logs(AiCorrelateRequest {
+            project: Some("/tmp/project".into()),
+            tool: Some("codex".into()),
+            ai_query: Some("deploy".into()),
+            log_query: Some("deploy".into()),
+            window_minutes: Some(1),
+            severity_min: Some("warning".into()),
+            limit: Some(2),
+            events_per_anchor: Some(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.total_anchors, 2);
+    assert_eq!(response.related_limit_per_anchor, 1);
+    assert_eq!(response.total_related_events, 2);
+    let truncated_count = response
+        .anchors
+        .iter()
+        .filter(|anchor| anchor.related_truncated)
+        .count();
+    assert_eq!(truncated_count, 1);
+    assert!(response
+        .anchors
+        .iter()
+        .all(|anchor| anchor.related.len() == 1));
+}
+
+#[tokio::test]
 async fn source_ip_filter_uses_network_sender_identity() {
     let (service, pool, _dir) = test_service();
     insert_logs_batch(

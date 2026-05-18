@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::StorageConfig;
-use crate::db::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
+use crate::db::{init_pool, insert_logs_batch, AiRelatedWindow, DbPool, LogBatchEntry};
 
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {
     StorageConfig::for_test(db_path)
@@ -442,6 +442,67 @@ fn search_ai_sessions_groups_results() {
 }
 
 #[test]
+fn search_ai_sessions_query_plan_uses_session_host_time_index() {
+    let (pool, _dir) = test_pool();
+    let mut entries = Vec::new();
+    for i in 0..150 {
+        entries.push(make_ai_entry(
+            &format!("2026-01-01T00:{:02}:00Z", i % 60),
+            "host-a",
+            "claude",
+            "/tmp/project",
+            "sess-1",
+            if i % 10 == 0 {
+                "indexed authentication match"
+            } else {
+                "background transcript event"
+            },
+        ));
+    }
+    for i in 0..50 {
+        entries.push(make_ai_entry(
+            &format!("2026-01-02T00:{:02}:00Z", i % 60),
+            "host-b",
+            "codex",
+            "/tmp/other",
+            "sess-2",
+            "indexed authentication match",
+        ));
+    }
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let params = SearchAiSessionsParams {
+        query: "authentication".into(),
+        ai_project: Some("/tmp/project".into()),
+        ai_tool: Some("claude".into()),
+        limit: Some(10),
+        ..Default::default()
+    };
+    let result = search_ai_sessions(&pool, &params).unwrap();
+    assert_eq!(result.sessions.len(), 1);
+    assert_eq!(result.sessions[0].event_count, 150);
+
+    let (sql, bindings) = search_ai_sessions_sql(&params, 10);
+    assert!(sql.contains("event_counts AS"));
+    assert!(!sql.contains("FROM logs total"));
+
+    let conn = pool.get().unwrap();
+    let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+    let plan = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+            row.get::<_, String>(3)
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+        .join("\n");
+    assert!(
+        plan.contains("idx_logs_ai_session_host_time"),
+        "expected AI session event-count plan to use idx_logs_ai_session_host_time, got:\n{plan}"
+    );
+}
+
+#[test]
 fn search_ai_sessions_candidate_cap_prefers_newer_rows() {
     let (pool, _dir) = test_pool();
     let mut entries = Vec::new();
@@ -513,6 +574,90 @@ fn search_ai_sessions_zero_limit_clamps_to_one_with_metadata() {
     assert_eq!(result.total_candidates, 1);
     assert_eq!(result.candidate_rows, 1);
     assert!(!result.truncated);
+}
+
+#[test]
+fn search_ai_related_logs_batches_windows_and_caps_per_anchor() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_ai_entry(
+                "2026-01-01T00:00:00Z",
+                "localhost",
+                "codex",
+                "/tmp/project",
+                "sess-1",
+                "anchor one deploy failure",
+            ),
+            make_entry(
+                "2026-01-01T00:00:30Z",
+                "host-a",
+                "err",
+                "deploy failed on host-a",
+            ),
+            make_entry(
+                "2026-01-01T00:00:40Z",
+                "host-a",
+                "warning",
+                "deploy warning on host-a",
+            ),
+            make_entry(
+                "2026-01-01T00:00:50Z",
+                "host-a",
+                "info",
+                "deploy info below severity",
+            ),
+            make_ai_entry(
+                "2026-01-01T00:10:00Z",
+                "localhost",
+                "codex",
+                "/tmp/project",
+                "sess-2",
+                "anchor two deploy failure",
+            ),
+            make_entry(
+                "2026-01-01T00:10:30Z",
+                "host-b",
+                "err",
+                "deploy failed on host-b",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let rows = search_ai_related_logs(
+        &pool,
+        &AiRelatedLogsParams {
+            windows: vec![
+                AiRelatedWindow {
+                    anchor_index: 0,
+                    window_from: "2026-01-01T00:00:00.000Z".into(),
+                    window_to: "2026-01-01T00:01:00.000Z".into(),
+                },
+                AiRelatedWindow {
+                    anchor_index: 1,
+                    window_from: "2026-01-01T00:10:00.000Z".into(),
+                    window_to: "2026-01-01T00:11:00.000Z".into(),
+                },
+            ],
+            query: Some("deploy".into()),
+            severity_in: vec!["err".into(), "warning".into()],
+            limit_per_anchor: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].anchor_index, 0);
+    assert_eq!(rows[0].logs.len(), 1);
+    assert_eq!(rows[0].logs[0].message, "deploy warning on host-a");
+    assert!(rows[0].truncated);
+    assert_eq!(rows[1].anchor_index, 1);
+    assert_eq!(rows[1].logs.len(), 1);
+    assert_eq!(rows[1].logs[0].message, "deploy failed on host-b");
+    assert!(!rows[1].truncated);
 }
 
 #[test]

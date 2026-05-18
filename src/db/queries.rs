@@ -6,10 +6,10 @@ use crate::config::StorageConfig;
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
 use super::models::{
     AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiProjectInventoryEntry,
-    AiSessionEntry, AiToolInventoryEntry, DbStats, ErrorSummaryEntry, HostEntry,
-    ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams,
-    ListAiToolsResult, LogEntry, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams,
-    SearchedAiSessionEntry,
+    AiRelatedLogsForAnchor, AiRelatedLogsParams, AiSessionEntry, AiToolInventoryEntry, DbStats,
+    ErrorSummaryEntry, HostEntry, ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams,
+    ListAiToolsParams, ListAiToolsResult, LogEntry, SearchAiSessionsParams, SearchAiSessionsResult,
+    SearchParams, SearchedAiSessionEntry,
 };
 use super::pool::DbPool;
 
@@ -32,6 +32,70 @@ pub fn validate_fts_query(query: &str) -> Result<()> {
         anyhow::bail!("Search query has too many terms ({term_count}); maximum is 16 terms");
     }
     Ok(())
+}
+
+#[derive(Debug, Default)]
+struct SqlParams {
+    bindings: Vec<rusqlite::types::Value>,
+    next_idx: usize,
+}
+
+impl SqlParams {
+    fn new(next_idx: usize) -> Self {
+        Self {
+            bindings: Vec::new(),
+            next_idx,
+        }
+    }
+
+    fn push_text(&mut self, value: String) -> usize {
+        let idx = self.next_idx;
+        self.bindings.push(rusqlite::types::Value::Text(value));
+        self.next_idx += 1;
+        idx
+    }
+
+    fn push_i64(&mut self, value: i64) -> usize {
+        let idx = self.next_idx;
+        self.bindings.push(rusqlite::types::Value::Integer(value));
+        self.next_idx += 1;
+        idx
+    }
+}
+
+fn push_required_ai_filters(sql: &mut String, alias: &str) {
+    sql.push_str(&format!(
+        " AND {alias}.ai_project IS NOT NULL AND {alias}.ai_project != ''
+          AND {alias}.ai_tool IS NOT NULL AND {alias}.ai_tool != ''
+          AND {alias}.ai_session_id IS NOT NULL AND {alias}.ai_session_id != ''"
+    ));
+}
+
+fn push_ai_scope_filters(
+    sql: &mut String,
+    params: &mut SqlParams,
+    alias: &str,
+    project: &Option<String>,
+    tool: &Option<String>,
+    from: &Option<String>,
+    to: &Option<String>,
+) {
+    if let Some(project) = project {
+        let idx = params.push_text(project.clone());
+        sql.push_str(&format!(" AND {alias}.ai_project = ?{idx}"));
+    }
+    if let Some(tool) = tool {
+        let idx = params.push_text(tool.clone());
+        sql.push_str(&format!(" AND {alias}.ai_tool = ?{idx}"));
+    }
+    if let Some(from) = from {
+        let idx = params.push_text(from.clone());
+        sql.push_str(&format!(" AND {alias}.timestamp >= ?{idx}"));
+    }
+    if let Some(to) = to {
+        let idx = params.push_text(to.clone());
+        sql.push_str(&format!(" AND {alias}.timestamp <= ?{idx}"));
+    }
 }
 
 /// Search logs with flexible filtering + FTS
@@ -295,90 +359,7 @@ pub fn search_ai_sessions(
 
     let conn = pool.get()?;
     let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
-    const CANDIDATE_CAP: usize = 5_000;
-
-    let mut sql = String::from(
-        "WITH candidates AS (
-            SELECT l.ai_project,
-                   l.ai_tool,
-                   l.ai_session_id,
-                   l.hostname,
-                   l.timestamp,
-                   l.message
-            FROM logs_fts
-            JOIN logs l ON l.id = logs_fts.rowid
-            WHERE logs_fts MATCH ?1
-              AND l.ai_project IS NOT NULL AND l.ai_project != ''
-              AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
-              AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
-    );
-    let mut bindings = vec![rusqlite::types::Value::Text(params.query.clone())];
-    let mut idx = 2usize;
-
-    if let Some(project) = &params.ai_project {
-        sql.push_str(&format!(" AND l.ai_project = ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(project.clone()));
-        idx += 1;
-    }
-    if let Some(tool) = &params.ai_tool {
-        sql.push_str(&format!(" AND l.ai_tool = ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(tool.clone()));
-        idx += 1;
-    }
-    if let Some(from) = &params.from {
-        sql.push_str(&format!(" AND l.timestamp >= ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(from.clone()));
-        idx += 1;
-    }
-    if let Some(to) = &params.to {
-        sql.push_str(&format!(" AND l.timestamp <= ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(to.clone()));
-    }
-    sql.push_str(&format!(
-        " ORDER BY logs_fts.rowid DESC
-           LIMIT {}
-         ),
-         grouped AS (
-            SELECT ai_project,
-                   ai_tool,
-                   ai_session_id,
-                   hostname,
-                   MIN(timestamp) AS first_seen,
-                   MAX(timestamp) AS last_seen,
-                   COUNT(*) AS match_count,
-                   (
-                       SELECT c2.message
-                       FROM candidates c2
-                       WHERE c2.ai_project = c.ai_project
-                         AND c2.ai_tool = c.ai_tool
-                         AND c2.ai_session_id = c.ai_session_id
-                         AND c2.hostname = c.hostname
-                       ORDER BY c2.timestamp DESC
-                       LIMIT 1
-                   ) AS best_snippet
-            FROM candidates c
-            GROUP BY ai_project, ai_tool, ai_session_id, hostname
-         )
-         SELECT ai_project, ai_tool, ai_session_id, hostname,
-                first_seen,
-                last_seen,
-                (
-                    SELECT COUNT(*)
-                    FROM logs total
-                    WHERE total.ai_project = grouped.ai_project
-                      AND total.ai_tool = grouped.ai_tool
-                      AND total.ai_session_id = grouped.ai_session_id
-                      AND total.hostname = grouped.hostname
-                ) AS event_count,
-                match_count,
-                best_snippet,
-                COUNT(*) OVER() AS total_candidates,
-                (SELECT COUNT(*) FROM candidates) AS raw_candidate_count
-         FROM grouped
-         ORDER BY last_seen DESC
-         LIMIT {limit}",
-        CANDIDATE_CAP + 1
-    ));
+    let (sql, bindings) = search_ai_sessions_sql(params, limit);
 
     let mut stmt = conn.prepare(&sql)?;
     let mut total_candidates = 0usize;
@@ -410,6 +391,98 @@ pub fn search_ai_sessions(
     })
 }
 
+const CANDIDATE_CAP: usize = 5_000;
+
+fn search_ai_sessions_sql(
+    params: &SearchAiSessionsParams,
+    limit: usize,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let mut sql = String::from(
+        "WITH candidates AS (
+            SELECT l.ai_project,
+                   l.ai_tool,
+                   l.ai_session_id,
+                   l.hostname,
+                   l.timestamp,
+                   l.message
+            FROM logs_fts
+            JOIN logs l ON l.id = logs_fts.rowid
+            WHERE logs_fts MATCH ?1",
+    );
+    push_required_ai_filters(&mut sql, "l");
+    let mut query_params = SqlParams::new(2);
+    query_params
+        .bindings
+        .push(rusqlite::types::Value::Text(params.query.clone()));
+    push_ai_scope_filters(
+        &mut sql,
+        &mut query_params,
+        "l",
+        &params.ai_project,
+        &params.ai_tool,
+        &params.from,
+        &params.to,
+    );
+    sql.push_str(&format!(
+        " ORDER BY logs_fts.rowid DESC
+           LIMIT {}
+         ),
+         grouped AS (
+            SELECT ai_project,
+                   ai_tool,
+                   ai_session_id,
+                   hostname,
+                   MIN(timestamp) AS first_seen,
+                   MAX(timestamp) AS last_seen,
+                   COUNT(*) AS match_count,
+                   (
+                       SELECT c2.message
+                       FROM candidates c2
+                       WHERE c2.ai_project = c.ai_project
+                         AND c2.ai_tool = c.ai_tool
+                         AND c2.ai_session_id = c.ai_session_id
+                         AND c2.hostname = c.hostname
+                       ORDER BY c2.timestamp DESC
+                       LIMIT 1
+                   ) AS best_snippet
+            FROM candidates c
+            GROUP BY ai_project, ai_tool, ai_session_id, hostname
+         ),
+         event_counts AS (
+            SELECT l.ai_project,
+                   l.ai_tool,
+                   l.ai_session_id,
+                   l.hostname,
+                   COUNT(*) AS event_count
+            FROM logs l
+            JOIN grouped g
+              ON g.ai_project = l.ai_project
+             AND g.ai_tool = l.ai_tool
+             AND g.ai_session_id = l.ai_session_id
+             AND g.hostname = l.hostname
+            GROUP BY l.ai_project, l.ai_tool, l.ai_session_id, l.hostname
+         )
+         SELECT g.ai_project, g.ai_tool, g.ai_session_id, g.hostname,
+                g.first_seen,
+                g.last_seen,
+                COALESCE(ec.event_count, 0) AS event_count,
+                g.match_count,
+                g.best_snippet,
+                COUNT(*) OVER() AS total_candidates,
+                (SELECT COUNT(*) FROM candidates) AS raw_candidate_count
+         FROM grouped g
+         LEFT JOIN event_counts ec
+           ON ec.ai_project = g.ai_project
+          AND ec.ai_tool = g.ai_tool
+          AND ec.ai_session_id = g.ai_session_id
+          AND ec.hostname = g.hostname
+         ORDER BY g.last_seen DESC
+         LIMIT {limit}",
+        CANDIDATE_CAP + 1
+    ));
+    (sql, query_params.bindings)
+}
+
 pub fn search_ai_anchors(pool: &DbPool, params: &AiCorrelateParams) -> Result<Vec<LogEntry>> {
     let conn = pool.get()?;
     let limit = params.limit.unwrap_or(10).clamp(1, 50);
@@ -425,10 +498,7 @@ pub fn search_ai_anchors(pool: &DbPool, params: &AiCorrelateParams) -> Result<Ve
                     l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
              FROM logs_fts
              JOIN logs l ON l.id = logs_fts.rowid
-             WHERE logs_fts MATCH ?1
-               AND l.ai_project IS NOT NULL AND l.ai_project != ''
-               AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
-               AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
+             WHERE logs_fts MATCH ?1",
         )
     } else {
         String::from(
@@ -436,12 +506,11 @@ pub fn search_ai_anchors(pool: &DbPool, params: &AiCorrelateParams) -> Result<Ve
                     l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
                     l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
              FROM logs l
-             WHERE l.ai_project IS NOT NULL AND l.ai_project != ''
-               AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
-               AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
+             WHERE 1=1",
         )
     };
 
+    push_required_ai_filters(&mut sql, "l");
     if let Some(project) = &params.ai_project {
         sql.push_str(&format!(" AND l.ai_project = ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(project.clone()));
@@ -474,6 +543,133 @@ pub fn search_ai_anchors(pool: &DbPool, params: &AiCorrelateParams) -> Result<Ve
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn search_ai_related_logs(
+    pool: &DbPool,
+    params: &AiRelatedLogsParams,
+) -> Result<Vec<AiRelatedLogsForAnchor>> {
+    if params.windows.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Some(query) = &params.query {
+        validate_fts_query(query)?;
+    }
+
+    let conn = pool.get()?;
+    let limit = params.limit_per_anchor.clamp(1, 200) as usize;
+    let mut sql_params = SqlParams::new(1);
+    let values = params
+        .windows
+        .iter()
+        .map(|window| {
+            let anchor_idx = sql_params.push_i64(window.anchor_index as i64);
+            let from_idx = sql_params.push_text(window.window_from.clone());
+            let to_idx = sql_params.push_text(window.window_to.clone());
+            format!("(?{anchor_idx}, ?{from_idx}, ?{to_idx})")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut sql = format!(
+        "WITH windows(anchor_index, window_from, window_to) AS (VALUES {values}),
+         ranked AS (
+            SELECT w.anchor_index,
+                   l.id, l.timestamp, l.hostname, l.facility, l.severity,
+                   l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
+                   l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY w.anchor_index
+                       ORDER BY l.timestamp DESC, l.id DESC
+                   ) AS related_rank
+            FROM windows w"
+    );
+    if let Some(query) = &params.query {
+        let query_idx = sql_params.push_text(query.clone());
+        sql.push_str(
+            "
+            JOIN logs_fts ON logs_fts MATCH ?",
+        );
+        sql.push_str(&query_idx.to_string());
+        sql.push_str(
+            "
+            JOIN logs l ON l.id = logs_fts.rowid
+             AND l.timestamp >= w.window_from
+             AND l.timestamp <= w.window_to",
+        );
+    } else {
+        sql.push_str(
+            "
+            JOIN logs l
+              ON l.timestamp >= w.window_from
+             AND l.timestamp <= w.window_to",
+        );
+    }
+    sql.push_str(" WHERE 1=1");
+
+    let search_params = SearchParams {
+        query: None,
+        hostname: params.hostname.clone(),
+        source_ip: params.source_ip.clone(),
+        severity: None,
+        severity_in: Some(params.severity_in.clone()),
+        app_name: params.app_name.clone(),
+        facility: None,
+        process_id: None,
+        from: None,
+        to: None,
+        limit: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        exclude_ai: true,
+    };
+    append_filters(
+        &mut sql,
+        &mut sql_params.bindings,
+        &mut sql_params.next_idx,
+        &search_params,
+    );
+    sql.push_str(&format!(
+        "
+         )
+         SELECT anchor_index, id, timestamp, hostname, facility, severity,
+                app_name, process_id, message, received_at, source_ip,
+                ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json,
+                related_rank
+         FROM ranked
+         WHERE related_rank <= {}
+         ORDER BY anchor_index ASC, related_rank ASC",
+        limit + 1
+    ));
+
+    let mut grouped = params
+        .windows
+        .iter()
+        .map(|window| AiRelatedLogsForAnchor {
+            anchor_index: window.anchor_index,
+            logs: Vec::new(),
+            truncated: false,
+        })
+        .collect::<Vec<_>>();
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(rusqlite::params_from_iter(sql_params.bindings.iter()))?;
+    while let Some(row) = rows.next()? {
+        let anchor_index = row.get::<_, i64>(0)? as usize;
+        let related_rank = row.get::<_, i64>(16)? as usize;
+        if let Some(anchor) = grouped
+            .iter_mut()
+            .find(|group| group.anchor_index == anchor_index)
+        {
+            if related_rank > limit {
+                anchor.truncated = true;
+            } else {
+                anchor.logs.push(map_row_offset(row, 1)?);
+            }
+        }
+    }
+
+    Ok(grouped)
 }
 
 const DEFAULT_AI_ABUSE_TERMS: &[&str] = &[
@@ -1000,22 +1196,26 @@ fn append_filters(
 }
 
 pub(super) fn map_row(row: &rusqlite::Row) -> rusqlite::Result<LogEntry> {
+    map_row_offset(row, 0)
+}
+
+fn map_row_offset(row: &rusqlite::Row, offset: usize) -> rusqlite::Result<LogEntry> {
     Ok(LogEntry {
-        id: row.get(0)?,
-        timestamp: row.get(1)?,
-        hostname: row.get(2)?,
-        facility: row.get(3)?,
-        severity: row.get(4)?,
-        app_name: row.get(5)?,
-        process_id: row.get(6)?,
-        message: row.get(7)?,
-        received_at: row.get(8)?,
-        source_ip: row.get(9)?,
-        ai_tool: row.get(10)?,
-        ai_project: row.get(11)?,
-        ai_session_id: row.get(12)?,
-        ai_transcript_path: row.get(13)?,
-        metadata_json: row.get(14)?,
+        id: row.get(offset)?,
+        timestamp: row.get(offset + 1)?,
+        hostname: row.get(offset + 2)?,
+        facility: row.get(offset + 3)?,
+        severity: row.get(offset + 4)?,
+        app_name: row.get(offset + 5)?,
+        process_id: row.get(offset + 6)?,
+        message: row.get(offset + 7)?,
+        received_at: row.get(offset + 8)?,
+        source_ip: row.get(offset + 9)?,
+        ai_tool: row.get(offset + 10)?,
+        ai_project: row.get(offset + 11)?,
+        ai_session_id: row.get(offset + 12)?,
+        ai_transcript_path: row.get(offset + 13)?,
+        metadata_json: row.get(offset + 14)?,
     })
 }
 
