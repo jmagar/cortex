@@ -1,6 +1,6 @@
 ---
 name: syslog-troubleshoot
-description: Use when the user reports syslog-mcp isn't working — connection failures ("MCP tool returns error", "Failed to reconnect", "/mcp unreachable"), missing logs ("no logs from X", "host stopped sending", "tail returns empty"), service problems ("syslog-mcp crashing", "container unhealthy", "restart loop"), or vague symptoms ("something's off with syslog", "logs aren't working"). Triggers on: troubleshoot syslog, syslog isn't working, no logs from X, mcp connection failing, syslog-mcp down, container unhealthy, why is syslog broken.
+description: Troubleshoot syslog-mcp connection failures, missing logs, unhealthy containers, restart loops, or vague "logs aren't working" reports.
 ---
 
 # Syslog Troubleshooting Skill
@@ -19,20 +19,24 @@ Most common cause: empty / wrong `$CLAUDE_PLUGIN_OPTION_SERVER_URL`, mismatched 
    `ss -tlnp | grep -E ":$CLAUDE_PLUGIN_OPTION_MCP_PORT"` — if empty, the service is down → branch C
 2. **Is the URL Claude Code is using sane?**
    Read `~/.claude/settings.json`, find the `pluginConfigs` key that starts with `syslog@`, and inspect `options.server_url` — empty string is a known footgun (the `.mcp.json` substitution produces a literal `/mcp`). Check non-empty, has scheme, no trailing `/mcp`.
-3. **Does the server require auth and the client send it?**
-   `curl -sS -o /dev/null -w '%{http_code}' "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp"` should return `401`. If `200`, server isn't enforcing auth (open access — flag this). If `404`, the route is wrong (different server is on that port). If connection refused, branch C.
-4. **Token roundtrip**: `curl -sS -X POST -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}' "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp"`. 401 = wrong token. 200 with valid response = server fine, problem is in Claude Code's MCP client config. Note: verify the MCP protocol version string (`2025-06-18`) matches the current spec if this test fails unexpectedly.
+3. **Does observed auth match configured auth?**
+   Run `curl -sS -o /dev/null -w '%{http_code}' "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp"`.
+   - If `$CLAUDE_PLUGIN_OPTION_NO_AUTH` is true or no bearer/OAuth auth is configured, `200` or MCP protocol-level `400/405` can be normal route evidence.
+   - If bearer or OAuth auth is enabled, expect `401` for an unauthenticated request.
+   - If `404`, the route is wrong or a different server owns that port. If connection refused, branch C.
+   - If `200` while auth is intended to be enabled, flag it as an auth configuration mismatch.
+4. **Token roundtrip in bearer mode**: `curl -sS -X POST -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}' "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp"`. 401 = wrong token. 200 with valid response = server fine, problem is in Claude Code's MCP client config. For OAuth mode, use the OAuth client flow instead of bearer-token curl. Note: verify the MCP protocol version string (`2025-06-18`) matches the current spec if this test fails unexpectedly.
 
 ### Branch B — "No logs from <host>" / "host X stopped sending" / "missing entries"
 
 1. **Does the host appear in the hosts list at all?**
    Call MCP tool: `syslog action=hosts`. If host is absent, no logs ever arrived → check forwarding config on `<host>`. If present with old `last_seen`, forwarding stopped → check rsyslog/forwarder on host.
 2. **Is the listener actually accepting connections?**
-   `ss -tlnp | grep ":$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT"` should show our process bound. From `<host>`: `nc -zv <our_host> "$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT"` should connect.
+   `ss -tlnp | grep -E ":(${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT:-$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT})\\b"` should show our process or container port publish. From `<host>`: `nc -zv <our_host> "${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT:-$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT}"` should connect.
 3. **Recent forwarding errors on the host?**
    `ssh <host> "sudo journalctl -t rsyslogd -n 30 --no-pager"` — look for `omfwd` errors (DNS resolution, peer closed, EOF on TCP). Common patterns we've seen: stale forwarder pointing at a dead host, idle TCP timeout flapping, missing rsyslog drop-in.
 4. **Drop-in present and correct?**
-   `ssh <host> "cat /etc/rsyslog.d/99-syslog-mcp.conf 2>/dev/null"` should contain `*.* @@<our_host>:$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT` (TCP) — if missing or wrong, use `syslog-deploy-dropins`.
+   `ssh <host> "cat /etc/rsyslog.d/99-syslog-mcp.conf 2>/dev/null"` should contain `*.* @@<our_host>:<externally reachable syslog port>` (TCP), usually `${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT:-$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT}` — if missing or wrong, use `syslog-deploy-dropins`.
 5. **For Docker container logs**: if user expected logs from a container in `$CLAUDE_PLUGIN_OPTION_FLEET_HOSTS` but doesn't see them, check `$CLAUDE_PLUGIN_OPTION_DOCKER_INGEST_ENABLED`. If false, ingest is off entirely. If true, verify the docker-socket-proxy on that host is reachable: `curl -sS http://<host>:2375/_ping` should return `OK`.
 
 ### Branch C — Service down / crashing / unhealthy
@@ -41,8 +45,8 @@ Most common cause: empty / wrong `$CLAUDE_PLUGIN_OPTION_SERVER_URL`, mismatched 
    `docker ps --filter name=syslog-mcp --format '{{.Status}}'`
 2. **If recently restarted / crashing — get the actual error**: use `syslog-logs` for the last 100 lines, or run `docker compose logs` manually. Look for: panic messages, port-bind errors (`address already in use`), DB lock errors, OOM kills.
 3. **Common service-failure causes (ranked by frequency in this plugin's history)**:
-   1. Port `$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT` or `$CLAUDE_PLUGIN_OPTION_MCP_PORT` held by another process. Resolve with `sudo fuser -k <port>/tcp` or kill the offender.
-   2. Database lock (another `syslog mcp` stdio process holds it). `pgrep -af "syslog mcp"` and kill stragglers.
+   1. Port `$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT` or `$CLAUDE_PLUGIN_OPTION_MCP_PORT` held by another process. First identify the owner with `ss -tulpn`/`lsof`/`fuser`; only kill or restart anything after the user approves the specific process and impact.
+   2. Database lock (another `syslog mcp` stdio process holds it). `pgrep -af "syslog mcp"` to list candidates; only kill stragglers after approval.
    3. Docker image missing/stale: `docker compose pull` to refresh.
 4. **If healthcheck failing but `/health` works manually**: Container is unhealthy because the healthcheck command inside the image is wrong/can't run. Compare image version to what you expect — `docker inspect syslog-mcp | jq '.[0].Config.Image'`.
 

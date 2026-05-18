@@ -38,7 +38,7 @@ plugins/
 
 ### Contents
 
-`plugins/skills/syslog/SKILL.md` includes:
+`plugins/syslog/skills/syslog/SKILL.md` includes:
 - Tool inventory (1 tool: `syslog`, with the current MCP action set described)
 - Parameter reference for each tool
 - FTS5 query syntax guide
@@ -49,14 +49,14 @@ plugins/
 
 ```bash
 just validate-skills
-# Checks skill definitions under plugins/skills/
+# Checks skill definitions under plugins/syslog/skills/
 ```
 
 ## Adding a skill
 
 If additional skills are needed:
 
-1. Create `plugins/skills/<name>/SKILL.md`
+1. Create `plugins/syslog/skills/<name>/SKILL.md`
 2. Add frontmatter with `name` and `description`
 3. Document tools, workflows, and examples
 4. Run `just validate-skills`

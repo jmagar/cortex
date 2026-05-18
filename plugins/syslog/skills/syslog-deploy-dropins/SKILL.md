@@ -1,6 +1,6 @@
 ---
 name: syslog-deploy-dropins
-description: Deploy rsyslog forwarding drop-ins to configured fleet hosts over SSH so each host forwards logs to syslog-mcp. Use when the user asks to configure fleet forwarding, deploy syslog drop-ins, repair missing rsyslog forwarding, or update forwarding after server_url or syslog_port changes.
+description: Deploy rsyslog forwarding drop-ins to configured fleet hosts over SSH. Use when configuring fleet forwarding, repairing missing rsyslog forwarding, or updating forwarding after server_url or syslog port changes.
 ---
 
 # Syslog Deploy Drop-ins
@@ -12,7 +12,7 @@ Install or update `/etc/rsyslog.d/99-syslog-mcp.conf` on each configured fleet h
 Verify before changing hosts:
 - SSH aliases from `fleet_hosts` work without prompting.
 - Sudo can write rsyslog config and restart rsyslog.
-- Each fleet host can route to the syslog-mcp server on the configured syslog port.
+- Each fleet host can route to the syslog-mcp server on the externally reachable syslog port.
 
 Skip devices that cannot be configured through SSH and rsyslog, such as UniFi, Mikrotik, ISP routers, or hosts running syslog-ng or other non-rsyslog forwarders. Point the user to `docs/SETUP.md` for those.
 
@@ -20,16 +20,24 @@ Skip devices that cannot be configured through SSH and rsyslog, such as UniFi, M
 
 Parse the host portion from `$CLAUDE_PLUGIN_OPTION_SERVER_URL`. If it is `localhost` or `127.0.0.1`, stop and ask for a routable hostname or IP because fleet hosts cannot forward to localhost.
 
-Call the resolved value `FORWARD_TARGET`. The endpoint is `FORWARD_TARGET:$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT`.
+Call the resolved value `FORWARD_TARGET`.
+
+Resolve the externally reachable port as:
+
+```bash
+FORWARD_PORT="${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT:-${CLAUDE_PLUGIN_OPTION_SYSLOG_PORT:-1514}}"
+```
+
+Use `CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT` when Docker publishes a host port that differs from the container's internal syslog port. The endpoint is `FORWARD_TARGET:FORWARD_PORT`.
 
 ## Drop-in
 
-Write this file on each host, replacing the target and port:
+Write this file on each host, using the resolved target and port:
 
 ```text
 # Avoid feeding syslog-mcp/rsyslog internal logs back into syslog-mcp.
 if ($programname == "syslog" or $programname == "rsyslogd") then stop
-*.* @@FORWARD_TARGET:SYSLOG_PORT
+*.* @@<FORWARD_TARGET>:<FORWARD_PORT>
 ```
 
 Use `@@` for TCP. Use single `@` only when a host cannot send TCP.
@@ -46,10 +54,15 @@ For each host in `$CLAUDE_PLUGIN_OPTION_FLEET_HOSTS` (split comma-separated or n
 
    On SSH failure: skip this host, mark it as `FAILED (SSH unreachable)` in the report, and continue to the next host.
 
-2. Write the drop-in:
+2. Build and write the drop-in. Do not run an example that contains literal `FORWARD_TARGET` or `SYSLOG_PORT` placeholders:
 
    ```bash
-   ssh <host> "printf '%s\n' '# Avoid feeding syslog-mcp/rsyslog internal logs back into syslog-mcp.' 'if (\$programname == \"syslog\" or \$programname == \"rsyslogd\") then stop' '*.* @@FORWARD_TARGET:SYSLOG_PORT' | sudo tee /etc/rsyslog.d/99-syslog-mcp.conf >/dev/null"
+   target_line="*.* @@${FORWARD_TARGET}:${FORWARD_PORT}"
+   dropin_content="$(printf '%s\n' \
+     '# Avoid feeding syslog-mcp/rsyslog internal logs back into syslog-mcp.' \
+     'if ($programname == "syslog" or $programname == "rsyslogd") then stop' \
+     "$target_line")"
+   printf '%s\n' "$dropin_content" | ssh <host> "sudo tee /etc/rsyslog.d/99-syslog-mcp.conf >/dev/null"
    ```
 
 3. Restart rsyslog:

@@ -232,8 +232,8 @@ async fn public_action_references_cover_schema_registry() {
         ("docs/mcp/TOOLS.md", include_str!("../../docs/mcp/TOOLS.md")),
         ("docs/mcp/TESTS.md", include_str!("../../docs/mcp/TESTS.md")),
         (
-            "plugins/skills/syslog/SKILL.md",
-            include_str!("../../plugins/skills/syslog/SKILL.md"),
+            "plugins/syslog/skills/syslog/SKILL.md",
+            include_str!("../../plugins/syslog/skills/syslog/SKILL.md"),
         ),
     ] {
         for action in SYSLOG_ACTIONS {
