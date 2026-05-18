@@ -496,11 +496,14 @@ fn search_ai_sessions_query_plan_uses_session_host_time_index() {
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap()
         .join("\n");
-    // SQLite's planner is free to pick equivalent indices; accept any
-    // ai-session-prefixed index so the test stays green across SQLite versions.
+    // Pin the EXACT index that the new (host, time) composite was added
+    // for so a planner regression that falls back to the broader
+    // `idx_logs_ai_session` is caught by this guard. If SQLite version
+    // drift starts flapping this in CI, prefer documenting the SQLite
+    // version pin over loosening this assertion.
     assert!(
-        plan.contains("idx_logs_ai_session"),
-        "expected AI session event-count plan to use an idx_logs_ai_session_* index, got:\n{plan}"
+        plan.contains("idx_logs_ai_session_host_time"),
+        "expected AI session event-count plan to use idx_logs_ai_session_host_time, got:\n{plan}"
     );
 }
 
