@@ -696,10 +696,15 @@ run_docker_mode() {
     "--tmpfs" "/data:rw,noexec,nosuid,size=64m,uid=1000,gid=1000"
   )
 
-  if [[ -n "${TOKEN}" ]]; then
-    docker_args+=("-e" "SYSLOG_MCP_TOKEN=${TOKEN}")
-    docker_args+=("-e" "SYSLOG_API_TOKEN=${TOKEN}")
+  # /api/* is always mounted post-v0.26, so the container will refuse to
+  # start without SYSLOG_API_TOKEN. Fail fast here with a clear message
+  # instead of leaving the user to debug a crash inside docker run.
+  if [[ -z "${TOKEN}" ]]; then
+    log_error "TOKEN must be set for docker-mode live tests (the server requires SYSLOG_API_TOKEN to start)"
+    return 2
   fi
+  docker_args+=("-e" "SYSLOG_MCP_TOKEN=${TOKEN}")
+  docker_args+=("-e" "SYSLOG_API_TOKEN=${TOKEN}")
 
   # Remove storage budget env vars that conflict with tmpfs size limits
   docker_args+=(

@@ -3104,28 +3104,21 @@ fn docker_inspect_data_mount(container: &str) -> Result<ContainerMountInfo, Stri
 }
 
 fn systemctl_show_env(unit: &str) -> Result<SystemctlEnv, String> {
-    let output = Command::new("systemctl")
-        .args([
-            "--user",
-            "show",
-            unit,
-            "-p",
-            "Environment",
-            "-p",
-            "EnvironmentFiles",
-            "-p",
-            "LoadState",
-            "--no-pager",
-        ])
-        .output()
-        .map_err(|error| format!("systemctl not available: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "systemctl show {unit} failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    // Reuse the shared --user wrapper so we pick up the
+    // DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR fallback for headless
+    // hosts where the user bus isn't auto-discovered.
+    let stdout = systemctl_user_output(&[
+        "show",
+        unit,
+        "-p",
+        "Environment",
+        "-p",
+        "EnvironmentFiles",
+        "-p",
+        "LoadState",
+        "--no-pager",
+    ])
+    .map_err(|error| error.to_string())?;
     Ok(parse_systemctl_env_output(&stdout))
 }
 
@@ -3243,9 +3236,12 @@ fn data_mount_phase_cached(
     let info = match cache.container_inspect(&container) {
         Ok(info) => info,
         Err(detail) => {
+            // Docker enumeration itself failed (daemon down, permission
+            // denied, etc.); per the doctor spec this is `warn`, not
+            // `skipped`. `skipped` is reserved for "container absent".
             return SetupPhase {
                 name,
-                status: SetupStatus::Skipped,
+                status: SetupStatus::Warn,
                 detail,
             };
         }
@@ -3344,9 +3340,12 @@ fn ai_watch_coordination_phase(env_path: &std::path::Path, cache: &mut DoctorCac
     let env = match cache.systemctl_env(&unit) {
         Ok(env) => env,
         Err(detail) => {
+            // systemctl enumeration failed (binary missing, bus error,
+            // permission denied, etc.); per the doctor spec this is
+            // `warn` — `skipped` is reserved for "ai-watch absent".
             return SetupPhase {
                 name,
-                status: SetupStatus::Skipped,
+                status: SetupStatus::Warn,
                 detail,
             };
         }

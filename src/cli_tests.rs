@@ -696,10 +696,7 @@ fn doctor_cache_dedupes_systemctl_show() {
     // outcome is acceptable; a hit on the unit would mean the test host
     // genuinely has it installed, which we treat as a setup error.
     match &first {
-        Ok(env) => assert!(
-            env.unit_missing,
-            "fake unit unexpectedly resolved: {env:?}"
-        ),
+        Ok(env) => assert!(env.unit_missing, "fake unit unexpectedly resolved: {env:?}"),
         Err(_) => {} // systemctl unavailable / probe failed — also acceptable
     }
     // The cache returns clones of the same Result on the second call.
@@ -729,9 +726,11 @@ fn doctor_cache_dedupes_docker_inspect() {
 #[test]
 fn ai_watch_coordination_skipped_when_unit_missing() {
     // SYSLOG_AI_WATCH_UNIT override forces the phase to query a unit that
-    // cannot exist; on any reasonable test host this returns a LoadState
-    // of not-found OR systemctl failure. Either way we expect Skipped.
-    std::env::set_var(
+    // cannot exist. On any reasonable test host this returns a LoadState
+    // of not-found (Skipped per doctor spec) OR systemctl probe failure
+    // (Warn). EnvVarGuard restores process-global state on panic so this
+    // test cannot leak SYSLOG_AI_WATCH_UNIT into peers.
+    let _g = EnvVarGuard::set(
         "SYSLOG_AI_WATCH_UNIT",
         "syslog-ai-watch-test-missing-9f3e.service",
     );
@@ -739,14 +738,12 @@ fn ai_watch_coordination_skipped_when_unit_missing() {
     let mut cache = DoctorCache::default();
     let phase = ai_watch_coordination_phase(&env_path, &mut cache);
     assert_eq!(phase.name, "ai-watch-coord");
-    assert_eq!(
-        phase.status,
-        SetupStatus::Skipped,
-        "expected Skipped, got {:?} (detail={})",
+    assert!(
+        matches!(phase.status, SetupStatus::Skipped | SetupStatus::Warn),
+        "expected Skipped or Warn, got {:?} (detail={})",
         phase.status,
         phase.detail
     );
-    std::env::remove_var("SYSLOG_AI_WATCH_UNIT");
 }
 
 #[test]

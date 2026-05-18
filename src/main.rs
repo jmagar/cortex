@@ -58,7 +58,11 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
             anyhow::bail!(
                 "{} has no effect on `{}` (local-only command); remove --http / --server / --token",
                 trigger,
-                if matches!(command, cli::CliCommand::Compose(_)) { "compose" } else { "setup" },
+                if matches!(command, cli::CliCommand::Compose(_)) {
+                    "compose"
+                } else {
+                    "setup"
+                },
             );
         }
         return match command {

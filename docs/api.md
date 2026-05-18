@@ -63,7 +63,7 @@ to them by default.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/db/status` | read | (none) | `DbMaintenanceStatus { db_path, page_count, freelist_count, page_size, logical_size_bytes, physical_size_bytes, wal_size_bytes?, shm_size_bytes?, auto_vacuum, journal_mode, integrity_ok?, integrity_messages: [String] }` | 200, 401, 503, 500 | Y | DIFFERENT shape from `/api/stats`: a maintenance-focused PRAGMA snapshot (page/freelist counts, WAL/SHM sizes, journal mode, optional integrity result). Bypasses `MAINTENANCE_PERMIT`. |
 | GET | `/api/db/integrity` | read | query: `quick?` (bool — default `false` runs full `PRAGMA integrity_check`; `true` runs `PRAGMA quick_check`). `deny_unknown_fields`. | `DbIntegrityResult` | 200, 400, 401, 503, 500 | Y | Full check on a multi-GB DB can be slow but does NOT take `MAINTENANCE_PERMIT`. |
-| POST | `/api/db/checkpoint` | **admin** | body: `{ "mode": "passive" | "full" | "restart" | "truncate" }`. Validated handler-side BEFORE the service call (eng-review #A17). | `DbCheckpointResult` | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention. `caller_ip` audit-logged before service call. |
+| POST | `/api/db/checkpoint` | **admin** | body: `{ "mode": "passive" \| "full" \| "restart" \| "truncate" }`. Validated handler-side BEFORE the service call (eng-review #A17). | `DbCheckpointResult` | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention. `caller_ip` audit-logged before service call. |
 | POST | `/api/db/vacuum` | **admin** | body: `{ "full": bool, "force"?: bool, "incremental_pages"?: u32 }`. `force` is `Option<bool>` so the size pre-flight only relaxes on explicit `"force": true`. | `DbVacuumResult` (incl. `after_physical_size_bytes`) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`. Size pre-flight: `full && !force` reads the LIVE `page_count * page_size` (no cached snapshot) on every call and returns 409 if logical size > **2 GB**. `caller_ip` audit-logged before service call. See "VACUUM on large DBs" below. |
 
 **Total: 22 routes** (1 added in bead `.1` + 6 pre-existing + 8 in `.2` + 3 in `.3` + 4 in `.4`).
@@ -259,7 +259,7 @@ The `compose doctor` subcommand runs the two drift diagnostics
 mismatch. A simple way to surface ai-watch / data-mount drift without
 manual invocation is a weekly user-systemd timer:
 
-```
+```ini
 [Unit]
 Description=syslog-mcp drift check
 
@@ -273,7 +273,7 @@ StandardError=journal
 WantedBy=default.target
 ```
 
-```
+```ini
 [Unit]
 Description=run syslog-mcp drift check weekly
 

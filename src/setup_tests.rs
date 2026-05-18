@@ -34,9 +34,13 @@ fn ensure_env_file_generates_api_token_when_missing() {
         .values
         .get("SYSLOG_API_TOKEN")
         .expect("SYSLOG_API_TOKEN must be present after ensure_env_file");
-    assert!(
-        token.len() >= 32,
-        "generated SYSLOG_API_TOKEN must be at least 32 chars, got {} chars",
+    // The implementation generates 32 random bytes encoded as hex → exactly
+    // 64 ASCII chars. Lock down the precise length so future refactors that
+    // shorten the token (and weaken brute-force resistance) fail this test.
+    assert_eq!(
+        token.len(),
+        64,
+        "generated SYSLOG_API_TOKEN must be 64 hex chars (32 random bytes), got {} chars",
         token.len()
     );
     assert!(
@@ -201,8 +205,11 @@ fn write_env_replaces_file_atomically() {
     for entry in std::fs::read_dir(dir.path()).unwrap().flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
+        // write_env names its tempfile `.{file_name}.tmp.{pid}.{nanos}`.
+        // For `.env` that's `..env.tmp.*`. Match the actual prefix so the
+        // assertion catches real orphans instead of silently passing.
         assert!(
-            !name.starts_with(".env.tmp."),
+            !name.starts_with("..env.tmp."),
             "orphaned tempfile after write_env: {name}"
         );
     }

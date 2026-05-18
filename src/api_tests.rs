@@ -1657,54 +1657,30 @@ async fn db_vacuum_blocks_db_checkpoint_via_shared_permit() {
     drop(permit);
 }
 
-/// Concurrent vacuum requests against the same ApiState: the second one
-/// must return 409 immediately (no queueing). Drives the single-flight path
-/// without manually holding the permit.
+/// Single-flight: while the MAINTENANCE_PERMIT is held, a concurrent
+/// vacuum request must return 409 immediately. Holding the permit
+/// explicitly removes the race window so the test actually enforces the
+/// contention promise made by its name (instead of accepting any
+/// 200/409 outcome and silently passing when both wins).
 #[tokio::test]
 async fn db_vacuum_concurrent_requests_second_returns_409() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let _held = Arc::clone(&state.maintenance_permit)
+        .try_acquire_owned()
+        .expect("permit must be free at test start");
     let app = test_router(state);
 
-    // Hold the permit explicitly to ensure the request below races against
-    // a guaranteed-held permit (without this the vacuum on a fresh DB
-    // finishes before the second spawn even runs).
-    // For a true "two real requests race" we'd need a slow vacuum — covered
-    // by the integration smoke tests.
-    let app2 = app.clone();
-    let h1 = tokio::spawn(async move {
-        post_json(
-            app2,
-            "/api/db/vacuum",
-            json!({"full": false, "incremental_pages": 16}),
-            Some("secret"),
-        )
-        .await
-    });
-    let h2 = tokio::spawn(async move {
-        post_json(
-            app,
-            "/api/db/vacuum",
-            json!({"full": false, "incremental_pages": 16}),
-            Some("secret"),
-        )
-        .await
-    });
-    let (r1, r2) = tokio::join!(h1, h2);
-    let (s1, _) = r1.unwrap();
-    let (s2, _) = r2.unwrap();
-    // At least one succeeds. The other is either 200 (raced wide enough that
-    // permit was free) or 409 (raced narrow enough to contend). Both must
-    // be in the success/conflict set — never 5xx, never block.
-    for code in [s1, s2] {
-        assert!(
-            code == axum::http::StatusCode::OK || code == axum::http::StatusCode::CONFLICT,
-            "expected 200 or 409, got {code}"
-        );
-    }
-    // And at least one must be 200 (the work happened at least once).
-    assert!(
-        s1 == axum::http::StatusCode::OK || s2 == axum::http::StatusCode::OK,
-        "at least one vacuum should complete"
+    let (status, _) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": false, "incremental_pages": 16}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::CONFLICT,
+        "vacuum must 409 while MAINTENANCE_PERMIT is held"
     );
 }
 

@@ -40,6 +40,19 @@ async fn http_mode() -> (MockServer, CliMode) {
     let server = MockServer::start().await;
     let client =
         HttpClient::discover(Some(server.uri()), Some("test-token".into())).expect("discover ok");
+    // Catch-all guard: any request that doesn't match a per-test
+    // mock returns 404 and counts against `expect(0)`. Combined with the
+    // per-test `expect(1)` on the actual endpoint, this asserts EXACTLY
+    // one total request per command — surfaces stray /api/version probes
+    // or any other extra call that would otherwise slip through silently.
+    // Lowest priority (255) so per-test mocks always match first; only
+    // unmatched requests fall through to the catch-all.
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(404))
+        .with_priority(255)
+        .expect(0)
+        .mount(&server)
+        .await;
     (server, CliMode::Http(client))
 }
 

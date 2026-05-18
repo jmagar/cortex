@@ -1003,6 +1003,14 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     if token_is_set_but_blank(&config.api.api_token) {
         return Err(anyhow::anyhow!("api.api_token must not be empty"));
     }
+    // Note: SYSLOG_API_TOKEN being entirely unset is enforced at
+    // route-mount time by `api::router` (anyhow::bail) rather than here.
+    // Failing in `Config::load()` would break stdio-mode invocations
+    // (which call `load_for_stdio()` with check_bind=false but still hit
+    // this function) and the broad swath of tests that build Config
+    // without exporting the token. The route-mount bail still fires
+    // during server startup before any request is served, so operators
+    // see the same error early.
 
     // ---- OAuth prerequisites ----------------------------------------------
     let auth = &config.mcp.auth;

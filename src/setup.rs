@@ -1034,6 +1034,15 @@ fn write_env(path: &Path, env: &BTreeMap<String, String>) -> io::Result<()> {
         // a different mode from a pre-existing file.
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
+    // fsync the parent directory so the rename — not just the file
+    // content — is durable across a power loss. Without this, the file
+    // content (rename target) can survive while the directory entry
+    // pointing at it has not yet hit disk.
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = std::fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
     Ok(())
 }
 
