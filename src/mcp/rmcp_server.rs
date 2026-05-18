@@ -127,7 +127,7 @@ impl ServerHandler for SyslogRmcpServer {
         let started = Instant::now();
         tracing::info!(tool = %tool_name, "MCP tool execution started");
 
-        match execute_tool(&self.state, &tool_name, arguments).await {
+        match execute_tool(&self.state, &tool_name, arguments, auth).await {
             Ok(result) => {
                 let result_count = safe_result_count(&result);
                 tracing::info!(
