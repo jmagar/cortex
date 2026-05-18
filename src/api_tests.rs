@@ -1,6 +1,8 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::body::to_bytes;
+use axum::extract::connect_info::MockConnectInfo;
 use axum::http::Request;
 use tower::util::ServiceExt;
 
@@ -10,33 +12,65 @@ use crate::mcp::AuthPolicy;
 
 use super::*;
 
-/// Build an ApiState with Mounted { auth_state: None } policy (static-bearer auth via AuthLayer).
-/// API always requires a token when enabled, so we always supply one here and let callers
-/// mutate if they need a different token.
+/// Build the router for a test, layering a `MockConnectInfo` so handlers
+/// extracting `ConnectInfo<SocketAddr>` (e.g. `ai_prune_checkpoints`) work
+/// under `tower::ServiceExt::oneshot`. Production wires `ConnectInfo` via
+/// `into_make_service_with_connect_info` at `src/main.rs:565`.
+fn test_router(state: ApiState) -> axum::Router {
+    router(state)
+        .unwrap()
+        .layer(MockConnectInfo(SocketAddr::from(([10, 0, 0, 99], 65000))))
+}
+
+/// Build an ApiState. The /api/* router forces bearer enforcement regardless
+/// of the supplied AuthPolicy (see `router()`), so tests can use whichever
+/// variant most closely matches the production wiring they care about.
 fn test_state(token: Option<String>) -> (ApiState, Arc<DbPool>, tempfile::TempDir) {
+    test_state_with_policy(token, AuthPolicy::Mounted { auth_state: None })
+}
+
+fn test_state_with_policy(
+    token: Option<String>,
+    auth_policy: AuthPolicy,
+) -> (ApiState, Arc<DbPool>, tempfile::TempDir) {
+    test_state_full(token, auth_policy, Vec::new())
+}
+
+fn test_state_with_origins(
+    token: Option<String>,
+    allowed_origins: Vec<String>,
+) -> (ApiState, Arc<DbPool>, tempfile::TempDir) {
+    test_state_full(
+        token,
+        AuthPolicy::Mounted { auth_state: None },
+        allowed_origins,
+    )
+}
+
+fn test_state_full(
+    token: Option<String>,
+    auth_policy: AuthPolicy,
+    allowed_origins: Vec<String>,
+) -> (ApiState, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("api-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
-    // When a token is provided we use Mounted policy so AuthLayer actually enforces it.
-    // When token is None the router() call itself returns Err, so the policy variant doesn't matter.
-    let auth_policy = if token.is_some() {
-        AuthPolicy::Mounted { auth_state: None }
-    } else {
-        AuthPolicy::LoopbackDev
-    };
-    (
-        ApiState {
-            service: crate::app::SyslogService::new(Arc::clone(&pool), storage),
-            config: ApiConfig {
-                enabled: true,
-                api_token: token,
-            },
-            cors_port: 3100,
-            auth_policy,
-        },
-        pool,
-        dir,
+    let service = crate::app::SyslogService::new(Arc::clone(&pool), storage);
+    // Every test gets a fresh per-state maintenance permit so parallel tests
+    // never contend on the process-wide `SHARED_MAINTENANCE_PERMIT` — see
+    // `ApiState::with_isolated_maintenance_permit` docs.
+    let state = ApiState::new(
+        service,
+        ApiConfig { api_token: token },
+        3100,
+        true,
+        allowed_origins,
+        auth_policy,
+        &pool,
     )
+    .expect("ApiState::new should succeed against a fresh pool")
+    .with_isolated_maintenance_permit();
+    (state, pool, dir)
 }
 
 fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> LogBatchEntry {
@@ -84,20 +118,18 @@ async fn get_json(
 }
 
 #[test]
-fn router_requires_token_when_enabled() {
+fn router_requires_token() {
     let (state, _pool, _dir) = test_state(None);
-    assert!(router(state).is_err());
-}
-
-#[test]
-fn router_rejects_disabled_config_when_called_directly() {
-    let (mut state, _pool, _dir) = test_state(Some("secret".into()));
-    state.config.enabled = false;
-    let err = match router(state) {
-        Ok(_) => panic!("disabled API config should be rejected"),
-        Err(err) => err,
-    };
-    assert!(err.to_string().contains("disabled"));
+    let err = router(state).expect_err("missing token must abort router construction");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("SYSLOG_API_TOKEN"),
+        "error must mention the missing env var: {msg}"
+    );
+    assert!(
+        msg.contains("syslog setup repair"),
+        "error must include recovery hint: {msg}"
+    );
 }
 
 #[tokio::test]
@@ -307,4 +339,1546 @@ async fn api_cookie_without_bearer_is_rejected() {
         axum::http::StatusCode::UNAUTHORIZED,
         "session cookie must not bypass bearer-only AuthLayer on /api/*"
     );
+}
+
+// ── /api/version + force-bearer-on-loopback + schema_version cache ────────────
+
+/// `/api/version` returns 200 with a well-formed payload when authenticated.
+/// Verifies the cached `version_info` is rendered, not re-queried.
+#[tokio::test]
+async fn version_route_returns_payload_with_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/version", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+    assert!(
+        value.get("schema_version").is_some(),
+        "schema_version must be present"
+    );
+    assert!(
+        value["schema_version"].as_i64().unwrap() >= 0,
+        "schema_version must be a non-negative integer"
+    );
+}
+
+/// CRITICAL (eng-review C1): even when the listener is bound to loopback and
+/// callers therefore *could* be unauthenticated under the MCP policy, the
+/// `/api/*` router MUST force `AuthPolicy::Mounted` and reject unauthenticated
+/// requests. Without this, the "single shared token" model documented for
+/// /api + /mcp breaks open on dev/loopback deployments.
+#[tokio::test]
+async fn version_route_requires_bearer_even_on_loopback_policy() {
+    let (state, _pool, _dir) =
+        test_state_with_policy(Some("secret".into()), AuthPolicy::LoopbackDev);
+    let app = router(state).unwrap();
+
+    let (status, _) = get_json(app.clone(), "/api/version", None).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::UNAUTHORIZED,
+        "loopback bind must not bypass bearer on /api/*"
+    );
+
+    let (status, value) = get_json(app, "/api/version", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+}
+
+/// Repeated calls return identical schema_version values, proving the value
+/// was captured once at startup rather than queried per request.
+#[tokio::test]
+async fn version_schema_version_is_cached_across_requests() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+
+    let (s1, v1) = get_json(app.clone(), "/api/version", Some("secret")).await;
+    let (s2, v2) = get_json(app, "/api/version", Some("secret")).await;
+    assert_eq!(s1, axum::http::StatusCode::OK);
+    assert_eq!(s2, axum::http::StatusCode::OK);
+    assert_eq!(v1["schema_version"], v2["schema_version"]);
+}
+
+/// When GIT_SHA is not set at build time, the JSON response omits the field
+/// rather than rendering `null`. This test is conditional: if a downstream
+/// build *does* set GIT_SHA, the field will be present and the assertion
+/// (`is_string()`) still holds.
+#[tokio::test]
+async fn version_git_sha_is_omitted_when_unset_or_string_when_set() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/version", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    match value.get("git_sha") {
+        None => {}
+        Some(v) => assert!(
+            v.is_string(),
+            "git_sha when present must be a string, got: {v}"
+        ),
+    }
+    assert!(
+        !value.get("git_sha").map(|v| v.is_null()).unwrap_or(false),
+        "git_sha must never be JSON null — omit the field instead"
+    );
+}
+
+// ── /api/sessions + /api/ai/* happy-paths and contract checks ───────────────
+
+fn ai_entry(
+    ts: &str,
+    host: &str,
+    severity: &str,
+    msg: &str,
+    project: &str,
+    tool: &str,
+    session: &str,
+) -> LogBatchEntry {
+    let mut e = entry(ts, host, severity, msg, "10.0.0.1:514");
+    e.ai_project = Some(project.into());
+    e.ai_tool = Some(tool.into());
+    e.ai_session_id = Some(session.into());
+    e
+}
+
+#[tokio::test]
+async fn sessions_route_returns_empty_when_db_empty() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/sessions", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["count"], 0);
+    assert!(value["sessions"].is_array());
+}
+
+#[tokio::test]
+async fn sessions_route_lists_ingested_session() {
+    let (state, pool, _dir) = test_state(Some("secret".into()));
+    db::insert_logs_batch(
+        &pool,
+        &[ai_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            "info",
+            "claude session start",
+            "syslog-mcp",
+            "claude",
+            "sess-1",
+        )],
+    )
+    .unwrap();
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/sessions", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["count"], 1);
+    assert_eq!(value["sessions"][0]["project"], "syslog-mcp");
+    assert_eq!(value["sessions"][0]["tool"], "claude");
+}
+
+#[tokio::test]
+async fn ai_search_requires_query_param() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/ai/search", Some("secret")).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::BAD_REQUEST,
+        "missing required `query` must yield 400"
+    );
+}
+
+#[tokio::test]
+async fn ai_search_clamps_limit_and_marks_truncated() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(
+        app,
+        "/api/ai/search?query=anything&limit=10000",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        value["limit_clamped_to"], 500,
+        "clamp marker must report the cap value"
+    );
+    assert_eq!(
+        value["truncated"], true,
+        "limit clamp must force truncated:true"
+    );
+}
+
+#[tokio::test]
+async fn ai_search_without_limit_omits_clamp_marker() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/ai/search?query=anything", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(
+        value.get("limit_clamped_to").is_none(),
+        "clamp marker must be omitted when limit not supplied"
+    );
+}
+
+#[tokio::test]
+async fn ai_abuse_accepts_terms_singular_query_param() {
+    // Bead 0p8r.15: server-side `QsQuery<AbuseSearchRequest>` accepts
+    // `terms=<x>` and surfaces it as a single-element Vec<String>.
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/ai/abuse?terms=ignore", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("matches").is_some());
+}
+
+#[tokio::test]
+async fn ai_abuse_accepts_multiple_terms_via_repeated_keys() {
+    // Bead 0p8r.15 round-trip: `terms=a&terms=b` (the wire shape
+    // `serde_qs::to_string` produces from `Vec<String>`) is accepted, and
+    // every term reaches the service.
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(
+        app,
+        "/api/ai/abuse?terms=alpha&terms=beta&terms=gamma",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let terms = value["terms"].as_array().expect("terms must be array");
+    let collected: Vec<&str> = terms.iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(
+        collected,
+        vec!["alpha", "beta", "gamma"],
+        "all three repeated terms must reach the service: {value}"
+    );
+}
+
+#[tokio::test]
+async fn ai_abuse_clamps_limit_and_marks_truncated() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/ai/abuse?limit=10000", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["limit_clamped_to"], 500);
+    assert_eq!(value["truncated"], true);
+}
+
+#[tokio::test]
+async fn ai_correlate_clamps_events_per_anchor_and_marks_clamp() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(
+        app,
+        "/api/ai/correlate?events_per_anchor=200",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        value["events_per_anchor_clamped_to"], 50,
+        "events_per_anchor clamp marker must be present when caller asked for > 50"
+    );
+    // related_limit_per_anchor reflects the clamped value (service computes
+    // from the value we pass after clamping).
+    assert_eq!(value["related_limit_per_anchor"], 50);
+}
+
+#[tokio::test]
+async fn ai_correlate_without_clamp_has_no_marker() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(
+        app,
+        "/api/ai/correlate?events_per_anchor=10",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(
+        value.get("events_per_anchor_clamped_to").is_none(),
+        "clamp marker must be omitted when caller stays under the cap"
+    );
+}
+
+#[tokio::test]
+async fn ai_blocks_returns_payload() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/ai/blocks", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("blocks").is_some());
+}
+
+#[tokio::test]
+async fn ai_context_rejects_missing_project() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/ai/context", Some("secret")).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::BAD_REQUEST,
+        "missing required `project` must yield 400"
+    );
+}
+
+#[tokio::test]
+async fn ai_context_rejects_empty_project() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/ai/context?project=", Some("secret")).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::BAD_REQUEST,
+        "empty `project` must yield 400 (eng-review #A7)"
+    );
+    assert!(
+        value["error"].as_str().unwrap_or("").contains("project"),
+        "error body must mention `project`: {value}"
+    );
+}
+
+#[tokio::test]
+async fn ai_context_accepts_non_empty_project() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/ai/context?project=foo", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["project"], "foo");
+}
+
+#[tokio::test]
+async fn ai_tools_returns_payload() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/ai/tools", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("tools").is_some());
+}
+
+#[tokio::test]
+async fn ai_projects_returns_payload() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, value) = get_json(app, "/api/ai/projects", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("projects").is_some());
+}
+
+// ── deny_unknown_fields enforcement ─────────────────────────────────────────
+
+#[tokio::test]
+async fn unknown_query_param_returns_400_on_ai_blocks() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/ai/blocks?bogus=1", Some("secret")).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::BAD_REQUEST,
+        "unknown query field must be rejected when deny_unknown_fields is in effect"
+    );
+}
+
+#[tokio::test]
+async fn unknown_query_param_returns_400_on_legacy_search() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/search?bogus=1", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+// ── all new routes require bearer ───────────────────────────────────────────
+
+#[tokio::test]
+async fn ai_routes_require_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    for path in [
+        "/api/sessions",
+        "/api/ai/search?query=x",
+        "/api/ai/abuse",
+        "/api/ai/correlate",
+        "/api/ai/blocks",
+        "/api/ai/context?project=foo",
+        "/api/ai/tools",
+        "/api/ai/projects",
+    ] {
+        let (status, _) = get_json(app.clone(), path, None).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{path} must require a bearer token",
+        );
+    }
+}
+
+// ── CORS plumbing from SYSLOG_MCP_ALLOWED_ORIGINS ───────────────────────────
+
+#[tokio::test]
+async fn allowed_origins_grants_cors_for_env_supplied_host() {
+    let (state, _pool, _dir) =
+        test_state_with_origins(Some("secret".into()), vec!["https://ui.example.com".into()]);
+    let app = router(state).unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/stats")
+        .header("Authorization", "Bearer secret")
+        .header("Origin", "https://ui.example.com")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(
+        response
+            .headers()
+            .get("access-control-allow-origin")
+            .map(|v| v.to_str().unwrap_or("").to_string())
+            .unwrap_or_default(),
+        "https://ui.example.com",
+        "env-supplied origin must be reflected by the CORS layer"
+    );
+}
+
+/// Bead 0p8r.21: on a non-loopback bind, the default `localhost:port` /
+/// `127.0.0.1:port` CORS allowlist must NOT fire. Only `SYSLOG_MCP_ALLOWED_ORIGINS`
+/// is authoritative.
+#[tokio::test]
+async fn cors_localhost_defaults_suppressed_on_external_bind() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(dir.path().join("api-test.db"));
+    let pool = Arc::new(db::init_pool(&storage).unwrap());
+    let service = crate::app::SyslogService::new(Arc::clone(&pool), storage);
+    let state = ApiState::new(
+        service,
+        ApiConfig {
+            api_token: Some("secret".into()),
+        },
+        3100,
+        // External bind — defaults must be dropped.
+        false,
+        vec![],
+        AuthPolicy::Mounted { auth_state: None },
+        &pool,
+    )
+    .unwrap()
+    .with_isolated_maintenance_permit();
+    let app = router(state).unwrap();
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/stats")
+        .header("Authorization", "Bearer secret")
+        .header("Origin", "http://localhost:3100")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert!(
+        response
+            .headers()
+            .get("access-control-allow-origin")
+            .is_none(),
+        "localhost origin must NOT be allowed on external bind without an explicit allowlist"
+    );
+}
+
+/// Grep guard: there must be no `SYSLOG_API_ENABLED` reference left in the
+/// source tree. The env var was retired when /api/* became always-on, and a
+/// stray reference would be a silent foot-gun (operators expecting it to
+/// control mounting).
+#[test]
+fn no_syslog_api_enabled_references_remain_in_source_tree() {
+    use std::path::{Path, PathBuf};
+
+    fn walk(dir: &Path, hits: &mut Vec<(PathBuf, usize, String)>) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, hits);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("rs") {
+                continue;
+            }
+            // Skip the grep test itself (it legitimately mentions the
+            // string as a literal we're searching for).
+            if path.file_name().and_then(|s| s.to_str()) == Some("api_tests.rs") {
+                continue;
+            }
+            let Ok(contents) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for (idx, line) in contents.lines().enumerate() {
+                if line.contains("SYSLOG_API_ENABLED") {
+                    hits.push((path.clone(), idx + 1, line.to_string()));
+                }
+            }
+        }
+    }
+
+    // CARGO_MANIFEST_DIR is the crate root regardless of where `cargo test`
+    // is invoked from (worktree, CI runner, etc.).
+    let src_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut hits = Vec::new();
+    walk(&src_root, &mut hits);
+    assert!(
+        hits.is_empty(),
+        "found leftover SYSLOG_API_ENABLED references in src/: {hits:#?}"
+    );
+}
+
+// ── bead 0p8r.3: AI diagnostic + prune-checkpoints endpoints ─────────────────
+
+async fn post_json(
+    app: axum::Router,
+    uri: &str,
+    body: serde_json::Value,
+    token: Option<&str>,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("Content-Type", "application/json");
+    if let Some(token) = token {
+        builder = builder.header("Authorization", format!("Bearer {token}"));
+    }
+    let response = app
+        .oneshot(
+            builder
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, value)
+}
+
+#[tokio::test]
+async fn ai_checkpoints_route_returns_empty_when_db_empty() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/ai/checkpoints", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.is_array(), "expected JSON array, got {value}");
+    assert_eq!(value.as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn ai_checkpoints_route_accepts_filter_flags() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = get_json(
+        app,
+        "/api/ai/checkpoints?errors_only=true&missing_only=false&limit=10",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ai_checkpoints_rejects_unknown_query_param() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = get_json(app, "/api/ai/checkpoints?bogus=1", Some("secret")).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::BAD_REQUEST,
+        "deny_unknown_fields must reject unknown query params"
+    );
+}
+
+#[tokio::test]
+async fn ai_parse_errors_route_returns_empty_when_db_empty() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/ai/errors", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.is_array(), "expected JSON array, got {value}");
+}
+
+#[tokio::test]
+async fn ai_parse_errors_honors_limit() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = get_json(app, "/api/ai/errors?limit=5", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ai_prune_checkpoints_with_dry_run_true_returns_ok() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = post_json(
+        app,
+        "/api/ai/prune-checkpoints",
+        // `missing_only` is required by the service (it refuses to prune
+        // arbitrary checkpoints — see scanner::checkpoint::prune_checkpoints).
+        json!({"dry_run": true, "missing_only": true}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["dry_run"], true);
+    assert_eq!(value["matched"], 0);
+    assert_eq!(value["pruned"], 0);
+}
+
+#[tokio::test]
+async fn ai_prune_checkpoints_with_dry_run_false_returns_ok_and_prunes() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = post_json(
+        app,
+        "/api/ai/prune-checkpoints",
+        json!({"dry_run": false, "missing_only": true}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["dry_run"], false);
+    // Empty DB → nothing matched/pruned, but the shape is correct.
+    assert_eq!(value["matched"], 0);
+    assert_eq!(value["pruned"], 0);
+}
+
+/// CRITICAL (eng-review C3): `POST {}` MUST return 400, not silently
+/// default `dry_run` to `false` and mass-delete checkpoints.
+#[tokio::test]
+async fn ai_prune_checkpoints_missing_dry_run_returns_400() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) =
+        post_json(app, "/api/ai/prune-checkpoints", json!({}), Some("secret")).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::BAD_REQUEST,
+        "POST {{}} must return 400 to defend against mass-delete (eng-review C3)"
+    );
+    let msg = value["error"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("dry_run is required"),
+        "error must mention dry_run is required, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn ai_prune_checkpoints_with_only_missing_only_returns_400() {
+    // missing_only present but dry_run absent → still 400.
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = post_json(
+        app,
+        "/api/ai/prune-checkpoints",
+        json!({"missing_only": true}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn ai_prune_checkpoints_rejects_unknown_field() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = post_json(
+        app,
+        "/api/ai/prune-checkpoints",
+        json!({"dry_run": true, "unknown": 1}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::BAD_REQUEST,
+        "deny_unknown_fields must reject unknown body fields"
+    );
+}
+
+#[tokio::test]
+async fn ai_prune_checkpoints_rejects_non_object_body() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = post_json(
+        app,
+        "/api/ai/prune-checkpoints",
+        json!([1, 2, 3]),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn ai_prune_checkpoints_rejects_malformed_json() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/ai/prune-checkpoints")
+        .header("Content-Type", "application/json")
+        .header("Authorization", "Bearer secret")
+        .body(axum::body::Body::from("{not json"))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn ai_prune_checkpoints_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = post_json(
+        app,
+        "/api/ai/prune-checkpoints",
+        json!({"dry_run": true}),
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn ai_checkpoints_routes_require_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    for path in ["/api/ai/checkpoints", "/api/ai/errors"] {
+        let (status, _) = get_json(app.clone(), path, None).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{path} must require a bearer token"
+        );
+    }
+}
+
+// ── CORS preflight for POST endpoint ────────────────────────────────────────
+
+/// Browser preflight: OPTIONS + Origin + Access-Control-Request-Method must
+/// return 2xx (axum's CORS layer returns 200 OK) with `Allow-Methods`
+/// listing POST. Without the CORS update in this bead, the preflight
+/// silently fails and the browser never issues the actual POST.
+#[tokio::test]
+async fn cors_preflight_for_post_includes_post_in_allow_methods() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let request = Request::builder()
+        .method("OPTIONS")
+        .uri("/api/ai/prune-checkpoints")
+        .header("Origin", "http://localhost:3100")
+        .header("Access-Control-Request-Method", "POST")
+        .header(
+            "Access-Control-Request-Headers",
+            "authorization,content-type",
+        )
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    // tower-http CorsLayer returns 200 OK for preflights.
+    assert!(
+        response.status().is_success() || response.status().as_u16() == 204,
+        "CORS preflight must succeed, got {}",
+        response.status()
+    );
+    let allow_methods = response
+        .headers()
+        .get("access-control-allow-methods")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    assert!(
+        allow_methods.contains("POST"),
+        "Access-Control-Allow-Methods must include POST, got: {allow_methods}"
+    );
+    assert!(
+        allow_methods.contains("OPTIONS"),
+        "Access-Control-Allow-Methods must include OPTIONS, got: {allow_methods}"
+    );
+
+    // Bead 0p8r.14: allowed-headers must be an explicit allowlist, NOT `*`.
+    // authorization / content-type / accept are required; arbitrary
+    // headers (cookie, x-custom-token, etc.) must NOT be reflected.
+    let allow_headers = response
+        .headers()
+        .get("access-control-allow-headers")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert!(
+        allow_headers.contains("authorization"),
+        "Access-Control-Allow-Headers must include authorization, got: {allow_headers}"
+    );
+    assert!(
+        allow_headers.contains("content-type"),
+        "Access-Control-Allow-Headers must include content-type, got: {allow_headers}"
+    );
+    assert!(
+        !allow_headers.contains('*'),
+        "Access-Control-Allow-Headers must NOT be the wildcard; got: {allow_headers}"
+    );
+}
+
+/// Bead 0p8r.14: a preflight that asks for a non-allowlisted header (cookie,
+/// x-custom-token) must NOT have that header echoed in
+/// access-control-allow-headers. The browser then refuses the actual request.
+#[tokio::test]
+async fn cors_preflight_rejects_non_allowlisted_header() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let request = Request::builder()
+        .method("OPTIONS")
+        .uri("/api/ai/prune-checkpoints")
+        .header("Origin", "http://localhost:3100")
+        .header("Access-Control-Request-Method", "POST")
+        .header(
+            "Access-Control-Request-Headers",
+            "authorization,cookie,x-custom-token",
+        )
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    let allow_headers = response
+        .headers()
+        .get("access-control-allow-headers")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert!(
+        !allow_headers.contains("cookie"),
+        "cookie header must not be reflected by CORS preflight: {allow_headers}"
+    );
+    assert!(
+        !allow_headers.contains("x-custom-token"),
+        "x-custom-token must not be reflected by CORS preflight: {allow_headers}"
+    );
+}
+
+/// All new bead-0p8r.3 routes must require a bearer (consolidated check).
+#[tokio::test]
+async fn bead_0p8r_3_routes_require_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    for path in ["/api/ai/checkpoints", "/api/ai/errors"] {
+        let (status, _) = get_json(app.clone(), path, None).await;
+        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "{path}");
+    }
+    let (status, _) = post_json(
+        app,
+        "/api/ai/prune-checkpoints",
+        json!({"dry_run": true}),
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+// ── Audit-log-before-service-call ordering ──────────────────────────────────
+
+/// Eng-review #A13 / security finding #35: `tracing::warn!` audit line must
+/// fire BEFORE the service call, so a process crash mid-prune still leaves
+/// an audit trail.
+///
+/// Test strategy (per bead 0p8r.3 MUST-CHECK fallback when `tracing-test`
+/// isn't a dependency): assert ordering via source-grep on the handler in
+/// `src/api.rs`. Specifically, inside the `async fn ai_prune_checkpoints`
+/// body the `tracing::warn!` macro invocation must appear LEXICALLY before
+/// the `.prune_ai_checkpoints(` service call. Because Rust executes
+/// expressions in source order within an async block, lexical ordering is
+/// emission ordering.
+///
+/// We also assert the audit fields (`caller_ip`, `action`, `dry_run`,
+/// `missing_only`) are present in the warn! invocation source so the
+/// observability surface is right.
+#[test]
+fn ai_prune_checkpoints_audit_log_precedes_service_call_in_source() {
+    let api_src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/api.rs"),
+    )
+    .expect("src/api.rs must be readable");
+
+    // Locate the handler body.
+    let handler_start = api_src
+        .find("async fn ai_prune_checkpoints(")
+        .expect("ai_prune_checkpoints handler must exist in src/api.rs");
+    let handler_tail = &api_src[handler_start..];
+    // Stop at the next top-level `async fn` or `fn ` after the handler so we
+    // don't drag audit-log strings from later handlers into the search.
+    let handler_end = handler_tail[1..]
+        .find("\nasync fn ")
+        .map(|i| i + 1)
+        .or_else(|| handler_tail[1..].find("\nfn ").map(|i| i + 1))
+        .unwrap_or(handler_tail.len());
+    let handler = &handler_tail[..handler_end];
+
+    let warn_pos = handler
+        .find("tracing::warn!(")
+        .expect("handler must contain tracing::warn!( audit invocation");
+    let service_call_pos = handler
+        .find(".prune_ai_checkpoints(")
+        .expect("handler must call .prune_ai_checkpoints( on the service");
+    assert!(
+        warn_pos < service_call_pos,
+        "audit tracing::warn! must appear in source BEFORE the \
+         .prune_ai_checkpoints service call (eng-review #A13). \
+         warn_pos={warn_pos}, service_call_pos={service_call_pos}"
+    );
+
+    // The warn! invocation must include the required audit fields.
+    let warn_slice_end = handler[warn_pos..]
+        .find(')')
+        .map(|i| warn_pos + i + 1)
+        .unwrap_or(handler.len());
+    let warn_slice = &handler[warn_pos..warn_slice_end];
+    for required in ["caller_ip", "action", "dry_run", "missing_only"] {
+        assert!(
+            warn_slice.contains(required),
+            "audit warn! must include `{required}` field, got: {warn_slice}"
+        );
+    }
+}
+
+// ── bead 0p8r.4: DB ops endpoints (status/integrity/checkpoint/vacuum) ───────
+
+#[tokio::test]
+async fn db_status_returns_pragma_snapshot() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/db/status", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(
+        value.get("page_count").is_some(),
+        "missing page_count: {value}"
+    );
+    assert!(
+        value.get("page_size").is_some(),
+        "missing page_size: {value}"
+    );
+    assert!(value.get("journal_mode").is_some());
+}
+
+#[tokio::test]
+async fn db_status_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = get_json(app, "/api/db/status", None).await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn db_integrity_quick_returns_ok() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/db/integrity?quick=true", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["ok"], true, "fresh DB should pass integrity: {value}");
+}
+
+#[tokio::test]
+async fn db_integrity_full_returns_ok() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/db/integrity", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["ok"], true);
+}
+
+#[tokio::test]
+async fn db_integrity_rejects_unknown_query_param() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = get_json(app, "/api/db/integrity?bogus=1", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn db_integrity_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = get_json(app, "/api/db/integrity", None).await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn db_checkpoint_passive_returns_ok() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = post_json(
+        app,
+        "/api/db/checkpoint",
+        json!({"mode": "passive"}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "body: {value}");
+    assert_eq!(value["mode"], "passive");
+}
+
+#[tokio::test]
+async fn db_checkpoint_accepts_uppercase_mode() {
+    // Validation is case-insensitive; the service receives the lowercase form.
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = post_json(
+        app,
+        "/api/db/checkpoint",
+        json!({"mode": "PASSIVE"}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["mode"], "passive");
+}
+
+/// Bead 0p8r.4 #A17: unknown `mode` returns 400 with allowed list.
+#[tokio::test]
+async fn db_checkpoint_rejects_invalid_mode() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = post_json(
+        app,
+        "/api/db/checkpoint",
+        json!({"mode": "INVALID"}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    let msg = value["error"].as_str().unwrap_or_default();
+    for required in ["passive", "full", "restart", "truncate"] {
+        assert!(
+            msg.contains(required),
+            "error must list allowed mode `{required}`, got: {msg}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn db_checkpoint_rejects_unknown_field() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = post_json(
+        app,
+        "/api/db/checkpoint",
+        json!({"mode": "passive", "bogus": 1}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn db_checkpoint_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = post_json(app, "/api/db/checkpoint", json!({"mode": "passive"}), None).await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn db_vacuum_incremental_returns_ok() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": false, "incremental_pages": 16}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "body: {value}");
+    assert_eq!(value["full"], false);
+    assert_eq!(value["incremental_pages"], 16);
+}
+
+#[tokio::test]
+async fn db_vacuum_full_on_small_db_returns_ok() {
+    // Fresh DB is well under 2 GB, no force needed.
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": true, "incremental_pages": 0}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "body: {value}");
+    assert_eq!(value["full"], true);
+}
+
+/// Bead 0p8r.4 / eng-review C3 + bead 0p8r.17: `force` MUST be explicit when
+/// the LIVE DB size exceeds the guard. We lower the threshold to 1 byte (via
+/// test-only `with_full_vacuum_size_guard_bytes`) so even a freshly-opened
+/// SQLite (page_count >= 1, page_size = 4096) trips the guard. This proves
+/// the handler is reading the live `page_count * page_size` at request time
+/// rather than a stale snapshot from `ApiState` construction.
+#[tokio::test]
+async fn db_vacuum_full_on_large_db_without_force_returns_409() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let state = state.with_full_vacuum_size_guard_bytes(1);
+    let app = test_router(state);
+    let (status, value) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": true, "incremental_pages": 0}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+    let msg = value["error"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("force") && msg.contains("GB"),
+        "error must mention force + GB hint, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn db_vacuum_full_with_force_bypasses_size_guard() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let state = state.with_full_vacuum_size_guard_bytes(1);
+    let app = test_router(state);
+    let (status, _) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": true, "incremental_pages": 0, "force": true}),
+        Some("secret"),
+    )
+    .await;
+    // force=true bypasses the live size pre-flight.
+    assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn db_vacuum_force_false_does_not_bypass_size_guard() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let state = state.with_full_vacuum_size_guard_bytes(1);
+    let app = test_router(state);
+    let (status, _) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": true, "incremental_pages": 0, "force": false}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::CONFLICT,
+        "force:false must NOT bypass — only Some(true) does"
+    );
+}
+
+/// Bead 0p8r.17: pre-flight reads LIVE size; a DB that grows past the guard
+/// AFTER `ApiState` construction must trip the gate. Seed the DB with rows
+/// post-construction, then assert 409. Pre-bead-.17 this would have used the
+/// stale startup cache (0 bytes on empty DB) and incorrectly returned 200.
+#[tokio::test]
+async fn db_vacuum_full_size_guard_reads_live_size_post_construction() {
+    let (state, pool, _dir) = test_state(Some("secret".into()));
+    let state = state.with_full_vacuum_size_guard_bytes(1);
+    // Insert real rows AFTER ApiState was built so the live page_count grows
+    // beyond the 1-byte threshold. A pre-bead-.17 implementation that
+    // snapshotted at construction would not see this growth and would
+    // incorrectly return 200.
+    let batch: Vec<_> = (0..32)
+        .map(|i| {
+            entry(
+                "2026-01-01T00:00:00Z",
+                "h",
+                "info",
+                &format!("seed-{i}"),
+                "10.0.0.1",
+            )
+        })
+        .collect();
+    db::insert_logs_batch(&pool, &batch).expect("seed insert");
+    let app = test_router(state);
+    let (status, value) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": true, "incremental_pages": 0}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::CONFLICT,
+        "live size must drive the pre-flight, not a stale snapshot: {value}"
+    );
+}
+
+#[tokio::test]
+async fn db_vacuum_size_guard_does_not_apply_to_incremental() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let state = state.with_full_vacuum_size_guard_bytes(1);
+    let app = test_router(state);
+    let (status, _) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": false, "incremental_pages": 16}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn db_vacuum_rejects_unknown_field() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": false, "incremental_pages": 16, "bogus": 1}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn db_vacuum_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": false, "incremental_pages": 16}),
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+/// Single-flight (eng-review C2): when MAINTENANCE_PERMIT is held, a
+/// concurrent vacuum POST returns 409 immediately.
+///
+/// We acquire the permit directly via `maintenance_permit()` to avoid racing
+/// two real vacuums on a fresh DB (which might both finish before the second
+/// request arrives).
+#[tokio::test]
+async fn db_vacuum_single_flight_returns_409_when_locked() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    // Grab the permit from THIS state (each test has its own per
+    // `with_isolated_maintenance_permit`).
+    let permit = Arc::clone(&state.maintenance_permit)
+        .try_acquire_owned()
+        .expect("permit must be free at test start");
+    let app = test_router(state);
+
+    let (status, value) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": false, "incremental_pages": 16}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+    assert_eq!(
+        value["error"].as_str().unwrap_or_default(),
+        "db maintenance already in progress"
+    );
+
+    drop(permit);
+}
+
+/// Bead 0p8r.16: prune_ai_checkpoints must compete for MAINTENANCE_PERMIT
+/// alongside vacuum/checkpoint, so concurrent maintenance surfaces as a
+/// clean 409 rather than SQLITE_BUSY/timeout.
+#[tokio::test]
+async fn ai_prune_checkpoints_single_flight_returns_409_when_locked() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let permit = Arc::clone(&state.maintenance_permit)
+        .try_acquire_owned()
+        .expect("permit must be free at test start");
+    let app = test_router(state);
+
+    let (status, value) = post_json(
+        app,
+        "/api/ai/prune-checkpoints",
+        json!({"dry_run": true}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+    assert_eq!(
+        value["error"].as_str().unwrap_or_default(),
+        "db maintenance already in progress"
+    );
+
+    drop(permit);
+}
+
+#[tokio::test]
+async fn db_checkpoint_single_flight_returns_409_when_locked() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let permit = Arc::clone(&state.maintenance_permit)
+        .try_acquire_owned()
+        .expect("permit must be free at test start");
+    let app = test_router(state);
+
+    let (status, value) = post_json(
+        app,
+        "/api/db/checkpoint",
+        json!({"mode": "passive"}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+    assert_eq!(
+        value["error"].as_str().unwrap_or_default(),
+        "db maintenance already in progress"
+    );
+
+    drop(permit);
+}
+
+/// Vacuum and checkpoint share the SAME permit (single-flight applies across
+/// both). With one held, the other returns 409.
+#[tokio::test]
+async fn db_vacuum_blocks_db_checkpoint_via_shared_permit() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let permit = Arc::clone(&state.maintenance_permit)
+        .try_acquire_owned()
+        .expect("permit must be free at test start");
+    let app = test_router(state);
+
+    // Hold the permit, fire a checkpoint POST — should 409.
+    let (status, _) = post_json(
+        app,
+        "/api/db/checkpoint",
+        json!({"mode": "passive"}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+
+    drop(permit);
+}
+
+/// Concurrent vacuum requests against the same ApiState: the second one
+/// must return 409 immediately (no queueing). Drives the single-flight path
+/// without manually holding the permit.
+#[tokio::test]
+async fn db_vacuum_concurrent_requests_second_returns_409() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+
+    // Hold the permit explicitly to ensure the request below races against
+    // a guaranteed-held permit (without this the vacuum on a fresh DB
+    // finishes before the second spawn even runs).
+    // For a true "two real requests race" we'd need a slow vacuum — covered
+    // by the integration smoke tests.
+    let app2 = app.clone();
+    let h1 = tokio::spawn(async move {
+        post_json(
+            app2,
+            "/api/db/vacuum",
+            json!({"full": false, "incremental_pages": 16}),
+            Some("secret"),
+        )
+        .await
+    });
+    let h2 = tokio::spawn(async move {
+        post_json(
+            app,
+            "/api/db/vacuum",
+            json!({"full": false, "incremental_pages": 16}),
+            Some("secret"),
+        )
+        .await
+    });
+    let (r1, r2) = tokio::join!(h1, h2);
+    let (s1, _) = r1.unwrap();
+    let (s2, _) = r2.unwrap();
+    // At least one succeeds. The other is either 200 (raced wide enough that
+    // permit was free) or 409 (raced narrow enough to contend). Both must
+    // be in the success/conflict set — never 5xx, never block.
+    for code in [s1, s2] {
+        assert!(
+            code == axum::http::StatusCode::OK || code == axum::http::StatusCode::CONFLICT,
+            "expected 200 or 409, got {code}"
+        );
+    }
+    // And at least one must be 200 (the work happened at least once).
+    assert!(
+        s1 == axum::http::StatusCode::OK || s2 == axum::http::StatusCode::OK,
+        "at least one vacuum should complete"
+    );
+}
+
+/// Eng-review C2: while the maintenance permit is held, reads (which use
+/// the independent `db_permits` pool inside `SyslogService::run_db`) must
+/// continue to succeed.
+#[tokio::test]
+async fn reads_continue_while_maintenance_permit_held() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let permit = Arc::clone(&state.maintenance_permit)
+        .try_acquire_owned()
+        .expect("permit must be free at test start");
+    let app = test_router(state);
+
+    // GET /api/hosts goes through the service's db_permits pool — totally
+    // independent of the maintenance permit.
+    let (status, _) = get_json(app.clone(), "/api/hosts", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+
+    // GET /api/db/status is also a read — bypasses the maintenance permit.
+    let (status, _) = get_json(app, "/api/db/status", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+
+    drop(permit);
+}
+
+/// All bead 0p8r.4 routes require a bearer (consolidated check).
+#[tokio::test]
+async fn bead_0p8r_4_routes_require_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+
+    for path in ["/api/db/status", "/api/db/integrity"] {
+        let (status, _) = get_json(app.clone(), path, None).await;
+        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "{path}");
+    }
+    let (status, _) = post_json(
+        app.clone(),
+        "/api/db/checkpoint",
+        json!({"mode": "passive"}),
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+    let (status, _) = post_json(
+        app,
+        "/api/db/vacuum",
+        json!({"full": false, "incremental_pages": 16}),
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+/// Audit-log ordering for `db_vacuum` and `db_checkpoint` — mirrors the
+/// bead 0p8r.3 source-grep approach for `ai_prune_checkpoints`. The
+/// `tracing::warn!` must appear lexically before the service call AND before
+/// the permit acquisition so even a queued-but-rejected attempt leaves a
+/// trace.
+#[test]
+fn db_admin_audit_logs_precede_service_calls_in_source() {
+    let api_src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/api.rs"),
+    )
+    .expect("src/api.rs must be readable");
+
+    for (handler_name, service_call, required_fields) in [
+        (
+            "async fn db_vacuum(",
+            ".db_vacuum(",
+            &["caller_ip", "action", "full", "force"][..],
+        ),
+        (
+            "async fn db_checkpoint(",
+            ".db_checkpoint(",
+            &["caller_ip", "action", "mode"][..],
+        ),
+    ] {
+        let handler_start = api_src
+            .find(handler_name)
+            .unwrap_or_else(|| panic!("{handler_name} handler must exist in src/api.rs"));
+        let handler_tail = &api_src[handler_start..];
+        let handler_end = handler_tail[1..]
+            .find("\nasync fn ")
+            .map(|i| i + 1)
+            .or_else(|| handler_tail[1..].find("\nfn ").map(|i| i + 1))
+            .unwrap_or(handler_tail.len());
+        let handler = &handler_tail[..handler_end];
+
+        let warn_pos = handler.find("tracing::warn!(").unwrap_or_else(|| {
+            panic!("{handler_name} must contain tracing::warn!( audit invocation")
+        });
+        let service_call_pos = handler
+            .find(service_call)
+            .unwrap_or_else(|| panic!("{handler_name} must call {service_call}"));
+        assert!(
+            warn_pos < service_call_pos,
+            "audit tracing::warn! must appear in source BEFORE the service call \
+             ({handler_name}). warn_pos={warn_pos}, service_call_pos={service_call_pos}"
+        );
+
+        let warn_slice_end = handler[warn_pos..]
+            .find(')')
+            .map(|i| warn_pos + i + 1)
+            .unwrap_or(handler.len());
+        let warn_slice = &handler[warn_pos..warn_slice_end];
+        for required in required_fields {
+            assert!(
+                warn_slice.contains(*required),
+                "{handler_name} audit warn! must include `{required}`, got: {warn_slice}"
+            );
+        }
+    }
+
+    // Bead 0p8r.22: db_checkpoint's audit warn! must also precede the mode
+    // allowlist check so a rejected `mode=evil` 400 still leaves an audit
+    // row; otherwise an attacker can probe modes indefinitely without trace.
+    let handler_start = api_src
+        .find("async fn db_checkpoint(")
+        .expect("db_checkpoint handler must exist");
+    let handler_tail = &api_src[handler_start..];
+    let handler_end = handler_tail[1..]
+        .find("\nasync fn ")
+        .map(|i| i + 1)
+        .or_else(|| handler_tail[1..].find("\nfn ").map(|i| i + 1))
+        .unwrap_or(handler_tail.len());
+    let handler = &handler_tail[..handler_end];
+    let warn_pos = handler.find("tracing::warn!(").expect("warn must exist");
+    let mode_check_pos = handler
+        .find("CHECKPOINT_ALLOWED_MODES.contains")
+        .expect("mode allowlist check must exist");
+    assert!(
+        warn_pos < mode_check_pos,
+        "db_checkpoint audit warn! must precede the mode allowlist check (bead 0p8r.22). \
+         warn_pos={warn_pos}, mode_check_pos={mode_check_pos}"
+    );
+}
+
+/// Bead 0p8r.4 / eng-review C2: the new admin handlers must NOT touch the
+/// `db_permits` pool directly — they only call into the service (which
+/// acquires from `db_permits` internally). Source-grep for any direct
+/// reference to `db_permits` in the new handlers, IGNORING comment lines
+/// (the dual-permit pattern is documented inline, which is intentional).
+#[test]
+fn db_admin_handlers_do_not_touch_db_permits_pool_directly() {
+    let api_src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/api.rs"),
+    )
+    .expect("src/api.rs must be readable");
+
+    for handler_name in ["async fn db_vacuum(", "async fn db_checkpoint("] {
+        let handler_start = api_src
+            .find(handler_name)
+            .unwrap_or_else(|| panic!("{handler_name} must exist"));
+        let handler_tail = &api_src[handler_start..];
+        let handler_end = handler_tail[1..]
+            .find("\nasync fn ")
+            .map(|i| i + 1)
+            .or_else(|| handler_tail[1..].find("\nfn ").map(|i| i + 1))
+            .unwrap_or(handler_tail.len());
+        let handler = &handler_tail[..handler_end];
+        // Strip comment lines (//-leading) before checking; the rationale
+        // comments are allowed to mention `db_permits`, but actual code must
+        // not.
+        let non_comment_lines: String = handler
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !non_comment_lines.contains("db_permits"),
+            "{handler_name} must not reference db_permits in code — the \
+             maintenance permit is the outer gate; the service's db_permits \
+             pool is acquired internally by run_db. Found in:\n{non_comment_lines}"
+        );
+    }
 }

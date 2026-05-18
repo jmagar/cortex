@@ -1,0 +1,631 @@
+//! Per-arm dispatch for query commands (bead 0p8r.7).
+//!
+//! For each of the 7 query commands (search/tail/errors/hosts/correlate/
+//! stats/sessions) we expose:
+//!
+//! - A `Cli*Args::into_request()` conversion that constructs the `*Request`
+//!   struct shared by the service layer and the REST surface. Sharing the
+//!   constructor between the Local and HTTP arms is what guards against
+//!   per-arm field drift (eng-review #A37). The unit tests below pin the
+//!   shape via `format!("{req:?}")` snapshots.
+//! - A `run_X(mode, args)` free `async fn` that branches on [`CliMode`] and
+//!   either calls the local [`SyslogService`] directly or routes through
+//!   [`HttpClient`]. The HTTP arm is wrapped in [`http_or_cancel`] so a
+//!   SIGINT during a long-running request bails with `"interrupted"`
+//!   (eng-review #A29). The Local arm is sync SQL — no cancellation needed.
+//!
+//! `--json` printing reuses the existing `print_*_response` formatters from
+//! `super::*`, so output is byte-identical between modes: the HTTP path
+//! proxies the same service the Local path would invoke server-side.
+
+use anyhow::{bail, Result};
+use std::future::Future;
+use std::path::PathBuf;
+use syslog_mcp::app::{
+    AbuseSearchRequest, AiCheckpointsRequest, AiCorrelateRequest, AiParseErrorsRequest,
+    AiPruneCheckpointsRequest, CorrelateEventsRequest, DbCheckpointRequest, DbIntegrityRequest,
+    DbVacuumRequest, GetErrorsRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListSessionsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
+    TailLogsRequest, UsageBlocksRequest,
+};
+
+use super::{
+    ai_smoke_watch, ai_watch_status, ensure_ai_doctor_success, ensure_index_success,
+    print_abuse_search_response, print_ai_correlate_response, print_ai_doctor_response,
+    print_ai_parse_errors_response, print_ai_projects_response, print_ai_smoke_watch_response,
+    print_ai_tools_response, print_ai_watch_status_response, print_checkpoints_response,
+    print_correlate_response, print_db_backup_response, print_db_checkpoint_response,
+    print_db_integrity_response, print_db_status_response, print_db_vacuum_response,
+    print_errors_response, print_hosts_response, print_index_response,
+    print_project_context_response, print_prune_checkpoints_response, print_search_response,
+    print_search_sessions_response, print_sessions_response, print_stats_response,
+    print_usage_blocks_response, run_coordination_phases, AiAbuseArgs, AiAddArgs, AiBlocksArgs,
+    AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIndexArgs,
+    AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs, AiWatchArgs, CliMode, CorrelateArgs,
+    DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs, OutputArgs,
+    SearchArgs, SessionsArgs, TailArgs, TimeRangeArgs,
+};
+
+// ─── Arg → Request conversions ──────────────────────────────────────────────
+//
+// One per `Cli*Args` struct in scope. No `IntoRequest` trait — per locked
+// decision (memo from the bead description), a trait with one impl per type
+// would be premature. The free `into_request()` methods are simpler and
+// individually inlinable.
+
+impl SearchArgs {
+    pub(super) fn into_request(self) -> SearchLogsRequest {
+        SearchLogsRequest {
+            query: self.query,
+            hostname: self.hostname,
+            source_ip: self.source_ip,
+            severity: self.severity,
+            app_name: self.app_name,
+            facility: None,
+            process_id: None,
+            from: self.from,
+            to: self.to,
+            limit: self.limit,
+        }
+    }
+}
+
+impl TailArgs {
+    pub(super) fn into_request(self) -> TailLogsRequest {
+        TailLogsRequest {
+            hostname: self.hostname,
+            source_ip: self.source_ip,
+            app_name: self.app_name,
+            severity_min: None,
+            n: self.n,
+        }
+    }
+}
+
+impl TimeRangeArgs {
+    pub(super) fn into_errors_request(self) -> GetErrorsRequest {
+        GetErrorsRequest {
+            from: self.from,
+            to: self.to,
+            group_by: None,
+        }
+    }
+}
+
+impl SessionsArgs {
+    pub(super) fn into_request(self) -> ListSessionsRequest {
+        ListSessionsRequest {
+            project: self.project,
+            tool: self.tool,
+            hostname: self.hostname,
+            from: self.from,
+            to: self.to,
+            limit: self.limit,
+        }
+    }
+}
+
+impl CorrelateArgs {
+    pub(super) fn into_request(self) -> CorrelateEventsRequest {
+        CorrelateEventsRequest {
+            reference_time: self.reference_time,
+            window_minutes: self.window_minutes,
+            severity_min: self.severity_min,
+            hostname: self.hostname,
+            source_ip: self.source_ip,
+            query: self.query,
+            limit: self.limit,
+        }
+    }
+}
+
+// ─── Cancellation helper ────────────────────────────────────────────────────
+
+/// Wrap an HTTP call so SIGINT (`ctrl_c`) cancels the in-flight request and
+/// bails with `"interrupted"` (eng-review #A29).
+///
+/// Indirects through [`http_or_cancel_with`] so unit tests can pass a
+/// deterministic cancellation future instead of `tokio::signal::ctrl_c()`,
+/// which is impractical to trigger from inside the test process.
+pub(super) async fn http_or_cancel<T>(fut: impl Future<Output = Result<T>>) -> Result<T> {
+    http_or_cancel_with(fut, async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await
+}
+
+/// Test-visible variant of [`http_or_cancel`] that accepts an arbitrary
+/// cancellation future. Production code calls the wrapper above; tests in
+/// `dispatch_tests.rs` plug in `tokio::time::sleep(...)` so the cancel branch
+/// is deterministic.
+pub(super) async fn http_or_cancel_with<T>(
+    fut: impl Future<Output = Result<T>>,
+    cancel: impl Future<Output = ()>,
+) -> Result<T> {
+    tokio::select! {
+        r = fut => r,
+        _ = cancel => bail!("interrupted"),
+    }
+}
+
+// ─── Per-command dispatch ───────────────────────────────────────────────────
+
+pub(super) async fn run_search(mode: &CliMode, args: SearchArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.search_logs(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.search(&req)).await?,
+    };
+    print_search_response(&response, json)
+}
+
+pub(super) async fn run_tail(mode: &CliMode, args: TailArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.tail_logs(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.tail(&req)).await?,
+    };
+    print_search_response(&response, json)
+}
+
+pub(super) async fn run_errors(mode: &CliMode, args: TimeRangeArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_errors_request();
+    let response = match mode {
+        CliMode::Local(service) => service.get_errors(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.errors(&req)).await?,
+    };
+    print_errors_response(&response, json)
+}
+
+pub(super) async fn run_hosts(mode: &CliMode, args: super::OutputArgs) -> Result<()> {
+    let response = match mode {
+        CliMode::Local(service) => service.list_hosts().await?,
+        CliMode::Http(client) => http_or_cancel(client.hosts()).await?,
+    };
+    print_hosts_response(&response, args.json)
+}
+
+pub(super) async fn run_correlate(mode: &CliMode, args: CorrelateArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.correlate_events(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.correlate(&req)).await?,
+    };
+    print_correlate_response(&response, json)
+}
+
+pub(super) async fn run_stats(mode: &CliMode, args: super::OutputArgs) -> Result<()> {
+    let response = match mode {
+        CliMode::Local(service) => service.get_stats().await?,
+        CliMode::Http(client) => http_or_cancel(client.stats()).await?,
+    };
+    print_stats_response(&response, args.json)
+}
+
+pub(super) async fn run_sessions(mode: &CliMode, args: SessionsArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.list_sessions(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.sessions(&req)).await?,
+    };
+    print_sessions_response(&response, json)
+}
+
+// ─── AI Arg → Request conversions (bead 0p8r.8) ─────────────────────────────
+
+impl AiSearchArgs {
+    pub(super) fn into_request(self) -> SearchSessionsRequest {
+        SearchSessionsRequest {
+            query: self.query,
+            project: self.project,
+            tool: self.tool,
+            from: self.from,
+            to: self.to,
+            limit: self.limit,
+        }
+    }
+}
+
+impl AiAbuseArgs {
+    pub(super) fn into_request(self) -> AbuseSearchRequest {
+        AbuseSearchRequest {
+            project: self.project,
+            tool: self.tool,
+            from: self.from,
+            to: self.to,
+            limit: self.limit,
+            before: self.before,
+            after: self.after,
+            terms: self.terms,
+        }
+    }
+}
+
+impl AiCorrelateArgs {
+    pub(super) fn into_request(self) -> AiCorrelateRequest {
+        AiCorrelateRequest {
+            project: self.project,
+            tool: self.tool,
+            session_id: self.session_id,
+            ai_query: self.ai_query,
+            log_query: self.log_query,
+            hostname: self.hostname,
+            source_ip: self.source_ip,
+            app_name: self.app_name,
+            from: self.from,
+            to: self.to,
+            window_minutes: self.window_minutes,
+            severity_min: self.severity_min,
+            limit: self.limit,
+            events_per_anchor: self.events_per_anchor,
+        }
+    }
+}
+
+impl AiBlocksArgs {
+    pub(super) fn into_request(self) -> UsageBlocksRequest {
+        UsageBlocksRequest {
+            project: self.project,
+            tool: self.tool,
+            from: self.from,
+            to: self.to,
+        }
+    }
+}
+
+impl AiContextArgs {
+    pub(super) fn into_request(self) -> ProjectContextRequest {
+        ProjectContextRequest {
+            project: self.project,
+            tool: self.tool,
+            limit: self.limit,
+        }
+    }
+}
+
+impl AiListArgs {
+    pub(super) fn into_tools_request(self) -> ListAiToolsRequest {
+        ListAiToolsRequest {
+            project: self.project,
+            from: self.from,
+            to: self.to,
+        }
+    }
+
+    pub(super) fn into_projects_request(self) -> ListAiProjectsRequest {
+        ListAiProjectsRequest {
+            tool: self.tool,
+            from: self.from,
+            to: self.to,
+        }
+    }
+}
+
+impl AiCheckpointsArgs {
+    pub(super) fn into_request(self) -> AiCheckpointsRequest {
+        AiCheckpointsRequest {
+            errors_only: self.errors_only,
+            missing_only: self.missing_only,
+            limit: self.limit,
+        }
+    }
+}
+
+impl AiErrorsArgs {
+    pub(super) fn into_request(self) -> AiParseErrorsRequest {
+        AiParseErrorsRequest { limit: self.limit }
+    }
+}
+
+impl AiPruneCheckpointsArgs {
+    pub(super) fn into_request(self) -> AiPruneCheckpointsRequest {
+        AiPruneCheckpointsRequest {
+            dry_run: self.dry_run,
+            missing_only: self.missing_only,
+            limit: self.limit,
+        }
+    }
+}
+
+// ─── AI per-command dispatch (bead 0p8r.8) ──────────────────────────────────
+//
+// HTTP-capable (10): search, abuse, correlate, blocks, context, tools,
+//   projects, checkpoints, errors, prune_checkpoints.
+// LOCAL-only (6): index, add, doctor, smoke_watch, watch_status, watch.
+//   These bail in HTTP mode with an inline message per the bead table
+//   (no shared helper — eng-review #S4).
+
+pub(super) async fn run_ai_search(mode: &CliMode, args: AiSearchArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.search_sessions(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_search(&req)).await?,
+    };
+    print_search_sessions_response(&response, json)
+}
+
+pub(super) async fn run_ai_abuse(mode: &CliMode, args: AiAbuseArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.search_abuse(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_abuse(&req)).await?,
+    };
+    print_abuse_search_response(&response, json)
+}
+
+pub(super) async fn run_ai_correlate(mode: &CliMode, args: AiCorrelateArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.correlate_ai_logs(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_correlate(&req)).await?,
+    };
+    print_ai_correlate_response(&response, json)
+}
+
+pub(super) async fn run_ai_blocks(mode: &CliMode, args: AiBlocksArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.usage_blocks(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_blocks(&req)).await?,
+    };
+    print_usage_blocks_response(&response, json)
+}
+
+pub(super) async fn run_ai_context(mode: &CliMode, args: AiContextArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.project_context(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_context(&req)).await?,
+    };
+    print_project_context_response(&response, json)
+}
+
+pub(super) async fn run_ai_tools(mode: &CliMode, args: AiListArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_tools_request();
+    let response = match mode {
+        CliMode::Local(service) => service.list_ai_tools(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_tools(&req)).await?,
+    };
+    print_ai_tools_response(&response, json)
+}
+
+pub(super) async fn run_ai_projects(mode: &CliMode, args: AiListArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_projects_request();
+    let response = match mode {
+        CliMode::Local(service) => service.list_ai_projects(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_projects(&req)).await?,
+    };
+    print_ai_projects_response(&response, json)
+}
+
+pub(super) async fn run_ai_checkpoints(mode: &CliMode, args: AiCheckpointsArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => {
+            service
+                .list_ai_checkpoints(req.errors_only, req.missing_only, req.limit)
+                .await?
+        }
+        CliMode::Http(client) => http_or_cancel(client.ai_checkpoints(&req)).await?,
+    };
+    print_checkpoints_response(&response, json)
+}
+
+pub(super) async fn run_ai_errors(mode: &CliMode, args: AiErrorsArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.list_ai_parse_errors(req.limit).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_parse_errors(&req)).await?,
+    };
+    print_ai_parse_errors_response(&response, json)
+}
+
+pub(super) async fn run_ai_prune_checkpoints(
+    mode: &CliMode,
+    args: AiPruneCheckpointsArgs,
+) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => {
+            service
+                .prune_ai_checkpoints(req.missing_only, req.dry_run, req.limit)
+                .await?
+        }
+        CliMode::Http(client) => http_or_cancel(client.prune_ai_checkpoints(&req)).await?,
+    };
+    print_prune_checkpoints_response(&response, json)
+}
+
+// ─── LOCAL-only AI commands (6) — error in HTTP mode ────────────────────────
+
+pub(super) async fn run_ai_index(mode: &CliMode, args: AiIndexArgs) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => {
+            bail!("ai index reads host ~/.claude/projects; omit --http")
+        }
+        CliMode::Local(service) => service,
+    };
+    let response = service
+        .index_ai_roots(args.path, args.force, args.since)
+        .await?;
+    print_index_response(&response, args.json)?;
+    ensure_index_success(&response)
+}
+
+pub(super) async fn run_ai_add(mode: &CliMode, args: AiAddArgs) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => bail!("ai add reads a host file path; omit --http"),
+        CliMode::Local(service) => service,
+    };
+    let response = service.add_ai_file(args.file, args.force).await?;
+    print_index_response(&response, args.json)?;
+    ensure_index_success(&response)
+}
+
+pub(super) async fn run_ai_doctor(mode: &CliMode, args: AiDoctorArgs) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => {
+            bail!("ai doctor checks host filesystem permissions; omit --http")
+        }
+        CliMode::Local(service) => service,
+    };
+    let response = service.ai_doctor().await?;
+    print_ai_doctor_response(&response, args.json)?;
+    ensure_ai_doctor_success(&response, args.strict_permissions)
+}
+
+pub(super) async fn run_ai_smoke_watch(mode: &CliMode, args: OutputArgs) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => {
+            bail!("ai smoke-watch writes synthetic transcript to host fs; omit --http")
+        }
+        CliMode::Local(service) => service,
+    };
+    let response = ai_smoke_watch(service).await?;
+    print_ai_smoke_watch_response(&response, args.json)?;
+    if !response.pruned_missing_checkpoint {
+        bail!("AI watch smoke checkpoint was not pruned within 30s");
+    }
+    Ok(())
+}
+
+pub(super) async fn run_ai_watch_status(mode: &CliMode, args: OutputArgs) -> Result<()> {
+    if matches!(mode, CliMode::Http(_)) {
+        bail!("ai watch-status shells out to systemctl on host; omit --http");
+    }
+    let response = ai_watch_status()?;
+    print_ai_watch_status_response(&response, args.json)
+}
+
+pub(super) async fn run_ai_watch(mode: &CliMode, args: AiWatchArgs) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => bail!("ai watch is a long-running daemon; omit --http"),
+        CliMode::Local(service) => service.clone(),
+    };
+    let options = syslog_mcp::ai_watch::WatchOptions {
+        path: args.path.map(std::path::PathBuf::from),
+        debounce: std::time::Duration::from_millis(args.debounce_ms),
+        settle: std::time::Duration::from_millis(args.settle_ms),
+        max_retries: args.max_retries,
+        initial_scan: !args.no_initial_scan,
+        json: args.json,
+    };
+    syslog_mcp::ai_watch::run(service, options).await
+}
+
+// ─── DB Arg → Request conversions (bead 0p8r.9) ─────────────────────────────
+//
+// DbIntegrityArgs / DbCheckpointArgs were identity maps to their *Request
+// counterparts (bead 0p8r.29). Inlined at the call sites. DbVacuumArgs keeps
+// `into_request` because `bool → Option<bool>` is non-trivial.
+
+impl DbVacuumArgs {
+    /// CLI `force: bool` maps to server `Option<bool>` as
+    /// `true → Some(true)`, `false → None` (NOT `Some(false)`). The size
+    /// pre-flight on `--full` is bypassed only when the body carries
+    /// `Some(true)`. `None` and `Some(false)` are equivalent on the wire and
+    /// both leave the pre-flight in force. See [`DbVacuumRequest`] docs and
+    /// bead 0p8r.4 eng-review C3.
+    pub(super) fn into_request(self) -> DbVacuumRequest {
+        DbVacuumRequest {
+            full: self.full,
+            incremental_pages: self.pages,
+            force: if self.force { Some(true) } else { None },
+        }
+    }
+}
+
+// ─── DB Per-command dispatch (bead 0p8r.9) ──────────────────────────────────
+
+pub(super) async fn run_db_status(mode: &CliMode, args: DbStatusArgs) -> Result<()> {
+    let response = match mode {
+        CliMode::Local(service) => service.db_status().await?,
+        CliMode::Http(client) => http_or_cancel(client.db_status()).await?,
+    };
+    // Coordination phases shell out to docker/systemctl on the host. They
+    // make sense in either mode — even with --http, the operator may want
+    // to verify that the host's ai-watch unit agrees with the container's
+    // /data bind. Keep the opt-in flag mode-agnostic.
+    let coordination = if args.check_coord {
+        Some(run_coordination_phases())
+    } else {
+        None
+    };
+    print_db_status_response(&response, coordination.as_deref(), args.json)
+}
+
+pub(super) async fn run_db_integrity(mode: &CliMode, args: DbIntegrityArgs) -> Result<()> {
+    let DbIntegrityArgs { quick, json } = args;
+    let req = DbIntegrityRequest { quick };
+    let response = match mode {
+        CliMode::Local(service) => service.db_integrity(quick).await?,
+        CliMode::Http(client) => http_or_cancel(client.db_integrity(&req)).await?,
+    };
+    print_db_integrity_response(&response, json)?;
+    if !response.ok {
+        bail!("database integrity check failed");
+    }
+    Ok(())
+}
+
+pub(super) async fn run_db_checkpoint(mode: &CliMode, args: DbCheckpointArgs) -> Result<()> {
+    let DbCheckpointArgs {
+        mode: chk_mode,
+        json,
+    } = args;
+    let req = DbCheckpointRequest {
+        mode: chk_mode.clone(),
+    };
+    let response = match mode {
+        CliMode::Local(service) => service.db_checkpoint(chk_mode).await?,
+        CliMode::Http(client) => http_or_cancel(client.db_checkpoint(&req)).await?,
+    };
+    print_db_checkpoint_response(&response, json)?;
+    if response.busy != 0 {
+        bail!("database WAL checkpoint was busy");
+    }
+    Ok(())
+}
+
+pub(super) async fn run_db_vacuum(mode: &CliMode, args: DbVacuumArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        // Local SQL doesn't enforce the 2GB pre-flight (only the API does),
+        // so `req.force` is intentionally ignored here.
+        CliMode::Local(service) => service.db_vacuum(req.full, req.incremental_pages).await?,
+        CliMode::Http(client) => http_or_cancel(client.db_vacuum(&req)).await?,
+    };
+    print_db_vacuum_response(&response, json)
+}
+
+pub(super) async fn run_db_backup(mode: &CliMode, args: DbBackupArgs) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => bail!(
+            "db backup currently runs locally; --output writes to a host filesystem path. \
+             Omit --http."
+        ),
+        CliMode::Local(service) => service,
+    };
+    let response = service.db_backup(args.output.map(PathBuf::from)).await?;
+    print_db_backup_response(&response, args.json)
+}
+
+#[cfg(test)]
+#[path = "dispatch_tests.rs"]
+mod tests;

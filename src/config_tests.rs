@@ -94,7 +94,6 @@ fn defaults_are_applied_without_env_vars() {
         "SYSLOG_MCP_RECOVERY_FREE_DISK_MB",
         "SYSLOG_MCP_CLEANUP_INTERVAL_SECS",
         "SYSLOG_MCP_CLEANUP_CHUNK_SIZE",
-        "SYSLOG_API_ENABLED",
         "SYSLOG_API_TOKEN",
         "SYSLOG_WRITE_CHANNEL_CAPACITY",
         "SYSLOG_DOCKER_INGEST_ENABLED",
@@ -137,7 +136,6 @@ fn defaults_are_applied_without_env_vars() {
     assert_eq!(cfg.storage.cleanup_interval_secs, 60);
     assert_eq!(cfg.storage.cleanup_chunk_size, 2_000);
     assert!(cfg.mcp.api_token.is_none());
-    assert!(!cfg.api.enabled);
     assert!(cfg.api.api_token.is_none());
     assert!(!cfg.docker_ingest.enabled);
     assert!(cfg.docker_ingest.hosts.is_empty());
@@ -258,82 +256,16 @@ fn env_var_can_clear_mcp_allowed_hosts_and_origins() {
 
 #[test]
 #[serial]
-fn api_enabled_requires_separate_token() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_API_ENABLED", "true");
-    std::env::remove_var("SYSLOG_API_TOKEN");
-    let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_API_ENABLED");
-
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("SYSLOG_API_TOKEN"));
-}
-
-#[test]
-#[serial]
-fn api_token_is_separate_from_mcp_token() {
-    std::env::set_var("SYSLOG_API_ENABLED", "true");
+fn api_token_loads_independently_of_mcp_token() {
     std::env::set_var("SYSLOG_API_TOKEN", "api-token");
     std::env::set_var("SYSLOG_MCP_TOKEN", "mcp-token");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_API_ENABLED");
     std::env::remove_var("SYSLOG_API_TOKEN");
     std::env::remove_var("SYSLOG_MCP_TOKEN");
 
-    let cfg = result.expect("Config::load() should accept separately authenticated API");
-    assert!(cfg.api.enabled);
+    let cfg = result.expect("Config::load() should accept distinct API + MCP tokens");
     assert_eq!(cfg.api.api_token, Some("api-token".into()));
     assert_eq!(cfg.mcp.api_token, Some("mcp-token".into()));
-}
-
-#[test]
-#[serial]
-fn api_enabled_accepts_common_truthy_values() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    for value in ["1", "yes", "Y", "on", "TRUE"] {
-        std::env::set_var("SYSLOG_API_ENABLED", value);
-        std::env::set_var("SYSLOG_API_TOKEN", "api-token");
-        let result = Config::load();
-        std::env::remove_var("SYSLOG_API_ENABLED");
-        std::env::remove_var("SYSLOG_API_TOKEN");
-
-        let cfg = result.unwrap_or_else(|err| panic!("value {value} should parse: {err}"));
-        assert!(cfg.api.enabled);
-    }
-    std::env::remove_var("SYSLOG_MCP_HOST");
-}
-
-#[test]
-#[serial]
-fn api_enabled_accepts_common_falsy_values() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    for value in ["0", "no", "N", "off", "FALSE"] {
-        std::env::set_var("SYSLOG_API_ENABLED", value);
-        std::env::remove_var("SYSLOG_API_TOKEN");
-        let result = Config::load();
-        std::env::remove_var("SYSLOG_API_ENABLED");
-
-        let cfg = result.unwrap_or_else(|err| panic!("value {value} should parse: {err}"));
-        assert!(!cfg.api.enabled);
-    }
-    std::env::remove_var("SYSLOG_MCP_HOST");
-}
-
-#[test]
-#[serial]
-fn api_enabled_rejects_invalid_bool_values() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_API_ENABLED", "maybe");
-    let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_API_ENABLED");
-
-    assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("SYSLOG_API_ENABLED"));
 }
 
 #[test]
@@ -346,9 +278,8 @@ fn auth_validation_rejects_blank_mcp_token() {
 }
 
 #[test]
-fn auth_validation_rejects_blank_api_token_when_enabled() {
+fn auth_validation_rejects_blank_api_token() {
     let mut cfg = Config::default();
-    cfg.api.enabled = true;
     cfg.api.api_token = Some("\t".into());
 
     let err = validate_auth_config(&cfg, true).unwrap_err();

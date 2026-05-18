@@ -160,6 +160,40 @@ bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of
 | `just test-live` | Run live integration tests | `just test-live` |
 | `just up` / `just down` | Start/stop Docker Compose | `just up` |
 
+## Diagnostics: host/container drift
+
+Two coordination diagnostics guard against the CLI and the container talking
+to different SQLite files:
+
+- `data-mount` — verifies the host directory bind-mounted at `/data` matches
+  `SYSLOG_MCP_DATA_VOLUME`.
+- `ai-watch-coord` — verifies the host systemd `syslog-ai-watch.service`
+  resolves `SYSLOG_MCP_DB_PATH` to the same canonical directory as the
+  container's `/data` bind.
+
+Where they run:
+
+- `syslog compose doctor` — always runs both phases. `--json` includes them
+  under a `coordination` array. A canonical mismatch is fatal (exit 1).
+- `syslog db status --check-coord` — opt-in. Adds both phases to the JSON
+  payload under `coordination`. The default `syslog db status` path is
+  unchanged (no shell-outs).
+
+Both phases shell out to `docker inspect` and `systemctl --user show`, which
+adds roughly 100-200ms per invocation. Within a single `compose doctor`
+invocation the results are cached so each shell-out fires only once.
+
+Status semantics for these phases:
+
+- `ok` — canonical paths match.
+- `skipped` — ai-watch unit is not installed/loadable, or container is not
+  running (data-mount only). Reserved for "ai-watch absent" — never used to
+  hide failures.
+- `warn` — could not enumerate inputs (docker/systemctl failed, canonicalize
+  hit `ENOENT` / `EACCES`). Emits the OS error verbatim; we never silently
+  fall back to literal-string compare.
+- `error` — both sides resolved and the canonical paths differ.
+
 ## Dependencies
 
 | Dependency | Purpose |

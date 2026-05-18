@@ -90,6 +90,7 @@ impl From<db::LogEntry> for LogEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListSessionsRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -143,6 +144,7 @@ impl From<db::AiSessionEntry> for AiSessionEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SearchSessionsRequest {
     pub query: String,
     pub project: Option<String>,
@@ -207,6 +209,11 @@ pub struct SearchSessionsResponse {
     pub candidate_window_truncated: bool,
     pub truncated: bool,
     pub sessions: Vec<SearchedSessionEntry>,
+    /// Set by the REST handler when the caller-supplied `limit` exceeded the
+    /// server-side hard cap and was clamped down. Omitted from MCP/non-REST
+    /// responses, where no clamp is applied at this layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_clamped_to: Option<u32>,
 }
 
 impl From<db::SearchAiSessionsResult> for SearchSessionsResponse {
@@ -218,11 +225,13 @@ impl From<db::SearchAiSessionsResult> for SearchSessionsResponse {
             candidate_window_truncated: value.candidate_window_truncated,
             truncated: value.truncated,
             sessions: value.sessions.into_iter().map(Into::into).collect(),
+            limit_clamped_to: None,
         }
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AbuseSearchRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -262,6 +271,10 @@ pub struct AbuseSearchResponse {
     pub candidate_window_truncated: bool,
     pub truncated: bool,
     pub matches: Vec<AbuseMatch>,
+    /// Set by the REST handler when the caller-supplied `limit` exceeded the
+    /// server-side hard cap and was clamped down. Omitted on MCP responses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_clamped_to: Option<u32>,
 }
 
 impl From<db::AiAbuseResult> for AbuseSearchResponse {
@@ -273,11 +286,13 @@ impl From<db::AiAbuseResult> for AbuseSearchResponse {
             candidate_window_truncated: value.candidate_window_truncated,
             truncated: value.truncated,
             matches: value.matches.into_iter().map(Into::into).collect(),
+            limit_clamped_to: None,
         }
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AiCorrelateRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -315,9 +330,15 @@ pub struct AiCorrelateResponse {
     pub related_limit_per_anchor: usize,
     pub total_related_events: usize,
     pub anchors: Vec<AiCorrelationAnchor>,
+    /// Set by the REST handler when the caller-supplied `events_per_anchor`
+    /// exceeded the server-side hard cap of 50 and was clamped down. Omitted
+    /// on MCP responses, which use the service-layer clamp (200) only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events_per_anchor_clamped_to: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UsageBlocksRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -366,6 +387,7 @@ impl From<db::AiUsageBlocksResult> for UsageBlocksResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectContextRequest {
     pub project: String,
     pub tool: Option<String>,
@@ -402,6 +424,7 @@ impl From<db::AiProjectContext> for ProjectContextResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListAiToolsRequest {
     pub project: Option<String>,
     pub from: Option<String>,
@@ -447,6 +470,7 @@ impl From<db::ListAiToolsResult> for ListAiToolsResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListAiProjectsRequest {
     pub tool: Option<String>,
     pub from: Option<String>,
@@ -494,6 +518,7 @@ impl From<db::ListAiProjectsResult> for ListAiProjectsResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SearchLogsRequest {
     pub query: Option<String>,
     pub hostname: Option<String>,
@@ -514,6 +539,7 @@ pub struct SearchLogsResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TailLogsRequest {
     pub hostname: Option<String>,
     pub source_ip: Option<String>,
@@ -545,6 +571,7 @@ impl From<db::ErrorSummaryEntry> for ErrorSummaryEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GetErrorsRequest {
     pub from: Option<String>,
     pub to: Option<String>,
@@ -582,6 +609,7 @@ pub struct ListHostsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CorrelateEventsRequest {
     pub reference_time: String,
     pub window_minutes: Option<u32>,
@@ -1141,6 +1169,95 @@ pub struct UnackErrorResponse {
     pub signature_hash: String,
     pub unacked_at: String,
     pub actor: String,
+}
+
+// ── AI checkpoint inventory + prune request structs (bead 0p8r.3) ────────────
+//
+// These are typed request shapes shared between the REST handlers in
+// `src/api.rs` and the future HTTP client in bead 0p8r.5. The corresponding
+// service methods (`list_ai_checkpoints`, `list_ai_parse_errors`,
+// `prune_ai_checkpoints` in `src/app/service.rs:609,628,638`) keep their
+// loose primitive signatures — handlers unpack the request into positional
+// args before calling the service.
+//
+// `deny_unknown_fields` on all three: typo'd POST/JSON fields must surface
+// as 400, not be silently dropped (eng-review #A1 echo).
+
+/// Query parameters for `GET /api/ai/checkpoints`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiCheckpointsRequest {
+    /// Restrict to checkpoints with persisted parse errors.
+    #[serde(default)]
+    pub errors_only: bool,
+    /// Restrict to checkpoints whose source file is missing on disk.
+    #[serde(default)]
+    pub missing_only: bool,
+    pub limit: Option<u32>,
+}
+
+/// Query parameters for `GET /api/ai/errors`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiParseErrorsRequest {
+    pub limit: Option<u32>,
+}
+
+/// JSON body for `POST /api/ai/prune-checkpoints`.
+///
+/// `dry_run` is intentionally `bool` (not `Option<bool>`): the handler
+/// pre-validates the JSON body contains the key before deserialization
+/// (eng-review C3). Defaulting silently to `false` would let `POST {}`
+/// mass-delete checkpoints — instead the handler returns 400.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiPruneCheckpointsRequest {
+    /// REQUIRED — must be specified explicitly. See struct docs.
+    pub dry_run: bool,
+    #[serde(default)]
+    pub missing_only: bool,
+    pub limit: Option<u32>,
+}
+
+/// Query parameters for `GET /api/db/integrity`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbIntegrityRequest {
+    /// Use the fast `PRAGMA quick_check` path. `false` (or absent) runs full
+    /// `PRAGMA integrity_check`.
+    #[serde(default)]
+    pub quick: bool,
+}
+
+/// JSON body for `POST /api/db/checkpoint`.
+///
+/// `mode` is validated at the handler entry against
+/// `{passive, full, restart, truncate}` (bead 0p8r.4 #A17) — SQLite would
+/// also reject unknown modes, but explicit handler-side validation produces
+/// a clearer 400 with the allowed list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbCheckpointRequest {
+    pub mode: String,
+}
+
+/// JSON body for `POST /api/db/vacuum`.
+///
+/// `force` is intentionally `Option<bool>` (not `bool` with serde default):
+/// the size pre-flight on `full == true` is bypassed ONLY when the body
+/// explicitly carries `"force": true`. `None` and `Some(false)` both leave
+/// the pre-flight in force, defending against accidental
+/// `POST {"full":true}` on a multi-GB DB. See bead 0p8r.4 (eng-review C3).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbVacuumRequest {
+    #[serde(default)]
+    pub full: bool,
+    #[serde(default)]
+    pub incremental_pages: u32,
+    /// Must be `Some(true)` to bypass the 2 GB size pre-flight on full
+    /// VACUUM. See struct docs.
+    pub force: Option<bool>,
 }
 
 #[cfg(test)]

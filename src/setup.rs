@@ -898,6 +898,28 @@ fn ensure_env_file(path: &Path, data_dir: &Path) -> io::Result<EnvResult> {
         env.insert("SYSLOG_MCP_TOKEN".to_string(), generate_token()?);
     }
 
+    // SYSLOG_API_TOKEN is always required — `/api/*` is unconditionally
+    // mounted and the container fails to start without it. Mirror the
+    // SYSLOG_MCP_TOKEN pattern: preserve any existing value byte-for-byte
+    // on re-runs, generate a fresh 64-char hex token only when missing or
+    // blank. (entry().or_insert_with() is not sufficient here because the
+    // key may exist with an empty value from an earlier upgrade.)
+    if env
+        .get("SYSLOG_API_TOKEN")
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        env.insert("SYSLOG_API_TOKEN".to_string(), generate_token()?);
+    }
+
+    // SYSLOG_USE_HTTP=true is the v0.26 cutover default — the CLI defaults to
+    // routing query/AI/DB commands through the container REST API. Unlike
+    // SYSLOG_API_TOKEN above, this is a behaviour toggle the operator may
+    // legitimately set to `false` (or any other value) to opt out. Use
+    // `entry().or_insert_with` so any existing value — including an empty
+    // string or `false` — survives byte-for-byte. Operator intent wins.
+    env.entry("SYSLOG_USE_HTTP".to_string())
+        .or_insert_with(|| "true".to_string());
+
     write_env(path, &env)?;
     let added = env.len().saturating_sub(before);
     Ok(EnvResult {
@@ -958,14 +980,58 @@ fn write_env(path: &Path, env: &BTreeMap<String, String>) -> io::Result<()> {
         out.push('\n');
     }
 
+    // Atomic write: temp file in the same directory (so rename(2) stays on
+    // the same filesystem), fsync, then rename over the target. A kill
+    // mid-write leaves the temp file orphaned but the live .env is either
+    // the old content or the fully written new content — never partial.
+    // Crucial because a corrupt .env breaks container startup
+    // (api.rs bails on empty SYSLOG_API_TOKEN).
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "env path must have a parent directory",
+        )
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "env path has no file name"))?;
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = parent.join(format!(".{file_name}.tmp.{pid}.{nanos}"));
+
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
-    options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-    options.open(path)?.write_all(out.as_bytes())?;
+    {
+        // O_NOFOLLOW protects against symlink races on the temp file; mode
+        // 0o600 keeps the secrets out of any read-by-other process.
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let write_result: io::Result<()> = (|| {
+        let mut file = options.open(&tmp_path)?;
+        file.write_all(out.as_bytes())?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if let Err(err) = write_result {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(err);
+    }
+
+    if let Err(err) = std::fs::rename(&tmp_path, path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(err);
+    }
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        // Re-assert 0o600 after rename in case the target inode picked up
+        // a different mode from a pre-existing file.
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(())

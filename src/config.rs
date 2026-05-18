@@ -344,10 +344,8 @@ impl McpConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct ApiConfig {
-    /// Enable the non-MCP JSON API. Disabled by default.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Required bearer token when the non-MCP API is enabled.
+    /// Required bearer token for the always-on non-MCP JSON API.
+    /// Provisioned by `syslog setup repair`. The server fails to start without it.
     #[serde(default)]
     pub api_token: Option<String>,
 }
@@ -707,7 +705,6 @@ impl Config {
             &mut config.mcp.auth.disable_static_token_with_oauth,
         )?;
 
-        env_override_bool("SYSLOG_API_ENABLED", &mut config.api.enabled)?;
         env_override_opt_str("SYSLOG_API_TOKEN", &mut config.api.api_token);
 
         env_override_opt_str(
@@ -1003,17 +1000,7 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     if token_is_set_but_blank(&config.mcp.api_token) {
         return Err(anyhow::anyhow!("mcp.api_token must not be empty"));
     }
-    if config.api.enabled {
-        match config.api.api_token.as_deref() {
-            Some(token) if !token.trim().is_empty() => {}
-            Some(_) => return Err(anyhow::anyhow!("api.api_token must not be empty")),
-            None => {
-                return Err(anyhow::anyhow!(
-                    "SYSLOG_API_TOKEN is required when SYSLOG_API_ENABLED=true"
-                ));
-            }
-        }
-    } else if token_is_set_but_blank(&config.api.api_token) {
+    if token_is_set_but_blank(&config.api.api_token) {
         return Err(anyhow::anyhow!("api.api_token must not be empty"));
     }
 
@@ -1094,10 +1081,25 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     Ok(())
 }
 
-pub(crate) fn mcp_bind_is_loopback(config: &Config) -> bool {
+pub fn mcp_bind_is_loopback(config: &Config) -> bool {
     IpAddr::from_str(&config.mcp.host)
         .map(|ip| ip.is_loopback())
         .unwrap_or(false)
+}
+
+/// Returns true when the MCP HTTP listener is bound to a non-loopback address
+/// AND the operator-facing public URL is plain http:// (or absent). In that
+/// case `SYSLOG_API_TOKEN` traverses the wire in plaintext. SWAG TLS
+/// termination is the operator's responsibility — this helper just makes the
+/// trade-off observable at startup.
+pub fn api_token_plaintext_exposure(config: &Config) -> bool {
+    if mcp_bind_is_loopback(config) {
+        return false;
+    }
+    !matches!(
+        config.mcp.auth.public_url.as_deref(),
+        Some(url) if url.trim_start().to_ascii_lowercase().starts_with("https://"),
+    )
 }
 
 fn option_is_blank(value: &Option<String>) -> bool {

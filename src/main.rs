@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
     match mode {
         Mode::ServeMcp => serve_mcp().await,
         Mode::StdioMcp => serve_stdio_mcp().await,
-        Mode::Cli(command) => run_cli(*command).await,
+        Mode::Cli(invocation) => run_cli(*invocation).await,
         Mode::Setup(command) => run_setup(command).await,
         Mode::DoctorBinary(command) => doctor::run_binary_doctor(command.json).await,
         Mode::DoctorFull(command) => doctor::run_full_doctor(command.json).await,
@@ -41,15 +41,42 @@ async fn serve_stdio_mcp() -> Result<()> {
     Ok(())
 }
 
-async fn run_cli(command: cli::CliCommand) -> Result<()> {
-    if matches!(command, cli::CliCommand::Compose(_)) {
-        return cli::run_compose(command);
+async fn run_cli(invocation: CliInvocation) -> Result<()> {
+    let CliInvocation { command, flags } = invocation;
+
+    // `compose` and `setup` stay on the local-only path: they manage local
+    // host state (systemd units, Docker compose stacks, on-disk config) that
+    // has no HTTP analogue. Reject HTTP-mode flags up front rather than
+    // silently dropping them.
+    if matches!(
+        command,
+        cli::CliCommand::Compose(_) | cli::CliCommand::Setup(_)
+    ) {
+        if let Some(trigger) = flags.http_trigger() {
+            anyhow::bail!(
+                "{} has no effect on `{}` (local-only command); remove --http / --server / --token / SYSLOG_USE_HTTP",
+                trigger,
+                if matches!(command, cli::CliCommand::Compose(_)) { "compose" } else { "setup" },
+            );
+        }
+        return match command {
+            cli::CliCommand::Compose(_) => cli::run_compose(command),
+            cli::CliCommand::Setup(cmd) => cli::run_setup(cmd),
+            _ => unreachable!("guarded by matches! above"),
+        };
     }
-    if let cli::CliCommand::Setup(command) = command {
-        return cli::run_setup(command);
-    }
-    let runtime = RuntimeCore::load_query_only().await?;
-    cli::run(runtime.service(), command).await
+
+    // Build CliMode ONCE per invocation, matching the per-invocation reqwest
+    // Client rule from bead .5. For Local mode we lazily load the runtime so
+    // HTTP-mode invocations don't pay the SQLite-open cost.
+    let mode = match flags.http_trigger() {
+        Some(trigger) => cli::CliMode::Http(flags.build_http_client(trigger)?),
+        None => {
+            let runtime = RuntimeCore::load_query_only().await?;
+            cli::CliMode::Local(runtime.service())
+        }
+    };
+    cli::run(mode, command).await
 }
 
 async fn run_setup(command: SetupCommand) -> Result<()> {
@@ -122,7 +149,6 @@ async fn serve_mcp() -> Result<()> {
         pool_size = runtime.config.storage.pool_size,
         wal_mode = runtime.config.storage.wal_mode,
         mcp_auth_enabled = runtime.config.mcp.api_token.is_some(),
-        api_enabled = runtime.config.api.enabled,
         docker_ingest_enabled = runtime.config.docker_ingest.enabled,
         docker_ingest_hosts = runtime.config.docker_ingest.hosts.len(),
         "Configuration loaded"
@@ -132,14 +158,30 @@ async fn serve_mcp() -> Result<()> {
     let _maintenance = runtime.spawn_maintenance_tasks();
 
     let mut app: Router = mcp::router(runtime.mcp_state());
-    if runtime.config.api.enabled {
-        app = app.merge(api::router(api::ApiState {
-            service: runtime.service(),
-            config: runtime.config.api.clone(),
-            cors_port: runtime.config.mcp.port,
-            auth_policy: runtime.auth_policy().clone(),
-        })?);
+    // /api/* is always-on. The container fails to start without
+    // SYSLOG_API_TOKEN — `api::router` enforces that explicitly with a
+    // recovery hint pointing at `syslog setup repair`.
+    {
+        let api_state = api::ApiState::new(
+            runtime.service(),
+            runtime.config.api.clone(),
+            runtime.config.mcp.port,
+            syslog_mcp::config::mcp_bind_is_loopback(&runtime.config),
+            runtime.config.mcp.allowed_origins.clone(),
+            runtime.auth_policy().clone(),
+            runtime.pool(),
+        )?;
+        app = app.merge(api::router(api_state)?);
         info!("Non-MCP API mounted under /api");
+    }
+    if syslog_mcp::config::api_token_plaintext_exposure(&runtime.config) {
+        tracing::warn!(
+            bind = %runtime.config.mcp.bind_addr(),
+            public_url = ?runtime.config.mcp.auth.public_url,
+            "SYSLOG_API_TOKEN will traverse the wire in plaintext: non-loopback bind with no \
+             https:// public URL configured. Front the listener with a TLS-terminating reverse \
+             proxy (e.g. SWAG) and set SYSLOG_MCP_PUBLIC_URL=https://..."
+        );
     }
     app = app.merge(runtime.otlp_router());
     info!("OTLP receiver mounted at /v1/logs (and /v1/metrics, /v1/traces → 404)");
@@ -172,12 +214,23 @@ async fn serve_mcp() -> Result<()> {
 enum Mode {
     ServeMcp,
     StdioMcp,
-    Cli(Box<cli::CliCommand>),
+    Cli(Box<CliInvocation>),
     Setup(SetupCommand),
     DoctorBinary(DoctorBinaryCommand),
     DoctorFull(DoctorFullCommand),
     Help,
     Version,
+}
+
+/// Pairs a parsed [`cli::CliCommand`] with the [`cli::GlobalFlags`] that came
+/// alongside it on the command line. Built by [`Mode::parse`] so `run_cli`
+/// can construct the [`cli::CliMode`] (Local vs Http) exactly once per
+/// invocation — matching the per-invocation `reqwest::Client` rule from
+/// bead .5.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CliInvocation {
+    command: cli::CliCommand,
+    flags: cli::GlobalFlags,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,19 +261,48 @@ struct DoctorBinaryCommand {
 
 impl Mode {
     fn parse(args: Vec<String>) -> Result<Self> {
-        match args.as_slice() {
-            [] => Ok(Self::ServeMcp),
-            [flag] if flag == "--help" || flag == "-h" || flag == "help" => Ok(Self::Help),
-            [flag] if flag == "--version" || flag == "-V" || flag == "version" => Ok(Self::Version),
-            [command] if command == "mcp" => Ok(Self::StdioMcp),
-            [serve, service] if serve == "serve" && service == "mcp" => Ok(Self::ServeMcp),
+        // `--help` / `--version` MUST bypass everything else: no global flag
+        // extraction, no env reads, no service construction. Per bead .6
+        // contract these work even with `SYSLOG_API_TOKEN` unset.
+        if let Some(first) = args.first() {
+            if first == "--help" || first == "-h" || first == "help" {
+                return Ok(Self::Help);
+            }
+            if first == "--version" || first == "-V" || first == "version" {
+                return Ok(Self::Version);
+            }
+        }
+
+        // Strip CLI-only global flags (`--http`, `--server`, `--token`) from
+        // the arg list before subcommand dispatch so they work in any
+        // position: `syslog --http search foo` AND `syslog search --http foo`.
+        // Non-CLI modes (serve/mcp/setup/doctor) reject them below — the
+        // flags imply HTTP transport, which only applies to the query CLI.
+        let mut remaining = args.clone();
+        let global = cli::GlobalFlags::extract(&mut remaining)?;
+
+        match remaining.as_slice() {
+            [] if global == cli::GlobalFlags::default() => Ok(Self::ServeMcp),
+            [command] if command == "mcp" && global == cli::GlobalFlags::default() => {
+                Ok(Self::StdioMcp)
+            }
+            [serve, service]
+                if serve == "serve"
+                    && service == "mcp"
+                    && global == cli::GlobalFlags::default() =>
+            {
+                Ok(Self::ServeMcp)
+            }
             [command, rest @ ..]
                 if command == "setup"
-                    && rest.first().map(String::as_str) != Some("plugin-hook") =>
+                    && rest.first().map(String::as_str) != Some("plugin-hook")
+                    && global == cli::GlobalFlags::default() =>
             {
                 Ok(Self::Setup(parse_setup_command(rest)?))
             }
-            [command, rest @ ..] if command == "doctor" => {
+            [command, rest @ ..]
+                if command == "doctor" && global == cli::GlobalFlags::default() =>
+            {
                 if rest.first().map(String::as_str) == Some("binary") {
                     Ok(Self::DoctorBinary(parse_doctor_command(rest)?))
                 } else {
@@ -246,7 +328,22 @@ impl Mode {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
                 cli_args.push(command.clone());
                 cli_args.extend(rest.iter().cloned());
-                Ok(Self::Cli(Box::new(cli::CliCommand::parse(cli_args)?)))
+                let command = cli::CliCommand::parse(cli_args)?;
+                Ok(Self::Cli(Box::new(CliInvocation {
+                    command,
+                    flags: global,
+                })))
+            }
+            _ if global != cli::GlobalFlags::default() => {
+                // Global HTTP flags only apply to CLI query commands. Surface
+                // a precise error rather than letting them be silently
+                // ignored for `serve mcp`, `setup`, etc.
+                anyhow::bail!(
+                    "--http / --server / --token only apply to CLI query commands \
+                     (search, tail, errors, hosts, sessions, ai, correlate, stats, db, compose, setup); \
+                     got: {}",
+                    args.join(" ")
+                );
             }
             _ => {
                 print_usage();
@@ -457,7 +554,7 @@ fn print_usage() {
   syslog db status [--json]
   syslog db integrity [--quick] [--json]
   syslog db checkpoint [--mode passive|full|restart|truncate] [--json]
-  syslog db vacuum [--pages N|--full] [--json]
+  syslog db vacuum [--pages N|--full] [--force] [--json]
   syslog db backup [--output PATH] [--json]
   syslog compose doctor [--json]
   syslog compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]
@@ -469,8 +566,18 @@ fn print_usage() {
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
   syslog stats [--json]
 
+Global CLI flags (apply to query commands above; not valid for serve/mcp/setup/doctor):
+  --http              Route this invocation through the container's REST API instead of opening the local SQLite DB.
+                      Fails closed: if no token/server is discoverable, the CLI exits non-zero (never silently uses local).
+  --server URL        Override the API base URL (implies --http). Default: SYSLOG_MCP_URL or http://127.0.0.1:3100
+  --token TOKEN       Override the bearer token (implies --http). Default: SYSLOG_API_TOKEN
+
 Environment:
   SYSLOG_MCP_DB_PATH  SQLite database path used by both transports
+  SYSLOG_USE_HTTP     Set to 1 or true to default to HTTP mode without passing --http (fail-closed if discovery fails).
+                      SYSLOG_API_TOKEN alone does NOT trigger HTTP — must explicitly opt in via --http or SYSLOG_USE_HTTP=1.
+  SYSLOG_MCP_URL      Default API base URL for --http mode (overridden by --server)
+  SYSLOG_API_TOKEN    Bearer token for --http mode (overridden by --token)
   RUST_LOG            Log filter; stdio logs always go to stderr"
     );
 }

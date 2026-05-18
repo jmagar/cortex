@@ -438,7 +438,10 @@ fn parse_db_status_accepts_json() {
 
     assert_eq!(
         parsed,
-        CliCommand::Db(DbCommand::Status(OutputArgs { json: true }))
+        CliCommand::Db(DbCommand::Status(DbStatusArgs {
+            json: true,
+            check_coord: false,
+        }))
     );
 }
 
@@ -470,7 +473,20 @@ fn parse_db_vacuum_and_backup_options() {
         CliCommand::Db(DbCommand::Vacuum(DbVacuumArgs {
             full: false,
             pages: 250,
+            force: false,
             json: false,
+        }))
+    );
+
+    let vacuum_full_force =
+        CliCommand::parse(strings(&["db", "vacuum", "--full", "--force", "--json"])).unwrap();
+    assert_eq!(
+        vacuum_full_force,
+        CliCommand::Db(DbCommand::Vacuum(DbVacuumArgs {
+            full: true,
+            pages: 1000,
+            force: true,
+            json: true,
         }))
     );
 
@@ -568,6 +584,191 @@ fn parse_setup_plugin_hook_collects_json_and_no_repair() {
 }
 
 #[test]
+fn parse_db_status_accepts_check_coord() {
+    let parsed = CliCommand::parse(strings(&["db", "status", "--check-coord", "--json"])).unwrap();
+    assert_eq!(
+        parsed,
+        CliCommand::Db(DbCommand::Status(DbStatusArgs {
+            json: true,
+            check_coord: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_db_status_rejects_unknown_flag() {
+    let err = CliCommand::parse(strings(&["db", "status", "--bogus"])).unwrap_err();
+    assert!(err.to_string().contains("unknown db status option"));
+}
+
+#[test]
+fn systemctl_env_parses_values_containing_equals() {
+    // Eng-review #A50 / security #39: values may legitimately contain `=`,
+    // so the parser must use `split_once('=')`, not `split('=')`.
+    let stdout = "Environment=KEY=value=with=equals OTHER=plain\nLoadState=loaded\n";
+    let env = parse_systemctl_env_output(stdout);
+    assert_eq!(env.inline.len(), 2);
+    assert_eq!(env.inline[0].0, "KEY");
+    assert_eq!(env.inline[0].1, "value=with=equals");
+    assert_eq!(env.inline[1].0, "OTHER");
+    assert_eq!(env.inline[1].1, "plain");
+    assert!(!env.unit_missing);
+}
+
+#[test]
+fn systemctl_env_marks_unit_missing_on_not_found_load_state() {
+    let stdout = "LoadState=not-found\nEnvironment=\nEnvironmentFiles=\n";
+    let env = parse_systemctl_env_output(stdout);
+    assert!(env.unit_missing);
+}
+
+#[test]
+fn systemctl_env_files_strips_ignore_errors_suffix() {
+    let stdout =
+        "Environment=\nEnvironmentFiles=/etc/foo (ignore_errors=no) /etc/bar (ignore_errors=yes)\n";
+    let env = parse_systemctl_env_output(stdout);
+    assert_eq!(env.files.len(), 2);
+    assert_eq!(env.files[0], std::path::PathBuf::from("/etc/foo"));
+    assert_eq!(env.files[1], std::path::PathBuf::from("/etc/bar"));
+}
+
+#[test]
+fn lookup_systemd_db_path_prefers_inline_environment() {
+    let env = SystemctlEnv {
+        inline: vec![("SYSLOG_MCP_DB_PATH".into(), "/inline/syslog.db".into())],
+        files: vec![],
+        unit_missing: false,
+    };
+    assert_eq!(
+        lookup_systemd_db_path(&env).as_deref(),
+        Some("/inline/syslog.db")
+    );
+}
+
+#[test]
+fn lookup_systemd_db_path_falls_back_to_environment_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let env_file = temp.path().join("ai-watch.env");
+    std::fs::write(
+        &env_file,
+        "# leading comment\nSYSLOG_MCP_DB_PATH=/file/syslog.db\nOTHER=ignored\n",
+    )
+    .unwrap();
+    let env = SystemctlEnv {
+        inline: vec![],
+        files: vec![env_file],
+        unit_missing: false,
+    };
+    assert_eq!(
+        lookup_systemd_db_path(&env).as_deref(),
+        Some("/file/syslog.db")
+    );
+}
+
+#[test]
+fn lookup_systemd_db_path_skips_missing_files_without_panic() {
+    let env = SystemctlEnv {
+        inline: vec![],
+        files: vec![std::path::PathBuf::from("/nonexistent/path-12345.env")],
+        unit_missing: false,
+    };
+    assert!(lookup_systemd_db_path(&env).is_none());
+}
+
+#[test]
+fn canonicalize_with_warning_reports_enoent_instead_of_silent_compare() {
+    // Eng-review #A48 / C5: the original drift bug fell back to literal
+    // string compare when canonicalize failed. This test pins down the new
+    // behaviour: ENOENT bubbles up as a structured warning string.
+    let missing = std::path::PathBuf::from("/nonexistent-canon-test-9f3e2d1c");
+    let err = canonicalize_with_warning(&missing).unwrap_err();
+    assert!(err.contains("could not canonicalize"));
+    assert!(err.contains("/nonexistent-canon-test-9f3e2d1c"));
+}
+
+#[test]
+fn doctor_cache_dedupes_systemctl_show() {
+    let mut cache = DoctorCache::default();
+    let first = cache.systemctl_env("definitely-not-a-real.service-ab12cd");
+    let second = cache.systemctl_env("definitely-not-a-real.service-ab12cd");
+    assert!(first.is_err() || first.as_ref().unwrap().unit_missing || first.is_ok());
+    // The cache returns clones of the same Result on the second call.
+    match (&first, &second) {
+        (Err(a), Err(b)) => assert_eq!(a, b),
+        (Ok(a), Ok(b)) => assert_eq!(a.unit_missing, b.unit_missing),
+        _ => panic!("cache returned divergent results for the same unit: {first:?} {second:?}"),
+    }
+}
+
+#[test]
+fn doctor_cache_dedupes_docker_inspect() {
+    let mut cache = DoctorCache::default();
+    let container = "definitely-not-a-real-container-ab12cd";
+    let first = cache.container_inspect(container);
+    let second = cache.container_inspect(container);
+    match (&first, &second) {
+        (Err(a), Err(b)) => assert_eq!(a, b),
+        (Ok(a), Ok(b)) => {
+            assert_eq!(a.running, b.running);
+            assert_eq!(a.mount_source, b.mount_source);
+        }
+        _ => panic!("cache returned divergent results: {first:?} {second:?}"),
+    }
+}
+
+#[test]
+fn ai_watch_coordination_skipped_when_unit_missing() {
+    // SYSLOG_AI_WATCH_UNIT override forces the phase to query a unit that
+    // cannot exist; on any reasonable test host this returns a LoadState
+    // of not-found OR systemctl failure. Either way we expect Skipped.
+    std::env::set_var(
+        "SYSLOG_AI_WATCH_UNIT",
+        "syslog-ai-watch-test-missing-9f3e.service",
+    );
+    let env_path = std::path::PathBuf::from("/nonexistent-env-9f3e");
+    let mut cache = DoctorCache::default();
+    let phase = ai_watch_coordination_phase(&env_path, &mut cache);
+    assert_eq!(phase.name, "ai-watch-coord");
+    assert_eq!(
+        phase.status,
+        SetupStatus::Skipped,
+        "expected Skipped, got {:?} (detail={})",
+        phase.status,
+        phase.detail
+    );
+    std::env::remove_var("SYSLOG_AI_WATCH_UNIT");
+}
+
+#[test]
+fn ensure_doctor_coordination_ok_passes_with_only_warnings_or_skips() {
+    let phases = vec![
+        SetupPhase {
+            name: "data-mount",
+            status: SetupStatus::Skipped,
+            detail: "no docker".into(),
+        },
+        SetupPhase {
+            name: "ai-watch-coord",
+            status: SetupStatus::Warn,
+            detail: "could not canonicalize".into(),
+        },
+    ];
+    assert!(ensure_doctor_coordination_ok(&phases).is_ok());
+}
+
+#[test]
+fn ensure_doctor_coordination_ok_fails_on_error_phase() {
+    let phases = vec![SetupPhase {
+        name: "ai-watch-coord",
+        status: SetupStatus::Error,
+        detail: "paths diverged".into(),
+    }];
+    let err = ensure_doctor_coordination_ok(&phases).unwrap_err();
+    assert!(err.to_string().contains("ai-watch-coord"));
+    assert!(err.to_string().contains("paths diverged"));
+}
+
+#[test]
 fn parse_setup_check_and_repair() {
     assert_eq!(
         CliCommand::parse(strings(&["setup", "check", "--json"])).unwrap(),
@@ -576,5 +777,318 @@ fn parse_setup_check_and_repair() {
     assert_eq!(
         CliCommand::parse(strings(&["setup", "repair"])).unwrap(),
         CliCommand::Setup(SetupCommand::Repair(SetupArgs { json: false }))
+    );
+}
+
+// ─── GlobalFlags / CliMode (bead 0p8r.6) ────────────────────────────────────
+//
+// Env-touching tests use `#[serial]` (matching `http_client_tests`) because
+// `SYSLOG_USE_HTTP` and `SYSLOG_API_TOKEN` are process-global and would race
+// otherwise.
+
+use serial_test::serial;
+
+/// Drop guard that restores the previous value of an env var when the test
+/// exits — mirrors `EnvVarGuard` in `cli::http_client::tests`. Duplicated
+/// (rather than re-exported) because that module is a sibling `mod` inside
+/// `src/cli.rs` and tests live in this sibling — keeping the helper local
+/// avoids tangling visibility just for tests.
+struct EnvVarGuard {
+    name: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn set(name: &'static str, value: &str) -> Self {
+        let previous = std::env::var(name).ok();
+        std::env::set_var(name, value);
+        Self { name, previous }
+    }
+    fn unset(name: &'static str) -> Self {
+        let previous = std::env::var(name).ok();
+        std::env::remove_var(name);
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(v) => std::env::set_var(self.name, v),
+            None => std::env::remove_var(self.name),
+        }
+    }
+}
+
+#[test]
+fn global_flags_default_is_empty() {
+    let mut args = strings(&["search", "foo"]);
+    let flags = GlobalFlags::extract(&mut args).unwrap();
+    assert_eq!(flags, GlobalFlags::default());
+    assert_eq!(args, strings(&["search", "foo"]));
+}
+
+#[test]
+fn global_flags_extract_http_bool_anywhere() {
+    // Before the subcommand.
+    let mut args = strings(&["--http", "search", "foo"]);
+    let flags = GlobalFlags::extract(&mut args).unwrap();
+    assert!(flags.force_http);
+    assert_eq!(args, strings(&["search", "foo"]));
+
+    // After the subcommand.
+    let mut args = strings(&["search", "--http", "foo"]);
+    let flags = GlobalFlags::extract(&mut args).unwrap();
+    assert!(flags.force_http);
+    assert_eq!(args, strings(&["search", "foo"]));
+
+    // Trailing.
+    let mut args = strings(&["search", "foo", "--http"]);
+    let flags = GlobalFlags::extract(&mut args).unwrap();
+    assert!(flags.force_http);
+    assert_eq!(args, strings(&["search", "foo"]));
+}
+
+#[test]
+fn global_flags_extract_server_separate_and_eq_forms() {
+    let mut args = strings(&["--server", "http://x:3100", "search", "foo"]);
+    let flags = GlobalFlags::extract(&mut args).unwrap();
+    assert_eq!(flags.server.as_deref(), Some("http://x:3100"));
+    assert_eq!(args, strings(&["search", "foo"]));
+
+    let mut args = strings(&["search", "--server=http://y:3100", "foo"]);
+    let flags = GlobalFlags::extract(&mut args).unwrap();
+    assert_eq!(flags.server.as_deref(), Some("http://y:3100"));
+    assert_eq!(args, strings(&["search", "foo"]));
+}
+
+#[test]
+fn global_flags_extract_token_separate_and_eq_forms() {
+    let mut args = strings(&["search", "--token", "value", "foo"]);
+    let flags = GlobalFlags::extract(&mut args).unwrap();
+    assert_eq!(flags.token.as_deref(), Some("value"));
+    assert_eq!(args, strings(&["search", "foo"]));
+
+    let mut args = strings(&["--token=value2", "search", "foo"]);
+    let flags = GlobalFlags::extract(&mut args).unwrap();
+    assert_eq!(flags.token.as_deref(), Some("value2"));
+    assert_eq!(args, strings(&["search", "foo"]));
+}
+
+#[test]
+fn global_flags_extract_rejects_missing_values() {
+    assert!(GlobalFlags::extract(&mut strings(&["--server"])).is_err());
+    assert!(GlobalFlags::extract(&mut strings(&["--token"])).is_err());
+    assert!(GlobalFlags::extract(&mut strings(&["--server="])).is_err());
+    assert!(GlobalFlags::extract(&mut strings(&["--token="])).is_err());
+    // Trailing empty value via separate-arg form.
+    assert!(GlobalFlags::extract(&mut strings(&["--server", ""])).is_err());
+    assert!(GlobalFlags::extract(&mut strings(&["--token", "   "])).is_err());
+}
+
+#[test]
+fn global_flags_combined_extract() {
+    let mut args = strings(&[
+        "--http",
+        "ai",
+        "search",
+        "--server=http://x:3100",
+        "--token",
+        "tok",
+        "needle",
+    ]);
+    let flags = GlobalFlags::extract(&mut args).unwrap();
+    assert!(flags.force_http);
+    assert_eq!(flags.server.as_deref(), Some("http://x:3100"));
+    assert_eq!(flags.token.as_deref(), Some("tok"));
+    assert_eq!(args, strings(&["ai", "search", "needle"]));
+}
+
+#[test]
+#[serial]
+fn http_trigger_default_no_env_no_flags_is_none() {
+    let _g = EnvVarGuard::unset(ENV_USE_HTTP);
+    let flags = GlobalFlags::default();
+    assert_eq!(flags.http_trigger(), None);
+}
+
+#[test]
+#[serial]
+fn http_trigger_token_alone_does_not_imply_http_mode() {
+    // The whole point of the locked decision: SYSLOG_API_TOKEN being set
+    // must NOT silently flip operators into HTTP mode just because they had
+    // it exported from an earlier deploy.
+    let _g1 = EnvVarGuard::unset(ENV_USE_HTTP);
+    let _g2 = EnvVarGuard::set("SYSLOG_API_TOKEN", "leftover-from-old-shell");
+    let flags = GlobalFlags::default();
+    assert_eq!(flags.http_trigger(), None);
+}
+
+#[test]
+#[serial]
+fn http_trigger_env_use_http_one_is_some() {
+    let _g = EnvVarGuard::set(ENV_USE_HTTP, "1");
+    let flags = GlobalFlags::default();
+    assert_eq!(flags.http_trigger(), Some("SYSLOG_USE_HTTP=1"));
+}
+
+#[test]
+#[serial]
+fn http_trigger_env_use_http_true_is_some() {
+    let _g = EnvVarGuard::set(ENV_USE_HTTP, "TRUE");
+    let flags = GlobalFlags::default();
+    assert_eq!(flags.http_trigger(), Some("SYSLOG_USE_HTTP=1"));
+}
+
+#[test]
+#[serial]
+fn http_trigger_env_use_http_other_values_are_none() {
+    for v in ["0", "false", "no", "", "yes", "y", "FALZE", "anything"] {
+        let _g = EnvVarGuard::set(ENV_USE_HTTP, v);
+        let flags = GlobalFlags::default();
+        assert_eq!(
+            flags.http_trigger(),
+            None,
+            "value `{v}` should not opt into HTTP"
+        );
+    }
+}
+
+#[test]
+#[serial]
+fn http_trigger_http_flag_wins_over_env() {
+    let _g = EnvVarGuard::unset(ENV_USE_HTTP);
+    let flags = GlobalFlags {
+        force_http: true,
+        ..Default::default()
+    };
+    assert_eq!(flags.http_trigger(), Some("--http"));
+}
+
+#[test]
+#[serial]
+fn http_trigger_server_flag_implies_http() {
+    let _g = EnvVarGuard::unset(ENV_USE_HTTP);
+    let flags = GlobalFlags {
+        server: Some("http://x:3100".into()),
+        ..Default::default()
+    };
+    assert_eq!(flags.http_trigger(), Some("--server"));
+}
+
+#[test]
+#[serial]
+fn http_trigger_token_flag_implies_http() {
+    let _g = EnvVarGuard::unset(ENV_USE_HTTP);
+    let flags = GlobalFlags {
+        token: Some("tok".into()),
+        ..Default::default()
+    };
+    assert_eq!(flags.http_trigger(), Some("--token"));
+}
+
+#[test]
+#[serial]
+fn build_http_client_fails_closed_on_missing_token_via_http_flag() {
+    // --http set but no token discoverable anywhere → must error with a
+    // message naming --http (eng-review #C6).
+    let _g1 = EnvVarGuard::unset(ENV_USE_HTTP);
+    let _g2 = EnvVarGuard::unset("SYSLOG_API_TOKEN");
+    let _g3 = EnvVarGuard::unset("SYSLOG_MCP_URL");
+    let _g4 = EnvVarGuard::unset("SYSLOG_MCP_PORT");
+    let flags = GlobalFlags {
+        force_http: true,
+        ..Default::default()
+    };
+    let trigger = flags.http_trigger().expect("--http should trigger");
+    let err = flags.build_http_client(trigger).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("HTTP mode requested via --http"),
+        "expected '--http' in error, got: {msg}"
+    );
+    assert!(
+        msg.contains("discovery failed"),
+        "expected 'discovery failed' in error, got: {msg}"
+    );
+}
+
+#[test]
+#[serial]
+fn build_http_client_fails_closed_on_missing_token_via_env() {
+    let _g1 = EnvVarGuard::set(ENV_USE_HTTP, "1");
+    let _g2 = EnvVarGuard::unset("SYSLOG_API_TOKEN");
+    let _g3 = EnvVarGuard::unset("SYSLOG_MCP_URL");
+    let _g4 = EnvVarGuard::unset("SYSLOG_MCP_PORT");
+    let flags = GlobalFlags::default();
+    let trigger = flags.http_trigger().expect("env should trigger");
+    let err = flags.build_http_client(trigger).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("HTTP mode requested via SYSLOG_USE_HTTP=1"),
+        "expected 'SYSLOG_USE_HTTP=1' in error, got: {msg}"
+    );
+}
+
+#[test]
+#[serial]
+fn build_http_client_fails_closed_on_missing_token_via_server_flag() {
+    let _g1 = EnvVarGuard::unset(ENV_USE_HTTP);
+    let _g2 = EnvVarGuard::unset("SYSLOG_API_TOKEN");
+    let flags = GlobalFlags {
+        server: Some("http://otherhost:3100".into()),
+        ..Default::default()
+    };
+    let trigger = flags.http_trigger().expect("--server should trigger");
+    let err = flags.build_http_client(trigger).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("HTTP mode requested via --server"),
+        "expected '--server' in error, got: {msg}"
+    );
+}
+
+#[test]
+#[serial]
+fn build_http_client_succeeds_with_token_override() {
+    // No env credential, but the flag override is supplied, so discovery succeeds and we get a
+    // real HttpClient (we don't actually call it; just confirm it constructs).
+    let _g1 = EnvVarGuard::unset(ENV_USE_HTTP);
+    let _g2 = EnvVarGuard::unset("SYSLOG_API_TOKEN");
+    let _g3 = EnvVarGuard::unset("SYSLOG_MCP_URL");
+    let flags = GlobalFlags {
+        token: Some("supplied-value".into()),
+        ..Default::default()
+    };
+    let trigger = flags.http_trigger().expect("--token should trigger");
+    let _client = flags.build_http_client(trigger).expect("should construct");
+}
+
+#[test]
+fn setup_report_phase_list_does_not_include_data_mount_post_cutover() {
+    // Bead syslog-mcp-0p8r.11: post-cutover (SYSLOG_USE_HTTP=true is the default),
+    // the SessionStart hook no longer needs to docker-inspect the container —
+    // CLI no longer opens SQLite directly. Drift detection moved to
+    // `compose doctor` (always) and `db status --check-coord` (opt-in) per
+    // bead syslog-mcp-0p8r.13.
+    //
+    // Source-grep guard: ensure setup_report's push-list does not call
+    // data_mount_phase. The function itself is intentionally retained because
+    // compose doctor / db status --check-coord still use it.
+    let source = include_str!("cli.rs");
+
+    // Find the setup_report fn body.
+    let start = source
+        .find("fn setup_report(mode: SetupMode)")
+        .expect("setup_report fn signature should exist in cli.rs");
+    // Take the next ~5000 chars — generous bound around the fn body.
+    let window_end = (start + 5000).min(source.len());
+    let body = &source[start..window_end];
+
+    assert!(
+        !body.contains("phases.push(data_mount_phase("),
+        "setup_report must NOT push data_mount_phase post-cutover \
+         (bead syslog-mcp-0p8r.11). Use compose doctor / db status --check-coord \
+         instead. Found a push call within the setup_report window."
     );
 }
