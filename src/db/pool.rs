@@ -538,39 +538,8 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     // Migration 13: enrichment-framework columns + partial indexes.
     // Spec: docs/superpowers/specs/2026-05-16-enrichment-framework-design.md §5
     // Contract: docs/contracts/db-additions.sql Epic B section
-    let already_applied_13: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM schema_migrations WHERE version = 13",
-        [],
-        |r| r.get(0),
-    )?;
-    if already_applied_13 == 0 {
-        // Wrap in an explicit transaction so a partial failure leaves the DB clean.
-        // rusqlite::Connection::execute_batch() calls sqlite3_exec() which runs
-        // each statement in its own implicit auto-commit — it is NOT atomic across
-        // the batch. A failed ALTER or CREATE INDEX mid-batch would leave some
-        // columns present but the version row absent, causing the next startup to
-        // error on duplicate ALTER TABLE. BEGIN IMMEDIATE / COMMIT makes the whole
-        // batch atomic.
-        conn.execute_batch(
-            "BEGIN IMMEDIATE;
-             ALTER TABLE logs ADD COLUMN http_status  INTEGER;
-             ALTER TABLE logs ADD COLUMN auth_outcome TEXT;
-             ALTER TABLE logs ADD COLUMN dns_blocked  INTEGER;
-             ALTER TABLE logs ADD COLUMN event_action TEXT;
-             ALTER TABLE logs ADD COLUMN parse_error  TEXT;
-
-             CREATE INDEX IF NOT EXISTS idx_logs_http_status_time
-                 ON logs(http_status, timestamp) WHERE http_status IS NOT NULL;
-             CREATE INDEX IF NOT EXISTS idx_logs_auth_outcome_time
-                 ON logs(auth_outcome, timestamp) WHERE auth_outcome IS NOT NULL;
-             CREATE INDEX IF NOT EXISTS idx_logs_dns_blocked_time
-                 ON logs(dns_blocked, timestamp) WHERE dns_blocked IS NOT NULL;
-             CREATE INDEX IF NOT EXISTS idx_logs_event_action_time
-                 ON logs(event_action, timestamp) WHERE event_action IS NOT NULL;
-
-             INSERT INTO schema_migrations (version) VALUES (13);
-             COMMIT;",
-        )?;
+    if !migration_applied(&conn, 13)? {
+        apply_migration_13(&conn)?;
         tracing::info!("Migration 13: added enrichment columns + partial indexes");
     }
 
@@ -588,6 +557,69 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
 
     tracing::info!(path = %config.db_path.display(), "Database initialized");
     Ok(pool)
+}
+
+fn migration_applied(conn: &Connection, version: i64) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM schema_migrations WHERE version = ?1",
+        [version],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count > 0)
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+        [table, column],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count > 0)
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> rusqlite::Result<()> {
+    if !column_exists(conn, table, column)? {
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {definition};"))?;
+    }
+    Ok(())
+}
+
+fn apply_migration_13(conn: &Connection) -> rusqlite::Result<()> {
+    // Explicit transaction keeps index/version updates atomic, while each ALTER is
+    // guarded so manually repaired or partially migrated DBs can converge instead
+    // of failing on duplicate columns with no version row.
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = (|| {
+        add_column_if_missing(conn, "logs", "http_status", "http_status INTEGER")?;
+        add_column_if_missing(conn, "logs", "auth_outcome", "auth_outcome TEXT")?;
+        add_column_if_missing(conn, "logs", "dns_blocked", "dns_blocked INTEGER")?;
+        add_column_if_missing(conn, "logs", "event_action", "event_action TEXT")?;
+        add_column_if_missing(conn, "logs", "parse_error", "parse_error TEXT")?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_logs_http_status_time
+                 ON logs(http_status, timestamp) WHERE http_status IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_auth_outcome_time
+                 ON logs(auth_outcome, timestamp) WHERE auth_outcome IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_dns_blocked_time
+                 ON logs(dns_blocked, timestamp) WHERE dns_blocked IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_event_action_time
+                 ON logs(event_action, timestamp) WHERE event_action IS NOT NULL;
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (13);",
+        )
+    })();
+
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT;"),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
 }
 
 fn configure_connection_pragmas(conn: &mut Connection, wal_mode: bool) -> rusqlite::Result<()> {
