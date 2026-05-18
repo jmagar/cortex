@@ -106,17 +106,17 @@ publish bump="patch":
     [ "$(git branch --show-current)" = "main" ] || { echo "Switch to main first"; exit 1; }
     [ -z "$(git status --porcelain)" ] || { echo "Commit or stash changes first"; exit 1; }
     git pull origin main
-    CURRENT=$(grep -m1 "^version" Cargo.toml | sed "s/.*\"\(.*\)\".*/\1/")
-    IFS="." read -r major minor patch <<< "$CURRENT"
     case "{{bump}}" in
-      major) major=$((major+1)); minor=0; patch=0 ;;
-      minor) minor=$((minor+1)); patch=0 ;;
-      patch) patch=$((patch+1)) ;;
+      major|minor|patch) ;;
       *) echo "Usage: just publish [major|minor|patch]"; exit 1 ;;
     esac
-    NEW="${major}.${minor}.${patch}"
-    echo "Version: ${CURRENT} → ${NEW}"
-    sed -i "s/^version = \"${CURRENT}\"/version = \"${NEW}\"/" Cargo.toml
-    cargo check 2>/dev/null || true
-    git add -A && git commit -m "release: v${NEW}" && git tag "v${NEW}" && git push origin main --tags
+    scripts/bump-version.sh "{{bump}}"
+    NEW=$(grep -m1 "^version" Cargo.toml | sed "s/.*\"\(.*\)\".*/\1/")
+    scripts/check-version-sync.sh --require-changelog
+    cargo test
+    cargo clippy -- -D warnings
+    git add -A
+    git commit -m "release: v${NEW}"
+    git tag "v${NEW}"
+    git push origin main --tags
     echo "Tagged v${NEW} — publish workflow will run automatically"
