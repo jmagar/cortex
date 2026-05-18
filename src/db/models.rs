@@ -193,6 +193,31 @@ pub struct AiCorrelateParams {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiRelatedWindow {
+    pub anchor_index: usize,
+    pub window_from: String,
+    pub window_to: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiRelatedLogsParams {
+    pub windows: Vec<AiRelatedWindow>,
+    pub query: Option<String>,
+    pub hostname: Option<String>,
+    pub source_ip: Option<String>,
+    pub severity_in: Vec<String>,
+    pub app_name: Option<String>,
+    pub limit_per_anchor: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiRelatedLogsForAnchor {
+    pub anchor_index: usize,
+    pub logs: Vec<LogEntry>,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiUsageBlocksParams {
     pub ai_project: Option<String>,

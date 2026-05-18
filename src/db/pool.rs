@@ -543,6 +543,31 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 13: added enrichment columns + partial indexes");
     }
 
+    let already_applied_14: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM schema_migrations WHERE version = 14",
+        [],
+        |r| r.get(0),
+    )?;
+    if already_applied_14 == 0 {
+        tracing::info!(
+            "Migration 14: starting CREATE INDEX idx_logs_ai_session_host_time \
+             — may take time on large AI transcript databases"
+        );
+        let started = std::time::Instant::now();
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_logs_ai_session_host_time
+                 ON logs(ai_project, ai_tool, ai_session_id, hostname, timestamp)
+                 WHERE ai_project IS NOT NULL
+                   AND ai_tool IS NOT NULL
+                   AND ai_session_id IS NOT NULL;
+             INSERT INTO schema_migrations (version) VALUES (14);",
+        )?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "Migration 14: AI session host/time index created"
+        );
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
@@ -550,6 +575,11 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
          CREATE INDEX IF NOT EXISTS idx_logs_ai_session
              ON logs(ai_tool, ai_project, ai_session_id)
              WHERE ai_tool IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS idx_logs_ai_session_host_time
+             ON logs(ai_project, ai_tool, ai_session_id, hostname, timestamp)
+             WHERE ai_project IS NOT NULL
+               AND ai_tool IS NOT NULL
+               AND ai_session_id IS NOT NULL;
          CREATE INDEX IF NOT EXISTS idx_logs_ai_transcript_path
              ON logs(ai_transcript_path)
              WHERE ai_transcript_path IS NOT NULL;",

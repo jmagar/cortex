@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migration indexes/version metadata.
 - **Review artifact preservation**: Copied the consolidated full-review issue
   register into tracked docs.
+- **AI analytics query cost**: `search_ai_sessions` now computes session event
+  counts with a grouped join backed by an AI session/host/time index, avoiding a
+  full-history count per grouped result. `ai_correlate` now batches related-log
+  window lookups into one bounded query instead of issuing one database search
+  per anchor.
 
 ## [0.25.2] - 2026-05-16
 
