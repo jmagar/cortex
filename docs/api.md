@@ -29,7 +29,7 @@ to them by default.
 | Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/search` | read | query params: `query?`, `hostname?`, `source_ip?`, `severity?`, `app_name?`, `facility?`, `process_id?`, `from?`, `to?`, `limit?` (u32) | `SearchLogsResponse { count: usize, logs: [LogEntry] }` | 200, 400, 401, 503, 500 | Y | FTS5 search; `deny_unknown_fields` rejects typos. |
-| GET | `/api/tail` | read | query: `hostname?`, `source_ip?`, `app_name?`, `severity_min?`, `n?` (u32) | `[LogEntry]` (tail order) | 200, 400, 401, 503, 500 | Y | `severity_min` honoured per RFC severity ordering. |
+| GET | `/api/tail` | read | query: `hostname?`, `source_ip?`, `app_name?`, `severity_min?`, `n?` (u32) | `SearchLogsResponse { count: usize, logs: [LogEntry] }` (tail order) | 200, 400, 401, 503, 500 | Y | `severity_min` honoured per RFC severity ordering. |
 | GET | `/api/errors` | read | query: `from?`, `to?`, `group_by?` (`app_name` only) | `GetErrorsResponse { summary: [ErrorSummaryEntry] }` | 200, 400, 401, 503, 500 | Y | Counts by host (and optional secondary key). |
 | GET | `/api/hosts` | read | (none) | `ListHostsResponse { hosts: [HostEntry] }` | 200, 401, 503, 500 | Y | Inventory of seen hostnames. |
 | GET | `/api/correlate` | read | query: `reference_time` (REQUIRED, RFC 3339), `window_minutes?` (u32), `severity_min?`, `hostname?`, `source_ip?`, `query?`, `limit?` (u32) | `CorrelateEventsResponse { reference_time, window_minutes, window_from, window_to, severity_min, total_events, truncated, hosts_count, hosts: [CorrelatedHost] }` | 200, 400, 401, 503, 500 | Y | **Distinct from `/api/ai/correlate`** — see disambiguation below. |
@@ -42,7 +42,7 @@ to them by default.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/sessions` | read | query: `project?`, `tool?`, `hostname?`, `from?`, `to?`, `limit?` | `ListSessionsResponse { count, sessions: [AiSessionEntry] }` | 200, 400, 401, 503, 500 | Y | Inventory of indexed AI transcripts. |
 | GET | `/api/ai/search` | read | query: `query` (REQUIRED), `project?`, `tool?`, `from?`, `to?`, `limit?` (u32) | `SearchSessionsResponse { total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, truncated, sessions: [SearchedSessionEntry], limit_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500** — see Response size caps. |
-| GET | `/api/ai/abuse` | read | query: `project?`, `tool?`, `from?`, `to?`, `limit?`, `before?` (u32), `after?` (u32), **`term?`** (single string — DEVIATION from `terms[]`, see below) | `AbuseSearchResponse { terms, candidate_rows, candidate_cap, candidate_window_truncated, truncated, matches: [AbuseMatch], limit_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500**. `term=` is a single-string surface because `serde_urlencoded` cannot deserialize `Vec<String>` from repeated query params. |
+| GET | `/api/ai/abuse` | read | query: `project?`, `tool?`, `from?`, `to?`, `limit?`, `before?` (u32), `after?` (u32), **`terms?`** (repeated key: `?terms=foo&terms=bar`) | `AbuseSearchResponse { terms, candidate_rows, candidate_cap, candidate_window_truncated, truncated, matches: [AbuseMatch], limit_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500**. Decoded via `serde_qs::axum::QsQuery`, so `Vec<String>` is supported through repeated `terms=` keys (the CLI's `HttpClient` serializes the shared request type the same way). |
 | GET | `/api/ai/correlate` | read | query: `project?`, `tool?`, `session_id?`, `ai_query?`, `log_query?`, `hostname?`, `source_ip?`, `app_name?`, `from?`, `to?`, `window_minutes?` (u32), `severity_min?`, `limit?` (u32), `events_per_anchor?` (u32) | `AiCorrelateResponse { window_minutes, severity_min, total_anchors, anchor_rows, anchor_limit, anchors_truncated, related_limit_per_anchor, total_related_events, anchors: [AiCorrelationAnchor], events_per_anchor_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `events_per_anchor` clamped at **50** — see Response size caps. Correlates AI transcript anchors against system logs. |
 | GET | `/api/ai/blocks` | read | query: `project?`, `tool?`, `from?`, `to?` | `UsageBlocksResponse { total_blocks, truncated, blocks: [UsageBlock] }` | 200, 400, 401, 503, 500 | Y | Time-bucketed usage. |
 | GET | `/api/ai/context` | read | query: `project` (REQUIRED, non-empty — handler 400s on empty per eng-review #A7), `tool?`, `limit?` | `ProjectContextResponse { project, tools, sessions, hostnames, first_seen?, last_seen?, event_count, recent_entries_truncated, recent_entries: [LogEntry] }` | 200, 400, 401, 503, 500 | Y | Empty `project=` rejected with explicit 400. |
@@ -55,16 +55,16 @@ to them by default.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/ai/checkpoints` | read | query: `errors_only?` (bool), `missing_only?` (bool), `limit?` (u32). `deny_unknown_fields`. | service-shaped (list of checkpoint records with parse-error metadata) | 200, 400, 401, 503, 500 | Y | Diagnostic inventory of indexed AI transcript checkpoints. |
 | GET | `/api/ai/errors` | read | query: `limit?`. `deny_unknown_fields`. | service-shaped (list of recent transcript parse errors) | 200, 400, 401, 503, 500 | Y | Surfaces parse failures from the AI indexer. |
-| POST | `/api/ai/prune-checkpoints` | **admin** | body: `{ "dry_run": bool (REQUIRED), "missing_only"?: bool, "limit"?: u32 }`. `deny_unknown_fields`. | service-shaped (count of pruned/would-prune rows) | 200, 400, 401, 500 | **N** | `dry_run` is **REQUIRED and explicit** — a missing key returns 400 (defends against `POST {}` mass-delete, eng-review C3). `caller_ip` audit-logged via `tracing::warn!` BEFORE the service call. |
+| POST | `/api/ai/prune-checkpoints` | **admin** | body: `{ "dry_run": bool (REQUIRED), "missing_only"?: bool, "limit"?: u32 }`. `deny_unknown_fields`. | service-shaped (count of pruned/would-prune rows) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention with `/api/db/vacuum` or `/api/db/checkpoint`. `dry_run` is **REQUIRED and explicit** — a missing key returns 400 (defends against `POST {}` mass-delete, eng-review C3). `caller_ip` audit-logged via `tracing::warn!` BEFORE the service call. |
 
 ### DB ops (4) — bead `.4`
 
 | Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/db/status` | read | (none) | `DbStats` (same shape as `/api/stats`) plus cached PRAGMA snapshot | 200, 401, 503, 500 | Y | Cached at startup; bypasses `MAINTENANCE_PERMIT`. |
+| GET | `/api/db/status` | read | (none) | `DbMaintenanceStatus { db_path, page_count, freelist_count, page_size, logical_size_bytes, physical_size_bytes, wal_size_bytes?, shm_size_bytes?, auto_vacuum, journal_mode, integrity_ok?, integrity_messages: [String] }` | 200, 401, 503, 500 | Y | DIFFERENT shape from `/api/stats`: a maintenance-focused PRAGMA snapshot (page/freelist counts, WAL/SHM sizes, journal mode, optional integrity result). Bypasses `MAINTENANCE_PERMIT`. |
 | GET | `/api/db/integrity` | read | query: `quick?` (bool — default `false` runs full `PRAGMA integrity_check`; `true` runs `PRAGMA quick_check`). `deny_unknown_fields`. | `DbIntegrityResult` | 200, 400, 401, 503, 500 | Y | Full check on a multi-GB DB can be slow but does NOT take `MAINTENANCE_PERMIT`. |
 | POST | `/api/db/checkpoint` | **admin** | body: `{ "mode": "passive" | "full" | "restart" | "truncate" }`. Validated handler-side BEFORE the service call (eng-review #A17). | `DbCheckpointResult` | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention. `caller_ip` audit-logged before service call. |
-| POST | `/api/db/vacuum` | **admin** | body: `{ "full": bool, "force"?: bool, "incremental_pages"?: u32 }`. `force` is `Option<bool>` so the size pre-flight only relaxes on explicit `"force": true`. | `DbVacuumResult` (incl. `after_physical_size_bytes` used to refresh the cached size for the next pre-flight) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`. Size pre-flight: `full && !force` returns 409 if cached DB size > **2 GB**. `caller_ip` audit-logged before service call. See "VACUUM on large DBs" below. |
+| POST | `/api/db/vacuum` | **admin** | body: `{ "full": bool, "force"?: bool, "incremental_pages"?: u32 }`. `force` is `Option<bool>` so the size pre-flight only relaxes on explicit `"force": true`. | `DbVacuumResult` (incl. `after_physical_size_bytes`) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`. Size pre-flight: `full && !force` reads the LIVE `page_count * page_size` (no cached snapshot) on every call and returns 409 if logical size > **2 GB**. `caller_ip` audit-logged before service call. See "VACUUM on large DBs" below. |
 
 **Total: 22 routes** (1 added in bead `.1` + 6 pre-existing + 8 in `.2` + 3 in `.3` + 4 in `.4`).
 
@@ -203,8 +203,11 @@ container with a 100000-row request.
 
 ## VACUUM on large DBs
 
-`POST /api/db/vacuum` enforces a **2 GB cached-size pre-flight** when
-`{"full": true, "force": <not true>}`. Two operational caveats:
+`POST /api/db/vacuum` enforces a **live 2 GB size pre-flight** when
+`{"full": true, "force": <not true>}` — `db_logical_size_bytes()` reads
+`page_count * page_size` fresh on every call so a long-running container
+cannot defeat the guard with a stale startup snapshot. Two operational
+caveats:
 
 - The default-reverse-proxy HTTP timeout (Axum upstream / SWAG) is on
   the order of minutes. A `VACUUM` on a database larger than ~10 GB

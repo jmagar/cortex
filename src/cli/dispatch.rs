@@ -606,9 +606,22 @@ pub(super) async fn run_db_vacuum(mode: &CliMode, args: DbVacuumArgs) -> Result<
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        // Local SQL doesn't enforce the 2GB pre-flight (only the API does),
-        // so `req.force` is intentionally ignored here.
-        CliMode::Local(service) => service.db_vacuum(req.full, req.incremental_pages).await?,
+        CliMode::Local(service) => {
+            // Mirror the API's 2GB pre-flight (bead 0p8r.4 / eng-review C3)
+            // so a local invocation can't bypass the guard just by skipping
+            // --http. Read the LIVE logical size, not a cached snapshot.
+            if req.full && req.force != Some(true) {
+                let size = service.db_logical_size_bytes().await?;
+                if size > crate::api::FULL_VACUUM_SIZE_GUARD_BYTES {
+                    let gb = size as f64 / (1024.0 * 1024.0 * 1024.0);
+                    bail!(
+                        "DB size {gb:.2} GB; full VACUUM would block ingest. \
+                         Pass --force to override, or use incremental (--pages N) instead."
+                    );
+                }
+            }
+            service.db_vacuum(req.full, req.incremental_pages).await?
+        }
         CliMode::Http(client) => http_or_cancel(client.db_vacuum(&req)).await?,
     };
     print_db_vacuum_response(&response, json)

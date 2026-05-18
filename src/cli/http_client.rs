@@ -573,10 +573,16 @@ pub(crate) fn resolve_token(token_override: Option<String>) -> Result<String> {
 /// container that hasn't started yet; surface them with the configured base
 /// URL so users know what address the CLI tried.
 fn map_send_error(err: reqwest::Error, base_url: &Url) -> anyhow::Error {
-    if err.is_connect() || err.is_timeout() {
+    if err.is_connect() {
         return anyhow!(
             "cannot connect to syslog-mcp at {base_url} — DNS or TCP connection failed within {}s",
             CONNECT_TIMEOUT.as_secs()
+        );
+    }
+    if err.is_timeout() {
+        return anyhow!(
+            "request to syslog-mcp at {base_url} timed out (request deadline {}s exceeded)",
+            REQUEST_TIMEOUT.as_secs()
         );
     }
     anyhow!("transport error talking to {base_url}: {err}")

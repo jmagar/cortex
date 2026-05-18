@@ -3564,6 +3564,20 @@ impl GlobalFlags {
     /// Note: `SYSLOG_API_TOKEN` being set does NOT trigger HTTP — only the
     /// explicit opt-ins above do (locked decision).
     pub(crate) fn http_trigger(&self) -> Option<&'static str> {
+        if let Some(flag) = self.http_flag_trigger() {
+            return Some(flag);
+        }
+        if env_opts_into_http() {
+            return Some("SYSLOG_USE_HTTP=1");
+        }
+        None
+    }
+
+    /// Like [`http_trigger`] but only considers explicit command-line FLAGS,
+    /// ignoring the `SYSLOG_USE_HTTP` env var. Used by local-only commands
+    /// (`compose`, `setup`) that must not bail just because operators have
+    /// `SYSLOG_USE_HTTP=true` written into `~/.syslog-mcp/.env`.
+    pub(crate) fn http_flag_trigger(&self) -> Option<&'static str> {
         if self.force_http {
             return Some("--http");
         }
@@ -3572,9 +3586,6 @@ impl GlobalFlags {
         }
         if self.token.is_some() {
             return Some("--token");
-        }
-        if env_opts_into_http() {
-            return Some("SYSLOG_USE_HTTP=1");
         }
         None
     }

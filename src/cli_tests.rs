@@ -691,7 +691,17 @@ fn doctor_cache_dedupes_systemctl_show() {
     let mut cache = DoctorCache::default();
     let first = cache.systemctl_env("definitely-not-a-real.service-ab12cd");
     let second = cache.systemctl_env("definitely-not-a-real.service-ab12cd");
-    assert!(first.is_err() || first.as_ref().unwrap().unit_missing || first.is_ok());
+    // On any reasonable host this fake unit is either reported missing
+    // (unit_missing == true) or the systemctl probe itself fails. Either
+    // outcome is acceptable; a hit on the unit would mean the test host
+    // genuinely has it installed, which we treat as a setup error.
+    match &first {
+        Ok(env) => assert!(
+            env.unit_missing,
+            "fake unit unexpectedly resolved: {env:?}"
+        ),
+        Err(_) => {} // systemctl unavailable / probe failed — also acceptable
+    }
     // The cache returns clones of the same Result on the second call.
     match (&first, &second) {
         (Err(a), Err(b)) => assert_eq!(a, b),

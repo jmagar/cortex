@@ -37,7 +37,12 @@ SYSLOG_ENV_FILE="${SYSLOG_ENV_FILE:-${HOME}/.syslog-mcp/.env}"
 
 pass() { printf 'PASS  %s\n' "$1"; }
 info() { printf 'INFO  %s\n' "$1"; }
-fail() { printf 'FAIL  %s\n' "$1" >&2; exit 1; }
+fail() {
+  local fmt="$1"; shift
+  # shellcheck disable=SC2059
+  printf "FAIL  ${fmt}\n" "$@" >&2
+  exit 1
+}
 need() { printf 'NEED  %s\n' "$1" >&2; exit 2; }
 
 # ─── Prereqs ────────────────────────────────────────────────────────────────
@@ -51,7 +56,10 @@ if [[ -z "${SYSLOG_API_TOKEN:-}" ]]; then
     SYSLOG_API_TOKEN="$(grep -E '^SYSLOG_API_TOKEN=' "$SYSLOG_ENV_FILE" | head -n1 | cut -d= -f2-)"
   fi
 fi
-[[ -n "${SYSLOG_API_TOKEN:-}" ]] || need "SYSLOG_API_TOKEN not set and not found in $SYSLOG_ENV_FILE"
+# Trim leading/trailing whitespace so blank-padded values are rejected.
+SYSLOG_API_TOKEN="${SYSLOG_API_TOKEN#"${SYSLOG_API_TOKEN%%[![:space:]]*}"}"
+SYSLOG_API_TOKEN="${SYSLOG_API_TOKEN%"${SYSLOG_API_TOKEN##*[![:space:]]}"}"
+[[ -n "${SYSLOG_API_TOKEN:-}" ]] || need "SYSLOG_API_TOKEN not set/blank (checked env and $SYSLOG_ENV_FILE)"
 export SYSLOG_API_TOKEN
 
 info "binary  : $(command -v "$SYSLOG_BIN")"
@@ -102,38 +110,44 @@ local_mode() {
 }
 
 # ─── HTTP-supported query commands (7) ──────────────────────────────────────
+#
+# CLI globals (--http, --server, --token) are stripped by Mode::parse before
+# subcommand parsing; per-command flags (including --json) MUST follow the
+# subcommand or they're rejected as an unknown leading argument.
 
-assert_json "http: search (limit 1)"     http --json search --limit 1
-assert_json "http: tail (limit 1)"       http --json tail --limit 1
-assert_json "http: errors (limit 1)"     http --json errors --limit 1
-assert_json "http: hosts"                http --json hosts
-assert_json "http: correlate (1m, h=_)"  http --json correlate --host _smoke_ --window-seconds 60
-assert_json "http: stats"                http --json stats
-assert_json "http: sessions (limit 1)"   http --json sessions --limit 1
+SYSLOG_SMOKE_REFTIME="${SYSLOG_SMOKE_REFTIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
+
+assert_json "http: search (limit 1)"     http search --json --limit 1
+assert_json "http: tail (limit 1)"       http tail --json --limit 1
+assert_json "http: errors (limit 1)"     http errors --json --limit 1
+assert_json "http: hosts"                http hosts --json
+assert_json "http: correlate (1m, h=_)"  http correlate --json --reference-time "$SYSLOG_SMOKE_REFTIME" --hostname _smoke_ --window-minutes 1
+assert_json "http: stats"                http stats --json
+assert_json "http: sessions (limit 1)"   http sessions --json --limit 1
 
 # ─── HTTP-supported AI commands (10) ────────────────────────────────────────
 
-assert_json "http: ai search"            http --json ai search --query smoke --limit 1
-assert_json "http: ai abuse"             http --json ai abuse --limit 1
-assert_json "http: ai correlate"         http --json ai correlate --window-seconds 60 --limit 1
-assert_json "http: ai blocks"            http --json ai blocks --limit 1
-assert_json "http: ai context"           http --json ai context --project / --limit 1
-assert_json "http: ai tools"             http --json ai tools
-assert_json "http: ai projects"          http --json ai projects
-assert_json "http: ai checkpoints"       http --json ai checkpoints --limit 1
-assert_json "http: ai errors"            http --json ai errors --limit 1
-assert_json "http: ai prune-checkpoints" http --json ai prune-checkpoints --dry-run --limit 1
+assert_json "http: ai search"            http ai search --json --query smoke --limit 1
+assert_json "http: ai abuse"             http ai abuse --json --limit 1
+assert_json "http: ai correlate"         http ai correlate --json --window-minutes 1 --limit 1
+assert_json "http: ai blocks"            http ai blocks --json
+assert_json "http: ai context"           http ai context --json --project / --limit 1
+assert_json "http: ai tools"             http ai tools --json
+assert_json "http: ai projects"          http ai projects --json
+assert_json "http: ai checkpoints"       http ai checkpoints --json --limit 1
+assert_json "http: ai errors"            http ai errors --json --limit 1
+assert_json "http: ai prune-checkpoints" http ai prune-checkpoints --json --missing --dry-run --limit 1
 
 # ─── HTTP-supported DB commands (4) ─────────────────────────────────────────
 
-assert_json "http: db status"            http --json db status
+assert_json "http: db status"            http db status --json
 # `db integrity --quick` keeps runtime predictable. The CLI bails non-zero
 # only if integrity actually fails — JSON parses either way.
-assert_json "http: db integrity (quick)" http --json db integrity --quick
-assert_json "http: db checkpoint"        http --json db checkpoint --mode passive
+assert_json "http: db integrity (quick)" http db integrity --json --quick
+assert_json "http: db checkpoint"        http db checkpoint --json --mode passive
 # `vacuum --pages 1` keeps wall-clock low; full VACUUM may exceed 10-min
 # HTTP timeout on large DBs (see docs/rollout.md Notes).
-assert_json "http: db vacuum (pages=1)"  http --json db vacuum --pages 1
+assert_json "http: db vacuum (pages=1)"  http db vacuum --json --pages 1
 
 # ─── LOCAL-only AI commands (6) — must succeed in default mode ──────────────
 # These all read host filesystem or run host-side processes. They are

@@ -46,15 +46,17 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
 
     // `compose` and `setup` stay on the local-only path: they manage local
     // host state (systemd units, Docker compose stacks, on-disk config) that
-    // has no HTTP analogue. Reject HTTP-mode flags up front rather than
-    // silently dropping them.
+    // has no HTTP analogue. Reject explicit HTTP-mode FLAGS up front, but
+    // silently ignore the `SYSLOG_USE_HTTP` env trigger — `setup repair`
+    // writes that into `~/.syslog-mcp/.env` as the post-cutover default, and
+    // bailing on it would break the very command operators run to repair.
     if matches!(
         command,
         cli::CliCommand::Compose(_) | cli::CliCommand::Setup(_)
     ) {
-        if let Some(trigger) = flags.http_trigger() {
+        if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
-                "{} has no effect on `{}` (local-only command); remove --http / --server / --token / SYSLOG_USE_HTTP",
+                "{} has no effect on `{}` (local-only command); remove --http / --server / --token",
                 trigger,
                 if matches!(command, cli::CliCommand::Compose(_)) { "compose" } else { "setup" },
             );

@@ -49,7 +49,7 @@ const REST_AI_LIMIT_CAP: u32 = 500;
 /// `"force": true`, the handler returns 409 instead of starting a multi-minute
 /// VACUUM that would block ingest. See `db_vacuum` for the dual-permit
 /// design (eng-review C2/C3).
-const FULL_VACUUM_SIZE_GUARD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+pub const FULL_VACUUM_SIZE_GUARD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Process-wide single-flight gate for the maintenance routes
 /// (`POST /api/db/vacuum`, `POST /api/db/checkpoint`,
@@ -203,8 +203,7 @@ fn read_schema_version(pool: &DbPool) -> anyhow::Result<i64> {
         .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
             row.get(0)
         })
-        .ok()
-        .flatten();
+        .map_err(|err| anyhow::anyhow!("schema_migrations probe failed: {err}"))?;
     Ok(version.unwrap_or(0))
 }
 
