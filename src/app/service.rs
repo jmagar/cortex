@@ -281,16 +281,21 @@ impl SyslogService {
             .run_db(move |pool| db::search_ai_related_logs(pool, &related_params))
             .await?;
 
+        let mut by_anchor: std::collections::HashMap<usize, db::AiRelatedLogsForAnchor> =
+            related_by_anchor
+                .into_iter()
+                .map(|group| (group.anchor_index, group))
+                .collect();
+
         let mut correlated = Vec::with_capacity(anchor_entries.len());
         let mut total_related_events = 0usize;
         for (anchor_index, (anchor, window_from, window_to)) in
             anchor_entries.into_iter().enumerate()
         {
-            let related = related_by_anchor
-                .iter()
-                .find(|group| group.anchor_index == anchor_index);
-            let related_logs = related.map(|group| group.logs.clone()).unwrap_or_default();
-            let related_truncated = related.map(|group| group.truncated).unwrap_or(false);
+            let (related_logs, related_truncated) = by_anchor
+                .remove(&anchor_index)
+                .map(|group| (group.logs, group.truncated))
+                .unwrap_or((Vec::new(), false));
             total_related_events += related_logs.len();
             correlated.push(AiCorrelationAnchor {
                 entry: anchor.into(),

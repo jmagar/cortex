@@ -652,15 +652,23 @@ pub fn search_ai_related_logs(
             truncated: false,
         })
         .collect::<Vec<_>>();
+    let mut anchor_pos: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::with_capacity(grouped.len());
+    for (pos, group) in grouped.iter().enumerate() {
+        if anchor_pos.insert(group.anchor_index, pos).is_some() {
+            anyhow::bail!(
+                "duplicate anchor_index {} in AiRelatedLogsParams windows",
+                group.anchor_index
+            );
+        }
+    }
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query(rusqlite::params_from_iter(sql_params.bindings.iter()))?;
     while let Some(row) = rows.next()? {
         let anchor_index = row.get::<_, i64>(0)? as usize;
         let related_rank = row.get::<_, i64>(16)? as usize;
-        if let Some(anchor) = grouped
-            .iter_mut()
-            .find(|group| group.anchor_index == anchor_index)
-        {
+        if let Some(&pos) = anchor_pos.get(&anchor_index) {
+            let anchor = &mut grouped[pos];
             if related_rank > limit {
                 anchor.truncated = true;
             } else {
