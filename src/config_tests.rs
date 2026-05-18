@@ -753,7 +753,7 @@ fn oauth_mode_rejects_allowed_emails_without_admin_until_enforced() {
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(
-        err.to_string().contains("allowed_emails") && err.to_string().contains("not enforced"),
+        err.to_string().contains("allowed_emails"),
         "wrong error: {err}"
     );
 }
@@ -782,7 +782,7 @@ fn oauth_mode_rejects_allowed_emails_even_with_admin_until_enforced() {
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(
-        err.to_string().contains("allowed_emails") && err.to_string().contains("not enforced"),
+        err.to_string().contains("allowed_emails"),
         "wrong error: {err}"
     );
 }
@@ -817,6 +817,18 @@ fn explicit_no_auth_allows_non_loopback_bind_without_token() {
     cfg.mcp.api_token = None;
     cfg.mcp.no_auth = true;
     validate_auth_config(&cfg, true).expect("gateway-protected no-auth mode");
+}
+
+#[test]
+fn explicit_no_auth_ignores_stale_oauth_fields() {
+    let mut cfg = Config::default();
+    cfg.mcp.host = "0.0.0.0".into();
+    cfg.mcp.api_token = None;
+    cfg.mcp.no_auth = true;
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.allowed_emails = vec!["stale@example.com".into()];
+
+    validate_auth_config(&cfg, true).expect("no_auth bypasses unused OAuth config");
 }
 
 #[test]
@@ -935,5 +947,23 @@ fn repo_local_config_uses_repo_local_db_path() {
         cfg.storage.db_path,
         std::path::PathBuf::from("data/syslog.db"),
         "repo config.toml should use a writable repo-local DB path for local dev"
+    );
+}
+
+#[test]
+fn repo_local_oauth_config_rejects_allowed_emails_until_enforced() {
+    let mut cfg: Config =
+        toml::from_str(include_str!("../config.toml")).expect("repo config.toml should parse");
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    cfg.mcp.auth.admin_email = "admin@example.com".into();
+    cfg.mcp.auth.allowed_emails = vec!["ops@example.com".into()];
+
+    let err = validate_auth_config(&cfg, true).unwrap_err();
+    assert!(
+        err.to_string().contains("allowed_emails"),
+        "wrong error: {err}"
     );
 }

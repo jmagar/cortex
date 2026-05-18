@@ -58,8 +58,9 @@ pub fn router(state: AppState) -> Router {
     // Locked Decision: OAuth router only when auth_state: Some(_).
     // bearer-only (auth_state: None) and LoopbackDev have no OAuth routes.
     //
-    // Locked Decision: /register and /auth/login are NOT in bearer_only_router
-    // (confirmed by lab-auth's BEARER_ONLY_ROUTER_FORBIDDEN_PATHS snapshot test).
+    // Locked Decision: use lab-auth's headless subset. /register and
+    // /auth/login are NOT in bearer_only_router (confirmed by lab-auth's
+    // BEARER_ONLY_ROUTER_FORBIDDEN_PATHS snapshot test).
     let oauth_router: Option<Router> = if let AuthPolicy::Mounted {
         auth_state: Some(ref state_arc),
     } = state.auth_policy
@@ -67,11 +68,8 @@ pub fn router(state: AppState) -> Router {
         tracing::info!(
             "OAuth router mounted: /.well-known/oauth-authorization-server, \
                  /.well-known/oauth-protected-resource, /mcp/.well-known/*, \
-                 /jwks, /authorize, /auth/google/callback, /token, /register"
+                 /jwks, /authorize, /auth/google/callback, /token"
         );
-        // Use the full router() so /register (DCR) is available for MCP clients.
-        // bearer_only_router excludes /register unconditionally; full router gates
-        // it on enable_dynamic_registration which we set true in build_auth_policy.
         let auth_state = state_arc.as_ref().clone();
         let path_based_discovery = Router::new()
             .route(
@@ -88,7 +86,7 @@ pub fn router(state: AppState) -> Router {
             )
             .with_state(auth_state.clone());
 
-        Some(lab_auth::routes::router(auth_state).merge(path_based_discovery))
+        Some(lab_auth::routes::bearer_only_router(auth_state).merge(path_based_discovery))
     } else {
         None
     };

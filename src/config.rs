@@ -994,7 +994,7 @@ fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()> {
+pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()> {
     if token_is_set_but_blank(&config.mcp.api_token) {
         return Err(anyhow::anyhow!("mcp.api_token must not be empty"));
     }
@@ -1009,6 +1009,10 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     // without exporting the token. The route-mount bail still fires
     // during server startup before any request is served, so operators
     // see the same error early.
+
+    if config.mcp.no_auth {
+        return Ok(());
+    }
 
     // ---- OAuth prerequisites ----------------------------------------------
     let auth = &config.mcp.auth;
@@ -1036,15 +1040,15 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
             .any(|entry| !entry.trim().is_empty());
         if allowed_emails_set {
             return Err(anyhow::anyhow!(
-                "[mcp.auth].allowed_emails is not enforced by lab-auth yet; remove \
-                 `allowed_emails` and use `admin_email` as the single OAuth account until \
-                 multi-user allowlist support lands"
+                "[mcp.auth].allowed_emails is not passed to lab-auth; remove \
+                 `allowed_emails` and use `admin_email` or lab-auth-managed allowed_users until \
+                 syslog-mcp can enforce the config list"
             ));
         }
         if admin_blank {
             return Err(anyhow::anyhow!(
                 "[mcp.auth] requires a non-empty `admin_email` when \
-                 SYSLOG_MCP_AUTH_MODE=oauth — `allowed_emails` is parsed but not enforced by \
+                 SYSLOG_MCP_AUTH_MODE=oauth — `allowed_emails` is parsed but not passed to \
                  lab-auth yet"
             ));
         }
@@ -1057,10 +1061,6 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     // ---- Non-loopback safety gate -----------------------------------------
     // Skip in stdio / query-only mode: no HTTP port is bound so the gate is
     // irrelevant. `check_bind` is false when called from Config::load_for_stdio.
-    if config.mcp.no_auth {
-        return Ok(());
-    }
-
     let bind_is_loopback = mcp_bind_is_loopback(config);
     if check_bind && !bind_is_loopback {
         let has_static_token = config
