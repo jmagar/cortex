@@ -42,7 +42,7 @@ NOT mounted in any mode:
 3. Client fetches `/.well-known/oauth-authorization-server` for the full metadata document.
 4. Client constructs an `/authorize` URL (PKCE S256, `scope=syslog:read`), opens in browser.
 5. User authenticates with Google; Google redirects to `/auth/google/callback`.
-6. Server validates email against allowlist, issues an RS256 access token (1h TTL) and a refresh token (8h TTL).
+6. Server validates the Google email against `admin_email`, issues an RS256 access token (1h TTL) and a refresh token (8h TTL).
 7. Client uses `POST /token?grant_type=refresh_token` to obtain new access tokens without re-prompting.
 
 ---
@@ -81,11 +81,12 @@ public_url = "https://syslog.example.com"
 google_client_id = "..."         # overridden by SYSLOG_MCP_GOOGLE_CLIENT_ID
 google_client_secret = "..."     # overridden by SYSLOG_MCP_GOOGLE_CLIENT_SECRET
 
-# Single admin email (bootstrap allowlist)
+# Single enforced OAuth email
 admin_email = "you@example.com"
 
-# Additional allowed emails
-allowed_emails = ["colleague@example.com"]
+# Reserved for future multi-user enforcement. Do not set in OAuth mode today:
+# startup rejects non-empty allowed_emails because lab-auth does not enforce it.
+allowed_emails = []
 
 # File paths (relative to the syslog DB directory)
 sqlite_path = "auth.db"
@@ -104,7 +105,7 @@ disable_static_token_with_oauth = true   # default: true
 ## Gotchas
 
 - **Refresh token TTL is 8h**, not lab-auth's default of 30d. This suits the read-only homelab profile. Adjust via `[mcp.auth].refresh_token_ttl_secs`.
-- **Allowlist is required**. Without `admin_email` or `allowed_emails`, startup fails with a config error — any Google account would gain access otherwise.
+- **`admin_email` is required**. It is the only OAuth email gate enforced by lab-auth today. Startup rejects OAuth configs with a blank `admin_email`, and also rejects non-empty `allowed_emails` until multi-user allowlist enforcement lands.
 - **`disable_static_token_with_oauth` defaults to `true`**. When OAuth is active, `SYSLOG_MCP_TOKEN` is rejected by default. Set `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in config.toml for break-glass bearer access.
 - **Stdio mode always uses LoopbackDev**. `cargo run -- mcp` ignores the auth config entirely — no credentials are needed or enforced.
 - **Docker bind-mount ownership**. `auth.db` and `auth-jwt.pem` are written by the container UID. Host-side backup scripts may need `sudo` or a sidecar copy step.
@@ -125,7 +126,7 @@ DELETE FROM refresh_tokens WHERE sub = 'user@example.com';
 DELETE FROM allowed_users  WHERE email = 'user@example.com';
 ```
 
-Remove them from `allowed_emails` in config.toml and restart. Future authorization attempts will fail at the callback.
+If they are the configured `admin_email`, replace `admin_email` with the remaining authorized account and restart. Future authorization attempts by the removed account will fail at the callback.
 
 **How do I rotate the JWT signing key?**
 
@@ -140,7 +141,7 @@ All existing access tokens become invalid immediately (they reference the old `k
 
 **How do I add a new allowed user without restarting?**
 
-Add their email to the `allowed_emails` list in config.toml and send `SIGHUP` (or restart). The email allowlist is checked at callback time — no DB entry is needed in advance.
+You cannot in V1. OAuth user changes are restart-only, and V1 supports only the single `admin_email` account. Non-empty `allowed_emails` is rejected at startup because lab-auth does not enforce that list yet.
 
 **How do I check which emails are currently allowed?**
 

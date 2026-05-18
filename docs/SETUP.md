@@ -222,5 +222,5 @@ syslog-mcp supports Google OAuth 2.0 in addition to the static bearer token. See
 
 - Google Console configuration (redirect URI, credentials)
 - Required env vars (`SYSLOG_MCP_AUTH_MODE`, `SYSLOG_MCP_PUBLIC_URL`, Google client ID/secret)
-- `config.toml` fields for allowlist, TTLs, and signing key path
+- `config.toml` fields for `admin_email`, TTLs, and signing key path
 - Operator FAQ (revoking users, rotating the JWT key)

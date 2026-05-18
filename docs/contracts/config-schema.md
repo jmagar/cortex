@@ -82,8 +82,8 @@ For every row in §4:
 | `public_url` | `SYSLOG_MCP_PUBLIC_URL` | string | `None` | public | restart-only | required when `oauth` | `public_url` | |
 | `google_client_id` | `SYSLOG_MCP_GOOGLE_CLIENT_ID` | string | `None` | public | restart-only | required when `oauth` | `google_client_id` | |
 | `google_client_secret` | `SYSLOG_MCP_GOOGLE_CLIENT_SECRET` | string | `None` | **secret** | restart-only | required when `oauth` | `google_client_secret` | |
-| `admin_email` | `SYSLOG_MCP_AUTH_ADMIN_EMAIL` | string | `""` | public | restart-only | non-empty OR `allowed_emails` non-empty when `oauth` | `auth_admin_email` | |
-| `allowed_emails` | — (TOML only) | string[] | `[]` | public | restart-only | see above | — | Currently informational; lab-auth honors `admin_email` only |
+| `admin_email` | `SYSLOG_MCP_AUTH_ADMIN_EMAIL` | string | `""` | public | restart-only | non-empty when `oauth` | `auth_admin_email` | Only enforced OAuth email gate in V1 |
+| `allowed_emails` | — (TOML only) | string[] | `[]` | public | restart-only | must be empty when `oauth` | — | Reserved for future multi-user enforcement; rejected in OAuth mode today |
 | `sqlite_path` | — | path | `auth.db` | **secret** | restart-only | relative resolved against `db_path` parent | — | See `docs/contracts/data-layout.md` |
 | `key_path` | — | path | `auth-jwt.pem` | **secret** | restart-only | relative resolved against `db_path` parent | — | JWT signing PEM; chmod 0600 enforced |
 | `access_token_ttl_secs` | — | u64 | `3600` | tuning | restart-only | — | — | 1 h |
@@ -208,7 +208,7 @@ These are checked in `src/config.rs::validate_*` and `src/runtime.rs::reject_uns
    - Neither a static token (`mcp.api_token`) nor `auth.mode == OAuth` is configured.
    - **OAuth-only on a non-loopback bind also requires `mcp.api_token`** because OTLP `/v1/logs` honors only the static bearer gate in V1. This is enforced once in `validate_auth_config` and again as defense-in-depth in `runtime.rs::reject_unsafe_otlp_oauth_only_exposure`.
 2. **Storage budget shape.** When `storage.max_db_size_mb > 0`: `storage.recovery_db_size_mb > 0` AND `storage.recovery_db_size_mb < storage.max_db_size_mb`. When `storage.max_db_size_mb == 0`: `storage.recovery_db_size_mb` MUST also be `0`. Symmetric rule for `min_free_disk_mb` / `recovery_free_disk_mb` (recovery must be **greater than** min).
-3. **OAuth allowlist required.** With `auth.mode == oauth`, at least one of `admin_email` or `allowed_emails` must be non-empty. Otherwise any Google account that completes OAuth would gain access.
+3. **OAuth admin email required.** With `auth.mode == oauth`, `admin_email` must be non-empty because lab-auth enforces only that single email today. Non-empty `allowed_emails` is rejected in OAuth mode until multi-user enforcement lands.
 4. **OAuth prerequisite triple.** `public_url`, `google_client_id`, `google_client_secret` are all required when `auth.mode == oauth`.
 5. **OTLP non-loopback gate.** Already captured by (1) — restated because it is the most-common operator misconfig: setting `mcp.host = 0.0.0.0` with neither token nor OAuth+token combo is rejected.
 6. **`SYSLOG_MCP_DB_PATH` parent must exist** when explicitly set via env. Catches the Docker misconfig where the variable is pointed at an unmounted host path.
@@ -237,6 +237,6 @@ The `syslog mcp` (stdio) entrypoint **bypasses** invariant (1) only, via `Config
 
 ## 9. Unresolved questions
 
-- `allowed_emails` is parsed into `AuthConfig` but lab-auth currently honors only `admin_email`. Spec status: noted in `src/runtime.rs::build_auth_policy` comment ("full email allowlist is a TODO for a future lab-auth release"). Operators relying on `allowed_emails` for a multi-user OAuth gate today get **only** `admin_email` enforcement.
+- `allowed_emails` is parsed into `AuthConfig` for schema compatibility, but lab-auth currently honors only `admin_email`. OAuth startup rejects non-empty `allowed_emails` until the runtime can enforce the full list.
 - The `[pollers.*]`, `[notifications.*]`, `[rag]`, `[agent_server]`, `[agent]` blocks above are **not** defined in `Config`. The exact field names listed in §5 may shift when the implementing epic lands — this contract will be revised against the merged code.
 - There is no schema-versioning header in `config.toml` today. Operators upgrading across major versions must consult release notes; adding a `schema_version` key is deferred to V2.

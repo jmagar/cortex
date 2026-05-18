@@ -286,14 +286,12 @@ pub struct AuthConfig {
     /// via `SYSLOG_MCP_GOOGLE_CLIENT_SECRET`.
     #[serde(default)]
     pub google_client_secret: Option<String>,
-    /// Single bootstrap admin email permitted to log in via Google OAuth.
-    /// Supplements `allowed_emails`. Overridable via
+    /// Single admin email permitted to log in via Google OAuth. Overridable via
     /// `SYSLOG_MCP_AUTH_ADMIN_EMAIL`.
     #[serde(default)]
     pub admin_email: String,
-    /// Email allowlist that augments the (future) DB-backed allowlist. MUST be
-    /// non-empty (or `admin_email` set) when `mode == OAuth` — without an
-    /// allowlist any Google account that completes OAuth would gain access.
+    /// Future multi-user email allowlist. Parsed for schema compatibility, but
+    /// rejected as the only OAuth gate until lab-auth enforces it.
     #[serde(default)]
     pub allowed_emails: Vec<String>,
     /// Path to the auth SQLite store. Relative paths are resolved against the
@@ -1031,19 +1029,23 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
                 "SYSLOG_MCP_GOOGLE_CLIENT_SECRET is required when SYSLOG_MCP_AUTH_MODE=oauth"
             ));
         }
-        // Empty allowlist + empty admin_email → ANY Google account that
-        // completes OAuth would gain access. Reject at startup. (DB-row
-        // allowlist is checked at runtime once the auth store is available.)
         let admin_blank = auth.admin_email.trim().is_empty();
-        let allowlist_blank = auth
+        let allowed_emails_set = auth
             .allowed_emails
             .iter()
-            .all(|entry| entry.trim().is_empty());
-        if admin_blank && allowlist_blank {
+            .any(|entry| !entry.trim().is_empty());
+        if allowed_emails_set {
             return Err(anyhow::anyhow!(
-                "[mcp.auth] requires at least one entry in `allowed_emails` (or a non-empty \
-                 `admin_email`) when SYSLOG_MCP_AUTH_MODE=oauth — without an allowlist any \
-                 Google account that completes OAuth would gain access"
+                "[mcp.auth].allowed_emails is not enforced by lab-auth yet; remove \
+                 `allowed_emails` and use `admin_email` as the single OAuth account until \
+                 multi-user allowlist support lands"
+            ));
+        }
+        if admin_blank {
+            return Err(anyhow::anyhow!(
+                "[mcp.auth] requires a non-empty `admin_email` when \
+                 SYSLOG_MCP_AUTH_MODE=oauth — `allowed_emails` is parsed but not enforced by \
+                 lab-auth yet"
             ));
         }
     }
