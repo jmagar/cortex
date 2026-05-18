@@ -32,6 +32,19 @@ cd "$PROJECT_DIR"
 versions=()
 files_checked=()
 
+changelog_has_release_heading() {
+  local version="$1"
+  local line
+
+  while IFS= read -r line; do
+    case "$line" in
+      "## [$version]" | "## [$version] "*) return 0 ;;
+    esac
+  done < CHANGELOG.md
+
+  return 1
+}
+
 # Extract version from each file type
 if [ -f "Cargo.toml" ]; then
   v=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
@@ -104,7 +117,7 @@ fi
 
 # Check CHANGELOG.md has an entry for the current version
 if [ -f "CHANGELOG.md" ]; then
-  if ! grep -qE "^## \\[$canonical\\]([[:space:]]|$)" CHANGELOG.md; then
+  if ! changelog_has_release_heading "$canonical"; then
     if [ "$REQUIRE_CHANGELOG" -eq 1 ]; then
       echo "[version-sync] FAIL — CHANGELOG.md has no release heading for version $canonical"
       echo "  Add a changelog entry before releasing."

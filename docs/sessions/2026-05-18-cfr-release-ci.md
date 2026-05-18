@@ -31,13 +31,16 @@ Use the `work-it` skill for Agent 4's assignment from `06-all-issues.md`: resolv
 4. Updated workflows, release scripts, `Justfile`, version metadata, and changelog.
 5. Ran local verification, committed, pushed, and opened PR #29.
 6. Addressed two external review comments about changelog heading matching and resolved both review threads.
+7. Addressed a later cubic review comment about avoiding regex interpolation in the changelog heading check.
 
 ## Key Findings
 
 - `scripts/check-version-sync.sh` warned on missing changelog entries but did not fail release paths.
 - `scripts/bump-version.sh` used `.claude-plugin/plugin.json` as the source version even though the current plugin manifest has no top-level version.
 - `just publish` previously ran `cargo check 2>/dev/null || true`, so release publishing could continue after a failed check.
-- CodeRabbit was rate-limited and did not provide actionable code review; cubic reported no issues; Codex/Copilot both flagged the changelog false-positive matcher.
+- CodeRabbit was rate-limited and did not provide actionable code review.
+- Codex/Copilot both flagged the changelog false-positive matcher.
+- cubic later flagged regex interpolation in the heading check; the final script uses literal shell pattern matching instead.
 
 ## Technical Decisions
 
@@ -91,6 +94,7 @@ Use the `work-it` skill for Agent 4's assignment from `06-all-issues.md`: resolv
 | YAML parse via `python3` | Workflows parse | `OK` | Pass |
 | `./scripts/check-version-sync.sh --require-changelog` | Strict sync passes | `OK -- all 2 files at v0.25.4` | Pass |
 | Temp changelog false-positive test | Version mention without heading fails | Failed first, passed after heading append | Pass |
+| Temp literal heading test | Version is not interpolated into regex | Failed without heading, passed after literal heading append | Pass |
 | `RUSTC_WRAPPER= cargo clippy -- -D warnings` | No warnings | Finished successfully | Pass |
 | `RUSTC_WRAPPER= cargo test` | Full suite passes | 579 lib, 48 bin, all integration/doc tests passed | Pass |
 | Pre-push hook | Test gate passes | `test` hook passed before each push | Pass |
@@ -109,12 +113,12 @@ Use the `work-it` skill for Agent 4's assignment from `06-all-issues.md`: resolv
 
 - PR #29: https://github.com/jmagar/syslog-mcp/pull/29
 - Issue register: `/home/jmagar/workspace/syslog-mcp/06-all-issues.md`
-- External review comments resolved: Codex and Copilot changelog-heading comments on `scripts/check-version-sync.sh`.
+- External review comments resolved: Codex, Copilot, and cubic comments on `scripts/check-version-sync.sh`.
 
 ## Open Questions
 
-- GitHub CI was still running after the final push when this note was written; local gates and pre-push tests were green, and earlier upstream checks had progressed successfully.
+- GitHub CI restarted after the final push when this note was written; local gates and pre-push tests were green, and earlier upstream checks had progressed successfully.
 
 ## Next Steps
 
-- Wait for final GitHub CI rollup on PR #29 to complete after commit `147f4e3`.
+- Wait for final GitHub CI rollup on PR #29 to complete after the final branch push.
