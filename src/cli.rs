@@ -3242,8 +3242,7 @@ fn data_mount_phase_cached(
             // missing container reports "No such object" / "no such
             // container"; anything else is a probe failure.
             let lower = detail.to_ascii_lowercase();
-            let status = if lower.contains("no such object")
-                || lower.contains("no such container")
+            let status = if lower.contains("no such object") || lower.contains("no such container")
             {
                 SetupStatus::Skipped
             } else {

@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 
 use axum::{
     extract::{ConnectInfo, Query, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{HeaderValue, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
     Router,
