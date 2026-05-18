@@ -686,6 +686,12 @@ fn cors_layer(port: u16, loopback_bind: bool, allowed_origins: &[String]) -> Cor
             format!("http://127.0.0.1:{port}")
                 .parse::<HeaderValue>()
                 .expect("valid 127.0.0.1 origin"),
+            // IPv6 loopback — when the listener binds [::1] or :: the
+            // browser sends an Origin like http://[::1]:port and would
+            // otherwise be blocked by CORS.
+            format!("http://[::1]:{port}")
+                .parse::<HeaderValue>()
+                .expect("valid ::1 origin"),
         ]
     } else {
         Vec::new()

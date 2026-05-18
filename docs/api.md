@@ -108,7 +108,7 @@ HTTP:
 ```bash
 # REST transport — same call, with auth + transport overhead
 export SYSLOG_USE_HTTP=true
-# SYSLOG_MCP_PUBLIC_URL + SYSLOG_API_TOKEN must already be set in env
+# SYSLOG_MCP_URL + SYSLOG_API_TOKEN must already be set in env
 time for i in $(seq 1 100); do syslog hosts > /dev/null; done
 ```
 

@@ -346,7 +346,8 @@ impl Mode {
                 // ignored for `serve mcp`, `setup`, etc.
                 anyhow::bail!(
                     "--http / --server / --token only apply to CLI query commands \
-                     (search, tail, errors, hosts, sessions, ai, correlate, stats, db, compose, setup); \
+                     (search, tail, errors, hosts, sessions, ai, correlate, stats, db); \
+                     compose and setup are local-only and reject HTTP flags; \
                      got: {}",
                     args.join(" ")
                 );
@@ -557,7 +558,7 @@ fn print_usage() {
   syslog ai doctor [--strict-permissions] [--json]
   syslog ai watch-status [--json]
   syslog ai smoke-watch [--json]
-  syslog db status [--json]
+  syslog db status [--check-coord] [--json]
   syslog db integrity [--quick] [--json]
   syslog db checkpoint [--mode passive|full|restart|truncate] [--json]
   syslog db vacuum [--pages N|--full] [--force] [--json]

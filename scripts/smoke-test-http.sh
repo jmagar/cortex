@@ -57,9 +57,11 @@ if [[ -z "${SYSLOG_API_TOKEN:-}" ]]; then
   fi
 fi
 # Trim leading/trailing whitespace so blank-padded values are rejected.
+# Guard against `set -u` blowing up if the var is entirely unset.
+SYSLOG_API_TOKEN="${SYSLOG_API_TOKEN:-}"
 SYSLOG_API_TOKEN="${SYSLOG_API_TOKEN#"${SYSLOG_API_TOKEN%%[![:space:]]*}"}"
 SYSLOG_API_TOKEN="${SYSLOG_API_TOKEN%"${SYSLOG_API_TOKEN##*[![:space:]]}"}"
-[[ -n "${SYSLOG_API_TOKEN:-}" ]] || need "SYSLOG_API_TOKEN not set/blank (checked env and $SYSLOG_ENV_FILE)"
+[[ -n "${SYSLOG_API_TOKEN}" ]] || need "SYSLOG_API_TOKEN not set/blank (checked env and $SYSLOG_ENV_FILE)"
 export SYSLOG_API_TOKEN
 
 info "binary  : $(command -v "$SYSLOG_BIN")"
@@ -119,7 +121,7 @@ SYSLOG_SMOKE_REFTIME="${SYSLOG_SMOKE_REFTIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
 
 assert_json "http: search (limit 1)"     http search --json --limit 1
 assert_json "http: tail (limit 1)"       http tail --json --limit 1
-assert_json "http: errors (limit 1)"     http errors --json --limit 1
+assert_json "http: errors"               http errors --json
 assert_json "http: hosts"                http hosts --json
 assert_json "http: correlate (1m, h=_)"  http correlate --json --reference-time "$SYSLOG_SMOKE_REFTIME" --hostname _smoke_ --window-minutes 1
 assert_json "http: stats"                http stats --json
