@@ -252,42 +252,56 @@ impl SyslogService {
         let anchors_truncated = anchors.len() > anchor_limit as usize;
         anchors.truncate(anchor_limit as usize);
 
-        let mut correlated = Vec::with_capacity(anchors.len());
-        let mut total_related_events = 0usize;
-        for anchor in anchors {
+        let mut anchor_entries = Vec::with_capacity(anchors.len());
+        let mut windows = Vec::with_capacity(anchors.len());
+        for (anchor_index, anchor) in anchors.into_iter().enumerate() {
             let ref_dt = parse_required_timestamp(&anchor.timestamp, "anchor.timestamp")?;
             let delta = TimeDelta::try_minutes(i64::from(window))
                 .ok_or_else(|| ServiceError::InvalidInput("duration overflow".into()))?;
             let window_from = rfc3339_z(ref_dt - delta);
             let window_to = rfc3339_z(ref_dt + delta);
-            let search_params = SearchParams {
-                query: req.log_query.clone(),
-                hostname: req.hostname.clone(),
-                source_ip: req.source_ip.clone(),
-                severity: None,
-                severity_in: Some(severity_levels.clone()),
-                app_name: req.app_name.clone(),
-                facility: None,
-                process_id: None,
-                from: Some(window_from.clone()),
-                to: Some(window_to.clone()),
-                limit: Some(related_limit + 1),
-                ai_tool: None,
-                ai_project: None,
-                ai_session_id: None,
-                exclude_ai: true,
-            };
-            let mut related = self
-                .run_db(move |pool| db::search_logs(pool, &search_params))
-                .await?;
-            let related_truncated = related.len() > related_limit as usize;
-            related.truncate(related_limit as usize);
-            total_related_events += related.len();
+            windows.push(db::AiRelatedWindow {
+                anchor_index,
+                window_from: window_from.clone(),
+                window_to: window_to.clone(),
+            });
+            anchor_entries.push((anchor, window_from, window_to));
+        }
+
+        let related_params = db::AiRelatedLogsParams {
+            windows,
+            query: req.log_query,
+            hostname: req.hostname,
+            source_ip: req.source_ip,
+            severity_in: severity_levels,
+            app_name: req.app_name,
+            limit_per_anchor: related_limit,
+        };
+        let related_by_anchor = self
+            .run_db(move |pool| db::search_ai_related_logs(pool, &related_params))
+            .await?;
+
+        let mut by_anchor: std::collections::HashMap<usize, db::AiRelatedLogsForAnchor> =
+            related_by_anchor
+                .into_iter()
+                .map(|group| (group.anchor_index, group))
+                .collect();
+
+        let mut correlated = Vec::with_capacity(anchor_entries.len());
+        let mut total_related_events = 0usize;
+        for (anchor_index, (anchor, window_from, window_to)) in
+            anchor_entries.into_iter().enumerate()
+        {
+            let (related_logs, related_truncated) = by_anchor
+                .remove(&anchor_index)
+                .map(|group| (group.logs, group.truncated))
+                .unwrap_or((Vec::new(), false));
+            total_related_events += related_logs.len();
             correlated.push(AiCorrelationAnchor {
                 entry: anchor.into(),
                 window_from,
                 window_to,
-                related: related.into_iter().map(Into::into).collect(),
+                related: related_logs.into_iter().map(Into::into).collect(),
                 related_truncated,
             });
         }
