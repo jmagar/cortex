@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{IntoResponse, Json},
     routing::get,
     Router,
 };
 use serde::Deserialize;
 use serde_json::json;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 
 use crate::app::{
     CorrelateEventsRequest, GetErrorsRequest, SearchLogsRequest, SyslogService, TailLogsRequest,
@@ -215,7 +215,7 @@ fn cors_layer(port: u16) -> CorsLayer {
                 .expect("valid 127.0.0.1 origin"),
         ])
         .allow_methods([axum::http::Method::GET])
-        .allow_headers(Any)
+        .allow_headers([header::ACCEPT, header::AUTHORIZATION])
 }
 
 #[cfg(test)]
