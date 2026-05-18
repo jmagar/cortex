@@ -99,16 +99,40 @@ fn rmcp_router_no_auth_middleware(state: AppState) -> Router {
     Router::new().nest_service("/mcp", streamable_http_service(state, config))
 }
 
-fn auth_ctx_with_scopes(scopes: Vec<&str>) -> AuthContext {
+fn auth_ctx(subject: &str, scopes: Vec<&str>, email: Option<&str>) -> AuthContext {
     AuthContext {
-        sub: "test-user@example.com".to_string(),
+        sub: subject.to_string(),
         actor_key: None,
         scopes: scopes.into_iter().map(String::from).collect(),
         issuer: "local".to_string(),
         via_session: false,
         csrf_token: None,
-        email: None,
+        email: email.map(String::from),
     }
+}
+
+fn auth_ctx_with_scopes(scopes: Vec<&str>) -> AuthContext {
+    auth_ctx("test-user@example.com", scopes, None)
+}
+
+fn seed_error_signature(pool: &DbPool, hash: &str) {
+    let conn = pool.get().unwrap();
+    crate::db::error_signatures::upsert_signature(
+        &conn,
+        crate::db::error_signatures::UpsertSignatureParams {
+            hash,
+            normalizer_version: crate::app::error_detection::NORMALIZER_VERSION,
+            template: "mounted auth coverage",
+            sample_message: "mounted auth coverage",
+            sample_hostname: "auth-test-host",
+            sample_app_name: Some("schema-test"),
+            severity: "err",
+            first_seen_at: "2026-01-01T00:00:00.000Z",
+            last_seen_at: "2026-01-01T00:00:00.000Z",
+            delta: 1,
+        },
+    )
+    .unwrap();
 }
 
 fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> LogBatchEntry {
@@ -778,6 +802,84 @@ async fn mounted_policy_with_both_scopes_permits_all_actions() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(response["result"].is_object(), "response: {response}");
+}
+
+#[tokio::test]
+async fn mounted_admin_actions_record_per_request_subject_actor() {
+    let (state, pool, _dir) = mounted_state();
+    let signature_hash = "1111111111111111111111111111111111111111111111111111111111111111";
+    seed_error_signature(&pool, signature_hash);
+
+    let alice_router = rmcp_router_with_auth(
+        state.clone(),
+        auth_ctx("alice-subject", vec!["syslog:admin"], None),
+    );
+    let (status, response) = post_rmcp(
+        alice_router,
+        jsonrpc_request(
+            41,
+            "tools/call",
+            Some(json!({
+                "name": "syslog",
+                "arguments": {
+                    "action": "ack_error",
+                    "signature_hash": signature_hash,
+                    "notes": "alice ack"
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let ack = content_json(&response);
+    assert_eq!(ack["actor"], "alice-subject", "response: {response}");
+
+    let bob_router = rmcp_router_with_auth(
+        state,
+        auth_ctx("bob-subject", vec!["syslog:admin"], Some("bob@example.com")),
+    );
+    let (status, response) = post_rmcp(
+        bob_router,
+        jsonrpc_request(
+            42,
+            "tools/call",
+            Some(json!({
+                "name": "syslog",
+                "arguments": {
+                    "action": "unack_error",
+                    "signature_hash": signature_hash,
+                    "reason": "bob unack"
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let unack = content_json(&response);
+    assert_eq!(unack["actor"], "bob@example.com", "response: {response}");
+
+    let conn = pool.get().unwrap();
+    let events = conn
+        .prepare(
+            "SELECT event_type, actor FROM error_signature_ack_events
+             WHERE signature_hash = ?1
+             ORDER BY id",
+        )
+        .unwrap()
+        .query_map([signature_hash], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    assert_eq!(
+        events,
+        vec![
+            ("ack".to_string(), "alice-subject".to_string()),
+            ("unack".to_string(), "bob@example.com".to_string()),
+        ]
+    );
 }
 
 /// `AuthPolicy::Mounted` + AuthContext with EMPTY scopes + any action → denied.
