@@ -20,6 +20,217 @@ fn ensure_env_file_preserves_existing_token_and_adds_compose_defaults() {
     assert!(raw.contains("COMPOSE_PROJECT_NAME=syslog-jmagar-lab"));
 }
 
+/// `SYSLOG_API_TOKEN` is always provisioned (API is unconditionally mounted).
+/// First run on a clean .env generates a 64-char hex token (32 bytes hex-encoded).
+#[test]
+fn ensure_env_file_generates_api_token_when_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    let data_dir = dir.path().join("data");
+
+    let result = ensure_env_file(&env_path, &data_dir).unwrap();
+
+    let token = result
+        .values
+        .get("SYSLOG_API_TOKEN")
+        .expect("SYSLOG_API_TOKEN must be present after ensure_env_file");
+    // The implementation generates 32 random bytes encoded as hex → exactly
+    // 64 ASCII chars. Lock down the precise length so future refactors that
+    // shorten the token (and weaken brute-force resistance) fail this test.
+    assert_eq!(
+        token.len(),
+        64,
+        "generated SYSLOG_API_TOKEN must be 64 hex chars (32 random bytes), got {} chars",
+        token.len()
+    );
+    assert!(
+        token.chars().all(|c| c.is_ascii_hexdigit()),
+        "generated SYSLOG_API_TOKEN must be hex"
+    );
+    let raw = std::fs::read_to_string(&env_path).unwrap();
+    assert!(raw.contains(&format!("SYSLOG_API_TOKEN={token}")));
+}
+
+/// Re-running `ensure_env_file` against a .env that already has a
+/// SYSLOG_API_TOKEN must preserve it byte-for-byte — mirrors the
+/// SYSLOG_MCP_TOKEN contract that operators depend on for token rotation.
+#[test]
+fn ensure_env_file_preserves_existing_api_token_byte_for_byte() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    let data_dir = dir.path().join("data");
+    std::fs::write(
+        &env_path,
+        "SYSLOG_MCP_TOKEN=mcp-keep\nSYSLOG_API_TOKEN=api-keep-me-exactly\n",
+    )
+    .unwrap();
+
+    let result = ensure_env_file(&env_path, &data_dir).unwrap();
+
+    assert_eq!(
+        result.values.get("SYSLOG_API_TOKEN").map(String::as_str),
+        Some("api-keep-me-exactly")
+    );
+    let raw = std::fs::read_to_string(&env_path).unwrap();
+    assert!(raw.contains("SYSLOG_API_TOKEN=api-keep-me-exactly"));
+}
+
+/// Cutover (bead 0p8r.10): on first install, `ensure_env_file` writes
+/// `SYSLOG_USE_HTTP=true` so the CLI defaults to HTTP transport via the
+/// container REST API.
+#[test]
+fn ensure_env_file_sets_use_http_true_when_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    let data_dir = dir.path().join("data");
+
+    let result = ensure_env_file(&env_path, &data_dir).unwrap();
+
+    assert_eq!(
+        result.values.get("SYSLOG_USE_HTTP").map(String::as_str),
+        Some("true"),
+        "first install must default SYSLOG_USE_HTTP=true"
+    );
+    let raw = std::fs::read_to_string(&env_path).unwrap();
+    assert!(
+        raw.contains("SYSLOG_USE_HTTP=true"),
+        "rendered .env must contain SYSLOG_USE_HTTP=true literally"
+    );
+}
+
+/// Operator opt-out (`SYSLOG_USE_HTTP=false`) must survive `setup repair`
+/// byte-for-byte — unlike SYSLOG_API_TOKEN, this is a behaviour toggle the
+/// operator may legitimately disable.
+#[test]
+fn ensure_env_file_preserves_use_http_false_byte_for_byte() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    let data_dir = dir.path().join("data");
+    std::fs::write(&env_path, "SYSLOG_USE_HTTP=false\n").unwrap();
+
+    let result = ensure_env_file(&env_path, &data_dir).unwrap();
+
+    assert_eq!(
+        result.values.get("SYSLOG_USE_HTTP").map(String::as_str),
+        Some("false"),
+        "operator override SYSLOG_USE_HTTP=false must be preserved exactly"
+    );
+    let raw = std::fs::read_to_string(&env_path).unwrap();
+    assert!(raw.contains("SYSLOG_USE_HTTP=false"));
+    assert!(!raw.contains("SYSLOG_USE_HTTP=true"));
+}
+
+/// Idempotent re-run: when `SYSLOG_USE_HTTP=true` already exists, repair
+/// leaves it untouched (no double-write, no value rewrite).
+#[test]
+fn ensure_env_file_preserves_use_http_true_on_rerun() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    let data_dir = dir.path().join("data");
+    std::fs::write(&env_path, "SYSLOG_USE_HTTP=true\n").unwrap();
+
+    let result = ensure_env_file(&env_path, &data_dir).unwrap();
+
+    assert_eq!(
+        result.values.get("SYSLOG_USE_HTTP").map(String::as_str),
+        Some("true")
+    );
+    let raw = std::fs::read_to_string(&env_path).unwrap();
+    // Exactly one occurrence — write_env must not duplicate the key.
+    assert_eq!(
+        raw.matches("SYSLOG_USE_HTTP=").count(),
+        1,
+        "SYSLOG_USE_HTTP must appear exactly once after re-run"
+    );
+}
+
+/// Empty value (`SYSLOG_USE_HTTP=`) is treated as an explicit operator
+/// choice and preserved. The CLI falls through to its compiled default in
+/// that case; we do NOT silently rewrite to `true` because doing so would
+/// override an operator who wrote the line intentionally blank to "let the
+/// binary decide". Mirrors the wider design: operator intent always wins
+/// for behaviour toggles.
+#[test]
+fn ensure_env_file_preserves_empty_use_http_value() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    let data_dir = dir.path().join("data");
+    std::fs::write(&env_path, "SYSLOG_USE_HTTP=\n").unwrap();
+
+    let result = ensure_env_file(&env_path, &data_dir).unwrap();
+
+    assert_eq!(
+        result.values.get("SYSLOG_USE_HTTP").map(String::as_str),
+        Some(""),
+        "empty SYSLOG_USE_HTTP must be preserved (operator intent wins)"
+    );
+}
+
+/// Blank API token must be replaced (an empty value would still fail the
+/// runtime `api.rs` token check and brick container startup).
+#[test]
+fn ensure_env_file_replaces_blank_api_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    let data_dir = dir.path().join("data");
+    std::fs::write(&env_path, "SYSLOG_API_TOKEN=\n").unwrap();
+
+    let result = ensure_env_file(&env_path, &data_dir).unwrap();
+
+    let token = result.values.get("SYSLOG_API_TOKEN").unwrap();
+    assert!(!token.trim().is_empty());
+    assert!(token.len() >= 32);
+}
+
+/// Atomic `write_env`: the live target file is either fully written or
+/// unchanged. Crucial because a corrupt .env bricks container startup
+/// (api.rs bails on empty SYSLOG_API_TOKEN).
+#[test]
+fn write_env_replaces_file_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    std::fs::write(&env_path, "OLD=value\n").unwrap();
+
+    let mut env = std::collections::BTreeMap::new();
+    env.insert("NEW".to_string(), "fresh".to_string());
+    env.insert("SECRET".to_string(), "shhh".to_string());
+    write_env(&env_path, &env).unwrap();
+
+    let raw = std::fs::read_to_string(&env_path).unwrap();
+    assert!(raw.contains("NEW=fresh"));
+    assert!(raw.contains("SECRET=shhh"));
+    assert!(!raw.contains("OLD=value"));
+
+    // No orphaned tempfiles in the directory after a successful write.
+    for entry in std::fs::read_dir(dir.path()).unwrap().flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        // write_env names its tempfile `.{file_name}.tmp.{pid}.{nanos}`.
+        // For `.env` that's `..env.tmp.*`. Match the actual prefix so the
+        // assertion catches real orphans instead of silently passing.
+        assert!(
+            !name.starts_with("..env.tmp."),
+            "orphaned tempfile after write_env: {name}"
+        );
+    }
+}
+
+/// Permission check (Unix only): atomic write must still produce a 0o600 file.
+#[cfg(unix)]
+#[test]
+fn write_env_sets_0600_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join(".env");
+    let mut env = std::collections::BTreeMap::new();
+    env.insert("K".to_string(), "v".to_string());
+    write_env(&env_path, &env).unwrap();
+
+    let mode = std::fs::metadata(&env_path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "expected 0o600 perms, got {mode:o}");
+}
+
 #[test]
 fn parse_env_ignores_comments_and_blank_lines() {
     let parsed = parse_env("\n# comment\nA=1\nB = two\n");

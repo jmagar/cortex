@@ -166,6 +166,12 @@ impl RuntimeCore {
         self.service.clone()
     }
 
+    /// Shared SQLite pool — exposed for callers that need to read startup-time
+    /// metadata (e.g. `api::ApiState::new` caches the schema version).
+    pub fn pool(&self) -> &Arc<DbPool> {
+        &self.pool
+    }
+
     /// Build the OTLP router with shared counters and the MCP API token (if any).
     pub fn otlp_router(&self) -> axum::Router {
         let state = OtlpState::new(

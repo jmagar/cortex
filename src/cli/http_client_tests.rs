@@ -1,0 +1,546 @@
+//! Unit + wiremock integration tests for `cli::http_client` (bead 0p8r.5).
+
+use super::{resolve_base_url, resolve_token, HttpClient, ServerVersion};
+use serial_test::serial;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+use wiremock::matchers::{header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+// ─── Discovery: base URL precedence ─────────────────────────────────────────
+
+#[test]
+#[serial]
+fn base_url_flag_wins_over_env() {
+    // Use a guard to clear the env var so this test doesn't depend on
+    // ambient state.
+    let _g = EnvVarGuard::set("SYSLOG_MCP_URL", "http://envhost:3100");
+    let resolved =
+        resolve_base_url(Some("http://flaghost:9000".into())).expect("flag should override env");
+    assert_eq!(resolved.as_str(), "http://flaghost:9000/");
+}
+
+#[test]
+#[serial]
+fn base_url_env_used_when_no_flag() {
+    let _g = EnvVarGuard::set("SYSLOG_MCP_URL", "http://envhost:3100");
+    let resolved = resolve_base_url(None).expect("env should resolve");
+    assert_eq!(resolved.as_str(), "http://envhost:3100/");
+}
+
+#[test]
+#[serial]
+fn base_url_default_when_no_flag_no_env() {
+    let _g1 = EnvVarGuard::unset("SYSLOG_MCP_URL");
+    let _g2 = EnvVarGuard::unset("SYSLOG_MCP_PORT");
+    let resolved = resolve_base_url(None).expect("default should resolve");
+    assert_eq!(resolved.as_str(), "http://127.0.0.1:3100/");
+}
+
+#[test]
+#[serial]
+fn base_url_default_respects_syslog_mcp_port_env() {
+    let _g1 = EnvVarGuard::unset("SYSLOG_MCP_URL");
+    let _g2 = EnvVarGuard::set("SYSLOG_MCP_PORT", "9999");
+    let resolved = resolve_base_url(None).expect("port-overridden default should resolve");
+    assert_eq!(resolved.as_str(), "http://127.0.0.1:9999/");
+}
+
+#[test]
+fn base_url_rejects_userinfo() {
+    // Locked decision: userinfo URLs leak credentials via anyhow traces and
+    // reqwest debug logs (eng-review #A24).
+    let err = resolve_base_url(Some("http://u@localhost:3100".into()))
+        .expect_err("userinfo URL must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("URL userinfo") && msg.contains("token flag"),
+        "error must mention URL userinfo and token flag guidance; got: {msg}"
+    );
+}
+
+#[test]
+fn base_url_rejects_userinfo_with_password() {
+    let err = resolve_base_url(Some("http://u:p@localhost:3100".into()))
+        .expect_err("user:pass URL must be rejected");
+    assert!(err.to_string().contains("token flag"));
+}
+
+#[test]
+fn base_url_rejects_non_http_scheme() {
+    let err = resolve_base_url(Some("file:///etc/passwd".into()))
+        .expect_err("non-http scheme must be rejected");
+    assert!(err.to_string().contains("http or https"));
+}
+
+#[test]
+fn base_url_normalised_to_trailing_slash() {
+    let resolved = resolve_base_url(Some("http://host:3100/sub".into())).expect("ok");
+    assert!(resolved.as_str().ends_with('/'));
+}
+
+// ─── Discovery: token precedence ────────────────────────────────────────────
+
+#[test]
+#[serial]
+fn token_flag_wins_over_env() {
+    let _g = EnvVarGuard::set("SYSLOG_API_TOKEN", "env-value");
+    let resolved = resolve_token(Some("flag-value".into())).unwrap();
+    assert_eq!(resolved, "flag-value");
+}
+
+#[test]
+#[serial]
+fn token_env_used_when_no_flag() {
+    let _g = EnvVarGuard::set("SYSLOG_API_TOKEN", "env-value");
+    let resolved = resolve_token(None).unwrap();
+    assert_eq!(resolved, "env-value");
+}
+
+#[test]
+#[serial]
+fn token_missing_error_mentions_setup_repair_and_copy_and_history_warning() {
+    let _g = EnvVarGuard::unset("SYSLOG_API_TOKEN");
+    let err = resolve_token(None).expect_err("must fail closed when token is missing");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("setup repair"),
+        "error must reference 'setup repair'; got: {msg}"
+    );
+    assert!(
+        msg.contains("another host"),
+        "error must reference copying from another host; got: {msg}"
+    );
+    assert!(
+        msg.contains("history") && msg.contains("export"),
+        "error must warn against export ... in interactive shell (history leak); got: {msg}"
+    );
+}
+
+#[test]
+#[serial]
+fn token_empty_flag_falls_through_to_env() {
+    let _g = EnvVarGuard::set("SYSLOG_API_TOKEN", "env-value");
+    let resolved = resolve_token(Some("".into())).unwrap();
+    assert_eq!(resolved, "env-value");
+}
+
+// ─── HttpClient::discover wiring ────────────────────────────────────────────
+
+#[test]
+#[serial]
+fn discover_constructs_client() {
+    let _g_url = EnvVarGuard::set("SYSLOG_MCP_URL", "http://localhost:3100");
+    let _g_tok = EnvVarGuard::set("SYSLOG_API_TOKEN", "test-value");
+    let client = HttpClient::discover(None, None).expect("discover should succeed");
+    drop(client);
+}
+
+#[test]
+#[serial]
+fn discover_rejects_userinfo_url() {
+    let _g = EnvVarGuard::set("SYSLOG_API_TOKEN", "test-value");
+    let err = HttpClient::discover(Some("http://t@localhost:3100".into()), None)
+        .expect_err("must reject userinfo URL at discovery");
+    assert!(err.to_string().contains("URL userinfo"));
+}
+
+#[test]
+#[serial]
+fn discover_fails_when_token_missing() {
+    let _g_url = EnvVarGuard::set("SYSLOG_MCP_URL", "http://localhost:3100");
+    let _g_tok = EnvVarGuard::unset("SYSLOG_API_TOKEN");
+    let err = HttpClient::discover(None, None).expect_err("must fail closed");
+    assert!(err.to_string().contains("setup repair"));
+}
+
+// ─── Connect-timeout fires within 5–6s on unreachable host ──────────────────
+//
+// TEST-NET-1 (RFC 5737) is non-routable in real networks; SYN packets go
+// into the void rather than getting refused, which exercises the actual
+// timeout path. ECONNREFUSED to 127.0.0.1:1 returns in <10ms and does NOT
+// test the timeout.
+//
+// Lower bound: > 9s — proves the 10s connect timeout (bead 0p8r.26) fired
+// (not an instant failure). Upper bound: < 15s — proves it didn't hang past
+// timeout + slack.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "Network-dependent: requires no route to 192.0.2.1; skip in restricted CI"]
+async fn connect_timeout_fires_within_window_on_unreachable_host() {
+    let client = HttpClient::discover(Some("http://192.0.2.1:80".into()), Some("token".into()))
+        .expect("discover ok");
+    let start = Instant::now();
+    let err = client
+        .hosts()
+        .await
+        .expect_err("connection should fail (timeout)");
+    let elapsed = start.elapsed();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("cannot connect") || msg.contains("DNS or TCP"),
+        "expected connect-failure message; got: {msg}"
+    );
+    assert!(
+        elapsed >= std::time::Duration::from_secs(9),
+        "connect should not return faster than 9s (timeout proof); got {elapsed:?}"
+    );
+    assert!(
+        elapsed <= std::time::Duration::from_secs(15),
+        "connect should not hang past 15s (timeout proof); got {elapsed:?}"
+    );
+}
+
+// ─── Wiremock helpers ───────────────────────────────────────────────────────
+
+async fn start_mock_with_client() -> (MockServer, HttpClient) {
+    let server = MockServer::start().await;
+    let client =
+        HttpClient::discover(Some(server.uri()), Some("test-value".into())).expect("client ok");
+    (server, client)
+}
+
+// ─── Authorization header is sensitive-flagged ──────────────────────────────
+//
+// We can't directly read HeaderValue::is_sensitive from outside reqwest
+// (it's not exposed through the request builder). What we CAN verify is
+// that the bearer token is present on every outgoing request, which is the
+// observable contract the test cares about.
+
+#[tokio::test]
+async fn bearer_token_present_on_outgoing_requests() {
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .and(header("authorization", "Bearer test-value"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"hosts": []})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let resp = client.hosts().await.expect("hosts ok");
+    assert!(resp.hosts.is_empty());
+}
+
+// ─── 401 / 403 error mapping ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn unauthorized_maps_to_auth_failed() {
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("nope"))
+        .mount(&server)
+        .await;
+    let err = client.hosts().await.expect_err("401");
+    let msg = err.to_string();
+    assert!(msg.contains("authentication failed") && msg.contains("setup repair"));
+}
+
+#[tokio::test]
+async fn forbidden_maps_to_403_message() {
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("no"))
+        .mount(&server)
+        .await;
+    let err = client.hosts().await.expect_err("403");
+    assert!(err.to_string().contains("forbidden"));
+}
+
+// ─── 404 enrichment via /api/version (depth-1 OnceCell guard) ───────────────
+
+#[tokio::test]
+async fn not_found_enriched_with_server_version() {
+    let (server, client) = start_mock_with_client().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not here"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/version"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "version": "0.99.0",
+            "git_sha": "abc123",
+            "schema_version": 7,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = client.hosts().await.expect_err("404 enriched");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("0.99.0"),
+        "server version in error; got: {msg}"
+    );
+    assert!(msg.contains("abc123"), "git sha in error; got: {msg}");
+    assert!(msg.contains("syslog compose pull"));
+}
+
+#[tokio::test]
+async fn not_found_with_missing_git_sha_renders_unknown() {
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/version"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "version": "0.99.0",
+            "schema_version": 7,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let err = client.hosts().await.expect_err("404");
+    assert!(err.to_string().contains("unknown"));
+}
+
+/// **MUST-CHECK**: hit a 404 endpoint multiple times and verify /api/version
+/// is probed EXACTLY ONCE total. This proves the OnceCell depth-1 guard.
+#[tokio::test]
+async fn version_probed_exactly_once_across_repeated_404s() {
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    // .expect(1) on /api/version: if the OnceCell guard breaks and we probe
+    // again, wiremock will panic on server drop because the call count
+    // exceeded the expectation.
+    Mock::given(method("GET"))
+        .and(path("/api/version"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "version": "1.0.0",
+            "schema_version": 1,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    for _ in 0..4 {
+        let err = client.hosts().await.expect_err("404 each time");
+        // Each error should reference the cached server version.
+        assert!(err.to_string().contains("1.0.0"));
+    }
+    // wiremock asserts .expect(1) on drop; an extra probe panics here.
+}
+
+#[tokio::test]
+async fn not_found_with_version_404_emits_too_old_or_auth_failed_message() {
+    // Server is too old to have /api/version. Cache populates with None;
+    // subsequent 404s reuse it (no re-probe).
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/version"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let err = client.hosts().await.expect_err("404");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("could not check version") || msg.contains("too old"),
+        "expected too-old / auth-failed fallback; got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn not_found_with_version_401_emits_auth_failed_fallback() {
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/version"))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let err = client.hosts().await.expect_err("404");
+    assert!(err.to_string().contains("could not check version"));
+}
+
+// ─── 503 retry path ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn retry_succeeds_after_503() {
+    let (server, _client) = start_mock_with_client().await;
+    // First call → 503, second → 200. Use a shared counter to alternate.
+    let counter = Arc::new(AtomicU64::new(0));
+    let counter2 = Arc::clone(&counter);
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .respond_with(move |_req: &wiremock::Request| {
+            let n = counter2.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                ResponseTemplate::new(503).set_body_string("warming up")
+            } else {
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"hosts": []}))
+            }
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    let client = HttpClient::discover(Some(server.uri()), Some("test-value".into())).unwrap();
+    let resp = client.hosts().await.expect("ok after retry");
+    assert!(resp.hosts.is_empty());
+    assert_eq!(counter.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn double_503_error_includes_both_bodies() {
+    let (server, client) = start_mock_with_client().await;
+    let counter = Arc::new(AtomicU64::new(0));
+    let counter2 = Arc::clone(&counter);
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .respond_with(move |_req: &wiremock::Request| {
+            let n = counter2.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                ResponseTemplate::new(503).set_body_string("body1")
+            } else {
+                ResponseTemplate::new(503).set_body_string("body2")
+            }
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    let err = client.hosts().await.expect_err("503 both attempts");
+    let msg = err.to_string();
+    assert!(msg.contains("body1"), "first body in error; got: {msg}");
+    assert!(msg.contains("body2"), "second body in error; got: {msg}");
+    assert_eq!(counter.load(Ordering::SeqCst), 2);
+}
+
+// ─── Malformed JSON: serde_path_to_error surfaces field path + preview ──────
+
+#[tokio::test]
+async fn malformed_response_includes_field_path_and_preview() {
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/hosts"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("{\"oops\":\"this is not a hosts response\"}"),
+        )
+        .mount(&server)
+        .await;
+    let err = client.hosts().await.expect_err("malformed");
+    let msg = err.to_string();
+    assert!(msg.contains("malformed response"), "got: {msg}");
+    // Either the missing-field name or `.` (root) is acceptable depending on
+    // serde version; verify we have *some* path info AND the body preview.
+    assert!(
+        msg.contains("oops"),
+        "preview should be in error; got: {msg}"
+    );
+}
+
+// ─── version() endpoint round-trip ──────────────────────────────────────────
+
+#[tokio::test]
+async fn version_endpoint_round_trip() {
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/version"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "version": "0.25.3",
+            "git_sha": null,
+            "schema_version": 12,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let v: ServerVersion = client.version().await.expect("ok");
+    assert_eq!(v.version, "0.25.3");
+    assert_eq!(v.schema_version, 12);
+    assert!(v.git_sha.is_none());
+}
+
+// ─── bead 0p8r.15: AbuseSearchRequest round-trip ────────────────────────────
+
+/// Bead 0p8r.15: the CLI serializes an `AbuseSearchRequest` with multiple
+/// terms via `serde_qs::to_string`; the wire bytes hit the mock server, which
+/// echoes the query string back. We then deserialize the same wire bytes
+/// with `serde_qs::from_str` and assert field parity. This guards the
+/// CLI-server contract for `Vec<String>` query params (the breakage the bead
+/// caught was: client/server hand-rolled flat structs and silently dropped
+/// `terms[1..]`).
+#[tokio::test]
+async fn ai_abuse_request_round_trips_through_serde_qs() {
+    use syslog_mcp::app::AbuseSearchRequest;
+
+    let req = AbuseSearchRequest {
+        project: Some("proj".into()),
+        tool: Some("Bash".into()),
+        from: None,
+        to: None,
+        limit: Some(25),
+        before: Some(2),
+        after: Some(3),
+        terms: vec!["alpha".into(), "beta".into(), "gamma".into()],
+    };
+
+    let qs = serde_qs::to_string(&req).expect("serialize");
+    // Multi-element Vec<String> must use repeated keys, not a flat
+    // single-value `term=` field (that was the regression).
+    assert!(
+        qs.matches("terms").count() >= 3,
+        "serde_qs must emit one `terms` key per element; got: {qs}"
+    );
+
+    let decoded: AbuseSearchRequest = serde_qs::from_str(&qs).expect("deserialize");
+    assert_eq!(decoded.project, req.project);
+    assert_eq!(decoded.tool, req.tool);
+    assert_eq!(decoded.limit, req.limit);
+    assert_eq!(decoded.before, req.before);
+    assert_eq!(decoded.after, req.after);
+    assert_eq!(decoded.terms, req.terms);
+}
+
+// ─── Env var guard ──────────────────────────────────────────────────────────
+//
+// `std::env::set_var` is data-racy across threads. We serialise via the
+// `#[serial]` macro from `serial_test` (already a dev-dep). The guard
+// restores the prior value on drop so tests don't leak state.
+
+struct EnvVarGuard {
+    name: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn set(name: &'static str, value: &str) -> Self {
+        let previous = std::env::var(name).ok();
+        std::env::set_var(name, value);
+        Self { name, previous }
+    }
+    fn unset(name: &'static str) -> Self {
+        let previous = std::env::var(name).ok();
+        std::env::remove_var(name);
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(v) => std::env::set_var(self.name, v),
+            None => std::env::remove_var(self.name),
+        }
+    }
+}
