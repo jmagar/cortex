@@ -468,8 +468,7 @@ async fn metrics_handler_returns_not_supported() {
 
 #[tokio::test]
 async fn traces_handler_requires_bearer_when_token_configured() {
-    let response =
-        traces_handler(State(state_with_token(Some("secret"))), HeaderMap::new()).await;
+    let response = traces_handler(State(state_with_token(Some("secret"))), HeaderMap::new()).await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
