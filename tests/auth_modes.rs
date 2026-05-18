@@ -171,17 +171,22 @@ async fn register_returns_404_in_all_modes() {
     }
 }
 
-/// `GET /auth/login` → 404 when OAuth is NOT active (no OAuth router mounted).
-/// When OAuth IS active we use lab_auth::routes::router() (not bearer_only_router)
-/// so that DCR /register is available; this means /auth/login is also mounted then.
+/// `GET /auth/login` → 404 in all modes. OAuth mode uses lab-auth's headless
+/// bearer_only_router subset, not the full browser router.
 #[tokio::test]
-async fn auth_login_returns_404_without_oauth() {
+async fn auth_login_returns_404_in_all_modes() {
     let d1 = TempDir::new().unwrap();
     let d2 = TempDir::new().unwrap();
+    let d3 = TempDir::new().unwrap();
     let loopback = testing::loopback_state(d1.path());
     let bearer = testing::bearer_state(d2.path(), "tok");
+    let oauth = testing::oauth_state(d3.path()).await;
 
-    for (label, state) in [("LoopbackDev", loopback), ("bearer-only", bearer)] {
+    for (label, state) in [
+        ("LoopbackDev", loopback),
+        ("bearer-only", bearer),
+        ("OAuth", oauth),
+    ] {
         let status = get_status(router(state), "/auth/login").await;
         assert_eq!(
             status,

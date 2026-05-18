@@ -763,19 +763,18 @@ async fn register_returns_404_in_all_modes() {
     }
 }
 
-/// GET /auth/login — not reachable in LoopbackDev or bearer-only (no OAuth router
-/// mounted), but IS mounted when OAuth is active because we use the full lab-auth
-/// router() (not bearer_only_router) so that DCR /register is available for MCP
-/// clients. /auth/login is a browser redirect to Google — harmless in a headless
-/// context but present so callers get a redirect rather than a 404.
+/// GET /auth/login is 404 in all modes. OAuth mode uses lab-auth's headless
+/// bearer_only_router subset, not the full browser router.
 #[tokio::test]
-async fn auth_login_not_mounted_without_oauth() {
+async fn auth_login_not_mounted_in_any_mode() {
     let (loopback_state, _dir1) = test_state_no_auth();
     let (bearer_state, _dir2) = test_state_with_token("tok".into());
+    let (oauth_state, _dir3) = test_state_with_oauth().await;
 
     for (label, state) in [
         ("LoopbackDev", loopback_state),
         ("bearer-only", bearer_state),
+        ("OAuth", oauth_state),
     ] {
         let app = router(state);
         let request = Request::builder()
