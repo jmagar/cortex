@@ -1,5 +1,6 @@
 {
   "name": "syslog",
+  "version": "0.25.3",
   "description": "Syslog management via MCP",
   "author": {
     "name": "jmagar"
@@ -12,9 +13,9 @@
     "logging",
     "homelab"
   ],
-  "mcpServers": "./plugins/.mcp.json",
-  "hooks": "./plugins/hooks/hooks.json",
-  "skills": "./plugins/skills",
+  "mcpServers": "./plugins/syslog/.mcp.json",
+  "hooks": "./plugins/syslog/hooks/hooks.json",
+  "skills": "./plugins/syslog/skills",
   "userConfig": {
     "is_server": {
       "type": "boolean",

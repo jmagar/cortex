@@ -21,4 +21,4 @@ Index for the `plugin/` documentation subdirectory. These docs cover every Claud
 | `OUTPUT-STYLES.md` | Output style definitions (none) |
 | `PLUGINS.md` | Plugin manifest reference: .claude-plugin, .codex-plugin, gemini-extension |
 | `SCHEDULES.md` | Scheduled tasks (none) |
-| `SKILLS.md` | Skill definitions under `plugins/skills/`, including MCP usage, reports, diagnostics, deployment, logs, and version checks |
+| `SKILLS.md` | Skill definitions under `plugins/syslog/skills/`, including MCP usage, reports, diagnostics, deployment, logs, and version checks |

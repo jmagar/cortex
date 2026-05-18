@@ -12,9 +12,9 @@ Changing any action's parameter names, parameter caps/defaults, or top-level
 response keys is a **breaking change** — coordinate with downstream consumers
 before editing:
 
-- `plugins/skills/syslog-*/SKILL.md` (Claude Code skills consume these
+- `plugins/syslog/skills/syslog-*/SKILL.md` (Claude Code skills consume these
   shapes by name)
-- `plugins/skills/syslog-report/REPORT-SCHEMA.md` (and any operator-side
+- `plugins/syslog/skills/syslog-report/REPORT-SCHEMA.md` (and any operator-side
   scripting)
 - Out-of-tree fleet runbooks that depend on the JSON envelope
 

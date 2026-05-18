@@ -51,14 +51,14 @@ validate-skills:
     #!/usr/bin/env bash
     set -euo pipefail
     found=0
-    for dir in plugins/skills/*; do
+    for dir in plugins/syslog/skills/*; do
       [[ -d "$dir" ]] || continue
       found=1
       test -f "$dir/SKILL.md" || { echo "MISSING: $dir/SKILL.md"; exit 1; }
       grep -q '^name:' "$dir/SKILL.md" || { echo "MISSING name: $dir/SKILL.md"; exit 1; }
       grep -q '^description:' "$dir/SKILL.md" || { echo "MISSING description: $dir/SKILL.md"; exit 1; }
     done
-    [[ "$found" -eq 1 ]] || { echo "MISSING: plugins/skills/*"; exit 1; }
+    [[ "$found" -eq 1 ]] || { echo "MISSING: plugins/syslog/skills/*"; exit 1; }
     echo "OK"
 
 # Generate a standalone CLI for this server (requires running server; HTTP-only transport)

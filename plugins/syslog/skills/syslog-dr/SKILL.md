@@ -29,11 +29,13 @@ Run a full PASS / WARN / FAIL diagnostic for syslog-mcp. Use this when the user 
    - writable by the service user
    - free space is at least `max_db_size_mb * 1.2`, or at least 2048 MB when max DB size is disabled
 
-5. Check API token quality without printing the value:
-   - empty is FAIL
-   - length under 24 characters is WARN
-   - known weak placeholders are FAIL: `your-secret-token`, `changeme`, `test`, `placeholder`, `secret`, `token`, `password`, `abc123`, `default`
-   - otherwise PASS
+5. Check auth mode and token quality without printing token values:
+   - If `$CLAUDE_PLUGIN_OPTION_NO_AUTH` is true, record `WARN (auth disabled by plugin config)` and do not fail an empty token.
+   - If OAuth mode is configured, verify OAuth config presence and skip bearer-token strength checks unless a bearer fallback token is also configured.
+   - In bearer mode with auth enabled, empty token is FAIL.
+   - In bearer mode with auth enabled, length under 24 characters is WARN.
+   - Known weak placeholders are FAIL: `your-secret-token`, `changeme`, `test`, `placeholder`, `secret`, `token`, `password`, `abc123`, `default`.
+   - Otherwise PASS.
 
 6. Check ports:
    - syslog TCP and UDP port
@@ -55,15 +57,18 @@ Run a full PASS / WARN / FAIL diagnostic for syslog-mcp. Use this when the user 
 
 10. Check listener reachability:
     - Parse host from `$CLAUDE_PLUGIN_OPTION_SERVER_URL`.
-    - TCP syslog: `nc -z -w2 <host> "$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT"`
-    - MCP auth: `curl -sS -o /dev/null -w "%{http_code}" -m 3 "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp"`; expect `401`.
+    - TCP syslog: `nc -z -w2 <host> "${CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT:-$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT}"`
+    - MCP auth: `curl -sS -o /dev/null -w "%{http_code}" -m 3 "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp"`.
+      - If auth is disabled (`NO_AUTH=true` or no bearer/OAuth auth configured), `200` or MCP protocol-level `400/405` is acceptable as route evidence; do not flag open access as a failure because it matches configuration.
+      - If bearer or OAuth auth is enabled, expect `401` for an unauthenticated request.
+      - `404` means the route is wrong or another service owns the port.
 
 11. Check optional Docker ingest hosts:
     - For each host in `$CLAUDE_PLUGIN_OPTION_FLEET_HOSTS`, `curl -sf -m 3 http://<host>:2375/_ping`; expect `OK`.
 
 12. Check fleet rsyslog forwarding in server mode when `$CLAUDE_PLUGIN_OPTION_FLEET_HOSTS` is non-empty:
     - SSH reachability
-    - drop-in contains the expected target and port
+    - drop-in contains the expected target and externally reachable port
     - rsyslog is active
     - host appears in MCP `hosts` output with `last_seen` within 30 minutes (low-volume hosts that send infrequently may legitimately fail a stricter threshold — use WARN rather than FAIL when last_seen is between 30 minutes and retention window)
 
