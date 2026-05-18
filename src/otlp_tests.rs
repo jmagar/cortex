@@ -462,23 +462,14 @@ fn auth_rejects_non_bearer_scheme() {
 
 #[tokio::test]
 async fn metrics_handler_returns_not_supported() {
-    let response = metrics_handler(
-        State(state_with_token(None)),
-        HeaderMap::new(),
-        Bytes::from_static(b"metrics"),
-    )
-    .await;
+    let response = metrics_handler(State(state_with_token(None)), HeaderMap::new()).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn traces_handler_requires_bearer_when_token_configured() {
-    let response = traces_handler(
-        State(state_with_token(Some("secret"))),
-        HeaderMap::new(),
-        Bytes::from_static(b"traces"),
-    )
-    .await;
+    let response =
+        traces_handler(State(state_with_token(Some("secret"))), HeaderMap::new()).await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -489,12 +480,7 @@ async fn traces_handler_returns_not_supported_after_auth() {
         axum::http::header::AUTHORIZATION,
         HeaderValue::from_static("Bearer secret"),
     );
-    let response = traces_handler(
-        State(state_with_token(Some("secret"))),
-        headers,
-        Bytes::from_static(b"traces"),
-    )
-    .await;
+    let response = traces_handler(State(state_with_token(Some("secret"))), headers).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 

@@ -303,6 +303,7 @@ async fn mcp_cors_preflight_allows_only_required_request_headers() {
         .to_str()
         .unwrap()
         .to_ascii_lowercase();
+    let allowed_tokens: Vec<&str> = allowed.split(',').map(str::trim).collect();
     for header in [
         "authorization",
         "content-type",
@@ -311,12 +312,12 @@ async fn mcp_cors_preflight_allows_only_required_request_headers() {
         "mcp-session-id",
     ] {
         assert!(
-            allowed.contains(header),
+            allowed_tokens.iter().any(|t| *t == header),
             "missing {header} from allow-headers: {allowed}"
         );
     }
     assert!(
-        !allowed.contains("x-unexpected-header"),
+        !allowed_tokens.iter().any(|t| *t == "x-unexpected-header"),
         "CORS allow-headers must not reflect arbitrary request headers: {allowed}"
     );
 }

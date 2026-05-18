@@ -1277,7 +1277,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 [Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.25.4...HEAD
-[0.25.4]: https://github.com/jmagar/syslog-mcp/compare/v0.25.3...v0.25.4
+[0.25.4]: https://github.com/jmagar/syslog-mcp/compare/v0.25.2...v0.25.4
 [0.25.2]: https://github.com/jmagar/syslog-mcp/compare/v0.25.1...v0.25.2
 [0.25.1]: https://github.com/jmagar/syslog-mcp/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/jmagar/syslog-mcp/compare/v0.24.1...v0.25.0
