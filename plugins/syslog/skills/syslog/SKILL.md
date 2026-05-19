@@ -20,6 +20,8 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
 | `abuse` | Abuse hits in AI transcripts with same-session context |
+| `abuse_incidents` | Groups abuse hits into scored incident candidates |
+| `abuse_investigate` | Expands incidents into deterministic evidence bundles |
 | `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
 | `usage_blocks` | AI activity in 5-hour windows |
 | `project_context` | Summary for one AI project path |

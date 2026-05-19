@@ -521,6 +521,10 @@ suite_sessions() {
     syslog search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "total_candidates"
   run_test "syslog abuse: returns matches array" \
     syslog abuse "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"project":$project,"terms":$term,"limit":5,"before":1,"after":1}')" "matches"
+  run_test "syslog abuse_incidents: returns incidents array" \
+    syslog abuse_incidents "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":5}')" "incidents"
+  run_test "syslog abuse_investigate: returns evidence array" \
+    syslog abuse_investigate "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":1}')" "evidence"
   run_test "syslog ai_correlate: returns anchors array" \
     syslog ai_correlate "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":2,"events_per_anchor":3}')" "anchors"
   run_test "syslog usage_blocks: returns blocks array" \

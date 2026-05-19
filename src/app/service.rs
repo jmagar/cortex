@@ -20,7 +20,6 @@ use super::models::{
     ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
     SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
     TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
-: add evidence bundles for abuse incidents (investigate_ai_incidents))
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
