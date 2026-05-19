@@ -88,7 +88,7 @@ pub fn list_apps(pool: &DbPool, params: &ListAppsParams<'_>) -> Result<ListAppsR
          FROM logs
          WHERE {where_clause}
          GROUP BY app_name
-         ORDER BY MAX(received_at) DESC
+         ORDER BY MAX(received_at) DESC, app_name ASC
          LIMIT {limit} OFFSET {offset}"
     );
     let mut stmt = conn.prepare(&data_sql)?;
@@ -164,7 +164,7 @@ pub fn list_source_ips(pool: &DbPool, params: &ListSourceIpsParams) -> Result<Li
             FROM logs
             WHERE source_ip != ''
             GROUP BY source_ip
-            ORDER BY COUNT(*) DESC
+            ORDER BY COUNT(*) DESC, source_ip ASC
             LIMIT {limit} OFFSET {offset}
          )
          SELECT l.source_ip, l.hostname, COUNT(*), MIN(l.received_at), MAX(l.received_at)
@@ -1202,7 +1202,7 @@ pub fn summarize_range(pool: &DbPool, from: &str, to: &str) -> Result<RangeSumma
         "SELECT hostname, COUNT(*) FROM logs
          WHERE timestamp >= ?1 AND timestamp <= ?2
          GROUP BY hostname
-         ORDER BY COUNT(*) DESC
+         ORDER BY COUNT(*) DESC, source_ip ASC
          LIMIT 10",
     )?;
     let top_hosts = host_stmt
@@ -1216,7 +1216,7 @@ pub fn summarize_range(pool: &DbPool, from: &str, to: &str) -> Result<RangeSumma
          WHERE timestamp >= ?1 AND timestamp <= ?2
            AND app_name IS NOT NULL AND app_name != ''
          GROUP BY app_name
-         ORDER BY COUNT(*) DESC
+         ORDER BY COUNT(*) DESC, source_ip ASC
          LIMIT 10",
     )?;
     let top_apps = app_stmt
