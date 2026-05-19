@@ -86,15 +86,123 @@ fn list_apps_returns_distinct_apps_with_counts() {
     )
     .unwrap();
 
-    let apps = list_apps(&pool, &ListAppsParams { hostname: None, from: None, to: None, limit: 500 }).unwrap();
+    let apps = list_apps(
+        &pool,
+        &ListAppsParams {
+            hostname: None,
+            from: None,
+            to: None,
+            limit: 500,
+        },
+    )
+    .unwrap();
     let nginx = apps.iter().find(|a| a.app_name == "nginx").unwrap();
     assert_eq!(nginx.log_count, 2);
     assert_eq!(nginx.host_count, 1);
 
     // Filter by hostname
-    let only_h2 = list_apps(&pool, &ListAppsParams { hostname: Some("h2"), from: None, to: None, limit: 500 }).unwrap();
+    let only_h2 = list_apps(
+        &pool,
+        &ListAppsParams {
+            hostname: Some("h2"),
+            from: None,
+            to: None,
+            limit: 500,
+        },
+    )
+    .unwrap();
     assert_eq!(only_h2.len(), 1);
     assert_eq!(only_h2[0].app_name, "sshd");
+}
+
+#[test]
+fn list_apps_to_filter_excludes_future_entries() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[entry("2026-01-01T00:00:01Z", "h1", "info", Some("nginx"), "msg")],
+    )
+    .unwrap();
+
+    // All entries are inserted with received_at = now(). A `to` in the far past
+    // should exclude them all; a `to` in the far future should include them.
+    let none = list_apps(
+        &pool,
+        &ListAppsParams {
+            hostname: None,
+            from: None,
+            to: Some("2000-01-01T00:00:00Z"),
+            limit: 500,
+        },
+    )
+    .unwrap();
+    assert!(none.is_empty(), "to=2000 should exclude all entries inserted now");
+
+    let all = list_apps(
+        &pool,
+        &ListAppsParams {
+            hostname: None,
+            from: None,
+            to: Some("9999-01-01T00:00:00Z"),
+            limit: 500,
+        },
+    )
+    .unwrap();
+    assert!(!all.is_empty(), "to=9999 should include all entries");
+}
+
+#[test]
+fn list_source_ips_truncated_when_over_limit() {
+    let (pool, _d) = test_pool();
+    // Insert 3 entries with distinct source IPs; request limit=2 to force truncation.
+    insert_logs_batch(
+        &pool,
+        &[
+            entry_with_source_ip("2026-01-01T00:00:01Z", "h1", "info", None, "a", "10.0.0.1:514"),
+            entry_with_source_ip("2026-01-01T00:00:02Z", "h1", "info", None, "b", "10.0.0.2:514"),
+            entry_with_source_ip("2026-01-01T00:00:03Z", "h1", "info", None, "c", "10.0.0.3:514"),
+        ],
+    )
+    .unwrap();
+
+    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 2 }).unwrap();
+    assert!(result.truncated, "expected truncated=true when 3 IPs exceed limit=2");
+    assert_eq!(result.source_ips.len(), 2);
+}
+
+#[test]
+fn list_source_ips_chatty_ip_does_not_suppress_others() {
+    // One IP with many hostnames must not crowd out other distinct IPs.
+    let (pool, _d) = test_pool();
+    let mut entries = vec![];
+    // ip1 logs from 20 different hostnames
+    for i in 0..20 {
+        entries.push(entry_with_source_ip(
+            "2026-01-01T00:00:01Z",
+            &format!("host-{i}"),
+            "info",
+            None,
+            "msg",
+            "10.0.0.1:514",
+        ));
+    }
+    // ip2 logs once
+    entries.push(entry_with_source_ip(
+        "2026-01-01T00:00:02Z",
+        "h2",
+        "info",
+        None,
+        "msg",
+        "10.0.0.2:514",
+    ));
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 500 }).unwrap();
+    assert!(!result.truncated);
+    assert!(
+        result.source_ips.iter().any(|e| e.source_ip == "10.0.0.2:514"),
+        "ip2 must appear even though ip1 has many hostnames"
+    );
 }
 
 #[test]
@@ -474,7 +582,11 @@ fn list_source_ips_aggregates_hostnames() {
     .unwrap();
     let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 500 }).unwrap();
     assert!(!result.truncated);
-    let first = result.source_ips.iter().find(|e| e.source_ip == "10.0.0.1:514").unwrap();
+    let first = result
+        .source_ips
+        .iter()
+        .find(|e| e.source_ip == "10.0.0.1:514")
+        .unwrap();
     assert_eq!(first.host_count, 2);
     assert_eq!(first.log_count, 3);
 }

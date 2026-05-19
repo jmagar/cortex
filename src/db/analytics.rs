@@ -67,9 +67,7 @@ pub fn list_apps(pool: &DbPool, params: &ListAppsParams<'_>) -> Result<Vec<AppEn
     if let Some(t) = params.to {
         sql.push_str(&format!(" AND received_at <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(t.to_owned()));
-        idx += 1;
     }
-    let _ = idx;
     sql.push_str(&format!(
         " GROUP BY app_name ORDER BY MAX(received_at) DESC LIMIT {limit}"
     ));
@@ -123,19 +121,31 @@ pub struct ListSourceIpsParams {
 
 pub fn list_source_ips(pool: &DbPool, params: &ListSourceIpsParams) -> Result<ListSourceIpsResult> {
     let limit = params.limit.clamp(1, 5_000);
-    // Fetch one extra row to detect truncation without a separate COUNT query.
+    // Fetch one extra distinct IP to detect truncation without a separate COUNT query.
+    // The LIMIT must be applied at the IP level (not the (ip,hostname) tuple level) so
+    // the fetch-N+1 trick operates on the same unit as the truncation check.
     let fetch = limit + 1;
     let conn = pool.get()?;
     // first_seen / last_seen come from `received_at` (server clock): for sender
     // identity / spoof-detection use cases, the network arrival time is the
     // verified value, while the message `timestamp` is whatever the sender claimed.
+    //
+    // CTE top_ips limits to {fetch} distinct source_ips ordered by total volume.
+    // Joining back to per-(ip,hostname) rows preserves the hostname breakdown.
     let mut stmt = conn.prepare(&format!(
-        "SELECT source_ip, hostname, COUNT(*), MIN(received_at), MAX(received_at)
-         FROM logs
-         WHERE source_ip != ''
-         GROUP BY source_ip, hostname
-         ORDER BY source_ip, COUNT(*) DESC
-         LIMIT {fetch}"
+        "WITH top_ips AS (
+            SELECT source_ip
+            FROM logs
+            WHERE source_ip != ''
+            GROUP BY source_ip
+            ORDER BY COUNT(*) DESC
+            LIMIT {fetch}
+         )
+         SELECT l.source_ip, l.hostname, COUNT(*), MIN(l.received_at), MAX(l.received_at)
+         FROM logs l
+         JOIN top_ips t ON t.source_ip = l.source_ip
+         GROUP BY l.source_ip, l.hostname
+         ORDER BY l.source_ip, COUNT(*) DESC"
     ))?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -176,6 +186,7 @@ pub fn list_source_ips(pool: &DbPool, params: &ListSourceIpsParams) -> Result<Li
 
     let mut out: Vec<SourceIpEntry> = by_ip.into_values().collect();
     out.sort_by_key(|entry| Reverse(entry.log_count));
+    // out.len() == top_ips result count (at most fetch distinct IPs)
     let truncated = out.len() > limit;
     out.truncate(limit);
     Ok(ListSourceIpsResult {

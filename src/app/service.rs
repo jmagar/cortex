@@ -16,10 +16,10 @@ use super::models::{
     ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
     ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
     ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, PatternsRequest,
-    PatternsResponse,
-    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
-    TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
+    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
+    SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest,
+    UsageBlocksResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
@@ -699,14 +699,16 @@ impl SyslogService {
     }
 
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
         let apps = self
             .run_db(move |pool| {
                 db::list_apps(
                     pool,
                     &db::ListAppsParams {
                         hostname: req.hostname.as_deref(),
-                        from: req.from.as_deref(),
-                        to: req.to.as_deref(),
+                        from: from.as_deref(),
+                        to: to.as_deref(),
                         limit: req.limit.unwrap_or(500) as usize,
                     },
                 )
