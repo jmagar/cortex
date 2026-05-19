@@ -86,13 +86,13 @@ fn list_apps_returns_distinct_apps_with_counts() {
     )
     .unwrap();
 
-    let apps = list_apps(&pool, None).unwrap();
+    let apps = list_apps(&pool, &ListAppsParams { hostname: None, from: None, to: None, limit: 500 }).unwrap();
     let nginx = apps.iter().find(|a| a.app_name == "nginx").unwrap();
     assert_eq!(nginx.log_count, 2);
     assert_eq!(nginx.host_count, 1);
 
     // Filter by hostname
-    let only_h2 = list_apps(&pool, Some("h2")).unwrap();
+    let only_h2 = list_apps(&pool, &ListAppsParams { hostname: Some("h2"), from: None, to: None, limit: 500 }).unwrap();
     assert_eq!(only_h2.len(), 1);
     assert_eq!(only_h2[0].app_name, "sshd");
 }
@@ -472,8 +472,9 @@ fn list_source_ips_aggregates_hostnames() {
         ],
     )
     .unwrap();
-    let ips = list_source_ips(&pool).unwrap();
-    let first = ips.iter().find(|e| e.source_ip == "10.0.0.1:514").unwrap();
+    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 500 }).unwrap();
+    assert!(!result.truncated);
+    let first = result.source_ips.iter().find(|e| e.source_ip == "10.0.0.1:514").unwrap();
     assert_eq!(first.host_count, 2);
     assert_eq!(first.log_count, 3);
 }

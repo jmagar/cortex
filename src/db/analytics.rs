@@ -31,48 +31,61 @@ pub struct AppEntry {
     pub last_seen: String,
 }
 
-pub fn list_apps(pool: &DbPool, hostname: Option<&str>) -> Result<Vec<AppEntry>> {
+pub struct ListAppsParams<'a> {
+    pub hostname: Option<&'a str>,
+    pub from: Option<&'a str>,
+    pub to: Option<&'a str>,
+    /// Default 500, max 5000.
+    pub limit: usize,
+}
+
+pub fn list_apps(pool: &DbPool, params: &ListAppsParams<'_>) -> Result<Vec<AppEntry>> {
     let conn = pool.get()?;
+    let limit = params.limit.clamp(1, 5_000);
+
     // first_seen / last_seen come from `received_at` (server clock) so they match
     // how the `hosts` table is updated and aren't skewed by a misconfigured device clock.
-    let (sql, want_host) = match hostname {
-        Some(_) => (
-            "SELECT app_name, COUNT(*), COUNT(DISTINCT hostname),
-                    MIN(received_at), MAX(received_at)
-             FROM logs
-             WHERE app_name IS NOT NULL AND app_name != '' AND hostname = ?1
-             GROUP BY app_name
-             ORDER BY MAX(received_at) DESC",
-            true,
-        ),
-        None => (
-            "SELECT app_name, COUNT(*), COUNT(DISTINCT hostname),
-                    MIN(received_at), MAX(received_at)
-             FROM logs
-             WHERE app_name IS NOT NULL AND app_name != ''
-             GROUP BY app_name
-             ORDER BY MAX(received_at) DESC",
-            false,
-        ),
-    };
+    let mut sql = String::from(
+        "SELECT app_name, COUNT(*), COUNT(DISTINCT hostname),
+                MIN(received_at), MAX(received_at)
+         FROM logs
+         WHERE app_name IS NOT NULL AND app_name != ''",
+    );
+    let mut bindings: Vec<rusqlite::types::Value> = vec![];
+    let mut idx = 1usize;
 
-    let mut stmt = conn.prepare(sql)?;
-    let map = |row: &rusqlite::Row| -> rusqlite::Result<AppEntry> {
-        Ok(AppEntry {
-            app_name: row.get(0)?,
-            log_count: row.get(1)?,
-            host_count: row.get(2)?,
-            first_seen: row.get(3)?,
-            last_seen: row.get(4)?,
-        })
-    };
-    let rows = if want_host {
-        stmt.query_map(params![hostname.unwrap()], map)?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    } else {
-        stmt.query_map([], map)?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
+    if let Some(h) = params.hostname {
+        sql.push_str(&format!(" AND hostname = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(h.to_owned()));
+        idx += 1;
+    }
+    if let Some(f) = params.from {
+        sql.push_str(&format!(" AND received_at >= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(f.to_owned()));
+        idx += 1;
+    }
+    if let Some(t) = params.to {
+        sql.push_str(&format!(" AND received_at <= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(t.to_owned()));
+        idx += 1;
+    }
+    let _ = idx;
+    sql.push_str(&format!(
+        " GROUP BY app_name ORDER BY MAX(received_at) DESC LIMIT {limit}"
+    ));
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+            Ok(AppEntry {
+                app_name: row.get(0)?,
+                log_count: row.get(1)?,
+                host_count: row.get(2)?,
+                first_seen: row.get(3)?,
+                last_seen: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
@@ -97,18 +110,33 @@ pub struct SourceIpEntry {
     pub hostnames: Vec<SourceIpHostBreakdown>,
 }
 
-pub fn list_source_ips(pool: &DbPool) -> Result<Vec<SourceIpEntry>> {
+pub struct ListSourceIpsResult {
+    pub source_ips: Vec<SourceIpEntry>,
+    /// True when the result was capped at `limit`.
+    pub truncated: bool,
+}
+
+pub struct ListSourceIpsParams {
+    /// Default 500, max 5000. Applied after aggregation; limits distinct IPs returned.
+    pub limit: usize,
+}
+
+pub fn list_source_ips(pool: &DbPool, params: &ListSourceIpsParams) -> Result<ListSourceIpsResult> {
+    let limit = params.limit.clamp(1, 5_000);
+    // Fetch one extra row to detect truncation without a separate COUNT query.
+    let fetch = limit + 1;
     let conn = pool.get()?;
     // first_seen / last_seen come from `received_at` (server clock): for sender
     // identity / spoof-detection use cases, the network arrival time is the
     // verified value, while the message `timestamp` is whatever the sender claimed.
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         "SELECT source_ip, hostname, COUNT(*), MIN(received_at), MAX(received_at)
          FROM logs
          WHERE source_ip != ''
          GROUP BY source_ip, hostname
-         ORDER BY source_ip, COUNT(*) DESC",
-    )?;
+         ORDER BY source_ip, COUNT(*) DESC
+         LIMIT {fetch}"
+    ))?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -148,7 +176,12 @@ pub fn list_source_ips(pool: &DbPool) -> Result<Vec<SourceIpEntry>> {
 
     let mut out: Vec<SourceIpEntry> = by_ip.into_values().collect();
     out.sort_by_key(|entry| Reverse(entry.log_count));
-    Ok(out)
+    let truncated = out.len() > limit;
+    out.truncate(limit);
+    Ok(ListSourceIpsResult {
+        source_ips: out,
+        truncated,
+    })
 }
 
 pub fn get_ai_usage_blocks(

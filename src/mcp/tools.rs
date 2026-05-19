@@ -5,8 +5,9 @@ use crate::app::{
     AbuseSearchRequest, AiCorrelateRequest, AnomaliesRequest, ClockSkewRequest, CompareRequest,
     ContextRequest, CorrelateEventsRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest,
     ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
-    SilentHostsRequest, TailLogsRequest, TimelineRequest, UsageBlocksRequest,
+    ListSourceIpsRequest, PatternsRequest, ProjectContextRequest, SearchLogsRequest,
+    SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
+    UsageBlocksRequest,
 };
 
 use super::schemas::SYSLOG_ACTIONS;
@@ -130,6 +131,9 @@ async fn tool_list_apps(state: &AppState, args: Value) -> anyhow::Result<Value> 
         .service
         .list_apps(ListAppsRequest {
             hostname: string_arg(&args, "hostname"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
         })
         .await?;
     tracing::debug!(app_count = response.apps.len(), "list_apps completed");
@@ -275,10 +279,16 @@ async fn tool_list_ai_projects(state: &AppState, args: Value) -> anyhow::Result<
     Ok(serde_json::to_value(response)?)
 }
 
-async fn tool_list_source_ips(state: &AppState, _args: Value) -> anyhow::Result<Value> {
-    let response = state.service.list_source_ips().await?;
+async fn tool_list_source_ips(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let response = state
+        .service
+        .list_source_ips(ListSourceIpsRequest {
+            limit: u32_arg(&args, "limit")?,
+        })
+        .await?;
     tracing::debug!(
         source_ip_count = response.source_ips.len(),
+        truncated = response.truncated,
         "list_source_ips completed"
     );
     Ok(serde_json::to_value(response)?)
