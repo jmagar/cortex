@@ -43,6 +43,8 @@ const READ_ONLY_ACTIONS: &[&str] = &[
     "sessions",
     "search_sessions",
     "abuse",
+    "abuse_incidents",
+    "abuse_investigate",
     "ai_correlate",
     "usage_blocks",
     "project_context",

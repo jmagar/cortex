@@ -292,6 +292,116 @@ impl From<db::AiAbuseResult> for AbuseSearchResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiIncidentRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiIncidentResponse {
+    pub incidents: Vec<AbuseIncident>,
+    pub total_incidents: usize,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AbuseIncident {
+    pub incident_id: String,
+    pub project: String,
+    pub tool: String,
+    pub session_id: String,
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub duration_secs: i64,
+    pub abuse_count: usize,
+    pub terms: Vec<String>,
+    pub anchor_ids: Vec<i64>,
+    pub priority_score: f64,
+    pub priority_label: String,
+    pub window_minutes: u32,
+}
+
+impl From<db::AbuseIncident> for AbuseIncident {
+    fn from(v: db::AbuseIncident) -> Self {
+        Self {
+            incident_id: v.incident_id,
+            project: v.project,
+            tool: v.tool,
+            session_id: v.session_id,
+            hostname: v.hostname,
+            first_seen: v.first_seen,
+            last_seen: v.last_seen,
+            duration_secs: v.duration_secs,
+            abuse_count: v.abuse_count,
+            terms: v.terms,
+            anchor_ids: v.anchor_ids,
+            priority_score: v.priority_score,
+            priority_label: v.priority_label,
+            window_minutes: v.window_minutes,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiInvestigateRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentEvidence {
+    pub incident: AbuseIncident,
+    pub transcript_before: Vec<LogEntry>,
+    pub transcript_before_truncated: bool,
+    pub transcript_after: Vec<LogEntry>,
+    pub transcript_after_truncated: bool,
+    pub anchors: Vec<LogEntry>,
+    pub nearby_logs: Vec<LogEntry>,
+    pub nearby_logs_truncated: bool,
+    pub nearby_errors: Vec<LogEntry>,
+}
+
+impl From<db::IncidentEvidence> for IncidentEvidence {
+    fn from(v: db::IncidentEvidence) -> Self {
+        Self {
+            incident: v.incident.into(),
+            transcript_before: v.transcript_before.into_iter().map(Into::into).collect(),
+            transcript_before_truncated: v.transcript_before_truncated,
+            transcript_after: v.transcript_after.into_iter().map(Into::into).collect(),
+            transcript_after_truncated: v.transcript_after_truncated,
+            anchors: v.anchors.into_iter().map(Into::into).collect(),
+            nearby_logs: v.nearby_logs.into_iter().map(Into::into).collect(),
+            nearby_logs_truncated: v.nearby_logs_truncated,
+            nearby_errors: v.nearby_errors.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiInvestigateResponse {
+    pub evidence: Vec<IncidentEvidence>,
+    pub total_incidents: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiCorrelateRequest {
     pub project: Option<String>,

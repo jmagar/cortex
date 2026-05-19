@@ -44,17 +44,17 @@ Compose diagnostics are non-mutating and are validated only for redacted shape,
 so the smoke test can pass on either Docker-backed or non-Docker deployments.
 When seeding is enabled, the smoke scripts import
 `tests/fixtures/ai-session-smoke.jsonl` and assert that `sessions`,
-`search_sessions`, `abuse`, `ai_correlate`, and `project_context` can retrieve real AI transcript
+`search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, and `project_context` can retrieve real AI transcript
 rows, not just empty response envelopes.
 `scripts/smoke-ai-mcp.sh` additionally seeds a temporary transcript and calls
-the HTTP MCP endpoint for `search_sessions`, `abuse`, `usage_blocks`,
+the HTTP MCP endpoint for `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `usage_blocks`,
 `project_context`, `list_ai_tools`, and `list_ai_projects`.
 The AI smoke scripts resolve `SYSLOG_BIN` first, then `syslog` on `PATH`, then
 the repo-local debug binary at `target/debug/syslog`, so repo-local builds do
 not require an installed shell binary.
 
 Action registry covered by live/script references: `search`, `tail`, `errors`,
-`hosts`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`,
+`hosts`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`,
 `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`,
 `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`,
 `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`,

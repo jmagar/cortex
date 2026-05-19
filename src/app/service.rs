@@ -8,7 +8,8 @@ use tokio::sync::Semaphore;
 use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
     AbuseSearchRequest, AbuseSearchResponse, AiCorrelateRequest, AiCorrelateResponse,
-    AiCorrelationAnchor, AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest,
+    AiCorrelationAnchor, AiIncidentRequest, AiIncidentResponse, AiInvestigateRequest,
+    AiInvestigateResponse, AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest,
     ClockSkewResponse, CompareRequest, CompareResponse, ContextRequest, ContextResponse,
     CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
     DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest,
@@ -233,6 +234,68 @@ impl SyslogService {
             .run_db(move |pool| db::search_ai_abuse(pool, &params))
             .await?;
         Ok(result.into())
+    }
+
+    pub async fn list_ai_incidents(
+        &self,
+        req: AiIncidentRequest,
+    ) -> ServiceResult<AiIncidentResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let result = self
+            .run_db(move |pool| {
+                db::search_ai_incidents(
+                    pool,
+                    &db::AiIncidentParams {
+                        ai_project: req.project,
+                        ai_tool: req.tool,
+                        from,
+                        to,
+                        limit: req.limit,
+                        window_minutes: req.window_minutes,
+                        terms: req.terms,
+                    },
+                )
+            })
+            .await?;
+        Ok(AiIncidentResponse {
+            incidents: result.incidents.into_iter().map(Into::into).collect(),
+            total_incidents: result.total_incidents,
+            candidate_rows: result.candidate_rows,
+            candidate_cap: result.candidate_cap,
+            candidate_window_truncated: result.candidate_window_truncated,
+            truncated: result.truncated,
+        })
+    }
+
+    pub async fn investigate_ai_incidents(
+        &self,
+        req: AiInvestigateRequest,
+    ) -> ServiceResult<AiInvestigateResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let result = self
+            .run_db(move |pool| {
+                db::investigate_ai_incidents(
+                    pool,
+                    &db::AiInvestigateParams {
+                        ai_project: req.project,
+                        ai_tool: req.tool,
+                        from,
+                        to,
+                        limit: req.limit,
+                        window_minutes: req.window_minutes,
+                        correlation_window_minutes: req.correlation_window_minutes,
+                        terms: req.terms,
+                    },
+                )
+            })
+            .await?;
+        Ok(AiInvestigateResponse {
+            evidence: result.evidence.into_iter().map(Into::into).collect(),
+            total_incidents: result.total_incidents,
+            truncated: result.truncated,
+        })
     }
 
     pub async fn correlate_ai_logs(

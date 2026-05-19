@@ -394,6 +394,99 @@ pub struct SearchParams {
     pub exclude_ai: bool,
 }
 
+// ---------------------------------------------------------------------------
+// Abuse incident grouping
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiIncidentParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// Max incidents to return. Default 20, clamp 1..=100.
+    pub limit: Option<u32>,
+    /// Grouping window in minutes. Default 10, clamp 1..=120.
+    pub window_minutes: Option<u32>,
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AbuseIncident {
+    /// Stable synthetic ID: sha256 of "project|tool|session|host|first_anchor_id".
+    pub incident_id: String,
+    pub project: String,
+    pub tool: String,
+    pub session_id: String,
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub duration_secs: i64,
+    pub abuse_count: usize,
+    /// Distinct normalized abuse terms found, sorted.
+    pub terms: Vec<String>,
+    /// Sorted anchor log IDs.
+    pub anchor_ids: Vec<i64>,
+    pub priority_score: f64,
+    /// "low" | "medium" | "high" | "critical"
+    pub priority_label: String,
+    pub window_minutes: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiIncidentResult {
+    pub incidents: Vec<AbuseIncident>,
+    pub total_incidents: usize,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
+    pub truncated: bool,
+}
+
+// ---------------------------------------------------------------------------
+// AI investigate — evidence bundle layer (kmib.2)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiInvestigateParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// Max incidents to investigate. Default 3, clamp 1..=10.
+    pub limit: Option<u32>,
+    /// Incident grouping window minutes. Default 10, clamp 1..=120.
+    pub window_minutes: Option<u32>,
+    /// Correlation window minutes around incident. Default 5, clamp 1..=120.
+    pub correlation_window_minutes: Option<u32>,
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentEvidence {
+    pub incident: AbuseIncident,
+    /// Transcript entries before first anchor (same session), capped at 20.
+    pub transcript_before: Vec<LogEntry>,
+    pub transcript_before_truncated: bool,
+    /// Transcript entries after last anchor (same session), capped at 20.
+    pub transcript_after: Vec<LogEntry>,
+    pub transcript_after_truncated: bool,
+    /// The abuse anchor log entries.
+    pub anchors: Vec<LogEntry>,
+    /// Non-AI syslog/Docker logs in the correlation window, capped at 50.
+    pub nearby_logs: Vec<LogEntry>,
+    pub nearby_logs_truncated: bool,
+    /// Subset of nearby_logs with severity warning or above.
+    pub nearby_errors: Vec<LogEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiInvestigateResult {
+    pub evidence: Vec<IncidentEvidence>,
+    pub total_incidents: usize,
+    pub truncated: bool,
+}
+
 #[cfg(test)]
 #[path = "models_tests.rs"]
 mod tests;

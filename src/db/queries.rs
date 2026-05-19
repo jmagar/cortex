@@ -5,11 +5,12 @@ use crate::config::StorageConfig;
 
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
 use super::models::{
-    AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiProjectInventoryEntry,
+    AbuseIncident, AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiIncidentParams,
+    AiIncidentResult, AiInvestigateParams, AiInvestigateResult, AiProjectInventoryEntry,
     AiRelatedLogsForAnchor, AiRelatedLogsParams, AiSessionEntry, AiToolInventoryEntry, DbStats,
-    ErrorSummaryEntry, HostEntry, ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams,
-    ListAiToolsParams, ListAiToolsResult, LogEntry, SearchAiSessionsParams, SearchAiSessionsResult,
-    SearchParams, SearchedAiSessionEntry,
+    ErrorSummaryEntry, HostEntry, IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult,
+    ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry, SearchAiSessionsParams,
+    SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
 };
 use super::pool::DbPool;
 
@@ -891,6 +892,419 @@ fn truncate_to_limit<T>(values: &mut Vec<T>, limit: usize) -> bool {
     let truncated = values.len() > limit;
     values.truncate(limit);
     truncated
+}
+
+pub fn search_ai_incidents(pool: &DbPool, params: &AiIncidentParams) -> Result<AiIncidentResult> {
+    use std::collections::HashMap;
+
+    let conn = pool.get()?;
+    let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
+    let window_secs = i64::from(params.window_minutes.unwrap_or(10).clamp(1, 120)) * 60;
+    let terms = normalized_abuse_terms(&params.terms);
+    const CANDIDATE_CAP: usize = 10_000;
+
+    // Fetch candidate abuse anchor rows (same FTS path as search_ai_abuse,
+    // no per-hit context needed here).
+    let mut sql = String::from(
+        "SELECT l.id, l.timestamp, l.hostname,
+                l.ai_tool, l.ai_project, l.ai_session_id, l.message
+         FROM logs_fts
+         JOIN logs l ON l.id = logs_fts.rowid
+         WHERE logs_fts MATCH ?1
+           AND l.ai_project IS NOT NULL AND l.ai_project != ''
+           AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
+           AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
+    );
+    let mut bindings = vec![rusqlite::types::Value::Text(abuse_fts_query(&terms))];
+    let mut idx = 2usize;
+
+    if let Some(project) = &params.ai_project {
+        sql.push_str(&format!(" AND l.ai_project = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(project.clone()));
+        idx += 1;
+    }
+    if let Some(tool) = &params.ai_tool {
+        sql.push_str(&format!(" AND l.ai_tool = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(tool.clone()));
+        idx += 1;
+    }
+    if let Some(from) = &params.from {
+        sql.push_str(&format!(" AND l.timestamp >= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(from.clone()));
+        idx += 1;
+    }
+    if let Some(to) = &params.to {
+        sql.push_str(&format!(" AND l.timestamp <= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(to.clone()));
+    }
+    let _ = idx;
+    sql.push_str(&format!(
+        " ORDER BY l.timestamp ASC LIMIT {}",
+        CANDIDATE_CAP + 1
+    ));
+
+    struct AnchorRow {
+        id: i64,
+        timestamp: String,
+        hostname: String,
+        tool: String,
+        project: String,
+        session_id: String,
+        message: String,
+    }
+
+    let mut stmt = conn.prepare(&sql)?;
+    let candidate_rows: Vec<AnchorRow> = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+            Ok(AnchorRow {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                hostname: row.get(2)?,
+                tool: row.get(3)?,
+                project: row.get(4)?,
+                session_id: row.get(5)?,
+                message: row.get(6)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let candidate_window_truncated = candidate_rows.len() > CANDIDATE_CAP;
+    let raw_candidate_count = candidate_rows.len();
+
+    // Group by (project, tool, session_id, hostname) + window-minute buckets.
+    // Key: (project, tool, session_id, hostname, window_bucket)
+    // window_bucket = unix_secs / window_secs * window_secs (floor to window boundary)
+    type GroupKey = (String, String, String, String, i64);
+    let mut groups: HashMap<GroupKey, Vec<&AnchorRow>> = HashMap::new();
+
+    for row in candidate_rows.iter().take(CANDIDATE_CAP) {
+        // Parse timestamp to unix seconds for bucketing.
+        let bucket = chrono::DateTime::parse_from_rfc3339(&row.timestamp)
+            .map(|dt| {
+                let secs = dt.timestamp();
+                (secs / window_secs) * window_secs
+            })
+            .unwrap_or(0);
+        let key = (
+            row.project.clone(),
+            row.tool.clone(),
+            row.session_id.clone(),
+            row.hostname.clone(),
+            bucket,
+        );
+        groups.entry(key).or_default().push(row);
+    }
+
+    // Build incidents from groups.
+    let mut incidents: Vec<AbuseIncident> = groups
+        .into_iter()
+        .map(
+            |((project, tool, session_id, hostname, _bucket), anchors)| {
+                let abuse_count = anchors.len();
+                let first_seen = anchors
+                    .first()
+                    .map(|r| r.timestamp.clone())
+                    .unwrap_or_default();
+                let last_seen = anchors
+                    .last()
+                    .map(|r| r.timestamp.clone())
+                    .unwrap_or_default();
+
+                // duration in seconds
+                let duration_secs = {
+                    let t0 = chrono::DateTime::parse_from_rfc3339(&first_seen)
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0);
+                    let t1 = chrono::DateTime::parse_from_rfc3339(&last_seen)
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0);
+                    (t1 - t0).max(0)
+                };
+
+                // Collect unique terms found in this group's messages.
+                let mut found_terms: Vec<String> = terms
+                    .iter()
+                    .filter(|term| {
+                        anchors.iter().any(|r| {
+                            first_abuse_term(&r.message, std::slice::from_ref(term)).is_some()
+                        })
+                    })
+                    .cloned()
+                    .collect();
+                found_terms.sort();
+                found_terms.dedup();
+
+                let mut anchor_ids: Vec<i64> = anchors.iter().map(|r| r.id).collect();
+                anchor_ids.sort();
+
+                // Score: abuse_count dominates; density and term variety boost.
+                let density = if duration_secs > 0 {
+                    abuse_count as f64 / (duration_secs as f64 / 60.0)
+                } else {
+                    abuse_count as f64
+                };
+                let term_variety = found_terms.len() as f64;
+                let priority_score = abuse_count as f64 * 10.0 + density * 2.0 + term_variety;
+
+                let priority_label = match priority_score as u64 {
+                    0..=14 => "low",
+                    15..=29 => "medium",
+                    30..=49 => "high",
+                    _ => "critical",
+                }
+                .to_string();
+
+                // Stable incident ID using a deterministic hash of session identity + anchor IDs.
+                let incident_id = {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut h = DefaultHasher::new();
+                    project.hash(&mut h);
+                    tool.hash(&mut h);
+                    session_id.hash(&mut h);
+                    hostname.hash(&mut h);
+                    for id in &anchor_ids {
+                        id.hash(&mut h);
+                    }
+                    format!("inc-{:016x}", h.finish())
+                };
+
+                AbuseIncident {
+                    incident_id,
+                    project,
+                    tool,
+                    session_id,
+                    hostname,
+                    first_seen,
+                    last_seen,
+                    duration_secs,
+                    abuse_count,
+                    terms: found_terms,
+                    anchor_ids,
+                    priority_score,
+                    priority_label,
+                    window_minutes: (window_secs / 60) as u32,
+                }
+            },
+        )
+        .collect();
+
+    // Sort by priority_score descending, then last_seen descending.
+    incidents.sort_by(|a, b| {
+        b.priority_score
+            .partial_cmp(&a.priority_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.last_seen.cmp(&a.last_seen))
+    });
+
+    let total_incidents = incidents.len();
+    let truncated = total_incidents > limit || candidate_window_truncated;
+    incidents.truncate(limit);
+
+    Ok(AiIncidentResult {
+        incidents,
+        total_incidents,
+        candidate_rows: raw_candidate_count.min(CANDIDATE_CAP),
+        candidate_cap: CANDIDATE_CAP,
+        candidate_window_truncated,
+        truncated,
+    })
+}
+
+pub fn investigate_ai_incidents(
+    pool: &DbPool,
+    params: &AiInvestigateParams,
+) -> Result<AiInvestigateResult> {
+    let limit = params.limit.unwrap_or(3).clamp(1, 10) as usize;
+    let corr_mins = i64::from(params.correlation_window_minutes.unwrap_or(5).clamp(1, 120));
+
+    // Reuse incident grouping to find the top incidents.
+    let incident_result = search_ai_incidents(
+        pool,
+        &AiIncidentParams {
+            ai_project: params.ai_project.clone(),
+            ai_tool: params.ai_tool.clone(),
+            from: params.from.clone(),
+            to: params.to.clone(),
+            limit: Some(limit as u32),
+            window_minutes: params.window_minutes,
+            terms: params.terms.clone(),
+        },
+    )?;
+    let total_incidents = incident_result.total_incidents;
+    let truncated = incident_result.truncated;
+
+    let conn = pool.get()?;
+    let mut evidence = Vec::with_capacity(incident_result.incidents.len());
+
+    for incident in incident_result.incidents {
+        const TRANSCRIPT_CAP: usize = 20;
+        const NEARBY_CAP: usize = 50;
+
+        // Fetch anchor log entries.
+        let anchors = if incident.anchor_ids.is_empty() {
+            Vec::new()
+        } else {
+            let placeholders: Vec<String> = (1..=incident.anchor_ids.len())
+                .map(|i| format!("?{i}"))
+                .collect();
+            let sql = format!(
+                "SELECT id, timestamp, hostname, facility, severity, app_name,
+                        process_id, message, received_at, source_ip,
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
+                 FROM logs WHERE id IN ({}) ORDER BY timestamp ASC",
+                placeholders.join(",")
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(
+                    rusqlite::params_from_iter(
+                        incident
+                            .anchor_ids
+                            .iter()
+                            .map(|id| rusqlite::types::Value::Integer(*id)),
+                    ),
+                    map_row,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+
+        // Transcript context: entries in the same session before first anchor and after last anchor.
+        let (transcript_before, transcript_before_truncated) = if let Some(first) = anchors.first()
+        {
+            let rows = {
+                let mut stmt = conn.prepare(
+                    "SELECT id, timestamp, hostname, facility, severity, app_name,
+                                process_id, message, received_at, source_ip,
+                                ai_tool, ai_project, ai_session_id, ai_transcript_path,
+                                metadata_json
+                         FROM logs
+                         WHERE ai_session_id = ?1 AND ai_project = ?2 AND ai_tool = ?3
+                           AND timestamp < ?4
+                         ORDER BY timestamp DESC
+                         LIMIT 21",
+                )?;
+                let rows = stmt
+                    .query_map(
+                        rusqlite::params![
+                            &incident.session_id,
+                            &incident.project,
+                            &incident.tool,
+                            &first.timestamp,
+                        ],
+                        map_row,
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows
+            };
+            let truncated = rows.len() > TRANSCRIPT_CAP;
+            let mut out = rows;
+            out.truncate(TRANSCRIPT_CAP);
+            out.reverse(); // chronological order
+            (out, truncated)
+        } else {
+            (Vec::new(), false)
+        };
+
+        let (transcript_after, transcript_after_truncated) = if let Some(last) = anchors.last() {
+            let rows = {
+                let mut stmt = conn.prepare(
+                    "SELECT id, timestamp, hostname, facility, severity, app_name,
+                            process_id, message, received_at, source_ip,
+                            ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
+                     FROM logs
+                     WHERE ai_session_id = ?1 AND ai_project = ?2 AND ai_tool = ?3
+                       AND timestamp > ?4
+                     ORDER BY timestamp ASC
+                     LIMIT 21",
+                )?;
+                let rows = stmt
+                    .query_map(
+                        rusqlite::params![
+                            &incident.session_id,
+                            &incident.project,
+                            &incident.tool,
+                            &last.timestamp,
+                        ],
+                        map_row,
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows
+            };
+            let truncated = rows.len() > TRANSCRIPT_CAP;
+            let mut out = rows;
+            out.truncate(TRANSCRIPT_CAP);
+            (out, truncated)
+        } else {
+            (Vec::new(), false)
+        };
+
+        // Nearby non-AI logs in the correlation window.
+        let (nearby_logs, nearby_logs_truncated) = {
+            // Window: corr_mins before first_seen through corr_mins after last_seen.
+            let win_from = chrono::DateTime::parse_from_rfc3339(&incident.first_seen)
+                .map(|dt| {
+                    use chrono::Duration;
+                    (dt.with_timezone(&chrono::Utc) - Duration::minutes(corr_mins))
+                        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                        .to_string()
+                })
+                .unwrap_or_else(|_| incident.first_seen.clone());
+            let win_to = chrono::DateTime::parse_from_rfc3339(&incident.last_seen)
+                .map(|dt| {
+                    use chrono::Duration;
+                    (dt.with_timezone(&chrono::Utc) + Duration::minutes(corr_mins))
+                        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                        .to_string()
+                })
+                .unwrap_or_else(|_| incident.last_seen.clone());
+
+            let mut stmt = conn.prepare(
+                "SELECT id, timestamp, hostname, facility, severity, app_name,
+                        process_id, message, received_at, source_ip,
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
+                 FROM logs
+                 WHERE timestamp >= ?1 AND timestamp <= ?2
+                   AND (ai_project IS NULL OR ai_project = '')
+                 ORDER BY timestamp ASC
+                 LIMIT 51",
+            )?;
+            let rows = stmt
+                .query_map(rusqlite::params![win_from, win_to], map_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let truncated = rows.len() > NEARBY_CAP;
+            let mut out = rows;
+            out.truncate(NEARBY_CAP);
+            (out, truncated)
+        };
+
+        // Nearby errors: subset of nearby_logs with severity warning+.
+        let error_sevs = ["emergency", "alert", "critical", "error", "warning"];
+        let nearby_errors: Vec<LogEntry> = nearby_logs
+            .iter()
+            .filter(|e| error_sevs.contains(&e.severity.as_str()))
+            .cloned()
+            .collect();
+
+        evidence.push(IncidentEvidence {
+            incident,
+            transcript_before,
+            transcript_before_truncated,
+            transcript_after,
+            transcript_after_truncated,
+            anchors,
+            nearby_logs,
+            nearby_logs_truncated,
+            nearby_errors,
+        });
+    }
+
+    Ok(AiInvestigateResult {
+        evidence,
+        total_incidents,
+        truncated,
+    })
 }
 
 fn normalized_abuse_terms(custom_terms: &[String]) -> Vec<String> {
