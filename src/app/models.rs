@@ -680,11 +680,19 @@ impl From<db::DbStats> for DbStats {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAppsRequest {
     pub hostname: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// Page size. Default 500, max 5000.
+    pub limit: Option<u32>,
+    /// Page offset. Default 0.
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListAppsResponse {
     pub apps: Vec<AppEntry>,
+    /// Total distinct app names matching the filter (across all pages).
+    pub total: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -708,9 +716,19 @@ impl From<db::AppEntry> for AppEntry {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListSourceIpsRequest {
+    /// Page size. Default 500, max 5000.
+    pub limit: Option<u32>,
+    /// Page offset. Default 0.
+    pub offset: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSourceIpsResponse {
     pub source_ips: Vec<SourceIpEntry>,
+    /// Total distinct source IPs in the database (across all pages).
+    pub total: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

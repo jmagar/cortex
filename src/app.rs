@@ -61,6 +61,7 @@ pub use models::{
     ListHostsResponse,
     ListSessionsRequest,
     ListSessionsResponse,
+    ListSourceIpsRequest,
     ListSourceIpsResponse,
     LogEntry,
     PatternsRequest,
