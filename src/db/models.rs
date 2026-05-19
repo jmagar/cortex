@@ -443,6 +443,50 @@ pub struct AiIncidentResult {
     pub truncated: bool,
 }
 
+// ---------------------------------------------------------------------------
+// AI investigate — evidence bundle layer (kmib.2)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiInvestigateParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// Max incidents to investigate. Default 3, clamp 1..=10.
+    pub limit: Option<u32>,
+    /// Incident grouping window minutes. Default 10, clamp 1..=120.
+    pub window_minutes: Option<u32>,
+    /// Correlation window minutes around incident. Default 5, clamp 1..=120.
+    pub correlation_window_minutes: Option<u32>,
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentEvidence {
+    pub incident: AbuseIncident,
+    /// Transcript entries before first anchor (same session), capped at 20.
+    pub transcript_before: Vec<LogEntry>,
+    pub transcript_before_truncated: bool,
+    /// Transcript entries after last anchor (same session), capped at 20.
+    pub transcript_after: Vec<LogEntry>,
+    pub transcript_after_truncated: bool,
+    /// The abuse anchor log entries.
+    pub anchors: Vec<LogEntry>,
+    /// Non-AI syslog/Docker logs in the correlation window, capped at 50.
+    pub nearby_logs: Vec<LogEntry>,
+    pub nearby_logs_truncated: bool,
+    /// Subset of nearby_logs with severity warning or above.
+    pub nearby_errors: Vec<LogEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiInvestigateResult {
+    pub evidence: Vec<IncidentEvidence>,
+    pub total_incidents: usize,
+    pub truncated: bool,
+}
+
 #[cfg(test)]
 #[path = "models_tests.rs"]
 mod tests;

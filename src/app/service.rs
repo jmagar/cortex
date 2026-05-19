@@ -8,19 +8,19 @@ use tokio::sync::Semaphore;
 use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
     AbuseSearchRequest, AbuseSearchResponse, AiCorrelateRequest, AiCorrelateResponse,
-    AiCorrelationAnchor, AiIncidentRequest, AiIncidentResponse, AiSessionEntry, AnomaliesRequest,
-    AnomaliesResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse,
-    ContextRequest, ContextResponse, CorrelateEventsRequest, CorrelateEventsResponse,
-    DbBackupResult, DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats,
-    DbVacuumResult, GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse,
-    IngestRateRequest, IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse,
-    ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse,
-    ListSessionsRequest, ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse,
-    LogEntry, PatternsRequest,
-    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
-    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
-    SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest,
-    UsageBlocksResponse,
+    AiCorrelationAnchor, AiIncidentRequest, AiIncidentResponse, AiInvestigateRequest,
+    AiInvestigateResponse, AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest,
+    ClockSkewResponse, CompareRequest, CompareResponse, ContextRequest, ContextResponse,
+    CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
+    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest,
+    GetErrorsResponse, GetLogRequest, GetLogResponse, IngestRateRequest, IngestRateResponse,
+    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
+    ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
+    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
+    SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
+    TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
+: add evidence bundles for abuse incidents (investigate_ai_incidents))
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
@@ -264,6 +264,36 @@ impl SyslogService {
             candidate_rows: result.candidate_rows,
             candidate_cap: result.candidate_cap,
             candidate_window_truncated: result.candidate_window_truncated,
+            truncated: result.truncated,
+        })
+    }
+
+    pub async fn investigate_ai_incidents(
+        &self,
+        req: AiInvestigateRequest,
+    ) -> ServiceResult<AiInvestigateResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let result = self
+            .run_db(move |pool| {
+                db::investigate_ai_incidents(
+                    pool,
+                    &db::AiInvestigateParams {
+                        ai_project: req.project,
+                        ai_tool: req.tool,
+                        from,
+                        to,
+                        limit: req.limit,
+                        window_minutes: req.window_minutes,
+                        correlation_window_minutes: req.correlation_window_minutes,
+                        terms: req.terms,
+                    },
+                )
+            })
+            .await?;
+        Ok(AiInvestigateResponse {
+            evidence: result.evidence.into_iter().map(Into::into).collect(),
+            total_incidents: result.total_incidents,
             truncated: result.truncated,
         })
     }

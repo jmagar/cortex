@@ -353,6 +353,55 @@ impl From<db::AbuseIncident> for AbuseIncident {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiInvestigateRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentEvidence {
+    pub incident: AbuseIncident,
+    pub transcript_before: Vec<LogEntry>,
+    pub transcript_before_truncated: bool,
+    pub transcript_after: Vec<LogEntry>,
+    pub transcript_after_truncated: bool,
+    pub anchors: Vec<LogEntry>,
+    pub nearby_logs: Vec<LogEntry>,
+    pub nearby_logs_truncated: bool,
+    pub nearby_errors: Vec<LogEntry>,
+}
+
+impl From<db::IncidentEvidence> for IncidentEvidence {
+    fn from(v: db::IncidentEvidence) -> Self {
+        Self {
+            incident: v.incident.into(),
+            transcript_before: v.transcript_before.into_iter().map(Into::into).collect(),
+            transcript_before_truncated: v.transcript_before_truncated,
+            transcript_after: v.transcript_after.into_iter().map(Into::into).collect(),
+            transcript_after_truncated: v.transcript_after_truncated,
+            anchors: v.anchors.into_iter().map(Into::into).collect(),
+            nearby_logs: v.nearby_logs.into_iter().map(Into::into).collect(),
+            nearby_logs_truncated: v.nearby_logs_truncated,
+            nearby_errors: v.nearby_errors.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiInvestigateResponse {
+    pub evidence: Vec<IncidentEvidence>,
+    pub total_incidents: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiCorrelateRequest {
     pub project: Option<String>,
