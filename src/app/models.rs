@@ -292,6 +292,67 @@ impl From<db::AiAbuseResult> for AbuseSearchResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiIncidentRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiIncidentResponse {
+    pub incidents: Vec<AbuseIncident>,
+    pub total_incidents: usize,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AbuseIncident {
+    pub incident_id: String,
+    pub project: String,
+    pub tool: String,
+    pub session_id: String,
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub duration_secs: i64,
+    pub abuse_count: usize,
+    pub terms: Vec<String>,
+    pub anchor_ids: Vec<i64>,
+    pub priority_score: f64,
+    pub priority_label: String,
+    pub window_minutes: u32,
+}
+
+impl From<db::AbuseIncident> for AbuseIncident {
+    fn from(v: db::AbuseIncident) -> Self {
+        Self {
+            incident_id: v.incident_id,
+            project: v.project,
+            tool: v.tool,
+            session_id: v.session_id,
+            hostname: v.hostname,
+            first_seen: v.first_seen,
+            last_seen: v.last_seen,
+            duration_secs: v.duration_secs,
+            abuse_count: v.abuse_count,
+            terms: v.terms,
+            anchor_ids: v.anchor_ids,
+            priority_score: v.priority_score,
+            priority_label: v.priority_label,
+            window_minutes: v.window_minutes,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiCorrelateRequest {
     pub project: Option<String>,

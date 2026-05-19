@@ -394,6 +394,55 @@ pub struct SearchParams {
     pub exclude_ai: bool,
 }
 
+// ---------------------------------------------------------------------------
+// Abuse incident grouping
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiIncidentParams {
+    pub ai_project: Option<String>,
+    pub ai_tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// Max incidents to return. Default 20, clamp 1..=100.
+    pub limit: Option<u32>,
+    /// Grouping window in minutes. Default 10, clamp 1..=120.
+    pub window_minutes: Option<u32>,
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AbuseIncident {
+    /// Stable synthetic ID: sha256 of "project|tool|session|host|first_anchor_id".
+    pub incident_id: String,
+    pub project: String,
+    pub tool: String,
+    pub session_id: String,
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub duration_secs: i64,
+    pub abuse_count: usize,
+    /// Distinct normalized abuse terms found, sorted.
+    pub terms: Vec<String>,
+    /// Sorted anchor log IDs.
+    pub anchor_ids: Vec<i64>,
+    pub priority_score: f64,
+    /// "low" | "medium" | "high" | "critical"
+    pub priority_label: String,
+    pub window_minutes: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiIncidentResult {
+    pub incidents: Vec<AbuseIncident>,
+    pub total_incidents: usize,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
+    pub truncated: bool,
+}
+
 #[cfg(test)]
 #[path = "models_tests.rs"]
 mod tests;

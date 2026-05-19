@@ -8,6 +8,7 @@ mod time;
 pub use correlate::severity_at_or_above;
 pub use error::{ServiceError, ServiceResult};
 pub use models::{
+    AbuseIncident,
     AbuseMatch,
     AbuseSearchRequest,
     AbuseSearchResponse,
@@ -18,6 +19,8 @@ pub use models::{
     AiCorrelateRequest,
     AiCorrelateResponse,
     AiCorrelationAnchor,
+    AiIncidentRequest,
+    AiIncidentResponse,
     AiParseErrorsRequest,
     AiProjectEntry,
     AiPruneCheckpointsRequest,

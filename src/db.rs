@@ -26,18 +26,19 @@ pub use maintenance::{
 };
 pub(crate) use maintenance::{db_pragma_i64, db_pragma_string};
 pub use models::{
-    AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiProjectContext,
-    AiProjectContextParams, AiProjectInventoryEntry, AiRelatedLogsForAnchor, AiRelatedLogsParams,
-    AiRelatedWindow, AiSessionEntry, AiToolInventoryEntry, AiUsageBlock, AiUsageBlocksParams,
-    AiUsageBlocksResult, DbStats, DockerCheckpoint, ErrorSummaryEntry, HostEntry,
-    ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams,
-    ListAiToolsResult, LogBatchEntry, LogEntry, SearchAiSessionsParams, SearchAiSessionsResult,
-    SearchParams, SearchedAiSessionEntry,
+    AbuseIncident, AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams,
+    AiIncidentParams, AiIncidentResult, AiProjectContext, AiProjectContextParams,
+    AiProjectInventoryEntry, AiRelatedLogsForAnchor, AiRelatedLogsParams, AiRelatedWindow,
+    AiSessionEntry, AiToolInventoryEntry, AiUsageBlock, AiUsageBlocksParams, AiUsageBlocksResult,
+    DbStats, DockerCheckpoint, ErrorSummaryEntry, HostEntry, ListAiProjectsParams,
+    ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogBatchEntry,
+    LogEntry, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
 };
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
 pub use pool::{init_pool, DbPool};
 pub use queries::{
     get_error_summary, get_stats, list_ai_projects, list_ai_sessions, list_ai_tools, list_hosts,
-    search_ai_abuse, search_ai_anchors, search_ai_related_logs, search_ai_sessions, search_logs,
-    severity_to_num, tail_logs, validate_fts_query, SEVERITY_LEVELS,
+    search_ai_abuse, search_ai_anchors, search_ai_incidents, search_ai_related_logs,
+    search_ai_sessions, search_logs, severity_to_num, tail_logs, validate_fts_query,
+    SEVERITY_LEVELS,
 };
