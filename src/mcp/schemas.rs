@@ -116,7 +116,11 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=apps: max distinct app names, default 500, max 5000. For action=source_ips: max distinct source IPs, default 500, max 5000; response includes truncated flag."
+                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to paginate; response includes total count of all distinct source IPs."
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "For action=apps or source_ips: number of items to skip for pagination. Default 0. Use with limit to page through all results: if total > offset + limit, increment offset by limit to fetch the next page."
                 },
                 "n": {
                     "type": "integer",

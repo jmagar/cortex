@@ -21,39 +21,42 @@ fn tool_definitions_include_expected_public_tools() {
 }
 
 #[test]
-fn schema_source_ips_exposes_limit_with_truncation_doc() {
+fn schema_source_ips_exposes_pagination() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];
     let limit_desc = props["limit"]["description"].as_str().unwrap();
+    let offset_desc = props["offset"]["description"].as_str().unwrap();
     assert!(
         limit_desc.contains("source_ips"),
-        "limit description must document source_ips default and truncated flag"
+        "limit description must document source_ips page size"
     );
     assert!(
-        limit_desc.contains("truncated"),
-        "limit description must mention truncated flag for source_ips"
+        limit_desc.contains("total"),
+        "limit description must mention total count in source_ips response"
+    );
+    assert!(
+        offset_desc.contains("source_ips"),
+        "offset description must mention source_ips"
+    );
+    assert!(
+        offset_desc.contains("paginate") || offset_desc.contains("page"),
+        "offset description must explain pagination usage"
     );
 }
 
 #[test]
-fn schema_apps_exposes_from_to_limit() {
+fn schema_apps_exposes_pagination_and_total() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];
     let from_desc = props["from"]["description"].as_str().unwrap();
     let to_desc = props["to"]["description"].as_str().unwrap();
     let limit_desc = props["limit"]["description"].as_str().unwrap();
-    assert!(
-        from_desc.contains("apps"),
-        "from description must include apps action"
-    );
-    assert!(
-        to_desc.contains("apps"),
-        "to description must include apps action"
-    );
-    assert!(
-        limit_desc.contains("apps"),
-        "limit description must document apps default and max"
-    );
+    let offset_desc = props["offset"]["description"].as_str().unwrap();
+    assert!(from_desc.contains("apps"), "from description must include apps action");
+    assert!(to_desc.contains("apps"), "to description must include apps action");
+    assert!(limit_desc.contains("apps"), "limit description must document apps page size");
+    assert!(limit_desc.contains("total"), "limit description must mention total count in apps response");
+    assert!(offset_desc.contains("apps"), "offset description must mention apps");
 }
 
 #[test]

@@ -134,9 +134,14 @@ async fn tool_list_apps(state: &AppState, args: Value) -> anyhow::Result<Value> 
             from: string_arg(&args, "from"),
             to: string_arg(&args, "to"),
             limit: u32_arg(&args, "limit")?,
+            offset: u32_arg(&args, "offset")?,
         })
         .await?;
-    tracing::debug!(app_count = response.apps.len(), "list_apps completed");
+    tracing::debug!(
+        app_count = response.apps.len(),
+        total = response.total,
+        "list_apps completed"
+    );
     Ok(serde_json::to_value(response)?)
 }
 
@@ -284,11 +289,12 @@ async fn tool_list_source_ips(state: &AppState, args: Value) -> anyhow::Result<V
         .service
         .list_source_ips(ListSourceIpsRequest {
             limit: u32_arg(&args, "limit")?,
+            offset: u32_arg(&args, "offset")?,
         })
         .await?;
     tracing::debug!(
         source_ip_count = response.source_ips.len(),
-        truncated = response.truncated,
+        total = response.total,
         "list_source_ips completed"
     );
     Ok(serde_json::to_value(response)?)

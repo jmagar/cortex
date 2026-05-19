@@ -35,45 +35,64 @@ pub struct ListAppsParams<'a> {
     pub hostname: Option<&'a str>,
     pub from: Option<&'a str>,
     pub to: Option<&'a str>,
-    /// Default 500, max 5000.
+    /// Page size. Default 500, max 5000.
     pub limit: usize,
+    /// Page offset (number of distinct apps to skip). Default 0.
+    pub offset: usize,
 }
 
-pub fn list_apps(pool: &DbPool, params: &ListAppsParams<'_>) -> Result<Vec<AppEntry>> {
+pub struct ListAppsResult {
+    pub apps: Vec<AppEntry>,
+    /// Total distinct app names matching the filter (across all pages).
+    pub total: usize,
+}
+
+pub fn list_apps(pool: &DbPool, params: &ListAppsParams<'_>) -> Result<ListAppsResult> {
     let conn = pool.get()?;
     let limit = params.limit.clamp(1, 5_000);
+    let offset = params.offset;
 
+    // Build the shared WHERE clause and bindings once; reuse for COUNT and data queries.
     // first_seen / last_seen come from `received_at` (server clock) so they match
     // how the `hosts` table is updated and aren't skewed by a misconfigured device clock.
-    let mut sql = String::from(
-        "SELECT app_name, COUNT(*), COUNT(DISTINCT hostname),
-                MIN(received_at), MAX(received_at)
-         FROM logs
-         WHERE app_name IS NOT NULL AND app_name != ''",
-    );
+    let mut where_clause = String::from("app_name IS NOT NULL AND app_name != ''");
     let mut bindings: Vec<rusqlite::types::Value> = vec![];
     let mut idx = 1usize;
 
     if let Some(h) = params.hostname {
-        sql.push_str(&format!(" AND hostname = ?{idx}"));
+        where_clause.push_str(&format!(" AND hostname = ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(h.to_owned()));
         idx += 1;
     }
     if let Some(f) = params.from {
-        sql.push_str(&format!(" AND received_at >= ?{idx}"));
+        where_clause.push_str(&format!(" AND received_at >= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(f.to_owned()));
         idx += 1;
     }
     if let Some(t) = params.to {
-        sql.push_str(&format!(" AND received_at <= ?{idx}"));
+        where_clause.push_str(&format!(" AND received_at <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(t.to_owned()));
+        idx += 1;
     }
-    sql.push_str(&format!(
-        " GROUP BY app_name ORDER BY MAX(received_at) DESC LIMIT {limit}"
-    ));
+    let _ = idx;
 
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
+    let total = conn.query_row(
+        &format!("SELECT COUNT(DISTINCT app_name) FROM logs WHERE {where_clause}"),
+        rusqlite::params_from_iter(bindings.iter()),
+        |row| row.get::<_, i64>(0),
+    )? as usize;
+
+    let data_sql = format!(
+        "SELECT app_name, COUNT(*), COUNT(DISTINCT hostname),
+                MIN(received_at), MAX(received_at)
+         FROM logs
+         WHERE {where_clause}
+         GROUP BY app_name
+         ORDER BY MAX(received_at) DESC
+         LIMIT {limit} OFFSET {offset}"
+    );
+    let mut stmt = conn.prepare(&data_sql)?;
+    let apps = stmt
         .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
             Ok(AppEntry {
                 app_name: row.get(0)?,
@@ -84,7 +103,8 @@ pub fn list_apps(pool: &DbPool, params: &ListAppsParams<'_>) -> Result<Vec<AppEn
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
+
+    Ok(ListAppsResult { apps, total })
 }
 
 // -----------------------------------------------------------------------------
@@ -110,27 +130,33 @@ pub struct SourceIpEntry {
 
 pub struct ListSourceIpsResult {
     pub source_ips: Vec<SourceIpEntry>,
-    /// True when the result was capped at `limit`.
-    pub truncated: bool,
+    /// Total distinct source IPs in the database (across all pages).
+    pub total: usize,
 }
 
 pub struct ListSourceIpsParams {
-    /// Default 500, max 5000. Applied after aggregation; limits distinct IPs returned.
+    /// Page size. Default 500, max 5000.
     pub limit: usize,
+    /// Page offset (number of distinct IPs to skip). Default 0.
+    pub offset: usize,
 }
 
 pub fn list_source_ips(pool: &DbPool, params: &ListSourceIpsParams) -> Result<ListSourceIpsResult> {
     let limit = params.limit.clamp(1, 5_000);
-    // Fetch one extra distinct IP to detect truncation without a separate COUNT query.
-    // The LIMIT must be applied at the IP level (not the (ip,hostname) tuple level) so
-    // the fetch-N+1 trick operates on the same unit as the truncation check.
-    let fetch = limit + 1;
+    let offset = params.offset;
     let conn = pool.get()?;
+
+    let total = conn.query_row(
+        "SELECT COUNT(DISTINCT source_ip) FROM logs WHERE source_ip != ''",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? as usize;
+
     // first_seen / last_seen come from `received_at` (server clock): for sender
     // identity / spoof-detection use cases, the network arrival time is the
     // verified value, while the message `timestamp` is whatever the sender claimed.
     //
-    // CTE top_ips limits to {fetch} distinct source_ips ordered by total volume.
+    // CTE top_ips selects the page of distinct source_ips by total volume.
     // Joining back to per-(ip,hostname) rows preserves the hostname breakdown.
     let mut stmt = conn.prepare(&format!(
         "WITH top_ips AS (
@@ -139,7 +165,7 @@ pub fn list_source_ips(pool: &DbPool, params: &ListSourceIpsParams) -> Result<Li
             WHERE source_ip != ''
             GROUP BY source_ip
             ORDER BY COUNT(*) DESC
-            LIMIT {fetch}
+            LIMIT {limit} OFFSET {offset}
          )
          SELECT l.source_ip, l.hostname, COUNT(*), MIN(l.received_at), MAX(l.received_at)
          FROM logs l
@@ -186,12 +212,9 @@ pub fn list_source_ips(pool: &DbPool, params: &ListSourceIpsParams) -> Result<Li
 
     let mut out: Vec<SourceIpEntry> = by_ip.into_values().collect();
     out.sort_by_key(|entry| Reverse(entry.log_count));
-    // out.len() == top_ips result count (at most fetch distinct IPs)
-    let truncated = out.len() > limit;
-    out.truncate(limit);
     Ok(ListSourceIpsResult {
         source_ips: out,
-        truncated,
+        total,
     })
 }
 

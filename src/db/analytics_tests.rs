@@ -92,11 +92,11 @@ fn list_apps_returns_distinct_apps_with_counts() {
             hostname: None,
             from: None,
             to: None,
-            limit: 500,
-        },
+            limit: 500, offset: 0, },
     )
     .unwrap();
-    let nginx = apps.iter().find(|a| a.app_name == "nginx").unwrap();
+    assert_eq!(apps.total, 2);
+    let nginx = apps.apps.iter().find(|a| a.app_name == "nginx").unwrap();
     assert_eq!(nginx.log_count, 2);
     assert_eq!(nginx.host_count, 1);
 
@@ -107,12 +107,11 @@ fn list_apps_returns_distinct_apps_with_counts() {
             hostname: Some("h2"),
             from: None,
             to: None,
-            limit: 500,
-        },
+            limit: 500, offset: 0, },
     )
     .unwrap();
-    assert_eq!(only_h2.len(), 1);
-    assert_eq!(only_h2[0].app_name, "sshd");
+    assert_eq!(only_h2.apps.len(), 1);
+    assert_eq!(only_h2.apps[0].app_name, "sshd");
 }
 
 #[test]
@@ -120,7 +119,13 @@ fn list_apps_to_filter_excludes_future_entries() {
     let (pool, _d) = test_pool();
     insert_logs_batch(
         &pool,
-        &[entry("2026-01-01T00:00:01Z", "h1", "info", Some("nginx"), "msg")],
+        &[entry(
+            "2026-01-01T00:00:01Z",
+            "h1",
+            "info",
+            Some("nginx"),
+            "msg",
+        )],
     )
     .unwrap();
 
@@ -132,11 +137,13 @@ fn list_apps_to_filter_excludes_future_entries() {
             hostname: None,
             from: None,
             to: Some("2000-01-01T00:00:00Z"),
-            limit: 500,
-        },
+            limit: 500, offset: 0, },
     )
     .unwrap();
-    assert!(none.is_empty(), "to=2000 should exclude all entries inserted now");
+    assert!(
+        none.apps.is_empty(),
+        "to=2000 should exclude all entries inserted now"
+    );
 
     let all = list_apps(
         &pool,
@@ -144,11 +151,10 @@ fn list_apps_to_filter_excludes_future_entries() {
             hostname: None,
             from: None,
             to: Some("9999-01-01T00:00:00Z"),
-            limit: 500,
-        },
+            limit: 500, offset: 0, },
     )
     .unwrap();
-    assert!(!all.is_empty(), "to=9999 should include all entries");
+    assert!(!all.apps.is_empty(), "to=9999 should include all entries");
 }
 
 #[test]
@@ -158,16 +164,37 @@ fn list_source_ips_truncated_when_over_limit() {
     insert_logs_batch(
         &pool,
         &[
-            entry_with_source_ip("2026-01-01T00:00:01Z", "h1", "info", None, "a", "10.0.0.1:514"),
-            entry_with_source_ip("2026-01-01T00:00:02Z", "h1", "info", None, "b", "10.0.0.2:514"),
-            entry_with_source_ip("2026-01-01T00:00:03Z", "h1", "info", None, "c", "10.0.0.3:514"),
+            entry_with_source_ip(
+                "2026-01-01T00:00:01Z",
+                "h1",
+                "info",
+                None,
+                "a",
+                "10.0.0.1:514",
+            ),
+            entry_with_source_ip(
+                "2026-01-01T00:00:02Z",
+                "h1",
+                "info",
+                None,
+                "b",
+                "10.0.0.2:514",
+            ),
+            entry_with_source_ip(
+                "2026-01-01T00:00:03Z",
+                "h1",
+                "info",
+                None,
+                "c",
+                "10.0.0.3:514",
+            ),
         ],
     )
     .unwrap();
 
-    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 2 }).unwrap();
-    assert!(result.truncated, "expected truncated=true when 3 IPs exceed limit=2");
-    assert_eq!(result.source_ips.len(), 2);
+    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 2, offset: 0 }).unwrap();
+    assert_eq!(result.total, 3, "total should reflect all 3 distinct IPs");
+    assert_eq!(result.source_ips.len(), 2, "page should contain only limit=2 IPs");
 }
 
 #[test]
@@ -197,10 +224,13 @@ fn list_source_ips_chatty_ip_does_not_suppress_others() {
     ));
     insert_logs_batch(&pool, &entries).unwrap();
 
-    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 500 }).unwrap();
-    assert!(!result.truncated);
+    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 500, offset: 0 }).unwrap();
+    assert_eq!(result.total, 2);
     assert!(
-        result.source_ips.iter().any(|e| e.source_ip == "10.0.0.2:514"),
+        result
+            .source_ips
+            .iter()
+            .any(|e| e.source_ip == "10.0.0.2:514"),
         "ip2 must appear even though ip1 has many hostnames"
     );
 }
@@ -580,8 +610,8 @@ fn list_source_ips_aggregates_hostnames() {
         ],
     )
     .unwrap();
-    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 500 }).unwrap();
-    assert!(!result.truncated);
+    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 500, offset: 0 }).unwrap();
+    assert_eq!(result.total, 2);
     let first = result
         .source_ips
         .iter()
