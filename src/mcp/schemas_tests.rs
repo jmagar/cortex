@@ -52,11 +52,26 @@ fn schema_apps_exposes_pagination_and_total() {
     let to_desc = props["to"]["description"].as_str().unwrap();
     let limit_desc = props["limit"]["description"].as_str().unwrap();
     let offset_desc = props["offset"]["description"].as_str().unwrap();
-    assert!(from_desc.contains("apps"), "from description must include apps action");
-    assert!(to_desc.contains("apps"), "to description must include apps action");
-    assert!(limit_desc.contains("apps"), "limit description must document apps page size");
-    assert!(limit_desc.contains("total"), "limit description must mention total count in apps response");
-    assert!(offset_desc.contains("apps"), "offset description must mention apps");
+    assert!(
+        from_desc.contains("apps"),
+        "from description must include apps action"
+    );
+    assert!(
+        to_desc.contains("apps"),
+        "to description must include apps action"
+    );
+    assert!(
+        limit_desc.contains("apps"),
+        "limit description must document apps page size"
+    );
+    assert!(
+        limit_desc.contains("total"),
+        "limit description must mention total count in apps response"
+    );
+    assert!(
+        offset_desc.contains("apps"),
+        "offset description must mention apps"
+    );
 }
 
 #[test]

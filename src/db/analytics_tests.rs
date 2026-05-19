@@ -92,7 +92,9 @@ fn list_apps_returns_distinct_apps_with_counts() {
             hostname: None,
             from: None,
             to: None,
-            limit: 500, offset: 0, },
+            limit: 500,
+            offset: 0,
+        },
     )
     .unwrap();
     assert_eq!(apps.total, 2);
@@ -107,7 +109,9 @@ fn list_apps_returns_distinct_apps_with_counts() {
             hostname: Some("h2"),
             from: None,
             to: None,
-            limit: 500, offset: 0, },
+            limit: 500,
+            offset: 0,
+        },
     )
     .unwrap();
     assert_eq!(only_h2.apps.len(), 1);
@@ -137,7 +141,9 @@ fn list_apps_to_filter_excludes_future_entries() {
             hostname: None,
             from: None,
             to: Some("2000-01-01T00:00:00Z"),
-            limit: 500, offset: 0, },
+            limit: 500,
+            offset: 0,
+        },
     )
     .unwrap();
     assert!(
@@ -151,7 +157,9 @@ fn list_apps_to_filter_excludes_future_entries() {
             hostname: None,
             from: None,
             to: Some("9999-01-01T00:00:00Z"),
-            limit: 500, offset: 0, },
+            limit: 500,
+            offset: 0,
+        },
     )
     .unwrap();
     assert!(!all.apps.is_empty(), "to=9999 should include all entries");
@@ -192,9 +200,20 @@ fn list_source_ips_truncated_when_over_limit() {
     )
     .unwrap();
 
-    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 2, offset: 0 }).unwrap();
+    let result = list_source_ips(
+        &pool,
+        &ListSourceIpsParams {
+            limit: 2,
+            offset: 0,
+        },
+    )
+    .unwrap();
     assert_eq!(result.total, 3, "total should reflect all 3 distinct IPs");
-    assert_eq!(result.source_ips.len(), 2, "page should contain only limit=2 IPs");
+    assert_eq!(
+        result.source_ips.len(),
+        2,
+        "page should contain only limit=2 IPs"
+    );
 }
 
 #[test]
@@ -224,7 +243,14 @@ fn list_source_ips_chatty_ip_does_not_suppress_others() {
     ));
     insert_logs_batch(&pool, &entries).unwrap();
 
-    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 500, offset: 0 }).unwrap();
+    let result = list_source_ips(
+        &pool,
+        &ListSourceIpsParams {
+            limit: 500,
+            offset: 0,
+        },
+    )
+    .unwrap();
     assert_eq!(result.total, 2);
     assert!(
         result
@@ -610,7 +636,14 @@ fn list_source_ips_aggregates_hostnames() {
         ],
     )
     .unwrap();
-    let result = list_source_ips(&pool, &ListSourceIpsParams { limit: 500, offset: 0 }).unwrap();
+    let result = list_source_ips(
+        &pool,
+        &ListSourceIpsParams {
+            limit: 500,
+            offset: 0,
+        },
+    )
+    .unwrap();
     assert_eq!(result.total, 2);
     let first = result
         .source_ips
