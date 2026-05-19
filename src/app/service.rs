@@ -281,7 +281,7 @@ impl SyslogService {
 
                 let mut anchor_entries = Vec::with_capacity(anchors.len());
                 let mut windows = Vec::with_capacity(anchors.len());
-                for (anchor_index, anchor) in anchors.iter().enumerate() {
+                for (anchor_index, anchor) in anchors.into_iter().enumerate() {
                     let ref_dt = parse_required_timestamp(&anchor.timestamp, "anchor.timestamp")
                         .map_err(anyhow::Error::from)?;
                     let window_from = rfc3339_z(ref_dt - delta);
@@ -291,7 +291,7 @@ impl SyslogService {
                         window_from: window_from.clone(),
                         window_to: window_to.clone(),
                     });
-                    anchor_entries.push((anchor.clone(), window_from, window_to));
+                    anchor_entries.push((anchor, window_from, window_to));
                 }
 
                 let related_params = db::AiRelatedLogsParams {
