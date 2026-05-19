@@ -545,6 +545,16 @@ phase_tools() {
     assert_jq "syslog abuse — custom detector finds seeded fixture" "${abuse_result}" '.matches | length >= 1' "true"
   fi
 
+  local abuse_incidents_result
+  abuse_incidents_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"abuse_incidents","project":$project,"limit":5}')")" || abuse_incidents_result=""
+  assert_jq "syslog abuse_incidents — incidents field is array" "${abuse_incidents_result}" '.incidents | type' "array"
+  assert_jq "syslog abuse_incidents — total_incidents present" "${abuse_incidents_result}" '.total_incidents != null'
+
+  local abuse_investigate_result
+  abuse_investigate_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"abuse_investigate","project":$project,"limit":1}')")" || abuse_investigate_result=""
+  assert_jq "syslog abuse_investigate — evidence field is array" "${abuse_investigate_result}" '.evidence | type' "array"
+  assert_jq "syslog abuse_investigate — total_incidents present" "${abuse_investigate_result}" '.total_incidents != null'
+
   local ai_correlate_result
   ai_correlate_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"ai_correlate","project":$project,"limit":2,"events_per_anchor":3}')")" || ai_correlate_result=""
   assert_jq "syslog ai_correlate — anchors field is array" "${ai_correlate_result}" '.anchors | type' "array"

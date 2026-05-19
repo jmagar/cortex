@@ -10,6 +10,8 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
     "sessions",
     "search_sessions",
     "abuse",
+    "abuse_incidents",
+    "abuse_investigate",
     "ai_correlate",
     "usage_blocks",
     "project_context",
@@ -42,7 +44,7 @@ pub(super) const SYSLOG_ACTIONS: &[&str] = &[
 pub(super) fn tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "syslog",
-        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, syslog compose_status, syslog compose_doctor, syslog unaddressed_errors, syslog ack_error, syslog unack_error, syslog notifications_recent, syslog notifications_test, and syslog help.",
+        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog search_sessions, syslog abuse, syslog abuse_incidents, syslog abuse_investigate, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, syslog compose_status, syslog compose_doctor, syslog unaddressed_errors, syslog ack_error, syslog unack_error, syslog notifications_recent, syslog notifications_test, and syslog help.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -108,15 +110,15 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "from": {
                     "type": "string",
-                    "description": "For action=search, sessions, search_sessions, abuse, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, or apps: start of time range as ISO 8601/RFC3339. Strongly recommended for timeline and patterns — omitting from/to causes a full-history scan."
+                    "description": "For action=search, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, or apps: start of time range as ISO 8601/RFC3339. Strongly recommended for timeline and patterns — omitting from/to causes a full-history scan."
                 },
                 "to": {
                     "type": "string",
-                    "description": "For action=search, sessions, search_sessions, abuse, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, or apps: end of time range as ISO 8601/RFC3339. Strongly recommended for timeline and patterns — omitting from/to causes a full-history scan."
+                    "description": "For action=search, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, or apps: end of time range as ISO 8601/RFC3339. Strongly recommended for timeline and patterns — omitting from/to causes a full-history scan."
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to paginate; response includes total count of all distinct source IPs."
+                    "description": "For action=search: max results, default 100, max 1000. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to paginate; response includes total count of all distinct source IPs."
                 },
                 "offset": {
                     "type": "integer",
@@ -132,7 +134,11 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "window_minutes": {
                     "type": "integer",
-                    "description": "For action=correlate: minutes before and after reference_time to search, default 5, max 60. For action=ai_correlate: minutes before and after each AI anchor, default 5, max 120."
+                    "description": "For action=correlate: minutes before and after reference_time to search, default 5, max 60. For action=ai_correlate: minutes before and after each AI anchor, default 5, max 120. For action=abuse_incidents or abuse_investigate: incident grouping window, default 10, max 120."
+                },
+                "correlation_window_minutes": {
+                    "type": "integer",
+                    "description": "For action=abuse_investigate: minutes before first and after last anchor for nearby non-AI log correlation, default 5, max 120."
                 },
                 "group_by": {
                     "type": "string",

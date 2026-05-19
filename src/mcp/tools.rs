@@ -2,12 +2,12 @@ use lab_auth::AuthContext;
 use serde_json::{json, Value};
 
 use crate::app::{
-    AbuseSearchRequest, AiCorrelateRequest, AnomaliesRequest, ClockSkewRequest, CompareRequest,
-    ContextRequest, CorrelateEventsRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSourceIpsRequest, PatternsRequest, ProjectContextRequest, SearchLogsRequest,
-    SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
-    UsageBlocksRequest,
+    AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
+    AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
+    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, PatternsRequest,
+    ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
+    TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
 use super::schemas::SYSLOG_ACTIONS;
@@ -45,6 +45,8 @@ async fn tool_syslog(
         "sessions" => tool_list_sessions(state, args).await,
         "search_sessions" => tool_search_sessions(state, args).await,
         "abuse" => tool_search_abuse(state, args).await,
+        "abuse_incidents" => tool_abuse_incidents(state, args).await,
+        "abuse_investigate" => tool_abuse_investigate(state, args).await,
         "ai_correlate" => tool_ai_correlate(state, args).await,
         "usage_blocks" => tool_usage_blocks(state, args).await,
         "project_context" => tool_project_context(state, args).await,
@@ -207,6 +209,73 @@ async fn tool_search_abuse(state: &AppState, args: Value) -> anyhow::Result<Valu
             terms,
         })
         .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_abuse_incidents(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let terms = args
+        .get("terms")
+        .map(|v| {
+            if let Some(arr) = v.as_array() {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            } else {
+                v.as_str().map(|s| vec![s.to_string()]).unwrap_or_default()
+            }
+        })
+        .unwrap_or_default();
+    let response = state
+        .service
+        .list_ai_incidents(AiIncidentRequest {
+            project: string_arg(&args, "project"),
+            tool: string_arg(&args, "tool"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
+            window_minutes: u32_arg(&args, "window_minutes")?,
+            terms,
+        })
+        .await?;
+    tracing::debug!(
+        incident_count = response.incidents.len(),
+        total = response.total_incidents,
+        "abuse_incidents completed"
+    );
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_abuse_investigate(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let terms = args
+        .get("terms")
+        .map(|v| {
+            if let Some(arr) = v.as_array() {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            } else {
+                v.as_str().map(|s| vec![s.to_string()]).unwrap_or_default()
+            }
+        })
+        .unwrap_or_default();
+    let response = state
+        .service
+        .investigate_ai_incidents(AiInvestigateRequest {
+            project: string_arg(&args, "project"),
+            tool: string_arg(&args, "tool"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
+            window_minutes: u32_arg(&args, "window_minutes")?,
+            correlation_window_minutes: u32_arg(&args, "correlation_window_minutes")?,
+            terms,
+        })
+        .await?;
+    tracing::debug!(
+        evidence_count = response.evidence.len(),
+        total_incidents = response.total_incidents,
+        "abuse_investigate completed"
+    );
     Ok(serde_json::to_value(response)?)
 }
 
@@ -832,6 +901,33 @@ Detects abuse in AI transcript rows and returns each hit with surrounding rows f
 - `limit` (integer, optional) — max matches (default 20, max 100)
 - `before`, `after` (integer, optional) — same-session context rows around each hit (default 2, max 20)
 - `terms` (array of strings, optional) — custom detector terms; replaces the built-in list
+
+---
+
+## syslog abuse_incidents
+Groups AI transcript abuse hits into scored incident candidates. Returns incidents ordered by priority score (abuse_count * 10 + density * 2 + term_variety) with priority labels: low / medium / high / critical. Response includes total_incidents, candidate_rows, and truncated metadata.
+
+**Parameters:**
+- `project` (string, optional) — exact project path filter
+- `tool` (string, optional) — AI tool filter
+- `from`, `to` (string, optional) — time range (ISO 8601)
+- `limit` (integer, optional) — max incidents (default 20, max 100)
+- `window_minutes` (integer, optional) — grouping window (default 10, max 120)
+- `terms` (array of strings, optional) — custom detector terms
+
+---
+
+## syslog abuse_investigate
+Expands top abuse incidents into deterministic evidence bundles. Each bundle includes transcript context before/after the incident, the abuse anchor entries, and nearby non-AI syslog/Docker logs.
+
+**Parameters:**
+- `project` (string, optional) — exact project path filter
+- `tool` (string, optional) — AI tool filter
+- `from`, `to` (string, optional) — time range (ISO 8601)
+- `limit` (integer, optional) — max incidents to expand (default 3, max 10)
+- `window_minutes` (integer, optional) — grouping window (default 10, max 120)
+- `correlation_window_minutes` (integer, optional) — minutes before/after incident for nearby log correlation (default 5, max 120)
+- `terms` (array of strings, optional) — custom detector terms
 
 ---
 
