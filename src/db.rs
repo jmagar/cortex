@@ -13,7 +13,8 @@ pub use analytics::{
     anomalies, clock_skew, context_around, fetch_log_by_id, get_ai_project_context,
     get_ai_usage_blocks, ingest_rate, ingest_rate_by_host, list_apps, list_source_ips, patterns,
     silent_hosts, summarize_range, timeline, AnomalyEntry, AppEntry, Bucket, ClockSkewEntry,
-    ContextRef, IngestRateBuckets, IngestRatePerHost, LogEntryWithRaw, PatternEntry, RangeSummary,
+    ContextRef, IngestRateBuckets, IngestRatePerHost, ListAppsParams, ListAppsResult,
+    ListSourceIpsParams, ListSourceIpsResult, LogEntryWithRaw, PatternEntry, RangeSummary,
     SilentHostEntry, SourceIpEntry, SourceIpHostBreakdown, TimelineGroupBy, TimelinePoint,
 };
 pub use ingest::insert_logs_batch;

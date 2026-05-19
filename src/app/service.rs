@@ -15,10 +15,11 @@ use super::models::{
     GetErrorsResponse, GetLogRequest, GetLogResponse, IngestRateRequest, IngestRateResponse,
     ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
     ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
-    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
-    TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, PatternsRequest,
+    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
+    SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest,
+    UsageBlocksResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
@@ -698,18 +699,46 @@ impl SyslogService {
     }
 
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {
-        let apps = self
-            .run_db(move |pool| db::list_apps(pool, req.hostname.as_deref()))
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let result = self
+            .run_db(move |pool| {
+                db::list_apps(
+                    pool,
+                    &db::ListAppsParams {
+                        hostname: req.hostname.as_deref(),
+                        from: from.as_deref(),
+                        to: to.as_deref(),
+                        limit: req.limit.unwrap_or(500) as usize,
+                        offset: req.offset.unwrap_or(0) as usize,
+                    },
+                )
+            })
             .await?;
         Ok(ListAppsResponse {
-            apps: apps.into_iter().map(Into::into).collect(),
+            apps: result.apps.into_iter().map(Into::into).collect(),
+            total: result.total,
         })
     }
 
-    pub async fn list_source_ips(&self) -> ServiceResult<ListSourceIpsResponse> {
-        let source_ips = self.run_db(db::list_source_ips).await?;
+    pub async fn list_source_ips(
+        &self,
+        req: ListSourceIpsRequest,
+    ) -> ServiceResult<ListSourceIpsResponse> {
+        let result = self
+            .run_db(move |pool| {
+                db::list_source_ips(
+                    pool,
+                    &db::ListSourceIpsParams {
+                        limit: req.limit.unwrap_or(500) as usize,
+                        offset: req.offset.unwrap_or(0) as usize,
+                    },
+                )
+            })
+            .await?;
         Ok(ListSourceIpsResponse {
-            source_ips: source_ips.into_iter().map(Into::into).collect(),
+            source_ips: result.source_ips.into_iter().map(Into::into).collect(),
+            total: result.total,
         })
     }
 
