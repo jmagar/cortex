@@ -5,13 +5,12 @@ use crate::config::StorageConfig;
 
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
 use super::models::{
-    AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiIncidentParams,
-    AiIncidentResult, AiInvestigateParams, AiInvestigateResult, AbuseIncident,
-    AiProjectInventoryEntry, AiRelatedLogsForAnchor, AiRelatedLogsParams, AiSessionEntry,
-    AiToolInventoryEntry, DbStats, ErrorSummaryEntry, HostEntry, IncidentEvidence,
-    ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams,
-    ListAiToolsResult, LogEntry, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams,
-    SearchedAiSessionEntry,
+    AbuseIncident, AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiIncidentParams,
+    AiIncidentResult, AiInvestigateParams, AiInvestigateResult, AiProjectInventoryEntry,
+    AiRelatedLogsForAnchor, AiRelatedLogsParams, AiSessionEntry, AiToolInventoryEntry, DbStats,
+    ErrorSummaryEntry, HostEntry, IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult,
+    ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry, SearchAiSessionsParams,
+    SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
 };
 use super::pool::DbPool;
 
@@ -939,7 +938,10 @@ pub fn search_ai_incidents(pool: &DbPool, params: &AiIncidentParams) -> Result<A
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
     let _ = idx;
-    sql.push_str(&format!(" ORDER BY l.timestamp ASC LIMIT {}", CANDIDATE_CAP + 1));
+    sql.push_str(&format!(
+        " ORDER BY l.timestamp ASC LIMIT {}",
+        CANDIDATE_CAP + 1
+    ));
 
     struct AnchorRow {
         id: i64,
@@ -996,83 +998,95 @@ pub fn search_ai_incidents(pool: &DbPool, params: &AiIncidentParams) -> Result<A
     // Build incidents from groups.
     let mut incidents: Vec<AbuseIncident> = groups
         .into_iter()
-        .map(|((project, tool, session_id, hostname, _bucket), anchors)| {
-            let abuse_count = anchors.len();
-            let first_seen = anchors.first().map(|r| r.timestamp.clone()).unwrap_or_default();
-            let last_seen = anchors.last().map(|r| r.timestamp.clone()).unwrap_or_default();
+        .map(
+            |((project, tool, session_id, hostname, _bucket), anchors)| {
+                let abuse_count = anchors.len();
+                let first_seen = anchors
+                    .first()
+                    .map(|r| r.timestamp.clone())
+                    .unwrap_or_default();
+                let last_seen = anchors
+                    .last()
+                    .map(|r| r.timestamp.clone())
+                    .unwrap_or_default();
 
-            // duration in seconds
-            let duration_secs = {
-                let t0 = chrono::DateTime::parse_from_rfc3339(&first_seen)
-                    .map(|dt| dt.timestamp())
-                    .unwrap_or(0);
-                let t1 = chrono::DateTime::parse_from_rfc3339(&last_seen)
-                    .map(|dt| dt.timestamp())
-                    .unwrap_or(0);
-                (t1 - t0).max(0)
-            };
+                // duration in seconds
+                let duration_secs = {
+                    let t0 = chrono::DateTime::parse_from_rfc3339(&first_seen)
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0);
+                    let t1 = chrono::DateTime::parse_from_rfc3339(&last_seen)
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0);
+                    (t1 - t0).max(0)
+                };
 
-            // Collect unique terms found in this group's messages.
-            let mut found_terms: Vec<String> = terms
-                .iter()
-                .filter(|term| anchors.iter().any(|r| first_abuse_term(&r.message, std::slice::from_ref(term)).is_some()))
-                .cloned()
-                .collect();
-            found_terms.sort();
-            found_terms.dedup();
+                // Collect unique terms found in this group's messages.
+                let mut found_terms: Vec<String> = terms
+                    .iter()
+                    .filter(|term| {
+                        anchors.iter().any(|r| {
+                            first_abuse_term(&r.message, std::slice::from_ref(term)).is_some()
+                        })
+                    })
+                    .cloned()
+                    .collect();
+                found_terms.sort();
+                found_terms.dedup();
 
-            let mut anchor_ids: Vec<i64> = anchors.iter().map(|r| r.id).collect();
-            anchor_ids.sort();
+                let mut anchor_ids: Vec<i64> = anchors.iter().map(|r| r.id).collect();
+                anchor_ids.sort();
 
-            // Score: abuse_count dominates; density and term variety boost.
-            let density = if duration_secs > 0 {
-                abuse_count as f64 / (duration_secs as f64 / 60.0)
-            } else {
-                abuse_count as f64
-            };
-            let term_variety = found_terms.len() as f64;
-            let priority_score = abuse_count as f64 * 10.0 + density * 2.0 + term_variety;
+                // Score: abuse_count dominates; density and term variety boost.
+                let density = if duration_secs > 0 {
+                    abuse_count as f64 / (duration_secs as f64 / 60.0)
+                } else {
+                    abuse_count as f64
+                };
+                let term_variety = found_terms.len() as f64;
+                let priority_score = abuse_count as f64 * 10.0 + density * 2.0 + term_variety;
 
-            let priority_label = match priority_score as u64 {
-                0..=14 => "low",
-                15..=29 => "medium",
-                30..=49 => "high",
-                _ => "critical",
-            }
-            .to_string();
-
-            // Stable incident ID using a deterministic hash of session identity + anchor IDs.
-            let incident_id = {
-                use std::collections::hash_map::DefaultHasher;
-                use std::hash::{Hash, Hasher};
-                let mut h = DefaultHasher::new();
-                project.hash(&mut h);
-                tool.hash(&mut h);
-                session_id.hash(&mut h);
-                hostname.hash(&mut h);
-                for id in &anchor_ids {
-                    id.hash(&mut h);
+                let priority_label = match priority_score as u64 {
+                    0..=14 => "low",
+                    15..=29 => "medium",
+                    30..=49 => "high",
+                    _ => "critical",
                 }
-                format!("inc-{:016x}", h.finish())
-            };
+                .to_string();
 
-            AbuseIncident {
-                incident_id,
-                project,
-                tool,
-                session_id,
-                hostname,
-                first_seen,
-                last_seen,
-                duration_secs,
-                abuse_count,
-                terms: found_terms,
-                anchor_ids,
-                priority_score,
-                priority_label,
-                window_minutes: (window_secs / 60) as u32,
-            }
-        })
+                // Stable incident ID using a deterministic hash of session identity + anchor IDs.
+                let incident_id = {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut h = DefaultHasher::new();
+                    project.hash(&mut h);
+                    tool.hash(&mut h);
+                    session_id.hash(&mut h);
+                    hostname.hash(&mut h);
+                    for id in &anchor_ids {
+                        id.hash(&mut h);
+                    }
+                    format!("inc-{:016x}", h.finish())
+                };
+
+                AbuseIncident {
+                    incident_id,
+                    project,
+                    tool,
+                    session_id,
+                    hostname,
+                    first_seen,
+                    last_seen,
+                    duration_secs,
+                    abuse_count,
+                    terms: found_terms,
+                    anchor_ids,
+                    priority_score,
+                    priority_label,
+                    window_minutes: (window_secs / 60) as u32,
+                }
+            },
+        )
         .collect();
 
     // Sort by priority_score descending, then last_seen descending.
@@ -1157,11 +1171,11 @@ pub fn investigate_ai_incidents(
         };
 
         // Transcript context: entries in the same session before first anchor and after last anchor.
-        let (transcript_before, transcript_before_truncated) =
-            if let Some(first) = anchors.first() {
-                let rows = {
-                    let mut stmt = conn.prepare(
-                        "SELECT id, timestamp, hostname, facility, severity, app_name,
+        let (transcript_before, transcript_before_truncated) = if let Some(first) = anchors.first()
+        {
+            let rows = {
+                let mut stmt = conn.prepare(
+                    "SELECT id, timestamp, hostname, facility, severity, app_name,
                                 process_id, message, received_at, source_ip,
                                 ai_tool, ai_project, ai_session_id, ai_transcript_path,
                                 metadata_json
@@ -1170,28 +1184,28 @@ pub fn investigate_ai_incidents(
                            AND timestamp < ?4
                          ORDER BY timestamp DESC
                          LIMIT 21",
-                    )?;
-                    let rows = stmt
-                        .query_map(
-                            rusqlite::params![
-                                &incident.session_id,
-                                &incident.project,
-                                &incident.tool,
-                                &first.timestamp,
-                            ],
-                            map_row,
-                        )?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    rows
-                };
-                let truncated = rows.len() > TRANSCRIPT_CAP;
-                let mut out = rows;
-                out.truncate(TRANSCRIPT_CAP);
-                out.reverse(); // chronological order
-                (out, truncated)
-            } else {
-                (Vec::new(), false)
+                )?;
+                let rows = stmt
+                    .query_map(
+                        rusqlite::params![
+                            &incident.session_id,
+                            &incident.project,
+                            &incident.tool,
+                            &first.timestamp,
+                        ],
+                        map_row,
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows
             };
+            let truncated = rows.len() > TRANSCRIPT_CAP;
+            let mut out = rows;
+            out.truncate(TRANSCRIPT_CAP);
+            out.reverse(); // chronological order
+            (out, truncated)
+        } else {
+            (Vec::new(), false)
+        };
 
         let (transcript_after, transcript_after_truncated) = if let Some(last) = anchors.last() {
             let rows = {

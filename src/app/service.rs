@@ -16,10 +16,11 @@ use super::models::{
     GetErrorsResponse, GetLogRequest, GetLogResponse, IngestRateRequest, IngestRateResponse,
     ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
     ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
-    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
-    TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, PatternsRequest,
+    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
+    SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest,
+    UsageBlocksResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};

@@ -3,12 +3,11 @@ use serde_json::{json, Value};
 
 use crate::app::{
     AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
-    AnomaliesRequest, ClockSkewRequest, CompareRequest,
-    ContextRequest, CorrelateEventsRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSourceIpsRequest, PatternsRequest, ProjectContextRequest, SearchLogsRequest,
-    SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
-    UsageBlocksRequest,
+    AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
+    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, PatternsRequest,
+    ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
+    TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
 use super::schemas::SYSLOG_ACTIONS;
@@ -222,9 +221,7 @@ async fn tool_abuse_incidents(state: &AppState, args: Value) -> anyhow::Result<V
                     .filter_map(|x| x.as_str().map(String::from))
                     .collect()
             } else {
-                v.as_str()
-                    .map(|s| vec![s.to_string()])
-                    .unwrap_or_default()
+                v.as_str().map(|s| vec![s.to_string()]).unwrap_or_default()
             }
         })
         .unwrap_or_default();
@@ -257,9 +254,7 @@ async fn tool_abuse_investigate(state: &AppState, args: Value) -> anyhow::Result
                     .filter_map(|x| x.as_str().map(String::from))
                     .collect()
             } else {
-                v.as_str()
-                    .map(|s| vec![s.to_string()])
-                    .unwrap_or_default()
+                v.as_str().map(|s| vec![s.to_string()]).unwrap_or_default()
             }
         })
         .unwrap_or_default();
