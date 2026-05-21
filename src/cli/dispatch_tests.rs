@@ -25,10 +25,10 @@ use super::{
 use crate::cli::http_client::HttpClient;
 use crate::cli::{
     AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
-    AiDoctorArgs, AiErrorsArgs, AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs, AiListArgs,
-    AiPruneCheckpointsArgs, AiSearchArgs, AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs,
-    DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs, OutputArgs, SearchArgs,
-    SessionsArgs, TailArgs, TimeRangeArgs,
+    AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
+    AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs,
+    DbStatusArgs, DbVacuumArgs, IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs, SessionsArgs,
+    SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 use anyhow::{bail, Result};
 use std::time::Duration;
@@ -1294,117 +1294,109 @@ async fn db_integrity_http_request_inherits_long_timeout_budget() {
     .expect("db integrity ok under timeout budget");
 }
 
-// ─── syslog-mcp-kmib: AI abuse incident investigations ───────────────────────
+// ─── Surface parity snapshot tests (Task 5/6) ───────────────────────────────
 
 #[test]
-fn incidents_args_into_request_defaults() {
-    let req = AiIncidentsArgs::default().into_request();
-    assert_eq!(req.project, None);
-    assert_eq!(req.tool, None);
-    assert_eq!(req.from, None);
-    assert_eq!(req.to, None);
-    assert_eq!(req.limit, None);
-    assert_eq!(req.window_minutes, None);
-    assert!(req.terms.is_empty());
-}
-
-#[test]
-fn incidents_args_into_request_full() {
-    let args = AiIncidentsArgs {
-        project: Some("proj".into()),
-        tool: Some("claude".into()),
-        from: Some("2026-01-01T00:00:00Z".into()),
-        to: Some("2026-01-02T00:00:00Z".into()),
-        limit: Some(10),
-        window_minutes: Some(15),
-        terms: vec!["shit".into(), "broken".into()],
-        json: false, // json flag is not propagated to Request
+fn source_ips_args_into_request_default() {
+    let args = SourceIpsArgs {
+        limit: None,
+        offset: None,
+        json: false,
     };
     let req = args.into_request();
-    assert_eq!(req.project.as_deref(), Some("proj"));
-    assert_eq!(req.tool.as_deref(), Some("claude"));
-    assert_eq!(req.limit, Some(10));
-    assert_eq!(req.window_minutes, Some(15));
-    assert_eq!(req.terms, vec!["shit", "broken"]);
+    assert_eq!(
+        format!("{req:?}"),
+        "ListSourceIpsRequest { limit: None, offset: None }"
+    );
 }
 
 #[test]
-fn investigate_args_into_request_full() {
-    let args = AiInvestigateArgs {
-        project: Some("lab".into()),
-        tool: Some("codex".into()),
+fn timeline_args_into_request_snapshot() {
+    let args = TimelineArgs {
+        bucket: Some("1h".to_string()),
+        group_by: None,
         from: None,
         to: None,
-        limit: Some(3),
-        window_minutes: Some(10),
-        correlation_window_minutes: Some(20),
-        terms: vec!["fuck".into()],
-        json: true, // json flag is not propagated to Request
+        hostname: None,
+        app_name: None,
+        severity_min: None,
+        json: false,
     };
     let req = args.into_request();
-    assert_eq!(req.project.as_deref(), Some("lab"));
-    assert_eq!(req.tool.as_deref(), Some("codex"));
-    assert_eq!(req.limit, Some(3));
-    assert_eq!(req.window_minutes, Some(10));
-    assert_eq!(req.correlation_window_minutes, Some(20));
-    assert_eq!(req.terms, vec!["fuck"]);
+    assert_eq!(
+        format!("{req:?}"),
+        "TimelineRequest { bucket: Some(\"1h\"), group_by: None, from: None, to: None, hostname: None, app_name: None, severity_min: None }"
+    );
 }
 
-fn empty_ai_incidents_body() -> serde_json::Value {
-    serde_json::json!({
-        "incidents": [],
-        "total_incidents": 0,
-        "candidate_rows": 0,
-        "candidate_cap": 0,
-        "candidate_window_truncated": false,
-        "truncated": false,
-    })
+#[test]
+fn patterns_args_into_request_default() {
+    let args = PatternsArgs::default();
+    let req = args.into_request();
+    assert_eq!(
+        format!("{req:?}"),
+        "PatternsRequest { from: None, to: None, hostname: None, app_name: None, severity_min: None, scan_limit: None, top_n: None }"
+    );
 }
 
-fn empty_ai_investigate_body() -> serde_json::Value {
-    serde_json::json!({
-        "evidence": [],
-        "total_incidents": 0,
-        "truncated": false,
-    })
+#[test]
+fn ingest_rate_args_into_request_by_host() {
+    let args = IngestRateArgs {
+        by_host: true,
+        json: false,
+    };
+    let req = args.into_request();
+    assert_eq!(
+        format!("{req:?}"),
+        "IngestRateRequest { by_host: Some(true) }"
+    );
 }
 
-#[tokio::test]
-async fn run_ai_incidents_http_sends_exactly_one_request() {
-    let (server, mode) = http_mode().await;
-    Mock::given(method("GET"))
-        .and(path("/api/ai/incidents"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(empty_ai_incidents_body()))
-        .expect(1)
-        .mount(&server)
-        .await;
-    run_ai_incidents(
-        &mode,
-        AiIncidentsArgs {
-            json: true,
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("ai incidents ok");
+#[test]
+fn ingest_rate_args_into_request_default_unset() {
+    let args = IngestRateArgs::default();
+    let req = args.into_request();
+    assert_eq!(format!("{req:?}"), "IngestRateRequest { by_host: None }");
 }
 
-#[tokio::test]
-async fn run_ai_investigate_http_sends_exactly_one_request() {
-    let (server, mode) = http_mode().await;
-    Mock::given(method("GET"))
-        .and(path("/api/ai/investigate"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(empty_ai_investigate_body()))
-        .expect(1)
-        .mount(&server)
-        .await;
-    run_ai_investigate(
-        &mode,
-        AiInvestigateArgs {
-            json: true,
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("ai investigate ok");
+#[test]
+fn sig_list_args_default() {
+    let args = SigListArgs {
+        limit: None,
+        include_acknowledged: false,
+        json: false,
+    };
+    let req = args.into_request();
+    assert_eq!(
+        format!("{req:?}"),
+        "UnaddressedErrorsRequest { limit: None, include_acknowledged: Some(false) }"
+    );
+}
+
+#[test]
+fn sig_ack_args_with_notes() {
+    let args = SigAckArgs {
+        signature_hash: "abc123".to_string(),
+        notes: Some("arcane auto-heal bug".to_string()),
+        json: false,
+    };
+    let req = args.into_request();
+    assert_eq!(
+        format!("{req:?}"),
+        "AckErrorRequest { signature_hash: \"abc123\", notes: Some(\"arcane auto-heal bug\") }"
+    );
+}
+
+#[test]
+fn sig_unack_args_with_reason() {
+    let args = SigUnackArgs {
+        signature_hash: "def456".to_string(),
+        reason: Some("regression fixed in v0.27.3".to_string()),
+        json: false,
+    };
+    let req = args.into_request();
+    assert_eq!(
+        format!("{req:?}"),
+        "UnackErrorRequest { signature_hash: \"def456\", reason: Some(\"regression fixed in v0.27.3\") }"
+    );
 }

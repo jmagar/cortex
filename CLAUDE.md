@@ -177,6 +177,15 @@ bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of
 | `syslog setup repair` | Auto-fix missing config | `syslog setup repair` |
 | `syslog compose status` | Container running status | `syslog compose status` |
 | `syslog compose doctor` | Full coordination diagnostics | `syslog compose doctor` |
+| `syslog source-ips` | List unique source IPs with log counts | `syslog source-ips --limit 50` |
+| `syslog timeline` | Log volume over time (bucketed) | `syslog timeline --bucket hour` |
+| `syslog patterns` | Recurring message patterns | `syslog patterns --top-n 25` |
+| `syslog ingest-rate` | Current ingest rate (logs/sec) | `syslog ingest-rate --by-host` |
+| `syslog sig list` | List unaddressed error signatures | `syslog sig list` |
+| `syslog sig ack HASH` | Acknowledge/suppress an error signature | `syslog sig ack ab12cd --notes "fixed"` |
+| `syslog sig unack HASH` | Revoke an acknowledgement | `syslog sig unack ab12cd` |
+| `syslog notify recent` | Recent notification firings | `syslog notify recent --limit 25` |
+| `syslog notify test` | Send a test notification via Apprise (HTTP-only) | `syslog --http notify test --body "ping"` |
 
 ## Diagnostics: host/container drift
 

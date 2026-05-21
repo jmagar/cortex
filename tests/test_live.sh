@@ -841,7 +841,7 @@ phase_cli_parity() {
     def strip:
       if type == "object" then
         with_entries(
-          select(.key | test("^(generated_at|elapsed_ms|duration_ms|started_at|finished_at|request_id|run_id|timestamp|ts)$") | not)
+          select(.key | test("^(generated_at|elapsed_ms|duration_ms|started_at|finished_at|request_id|run_id|timestamp|ts|now)$") | not)
         ) | map_values(strip)
       elif type == "array" then map(strip)
       else . end;
@@ -858,6 +858,13 @@ phase_cli_parity() {
     "search --limit 1|search --limit 1"
     "sessions --limit 1|sessions --limit 1"
     "db status|db status"
+    # Surface parity (2026-05-21)
+    "source-ips --limit 3|source-ips --limit 3"
+    "timeline --bucket hour|timeline --bucket hour"
+    "patterns --top-n 5|patterns --top-n 5"
+    "ingest-rate|ingest-rate"
+    "sig list --limit 5|sig list --limit 5"
+    "notify recent --limit 5|notify recent --limit 5"
   )
 
   local pair label args local_out http_out filtered_local filtered_http diff
@@ -906,6 +913,59 @@ phase_cli_parity() {
 }
 
 # ---------------------------------------------------------------------------
+# Phase 6 — Surface parity REST routes
+#
+# Smoke-checks the routes added by the 2026-05-21 surface-parity plan. Just
+# verifies each route returns 200 with a well-formed JSON body — the cli-
+# parity phase already proves the body matches the local SQLite path.
+# ---------------------------------------------------------------------------
+phase_surface_parity_rest() {
+  section "Phase 6 — Surface parity REST routes"
+
+  if [[ -z "${TOKEN}" ]]; then
+    _skip "surface parity REST phase" "no TOKEN configured"
+    return 0
+  fi
+
+  build_auth_args
+
+  # POST mutation routes (/api/errors/ack, /api/errors/unack,
+  # /api/notifications/test) are intentionally excluded from smoke tests —
+  # they require seeded data or external service availability and are covered
+  # by unit tests in src/api_tests.rs and src/app/service.rs.
+  local routes=(
+    "GET /api/source-ips?limit=3|source_ips"
+    "GET /api/timeline?bucket=hour|points"
+    "GET /api/patterns?top_n=5|patterns"
+    "GET /api/ingest-rate|buckets"
+    "GET /api/get?id=1|log"
+    "GET /api/errors/unaddressed?limit=5|signatures"
+    "GET /api/notifications/recent?limit=5|"
+  )
+
+  local route_pair label path field response
+  for route_pair in "${routes[@]}"; do
+    label="${route_pair%%|*}"
+    field="${route_pair##*|}"
+    path="${label#GET }"
+    response="$(curl -sf --max-time 10 "${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}" "${BASE_URL}${path}" 2>&1)" || {
+      _fail "${label}" "curl failed: ${response:0:200}"
+      continue
+    }
+    if ! printf '%s' "${response}" | jq -e '.' >/dev/null 2>&1; then
+      _fail "${label}" "response not valid JSON: ${response:0:200}"
+      continue
+    fi
+    if [[ -n "${field}" ]]; then
+      assert_jq "${label} — ${field} field present" "${response}" ".${field} != null"
+    else
+      # /api/notifications/recent returns a JSON array directly
+      assert_jq "${label} — response is array" "${response}" 'type' "array"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Run all test phases
 # ---------------------------------------------------------------------------
 run_test_phases() {
@@ -914,6 +974,7 @@ run_test_phases() {
   phase_protocol
   phase_tools
   phase_cli_parity
+  phase_surface_parity_rest
 }
 
 # ---------------------------------------------------------------------------
