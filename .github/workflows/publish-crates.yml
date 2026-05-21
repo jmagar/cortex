@@ -28,6 +28,9 @@ jobs:
             exit 1
           fi
 
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
       - name: Run tests
         run: cargo test
 

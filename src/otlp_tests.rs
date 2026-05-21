@@ -406,10 +406,17 @@ fn build_entries_ignores_oversized_ai_project_and_session_id() {
 fn state_with_token(token: Option<&str>) -> OtlpState {
     let (tx, _rx) = tokio::sync::mpsc::channel::<crate::db::LogBatchEntry>(10);
     let ingest = crate::ingest::IngestTx::from_sender_for_test(tx);
+    // Use Mounted when a token is configured so is_authorized enforces it.
+    let auth_policy = if token.is_some() {
+        crate::mcp::AuthPolicy::Mounted { auth_state: None }
+    } else {
+        crate::mcp::AuthPolicy::LoopbackDev
+    };
     OtlpState::new(
         ingest,
         token.map(String::from),
         Arc::new(OtlpCounters::default()),
+        auth_policy,
     )
 }
 

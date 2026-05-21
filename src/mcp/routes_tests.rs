@@ -130,8 +130,9 @@ async fn integration_health_returns_200() {
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    // /health is the minimal liveness probe — no ingest counters.
     assert_eq!(value["status"], "ok");
-    assert!(value["ingest"]["ingest_queue_depth"].is_number());
+    assert!(value.get("ingest").is_none());
 }
 
 #[tokio::test]

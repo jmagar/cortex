@@ -77,22 +77,21 @@ pub fn db_integrity_check(pool: &DbPool, quick: bool) -> Result<Vec<String>> {
     Ok(messages)
 }
 
-/// Reads a trusted, hardcoded integer PRAGMA name.
-///
-/// SQLite PRAGMA identifiers cannot be parameterized; do not pass untrusted
-/// input to this helper.
-pub(crate) fn db_pragma_i64(pool: &DbPool, pragma: &str) -> Result<i64> {
+/// Type-safe PRAGMA identifier. Only constructible from `'static` str so that
+/// runtime-injected values can never reach the SQL string interpolation in
+/// `db_pragma_i64` / `db_pragma_string`.
+pub struct PragmaName(pub &'static str);
+
+/// Reads a trusted, hardcoded integer PRAGMA.
+pub(crate) fn db_pragma_i64(pool: &DbPool, pragma: PragmaName) -> Result<i64> {
     let conn = pool.get()?;
-    Ok(conn.query_row(&format!("PRAGMA {pragma}"), [], |row| row.get(0))?)
+    Ok(conn.query_row(&format!("PRAGMA {}", pragma.0), [], |row| row.get(0))?)
 }
 
-/// Reads a trusted, hardcoded string PRAGMA name.
-///
-/// SQLite PRAGMA identifiers cannot be parameterized; do not pass untrusted
-/// input to this helper.
-pub(crate) fn db_pragma_string(pool: &DbPool, pragma: &str) -> Result<String> {
+/// Reads a trusted, hardcoded string PRAGMA.
+pub(crate) fn db_pragma_string(pool: &DbPool, pragma: PragmaName) -> Result<String> {
     let conn = pool.get()?;
-    Ok(conn.query_row(&format!("PRAGMA {pragma}"), [], |row| row.get(0))?)
+    Ok(conn.query_row(&format!("PRAGMA {}", pragma.0), [], |row| row.get(0))?)
 }
 
 pub fn get_storage_metrics_with_probe(
@@ -537,33 +536,29 @@ fn reconcile_hosts(pool: &DbPool, hostnames: &[String]) -> Result<()> {
     let mut conn = pool.get()?;
     let tx = conn.transaction()?;
     for hostname in hostnames {
-        let count: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM logs WHERE hostname = ?1",
-            [hostname],
-            |row| row.get(0),
-        )?;
+        // One query: count + timestamp bounds in a single pass over the index.
+        // MIN/MAX return NULL when count=0, so timestamps are Option<String>.
+        let (count, first_seen, last_seen): (i64, Option<String>, Option<String>) = tx
+            .query_row(
+                "SELECT COUNT(*), MIN(received_at), MAX(received_at)
+                 FROM logs WHERE hostname = ?1",
+                [hostname],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
 
-        if count == 0 {
-            tx.execute("DELETE FROM hosts WHERE hostname = ?1", [hostname])?;
-            continue;
+        match (count, first_seen, last_seen) {
+            (0, _, _) | (_, None, _) | (_, _, None) => {
+                tx.execute("DELETE FROM hosts WHERE hostname = ?1", [hostname])?;
+            }
+            (count, Some(first_seen), Some(last_seen)) => {
+                tx.execute(
+                    "UPDATE hosts
+                     SET first_seen = ?2, last_seen = ?3, log_count = ?4
+                     WHERE hostname = ?1",
+                    params![hostname, first_seen, last_seen, count],
+                )?;
+            }
         }
-
-        let first_seen: String = tx.query_row(
-            "SELECT MIN(received_at) FROM logs WHERE hostname = ?1",
-            [hostname],
-            |row| row.get(0),
-        )?;
-        let last_seen: String = tx.query_row(
-            "SELECT MAX(received_at) FROM logs WHERE hostname = ?1",
-            [hostname],
-            |row| row.get(0),
-        )?;
-        tx.execute(
-            "UPDATE hosts
-             SET first_seen = ?2, last_seen = ?3, log_count = ?4
-             WHERE hostname = ?1",
-            params![hostname, first_seen, last_seen, count],
-        )?;
     }
     tx.commit()?;
     tracing::debug!(

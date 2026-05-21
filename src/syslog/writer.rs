@@ -2,7 +2,7 @@ use rusqlite::{Error as SqliteError, ErrorCode};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info};
 
 use super::enrichment::{enrich_entry, EnrichmentConfig};
@@ -52,6 +52,7 @@ pub(crate) async fn batch_writer(
     context: WriterContext,
     batch_size: usize,
     flush_interval: tokio::time::Duration,
+    mut shutdown: watch::Receiver<bool>,
 ) {
     let mut batch: Vec<db::LogBatchEntry> = Vec::with_capacity(batch_size);
     let mut storage_blocked = false;
@@ -102,6 +103,22 @@ pub(crate) async fn batch_writer(
                 }
                 _ = &mut deadline => {
                     break;
+                }
+                // Cooperative shutdown: drain remaining entries from the channel
+                // then flush one final batch before exiting. This prevents log
+                // loss when the runtime receives SIGTERM.
+                Ok(()) = shutdown.changed(), if *shutdown.borrow() => {
+                    // Drain whatever is already in the channel without blocking.
+                    while let Ok(entry) = rx.try_recv() {
+                        batch.push(entry);
+                    }
+                    if !batch.is_empty() {
+                        info!(batch_len = batch.len(), "Flushing residual batch on shutdown");
+                        flush_batch(&mut batch, &mut storage_blocked, &mut summary, &context).await;
+                    }
+                    emit_ingest_summary(&mut summary);
+                    info!("Batch writer shutdown cleanly");
+                    return;
                 }
             }
         }

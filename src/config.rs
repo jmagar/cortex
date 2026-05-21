@@ -393,7 +393,11 @@ fn default_db_path() -> PathBuf {
     PathBuf::from("/data/syslog.db")
 }
 fn default_mcp_host() -> String {
-    "0.0.0.0".into()
+    // Loopback by default — operators exposing the query API to a network
+    // interface set SYSLOG_MCP_HOST=0.0.0.0 (or bind a reverse proxy).
+    // The syslog ingest port (1514) intentionally keeps 0.0.0.0 because
+    // log receivers need to accept from all sending hosts.
+    "127.0.0.1".into()
 }
 fn default_mcp_port() -> u16 {
     3100

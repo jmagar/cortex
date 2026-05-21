@@ -24,7 +24,7 @@ pub use maintenance::{
     enforce_storage_budget, get_storage_metrics, physical_size_bytes, purge_by_tag_window,
     purge_old_logs, DiskSpaceProbe,
 };
-pub(crate) use maintenance::{db_pragma_i64, db_pragma_string};
+pub(crate) use maintenance::{db_pragma_i64, db_pragma_string, PragmaName};
 pub use models::{
     AbuseIncident, AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiIncidentParams,
     AiIncidentResult, AiInvestigateParams, AiInvestigateResult, AiProjectContext,

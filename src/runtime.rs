@@ -181,6 +181,7 @@ impl RuntimeCore {
             self.ingest.clone(),
             self.config.mcp.api_token.clone(),
             Arc::clone(&self.otlp_counters),
+            self.auth_policy.clone(),
         );
         otlp::router(state)
     }
@@ -200,6 +201,19 @@ impl RuntimeCore {
     /// diagnostics and for tests.
     pub fn auth_policy(&self) -> &AuthPolicy {
         &self.auth_policy
+    }
+
+    /// Signal the ingest pipeline to drain, wait up to `timeout` for the batch
+    /// writer to flush, then checkpoint the WAL. Call this after the HTTP server
+    /// has stopped accepting connections.
+    pub async fn shutdown(self, timeout: std::time::Duration) {
+        let pool = Arc::clone(&self.pool);
+        self.ingest.shutdown(timeout).await;
+        if let Err(e) = db::db_wal_checkpoint(&pool, "truncate") {
+            tracing::warn!(error = %e, "WAL checkpoint on shutdown failed (non-fatal)");
+        } else {
+            tracing::info!("WAL checkpoint completed on clean shutdown");
+        }
     }
 
     pub async fn start_syslog(&self) -> Result<()> {

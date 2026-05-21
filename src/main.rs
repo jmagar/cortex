@@ -223,6 +223,12 @@ async fn serve_mcp() -> Result<()> {
     .with_graceful_shutdown(shutdown_signal())
     .await?;
 
+    // HTTP connections are drained. Now signal the syslog listeners and batch
+    // writer to drain and exit, then checkpoint the WAL so the next startup
+    // doesn't replay a large WAL file.
+    info!("HTTP server stopped; draining ingest pipeline");
+    runtime.shutdown(std::time::Duration::from_secs(5)).await;
+
     Ok(())
 }
 

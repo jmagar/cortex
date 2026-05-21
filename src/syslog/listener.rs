@@ -63,9 +63,18 @@ pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) 
 
                 let mut entry = parse_syslog(&raw, addr.to_string());
                 stamp_source_kind(&mut entry, SourceKind::SyslogUdp);
-                if ingest.send(entry).await.is_err() {
-                    error!("Write channel closed");
-                    break;
+                match ingest.try_send(entry) {
+                    Ok(()) => {}
+                    Err(crate::ingest::TrySendErr::Full) => {
+                        // Packet dropped; channel backpressure already logged above.
+                        // try_send is used (not .await) so the UDP recv loop is never
+                        // blocked — kernel buffer absorbs bursts, explicit drop counter
+                        // is tracked via observability.record_enqueue_error.
+                    }
+                    Err(crate::ingest::TrySendErr::Closed) => {
+                        error!("Write channel closed");
+                        break;
+                    }
                 }
             }
             Err(e) => {
@@ -150,8 +159,16 @@ pub(super) async fn handle_tcp_connection(
                         "TCP syslog sender identified"
                     );
                 }
-                if ingest.send(entry).await.is_err() {
-                    break "write_channel_closed";
+                match ingest.try_send(entry) {
+                    Ok(()) => {}
+                    Err(crate::ingest::TrySendErr::Full) => {
+                        // Packet dropped on backpressure; TCP sender sees no error,
+                        // which is intentional — we shed load rather than stall the
+                        // connection. The backpressure log above already captures this.
+                    }
+                    Err(crate::ingest::TrySendErr::Closed) => {
+                        break "write_channel_closed";
+                    }
                 }
             }
             Ok(Ok(TcpFrame::Oversize {

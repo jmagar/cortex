@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::config::{StorageConfig, SyslogConfig};
 use crate::db::{self, DbPool};
@@ -22,6 +22,10 @@ pub(crate) struct IngestTx {
     tx: mpsc::Sender<db::LogBatchEntry>,
     observability: Arc<RuntimeObservability>,
     channel_capacity: usize,
+    /// Shutdown signal. Sending `true` tells the batch writer and all syslog
+    /// listeners to drain and exit. `watch` is used (not `oneshot`) so that
+    /// multiple listeners can subscribe to the same signal.
+    shutdown_tx: Arc<watch::Sender<bool>>,
 }
 
 struct WriterTuning {
@@ -94,6 +98,17 @@ impl IngestTx {
         Arc::clone(&self.observability)
     }
 
+    /// Signal all listeners and the batch writer to drain and exit, then wait
+    /// up to `timeout` for the writer to finish flushing. Called from main after
+    /// the HTTP server finishes draining its connections.
+    pub(crate) async fn shutdown(self, timeout: std::time::Duration) {
+        let _ = self.shutdown_tx.send(true);
+        // Drop our tx clone so the writer's channel sees EOF once all listeners exit.
+        drop(self.tx);
+        // Give the batch writer time to flush the residual batch.
+        tokio::time::sleep(timeout).await;
+    }
+
     /// Test-only constructor: builds an `IngestTx` from a raw sender so tests
     /// don't have to spawn a real batch writer.
     #[cfg(test)]
@@ -101,10 +116,12 @@ impl IngestTx {
         let observability = Arc::new(RuntimeObservability::default());
         let channel_capacity = tx.max_capacity();
         observability.set_queue_capacity(channel_capacity);
+        let (shutdown_tx, _) = watch::channel(false);
         Self {
             tx,
             observability,
             channel_capacity,
+            shutdown_tx: Arc::new(shutdown_tx),
         }
     }
 }
@@ -123,6 +140,7 @@ fn start_writer(
         channel_capacity,
     } = tuning;
     let (tx, rx) = mpsc::channel::<db::LogBatchEntry>(channel_capacity);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
     observability.set_queue_capacity(channel_capacity);
     let writer_observability = Arc::clone(&observability);
     tokio::spawn(async move {
@@ -139,6 +157,7 @@ fn start_writer(
             context,
             batch_size,
             tokio::time::Duration::from_millis(flush_interval_ms),
+            shutdown_rx,
         )
         .await;
     });
@@ -146,6 +165,7 @@ fn start_writer(
         tx,
         observability,
         channel_capacity,
+        shutdown_tx: Arc::new(shutdown_tx),
     }
 }
 
