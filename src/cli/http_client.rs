@@ -61,16 +61,19 @@ use tokio::sync::OnceCell;
 use url::Url;
 
 use syslog_mcp::app::{
-    AbuseSearchRequest, AbuseSearchResponse, AiCheckpointsRequest, AiCorrelateRequest,
-    AiCorrelateResponse, AiIncidentRequest, AiIncidentResponse, AiInvestigateRequest,
-    AiInvestigateResponse, AiParseErrorsRequest, AiPruneCheckpointsRequest, CorrelateEventsRequest,
-    CorrelateEventsResponse, DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest,
-    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult,
-    GetErrorsRequest, GetErrorsResponse, ListAiProjectsRequest, ListAiProjectsResponse,
-    ListAiToolsRequest, ListAiToolsResponse, ListHostsResponse, ListSessionsRequest,
-    ListSessionsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
-    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, TailLogsRequest,
-    UsageBlocksRequest, UsageBlocksResponse,
+    AbuseSearchRequest, AbuseSearchResponse, AckErrorRequest, AckErrorResponse,
+    AiCheckpointsRequest, AiCorrelateRequest, AiCorrelateResponse, AiParseErrorsRequest,
+    AiPruneCheckpointsRequest, CorrelateEventsRequest, CorrelateEventsResponse,
+    DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest, DbIntegrityResult,
+    DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult, GetErrorsRequest,
+    GetErrorsResponse, GetLogRequest, GetLogResponse, IngestRateRequest, IngestRateResponse,
+    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
+    ListHostsResponse, ListSessionsRequest, ListSessionsResponse, ListSourceIpsRequest,
+    ListSourceIpsResponse, PatternsRequest, PatternsResponse, ProjectContextRequest,
+    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
+    SearchSessionsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, UnackErrorRequest,
+    UnackErrorResponse, UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest,
+    UsageBlocksResponse,
 };
 use syslog_mcp::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
 
@@ -515,6 +518,79 @@ impl HttpClient {
 
     pub async fn db_vacuum(&self, req: &DbVacuumRequest) -> Result<DbVacuumResult> {
         self.post_json("/api/db/vacuum", req).await
+    }
+
+    // ─── REST surface: surface parity ───────────────────────────────────────
+
+    pub async fn source_ips(
+        &self,
+        req: &ListSourceIpsRequest,
+    ) -> Result<ListSourceIpsResponse> {
+        self.get_json("/api/source-ips", Some(req)).await
+    }
+
+    pub async fn timeline(&self, req: &TimelineRequest) -> Result<TimelineResponse> {
+        self.get_json("/api/timeline", Some(req)).await
+    }
+
+    pub async fn patterns(&self, req: &PatternsRequest) -> Result<PatternsResponse> {
+        self.get_json("/api/patterns", Some(req)).await
+    }
+
+    pub async fn ingest_rate(&self, req: &IngestRateRequest) -> Result<IngestRateResponse> {
+        self.get_json("/api/ingest-rate", Some(req)).await
+    }
+
+    pub async fn get_log(&self, req: &GetLogRequest) -> Result<GetLogResponse> {
+        self.get_json("/api/get", Some(req)).await
+    }
+
+    pub async fn unaddressed_errors(
+        &self,
+        req: &UnaddressedErrorsRequest,
+    ) -> Result<UnaddressedErrorsResponse> {
+        self.get_json("/api/errors/unaddressed", Some(req)).await
+    }
+
+    pub async fn ack_error(&self, req: &AckErrorRequest) -> Result<AckErrorResponse> {
+        self.post_json("/api/errors/ack", req).await
+    }
+
+    pub async fn unack_error(&self, req: &UnackErrorRequest) -> Result<UnackErrorResponse> {
+        self.post_json("/api/errors/unack", req).await
+    }
+
+    /// Recent notification firings. The server returns `Vec<FiringRow>` but
+    /// `FiringRow` lives in `pub(crate) mod db::notifications`, so the CLI
+    /// keeps the raw JSON value for printing/JSON-passthrough.
+    pub async fn notifications_recent(
+        &self,
+        limit: i64,
+        rule_id: Option<String>,
+        since: Option<String>,
+    ) -> Result<serde_json::Value> {
+        #[derive(serde::Serialize)]
+        struct Params {
+            limit: i64,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            rule_id: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            since: Option<String>,
+        }
+        self.get_json(
+            "/api/notifications/recent",
+            Some(&Params { limit, rule_id, since }),
+        )
+        .await
+    }
+
+    pub async fn notifications_test(&self, body: Option<String>) -> Result<serde_json::Value> {
+        #[derive(serde::Serialize)]
+        struct Payload {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            body: Option<String>,
+        }
+        self.post_json("/api/notifications/test", &Payload { body }).await
     }
 }
 
