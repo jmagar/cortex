@@ -541,6 +541,8 @@ impl SyslogService {
             query: req.query,
             ai_project: req.project,
             ai_tool: req.tool,
+            hostname: None,
+            app_name: None,
             from,
             to,
             limit: req.limit,
@@ -1777,6 +1779,7 @@ impl SyslogService {
     ) -> ServiceResult<SimilarIncidentsResponse> {
         let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
         let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let severity_min = validate_optional_severity(req.severity_min)?;
         let result = self
             .run_db(move |pool| {
                 db::similar_incidents_clusters(
@@ -1785,7 +1788,7 @@ impl SyslogService {
                         query: req.query,
                         hostname: req.hostname,
                         app_name: req.app_name,
-                        severity_min: req.severity_min,
+                        severity_min,
                         from,
                         to,
                         window_minutes: req.window_minutes,

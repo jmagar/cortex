@@ -83,6 +83,10 @@ pub struct SearchAiSessionsParams {
     pub query: String,
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
+    /// Filter AI transcript sessions to those where the session's host matches.
+    pub hostname: Option<String>,
+    /// Filter AI transcript sessions to those where the session's app matches.
+    pub app_name: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
     pub limit: Option<u32>,
@@ -565,7 +569,7 @@ pub struct AskHistoryResult {
     pub truncated: bool,
     /// Sessions with transcript hits ranked by match count.
     pub sessions: Vec<SearchedAiSessionEntry>,
-    /// System (non-AI) log entries from the same time windows as the top sessions.
+    /// System (non-AI) log entries from the top-ranked session's time window.
     pub context_logs: Vec<LogEntry>,
 }
 

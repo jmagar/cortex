@@ -924,6 +924,8 @@ fn ai_session_queries_respect_filters() {
             query: "needle".into(),
             ai_project: Some("/tmp/b".into()),
             ai_tool: Some("codex".into()),
+            hostname: None,
+            app_name: None,
             from: Some("2026-01-01T00:30:00Z".into()),
             to: Some("2026-01-01T01:30:00Z".into()),
             limit: Some(10),
