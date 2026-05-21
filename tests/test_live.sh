@@ -714,6 +714,7 @@ run_docker_mode() {
     log_error "TOKEN must be set for docker-mode live tests (the server requires SYSLOG_API_TOKEN to start)"
     return 2
   fi
+  docker_args+=("-e" "SYSLOG_MCP_HOST=0.0.0.0")
   docker_args+=("-e" "SYSLOG_MCP_TOKEN=${TOKEN}")
   docker_args+=("-e" "SYSLOG_API_TOKEN=${TOKEN}")
 
