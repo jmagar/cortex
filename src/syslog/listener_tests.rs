@@ -27,7 +27,7 @@ async fn tcp_connection_allows_multiple_lines_beyond_connection_total_size() {
 
     let accept_task = tokio::spawn(async move {
         let (server_stream, peer) = listener.accept().await.unwrap();
-        handle_tcp_connection(server_stream, peer, ingest, 64, 5).await;
+        handle_tcp_connection(server_stream, peer, ingest, 64, 5, &[]).await;
     });
 
     let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -64,7 +64,7 @@ async fn tcp_connection_closes_oversized_unterminated_line_without_enqueueing() 
 
     let accept_task = tokio::spawn(async move {
         let (server_stream, peer) = listener.accept().await.unwrap();
-        handle_tcp_connection(server_stream, peer, ingest, 32, 5).await;
+        handle_tcp_connection(server_stream, peer, ingest, 32, 5, &[]).await;
     });
 
     let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -99,7 +99,7 @@ async fn tcp_connection_drops_oversized_delimited_line_and_keeps_later_frames() 
 
     let accept_task = tokio::spawn(async move {
         let (server_stream, peer) = listener.accept().await.unwrap();
-        handle_tcp_connection(server_stream, peer, ingest, 32, 5).await;
+        handle_tcp_connection(server_stream, peer, ingest, 32, 5, &[]).await;
     });
 
     let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -115,6 +115,76 @@ async fn tcp_connection_drops_oversized_delimited_line_and_keeps_later_frames() 
     assert!(entry.raw.contains("valid"));
 
     accept_task.await.unwrap();
+}
+
+#[test]
+fn cidr_open_policy_when_empty() {
+    let ip: std::net::IpAddr = "10.0.0.1".parse().unwrap();
+    assert!(is_source_allowed(ip, &[]));
+}
+
+#[test]
+fn cidr_v4_host_route_prefix32() {
+    let target: std::net::IpAddr = "192.168.1.5".parse().unwrap();
+    let other: std::net::IpAddr = "192.168.1.6".parse().unwrap();
+    let cidrs = vec!["192.168.1.5/32".to_string()];
+    assert!(is_source_allowed(target, &cidrs));
+    assert!(!is_source_allowed(other, &cidrs));
+}
+
+#[test]
+fn cidr_v4_class_c() {
+    let inside: std::net::IpAddr = "10.0.0.100".parse().unwrap();
+    let outside: std::net::IpAddr = "10.1.0.1".parse().unwrap();
+    let cidrs = vec!["10.0.0.0/24".to_string()];
+    assert!(is_source_allowed(inside, &cidrs));
+    assert!(!is_source_allowed(outside, &cidrs));
+}
+
+#[test]
+fn cidr_v4_prefix0_matches_all() {
+    let any: std::net::IpAddr = "203.0.113.1".parse().unwrap();
+    let cidrs = vec!["0.0.0.0/0".to_string()];
+    assert!(is_source_allowed(any, &cidrs));
+}
+
+#[test]
+fn cidr_v6_prefix128_host_route() {
+    let target: std::net::IpAddr = "::1".parse().unwrap();
+    let other: std::net::IpAddr = "::2".parse().unwrap();
+    let cidrs = vec!["::1/128".to_string()];
+    assert!(is_source_allowed(target, &cidrs));
+    assert!(!is_source_allowed(other, &cidrs));
+}
+
+#[test]
+fn cidr_v4_v6_mismatch_does_not_match() {
+    let v4: std::net::IpAddr = "10.0.0.1".parse().unwrap();
+    let cidrs = vec!["::10.0.0.0/120".to_string()]; // v6 CIDR for v4 addr
+    // v4 vs v6 → no match (mismatch branch returns false)
+    assert!(!is_source_allowed(v4, &cidrs));
+}
+
+#[test]
+fn cidr_multiple_cidrs_any_match_allows() {
+    let ip: std::net::IpAddr = "172.16.0.5".parse().unwrap();
+    let cidrs = vec!["10.0.0.0/8".to_string(), "172.16.0.0/16".to_string()];
+    assert!(is_source_allowed(ip, &cidrs));
+}
+
+#[test]
+fn cidr_malformed_entry_is_skipped() {
+    let ip: std::net::IpAddr = "10.0.0.1".parse().unwrap();
+    // Only a malformed entry — should not match (no valid CIDR matches)
+    let cidrs = vec!["not-a-cidr".to_string()];
+    assert!(!is_source_allowed(ip, &cidrs));
+}
+
+#[test]
+fn cidr_prefix_len_too_large_does_not_match() {
+    let ip: std::net::IpAddr = "10.0.0.1".parse().unwrap();
+    let cidrs = vec!["10.0.0.0/33".to_string()]; // /33 is invalid for v4
+    assert!(!is_source_allowed(ip, &cidrs));
 }
 
 #[tokio::test]
