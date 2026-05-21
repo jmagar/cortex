@@ -187,6 +187,72 @@ fn test_search_timestamp_range_filtering() {
 }
 
 #[test]
+fn test_search_received_at_range_filtering() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_entry("2026-01-01T00:00:00Z", "host-a", "info", "received early"),
+            make_entry("2026-01-01T00:00:00Z", "host-a", "info", "received mid"),
+            make_entry("2026-01-01T00:00:00Z", "host-a", "info", "received late"),
+        ],
+    )
+    .unwrap();
+
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "UPDATE logs SET received_at = ?1 WHERE message = ?2",
+        rusqlite::params!["2026-01-01T00:00:00Z", "received early"],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE logs SET received_at = ?1 WHERE message = ?2",
+        rusqlite::params!["2026-01-01T00:30:00Z", "received mid"],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE logs SET received_at = ?1 WHERE message = ?2",
+        rusqlite::params!["2026-01-01T01:00:00Z", "received late"],
+    )
+    .unwrap();
+    drop(conn);
+
+    let results = search_logs(
+        &pool,
+        &SearchParams {
+            received_from: Some("2026-01-01T00:15:00Z".into()),
+            received_to: Some("2026-01-01T00:45:00Z".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].message, "received mid");
+}
+
+#[test]
+fn test_search_exclude_facility_keeps_unknown_facility_rows() {
+    let (pool, _dir) = test_pool();
+    let mut auth = make_entry("2026-01-01T00:00:00Z", "host-a", "info", "auth event");
+    auth.facility = Some("auth".into());
+    let mut daemon = make_entry("2026-01-01T00:00:01Z", "host-a", "info", "daemon event");
+    daemon.facility = Some("daemon".into());
+    let unknown = make_entry("2026-01-01T00:00:02Z", "host-a", "info", "unknown event");
+    insert_logs_batch(&pool, &[auth, daemon, unknown]).unwrap();
+
+    let results = search_logs(
+        &pool,
+        &SearchParams {
+            exclude_facility: Some("auth".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let messages: Vec<&str> = results.iter().map(|row| row.message.as_str()).collect();
+    assert_eq!(messages, vec!["unknown event", "daemon event"]);
+}
+
+#[test]
 fn test_severity_to_num() {
     assert_eq!(severity_to_num("emerg"), Some(0));
     assert_eq!(severity_to_num("alert"), Some(1));

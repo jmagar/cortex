@@ -198,13 +198,7 @@ impl ApiState {
 }
 
 fn read_schema_version(pool: &DbPool) -> anyhow::Result<i64> {
-    let conn = pool.get()?;
-    let version: Option<i64> = conn
-        .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
-            row.get(0)
-        })
-        .map_err(|err| anyhow::anyhow!("schema_migrations probe failed: {err}"))?;
-    Ok(version.unwrap_or(0))
+    Ok(crate::db::read_schema_version_info(pool)?.version)
 }
 
 pub fn router(state: ApiState) -> anyhow::Result<Router> {
@@ -279,9 +273,12 @@ struct SearchQuery {
     severity: Option<String>,
     app_name: Option<String>,
     facility: Option<String>,
+    exclude_facility: Option<String>,
     process_id: Option<String>,
     from: Option<String>,
     to: Option<String>,
+    received_from: Option<String>,
+    received_to: Option<String>,
     limit: Option<u32>,
 }
 
@@ -299,9 +296,12 @@ async fn search(
                 severity: query.severity,
                 app_name: query.app_name,
                 facility: query.facility,
+                exclude_facility: query.exclude_facility,
                 process_id: query.process_id,
                 from: query.from,
                 to: query.to,
+                received_from: query.received_from,
+                received_to: query.received_to,
                 limit: query.limit,
             })
             .await,

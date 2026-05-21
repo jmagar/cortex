@@ -16,9 +16,15 @@ fn parse_search_collects_query_and_filters() {
         "--severity",
         "err",
         "--app-name=kernel",
+        "--facility=auth",
+        "--exclude-facility",
+        "transcript",
         "--from",
         "2026-01-01T00:00:00Z",
         "--to=2026-01-02T00:00:00Z",
+        "--received-from=2026-01-01T00:00:30Z",
+        "--received-to",
+        "2026-01-02T00:00:30Z",
         "--limit",
         "25",
         "--json",
@@ -33,8 +39,12 @@ fn parse_search_collects_query_and_filters() {
             source_ip: Some("10.0.0.5:514".into()),
             severity: Some("err".into()),
             app_name: Some("kernel".into()),
+            facility: Some("auth".into()),
+            exclude_facility: Some("transcript".into()),
             from: Some("2026-01-01T00:00:00Z".into()),
             to: Some("2026-01-02T00:00:00Z".into()),
+            received_from: Some("2026-01-01T00:00:30Z".into()),
+            received_to: Some("2026-01-02T00:00:30Z".into()),
             limit: Some(25),
             json: true,
         })
@@ -51,6 +61,64 @@ fn parse_tail_accepts_positional_count() {
             n: Some(10),
             hostname: Some("router".into()),
             ..Default::default()
+        })
+    );
+}
+
+#[test]
+fn parse_service_logs_accepts_time_range_and_json() {
+    let parsed = CliCommand::parse(strings(&[
+        "service",
+        "logs",
+        "syslog-ai-watch",
+        "--from",
+        "2026-05-19 19:55:00",
+        "--to=2026-05-19 20:05:00",
+        "--tail",
+        "50",
+        "--json",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Service(ServiceCommand::Logs(ServiceLogsArgs {
+            service: "syslog-ai-watch".into(),
+            from: Some("2026-05-19 19:55:00".into()),
+            to: Some("2026-05-19 20:05:00".into()),
+            tail: Some(50),
+            json: true,
+        }))
+    );
+}
+
+#[test]
+fn parse_incident_accepts_window_service_and_json() {
+    let parsed = CliCommand::parse(strings(&[
+        "incident",
+        "--around",
+        "2026-05-20T04:00:00Z",
+        "--minutes",
+        "10",
+        "--service",
+        "syslog-ai-watch",
+        "--host",
+        "dookie",
+        "--limit",
+        "25",
+        "--json",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        parsed,
+        CliCommand::Incident(IncidentArgs {
+            around: "2026-05-20T04:00:00Z".into(),
+            minutes: Some(10),
+            service: Some("syslog-ai-watch".into()),
+            hostname: Some("dookie".into()),
+            limit: Some(25),
+            json: true,
         })
     );
 }
@@ -371,6 +439,10 @@ fn smoke_watch_target_uses_codex_root_when_claude_is_unavailable() {
     std::fs::create_dir_all(&codex_root).unwrap();
     let doctor = AiDoctorReport {
         db_path: "/tmp/syslog.db".into(),
+        db_schema_version: 14,
+        db_last_migration_at: Some("2026-01-01T00:00:00Z".into()),
+        known_schema_version: 14,
+        schema_current: true,
         claude_root: transcript_root_status("/missing", false),
         codex_root: transcript_root_status(&codex_root.to_string_lossy(), true),
         checkpoint_count: 0,
@@ -402,6 +474,10 @@ fn smoke_watch_target_uses_codex_root_when_claude_is_unavailable() {
 fn strict_ai_doctor_permissions_ignore_missing_roots() {
     let doctor = AiDoctorReport {
         db_path: "/tmp/syslog.db".into(),
+        db_schema_version: 14,
+        db_last_migration_at: Some("2026-01-01T00:00:00Z".into()),
+        known_schema_version: 14,
+        schema_current: true,
         claude_root: transcript_root_status("/missing", false),
         codex_root: transcript_root_status("/tmp/codex", true),
         checkpoint_count: 0,
@@ -695,9 +771,9 @@ fn doctor_cache_dedupes_systemctl_show() {
     // (unit_missing == true) or the systemctl probe itself fails. Either
     // outcome is acceptable; a hit on the unit would mean the test host
     // genuinely has it installed, which we treat as a setup error.
-    match &first {
-        Ok(env) => assert!(env.unit_missing, "fake unit unexpectedly resolved: {env:?}"),
-        Err(_) => {} // systemctl unavailable / probe failed — also acceptable
+    // Err(_) is also acceptable: systemctl unavailable / probe failed.
+    if let Ok(env) = &first {
+        assert!(env.unit_missing, "fake unit unexpectedly resolved: {env:?}");
     }
     // The cache returns clones of the same Result on the second call.
     match (&first, &second) {

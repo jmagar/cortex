@@ -1,52 +1,21 @@
+name: syslog-mcp
+
+# Local development stack. Builds from this checkout.
 services:
   syslog-mcp:
-    # Default to the published image so plugin deploys can `docker compose pull`
-    # without source. Override with --build (or `docker compose build`) for local
-    # source development.
-    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}
-    # syslog-setup-build-stanza-start
+    extends:
+      file: docker-compose.prod.yml
+      service: syslog-mcp
+    image: syslog-mcp:dev
+    pull_policy: build
     build:
       context: .
       dockerfile: config/Dockerfile
-    # syslog-setup-build-stanza-end
-    container_name: syslog-mcp
-    restart: unless-stopped
-    user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"
-    env_file:
-      - path: .env
-        required: false
-    ports:
-      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/udp"
-      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/tcp"
-      - "${SYSLOG_MCP_PORT:-3100}:3100/tcp"
-    volumes:
-      - ${SYSLOG_MCP_DATA_VOLUME:-syslog-mcp-data}:/data
-    # The container listens on SYSLOG_PORT (default 1514). To serve host port
-    # 514, set SYSLOG_HOST_PORT=514 while leaving SYSLOG_PORT at 1514, or add
-    # host-level firewall/NAT redirects from 514 to 1514.
-    # NET_BIND_SERVICE is only needed if the container itself binds port 514.
-    # cap_add:
-    #   - NET_BIND_SERVICE
-    networks:
-      - jakenet
-
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3100/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '1.0'
 
 volumes:
   syslog-mcp-data:
 
 networks:
-  jakenet:
+  syslog-mcp:
     name: ${DOCKER_NETWORK:-syslog-mcp}
     external: true

@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use syslog_mcp::app::{
     AbuseSearchRequest, AiCheckpointsRequest, AiCorrelateRequest, AiParseErrorsRequest,
     AiPruneCheckpointsRequest, CorrelateEventsRequest, DbCheckpointRequest, DbIntegrityRequest,
-    DbVacuumRequest, GetErrorsRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    DbVacuumRequest, GetErrorsRequest, IncidentRequest, ListAiProjectsRequest, ListAiToolsRequest,
     ListSessionsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
     TailLogsRequest, UsageBlocksRequest,
 };
@@ -36,14 +36,14 @@ use super::{
     print_ai_tools_response, print_ai_watch_status_response, print_checkpoints_response,
     print_correlate_response, print_db_backup_response, print_db_checkpoint_response,
     print_db_integrity_response, print_db_status_response, print_db_vacuum_response,
-    print_errors_response, print_hosts_response, print_index_response,
+    print_errors_response, print_hosts_response, print_incident_response, print_index_response,
     print_project_context_response, print_prune_checkpoints_response, print_search_response,
     print_search_sessions_response, print_sessions_response, print_stats_response,
     print_usage_blocks_response, run_coordination_phases, AiAbuseArgs, AiAddArgs, AiBlocksArgs,
     AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIndexArgs,
     AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs, AiWatchArgs, CliMode, CorrelateArgs,
-    DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs, OutputArgs,
-    SearchArgs, SessionsArgs, TailArgs, TimeRangeArgs,
+    DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs, IncidentArgs,
+    OutputArgs, SearchArgs, SessionsArgs, TailArgs, TimeRangeArgs,
 };
 
 // ─── Arg → Request conversions ──────────────────────────────────────────────
@@ -61,10 +61,25 @@ impl SearchArgs {
             source_ip: self.source_ip,
             severity: self.severity,
             app_name: self.app_name,
-            facility: None,
+            facility: self.facility,
+            exclude_facility: self.exclude_facility,
             process_id: None,
             from: self.from,
             to: self.to,
+            received_from: self.received_from,
+            received_to: self.received_to,
+            limit: self.limit,
+        }
+    }
+}
+
+impl IncidentArgs {
+    pub(super) fn into_request(self) -> IncidentRequest {
+        IncidentRequest {
+            around: self.around,
+            minutes: self.minutes,
+            service: self.service,
+            hostname: self.hostname,
             limit: self.limit,
         }
     }
@@ -186,6 +201,17 @@ pub(super) async fn run_hosts(mode: &CliMode, args: super::OutputArgs) -> Result
         CliMode::Http(client) => http_or_cancel(client.hosts()).await?,
     };
     print_hosts_response(&response, args.json)
+}
+
+pub(super) async fn run_incident(mode: &CliMode, args: IncidentArgs) -> Result<()> {
+    let json = args.json;
+    match mode {
+        CliMode::Http(_) => bail!("incident reads host-local service logs; omit --http"),
+        CliMode::Local(service) => {
+            let response = service.incident(args.into_request()).await?;
+            print_incident_response(&response, json)
+        }
+    }
 }
 
 pub(super) async fn run_correlate(mode: &CliMode, args: CorrelateArgs) -> Result<()> {
@@ -508,7 +534,10 @@ pub(super) async fn run_ai_watch_status(mode: &CliMode, args: OutputArgs) -> Res
     if matches!(mode, CliMode::Http(_)) {
         bail!("ai watch-status shells out to systemctl on host; omit --http");
     }
-    let response = ai_watch_status()?;
+    let CliMode::Local(service) = mode else {
+        unreachable!("http mode returned above");
+    };
+    let response = ai_watch_status(service).await?;
     print_ai_watch_status_response(&response, args.json)
 }
 

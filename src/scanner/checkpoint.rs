@@ -5,8 +5,9 @@ use crate::db::DbPool;
 use std::path::Path;
 
 use crate::scanner::{
-    AiDoctorReport, CheckpointEntry, CheckpointListOptions, FileMetadata, ParseErrorEntry,
-    ParseErrorListOptions, PruneCheckpointsOptions, PruneCheckpointsResult, TranscriptRootStatus,
+    AiDoctorReport, AiIndexingHealth, CheckpointEntry, CheckpointListOptions, FileMetadata,
+    ParseErrorEntry, ParseErrorListOptions, PruneCheckpointsOptions, PruneCheckpointsResult,
+    SchemaDriftMigration, TranscriptRootStatus,
 };
 
 pub struct CheckpointStore<'a> {
@@ -331,6 +332,7 @@ impl<'a> CheckpointStore<'a> {
 
     pub fn doctor(&self, db_path: &Path) -> Result<AiDoctorReport> {
         let conn = self.pool.get()?;
+        let schema = crate::db::read_schema_version_info_conn(&conn)?;
         let checkpoint_count =
             conn.query_row("SELECT COUNT(*) FROM transcript_sources", [], |row| {
                 row.get(0)
@@ -371,6 +373,10 @@ impl<'a> CheckpointStore<'a> {
         let (claude_root, codex_root) = default_root_statuses();
         Ok(AiDoctorReport {
             db_path: db_path.display().to_string(),
+            db_schema_version: schema.version,
+            db_last_migration_at: schema.last_migration_at,
+            known_schema_version: schema.known_version,
+            schema_current: schema.version >= schema.known_version,
             claude_root,
             codex_root,
             checkpoint_count,
@@ -380,6 +386,104 @@ impl<'a> CheckpointStore<'a> {
             parse_error_count,
             newest_indexed_path: newest.as_ref().map(|(path, _)| path.clone()),
             newest_indexed_at: newest.map(|(_, indexed_at)| indexed_at),
+        })
+    }
+
+    pub fn indexing_health(&self, process_start_time: Option<&str>) -> Result<AiIndexingHealth> {
+        let conn = self.pool.get()?;
+        let schema = crate::db::read_schema_version_info_conn(&conn)?;
+        let schema_current = schema.version >= schema.known_version;
+
+        let schema_drift_migrations = if let Some(started_at) = process_start_time {
+            let mut stmt = conn.prepare(
+                "SELECT version, applied_at
+                 FROM schema_migrations
+                 WHERE applied_at > ?1
+                 ORDER BY version ASC",
+            )?;
+            let rows = stmt.query_map([started_at], |row| {
+                Ok(SchemaDriftMigration {
+                    version: row.get(0)?,
+                    applied_at: row.get(1)?,
+                })
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+        let schema_drift_detected = !schema_drift_migrations.is_empty();
+
+        let last_successful_ingest_at: Option<String> = conn.query_row(
+            "SELECT MAX(last_indexed_at)
+             FROM transcript_sources
+             WHERE last_error IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let (recent_failure_count, first_failure_at, last_failure_at): (
+            i64,
+            Option<String>,
+            Option<String>,
+        ) = conn.query_row(
+            "SELECT COUNT(*), MIN(seen_at), MAX(seen_at)
+             FROM transcript_parse_errors
+             WHERE seen_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+
+        let mut stmt = conn.prepare(
+            "SELECT canonical_path
+             FROM transcript_sources
+             WHERE last_error IS NOT NULL
+             ORDER BY COALESCE(last_indexed_at, '') DESC, canonical_path ASC
+             LIMIT 20",
+        )?;
+        let affected_paths = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let recent_schema_error_count: i64 = conn.query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM transcript_sources
+                 WHERE last_error LIKE '%no such table%'
+                    OR last_error LIKE '%schema%')
+              + (SELECT COUNT(*) FROM transcript_parse_errors
+                 WHERE seen_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour')
+                   AND (error LIKE '%no such table%' OR error LIKE '%schema%'))",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let mut stale_indicators = Vec::new();
+        if !schema_current {
+            stale_indicators.push("schema_behind_binary".to_string());
+        }
+        if schema_drift_detected {
+            stale_indicators.push("schema_drift".to_string());
+        }
+        if recent_failure_count > 0 {
+            stale_indicators.push("recent_indexing_failures".to_string());
+        }
+        if recent_schema_error_count > 0 {
+            stale_indicators.push("recent_schema_errors".to_string());
+        }
+
+        Ok(AiIndexingHealth {
+            db_schema_version: schema.version,
+            db_last_migration_at: schema.last_migration_at,
+            known_schema_version: schema.known_version,
+            schema_current,
+            schema_drift_detected,
+            schema_drift_migrations,
+            last_successful_ingest_at,
+            recent_failure_count,
+            first_failure_at,
+            last_failure_at,
+            affected_paths,
+            recent_schema_error_count,
+            stale_indicators,
         })
     }
 }

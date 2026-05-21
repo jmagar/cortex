@@ -6,8 +6,9 @@ use std::process::Command;
 use syslog_mcp::app::{
     AbuseSearchResponse, AiCorrelateResponse, CorrelateEventsResponse, DbBackupResult,
     DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult,
-    GetErrorsResponse, ListAiProjectsResponse, ListAiToolsResponse, ListHostsResponse, LogEntry,
-    ProjectContextResponse, SearchLogsResponse, SearchSessionsResponse, SyslogService,
+    GetErrorsResponse, IncidentResponse, ListAiProjectsResponse, ListAiToolsResponse,
+    ListHostsResponse, LogEntry, ProjectContextResponse, SearchLogsResponse,
+    SearchSessionsResponse, ServiceLogsRequest, ServiceLogsResponse, SyslogService,
     UsageBlocksResponse,
 };
 use syslog_mcp::compose::{
@@ -15,7 +16,8 @@ use syslog_mcp::compose::{
     ComposeService, ComposeStatus, ComposeTarget, MutationOptions, ProcessRunner,
 };
 use syslog_mcp::scanner::{
-    AiDoctorReport, CheckpointEntry, IndexResult, ParseErrorEntry, PruneCheckpointsResult,
+    AiDoctorReport, AiIndexingHealth, CheckpointEntry, IndexResult, ParseErrorEntry,
+    PruneCheckpointsResult,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,10 +27,12 @@ pub(crate) enum CliCommand {
     Errors(TimeRangeArgs),
     Hosts(OutputArgs),
     Sessions(SessionsArgs),
+    Incident(IncidentArgs),
     Ai(AiCommand),
     Correlate(CorrelateArgs),
     Stats(OutputArgs),
     Compose(ComposeCommand),
+    Service(ServiceCommand),
     Setup(SetupCommand),
     Db(DbCommand),
 }
@@ -62,6 +66,11 @@ pub(crate) enum ComposeCommand {
     Restart(ComposeMutationArgs),
     Pull(ComposeMutationArgs),
     Logs(ComposeLogsArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ServiceCommand {
+    Logs(ServiceLogsArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,6 +191,37 @@ pub(crate) struct ComposeLogsArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ServiceLogsArgs {
+    pub service: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub tail: Option<u32>,
+    pub json: bool,
+}
+
+impl Default for ServiceLogsArgs {
+    fn default() -> Self {
+        Self {
+            service: String::new(),
+            from: None,
+            to: None,
+            tail: Some(200),
+            json: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct IncidentArgs {
+    pub around: String,
+    pub minutes: Option<u32>,
+    pub service: Option<String>,
+    pub hostname: Option<String>,
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SessionsArgs {
     pub project: Option<String>,
@@ -200,8 +240,12 @@ pub(crate) struct SearchArgs {
     pub source_ip: Option<String>,
     pub severity: Option<String>,
     pub app_name: Option<String>,
+    pub facility: Option<String>,
+    pub exclude_facility: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
+    pub received_from: Option<String>,
+    pub received_to: Option<String>,
     pub limit: Option<u32>,
     pub json: bool,
 }
@@ -374,10 +418,12 @@ impl CliCommand {
             "errors" => parse_errors(rest),
             "hosts" => parse_hosts(rest),
             "sessions" => parse_sessions(rest),
+            "incident" => parse_incident(rest),
             "ai" => parse_ai(rest),
             "correlate" => parse_correlate(rest),
             "stats" => parse_stats(rest),
             "compose" => parse_compose(rest),
+            "service" => parse_service(rest),
             "setup" => parse_setup(rest),
             "db" => parse_db(rest),
             _ => bail!("unknown CLI command: {command}"),
@@ -419,6 +465,7 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::Tail(args) => dispatch::run_tail(&mode, args).await,
         CliCommand::Errors(args) => dispatch::run_errors(&mode, args).await,
         CliCommand::Hosts(args) => dispatch::run_hosts(&mode, args).await,
+        CliCommand::Incident(args) => dispatch::run_incident(&mode, args).await,
         CliCommand::Correlate(args) => dispatch::run_correlate(&mode, args).await,
         CliCommand::Stats(args) => dispatch::run_stats(&mode, args).await,
         CliCommand::Sessions(args) => dispatch::run_sessions(&mode, args).await,
@@ -456,9 +503,9 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         // Compose/Setup are local-only and main::run_cli reroutes them BEFORE
         // calling run(). If we reach here, the front door was bypassed —
         // bail with a clear internal-error message rather than a placeholder.
-        CliCommand::Compose(_) | CliCommand::Setup(_) => {
+        CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
             bail!(
-                "internal: compose/setup must be dispatched by main::run_cli before reaching cli::run()"
+                "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"
             )
         }
     }
@@ -530,6 +577,27 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
     }
 }
 
+/// DB-free entry point for `syslog service ...` — avoids opening the SQLite
+/// pool so this command remains usable when the DB is corrupted/locked/full.
+pub async fn run_service_no_db(command: CliCommand) -> Result<()> {
+    let CliCommand::Service(command) = command else {
+        bail!("internal: run_service_no_db called with non-service command");
+    };
+    match command {
+        ServiceCommand::Logs(args) => {
+            let json = args.json;
+            let report = syslog_mcp::app::run_service_logs(ServiceLogsRequest {
+                service: args.service,
+                from: args.from,
+                to: args.to,
+                tail: args.tail,
+            })
+            .await?;
+            print_service_logs_response(&report, json)
+        }
+    }
+}
+
 fn parse_search(args: &[String]) -> Result<CliCommand> {
     let mut parsed = SearchArgs::default();
     let mut query = Vec::new();
@@ -541,8 +609,14 @@ fn parse_search(args: &[String]) -> Result<CliCommand> {
             "--source-ip" => parsed.source_ip = Some(flags.value("--source-ip")?),
             "--severity" => parsed.severity = Some(flags.value("--severity")?),
             "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--facility" => parsed.facility = Some(flags.value("--facility")?),
+            "--exclude-facility" => {
+                parsed.exclude_facility = Some(flags.value("--exclude-facility")?)
+            }
             "--from" => parsed.from = Some(flags.value("--from")?),
             "--to" => parsed.to = Some(flags.value("--to")?),
+            "--received-from" => parsed.received_from = Some(flags.value("--received-from")?),
+            "--received-to" => parsed.received_to = Some(flags.value("--received-to")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "-h" | "--help" => bail!("use `syslog --help` for usage"),
             _ if arg.starts_with("--hostname=") => {
@@ -557,10 +631,22 @@ fn parse_search(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--app-name=") => {
                 parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
             }
+            _ if arg.starts_with("--facility=") => {
+                parsed.facility = Some(value_after_equals(arg, "--facility")?)
+            }
+            _ if arg.starts_with("--exclude-facility=") => {
+                parsed.exclude_facility = Some(value_after_equals(arg, "--exclude-facility")?)
+            }
             _ if arg.starts_with("--from=") => {
                 parsed.from = Some(value_after_equals(arg, "--from")?)
             }
             _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--received-from=") => {
+                parsed.received_from = Some(value_after_equals(arg, "--received-from")?)
+            }
+            _ if arg.starts_with("--received-to=") => {
+                parsed.received_to = Some(value_after_equals(arg, "--received-to")?)
+            }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
                     "--limit",
@@ -573,6 +659,105 @@ fn parse_search(args: &[String]) -> Result<CliCommand> {
     }
     parsed.query = (!query.is_empty()).then(|| query.join(" "));
     Ok(CliCommand::Search(parsed))
+}
+
+fn parse_service(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("service requires a subcommand"))?;
+    match subcommand.as_str() {
+        "logs" => parse_service_logs(rest),
+        _ => bail!("unknown service subcommand: {subcommand}"),
+    }
+}
+
+fn parse_service_logs(args: &[String]) -> Result<CliCommand> {
+    let (service, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("service logs requires a service name"))?;
+    if service.starts_with('-') {
+        bail!("service logs requires a service name");
+    }
+    let mut parsed = ServiceLogsArgs {
+        service: service.clone(),
+        ..Default::default()
+    };
+    let mut flags = FlagCursor::new(rest);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--tail" | "-n" => parsed.tail = Some(parse_u32_flag(&arg, flags.value(&arg)?)?),
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--tail=") => {
+                parsed.tail = Some(parse_u32_flag(
+                    "--tail",
+                    value_after_equals(arg, "--tail")?,
+                )?)
+            }
+            _ if arg.starts_with("-n=") => {
+                parsed.tail = Some(parse_u32_flag("-n", value_after_equals(arg, "-n")?)?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown service logs option: {arg}"),
+            _ => bail!("unexpected service logs argument: {arg}"),
+        }
+    }
+    Ok(CliCommand::Service(ServiceCommand::Logs(parsed)))
+}
+
+fn parse_incident(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = IncidentArgs {
+        minutes: Some(5),
+        limit: Some(500),
+        ..Default::default()
+    };
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--around" => parsed.around = flags.value("--around")?,
+            "--minutes" => {
+                parsed.minutes = Some(parse_u32_flag("--minutes", flags.value("--minutes")?)?)
+            }
+            "--service" => parsed.service = Some(flags.value("--service")?),
+            "--hostname" | "--host" => parsed.hostname = Some(flags.value(&arg)?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--around=") => {
+                parsed.around = value_after_equals(arg, "--around")?
+            }
+            _ if arg.starts_with("--minutes=") => {
+                parsed.minutes = Some(parse_u32_flag(
+                    "--minutes",
+                    value_after_equals(arg, "--minutes")?,
+                )?)
+            }
+            _ if arg.starts_with("--service=") => {
+                parsed.service = Some(value_after_equals(arg, "--service")?)
+            }
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--host=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--host")?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown incident option: {arg}"),
+            _ => bail!("unexpected incident argument: {arg}"),
+        }
+    }
+    if parsed.around.is_empty() {
+        bail!("incident requires --around <RFC3339>");
+    }
+    Ok(CliCommand::Incident(parsed))
 }
 
 fn parse_tail(args: &[String]) -> Result<CliCommand> {
@@ -1158,6 +1343,10 @@ pub(super) struct AiWatchStatusReport {
     enabled: Option<String>,
     main_pid: Option<u32>,
     exec_start: Option<String>,
+    exec_main_start_timestamp: Option<String>,
+    process_start_time: Option<String>,
+    db_path: String,
+    health: AiIndexingHealth,
     latest_journal: Vec<String>,
 }
 
@@ -1308,7 +1497,7 @@ fn smoke_watch_target(
     bail!("no writable AI transcript root is available for smoke-watch");
 }
 
-pub(super) fn ai_watch_status() -> Result<AiWatchStatusReport> {
+pub(super) async fn ai_watch_status(service: &SyslogService) -> Result<AiWatchStatusReport> {
     const SERVICE: &str = "syslog-ai-watch.service";
     let active = systemctl_user_output(&["is-active", SERVICE]).ok();
     let enabled = systemctl_user_output(&["is-enabled", SERVICE]).ok();
@@ -1317,6 +1506,13 @@ pub(super) fn ai_watch_status() -> Result<AiWatchStatusReport> {
         .and_then(|value| value.parse::<u32>().ok())
         .filter(|pid| *pid > 0);
     let exec_start = systemctl_user_output(&["show", "-p", "ExecStart", "--value", SERVICE]).ok();
+    let exec_main_start_timestamp =
+        systemctl_user_output(&["show", "-p", "ExecMainStartTimestamp", "--value", SERVICE]).ok();
+    let process_start_time = syslog_mcp::doctor::ai_watcher_process_start_time();
+    let doctor = service.ai_doctor().await?;
+    let health = service
+        .ai_indexing_health(process_start_time.clone())
+        .await?;
     let latest_journal = command_output(
         "journalctl",
         &[
@@ -1338,6 +1534,10 @@ pub(super) fn ai_watch_status() -> Result<AiWatchStatusReport> {
         enabled,
         main_pid,
         exec_start,
+        exec_main_start_timestamp,
+        process_start_time,
+        db_path: doctor.db_path,
+        health,
         latest_journal,
     })
 }
@@ -2556,6 +2756,20 @@ pub(super) fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) ->
     }
     println!("db_path: {}", response.db_path);
     println!(
+        "db_schema_version: {}/{} ({})",
+        response.db_schema_version,
+        response.known_schema_version,
+        if response.schema_current {
+            "current"
+        } else {
+            "behind"
+        }
+    );
+    println!(
+        "db_last_migration_at: {}",
+        response.db_last_migration_at.as_deref().unwrap_or("-")
+    );
+    println!(
         "claude_root: {} ({}, readable={}, writable={}, owner={:?}:{:?}, mode={:?}, strict_ok={})",
         response.claude_root.path,
         if response.claude_root.exists {
@@ -2625,11 +2839,99 @@ pub(super) fn print_ai_watch_status_response(
         "exec_start: {}",
         response.exec_start.as_deref().unwrap_or("-")
     );
+    println!(
+        "process_start_time: {}",
+        response.process_start_time.as_deref().unwrap_or("-")
+    );
+    println!("db_path: {}", response.db_path);
+    println!(
+        "db_schema_version: {}/{}",
+        response.health.db_schema_version, response.health.known_schema_version
+    );
+    println!(
+        "schema_drift_detected: {}",
+        response.health.schema_drift_detected
+    );
+    println!(
+        "last_successful_ingest_at: {}",
+        response
+            .health
+            .last_successful_ingest_at
+            .as_deref()
+            .unwrap_or("-")
+    );
+    println!(
+        "recent_failure_count: {}",
+        response.health.recent_failure_count
+    );
+    if !response.health.stale_indicators.is_empty() {
+        println!(
+            "stale_indicators: {}",
+            response.health.stale_indicators.join(", ")
+        );
+    }
     if !response.latest_journal.is_empty() {
         println!("latest_journal:");
         for line in &response.latest_journal {
             println!("  {line}");
         }
+    }
+    Ok(())
+}
+
+fn print_service_logs_response(report: &ServiceLogsResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(report);
+    }
+    if report.dropped_lines > 0 {
+        eprintln!(
+            "warning: {} malformed journal line(s) dropped",
+            report.dropped_lines
+        );
+    }
+    if report.entries.is_empty() {
+        println!("{}: 0 journal entries", report.service);
+        return Ok(());
+    }
+    for entry in &report.entries {
+        let timestamp = entry.timestamp.as_deref().unwrap_or("-");
+        let ident = entry
+            .syslog_identifier
+            .as_deref()
+            .or(entry.unit.as_deref())
+            .unwrap_or("-");
+        let message = entry.message.as_deref().unwrap_or("");
+        println!("{timestamp} {ident}: {message}");
+    }
+    Ok(())
+}
+
+pub(super) fn print_incident_response(response: &IncidentResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "incident around {} +/- {}m: {} event(s){}",
+        response.around,
+        response.window_minutes,
+        response.event_count,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    for warning in &response.warnings {
+        println!("warn: {warning}");
+    }
+    for event in &response.events {
+        let host = event.host.as_deref().unwrap_or("-");
+        let severity = event.severity.as_deref().unwrap_or("-");
+        let app = event.app.as_deref().unwrap_or("-");
+        println!(
+            "{} {} {} {} {}: {}",
+            event.timestamp, event.source, host, severity, app, event.message
+        );
     }
     Ok(())
 }
