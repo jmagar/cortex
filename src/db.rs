@@ -37,7 +37,8 @@ pub use models::{
 };
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
 pub use pool::{
-    init_pool, read_schema_version_info, DbPool, SchemaVersionInfo, KNOWN_SCHEMA_VERSION,
+    init_pool, read_schema_version_info, read_schema_version_info_conn, DbPool, SchemaVersionInfo,
+    KNOWN_SCHEMA_VERSION,
 };
 pub use queries::{
     get_error_summary, get_stats, investigate_ai_incidents, list_ai_projects, list_ai_sessions,

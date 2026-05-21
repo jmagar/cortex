@@ -70,10 +70,9 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         }
         return match command {
             cli::CliCommand::Compose(_) => cli::run_compose(command),
-            cli::CliCommand::Service(_) => {
-                let runtime = RuntimeCore::load_query_only().await?;
-                cli::run_service(&runtime.service(), command).await
-            }
+            // `service` is a pure-journal surface — don't open SQLite for it.
+            // The watcher/DB might be the very thing the operator is debugging.
+            cli::CliCommand::Service(_) => cli::run_service_no_db(command).await,
             cli::CliCommand::Setup(cmd) => cli::run_setup(cmd),
             _ => unreachable!("guarded by matches! above"),
         };

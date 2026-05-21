@@ -131,7 +131,7 @@ fn journal_realtime_timestamp(micros: &str) -> Option<String> {
     let micros = micros.parse::<i64>().ok()?;
     let secs = micros.div_euclid(1_000_000);
     let nanos = micros.rem_euclid(1_000_000) as u32 * 1_000;
-    chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nanos).map(|dt| dt.to_rfc3339())
+    chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nanos).map(super::time::rfc3339_z)
 }
 
 fn service_app_filter(service: &str) -> String {
@@ -182,6 +182,45 @@ fn incident_sort_key(timestamp: &str) -> i64 {
         .unwrap_or(i64::MAX)
 }
 
+/// Read a syslog-owned service's journal via `journalctl`. Free function so
+/// callers can invoke it without standing up a [`SyslogService`] (and the
+/// SQLite pool that backs it) — `syslog service logs` is a self-debugging
+/// surface that must work when the DB is corrupted, locked, or full.
+pub async fn run_service_logs(req: ServiceLogsRequest) -> ServiceResult<ServiceLogsResponse> {
+    let service = normalize_syslog_owned_service(&req.service)?;
+    let mut args = vec![
+        "--user".to_string(),
+        "-u".to_string(),
+        service.clone(),
+        "--no-pager".to_string(),
+        "--output".to_string(),
+        "json".to_string(),
+    ];
+    if let Some(from) = &req.from {
+        args.push("--since".to_string());
+        args.push(from.clone());
+    }
+    if let Some(to) = &req.to {
+        args.push("--until".to_string());
+        args.push(to.clone());
+    }
+    let tail = req.tail.map(|tail| tail.clamp(1, 5_000));
+    if let Some(tail) = tail {
+        args.push("-n".to_string());
+        args.push(tail.to_string());
+    }
+
+    let raw = command_output("journalctl", &args).await?;
+    let entries = parse_journal_json_lines(&raw)?;
+    Ok(ServiceLogsResponse {
+        service,
+        from: req.from,
+        to: req.to,
+        tail,
+        entries,
+    })
+}
+
 /// Service-layer entry point bridging request structs to SQLite.
 ///
 /// `Clone` is cheap — every field is either `Arc`-wrapped or a small `Copy`
@@ -213,38 +252,12 @@ impl SyslogService {
         &self,
         req: ServiceLogsRequest,
     ) -> ServiceResult<ServiceLogsResponse> {
-        let service = normalize_syslog_owned_service(&req.service)?;
-        let mut args = vec![
-            "--user".to_string(),
-            "-u".to_string(),
-            service.clone(),
-            "--no-pager".to_string(),
-            "--output".to_string(),
-            "json".to_string(),
-        ];
-        if let Some(from) = &req.from {
-            args.push("--since".to_string());
-            args.push(from.clone());
-        }
-        if let Some(to) = &req.to {
-            args.push("--until".to_string());
-            args.push(to.clone());
-        }
-        let tail = req.tail.map(|tail| tail.clamp(1, 5_000));
-        if let Some(tail) = tail {
-            args.push("-n".to_string());
-            args.push(tail.to_string());
-        }
-
-        let raw = command_output("journalctl", &args).await?;
-        let entries = parse_journal_json_lines(&raw)?;
-        Ok(ServiceLogsResponse {
-            service,
-            from: req.from,
-            to: req.to,
-            tail,
-            entries,
-        })
+        // Delegate to the free function — `service_logs` is pure shell-out
+        // to journalctl and does not touch `self.pool`. Exposing it as a
+        // free function lets callers (e.g. the CLI dispatch path) invoke
+        // it without first opening SQLite, which would defeat the
+        // self-debugging surface when the DB is corrupted/locked/full.
+        run_service_logs(req).await
     }
 
     pub async fn incident(&self, req: IncidentRequest) -> ServiceResult<IncidentResponse> {
@@ -292,7 +305,7 @@ impl SyslogService {
                     service,
                     from: Some(from.clone()),
                     to: Some(to.clone()),
-                    tail: Some(limit),
+                    tail: Some(limit.saturating_add(1)),
                 })
                 .await
             {

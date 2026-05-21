@@ -424,9 +424,12 @@ fn parse_ai_watch_status_accepts_json() {
 
 #[test]
 fn parse_systemctl_timestamp_utc_accepts_systemctl_output() {
+    // Now formatted as RFC3339 millis+Z (matches SQLite stored shape) and
+    // lives in the `doctor` module (deduped from cli.rs).
     assert_eq!(
-        parse_systemctl_timestamp_utc("Tue 2026-05-19 22:30:09 EDT").as_deref(),
-        Some("2026-05-20T02:30:09Z")
+        syslog_mcp::doctor::parse_systemctl_timestamp_utc("Tue 2026-05-19 22:30:09 EDT")
+            .as_deref(),
+        Some("2026-05-20T02:30:09.000Z")
     );
 }
 

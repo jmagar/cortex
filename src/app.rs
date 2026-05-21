@@ -3,7 +3,7 @@ mod error;
 pub(crate) mod error_detection;
 mod models;
 mod service;
-mod time;
+pub(crate) mod time;
 
 pub use correlate::severity_at_or_above;
 pub use error::{ServiceError, ServiceResult};
@@ -98,7 +98,7 @@ pub use models::{
     UsageBlocksRequest,
     UsageBlocksResponse,
 };
-pub use service::SyslogService;
+pub use service::{run_service_logs, SyslogService};
 pub use time::parse_optional_timestamp;
 
 #[cfg(test)]

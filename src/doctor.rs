@@ -493,44 +493,49 @@ async fn collect_ai_section() -> DoctorSection {
                         format!("{} parse errors", ai.parse_error_count),
                     ));
                 }
-                if let Some(process_start_time) = ai_watcher_process_start_time() {
-                    match runtime
-                        .service()
-                        .ai_indexing_health(Some(process_start_time.clone()))
-                        .await
-                    {
-                        Ok(health) => {
+                // Always collect indexing-health diagnostics — these are the
+                // most useful surfaces during a watcher outage when the start
+                // timestamp is unavailable (`n/a`) or parsing failed. Only the
+                // schema-drift comparison requires a known watcher start time.
+                let process_start_time = ai_watcher_process_start_time();
+                match runtime
+                    .service()
+                    .ai_indexing_health(process_start_time.clone())
+                    .await
+                {
+                    Ok(health) => {
+                        if let Some(start) = process_start_time.as_deref() {
                             if health.schema_drift_detected {
                                 phases.push(DoctorPhase::new(
                                     SetupStatus::Error,
                                     "ai_watch_schema_drift",
                                     format!(
-                                        "watcher started {process_start_time}; {} migration(s) applied later; fix: systemctl --user restart syslog-ai-watch.service",
+                                        "watcher started {start}; {} migration(s) applied later; fix: systemctl --user restart syslog-ai-watch.service",
                                         health.schema_drift_migrations.len()
                                     ),
                                 ));
                             }
-                            if health.recent_failure_count > 0
-                                || health.recent_schema_error_count > 0
-                            {
-                                phases.push(DoctorPhase::new(
-                                    SetupStatus::Warn,
-                                    "ai_watch_recent_failures",
-                                    format!(
-                                        "{} parse/index failures in last hour, {} schema-like errors, affected_paths={}",
-                                        health.recent_failure_count,
-                                        health.recent_schema_error_count,
-                                        health.affected_paths.len()
-                                    ),
-                                ));
-                            }
                         }
-                        Err(error) => phases.push(DoctorPhase::new(
-                            SetupStatus::Warn,
-                            "ai_watch_health",
-                            error.to_string(),
-                        )),
+                        if health.recent_failure_count > 0
+                            || health.recent_schema_error_count > 0
+                        {
+                            phases.push(DoctorPhase::new(
+                                SetupStatus::Warn,
+                                "ai_watch_recent_failures",
+                                format!(
+                                    "{} parse/index failures in last hour, {} schema-like errors, affected_paths={}",
+                                    health.recent_failure_count,
+                                    health.recent_schema_error_count,
+                                    health.affected_paths.len()
+                                ),
+                            ));
+                        }
                     }
+                    Err(error) => phases.push(DoctorPhase::new(
+                        SetupStatus::Warn,
+                        "ai_watch_health",
+                        error.to_string(),
+                    )),
                 }
             }
             Err(error) => phases.push(DoctorPhase::new(
@@ -548,8 +553,17 @@ async fn collect_ai_section() -> DoctorSection {
     DoctorSection::new("AI Transcripts", phases)
 }
 
-fn ai_watcher_process_start_time() -> Option<String> {
+pub fn ai_watcher_process_start_time() -> Option<String> {
     const SERVICE: &str = "syslog-ai-watch.service";
+    // Prefer the unambiguous `ExecMainStartTimestampMonotonic` property
+    // (microseconds since boot) joined with `/proc/stat`'s btime, but the
+    // most portable approach is `systemctl show --timestamp=unix` (systemd
+    // 247+), which renders `ExecMainStartTimestamp` as `@<unix_seconds>`.
+    // If neither is available, fall back to parsing the human-readable form.
+    let usec = systemctl_unix_timestamp(SERVICE);
+    if usec.is_some() {
+        return usec;
+    }
     let output = std::process::Command::new("systemctl")
         .arg("--user")
         .args(["show", "-p", "ExecMainStartTimestamp", "--value", SERVICE])
@@ -561,7 +575,38 @@ fn ai_watcher_process_start_time() -> Option<String> {
     parse_systemctl_timestamp_utc(String::from_utf8_lossy(&output.stdout).trim())
 }
 
-fn parse_systemctl_timestamp_utc(raw: &str) -> Option<String> {
+fn systemctl_unix_timestamp(service: &str) -> Option<String> {
+    let output = std::process::Command::new("systemctl")
+        .arg("--user")
+        .args([
+            "show",
+            "-p",
+            "ExecMainStartTimestamp",
+            "--value",
+            "--timestamp=unix",
+            service,
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stripped = raw.strip_prefix('@')?;
+    let secs: i64 = stripped.split('.').next()?.parse().ok()?;
+    let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0)?;
+    Some(crate::app::time::rfc3339_z(dt))
+}
+
+/// Parse the human-readable `ExecMainStartTimestamp` form emitted by older
+/// systemd versions, e.g. `Mon 2026-05-20 17:32:11 EDT`. Returns the time as
+/// an RFC3339 millis+Z string so downstream comparisons match the format
+/// SQLite stores for `applied_at`.
+///
+/// This is intentionally a fallback — prefer `systemctl --timestamp=unix`
+/// when available, since this parser only knows a handful of US timezone
+/// abbreviations and may return `None` on other locales.
+pub fn parse_systemctl_timestamp_utc(raw: &str) -> Option<String> {
     let raw = raw.trim();
     if raw.is_empty() || raw == "n/a" {
         return None;
@@ -581,11 +626,8 @@ fn parse_systemctl_timestamp_utc(raw: &str) -> Option<String> {
         _ => return None,
     };
     let utc = naive - chrono::TimeDelta::seconds(i64::from(offset_seconds));
-    Some(
-        chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(utc, chrono::Utc)
-            .format("%Y-%m-%dT%H:%M:%SZ")
-            .to_string(),
-    )
+    let dt = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(utc, chrono::Utc);
+    Some(crate::app::time::rfc3339_z(dt))
 }
 
 fn status_label(s: &SetupStatus) -> &'static str {

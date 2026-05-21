@@ -25,6 +25,12 @@ fn shared_scheduled_thread_pool() -> Arc<ScheduledThreadPool> {
 
 pub fn read_schema_version_info(pool: &DbPool) -> Result<SchemaVersionInfo> {
     let conn = pool.get()?;
+    read_schema_version_info_conn(&conn)
+}
+
+/// Probe `schema_migrations` from an already-borrowed connection. Used by
+/// callers that do not own a [`DbPool`] (e.g. the scanner's checkpoint store).
+pub fn read_schema_version_info_conn(conn: &Connection) -> Result<SchemaVersionInfo> {
     let (version, last_migration_at): (Option<i64>, Option<String>) = conn
         .query_row(
             "SELECT MAX(version), MAX(applied_at) FROM schema_migrations",

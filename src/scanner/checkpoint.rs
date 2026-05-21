@@ -332,7 +332,7 @@ impl<'a> CheckpointStore<'a> {
 
     pub fn doctor(&self, db_path: &Path) -> Result<AiDoctorReport> {
         let conn = self.pool.get()?;
-        let schema = read_schema_version_info_conn(&conn)?;
+        let schema = crate::db::read_schema_version_info_conn(&conn)?;
         let checkpoint_count =
             conn.query_row("SELECT COUNT(*) FROM transcript_sources", [], |row| {
                 row.get(0)
@@ -391,7 +391,7 @@ impl<'a> CheckpointStore<'a> {
 
     pub fn indexing_health(&self, process_start_time: Option<&str>) -> Result<AiIndexingHealth> {
         let conn = self.pool.get()?;
-        let schema = read_schema_version_info_conn(&conn)?;
+        let schema = crate::db::read_schema_version_info_conn(&conn)?;
         let schema_current = schema.version >= schema.known_version;
 
         let schema_drift_migrations = if let Some(started_at) = process_start_time {
@@ -486,23 +486,6 @@ impl<'a> CheckpointStore<'a> {
             stale_indicators,
         })
     }
-}
-
-fn read_schema_version_info_conn(
-    conn: &rusqlite::Connection,
-) -> Result<crate::db::SchemaVersionInfo> {
-    let (version, last_migration_at): (Option<i64>, Option<String>) = conn
-        .query_row(
-            "SELECT MAX(version), MAX(applied_at) FROM schema_migrations",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|err| anyhow::anyhow!("schema_migrations probe failed: {err}"))?;
-    Ok(crate::db::SchemaVersionInfo {
-        version: version.unwrap_or(0),
-        last_migration_at,
-        known_version: crate::db::KNOWN_SCHEMA_VERSION,
-    })
 }
 
 fn default_root_statuses() -> (TranscriptRootStatus, TranscriptRootStatus) {

@@ -577,21 +577,22 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
     }
 }
 
-pub(crate) async fn run_service(service: &SyslogService, command: CliCommand) -> Result<()> {
+/// DB-free entry point for `syslog service ...` — avoids opening the SQLite
+/// pool so this command remains usable when the DB is corrupted/locked/full.
+pub async fn run_service_no_db(command: CliCommand) -> Result<()> {
     let CliCommand::Service(command) = command else {
-        bail!("internal: run_service called with non-service command");
+        bail!("internal: run_service_no_db called with non-service command");
     };
     match command {
         ServiceCommand::Logs(args) => {
             let json = args.json;
-            let report = service
-                .service_logs(ServiceLogsRequest {
-                    service: args.service,
-                    from: args.from,
-                    to: args.to,
-                    tail: args.tail,
-                })
-                .await?;
+            let report = syslog_mcp::app::run_service_logs(ServiceLogsRequest {
+                service: args.service,
+                from: args.from,
+                to: args.to,
+                tail: args.tail,
+            })
+            .await?;
             print_service_logs_response(&report, json)
         }
     }
@@ -1507,9 +1508,7 @@ pub(super) async fn ai_watch_status(service: &SyslogService) -> Result<AiWatchSt
     let exec_start = systemctl_user_output(&["show", "-p", "ExecStart", "--value", SERVICE]).ok();
     let exec_main_start_timestamp =
         systemctl_user_output(&["show", "-p", "ExecMainStartTimestamp", "--value", SERVICE]).ok();
-    let process_start_time = exec_main_start_timestamp
-        .as_deref()
-        .and_then(parse_systemctl_timestamp_utc);
+    let process_start_time = syslog_mcp::doctor::ai_watcher_process_start_time();
     let doctor = service.ai_doctor().await?;
     let health = service
         .ai_indexing_health(process_start_time.clone())
@@ -1541,33 +1540,6 @@ pub(super) async fn ai_watch_status(service: &SyslogService) -> Result<AiWatchSt
         health,
         latest_journal,
     })
-}
-
-fn parse_systemctl_timestamp_utc(raw: &str) -> Option<String> {
-    let raw = raw.trim();
-    if raw.is_empty() || raw == "n/a" {
-        return None;
-    }
-    let (prefix, tz) = raw.rsplit_once(' ')?;
-    let naive = chrono::NaiveDateTime::parse_from_str(prefix, "%a %Y-%m-%d %H:%M:%S").ok()?;
-    let offset_seconds = match tz {
-        "UTC" | "GMT" | "Z" => 0,
-        "EST" => -5 * 3600,
-        "EDT" => -4 * 3600,
-        "CST" => -6 * 3600,
-        "CDT" => -5 * 3600,
-        "MST" => -7 * 3600,
-        "MDT" => -6 * 3600,
-        "PST" => -8 * 3600,
-        "PDT" => -7 * 3600,
-        _ => return None,
-    };
-    let utc = naive - chrono::TimeDelta::seconds(i64::from(offset_seconds));
-    Some(
-        chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(utc, chrono::Utc)
-            .format("%Y-%m-%dT%H:%M:%SZ")
-            .to_string(),
-    )
 }
 
 fn systemctl_user_output(args: &[&str]) -> Result<String> {
@@ -2912,7 +2884,7 @@ fn print_service_logs_response(report: &ServiceLogsResponse, json: bool) -> Resu
         return print_json(report);
     }
     if report.entries.is_empty() {
-        println!("{}: 0 journal entrie(s)", report.service);
+        println!("{}: 0 journal entries", report.service);
         return Ok(());
     }
     for entry in &report.entries {
