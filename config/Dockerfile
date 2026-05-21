@@ -9,9 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libs
 
 # Cache deps
 COPY Cargo.toml Cargo.lock ./
-RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=syslog-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=syslog-cargo-target,target=/app/target,sharing=locked \
+RUN --mount=type=cache,id=syslog-cargo-registry-v2,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=syslog-cargo-git-v2,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=syslog-cargo-target-v2,target=/app/target,sharing=locked \
     case "$SYSLOG_BUILD_PROFILE" in release|debug) ;; *) echo "invalid SYSLOG_BUILD_PROFILE=$SYSLOG_BUILD_PROFILE"; exit 1; esac && \
     mkdir src && echo "fn main() {}" > src/main.rs && \
     if [ "$SYSLOG_BUILD_PROFILE" = "release" ]; then cargo build --release --locked; else cargo build --locked; fi && \
@@ -21,9 +21,9 @@ RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry
 COPY src/ src/
 COPY docker-compose.yml ./
 COPY config/Dockerfile config/Dockerfile
-RUN --mount=type=cache,id=syslog-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=syslog-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=syslog-cargo-target,target=/app/target,sharing=locked \
+RUN --mount=type=cache,id=syslog-cargo-registry-v2,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=syslog-cargo-git-v2,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=syslog-cargo-target-v2,target=/app/target,sharing=locked \
     case "$SYSLOG_BUILD_PROFILE" in release|debug) ;; *) echo "invalid SYSLOG_BUILD_PROFILE=$SYSLOG_BUILD_PROFILE"; exit 1; esac && \
     touch src/main.rs && \
     if [ "$SYSLOG_BUILD_PROFILE" = "release" ]; then \
