@@ -153,6 +153,7 @@ pub struct ApiState {
 impl ApiState {
     /// Build an `ApiState`, querying the SQLite schema version once at
     /// startup. Caching avoids per-request DB hits on `/api/version`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         service: SyslogService,
         config: ApiConfig,
