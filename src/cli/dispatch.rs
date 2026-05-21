@@ -898,11 +898,10 @@ pub(super) async fn run_sig_list(mode: &CliMode, args: SigListArgs) -> Result<()
         } else {
             ""
         };
-        let hash_short = if sig.signature_hash.len() >= 16 {
-            &sig.signature_hash[..16]
-        } else {
-            sig.signature_hash.as_str()
-        };
+        let hash_short = sig
+            .signature_hash
+            .get(..16)
+            .unwrap_or(sig.signature_hash.as_str());
         println!(
             "  {:>6}x  {}  {}{}",
             sig.total_count, hash_short, sig.template, acked
