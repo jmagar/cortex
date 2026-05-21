@@ -1302,7 +1302,7 @@ fn parse_ai_assess_with_incident_id() {
     let CliCommand::Ai(AiCommand::Assess(args)) = cmd else {
         panic!("expected Assess");
     };
-    assert_eq!(args.incident_id.as_deref(), Some("inc-00000000deadbeef"));
+    assert_eq!(args.incident_id, "inc-00000000deadbeef");
     assert_eq!(args.model, None);
     assert!(!args.json);
 }
@@ -1321,7 +1321,7 @@ fn parse_ai_assess_with_model_and_json() {
     let CliCommand::Ai(AiCommand::Assess(args)) = cmd else {
         panic!("expected Assess");
     };
-    assert_eq!(args.incident_id.as_deref(), Some("inc-abc123"));
+    assert_eq!(args.incident_id, "inc-abc123");
     assert_eq!(args.model.as_deref(), Some("gemini-2.0-flash"));
     assert!(args.json);
 }
@@ -1371,7 +1371,7 @@ fn parse_ai_assess_filter_flags_forwarded() {
     let CliCommand::Ai(AiCommand::Assess(args)) = cmd else {
         panic!("expected Assess");
     };
-    assert_eq!(args.incident_id.as_deref(), Some("inc-abc123"));
+    assert_eq!(args.incident_id, "inc-abc123");
     assert_eq!(args.project.as_deref(), Some("axon_rust"));
     assert_eq!(args.tool.as_deref(), Some("claude"));
     assert_eq!(args.window_minutes, Some(10));

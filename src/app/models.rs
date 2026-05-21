@@ -474,7 +474,7 @@ pub struct AiInvestigateResponse {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiAssessRequest {
     /// The incident_id to look up — must match a real AbuseIncident.incident_id.
     /// The incident_id is a deterministic hash of the anchor IDs; these depend on
