@@ -14,15 +14,13 @@ use tokio::sync::Semaphore;
 use tower_http::cors::CorsLayer;
 
 use crate::app::{
-    AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateRequest,
-    AiParseErrorsRequest, AiPruneCheckpointsRequest, CorrelateEventsRequest, DbCheckpointRequest,
-    DbIntegrityRequest, DbVacuumRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListSessionsRequest, ListSourceIpsRequest,
-    PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
-    SyslogService, TailLogsRequest, TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest,
-    UsageBlocksRequest,
+    AbuseSearchRequest, AiCheckpointsRequest, AiCorrelateRequest, AiParseErrorsRequest,
+    AiPruneCheckpointsRequest, CorrelateEventsRequest, DbCheckpointRequest, DbIntegrityRequest,
+    DbVacuumRequest, GetErrorsRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListSessionsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
+    SyslogService, TailLogsRequest, UsageBlocksRequest,
 };
-use crate::config::{ApiConfig, NotificationsConfig};
+use crate::config::ApiConfig;
 use crate::db::DbPool;
 use crate::mcp::{build_auth_layer, AuthPolicy};
 
@@ -144,16 +142,11 @@ pub struct ApiState {
     /// `SHARED_MAINTENANCE_PERMIT` docs for the dual-permit rationale
     /// (eng-review C2) and the test-isolation rationale.
     pub maintenance_permit: Arc<Semaphore>,
-    /// Notifications configuration (apprise URLs) needed by
-    /// `POST /api/notifications/test`. Server-side authoritative — caller
-    /// cannot override apprise URLs over the wire.
-    pub notifications_config: NotificationsConfig,
 }
 
 impl ApiState {
     /// Build an `ApiState`, querying the SQLite schema version once at
     /// startup. Caching avoids per-request DB hits on `/api/version`.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         service: SyslogService,
         config: ApiConfig,
@@ -162,7 +155,6 @@ impl ApiState {
         allowed_origins: Vec<String>,
         auth_policy: AuthPolicy,
         pool: &DbPool,
-        notifications_config: NotificationsConfig,
     ) -> anyhow::Result<Self> {
         let schema_version = read_schema_version(pool)?;
         let version_info = Arc::new(VersionInfo {
@@ -180,7 +172,6 @@ impl ApiState {
             version_info,
             full_vacuum_size_guard_bytes: FULL_VACUUM_SIZE_GUARD_BYTES,
             maintenance_permit: shared_maintenance_permit(),
-            notifications_config,
         })
     }
 
@@ -226,19 +217,6 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/correlate", get(correlate))
         .route("/api/stats", get(stats))
         .route("/api/version", get(version))
-        // --- surface parity: query gaps ---
-        .route("/api/source-ips", get(source_ips))
-        .route("/api/timeline", get(timeline))
-        .route("/api/patterns", get(patterns))
-        .route("/api/ingest-rate", get(ingest_rate))
-        .route("/api/get", get(get_log))
-        // --- error signatures ---
-        .route("/api/errors/unaddressed", get(unaddressed_errors))
-        .route("/api/errors/ack", post(ack_error))
-        .route("/api/errors/unack", post(unack_error))
-        // --- notifications ---
-        .route("/api/notifications/recent", get(notifications_recent))
-        .route("/api/notifications/test", post(notifications_test))
         // --- ai session queries ---
         .route("/api/sessions", get(sessions))
         .route("/api/ai/search", get(ai_search))
@@ -248,8 +226,6 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/ai/context", get(ai_context))
         .route("/api/ai/tools", get(ai_tools))
         .route("/api/ai/projects", get(ai_projects))
-        .route("/api/ai/incidents", get(ai_incidents))
-        .route("/api/ai/investigate", get(ai_investigate))
         // --- ai diagnostic + admin (bead 0p8r.3) ---
         .route("/api/ai/checkpoints", get(ai_checkpoints))
         .route("/api/ai/errors", get(ai_parse_errors))
@@ -421,254 +397,6 @@ async fn stats(State(state): State<ApiState>) -> impl IntoResponse {
     respond(state.service.get_stats().await)
 }
 
-// ─── Surface parity handlers ────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SourceIpsQuery {
-    limit: Option<u32>,
-    offset: Option<u32>,
-}
-
-async fn source_ips(
-    State(state): State<ApiState>,
-    Query(query): Query<SourceIpsQuery>,
-) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .list_source_ips(ListSourceIpsRequest {
-                limit: query.limit,
-                offset: query.offset,
-            })
-            .await,
-    )
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TimelineQuery {
-    bucket: Option<String>,
-    group_by: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
-    hostname: Option<String>,
-    app_name: Option<String>,
-    severity_min: Option<String>,
-}
-
-async fn timeline(
-    State(state): State<ApiState>,
-    Query(query): Query<TimelineQuery>,
-) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .timeline(TimelineRequest {
-                bucket: query.bucket,
-                group_by: query.group_by,
-                from: query.from,
-                to: query.to,
-                hostname: query.hostname,
-                app_name: query.app_name,
-                severity_min: query.severity_min,
-            })
-            .await,
-    )
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PatternsQuery {
-    from: Option<String>,
-    to: Option<String>,
-    hostname: Option<String>,
-    app_name: Option<String>,
-    severity_min: Option<String>,
-    scan_limit: Option<u32>,
-    top_n: Option<u32>,
-}
-
-async fn patterns(
-    State(state): State<ApiState>,
-    Query(query): Query<PatternsQuery>,
-) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .patterns(PatternsRequest {
-                from: query.from,
-                to: query.to,
-                hostname: query.hostname,
-                app_name: query.app_name,
-                severity_min: query.severity_min,
-                scan_limit: query.scan_limit,
-                top_n: query.top_n,
-            })
-            .await,
-    )
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct IngestRateQuery {
-    by_host: Option<bool>,
-}
-
-async fn ingest_rate(
-    State(state): State<ApiState>,
-    Query(query): Query<IngestRateQuery>,
-) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .ingest_rate(IngestRateRequest {
-                by_host: query.by_host,
-            })
-            .await,
-    )
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct GetLogQuery {
-    id: i64,
-}
-
-async fn get_log(
-    State(state): State<ApiState>,
-    Query(query): Query<GetLogQuery>,
-) -> impl IntoResponse {
-    respond(state.service.get_log(GetLogRequest { id: query.id }).await)
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct UnaddressedErrorsQuery {
-    limit: Option<u32>,
-    include_acknowledged: Option<bool>,
-}
-
-async fn unaddressed_errors(
-    State(state): State<ApiState>,
-    Query(query): Query<UnaddressedErrorsQuery>,
-) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .unaddressed_errors(UnaddressedErrorsRequest {
-                limit: query.limit,
-                include_acknowledged: query.include_acknowledged,
-            })
-            .await,
-    )
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AckErrorBody {
-    signature_hash: String,
-    notes: Option<String>,
-}
-
-async fn ack_error(
-    State(state): State<ApiState>,
-    Json(body): Json<AckErrorBody>,
-) -> impl IntoResponse {
-    // REST API uses the API token identity — no per-user JWT in bearer mode.
-    let actor = "api";
-    respond(
-        state
-            .service
-            .ack_error(
-                AckErrorRequest {
-                    signature_hash: body.signature_hash,
-                    notes: body.notes,
-                },
-                actor,
-            )
-            .await,
-    )
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct UnackErrorBody {
-    signature_hash: String,
-    reason: Option<String>,
-}
-
-async fn unack_error(
-    State(state): State<ApiState>,
-    Json(body): Json<UnackErrorBody>,
-) -> impl IntoResponse {
-    let actor = "api";
-    respond(
-        state
-            .service
-            .unack_error(
-                UnackErrorRequest {
-                    signature_hash: body.signature_hash,
-                    reason: body.reason,
-                },
-                actor,
-            )
-            .await,
-    )
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NotificationsRecentQuery {
-    limit: Option<i64>,
-    rule_id: Option<String>,
-    since: Option<String>,
-}
-
-async fn notifications_recent(
-    State(state): State<ApiState>,
-    Query(query): Query<NotificationsRecentQuery>,
-) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .notifications_recent(
-                query.limit.unwrap_or(50).clamp(1, 500),
-                query.rule_id,
-                query.since,
-            )
-            .await,
-    )
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NotificationsTestBody {
-    body: Option<String>,
-}
-
-async fn notifications_test(
-    State(state): State<ApiState>,
-    Json(body): Json<NotificationsTestBody>,
-) -> impl IntoResponse {
-    let actor = "api".to_string();
-    let apprise_url = state.notifications_config.apprise_url.clone();
-    let apprise_urls = state.notifications_config.apprise_urls.clone();
-    respond(
-        state
-            .service
-            .notifications_test(
-                body.body
-                    .unwrap_or_else(|| "Test notification from syslog-mcp".to_string()),
-                actor,
-                apprise_url,
-                apprise_urls,
-            )
-            .await
-            .map(|r| json!({ "result": r })),
-    )
-}
-
 /// `GET /api/version` — returns the cached server identity. SQLite is NOT
 /// queried per request; `schema_version` is captured once at startup.
 async fn version(State(state): State<ApiState>) -> impl IntoResponse {
@@ -791,22 +519,6 @@ async fn ai_projects(
     Query(req): Query<ListAiProjectsRequest>,
 ) -> impl IntoResponse {
     respond(state.service.list_ai_projects(req).await)
-}
-
-/// `GET /api/ai/incidents` — scored abuse incident groups.
-async fn ai_incidents(
-    State(state): State<ApiState>,
-    serde_qs::axum::QsQuery(req): serde_qs::axum::QsQuery<AiIncidentRequest>,
-) -> impl IntoResponse {
-    respond(state.service.list_ai_incidents(req).await)
-}
-
-/// `GET /api/ai/investigate` — correlated evidence bundles for abuse incidents.
-async fn ai_investigate(
-    State(state): State<ApiState>,
-    serde_qs::axum::QsQuery(req): serde_qs::axum::QsQuery<AiInvestigateRequest>,
-) -> impl IntoResponse {
-    respond(state.service.investigate_ai_incidents(req).await)
 }
 
 // ─── AI diagnostic + admin (bead 0p8r.3) ─────────────────────────────────────
