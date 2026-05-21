@@ -2532,6 +2532,13 @@ fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<()> {
     Ok(())
 }
 
+fn local_ts(utc: &str) -> String {
+    use chrono::{DateTime, Local};
+    DateTime::parse_from_rfc3339(utc)
+        .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S %Z").to_string())
+        .unwrap_or_else(|_| utc.to_string())
+}
+
 pub(super) fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);
@@ -2551,7 +2558,7 @@ fn print_log(log: &LogEntry) {
     let app = log.app_name.as_deref().unwrap_or("-");
     println!(
         "{} {:<7} {:<20} {:<16} {}",
-        log.timestamp, log.severity, log.hostname, app, log.message
+        local_ts(&log.timestamp), log.severity, log.hostname, app, log.message
     );
 }
 
@@ -2569,7 +2576,7 @@ fn print_ai_log(log: &LogEntry) {
     let session = log.ai_session_id.as_deref().unwrap_or("(unknown session)");
     println!(
         "{} {:<7} {:<8} {:<36} session={}",
-        log.timestamp,
+        local_ts(&log.timestamp),
         log.severity,
         truncate(tool, 8),
         truncate(project, 35),
@@ -2609,7 +2616,7 @@ pub(super) fn print_hosts_response(response: &ListHostsResponse, json: bool) -> 
     for host in &response.hosts {
         println!(
             "{:<20} {:<5} {}",
-            host.hostname, host.log_count, host.last_seen
+            host.hostname, host.log_count, local_ts(&host.last_seen)
         );
     }
     Ok(())
@@ -2708,7 +2715,7 @@ pub(super) fn print_abuse_search_response(
         println!();
         println!(
             "match term={} id={} {}",
-            item.term, item.entry.id, item.entry.timestamp
+            item.term, item.entry.id, local_ts(&item.entry.timestamp)
         );
         for before in &item.before {
             println!("  before:");
@@ -2748,9 +2755,9 @@ pub(super) fn print_ai_correlate_response(
         println!(
             "AI anchor id={} {} window={}..{}{}",
             anchor.entry.id,
-            anchor.entry.timestamp,
-            anchor.window_from,
-            anchor.window_to,
+            local_ts(&anchor.entry.timestamp),
+            local_ts(&anchor.window_from),
+            local_ts(&anchor.window_to),
             if anchor.related_truncated {
                 " (related truncated)"
             } else {
@@ -2841,7 +2848,7 @@ pub(super) fn print_ai_tools_response(response: &ListAiToolsResponse, json: bool
     for tool in &response.tools {
         println!(
             "{:<10} {:<6} {:<8} {}",
-            tool.tool, tool.event_count, tool.session_count, tool.last_seen
+            tool.tool, tool.event_count, tool.session_count, local_ts(&tool.last_seen)
         );
     }
     Ok(())
@@ -3132,7 +3139,7 @@ pub(super) fn print_incident_response(response: &IncidentResponse, json: bool) -
         let app = event.app.as_deref().unwrap_or("-");
         println!(
             "{} {} {} {} {}: {}",
-            event.timestamp, event.source, host, severity, app, event.message
+            local_ts(&event.timestamp), event.source, host, severity, app, event.message
         );
     }
     Ok(())
