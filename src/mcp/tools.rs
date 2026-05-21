@@ -3,10 +3,11 @@ use serde_json::{json, Value};
 
 use crate::app::{
     AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
-    AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
-    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, PatternsRequest,
-    ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
+    AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
+    CorrelateEventsRequest, GetErrorsRequest, GetLogRequest, IncidentContextRequest,
+    IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest,
+    ListSessionsRequest, ListSourceIpsRequest, PatternsRequest, ProjectContextRequest,
+    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, SimilarIncidentsRequest,
     TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
@@ -69,6 +70,9 @@ async fn tool_syslog(
         "unack_error" => tool_unack_error(state, args, auth).await,
         "notifications_recent" => tool_notifications_recent(state, args).await,
         "notifications_test" => tool_notifications_test(state, args, auth).await,
+        "similar_incidents" => tool_similar_incidents(state, args).await,
+        "ask_history" => tool_ask_history(state, args).await,
+        "incident_context" => tool_incident_context(state, args).await,
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
             "unknown syslog action: {action}; expected one of {}",
@@ -1182,6 +1186,62 @@ List recent notification firings from the `notification_firings` table.
 - `rule_id` (string, optional) — filter by rule ID (e.g. `oom_kill`, `daily_digest`)
 - `since` (string, optional) — ISO8601 lower bound for `fired_at`
 
+---
+
+## syslog similar_incidents
+
+Find historical incidents similar to a query. Groups FTS5-matched system log hits
+into time-windowed clusters by host+app_name. Returns ranked clusters (most
+log hits first) with representative message snippets and correlated AI sessions
+whose transcript timestamps overlap the cluster window.
+
+**Required:** `query` (FTS5 syntax, e.g. `nginx upstream error` or `OOM killed`)
+**Optional:** `hostname`, `app_name`, `severity_min`, `from`, `to`,
+             `window_minutes` (cluster window, default 30, clamp 5..=120),
+             `limit` (default 10, max 50)
+
+Example: `{"action":"similar_incidents","query":"upstream connect error","app_name":"nginx"}`
+
+Response fields: `query`, `total_clusters`, `truncated`, `clusters` where each
+cluster has: `hostname`, `app_name`, `window_start`, `window_end`, `log_count`,
+`severity_peak`, `representative_messages` (up to 3), `correlated_sessions` (up to 5).
+
+---
+
+## syslog ask_history
+
+Search AI session transcripts for past work related to a topic. Returns sessions
+ranked by match count with system log context from the top session's time window.
+Use this to answer "what did an AI agent work on related to X?".
+
+**Required:** `query` (FTS5 syntax, e.g. `nginx ssl certificate` or `OOM postgres`)
+**Optional:** `hostname`, `app_name`, `from`, `to`, `limit` (default 10, max 50)
+
+Example: `{"action":"ask_history","query":"nginx ssl certificate"}`
+
+Response fields: `query`, `total_candidates`, `truncated`,
+`sessions` (SearchedSessionEntry array ranked by match_count),
+`context_logs` (system log entries from the top session's time window).
+
+---
+
+## syslog incident_context
+
+Return full context for a known time window: log counts by severity and app,
+error-level log rows, and AI sessions active in that window. Useful for
+post-incident review of a time range you already know was problematic.
+
+**Required:** `from`, `to` (ISO 8601/RFC3339)
+**Optional:** `hostname`, `app_name`, `severity_min` (default warning),
+             `limit` (max error log rows, default 50, max 200)
+**Note:** `query` is accepted but reserved for v2 FTS5 filtering; it is
+          currently ignored — omit it for incident_context.
+
+Example: `{"action":"incident_context","from":"2024-01-15T10:00:00Z","to":"2024-01-15T11:00:00Z"}`
+
+Response fields: `window_from`, `window_to`, `total_logs`, `by_severity` (array),
+`by_app` (array, top 20), `error_logs` (array), `error_logs_truncated`, `ai_sessions`.
+
 "#;
     let help = format!(
         "{help}{}{}",
@@ -1195,6 +1255,77 @@ Returns this markdown documentation.
 "#
     );
     Ok(json!({ "help": help }))
+}
+
+// ---------------------------------------------------------------------------
+// RAG v1 handlers
+// ---------------------------------------------------------------------------
+
+async fn tool_similar_incidents(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let query = string_arg(&args, "query").ok_or_else(|| anyhow::anyhow!("query is required"))?;
+    let response = state
+        .service
+        .similar_incidents(SimilarIncidentsRequest {
+            query,
+            hostname: string_arg(&args, "hostname"),
+            app_name: string_arg(&args, "app_name"),
+            severity_min: string_arg(&args, "severity_min"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            window_minutes: u32_arg(&args, "window_minutes")?,
+            limit: u32_arg(&args, "limit")?,
+        })
+        .await?;
+    tracing::debug!(
+        cluster_count = response.total_clusters,
+        "similar_incidents completed"
+    );
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_ask_history(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let query = string_arg(&args, "query").ok_or_else(|| anyhow::anyhow!("query is required"))?;
+    let response = state
+        .service
+        .ask_history(AskHistoryRequest {
+            query,
+            hostname: string_arg(&args, "hostname"),
+            app_name: string_arg(&args, "app_name"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
+        })
+        .await?;
+    tracing::debug!(
+        session_count = response.sessions.len(),
+        "ask_history completed"
+    );
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_incident_context(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let from = string_arg(&args, "from")
+        .ok_or_else(|| anyhow::anyhow!("from is required for incident_context"))?;
+    let to = string_arg(&args, "to")
+        .ok_or_else(|| anyhow::anyhow!("to is required for incident_context"))?;
+    let response = state
+        .service
+        .incident_context(IncidentContextRequest {
+            from,
+            to,
+            hostname: string_arg(&args, "hostname"),
+            app_name: string_arg(&args, "app_name"),
+            query: string_arg(&args, "query"),
+            severity_min: string_arg(&args, "severity_min"),
+            limit: u32_arg(&args, "limit")?,
+        })
+        .await?;
+    tracing::debug!(
+        total_logs = response.total_logs,
+        error_count = response.error_logs.len(),
+        "incident_context completed"
+    );
+    Ok(serde_json::to_value(response)?)
 }
 
 /// Parse an optional RFC3339 timestamp string and normalize it to UTC.

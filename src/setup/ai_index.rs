@@ -2,11 +2,11 @@ use std::io::{self, ErrorKind};
 use std::path::Path;
 use std::time::Instant;
 
+use super::systemd::{systemctl_user_phase, systemctl_user_required_phase};
 use super::{
     check_file_phase, host_local_report_input, setup_report, AiIndexTimerAction, PhaseTimer,
     SetupPhase, SetupReport, SetupStatus,
 };
-use super::systemd::{systemctl_user_phase, systemctl_user_required_phase};
 
 pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<SetupReport> {
     let started = Instant::now();

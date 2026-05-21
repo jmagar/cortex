@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use super::docker::DockerUnavailableError;
 use super::format::{is_stopped_status, status_from_target, unresolved_status};
 use super::types::{
-    CommandOutput, CommandRunner, ComposeDiagnostic, ComposeCommandResult, ComposeDefaults,
+    CommandOutput, CommandRunner, ComposeCommandResult, ComposeDefaults, ComposeDiagnostic,
     ComposeDryRun, ComposeInvocation, ComposeMutation, ComposeStatus, ComposeTarget,
     ComposeTargetSummary, DiagnosticSeverity, DockerInspect, ListenerInfo, MutationOptions,
     ResolvedComposeTarget, TargetConfidence, TargetSource,
@@ -40,7 +40,11 @@ impl<I, R> ComposeService<I, R> {
         self.invocation(target, args)
     }
 
-    pub(crate) fn logs_invocation(&self, target: &ResolvedComposeTarget, tail: u32) -> ComposeInvocation {
+    pub(crate) fn logs_invocation(
+        &self,
+        target: &ResolvedComposeTarget,
+        tail: u32,
+    ) -> ComposeInvocation {
         let mut args = compose_base_args(target);
         args.push("logs".into());
         args.push("--tail".into());

@@ -26,6 +26,7 @@
 #   syslog anomalies, syslog compare, syslog compose_status,
 #   syslog compose_doctor, syslog unaddressed_errors, syslog ack_error,
 #   syslog unack_error, syslog notifications_recent, syslog notifications_test,
+#   syslog similar_incidents, syslog ask_history, syslog incident_context,
 #   syslog help
 #
 # Exit codes:
@@ -713,6 +714,7 @@ run_docker_mode() {
     log_error "TOKEN must be set for docker-mode live tests (the server requires SYSLOG_API_TOKEN to start)"
     return 2
   fi
+  docker_args+=("-e" "SYSLOG_MCP_HOST=0.0.0.0")
   docker_args+=("-e" "SYSLOG_MCP_TOKEN=${TOKEN}")
   docker_args+=("-e" "SYSLOG_API_TOKEN=${TOKEN}")
 

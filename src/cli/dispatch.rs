@@ -23,25 +23,28 @@ use std::future::Future;
 use std::path::PathBuf;
 use syslog_mcp::app::{
     AbuseSearchRequest, AiCheckpointsRequest, AiCorrelateRequest, AiParseErrorsRequest,
-    AiPruneCheckpointsRequest, CorrelateEventsRequest, DbCheckpointRequest, DbIntegrityRequest,
-    DbVacuumRequest, GetErrorsRequest, IncidentRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListSessionsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
-    TailLogsRequest, UsageBlocksRequest,
+    AiPruneCheckpointsRequest, AskHistoryRequest, CorrelateEventsRequest, DbCheckpointRequest,
+    DbIntegrityRequest, DbVacuumRequest, GetErrorsRequest, IncidentContextRequest, IncidentRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListSessionsRequest, ProjectContextRequest,
+    SearchLogsRequest, SearchSessionsRequest, SimilarIncidentsRequest, TailLogsRequest,
+    UsageBlocksRequest,
 };
 
 use super::{
     ai_smoke_watch, ai_watch_status, ensure_ai_doctor_success, ensure_index_success,
     print_abuse_search_response, print_ai_correlate_response, print_ai_doctor_response,
     print_ai_parse_errors_response, print_ai_projects_response, print_ai_smoke_watch_response,
-    print_ai_tools_response, print_ai_watch_status_response, print_checkpoints_response,
-    print_correlate_response, print_db_backup_response, print_db_checkpoint_response,
-    print_db_integrity_response, print_db_status_response, print_db_vacuum_response,
-    print_errors_response, print_hosts_response, print_incident_response, print_index_response,
+    print_ai_tools_response, print_ai_watch_status_response, print_ask_history_response,
+    print_checkpoints_response, print_correlate_response, print_db_backup_response,
+    print_db_checkpoint_response, print_db_integrity_response, print_db_status_response,
+    print_db_vacuum_response, print_errors_response, print_hosts_response,
+    print_incident_context_response, print_incident_response, print_index_response,
     print_project_context_response, print_prune_checkpoints_response, print_search_response,
-    print_search_sessions_response, print_sessions_response, print_stats_response,
-    print_usage_blocks_response, run_coordination_phases, AiAbuseArgs, AiAddArgs, AiBlocksArgs,
-    AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIndexArgs,
-    AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs, AiWatchArgs, CliMode, CorrelateArgs,
+    print_search_sessions_response, print_sessions_response, print_similar_incidents_response,
+    print_stats_response, print_usage_blocks_response, run_coordination_phases, AiAbuseArgs,
+    AiAddArgs, AiAskHistoryArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
+    AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs, AiIndexArgs, AiListArgs,
+    AiPruneCheckpointsArgs, AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliMode, CorrelateArgs,
     DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs, IncidentArgs,
     OutputArgs, SearchArgs, SessionsArgs, TailArgs, TimeRangeArgs,
 };
@@ -358,6 +361,48 @@ impl AiPruneCheckpointsArgs {
     }
 }
 
+impl AiSimilarArgs {
+    pub(super) fn into_request(self) -> SimilarIncidentsRequest {
+        SimilarIncidentsRequest {
+            query: self.query,
+            hostname: self.hostname,
+            app_name: self.app_name,
+            severity_min: self.severity_min,
+            from: self.from,
+            to: self.to,
+            window_minutes: self.window_minutes,
+            limit: self.limit,
+        }
+    }
+}
+
+impl AiAskHistoryArgs {
+    pub(super) fn into_request(self) -> AskHistoryRequest {
+        AskHistoryRequest {
+            query: self.query,
+            hostname: self.hostname,
+            app_name: self.app_name,
+            from: self.from,
+            to: self.to,
+            limit: self.limit,
+        }
+    }
+}
+
+impl AiIncidentContextArgs {
+    pub(super) fn into_request(self) -> IncidentContextRequest {
+        IncidentContextRequest {
+            from: self.from,
+            to: self.to,
+            hostname: self.hostname,
+            app_name: self.app_name,
+            query: self.query,
+            severity_min: self.severity_min,
+            limit: self.limit,
+        }
+    }
+}
+
 // ─── AI per-command dispatch (bead 0p8r.8) ──────────────────────────────────
 //
 // HTTP-capable (10): search, abuse, correlate, blocks, context, tools,
@@ -666,6 +711,44 @@ pub(super) async fn run_db_backup(mode: &CliMode, args: DbBackupArgs) -> Result<
     };
     let response = service.db_backup(args.output.map(PathBuf::from)).await?;
     print_db_backup_response(&response, args.json)
+}
+
+// ─── RAG v1 dispatch (LOCAL-only) ────────────────────────────────────────────
+
+pub(super) async fn run_ai_similar_incidents(mode: &CliMode, args: AiSimilarArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let service = match mode {
+        CliMode::Http(_) => bail!("similar_incidents currently runs locally only; omit --http."),
+        CliMode::Local(service) => service,
+    };
+    let response = service.similar_incidents(req).await?;
+    print_similar_incidents_response(&response, json)
+}
+
+pub(super) async fn run_ai_ask_history(mode: &CliMode, args: AiAskHistoryArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let service = match mode {
+        CliMode::Http(_) => bail!("ask_history currently runs locally only; omit --http."),
+        CliMode::Local(service) => service,
+    };
+    let response = service.ask_history(req).await?;
+    print_ask_history_response(&response, json)
+}
+
+pub(super) async fn run_ai_incident_context(
+    mode: &CliMode,
+    args: AiIncidentContextArgs,
+) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let service = match mode {
+        CliMode::Http(_) => bail!("incident_context currently runs locally only; omit --http."),
+        CliMode::Local(service) => service,
+    };
+    let response = service.incident_context(req).await?;
+    print_incident_context_response(&response, json)
 }
 
 #[cfg(test)]

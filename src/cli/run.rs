@@ -72,6 +72,13 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             AiCommand::SmokeWatch(args) => dispatch::run_ai_smoke_watch(&mode, args).await,
             AiCommand::WatchStatus(args) => dispatch::run_ai_watch_status(&mode, args).await,
             AiCommand::Watch(args) => dispatch::run_ai_watch(&mode, args).await,
+            AiCommand::SimilarIncidents(args) => {
+                dispatch::run_ai_similar_incidents(&mode, args).await
+            }
+            AiCommand::AskHistory(args) => dispatch::run_ai_ask_history(&mode, args).await,
+            AiCommand::IncidentContext(args) => {
+                dispatch::run_ai_incident_context(&mode, args).await
+            }
         },
         // DB commands (bead 0p8r.9). 4 are HTTP-capable; backup stays LOCAL
         // and bails in HTTP mode with an inline message.
