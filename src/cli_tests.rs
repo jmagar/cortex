@@ -1297,8 +1297,7 @@ fn parse_ai_investigate_equals_syntax() {
 
 #[test]
 fn parse_ai_assess_with_incident_id() {
-    let cmd =
-        CliCommand::parse(strings(&["ai", "assess", "inc-00000000deadbeef"])).unwrap();
+    let cmd = CliCommand::parse(strings(&["ai", "assess", "inc-00000000deadbeef"])).unwrap();
     let CliCommand::Ai(AiCommand::Assess(args)) = cmd else {
         panic!("expected Assess");
     };

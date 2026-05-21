@@ -11,20 +11,19 @@ use super::models::{
     AbuseSearchRequest, AbuseSearchResponse, AiAssessEvidenceSummary, AiAssessRequest,
     AiAssessResponse, AiCorrelateRequest, AiCorrelateResponse, AiCorrelationAnchor,
     AiIncidentRequest, AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse,
-    AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest,
-    ClockSkewResponse, CompareRequest, CompareResponse, ContextRequest, ContextResponse,
-    CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
-    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest,
-    GetErrorsResponse, GetLogRequest, GetLogResponse, IncidentEvent, IncidentRequest,
-    IncidentResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
-    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
-    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
-    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry, ServiceLogsRequest,
-    ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest,
-    SimilarIncidentsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
-    UsageBlocksRequest, UsageBlocksResponse,
+    AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest, ClockSkewResponse,
+    CompareRequest, CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
+    CorrelateEventsResponse, DbBackupResult, DbCheckpointResult, DbIntegrityResult,
+    DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest, GetErrorsResponse,
+    GetLogRequest, GetLogResponse, IncidentEvent, IncidentRequest, IncidentResponse,
+    IngestRateRequest, IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse,
+    ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse,
+    ListSessionsRequest, ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse,
+    LogEntry, PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse,
+    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
+    ServiceJournalEntry, ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest,
+    SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest,
+    UsageBlocksResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
@@ -664,10 +663,7 @@ impl SyslogService {
     /// Gemini prompt, spawn the Gemini CLI, and return the assessment markdown.
     ///
     /// LOCAL-only: the Gemini binary must be in PATH on the host machine.
-    pub async fn run_gemini_assess(
-        &self,
-        req: AiAssessRequest,
-    ) -> ServiceResult<AiAssessResponse> {
+    pub async fn run_gemini_assess(&self, req: AiAssessRequest) -> ServiceResult<AiAssessResponse> {
         use tokio::io::AsyncWriteExt;
 
         let incident_id = req.incident_id.clone();
@@ -749,9 +745,10 @@ impl SyslogService {
             prompt_len = prompt.len(),
             "sending assessment prompt to gemini"
         );
-        stdin.write_all(prompt.as_bytes()).await.map_err(|e| {
-            ServiceError::Internal(anyhow::anyhow!("stdin write failed: {e}"))
-        })?;
+        stdin
+            .write_all(prompt.as_bytes())
+            .await
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("stdin write failed: {e}")))?;
         // Drop stdin to close the pipe; Gemini reads until EOF.
         drop(stdin);
 

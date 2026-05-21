@@ -16,8 +16,8 @@
 
 use super::{
     http_or_cancel_with, run_ai_abuse, run_ai_add, run_ai_blocks, run_ai_checkpoints,
-    run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_incidents,
-    run_ai_index, run_ai_investigate, run_ai_projects, run_ai_prune_checkpoints, run_ai_search,
+    run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_incidents, run_ai_index,
+    run_ai_investigate, run_ai_projects, run_ai_prune_checkpoints, run_ai_search,
     run_ai_smoke_watch, run_ai_tools, run_ai_watch, run_ai_watch_status, run_correlate,
     run_db_backup, run_db_checkpoint, run_db_integrity, run_db_status, run_db_vacuum, run_errors,
     run_hosts, run_search, run_sessions, run_stats, run_tail,
@@ -1374,9 +1374,7 @@ async fn run_ai_incidents_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
         .and(path("/api/ai/incidents"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(empty_ai_incidents_body()),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(empty_ai_incidents_body()))
         .expect(1)
         .mount(&server)
         .await;
@@ -1396,9 +1394,7 @@ async fn run_ai_investigate_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
         .and(path("/api/ai/investigate"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(empty_ai_investigate_body()),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(empty_ai_investigate_body()))
         .expect(1)
         .mount(&server)
         .await;
