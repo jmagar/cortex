@@ -15,6 +15,9 @@ pub use models::{
     // Error detection
     AckErrorRequest,
     AckErrorResponse,
+    AiAssessEvidenceSummary,
+    AiAssessRequest,
+    AiAssessResponse,
     AiCheckpointsRequest,
     AiCorrelateRequest,
     AiCorrelateResponse,

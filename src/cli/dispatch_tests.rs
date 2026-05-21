@@ -16,18 +16,19 @@
 
 use super::{
     http_or_cancel_with, run_ai_abuse, run_ai_add, run_ai_blocks, run_ai_checkpoints,
-    run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_index, run_ai_projects,
-    run_ai_prune_checkpoints, run_ai_search, run_ai_smoke_watch, run_ai_tools, run_ai_watch,
-    run_ai_watch_status, run_correlate, run_db_backup, run_db_checkpoint, run_db_integrity,
-    run_db_status, run_db_vacuum, run_errors, run_hosts, run_search, run_sessions, run_stats,
-    run_tail,
+    run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_incidents, run_ai_index,
+    run_ai_investigate, run_ai_projects, run_ai_prune_checkpoints, run_ai_search,
+    run_ai_smoke_watch, run_ai_tools, run_ai_watch, run_ai_watch_status, run_correlate,
+    run_db_backup, run_db_checkpoint, run_db_integrity, run_db_status, run_db_vacuum, run_errors,
+    run_hosts, run_search, run_sessions, run_stats, run_tail,
 };
 use crate::cli::http_client::HttpClient;
 use crate::cli::{
     AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
-    AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
-    AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs,
-    DbStatusArgs, DbVacuumArgs, OutputArgs, SearchArgs, SessionsArgs, TailArgs, TimeRangeArgs,
+    AiDoctorArgs, AiErrorsArgs, AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs, AiListArgs,
+    AiPruneCheckpointsArgs, AiSearchArgs, AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs,
+    DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs, OutputArgs, SearchArgs,
+    SessionsArgs, TailArgs, TimeRangeArgs,
 };
 use anyhow::{bail, Result};
 use std::time::Duration;
@@ -1291,4 +1292,119 @@ async fn db_integrity_http_request_inherits_long_timeout_budget() {
     )
     .await
     .expect("db integrity ok under timeout budget");
+}
+
+// ─── syslog-mcp-kmib: AI abuse incident investigations ───────────────────────
+
+#[test]
+fn incidents_args_into_request_defaults() {
+    let req = AiIncidentsArgs::default().into_request();
+    assert_eq!(req.project, None);
+    assert_eq!(req.tool, None);
+    assert_eq!(req.from, None);
+    assert_eq!(req.to, None);
+    assert_eq!(req.limit, None);
+    assert_eq!(req.window_minutes, None);
+    assert!(req.terms.is_empty());
+}
+
+#[test]
+fn incidents_args_into_request_full() {
+    let args = AiIncidentsArgs {
+        project: Some("proj".into()),
+        tool: Some("claude".into()),
+        from: Some("2026-01-01T00:00:00Z".into()),
+        to: Some("2026-01-02T00:00:00Z".into()),
+        limit: Some(10),
+        window_minutes: Some(15),
+        terms: vec!["shit".into(), "broken".into()],
+        json: false, // json flag is not propagated to Request
+    };
+    let req = args.into_request();
+    assert_eq!(req.project.as_deref(), Some("proj"));
+    assert_eq!(req.tool.as_deref(), Some("claude"));
+    assert_eq!(req.limit, Some(10));
+    assert_eq!(req.window_minutes, Some(15));
+    assert_eq!(req.terms, vec!["shit", "broken"]);
+}
+
+#[test]
+fn investigate_args_into_request_full() {
+    let args = AiInvestigateArgs {
+        project: Some("lab".into()),
+        tool: Some("codex".into()),
+        from: None,
+        to: None,
+        limit: Some(3),
+        window_minutes: Some(10),
+        correlation_window_minutes: Some(20),
+        terms: vec!["fuck".into()],
+        json: true, // json flag is not propagated to Request
+    };
+    let req = args.into_request();
+    assert_eq!(req.project.as_deref(), Some("lab"));
+    assert_eq!(req.tool.as_deref(), Some("codex"));
+    assert_eq!(req.limit, Some(3));
+    assert_eq!(req.window_minutes, Some(10));
+    assert_eq!(req.correlation_window_minutes, Some(20));
+    assert_eq!(req.terms, vec!["fuck"]);
+}
+
+fn empty_ai_incidents_body() -> serde_json::Value {
+    serde_json::json!({
+        "incidents": [],
+        "total_incidents": 0,
+        "candidate_rows": 0,
+        "candidate_cap": 0,
+        "candidate_window_truncated": false,
+        "truncated": false,
+    })
+}
+
+fn empty_ai_investigate_body() -> serde_json::Value {
+    serde_json::json!({
+        "evidence": [],
+        "total_incidents": 0,
+        "truncated": false,
+    })
+}
+
+#[tokio::test]
+async fn run_ai_incidents_http_sends_exactly_one_request() {
+    let (server, mode) = http_mode().await;
+    Mock::given(method("GET"))
+        .and(path("/api/ai/incidents"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(empty_ai_incidents_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    run_ai_incidents(
+        &mode,
+        AiIncidentsArgs {
+            json: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("ai incidents ok");
+}
+
+#[tokio::test]
+async fn run_ai_investigate_http_sends_exactly_one_request() {
+    let (server, mode) = http_mode().await;
+    Mock::given(method("GET"))
+        .and(path("/api/ai/investigate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(empty_ai_investigate_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    run_ai_investigate(
+        &mode,
+        AiInvestigateArgs {
+            json: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("ai investigate ok");
 }

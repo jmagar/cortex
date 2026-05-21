@@ -41,6 +41,9 @@ pub(crate) enum AiCommand {
     SimilarIncidents(AiSimilarArgs),
     AskHistory(AiAskHistoryArgs),
     IncidentContext(AiIncidentContextArgs),
+    Incidents(AiIncidentsArgs),
+    Investigate(AiInvestigateArgs),
+    Assess(AiAssessArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -427,6 +430,46 @@ pub(crate) struct AiIncidentContextArgs {
     pub severity_min: Option<String>,
     pub limit: Option<u32>,
     pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiIncidentsArgs {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub terms: Vec<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiInvestigateArgs {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    pub terms: Vec<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiAssessArgs {
+    pub incident_id: String,
+    pub model: Option<String>,
+    pub json: bool,
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    pub terms: Vec<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

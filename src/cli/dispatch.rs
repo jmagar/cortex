@@ -22,9 +22,10 @@ use anyhow::{bail, Result};
 use std::future::Future;
 use std::path::PathBuf;
 use syslog_mcp::app::{
-    AbuseSearchRequest, AiCheckpointsRequest, AiCorrelateRequest, AiParseErrorsRequest,
-    AiPruneCheckpointsRequest, AskHistoryRequest, CorrelateEventsRequest, DbCheckpointRequest,
-    DbIntegrityRequest, DbVacuumRequest, GetErrorsRequest, IncidentContextRequest, IncidentRequest,
+    AbuseSearchRequest, AiAssessRequest, AiCheckpointsRequest, AiCorrelateRequest,
+    AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
+    AskHistoryRequest, CorrelateEventsRequest, DbCheckpointRequest, DbIntegrityRequest,
+    DbVacuumRequest, GetErrorsRequest, IncidentContextRequest, IncidentRequest,
     ListAiProjectsRequest, ListAiToolsRequest, ListSessionsRequest, ProjectContextRequest,
     SearchLogsRequest, SearchSessionsRequest, SimilarIncidentsRequest, TailLogsRequest,
     UsageBlocksRequest,
@@ -33,20 +34,21 @@ use syslog_mcp::app::{
 use super::{
     ai_smoke_watch, ai_watch_status, ensure_ai_doctor_success, ensure_index_success,
     print_abuse_search_response, print_ai_correlate_response, print_ai_doctor_response,
-    print_ai_parse_errors_response, print_ai_projects_response, print_ai_smoke_watch_response,
-    print_ai_tools_response, print_ai_watch_status_response, print_ask_history_response,
-    print_checkpoints_response, print_correlate_response, print_db_backup_response,
-    print_db_checkpoint_response, print_db_integrity_response, print_db_status_response,
-    print_db_vacuum_response, print_errors_response, print_hosts_response,
-    print_incident_context_response, print_incident_response, print_index_response,
-    print_project_context_response, print_prune_checkpoints_response, print_search_response,
-    print_search_sessions_response, print_sessions_response, print_similar_incidents_response,
-    print_stats_response, print_usage_blocks_response, run_coordination_phases, AiAbuseArgs,
-    AiAddArgs, AiAskHistoryArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
-    AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs, AiIndexArgs, AiListArgs,
-    AiPruneCheckpointsArgs, AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliMode, CorrelateArgs,
-    DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs, IncidentArgs,
-    OutputArgs, SearchArgs, SessionsArgs, TailArgs, TimeRangeArgs,
+    print_ai_incidents_response, print_ai_investigate_response, print_ai_parse_errors_response,
+    print_ai_projects_response, print_ai_smoke_watch_response, print_ai_tools_response,
+    print_ai_watch_status_response, print_ask_history_response, print_checkpoints_response,
+    print_correlate_response, print_db_backup_response, print_db_checkpoint_response,
+    print_db_integrity_response, print_db_status_response, print_db_vacuum_response,
+    print_errors_response, print_hosts_response, print_incident_context_response,
+    print_incident_response, print_index_response, print_project_context_response,
+    print_prune_checkpoints_response, print_search_response, print_search_sessions_response,
+    print_sessions_response, print_similar_incidents_response, print_stats_response,
+    print_usage_blocks_response, run_coordination_phases, AiAbuseArgs, AiAddArgs, AiAskHistoryArgs,
+    AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs, AiDoctorArgs,
+    AiErrorsArgs, AiIncidentContextArgs, AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs,
+    AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliMode,
+    CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs,
+    IncidentArgs, OutputArgs, SearchArgs, SessionsArgs, TailArgs, TimeRangeArgs,
 };
 
 // ─── Arg → Request conversions ──────────────────────────────────────────────
@@ -749,6 +751,89 @@ pub(super) async fn run_ai_incident_context(
     };
     let response = service.incident_context(req).await?;
     print_incident_context_response(&response, json)
+}
+
+impl AiIncidentsArgs {
+    pub(super) fn into_request(self) -> AiIncidentRequest {
+        AiIncidentRequest {
+            project: self.project,
+            tool: self.tool,
+            from: self.from,
+            to: self.to,
+            limit: self.limit,
+            window_minutes: self.window_minutes,
+            terms: self.terms,
+        }
+    }
+}
+
+impl AiInvestigateArgs {
+    pub(super) fn into_request(self) -> AiInvestigateRequest {
+        AiInvestigateRequest {
+            project: self.project,
+            tool: self.tool,
+            from: self.from,
+            to: self.to,
+            limit: self.limit,
+            window_minutes: self.window_minutes,
+            correlation_window_minutes: self.correlation_window_minutes,
+            terms: self.terms,
+        }
+    }
+}
+
+pub(super) async fn run_ai_incidents(mode: &CliMode, args: AiIncidentsArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.list_ai_incidents(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_incidents(&req)).await?,
+    };
+    print_ai_incidents_response(&response, json)
+}
+
+pub(super) async fn run_ai_investigate(mode: &CliMode, args: AiInvestigateArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.investigate_ai_incidents(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_investigate(&req)).await?,
+    };
+    print_ai_investigate_response(&response, json)
+}
+
+pub(super) async fn run_ai_assess(mode: &CliMode, args: AiAssessArgs) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => {
+            bail!("ai assess spawns Gemini CLI on the local host; omit --http")
+        }
+        CliMode::Local(service) => service,
+    };
+    let req = AiAssessRequest {
+        incident_id: args.incident_id,
+        model: args.model,
+        project: args.project,
+        tool: args.tool,
+        from: args.from,
+        to: args.to,
+        window_minutes: args.window_minutes,
+        correlation_window_minutes: args.correlation_window_minutes,
+        terms: args.terms,
+        limit: args.limit,
+    };
+    let response = service.run_gemini_assess(req).await?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else {
+        println!("{}", response.assessment);
+        eprintln!(
+            "\n[assessed incident={} anchors={} bundles={}]",
+            response.incident_id,
+            response.evidence_summary.total_anchors,
+            response.evidence_summary.evidence_bundle_count,
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

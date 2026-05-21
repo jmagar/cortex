@@ -62,7 +62,8 @@ use url::Url;
 
 use syslog_mcp::app::{
     AbuseSearchRequest, AbuseSearchResponse, AiCheckpointsRequest, AiCorrelateRequest,
-    AiCorrelateResponse, AiParseErrorsRequest, AiPruneCheckpointsRequest, CorrelateEventsRequest,
+    AiCorrelateResponse, AiIncidentRequest, AiIncidentResponse, AiInvestigateRequest,
+    AiInvestigateResponse, AiParseErrorsRequest, AiPruneCheckpointsRequest, CorrelateEventsRequest,
     CorrelateEventsResponse, DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest,
     DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult,
     GetErrorsRequest, GetErrorsResponse, ListAiProjectsRequest, ListAiProjectsResponse,
@@ -460,6 +461,22 @@ impl HttpClient {
 
     pub async fn ai_projects(&self, req: &ListAiProjectsRequest) -> Result<ListAiProjectsResponse> {
         self.get_json("/api/ai/projects", Some(req)).await
+    }
+
+    pub async fn ai_incidents(&self, req: &AiIncidentRequest) -> Result<AiIncidentResponse> {
+        let qs = serde_qs::to_string(req)
+            .context("failed to serialize AiIncidentRequest as query string")?;
+        self.get_json_with_raw_query("/api/ai/incidents", &qs).await
+    }
+
+    pub async fn ai_investigate(
+        &self,
+        req: &AiInvestigateRequest,
+    ) -> Result<AiInvestigateResponse> {
+        let qs = serde_qs::to_string(req)
+            .context("failed to serialize AiInvestigateRequest as query string")?;
+        self.get_json_with_raw_query("/api/ai/investigate", &qs)
+            .await
     }
 
     // ─── REST surface: bead 0p8r.3 (AI diagnostic + admin) ──────────────────

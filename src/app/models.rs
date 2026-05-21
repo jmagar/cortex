@@ -474,6 +474,36 @@ pub struct AiInvestigateResponse {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAssessRequest {
+    pub incident_id: String,
+    pub model: Option<String>,
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAssessEvidenceSummary {
+    pub total_incidents: usize,
+    pub evidence_bundle_count: usize,
+    pub total_anchors: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAssessResponse {
+    pub incident_id: String,
+    pub assessment: String,
+    pub prompt_preview: String,
+    pub evidence_summary: AiAssessEvidenceSummary,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiCorrelateRequest {
