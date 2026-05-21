@@ -15,12 +15,12 @@ use tower_http::cors::CorsLayer;
 
 use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateRequest,
-    AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
-    CorrelateEventsRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest,
-    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListSessionsRequest, ListSourceIpsRequest, PatternsRequest, ProjectContextRequest,
-    SearchLogsRequest, SearchSessionsRequest, SyslogService, TailLogsRequest, TimelineRequest,
-    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
+    AiParseErrorsRequest, AiPruneCheckpointsRequest, CorrelateEventsRequest, DbCheckpointRequest,
+    DbIntegrityRequest, DbVacuumRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListSessionsRequest, ListSourceIpsRequest,
+    PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
+    SyslogService, TailLogsRequest, TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest,
+    UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::db::DbPool;
