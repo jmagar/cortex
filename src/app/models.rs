@@ -475,6 +475,32 @@ pub struct AiInvestigateResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiAssessRequest {
+    /// The incident_id to look up — must match a real AbuseIncident.incident_id.
+    pub incident_id: String,
+    /// Optional Gemini model override (e.g. "gemini-2.0-flash").
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAssessEvidenceSummary {
+    pub total_incidents: usize,
+    pub evidence_bundle_count: usize,
+    pub total_anchors: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAssessResponse {
+    pub incident_id: String,
+    /// The raw Markdown assessment produced by Gemini.
+    pub assessment: String,
+    /// The first 500 chars of the prompt sent to Gemini, for debugging.
+    pub prompt_preview: String,
+    /// Evidence bundle summary (incident count, anchor count).
+    pub evidence_summary: AiAssessEvidenceSummary,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiCorrelateRequest {
     pub project: Option<String>,
