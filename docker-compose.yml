@@ -14,6 +14,7 @@ services:
 
 volumes:
   syslog-mcp-data:
+    name: ${SYSLOG_MCP_VOLUME_NAME:-syslog-mcp-data}
 
 networks:
   syslog-mcp:
