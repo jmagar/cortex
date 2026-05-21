@@ -166,6 +166,54 @@ pub fn evaluate_authelia_mfa_fail(
         .collect()
 }
 
+/// Evaluate disk fill pressure from storage metrics.
+///
+/// This is NOT a log-scan rule — it takes raw bytes, not `&[LogRow]`.
+/// The storage enforcement task in `src/runtime.rs` calls this function
+/// directly after each `enforce_storage_budget` cycle.
+///
+/// Fires when `free_bytes` is below the configured guardrail thresholds:
+///   - `free_bytes < critical_bytes` → "critical"
+///   - `free_bytes < warn_bytes`     → "warning"
+///   - otherwise                     → `None`
+///
+/// `critical_bytes` = `min_free_disk_mb * 1024 * 1024` from StorageConfig.
+/// `warn_bytes`     = `recovery_free_disk_mb * 1024 * 1024` from StorageConfig.
+///
+/// Pass `critical_bytes = 0` or `warn_bytes = 0` to disable that threshold.
+pub fn evaluate_disk_fill(
+    hostname: &str,
+    free_bytes: u64,
+    critical_bytes: u64,
+    warn_bytes: u64,
+    apprise_urls_json: &str,
+) -> Option<OutboxInsertParams> {
+    let (severity, label) = if critical_bytes > 0 && free_bytes < critical_bytes {
+        ("critical", "CRITICAL")
+    } else if warn_bytes > 0 && free_bytes < warn_bytes {
+        ("warning", "WARNING")
+    } else {
+        return None;
+    };
+    let free_mib = free_bytes / (1024 * 1024);
+    let title = escape_for_notification(&format!(
+        "[{label}] Disk fill on {hostname}: {free_mib} MiB free"
+    ));
+    let body = escape_for_notification(&format!(
+        "Host **{hostname}** has only {free_mib} MiB disk space remaining."
+    ));
+    Some(OutboxInsertParams {
+        dedup_key: format!("disk_fill:{hostname}:{severity}"),
+        rule_id: "disk_fill".to_string(),
+        severity: severity.to_string(),
+        hostname: hostname.to_string(),
+        title,
+        body,
+        apprise_urls_json: apprise_urls_json.to_string(),
+        next_attempt_at: backoff_next_attempt_at(0),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,5 +412,60 @@ mod tests {
             !results[0].body.contains('<'),
             "< should be stripped from body"
         );
+    }
+
+    #[test]
+    fn disk_fill_critical_fires() {
+        // 300 MiB free, critical threshold = 512 MiB → critical
+        let result = evaluate_disk_fill(
+            "nas1",
+            300 * 1024 * 1024,
+            512 * 1024 * 1024,
+            768 * 1024 * 1024,
+            "[]",
+        );
+        assert!(result.is_some());
+        let p = result.unwrap();
+        assert_eq!(p.rule_id, "disk_fill");
+        assert_eq!(p.severity, "critical");
+        assert_eq!(p.hostname, "nas1");
+        assert!(p.dedup_key.contains("nas1"));
+        assert!(p.dedup_key.contains("critical"));
+    }
+
+    #[test]
+    fn disk_fill_warning_fires() {
+        // 600 MiB free: above critical (512), below warn (768) → warning
+        let result = evaluate_disk_fill(
+            "nas1",
+            600 * 1024 * 1024,
+            512 * 1024 * 1024,
+            768 * 1024 * 1024,
+            "[]",
+        );
+        assert!(result.is_some());
+        let p = result.unwrap();
+        assert_eq!(p.severity, "warning");
+        assert!(p.dedup_key.contains("warning"));
+    }
+
+    #[test]
+    fn disk_fill_ok_does_not_fire() {
+        // 1 GiB free: above both thresholds → no alert
+        let result = evaluate_disk_fill(
+            "nas1",
+            1024 * 1024 * 1024,
+            512 * 1024 * 1024,
+            768 * 1024 * 1024,
+            "[]",
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn disk_fill_zero_thresholds_do_not_fire() {
+        // disabled thresholds: critical=0, warn=0 → no alert
+        let result = evaluate_disk_fill("nas1", 0, 0, 0, "[]");
+        assert!(result.is_none());
     }
 }
