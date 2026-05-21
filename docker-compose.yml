@@ -16,6 +16,6 @@ volumes:
   syslog-mcp-data:
 
 networks:
-  jakenet:
-    name: ${DOCKER_NETWORK:-jakenet}
+  syslog-mcp:
+    name: ${DOCKER_NETWORK:-syslog-mcp}
     external: true
