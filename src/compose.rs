@@ -97,6 +97,7 @@ pub struct MountInfo {
     pub source: Option<PathBuf>,
     pub target: String,
     pub kind: String,
+    pub volume_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -496,6 +497,32 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             let target_container = self
                 .inspector
                 .inspect_container(&target.target.container_name)?;
+
+            // Guard: if the running container has a /data volume with an unexpected
+            // name (e.g. from a stale COMPOSE_PROJECT_NAME), refuse Up to prevent
+            // silently creating a second orphaned database alongside the old one.
+            if matches!(mutation, ComposeMutation::Up) {
+                let expected_volume = std::env::var("SYSLOG_MCP_VOLUME_NAME")
+                    .unwrap_or_else(|_| "syslog-mcp-data".to_string());
+                if let Some(info) = &target_container {
+                    if let Some(mount) = info.mounts.iter().find(|m| m.target == "/data") {
+                        if mount.kind == "volume" {
+                            let actual = mount.volume_name.as_deref().unwrap_or("unknown");
+                            if actual != expected_volume {
+                                return Err(anyhow!(
+                                    "refusing up: container /data uses volume '{actual}' but \
+                                     expected '{expected_volume}' — stale volume from a previous \
+                                     COMPOSE_PROJECT_NAME would be orphaned.\n\
+                                     Fix: `docker stop syslog-mcp && docker rm syslog-mcp` \
+                                     then retry, or set SYSLOG_MCP_VOLUME_NAME={actual} to \
+                                     keep the existing volume."
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
             let target_container_id = target_container.as_ref().map(|info| info.id.as_str());
             let published_ports = target_container
                 .as_ref()
@@ -599,18 +626,18 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             }
         };
         let mut status = status_from_target(target, info, systemd);
-        // Detect DB drift: the container's /data must be a bind mount, not a
-        // Docker named volume. A named volume means --env-file wasn't passed to
-        // compose (SYSLOG_MCP_DATA_VOLUME substitution failed), so the container
-        // writes to an isolated volume while the CLI reads from a different file.
-        // Only check when the container is in a running state (mounts are populated
-        // for stopped containers too but the status field indicates it's running).
+        // Detect DB drift: verify the container's /data mount matches what the
+        // configured volume/bind expects. Named volumes are valid; bind mounts are
+        // valid. Only error when the volume name is unexpected (e.g. orphaned from a
+        // previous COMPOSE_PROJECT_NAME). Only check while the container is running.
         if status
             .status
             .as_deref()
             .map(|s| !is_stopped_status(s))
             .unwrap_or(false)
         {
+            let expected_volume = std::env::var("SYSLOG_MCP_VOLUME_NAME")
+                .unwrap_or_else(|_| "syslog-mcp-data".to_string());
             let data_mount = status.data_mounts.iter().find(|m| m.target == "/data");
             match data_mount {
                 None => {
@@ -620,16 +647,19 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                         message: "container has no /data mount — syslog DB is inaccessible".into(),
                     });
                 }
-                Some(mount) if mount.kind != "bind" => {
-                    status.diagnostics.push(ComposeDiagnostic {
-                        severity: DiagnosticSeverity::Error,
-                        code: "data_volume_not_bind".into(),
-                        message: format!(
-                            "/data is a {} (not a bind mount) — container and CLI are \
-                             using separate databases; run `syslog compose up` to recreate",
-                            mount.kind
-                        ),
-                    });
+                Some(mount) if mount.kind == "volume" => {
+                    let actual = mount.volume_name.as_deref().unwrap_or("unknown");
+                    if actual != expected_volume {
+                        status.diagnostics.push(ComposeDiagnostic {
+                            severity: DiagnosticSeverity::Error,
+                            code: "data_volume_unexpected".into(),
+                            message: format!(
+                                "container /data uses volume '{actual}', expected \
+                                 '{expected_volume}' — stale volume from a previous \
+                                 COMPOSE_PROJECT_NAME; run `syslog compose up` to recreate"
+                            ),
+                        });
+                    }
                 }
                 Some(_) => {}
             }
@@ -1298,6 +1328,10 @@ fn container_info_from_inspect(value: serde_json::Value) -> Result<ContainerInfo
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
+                    volume_name: m
+                        .get("Name")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
                 })
                 .collect()
         })

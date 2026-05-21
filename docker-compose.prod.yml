@@ -51,7 +51,12 @@ services:
           cpus: '1.0'
 
 volumes:
+  # Named volume with an explicit stable name — never gets project-prefixed, so
+  # COMPOSE_PROJECT_NAME changes don't orphan the database.
+  # To use a bind mount instead: set SYSLOG_MCP_DATA_VOLUME=/absolute/host/path
+  # To rename the volume:       set SYSLOG_MCP_VOLUME_NAME=my-volume-name
   syslog-mcp-data:
+    name: ${SYSLOG_MCP_VOLUME_NAME:-syslog-mcp-data}
 
 networks:
   syslog-mcp:

@@ -360,7 +360,39 @@ fn collect_compose_section() -> DoctorSection {
                     status.health.as_deref().unwrap_or("no healthcheck")
                 ),
             ));
+            let expected_volume = std::env::var("SYSLOG_MCP_VOLUME_NAME")
+                .unwrap_or_else(|_| "syslog-mcp-data".to_string());
             match status.data_mounts.iter().find(|m| m.target == "/data") {
+                Some(m) if m.kind == "bind" => {
+                    let src = m
+                        .source
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
+                    phases.push(DoctorPhase::new(
+                        SetupStatus::Ok,
+                        "data_volume",
+                        format!("bind {} -> /data", src),
+                    ));
+                }
+                Some(m) if m.kind == "volume" => {
+                    let actual = m.volume_name.as_deref().unwrap_or("unknown");
+                    let (phase_status, detail) = if actual == expected_volume {
+                        (
+                            SetupStatus::Ok,
+                            format!("volume {actual} -> /data"),
+                        )
+                    } else {
+                        (
+                            SetupStatus::Error,
+                            format!(
+                                "volume {actual} -> /data (expected '{expected_volume}' — \
+                                 stale volume from previous deployment)"
+                            ),
+                        )
+                    };
+                    phases.push(DoctorPhase::new(phase_status, "data_volume", detail));
+                }
                 Some(m) => {
                     let src = m
                         .source
@@ -368,11 +400,7 @@ fn collect_compose_section() -> DoctorSection {
                         .map(|p| p.display().to_string())
                         .unwrap_or_default();
                     phases.push(DoctorPhase::new(
-                        if m.kind == "bind" {
-                            SetupStatus::Ok
-                        } else {
-                            SetupStatus::Error
-                        },
+                        SetupStatus::Ok,
                         "data_volume",
                         format!("{} {} -> /data", m.kind, src),
                     ));
