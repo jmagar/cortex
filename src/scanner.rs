@@ -417,6 +417,7 @@ pub fn index_file_with_options(
         source_kind = detect_explicit_file_source_kind(&canonical_path)?;
     }
     let tool = source_kind.tool_name();
+    let host = local_hostname();
     let mut fallback_project = project_for_file(source_kind, &canonical_path);
     let mut fallback_session_id = if source_kind == SourceKind::CodexSession {
         canonical_path
@@ -550,7 +551,7 @@ pub fn index_file_with_options(
                 }));
                 let entry = LogBatchEntry {
                     timestamp: normalize_timestamp(parsed.timestamp.as_deref())?,
-                    hostname: "localhost".to_string(),
+                    hostname: host.clone(),
                     facility: Some("transcript".to_string()),
                     severity: "info".to_string(),
                     app_name: Some(format!("{tool}-transcript")),
@@ -1059,6 +1060,21 @@ fn normalize_timestamp(timestamp: Option<&str>) -> Result<String> {
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string()),
     }
+}
+
+fn local_hostname() -> String {
+    let mut buf = vec![0u8; 256];
+    let result = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
+    if result == 0 {
+        let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        if let Ok(name) = std::str::from_utf8(&buf[..len]) {
+            let name = name.trim();
+            if !name.is_empty() && name != "localhost" {
+                return name.to_string();
+            }
+        }
+    }
+    std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
 }
 
 fn log_entry_string_bytes(entry: &LogBatchEntry) -> usize {
