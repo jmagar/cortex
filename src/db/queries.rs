@@ -1798,8 +1798,9 @@ pub fn similar_incidents_clusters(
         SELECT hostname, app_name, window_start, window_end, log_count, severities, messages
         FROM bucketed
         ORDER BY log_count DESC, window_start DESC
-        LIMIT {}"
-    , limit + 1));
+        LIMIT {}",
+        limit + 1
+    ));
 
     let mut stmt = conn.prepare(&sql).map_err(|e| {
         tracing::error!(error = %e, "similar_incidents_clusters prepare failed");
@@ -1876,17 +1877,18 @@ pub fn similar_incidents_clusters(
     // Build one UNION ALL query across all cluster windows so each window gets
     // its own per-session match_count.  This is O(1) roundtrips while keeping
     // counts accurate (no global-span inflation when a session spans clusters).
-    let per_cluster_sessions =
-        find_correlated_sessions_per_cluster(&conn, &raw.iter().map(|c| (c.window_start.as_str(), c.window_end.as_str())).collect::<Vec<_>>())?;
+    let per_cluster_sessions = find_correlated_sessions_per_cluster(
+        &conn,
+        &raw.iter()
+            .map(|c| (c.window_start.as_str(), c.window_end.as_str()))
+            .collect::<Vec<_>>(),
+    )?;
 
     let clusters: Vec<IncidentCluster> = raw
         .into_iter()
         .map(|rc| {
             let key = (rc.window_start.clone(), rc.window_end.clone());
-            let correlated_sessions = per_cluster_sessions
-                .get(&key)
-                .cloned()
-                .unwrap_or_default();
+            let correlated_sessions = per_cluster_sessions.get(&key).cloned().unwrap_or_default();
             IncidentCluster {
                 hostname: rc.hostname,
                 app_name: rc.app_name,
@@ -1993,7 +1995,7 @@ fn find_correlated_sessions_per_cluster(
     }
     // Sort by match_count descending, then cap at 5 per cluster.
     for sessions in map.values_mut() {
-        sessions.sort_by(|a, b| b.match_count.cmp(&a.match_count));
+        sessions.sort_by_key(|b| std::cmp::Reverse(b.match_count));
         sessions.truncate(5);
     }
     Ok(map)
@@ -2146,12 +2148,15 @@ pub fn incident_context_summary(
         ))
         .map_err(|e| anyhow::anyhow!("incident_context by_severity prepare: {e}"))?;
     let by_severity: Vec<SeverityCount> = by_sev_stmt
-        .query_map(rusqlite::params_from_iter(agg_params.bindings.iter()), |row| {
-            Ok(SeverityCount {
-                severity: row.get(0)?,
-                count: row.get(1)?,
-            })
-        })
+        .query_map(
+            rusqlite::params_from_iter(agg_params.bindings.iter()),
+            |row| {
+                Ok(SeverityCount {
+                    severity: row.get(0)?,
+                    count: row.get(1)?,
+                })
+            },
+        )
         .map_err(|e| anyhow::anyhow!("incident_context by_severity query: {e}"))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
@@ -2166,12 +2171,15 @@ pub fn incident_context_summary(
         ))
         .map_err(|e| anyhow::anyhow!("incident_context by_app prepare: {e}"))?;
     let by_app: Vec<AppLogCount> = by_app_stmt
-        .query_map(rusqlite::params_from_iter(agg_params.bindings.iter()), |row| {
-            Ok(AppLogCount {
-                app_name: row.get(0)?,
-                count: row.get(1)?,
-            })
-        })
+        .query_map(
+            rusqlite::params_from_iter(agg_params.bindings.iter()),
+            |row| {
+                Ok(AppLogCount {
+                    app_name: row.get(0)?,
+                    count: row.get(1)?,
+                })
+            },
+        )
         .map_err(|e| anyhow::anyhow!("incident_context by_app query: {e}"))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 

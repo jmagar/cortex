@@ -4984,7 +4984,11 @@ pub(super) fn print_incident_context_response(
     } else {
         String::new()
     };
-    println!("Error logs ({}{}):", response.error_logs.len(), truncated_note);
+    println!(
+        "Error logs ({}{}):",
+        response.error_logs.len(),
+        truncated_note
+    );
     for log in &response.error_logs {
         println!(
             "  [{}] {} {} {}",
