@@ -1454,8 +1454,9 @@ acknowledged (suppressed from future alerts).
       "total_count":       0,
       "first_seen_at":     "RFC3339",
       "last_seen_at":      "RFC3339",
-      "acknowledged_at":   "RFC3339 | null",
-      "acknowledged_by":   "string | null"
+      "total_count":       0,
+      "count_last_1h":     0,
+      "acknowledged_at":   "RFC3339 | null"
     }
   ]
 }
@@ -1498,7 +1499,7 @@ actor identity is extracted from the request and recorded in the audit event.
 {
   "signature_hash":  "string",
   "acknowledged_at": "RFC3339",
-  "acknowledged_by": "string"
+  "actor":           "string"
 }
 ```
 
@@ -1533,7 +1534,8 @@ audit event; does NOT delete ack history.
 ```json
 {
   "signature_hash": "string",
-  "unacked_at":     "RFC3339"
+  "unacked_at":     "RFC3339",
+  "actor":          "string"
 }
 ```
 
@@ -1569,12 +1571,9 @@ to audit what alerts have been sent, when, and whether they succeeded.
     "id":          0,
     "outbox_id":   0,
     "rule_id":     "string",
-    "severity":    "string",
     "hostname":    "string",
     "fired_at":    "RFC3339",
-    "status_code": 200,
-    "notes":       "string | null",
-    "dedup_key":   "string"
+    "status_code": 200
   }
 ]
 ```

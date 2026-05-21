@@ -929,11 +929,16 @@ phase_surface_parity_rest() {
 
   build_auth_args
 
+  # POST mutation routes (/api/errors/ack, /api/errors/unack,
+  # /api/notifications/test) are intentionally excluded from smoke tests —
+  # they require seeded data or external service availability and are covered
+  # by unit tests in src/api_tests.rs and src/app/service.rs.
   local routes=(
     "GET /api/source-ips?limit=3|source_ips"
     "GET /api/timeline?bucket=1h|points"
     "GET /api/patterns?top_n=5|patterns"
     "GET /api/ingest-rate|buckets"
+    "GET /api/get?id=1|"
     "GET /api/errors/unaddressed?limit=5|signatures"
     "GET /api/notifications/recent?limit=5|"
   )

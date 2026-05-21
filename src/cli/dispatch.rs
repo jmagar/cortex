@@ -981,7 +981,10 @@ pub(super) async fn run_notify_recent(mode: &CliMode, args: NotifyRecentArgs) ->
                 return super::print_json(&firings);
             }
             // Returned as a JSON array of objects matching FiringRow shape.
-            let arr = firings.as_array().cloned().unwrap_or_default();
+            let arr = firings
+                .as_array()
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("unexpected response shape: expected JSON array, got {}", firings))?;
             if arr.is_empty() {
                 println!("No recent notification firings.");
                 return Ok(());
