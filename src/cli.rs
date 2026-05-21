@@ -2898,7 +2898,10 @@ fn print_service_logs_response(report: &ServiceLogsResponse, json: bool) -> Resu
         println!("{timestamp} {ident}: {message}");
     }
     if report.dropped_lines > 0 {
-        eprintln!("warning: {} malformed journal line(s) dropped", report.dropped_lines);
+        eprintln!(
+            "warning: {} malformed journal line(s) dropped",
+            report.dropped_lines
+        );
     }
     Ok(())
 }
