@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-05-20
+
+### Fixed
+
+- **Journalctl timeout**: `command_output` now enforces a 30-second timeout so
+  a wedged user bus or stalled `journalctl` cannot block `syslog ai doctor`
+  indefinitely.
+- **Incident hostname+service conflict**: `syslog incident` now returns a clear
+  error when both `--host` and `--service` are supplied, since journal entries
+  cannot be filtered by remote hostname.
+- **Service-log dropped lines**: Human-readable output of `syslog service logs`
+  now prints a stderr warning when `dropped_lines > 0` (malformed journal
+  lines were previously silently discarded).
+- **HTTP-flags error message**: The error for passing `--http`/`--server`/
+  `--token` to local-only commands now correctly lists `incident` alongside
+  the other query commands.
+- **Docker image tag**: `docker-compose.prod.yml` defaults to `0.27.1` instead
+  of `latest` for reproducible production deploys.
+- **MCP search help**: `syslog help` now documents `exclude_facility`,
+  `received_from`, and `received_to` for the `search` action.
+
+### Refactor
+
+- **Doctor tests**: Moved inline `#[cfg(test)] mod tests` block in `doctor.rs`
+  to the standard sidecar `doctor_tests.rs` per repo layout rule.
+
 ## [0.27.0] - 2026-05-20
 
 ### Added
@@ -1343,7 +1369,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.27.1...HEAD
+[0.27.1]: https://github.com/jmagar/syslog-mcp/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/jmagar/syslog-mcp/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/jmagar/syslog-mcp/compare/v0.25.4...v0.26.0
 [0.25.4]: https://github.com/jmagar/syslog-mcp/compare/v0.25.3...v0.25.4
