@@ -1873,37 +1873,20 @@ pub fn similar_incidents_clusters(
     let truncated = raw.len() > limit;
     raw.truncate(limit);
 
-    // Batch-fetch correlated AI sessions for the overall time span of all
-    // clusters in a single query, then assign per-cluster in memory.
-    // This avoids an N+1 pattern (one query per cluster).
-    let all_correlated: Vec<(String, String, CorrelatedSession)> = if raw.is_empty() {
-        Vec::new()
-    } else {
-        let overall_start = raw
-            .iter()
-            .map(|c| c.window_start.as_str())
-            .min()
-            .unwrap_or("")
-            .to_string();
-        let overall_end = raw
-            .iter()
-            .map(|c| c.window_end.as_str())
-            .max()
-            .unwrap_or("")
-            .to_string();
-        find_correlated_sessions_for_span(&conn, &overall_start, &overall_end)?
-    };
+    // Build one UNION ALL query across all cluster windows so each window gets
+    // its own per-session match_count.  This is O(1) roundtrips while keeping
+    // counts accurate (no global-span inflation when a session spans clusters).
+    let per_cluster_sessions =
+        find_correlated_sessions_per_cluster(&conn, &raw.iter().map(|c| (c.window_start.as_str(), c.window_end.as_str())).collect::<Vec<_>>())?;
 
     let clusters: Vec<IncidentCluster> = raw
         .into_iter()
         .map(|rc| {
-            // Assign sessions that overlap this cluster's window.
-            let correlated_sessions: Vec<CorrelatedSession> = all_correlated
-                .iter()
-                .filter(|(ws, we, _)| ws.as_str() <= rc.window_end.as_str() && we.as_str() >= rc.window_start.as_str())
-                .map(|(_, _, s)| s.clone())
-                .take(5)
-                .collect();
+            let key = (rc.window_start.clone(), rc.window_end.clone());
+            let correlated_sessions = per_cluster_sessions
+                .get(&key)
+                .cloned()
+                .unwrap_or_default();
             IncidentCluster {
                 hostname: rc.hostname,
                 app_name: rc.app_name,
@@ -1926,62 +1909,93 @@ pub fn similar_incidents_clusters(
     })
 }
 
-/// Batch variant — fetches all AI
-/// transcript sessions active anywhere in [span_start, span_end] and returns
-/// them as `(session_first_seen, session_last_seen, CorrelatedSession)` tuples
-/// so callers can filter per-cluster in memory without an N+1 query pattern.
-fn find_correlated_sessions_for_span(
+/// Per-cluster session lookup using a single UNION ALL query so each cluster
+/// window gets its own accurate match_count rather than an inflated global count.
+/// Returns a map keyed by (window_start, window_end) → top-5 sessions.
+fn find_correlated_sessions_per_cluster(
     conn: &rusqlite::Connection,
-    span_start: &str,
-    span_end: &str,
-) -> Result<Vec<(String, String, CorrelatedSession)>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT l.ai_project, l.ai_tool, l.ai_session_id,
+    windows: &[(&str, &str)],
+) -> Result<std::collections::HashMap<(String, String), Vec<CorrelatedSession>>> {
+    use std::collections::HashMap;
+
+    if windows.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    // Build UNION ALL: one SELECT per cluster window, tagging each row with ws/we.
+    // Parameters are laid out as (ws1, we1, ws1, we1, ws2, we2, ws2, we2, ...) —
+    // four bindings per window (two for the range, two repeated for best_snippet).
+    let mut arms: Vec<String> = Vec::with_capacity(windows.len());
+    let base = 1usize;
+    for (i, _) in windows.iter().enumerate() {
+        let p = base + i * 4;
+        arms.push(format!(
+            "SELECT ?{p} AS ws, ?{p1} AS we,
+                    l.ai_project, l.ai_tool, l.ai_session_id,
                     COUNT(*) AS match_count,
-                    MIN(l.timestamp) AS first_seen,
-                    MAX(l.timestamp) AS last_seen,
-                    (SELECT l2.message
-                     FROM logs l2
+                    (SELECT l2.message FROM logs l2
                      WHERE l2.ai_project = l.ai_project
                        AND l2.ai_tool = l.ai_tool
                        AND l2.ai_session_id = l.ai_session_id
-                       AND l2.timestamp BETWEEN ?1 AND ?2
+                       AND l2.timestamp BETWEEN ?{p2} AND ?{p3}
                      ORDER BY l2.timestamp DESC LIMIT 1) AS best_snippet
              FROM logs l
              WHERE l.ai_project IS NOT NULL AND l.ai_project != ''
                AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
                AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''
-               AND l.timestamp BETWEEN ?1 AND ?2
-             GROUP BY l.ai_project, l.ai_tool, l.ai_session_id
-             ORDER BY match_count DESC",
-        )
-        .map_err(|e| anyhow::anyhow!("find_correlated_sessions_for_span prepare: {e}"))?;
+               AND l.timestamp BETWEEN ?{p2} AND ?{p3}
+             GROUP BY l.ai_project, l.ai_tool, l.ai_session_id",
+            p = p, p1 = p + 1, p2 = p, p3 = p + 1,
+        ));
+    }
+    let sql = arms.join("\nUNION ALL\n");
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| anyhow::anyhow!("find_correlated_sessions_per_cluster prepare: {e}"))?;
+
+    // Bind four params per window: ws, we, ws, we (range twice — range + snippet subquery).
+    let params: Vec<&dyn rusqlite::ToSql> = windows
+        .iter()
+        .flat_map(|(ws, we)| {
+            let v: [&dyn rusqlite::ToSql; 2] = [ws, we];
+            v
+        })
+        .collect();
 
     let rows = stmt
-        .query_map(rusqlite::params![span_start, span_end], |row| {
-            let project: String = row.get(0)?;
-            let tool: String = row.get(1)?;
-            let session_id: String = row.get(2)?;
-            let match_count: i64 = row.get(3)?;
-            let first_seen: String = row.get(4)?;
-            let last_seen: String = row.get(5)?;
+        .query_map(params.as_slice(), |row| {
+            let ws: String = row.get(0)?;
+            let we: String = row.get(1)?;
+            let project: String = row.get(2)?;
+            let tool: String = row.get(3)?;
+            let session_id: String = row.get(4)?;
+            let match_count: i64 = row.get(5)?;
             let best_snippet: Option<String> = row.get(6)?;
-            Ok((
-                first_seen,
-                last_seen,
-                CorrelatedSession {
-                    project,
-                    tool,
-                    session_id,
-                    match_count,
-                    best_snippet,
-                },
-            ))
+            Ok((ws, we, project, tool, session_id, match_count, best_snippet))
         })
-        .map_err(|e| anyhow::anyhow!("find_correlated_sessions_for_span query: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("find_correlated_sessions_per_cluster query: {e}"))?;
 
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut map: HashMap<(String, String), Vec<CorrelatedSession>> = HashMap::new();
+    for row in rows {
+        let (ws, we, project, tool, session_id, match_count, best_snippet) =
+            row.map_err(|e| anyhow::anyhow!("find_correlated_sessions_per_cluster row: {e}"))?;
+        let entry = map.entry((ws, we)).or_default();
+        if entry.len() < 5 {
+            entry.push(CorrelatedSession {
+                project,
+                tool,
+                session_id,
+                match_count,
+                best_snippet,
+            });
+        }
+    }
+    // Sort each cluster's sessions by match_count descending (UNION ALL rows are unordered).
+    for sessions in map.values_mut() {
+        sessions.sort_by(|a, b| b.match_count.cmp(&a.match_count));
+    }
+    Ok(map)
 }
 
 /// FTS5 search over AI transcript entries, returns sessions grouped by
