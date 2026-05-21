@@ -841,7 +841,7 @@ phase_cli_parity() {
     def strip:
       if type == "object" then
         with_entries(
-          select(.key | test("^(generated_at|elapsed_ms|duration_ms|started_at|finished_at|request_id|run_id|timestamp|ts)$") | not)
+          select(.key | test("^(generated_at|elapsed_ms|duration_ms|started_at|finished_at|request_id|run_id|timestamp|ts|now)$") | not)
         ) | map_values(strip)
       elif type == "array" then map(strip)
       else . end;
@@ -860,7 +860,7 @@ phase_cli_parity() {
     "db status|db status"
     # Surface parity (2026-05-21)
     "source-ips --limit 3|source-ips --limit 3"
-    "timeline --bucket 1h|timeline --bucket 1h"
+    "timeline --bucket hour|timeline --bucket hour"
     "patterns --top-n 5|patterns --top-n 5"
     "ingest-rate|ingest-rate"
     "sig list --limit 5|sig list --limit 5"
@@ -935,7 +935,7 @@ phase_surface_parity_rest() {
   # by unit tests in src/api_tests.rs and src/app/service.rs.
   local routes=(
     "GET /api/source-ips?limit=3|source_ips"
-    "GET /api/timeline?bucket=1h|points"
+    "GET /api/timeline?bucket=hour|points"
     "GET /api/patterns?top_n=5|patterns"
     "GET /api/ingest-rate|buckets"
     "GET /api/get?id=1|log"

@@ -522,10 +522,7 @@ impl HttpClient {
 
     // ─── REST surface: surface parity ───────────────────────────────────────
 
-    pub async fn source_ips(
-        &self,
-        req: &ListSourceIpsRequest,
-    ) -> Result<ListSourceIpsResponse> {
+    pub async fn source_ips(&self, req: &ListSourceIpsRequest) -> Result<ListSourceIpsResponse> {
         self.get_json("/api/source-ips", Some(req)).await
     }
 
@@ -579,7 +576,11 @@ impl HttpClient {
         }
         self.get_json(
             "/api/notifications/recent",
-            Some(&Params { limit, rule_id, since }),
+            Some(&Params {
+                limit,
+                rule_id,
+                since,
+            }),
         )
         .await
     }
@@ -590,7 +591,8 @@ impl HttpClient {
             #[serde(skip_serializing_if = "Option::is_none")]
             body: Option<String>,
         }
-        self.post_json("/api/notifications/test", &Payload { body }).await
+        self.post_json("/api/notifications/test", &Payload { body })
+            .await
     }
 }
 
