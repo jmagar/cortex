@@ -3,15 +3,13 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
+use super::ai_watch::{run_ai_watch_service_setup, transcript_root_permissions_phase};
+use super::debug_wrapper::{check_debug_compose_content_phase, check_debug_wrapper_content_phase};
+use super::firstrun::filesystem_phase;
 use super::{
     check_file_phase, setup_report, AiWatchServiceAction, PhaseTimer, SetupPhase, SetupReport,
     SetupReportInput, SetupStatus,
 };
-use super::ai_watch::{run_ai_watch_service_setup, transcript_root_permissions_phase};
-use super::debug_wrapper::{
-    check_debug_compose_content_phase, check_debug_wrapper_content_phase,
-};
-use super::firstrun::filesystem_phase;
 
 pub async fn run_setup_doctor() -> io::Result<SetupReport> {
     let started = Instant::now();

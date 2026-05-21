@@ -161,7 +161,7 @@ fn cidr_v6_prefix128_host_route() {
 fn cidr_v4_v6_mismatch_does_not_match() {
     let v4: std::net::IpAddr = "10.0.0.1".parse().unwrap();
     let cidrs = vec!["::10.0.0.0/120".to_string()]; // v6 CIDR for v4 addr
-    // v4 vs v6 → no match (mismatch branch returns false)
+                                                    // v4 vs v6 → no match (mismatch branch returns false)
     assert!(!is_source_allowed(v4, &cidrs));
 }
 

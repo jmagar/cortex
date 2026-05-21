@@ -3,20 +3,18 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-use super::{
-    check_file_phase, host_local_report_input, setup_path_value, setup_report, skipped_phase,
-    should_skip_ai_watch_systemd_enable, AiWatchServiceAction, PhaseTimer, SetupIssueKind,
-    SetupPhase, SetupReport, SetupStatus, AI_WATCH_SERVICE_ACTIVE_PHASE,
-    AI_WATCH_SERVICE_ENABLED_PHASE,
-};
 use super::firstrun::{ensure_private_dir, parse_env};
 use super::systemd::{
     systemctl_user_phase, systemctl_user_required_named_phase, systemctl_user_state,
 };
+use super::{
+    check_file_phase, host_local_report_input, setup_path_value, setup_report,
+    should_skip_ai_watch_systemd_enable, skipped_phase, AiWatchServiceAction, PhaseTimer,
+    SetupIssueKind, SetupPhase, SetupReport, SetupStatus, AI_WATCH_SERVICE_ACTIVE_PHASE,
+    AI_WATCH_SERVICE_ENABLED_PHASE,
+};
 
-pub async fn run_ai_watch_service_setup(
-    action: AiWatchServiceAction,
-) -> io::Result<SetupReport> {
+pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Result<SetupReport> {
     let started = Instant::now();
     let home = super::syslog_home_dir()?;
     let env_path = home.join(".env");
@@ -197,10 +195,7 @@ fn install_ai_watch_service_files(
     ))
 }
 
-fn remove_ai_watch_service_files(
-    env_path: &Path,
-    service_path: &Path,
-) -> io::Result<SetupPhase> {
+fn remove_ai_watch_service_files(env_path: &Path, service_path: &Path) -> io::Result<SetupPhase> {
     let timer = PhaseTimer::start("ai-watch-service-files");
     for path in [env_path, service_path] {
         match std::fs::remove_file(path) {
