@@ -418,7 +418,7 @@ pub(crate) struct AiInvestigateArgs {
     pub json: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AiAssessArgs {
     pub incident_id: String,
     pub model: Option<String>,
@@ -433,23 +433,6 @@ pub(crate) struct AiAssessArgs {
     pub limit: Option<u32>,
 }
 
-impl Default for AiAssessArgs {
-    fn default() -> Self {
-        Self {
-            incident_id: String::new(),
-            model: None,
-            json: false,
-            project: None,
-            tool: None,
-            from: None,
-            to: None,
-            window_minutes: None,
-            correlation_window_minutes: None,
-            terms: Vec::new(),
-            limit: None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ConfigCommand {
