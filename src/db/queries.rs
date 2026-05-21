@@ -1923,12 +1923,12 @@ fn find_correlated_sessions_per_cluster(
     }
 
     // Build UNION ALL: one SELECT per cluster window, tagging each row with ws/we.
-    // Parameters are laid out as (ws1, we1, ws1, we1, ws2, we2, ws2, we2, ...) —
-    // four bindings per window (two for the range, two repeated for best_snippet).
+    // Parameters use stride-2 (?{p} = ws, ?{p+1} = we for window i).  SQLite ?N
+    // numbered bindings reuse the same value within one arm's subquery without
+    // requiring duplicate params in the binding list.
     let mut arms: Vec<String> = Vec::with_capacity(windows.len());
-    let base = 1usize;
     for (i, _) in windows.iter().enumerate() {
-        let p = base + i * 4;
+        let p = 1 + i * 2;
         arms.push(format!(
             "SELECT ?{p} AS ws, ?{p1} AS we,
                     l.ai_project, l.ai_tool, l.ai_session_id,
@@ -1937,15 +1937,16 @@ fn find_correlated_sessions_per_cluster(
                      WHERE l2.ai_project = l.ai_project
                        AND l2.ai_tool = l.ai_tool
                        AND l2.ai_session_id = l.ai_session_id
-                       AND l2.timestamp BETWEEN ?{p2} AND ?{p3}
+                       AND l2.timestamp BETWEEN ?{p} AND ?{p1}
                      ORDER BY l2.timestamp DESC LIMIT 1) AS best_snippet
              FROM logs l
              WHERE l.ai_project IS NOT NULL AND l.ai_project != ''
                AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
                AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''
-               AND l.timestamp BETWEEN ?{p2} AND ?{p3}
+               AND l.timestamp BETWEEN ?{p} AND ?{p1}
              GROUP BY l.ai_project, l.ai_tool, l.ai_session_id",
-            p = p, p1 = p + 1, p2 = p, p3 = p + 1,
+            p = p,
+            p1 = p + 1,
         ));
     }
     let sql = arms.join("\nUNION ALL\n");
@@ -1954,7 +1955,7 @@ fn find_correlated_sessions_per_cluster(
         .prepare(&sql)
         .map_err(|e| anyhow::anyhow!("find_correlated_sessions_per_cluster prepare: {e}"))?;
 
-    // Bind four params per window: ws, we, ws, we (range twice — range + snippet subquery).
+    // Two params per window (ws, we); ?N reuse within each arm handles the rest.
     let params: Vec<&dyn rusqlite::ToSql> = windows
         .iter()
         .flat_map(|(ws, we)| {
@@ -1976,24 +1977,24 @@ fn find_correlated_sessions_per_cluster(
         })
         .map_err(|e| anyhow::anyhow!("find_correlated_sessions_per_cluster query: {e}"))?;
 
+    // Collect all sessions per cluster before sorting — UNION ALL rows arrive
+    // unordered, so the top-5 cap must come after sorting, not during insertion.
     let mut map: HashMap<(String, String), Vec<CorrelatedSession>> = HashMap::new();
     for row in rows {
         let (ws, we, project, tool, session_id, match_count, best_snippet) =
             row.map_err(|e| anyhow::anyhow!("find_correlated_sessions_per_cluster row: {e}"))?;
-        let entry = map.entry((ws, we)).or_default();
-        if entry.len() < 5 {
-            entry.push(CorrelatedSession {
-                project,
-                tool,
-                session_id,
-                match_count,
-                best_snippet,
-            });
-        }
+        map.entry((ws, we)).or_default().push(CorrelatedSession {
+            project,
+            tool,
+            session_id,
+            match_count,
+            best_snippet,
+        });
     }
-    // Sort each cluster's sessions by match_count descending (UNION ALL rows are unordered).
+    // Sort by match_count descending, then cap at 5 per cluster.
     for sessions in map.values_mut() {
         sessions.sort_by(|a, b| b.match_count.cmp(&a.match_count));
+        sessions.truncate(5);
     }
     Ok(map)
 }
