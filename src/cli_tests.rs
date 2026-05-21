@@ -1175,3 +1175,173 @@ fn setup_report_phase_list_does_not_include_data_mount_post_cutover() {
          instead. Found a push call within the setup_report window."
     );
 }
+
+// ─── syslog-mcp-kmib: AI abuse incident investigations ───────────────────────
+
+#[test]
+fn parse_ai_incidents_defaults() {
+    let cmd = CliCommand::parse(strings(&["ai", "incidents"])).unwrap();
+    let CliCommand::Ai(AiCommand::Incidents(args)) = cmd else {
+        panic!("expected Incidents");
+    };
+    assert_eq!(args.project, None);
+    assert_eq!(args.tool, None);
+    assert_eq!(args.limit, None);
+    assert_eq!(args.window_minutes, None);
+    assert!(args.terms.is_empty());
+    assert!(!args.json);
+}
+
+#[test]
+fn parse_ai_incidents_all_flags() {
+    let cmd = CliCommand::parse(strings(&[
+        "ai",
+        "incidents",
+        "--project",
+        "axon_rust",
+        "--tool",
+        "claude",
+        "--limit",
+        "5",
+        "--window-minutes",
+        "15",
+        "--term",
+        "shit",
+        "--term",
+        "fuck",
+        "--json",
+    ]))
+    .unwrap();
+    let CliCommand::Ai(AiCommand::Incidents(args)) = cmd else {
+        panic!("expected Incidents");
+    };
+    assert_eq!(args.project.as_deref(), Some("axon_rust"));
+    assert_eq!(args.tool.as_deref(), Some("claude"));
+    assert_eq!(args.limit, Some(5));
+    assert_eq!(args.window_minutes, Some(15));
+    assert_eq!(args.terms, vec!["shit", "fuck"]);
+    assert!(args.json);
+}
+
+#[test]
+fn parse_ai_incidents_equals_syntax() {
+    let cmd = CliCommand::parse(strings(&[
+        "ai",
+        "incidents",
+        "--project=lab",
+        "--window-minutes=30",
+        "--term=broken",
+    ]))
+    .unwrap();
+    let CliCommand::Ai(AiCommand::Incidents(args)) = cmd else {
+        panic!("expected Incidents");
+    };
+    assert_eq!(args.project.as_deref(), Some("lab"));
+    assert_eq!(args.window_minutes, Some(30));
+    assert_eq!(args.terms, vec!["broken"]);
+}
+
+#[test]
+fn parse_ai_investigate_defaults() {
+    let cmd = CliCommand::parse(strings(&["ai", "investigate"])).unwrap();
+    let CliCommand::Ai(AiCommand::Investigate(args)) = cmd else {
+        panic!("expected Investigate");
+    };
+    assert_eq!(args.project, None);
+    assert_eq!(args.correlation_window_minutes, None);
+    assert!(!args.json);
+}
+
+#[test]
+fn parse_ai_investigate_all_flags() {
+    let cmd = CliCommand::parse(strings(&[
+        "ai",
+        "investigate",
+        "--project",
+        "lab",
+        "--window-minutes",
+        "10",
+        "--correlation-window-minutes",
+        "20",
+        "--limit",
+        "3",
+        "--term",
+        "broken",
+        "--json",
+    ]))
+    .unwrap();
+    let CliCommand::Ai(AiCommand::Investigate(args)) = cmd else {
+        panic!("expected Investigate");
+    };
+    assert_eq!(args.project.as_deref(), Some("lab"));
+    assert_eq!(args.window_minutes, Some(10));
+    assert_eq!(args.correlation_window_minutes, Some(20));
+    assert_eq!(args.limit, Some(3));
+    assert_eq!(args.terms, vec!["broken"]);
+    assert!(args.json);
+}
+
+#[test]
+fn parse_ai_investigate_equals_syntax() {
+    let cmd = CliCommand::parse(strings(&[
+        "ai",
+        "investigate",
+        "--correlation-window-minutes=45",
+    ]))
+    .unwrap();
+    let CliCommand::Ai(AiCommand::Investigate(args)) = cmd else {
+        panic!("expected Investigate");
+    };
+    assert_eq!(args.correlation_window_minutes, Some(45));
+}
+
+#[test]
+fn parse_ai_assess_with_incident_id() {
+    let cmd =
+        CliCommand::parse(strings(&["ai", "assess", "inc-00000000deadbeef"])).unwrap();
+    let CliCommand::Ai(AiCommand::Assess(args)) = cmd else {
+        panic!("expected Assess");
+    };
+    assert_eq!(args.incident_id.as_deref(), Some("inc-00000000deadbeef"));
+    assert_eq!(args.model, None);
+    assert!(!args.json);
+}
+
+#[test]
+fn parse_ai_assess_with_model_and_json() {
+    let cmd = CliCommand::parse(strings(&[
+        "ai",
+        "assess",
+        "inc-abc123",
+        "--model",
+        "gemini-2.0-flash",
+        "--json",
+    ]))
+    .unwrap();
+    let CliCommand::Ai(AiCommand::Assess(args)) = cmd else {
+        panic!("expected Assess");
+    };
+    assert_eq!(args.incident_id.as_deref(), Some("inc-abc123"));
+    assert_eq!(args.model.as_deref(), Some("gemini-2.0-flash"));
+    assert!(args.json);
+}
+
+#[test]
+fn parse_ai_assess_requires_incident_id() {
+    let result = CliCommand::parse(strings(&["ai", "assess"]));
+    assert!(result.is_err(), "assess without incident_id should fail");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("incident_id"),
+        "error should mention incident_id, got: {msg}"
+    );
+}
+
+#[test]
+fn parse_ai_assess_rejects_extra_positional() {
+    let result = CliCommand::parse(strings(&["ai", "assess", "inc-abc", "extra"]));
+    assert!(
+        result.is_err(),
+        "assess with two positional args should fail"
+    );
+}
