@@ -100,6 +100,16 @@ the non-loopback safety gate (§9) bars this combo at startup.
 | `GET /api/hosts`                                         | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::hosts`                 | Same condition. Known-hosts list.                                                                |
 | `GET /api/correlate`                                     | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::correlate`             | Same condition. Window-based event correlation.                                                  |
 | `GET /api/stats`                                         | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::stats`                 | Same condition. Aggregate counts.                                                                |
+| `GET /api/source-ips`                                    | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.27.x     | `api.rs::source_ips`            | Distinct verified source IPs with log and host counts.                                           |
+| `GET /api/timeline`                                      | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.27.x     | `api.rs::timeline`              | Bucketed log counts over a time range.                                                           |
+| `GET /api/patterns`                                      | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.27.x     | `api.rs::patterns`              | Recurring message templates with frequency counts.                                               |
+| `GET /api/ingest-rate`                                   | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.27.x     | `api.rs::ingest_rate`           | Current ingest throughput (1m/5m/15m buckets), optionally broken down by host.                   |
+| `GET /api/get`                                           | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.27.x     | `api.rs::get_log`               | Fetch a single log entry by `id`.                                                                |
+| `GET /api/errors/unaddressed`                            | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.27.x     | `api.rs::unaddressed_errors`    | List error signatures not yet acknowledged.                                                      |
+| `POST /api/errors/ack`                                   | `experimental` | bearer-or-oauth †     | 64 KiB     | localhost-only             | —                   | 0.27.x     | `api.rs::ack_error`             | Acknowledge an error signature; suppresses it from future alerts. Actor set to `"api"`.          |
+| `POST /api/errors/unack`                                 | `experimental` | bearer-or-oauth †     | 64 KiB     | localhost-only             | —                   | 0.27.x     | `api.rs::unack_error`           | Revoke an acknowledgement so the signature resurfaces. Actor set to `"api"`.                     |
+| `GET /api/notifications/recent`                          | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.27.x     | `api.rs::notifications_recent`  | Recent notification firings from `notification_firings` table.                                   |
+| `POST /api/notifications/test`                           | `experimental` | bearer-or-oauth †     | 64 KiB     | localhost-only             | 10/min per actor    | 0.27.x     | `api.rs::notifications_test`    | Send a test notification via the configured Apprise endpoint (SSRF-safe: URLs from server config only). |
 | `WS /ws/agent` (Upgrade)                                 | `deferred`     | first-message token ¶ | 1 KiB pre-hello / 1 MiB per frame post-hello | n/a (subprotocol-gated) | per-agent leaky bucket (`-32030 QuotaExceeded`) | Epic A (`syslog-mcp-qgnx`) | `mcp/ws_agent.rs` (planned — **not yet mounted**) | Path reserved. Currently returns `404`. Will carry JSON-RPC 2.0 over WebSocket (`agent.hello`, `logs.push`, `metrics.push`, `agent.heartbeat`, `probe.request/response`, `config.update`, `agent.shutdown`) when Epic A lands. See `agent-protocol.md` for envelopes, methods, error codes. |
 | `* /*` (fallback)                                        | `stable`       | none                  | 64 KiB     | configured allowlist       | —                   | 0.1.x      | `mcp/routes.rs::router` (fallback) | Returns `404 {"error":"not_found"}` for any unmatched path. The 64 KiB body limit applies to the merged MCP router. |
 
@@ -132,7 +142,8 @@ OTel exporters back off for a day instead of retrying immediately.
 | Surface                                                | Limit  | Source                                       | On overflow                                   |
 | ------------------------------------------------------ | ------ | -------------------------------------------- | --------------------------------------------- |
 | Merged MCP router (`/mcp`, `/health`, OAuth, fallback) | 64 KiB | `mcp/routes.rs::MCP_BODY_LIMIT_BYTES`         | `413` (no `Retry-After`)                       |
-| Non-MCP API (`/api/*`)                                 | n/a    | All endpoints are `GET`; querystring only.    | n/a                                            |
+| Non-MCP API (`/api/*`) — `GET` routes                 | n/a    | All GET endpoints use querystring only.       | n/a                                            |
+| Non-MCP API (`/api/*`) — `POST` routes                | 64 KiB | `POST /api/errors/ack`, `POST /api/errors/unack`, `POST /api/notifications/test` | `413` (no `Retry-After`) |
 | OTLP (`/v1/logs`, `/v1/metrics`, `/v1/traces`)         | 4 MiB  | `otlp.rs::OTLP_BODY_LIMIT_BYTES`              | `413 + Retry-After: 86400`                     |
 | `/ws/agent` pre-handshake                              | 1 KiB  | `agent-protocol.md` §2                        | WS close `4000` (handshake timeout)            |
 | `/ws/agent` post-handshake per frame                   | 1 MiB  | `agent-protocol.md` §2                        | WS close `1009 Message Too Big`                |
@@ -149,7 +160,7 @@ Two CORS regimes coexist, applied at the router boundary:
    `/mcp` from a different origin.
 2. **Localhost-only (`/api/*`).** Hardcoded to
    `http://localhost:<mcp_port>` and `http://127.0.0.1:<mcp_port>` where
-   `<mcp_port>` is `mcp.port`. Methods: `GET`. Headers: `Any`.
+   `<mcp_port>` is `mcp.port`. Methods: `GET, POST`. Headers: `Any`.
 
 OTLP and `/ws/agent` are server-to-server channels and have **no** CORS
 layer; browsers should never hit them.
@@ -271,3 +282,26 @@ quick read:
 - `/register` is a public, unauthenticated endpoint **by design** — OAuth
   2.0 Dynamic Client Registration is how MCP clients self-onboard. The
   `register_rpm` knob is the mitigation against abuse.
+
+## Surface Parity Additions (2026-05-21)
+
+These routes mirror existing MCP actions through the REST surface — pure
+plumbing, no new behaviour. All require the standard bearer token.
+
+| Method | Path | Body / Query | Service method |
+|---|---|---|---|
+| GET | `/api/source-ips` | `?limit=N&offset=N` | `list_source_ips` |
+| GET | `/api/timeline` | `?bucket=...&group_by=...&from=...&to=...&hostname=...&app_name=...&severity_min=...` | `timeline` |
+| GET | `/api/patterns` | filter + `&scan_limit=N&top_n=N` | `patterns` |
+| GET | `/api/ingest-rate` | `?by_host=true` | `ingest_rate` |
+| GET | `/api/get` | `?id=N` | `get_log` |
+| GET | `/api/errors/unaddressed` | `?limit=N&include_acknowledged=true` | `unaddressed_errors` |
+| POST | `/api/errors/ack` | `{"signature_hash":"...","notes":"..."}` | `ack_error` (actor=`api`) |
+| POST | `/api/errors/unack` | `{"signature_hash":"...","reason":"..."}` | `unack_error` (actor=`api`) |
+| GET | `/api/notifications/recent` | `?limit=N&rule_id=...&since=...` | `notifications_recent` |
+| POST | `/api/notifications/test` | `{"body":"..."}` | `notifications_test` (apprise URLs server-side) |
+
+The `/api/notifications/test` route uses the server's configured apprise URLs
+(`config.notifications.apprise_url` / `apprise_urls`); callers cannot override
+them on the wire. Rate-limited to 10 test notifications per minute per
+`actor`, where actor is hard-coded to `"api"` for REST requests.

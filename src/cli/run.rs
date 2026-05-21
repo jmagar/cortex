@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use syslog_mcp::app::SyslogService;
 
-use super::args::{AiCommand, CliCommand, DbCommand};
+use super::args::{AiCommand, CliCommand, DbCommand, NotifyCommand, SigCommand};
 use super::dispatch;
 
 /// Env var that opts a process into HTTP transport without passing `--http`.
@@ -95,6 +95,19 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         // Compose/Setup/Config are local-only and main::run_cli reroutes them BEFORE
         // calling run(). If we reach here, the front door was bypassed —
         // bail with a clear internal-error message rather than a placeholder.
+        CliCommand::SourceIps(args) => dispatch::run_source_ips(&mode, args).await,
+        CliCommand::Timeline(args) => dispatch::run_timeline(&mode, args).await,
+        CliCommand::Patterns(args) => dispatch::run_patterns(&mode, args).await,
+        CliCommand::IngestRate(args) => dispatch::run_ingest_rate(&mode, args).await,
+        CliCommand::Sig(sig) => match sig {
+            SigCommand::List(args) => dispatch::run_sig_list(&mode, args).await,
+            SigCommand::Ack(args) => dispatch::run_sig_ack(&mode, args).await,
+            SigCommand::Unack(args) => dispatch::run_sig_unack(&mode, args).await,
+        },
+        CliCommand::Notify(notify) => match notify {
+            NotifyCommand::Recent(args) => dispatch::run_notify_recent(&mode, args).await,
+            NotifyCommand::Test(args) => dispatch::run_notify_test(&mode, args).await,
+        },
         CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
             bail!(
                 "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"

@@ -348,6 +348,12 @@ impl Mode {
                         | "service"
                         | "setup"
                         | "config"
+                        | "source-ips"
+                        | "timeline"
+                        | "patterns"
+                        | "ingest-rate"
+                        | "sig"
+                        | "notify"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);

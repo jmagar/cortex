@@ -1403,5 +1403,219 @@ contract — adding them is a separate (breaking) version event.
 | New enum value in a response field | Requires client tolerance. Add to the contract when introducing it; clients SHOULD treat unknown enum values as opaque strings. |
 | Tool error vs structured error | `stable`. `compose_doctor` is the only action that returns a tool error on a recognised failure mode; others must keep returning structured responses. |
 
-All 29 actions listed in §2 are `stable`. Removing any of them is a major
-version event.
+All 34 actions listed in §2 and §7 are `stable`. Removing any of them is a
+major version event.
+
+---
+
+## 7. Error Signature & Notification Actions
+
+Added in PR #40 (surface parity). These 5 actions have REST (`/api/*`) and
+CLI (`syslog sig *`, `syslog notify *`) equivalents added in the same PR.
+
+---
+
+### unaddressed_errors
+
+**Source:** `src/mcp/tools.rs::tool_unaddressed_errors` → `src/app/service.rs::unaddressed_errors`.
+
+**Purpose:** List error signatures that have not been acknowledged. An error
+signature is a normalised message template (variable tokens replaced with `ℕ`
+or `…`) seen at least `frequency_threshold` times in a rolling 1-hour window.
+Use this to find recurring noisy errors that should either be fixed or
+acknowledged (suppressed from future alerts).
+
+**Params:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action":                { "const": "unaddressed_errors" },
+    "limit":                 { "type": "integer", "minimum": 1, "maximum": 500 },
+    "include_acknowledged":  { "type": "boolean" }
+  },
+  "required": ["action"]
+}
+```
+
+**Response shape:**
+
+```json
+{
+  "signatures": [
+    {
+      "signature_hash":    "string (SHA-256 hex)",
+      "template":          "string (normalised message pattern)",
+      "sample_message":    "string",
+      "sample_hostname":   "string",
+      "sample_app_name":   "string | null",
+      "severity":          "string",
+      "total_count":       0,
+      "first_seen_at":     "RFC3339",
+      "last_seen_at":      "RFC3339",
+      "total_count":       0,
+      "count_last_1h":     0,
+      "acknowledged_at":   "RFC3339 | null"
+    }
+  ]
+}
+```
+
+**Caps + defaults:** `limit` defaults to 50, capped at 500.
+Results are ordered by `total_count DESC`.
+
+---
+
+### ack_error
+
+**Source:** `src/mcp/tools.rs::tool_ack_error` → `src/app/service.rs::ack_error`.
+
+**Purpose:** Acknowledge an error signature so it is suppressed from future
+`unaddressed_errors` results and does not trigger `unaddressed_error_signature`
+notification rules. Writes an audit event to `error_signature_ack_events`.
+Use `unack_error` to revoke.
+
+**Auth:** Requires a valid auth context (bearer token or OAuth JWT). The
+actor identity is extracted from the request and recorded in the audit event.
+
+**Params:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action":          { "const": "ack_error" },
+    "signature_hash":  { "type": "string" },
+    "notes":           { "type": "string", "maxLength": 4096 }
+  },
+  "required": ["action", "signature_hash"]
+}
+```
+
+**Response shape:**
+
+```json
+{
+  "signature_hash":  "string",
+  "acknowledged_at": "RFC3339",
+  "actor":           "string"
+}
+```
+
+---
+
+### unack_error
+
+**Source:** `src/mcp/tools.rs::tool_unack_error` → `src/app/service.rs::unack_error`.
+
+**Purpose:** Revoke an existing acknowledgement so the signature reappears in
+`unaddressed_errors` and can trigger notifications again. Writes an unack
+audit event; does NOT delete ack history.
+
+**Auth:** Same as `ack_error`.
+
+**Params:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action":          { "const": "unack_error" },
+    "signature_hash":  { "type": "string" },
+    "reason":          { "type": "string", "maxLength": 4096 }
+  },
+  "required": ["action", "signature_hash"]
+}
+```
+
+**Response shape:**
+
+```json
+{
+  "signature_hash": "string",
+  "unacked_at":     "RFC3339",
+  "actor":          "string"
+}
+```
+
+---
+
+### notifications_recent
+
+**Source:** `src/mcp/tools.rs::tool_notifications_recent` → `src/app/service.rs::notifications_recent`.
+
+**Purpose:** List recent notification firings from `notification_firings`. Use
+to audit what alerts have been sent, when, and whether they succeeded.
+
+**Params:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action":   { "const": "notifications_recent" },
+    "limit":    { "type": "integer", "minimum": 1, "maximum": 500 },
+    "rule_id":  { "type": "string" },
+    "since":    { "type": "string", "description": "RFC3339 lower bound on fired_at" }
+  },
+  "required": ["action"]
+}
+```
+
+**Response shape:** Array of firing rows:
+
+```json
+[
+  {
+    "id":          0,
+    "outbox_id":   0,
+    "rule_id":     "string",
+    "hostname":    "string",
+    "fired_at":    "RFC3339",
+    "status_code": 200
+  }
+]
+```
+
+**Caps + defaults:** `limit` defaults to 50, capped at 500. Results ordered by `fired_at DESC`.
+
+---
+
+### notifications_test
+
+**Source:** `src/mcp/tools.rs::tool_notifications_test` → `src/app/service.rs::notifications_test`.
+
+**Purpose:** Send a test notification through the configured Apprise endpoint.
+Useful for verifying the notification pipeline end-to-end after config changes.
+
+**Security:** Apprise URLs are read exclusively from server config
+(`notifications_config.apprise_url` / `apprise_urls`). Caller-supplied URL
+overrides are intentionally rejected — passing an `apprise_url` argument has
+no effect. This prevents SSRF via the MCP surface.
+
+**Rate limit:** 10 test notifications per minute per actor (enforced in
+`src/app/service.rs`).
+
+**Auth:** Requires a valid auth context.
+
+**Params:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": { "const": "notifications_test" },
+    "body":   { "type": "string", "description": "Notification body text" }
+  },
+  "required": ["action"]
+}
+```
+
+**Response shape:**
+
+```json
+{ "result": "string" }
+```
+
+Where `result` is `"sent"`, `"partial"`, or an error description string.
