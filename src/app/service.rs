@@ -11,19 +11,20 @@ use super::models::{
     AbuseSearchRequest, AbuseSearchResponse, AiAssessEvidenceSummary, AiAssessRequest,
     AiAssessResponse, AiCorrelateRequest, AiCorrelateResponse, AiCorrelationAnchor,
     AiIncidentRequest, AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse,
-    AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest, ClockSkewResponse,
-    CompareRequest, CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
-    CorrelateEventsResponse, DbBackupResult, DbCheckpointResult, DbIntegrityResult,
-    DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest, GetErrorsResponse,
-    GetLogRequest, GetLogResponse, IncidentEvent, IncidentRequest, IncidentResponse,
-    IngestRateRequest, IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse,
-    ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse,
-    ListSessionsRequest, ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse,
-    LogEntry, PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse,
-    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
-    ServiceJournalEntry, ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest,
-    SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest,
-    UsageBlocksResponse,
+    AiSessionEntry, AnomaliesRequest, AnomaliesResponse, AskHistoryRequest, AskHistoryResponse,
+    ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse, ContextRequest,
+    ContextResponse, CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult,
+    DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult,
+    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, IncidentContextRequest,
+    IncidentContextResponse, IncidentEvent, IncidentRequest, IncidentResponse, IngestRateRequest,
+    IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
+    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, PatternsRequest,
+    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry,
+    ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse,
+    SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
+    TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
@@ -33,10 +34,6 @@ use crate::scanner;
 
 const DB_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 const GEMINI_ASSESS_TIMEOUT: Duration = Duration::from_secs(120);
-
-/// System-prompt header prepended to every Gemini assess invocation.
-/// Instructs Gemini to act as a frustration assessor and produce the
-/// 8-section report format defined in the syslog-frustration-assessment skill.
 const FRUSTRATION_ASSESSMENT_PROMPT_HEADER: &str = "\
 You are a frustration assessment system for AI agent sessions. \
 Analyze the following abuse incident evidence bundle and produce a Markdown report with \
@@ -656,149 +653,6 @@ impl SyslogService {
             evidence: result.evidence.into_iter().map(Into::into).collect(),
             total_incidents: result.total_incidents,
             truncated: result.truncated,
-        })
-    }
-
-    /// Fetch the evidence bundle for a given incident ID, format it as a
-    /// Gemini prompt, spawn the Gemini CLI, and return the assessment markdown.
-    ///
-    /// LOCAL-only: the Gemini binary must be in PATH on the host machine.
-    pub async fn run_gemini_assess(&self, req: AiAssessRequest) -> ServiceResult<AiAssessResponse> {
-        use tokio::io::AsyncWriteExt;
-
-        let incident_id = req.incident_id.clone();
-
-        // Forward all filter fields from AiAssessRequest so the incident ID
-        // can be reproduced deterministically.  The incident_id is a hash of
-        // the anchor set, which depends on the search terms; omitting terms
-        // here would produce different anchor sets and the hash would never
-        // match.  Use a generous limit (default 200) to cover lower-priority
-        // incidents that fall outside the top-100 default window.
-        let invest_req = AiInvestigateRequest {
-            project: req.project,
-            tool: req.tool,
-            from: req.from,
-            to: req.to,
-            limit: Some(req.limit.unwrap_or(200).max(200)),
-            window_minutes: req.window_minutes,
-            correlation_window_minutes: req.correlation_window_minutes,
-            terms: req.terms,
-        };
-        let invest_resp = self.investigate_ai_incidents(invest_req).await?;
-
-        let matching: Vec<_> = invest_resp
-            .evidence
-            .iter()
-            .filter(|e| e.incident.incident_id == incident_id)
-            .collect();
-
-        if matching.is_empty() {
-            return Err(ServiceError::InvalidInput(format!(
-                "no incident found with id '{}'; run `syslog ai incidents` (with the same \
-                 --project/--tool/--term flags) to list available ids",
-                incident_id
-            )));
-        }
-
-        // Serialize matching evidence to JSON for the prompt.
-        let evidence_json = serde_json::to_string_pretty(&matching)
-            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("json serialize failed: {e}")))?;
-
-        // Build the full prompt.
-        let prompt = format!("{FRUSTRATION_ASSESSMENT_PROMPT_HEADER}{evidence_json}");
-        let prompt_preview = prompt.chars().take(500).collect::<String>();
-
-        // Evidence summary for the response.
-        let evidence_summary = AiAssessEvidenceSummary {
-            total_incidents: invest_resp.total_incidents,
-            evidence_bundle_count: matching.len(),
-            total_anchors: matching.iter().map(|e| e.anchors.len()).sum(),
-        };
-
-        // Spawn the Gemini CLI, pass prompt via stdin.
-        let mut cmd = tokio::process::Command::new("gemini");
-        if let Some(model) = &req.model {
-            cmd.arg("--model").arg(model);
-        }
-        cmd.stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true);
-
-        let mut child = cmd.spawn().map_err(|e| {
-            ServiceError::Internal(anyhow::anyhow!(
-                "failed to spawn gemini CLI: {e}. Is 'gemini' installed and in PATH?"
-            ))
-        })?;
-
-        // Write prompt to stdin and close the pipe.
-        // stdin must be Some because we called .stdin(Stdio::piped()) above;
-        // return an error rather than silently sending no prompt if somehow
-        // the pipe was not created.
-        let mut stdin = child.stdin.take().ok_or_else(|| {
-            ServiceError::Internal(anyhow::anyhow!(
-                "internal: gemini stdin pipe was not created despite Stdio::piped()"
-            ))
-        })?;
-        tracing::debug!(
-            incident_id = %incident_id,
-            prompt_len = prompt.len(),
-            "sending assessment prompt to gemini"
-        );
-        stdin
-            .write_all(prompt.as_bytes())
-            .await
-            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("stdin write failed: {e}")))?;
-        // Drop stdin to close the pipe; Gemini reads until EOF.
-        drop(stdin);
-
-        let output = tokio::time::timeout(GEMINI_ASSESS_TIMEOUT, child.wait_with_output())
-            .await
-            .map_err(|_| {
-                ServiceError::Internal(anyhow::anyhow!(
-                    "gemini CLI timed out after {}s",
-                    GEMINI_ASSESS_TIMEOUT.as_secs()
-                ))
-            })?
-            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("gemini CLI wait failed: {e}")))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ServiceError::Internal(anyhow::anyhow!(
-                "gemini CLI exited with status {}: {}",
-                output.status,
-                stderr.trim()
-            )));
-        }
-
-        let assessment = String::from_utf8_lossy(&output.stdout).to_string();
-        if assessment.trim().is_empty() {
-            return Err(ServiceError::Internal(anyhow::anyhow!(
-                "gemini CLI produced no output (exit 0 but empty stdout)"
-            )));
-        }
-
-        // Log stderr at warn level even on success — Gemini sometimes emits
-        // rate-limit or quota warnings to stderr while still producing output.
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.trim().is_empty() {
-            tracing::warn!(
-                incident_id = %incident_id,
-                stderr = %stderr.trim(),
-                "gemini assess: stderr output on successful run"
-            );
-        }
-        tracing::debug!(
-            incident_id = %incident_id,
-            assessment_len = assessment.len(),
-            "gemini assess completed"
-        );
-
-        Ok(AiAssessResponse {
-            incident_id,
-            assessment,
-            prompt_preview,
-            evidence_summary,
         })
     }
 
@@ -2010,6 +1864,103 @@ impl SyslogService {
             })
             .await?;
         Ok(result.into())
+    }
+
+    pub async fn run_gemini_assess(&self, req: AiAssessRequest) -> ServiceResult<AiAssessResponse> {
+        use tokio::io::AsyncWriteExt;
+
+        let incident_id = req.incident_id.clone();
+        let invest_req = AiInvestigateRequest {
+            project: req.project,
+            tool: req.tool,
+            from: req.from,
+            to: req.to,
+            limit: Some(req.limit.unwrap_or(200).max(200)),
+            window_minutes: req.window_minutes,
+            correlation_window_minutes: req.correlation_window_minutes,
+            terms: req.terms,
+        };
+        let invest_resp = self.investigate_ai_incidents(invest_req).await?;
+
+        let matching: Vec<_> = invest_resp
+            .evidence
+            .iter()
+            .filter(|e| e.incident.incident_id == incident_id)
+            .collect();
+
+        if matching.is_empty() {
+            return Err(ServiceError::InvalidInput(format!(
+                "no incident found with id '{}'; run `syslog ai incidents` to list available ids",
+                incident_id
+            )));
+        }
+
+        let evidence_json = serde_json::to_string_pretty(&matching)
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("json serialize failed: {e}")))?;
+        let prompt = format!("{FRUSTRATION_ASSESSMENT_PROMPT_HEADER}{evidence_json}");
+        let prompt_preview = prompt.chars().take(500).collect::<String>();
+        let evidence_summary = AiAssessEvidenceSummary {
+            total_incidents: invest_resp.total_incidents,
+            evidence_bundle_count: matching.len(),
+            total_anchors: matching.iter().map(|e| e.anchors.len()).sum(),
+        };
+
+        let mut cmd = tokio::process::Command::new("gemini");
+        if let Some(ref model) = req.model {
+            cmd.arg("--model").arg(model);
+        }
+        cmd.stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+
+        let mut child = cmd.spawn().map_err(|e| {
+            ServiceError::Internal(anyhow::anyhow!(
+                "failed to spawn gemini CLI: {e}. Is 'gemini' installed and in PATH?"
+            ))
+        })?;
+
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            ServiceError::Internal(anyhow::anyhow!("gemini stdin pipe was not created"))
+        })?;
+        stdin
+            .write_all(prompt.as_bytes())
+            .await
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("stdin write failed: {e}")))?;
+        drop(stdin);
+
+        let output = tokio::time::timeout(GEMINI_ASSESS_TIMEOUT, child.wait_with_output())
+            .await
+            .map_err(|_| {
+                ServiceError::Internal(anyhow::anyhow!(
+                    "gemini CLI timed out after {}s",
+                    GEMINI_ASSESS_TIMEOUT.as_secs()
+                ))
+            })?
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("gemini CLI wait failed: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ServiceError::Internal(anyhow::anyhow!(
+                "gemini CLI exited with status {}: {}",
+                output.status,
+                stderr.trim()
+            )));
+        }
+
+        let assessment = String::from_utf8_lossy(&output.stdout).to_string();
+        if assessment.trim().is_empty() {
+            return Err(ServiceError::Internal(anyhow::anyhow!(
+                "gemini CLI produced no output"
+            )));
+        }
+
+        Ok(AiAssessResponse {
+            incident_id,
+            assessment,
+            prompt_preview,
+            evidence_summary,
+        })
     }
 }
 

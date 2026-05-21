@@ -72,6 +72,13 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             AiCommand::SmokeWatch(args) => dispatch::run_ai_smoke_watch(&mode, args).await,
             AiCommand::WatchStatus(args) => dispatch::run_ai_watch_status(&mode, args).await,
             AiCommand::Watch(args) => dispatch::run_ai_watch(&mode, args).await,
+            AiCommand::SimilarIncidents(args) => {
+                dispatch::run_ai_similar_incidents(&mode, args).await
+            }
+            AiCommand::AskHistory(args) => dispatch::run_ai_ask_history(&mode, args).await,
+            AiCommand::IncidentContext(args) => {
+                dispatch::run_ai_incident_context(&mode, args).await
+            }
             AiCommand::Incidents(args) => dispatch::run_ai_incidents(&mode, args).await,
             AiCommand::Investigate(args) => dispatch::run_ai_investigate(&mode, args).await,
             AiCommand::Assess(args) => dispatch::run_ai_assess(&mode, args).await,

@@ -5,11 +5,12 @@ use std::path::PathBuf;
 use std::process::Command;
 use syslog_mcp::app::{
     AbuseSearchResponse, AiCorrelateResponse, AiIncidentResponse, AiInvestigateResponse,
-    CorrelateEventsResponse, DbBackupResult, DbCheckpointResult, DbIntegrityResult,
-    DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsResponse, IncidentResponse,
-    ListAiProjectsResponse, ListAiToolsResponse, ListHostsResponse, LogEntry,
-    ProjectContextResponse, SearchLogsResponse, SearchSessionsResponse, ServiceLogsRequest,
-    ServiceLogsResponse, SyslogService, UsageBlocksResponse,
+    AskHistoryResponse, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
+    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsResponse,
+    IncidentContextResponse, IncidentResponse, ListAiProjectsResponse, ListAiToolsResponse,
+    ListHostsResponse, LogEntry, ProjectContextResponse, SearchLogsResponse,
+    SearchSessionsResponse, ServiceLogsRequest, ServiceLogsResponse, SimilarIncidentsResponse,
+    SyslogService, UsageBlocksResponse,
 };
 use syslog_mcp::compose::{
     CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
@@ -416,6 +417,9 @@ fn parse_ai(args: &[String]) -> Result<CliCommand> {
             "ai smoke-watch",
             rest,
         )?))),
+        "similar" => parse_ai_similar(rest),
+        "ask-history" => parse_ai_ask_history(rest),
+        "incident-context" => parse_ai_incident_context(rest),
         "incidents" => parse_ai_incidents(rest),
         "investigate" => parse_ai_investigate(rest),
         "assess" => parse_ai_assess(rest),
@@ -4191,6 +4195,280 @@ pub(crate) mod dispatch;
 // ENV_USE_HTTP, GlobalFlags, env_opts_into_http, strip_eq_prefix are in cli/run.rs.
 
 // ENV_USE_HTTP, GlobalFlags, env_opts_into_http, strip_eq_prefix are in cli/run.rs.
+
+fn parse_ai_similar(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiSimilarArgs::default();
+    let mut query_parts = Vec::new();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--window-minutes" => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    flags.value("--window-minutes")?,
+                )?)
+            }
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--severity-min=") => {
+                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--window-minutes=") => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    value_after_equals(arg, "--window-minutes")?,
+                )?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai similar option: {arg}"),
+            _ => query_parts.push(arg),
+        }
+    }
+    parsed.query = query_parts.join(" ");
+    if parsed.query.is_empty() {
+        bail!("ai similar requires a query");
+    }
+    Ok(CliCommand::Ai(AiCommand::SimilarIncidents(parsed)))
+}
+
+fn parse_ai_ask_history(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiAskHistoryArgs::default();
+    let mut query_parts = Vec::new();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai ask-history option: {arg}"),
+            _ => query_parts.push(arg),
+        }
+    }
+    parsed.query = query_parts.join(" ");
+    if parsed.query.is_empty() {
+        bail!("ai ask-history requires a query");
+    }
+    Ok(CliCommand::Ai(AiCommand::AskHistory(parsed)))
+}
+
+fn parse_ai_incident_context(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiIncidentContextArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--from" => parsed.from = flags.value("--from")?,
+            "--to" => parsed.to = flags.value("--to")?,
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--query" => parsed.query = Some(flags.value("--query")?),
+            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--from=") => parsed.from = value_after_equals(arg, "--from")?,
+            _ if arg.starts_with("--to=") => parsed.to = value_after_equals(arg, "--to")?,
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--query=") => {
+                parsed.query = Some(value_after_equals(arg, "--query")?)
+            }
+            _ if arg.starts_with("--severity-min=") => {
+                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai incident-context option: {arg}"),
+            _ => bail!("unexpected positional argument for ai incident-context: {arg}"),
+        }
+    }
+    if parsed.from.is_empty() {
+        bail!("ai incident-context requires --from");
+    }
+    if parsed.to.is_empty() {
+        bail!("ai incident-context requires --to");
+    }
+    Ok(CliCommand::Ai(AiCommand::IncidentContext(parsed)))
+}
+
+pub(super) fn print_similar_incidents_response(
+    response: &SimilarIncidentsResponse,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "{} incident cluster(s){}",
+        response.total_clusters,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    for cluster in &response.clusters {
+        println!(
+            "\n[{} / {}] {} → {} | {} log(s) | peak: {}",
+            cluster.hostname,
+            cluster.app_name.as_deref().unwrap_or("-"),
+            cluster.window_start,
+            cluster.window_end,
+            cluster.log_count,
+            cluster.severity_peak
+        );
+        for msg in &cluster.representative_messages {
+            println!("  {}", truncate(msg, 120));
+        }
+        if !cluster.correlated_sessions.is_empty() {
+            println!("  AI sessions:");
+            for sess in &cluster.correlated_sessions {
+                println!(
+                    "    [{}/{}] {} ({} hits)",
+                    sess.tool, sess.project, sess.session_id, sess.match_count
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn print_ask_history_response(response: &AskHistoryResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "{} session(s) for query {:?}{}",
+        response.sessions.len(),
+        response.query,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    for session in &response.sessions {
+        println!(
+            "{:<10} {:<30} {:<20} {} hit(s)",
+            session.tool,
+            truncate(&session.project, 29),
+            truncate(&session.session_id, 19),
+            session.match_count
+        );
+        if let Some(snippet) = &session.best_snippet {
+            println!("  snippet: {}", truncate(snippet, 100));
+        }
+    }
+    if !response.context_logs.is_empty() {
+        println!(
+            "\nSystem log context ({} entries):",
+            response.context_logs.len()
+        );
+        for log in &response.context_logs {
+            println!(
+                "  [{}] {} {} {}",
+                log.severity,
+                local_ts(&log.timestamp),
+                log.hostname,
+                truncate(&log.message, 80)
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn print_incident_context_response(
+    response: &IncidentContextResponse,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("Window: {} → {}", response.window_from, response.window_to);
+    println!("Total logs: {}", response.total_logs);
+    println!("By severity:");
+    for sv in &response.by_severity {
+        println!("  {:<10} {}", sv.severity, sv.count);
+    }
+    let truncated_note = if response.error_logs_truncated {
+        " (truncated)".to_string()
+    } else {
+        String::new()
+    };
+    println!(
+        "Error logs ({}{}):",
+        response.error_logs.len(),
+        truncated_note
+    );
+    for log in &response.error_logs {
+        println!(
+            "  [{}] {} {} {}",
+            log.severity,
+            local_ts(&log.timestamp),
+            log.hostname,
+            truncate(&log.message, 80)
+        );
+    }
+    if !response.ai_sessions.is_empty() {
+        println!("AI sessions ({}):", response.ai_sessions.len());
+        for sess in &response.ai_sessions {
+            println!(
+                "  {}/{} {} {} → {}",
+                sess.tool,
+                truncate(&sess.project, 20),
+                truncate(&sess.session_id, 16),
+                sess.first_seen,
+                sess.last_seen
+            );
+        }
+    }
+    Ok(())
+}
 
 fn parse_ai_incidents(args: &[String]) -> Result<CliCommand> {
     let mut parsed = AiIncidentsArgs::default();
