@@ -771,9 +771,9 @@ fn doctor_cache_dedupes_systemctl_show() {
     // (unit_missing == true) or the systemctl probe itself fails. Either
     // outcome is acceptable; a hit on the unit would mean the test host
     // genuinely has it installed, which we treat as a setup error.
-    match &first {
-        Ok(env) => assert!(env.unit_missing, "fake unit unexpectedly resolved: {env:?}"),
-        Err(_) => {} // systemctl unavailable / probe failed — also acceptable
+    // Err(_) is also acceptable: systemctl unavailable / probe failed.
+    if let Ok(env) = &first {
+        assert!(env.unit_missing, "fake unit unexpectedly resolved: {env:?}");
     }
     // The cache returns clones of the same Result on the second call.
     match (&first, &second) {

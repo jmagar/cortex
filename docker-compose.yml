@@ -8,11 +8,9 @@ services:
       service: syslog-mcp
     image: syslog-mcp:dev
     pull_policy: build
-    # syslog-setup-build-stanza-start
     build:
       context: .
       dockerfile: config/Dockerfile
-    # syslog-setup-build-stanza-end
 
 volumes:
   syslog-mcp-data:

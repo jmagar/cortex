@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-const COMPOSE_ASSET: &str = include_str!("../docker-compose.yml");
+// `setup install` ships the *publishable* template — the local-dev
+// `docker-compose.yml` extends this file to build from source.
+const COMPOSE_ASSET: &str = include_str!("../docker-compose.prod.yml");
 const DOCKERFILE_ASSET: &str = include_str!("../config/Dockerfile");
 
 #[cfg(test)]
@@ -1062,25 +1064,14 @@ fn write_compose_assets(compose_dir: &Path) -> io::Result<SetupPhase> {
 }
 
 fn installed_compose_asset() -> String {
-    let start = "    # syslog-setup-build-stanza-start\n";
-    let end = "    # syslog-setup-build-stanza-end\n";
-    let start_index = COMPOSE_ASSET
-        .find(start)
-        .expect("installed compose asset transform failed: build stanza start marker not found");
-    let after_start = start_index + start.len();
-    let end_index = COMPOSE_ASSET[after_start..]
-        .find(end)
-        .map(|index| after_start + index + end.len())
-        .expect("installed compose asset transform failed: build stanza end marker not found");
-    let without_build = format!(
-        "{}{}",
-        &COMPOSE_ASSET[..start_index],
-        &COMPOSE_ASSET[end_index..]
-    );
-    let installed = without_build.replace("      - path: .env\n", "      - path: ../.env\n");
+    // The installed compose file lives one level deeper than the env file
+    // (`compose/docker-compose.yml` vs `.env` in the parent), so rewrite the
+    // env_file path. Panic if the template stops matching: a silent no-op
+    // here would ship a compose file pointing at a non-existent env file.
+    let installed = COMPOSE_ASSET.replace("      - path: .env\n", "      - path: ../.env\n");
     assert_ne!(
-        installed, without_build,
-        "installed compose asset transform failed: expected env_file path was not found"
+        installed, COMPOSE_ASSET,
+        "installed compose asset transform failed: expected `      - path: .env\\n` was not found in docker-compose.prod.yml"
     );
     installed
 }

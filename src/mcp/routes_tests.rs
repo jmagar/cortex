@@ -312,12 +312,12 @@ async fn mcp_cors_preflight_allows_only_required_request_headers() {
         "mcp-session-id",
     ] {
         assert!(
-            allowed_tokens.iter().any(|t| *t == header),
+            allowed_tokens.contains(&header),
             "missing {header} from allow-headers: {allowed}"
         );
     }
     assert!(
-        !allowed_tokens.iter().any(|t| *t == "x-unexpected-header"),
+        !allowed_tokens.contains(&"x-unexpected-header"),
         "CORS allow-headers must not reflect arbitrary request headers: {allowed}"
     );
 }
