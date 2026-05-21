@@ -361,6 +361,7 @@ impl RuntimeCore {
         }
         let storage_pool = Arc::clone(&self.pool);
         let storage_config = self.config.storage.clone();
+        let notifications_cfg = self.config.notifications.clone();
         let shared_storage_state = Arc::clone(&self.storage_state);
         let limiter = Arc::clone(&self.maintenance_permit);
         let handle = tokio::spawn(async move {
@@ -400,6 +401,55 @@ impl RuntimeCore {
                             });
                             previous_blocked
                         };
+
+                        // Disk fill alert: fire when free disk is below storage guardrail thresholds.
+                        // Uses the same min_free_disk_mb (critical) and recovery_free_disk_mb (warning)
+                        // that the storage guardrail uses — no extra config needed.
+                        if let Some(free_bytes) = outcome.metrics.free_disk_bytes {
+                            if notifications_cfg.enabled
+                                && notifications_cfg.evaluators.disk_fill
+                                && !notifications_cfg.apprise_urls.is_empty()
+                            {
+                                let critical_bytes =
+                                    storage_config.min_free_disk_mb.saturating_mul(1024 * 1024);
+                                let warn_bytes = storage_config
+                                    .recovery_free_disk_mb
+                                    .saturating_mul(1024 * 1024);
+                                let urls_json =
+                                    serde_json::to_string(&notifications_cfg.apprise_urls)
+                                        .unwrap_or_else(|_| "[]".to_string());
+                                let hostname = std::env::var("HOSTNAME")
+                                    .unwrap_or_else(|_| "localhost".to_string());
+                                if let Some(params) = crate::notifications::rules::evaluate_disk_fill(
+                                    &hostname,
+                                    free_bytes,
+                                    critical_bytes,
+                                    warn_bytes,
+                                    &urls_json,
+                                ) {
+                                    let pool_n = Arc::clone(&storage_pool);
+                                    let result = tokio::task::spawn_blocking(move || {
+                                        let conn = pool_n.get()?;
+                                        crate::db::notifications::outbox_insert(&conn, &params)
+                                            .map_err(anyhow::Error::from)
+                                    })
+                                    .await;
+                                    match result {
+                                        Ok(Ok(())) => {
+                                            tracing::debug!("disk_fill: outbox row queued")
+                                        }
+                                        Ok(Err(e)) => tracing::warn!(
+                                            error = %e,
+                                            "disk_fill: outbox_insert failed (non-fatal)"
+                                        ),
+                                        Err(e) => tracing::warn!(
+                                            error = %e,
+                                            "disk_fill: spawn_blocking failed (non-fatal)"
+                                        ),
+                                    }
+                                }
+                            }
+                        }
 
                         if outcome.deleted_rows > 0
                             || outcome.write_blocked

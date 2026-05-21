@@ -73,6 +73,8 @@ pub struct NotificationEvaluatorsConfig {
     pub fail2ban_ban: bool,
     /// Enable Authelia MFA failure detection. Default: true.
     pub authelia_mfa_fail: bool,
+    /// Enable disk fill detection from storage guardrail. Default: true.
+    pub disk_fill: bool,
     /// How often to run evaluation (seconds). Default: 300 (5 minutes).
     pub evaluator_interval_secs: u64,
 }
@@ -84,6 +86,7 @@ impl Default for NotificationEvaluatorsConfig {
             container_die_nonzero: true,
             fail2ban_ban: true,
             authelia_mfa_fail: true,
+            disk_fill: true,
             evaluator_interval_secs: 300,
         }
     }
