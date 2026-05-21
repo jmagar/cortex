@@ -951,7 +951,11 @@ pub(super) async fn run_sig_unack(mode: &CliMode, args: SigUnackArgs) -> Result<
 
 pub(super) async fn run_notify_recent(mode: &CliMode, args: NotifyRecentArgs) -> Result<()> {
     let json = args.json;
-    let limit = args.limit.unwrap_or(50).clamp(1, 500);
+    let raw_limit = args.limit.unwrap_or(50);
+    if !(1..=500).contains(&raw_limit) {
+        anyhow::bail!("--limit must be between 1 and 500 (got {raw_limit})");
+    }
+    let limit = raw_limit;
     match mode {
         CliMode::Local(service) => {
             let firings = service

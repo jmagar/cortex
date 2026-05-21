@@ -1403,15 +1403,15 @@ contract — adding them is a separate (breaking) version event.
 | New enum value in a response field | Requires client tolerance. Add to the contract when introducing it; clients SHOULD treat unknown enum values as opaque strings. |
 | Tool error vs structured error | `stable`. `compose_doctor` is the only action that returns a tool error on a recognised failure mode; others must keep returning structured responses. |
 
-All 29 actions listed in §2 are `stable`. Removing any of them is a major
-version event.
+All 34 actions listed in §2 and §7 are `stable`. Removing any of them is a
+major version event.
 
 ---
 
 ## 7. Error Signature & Notification Actions
 
-Added in PR #40 (surface parity). These 5 actions exist only in the MCP
-surface; REST and CLI equivalents were added in the same PR.
+Added in PR #40 (surface parity). These 5 actions have REST (`/api/*`) and
+CLI (`syslog sig *`, `syslog notify *`) equivalents added in the same PR.
 
 ---
 
