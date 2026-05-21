@@ -493,6 +493,120 @@ pub struct AiInvestigateResult {
     pub truncated: bool,
 }
 
+// ---------------------------------------------------------------------------
+// RAG v1: similar_incidents, ask_history, incident_context
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct SimilarIncidentsParams {
+    pub query: String,
+    pub hostname: Option<String>,
+    pub app_name: Option<String>,
+    /// Minimum severity (e.g. "warning"). None = all severities.
+    pub severity_min: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// Cluster grouping window in minutes. Default 30, clamp 5..=120.
+    pub window_minutes: Option<u32>,
+    /// Max clusters to return. Default 10, clamp 1..=50.
+    pub limit: Option<u32>,
+}
+
+/// A time-windowed cluster of log hits (one "incident").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentCluster {
+    pub hostname: String,
+    pub app_name: Option<String>,
+    /// RFC 3339 timestamp of the first matching log in this cluster.
+    pub window_start: String,
+    /// RFC 3339 timestamp of the last matching log in this cluster.
+    pub window_end: String,
+    pub log_count: i64,
+    /// Highest severity in this cluster (emerg > alert > ... > debug).
+    pub severity_peak: String,
+    /// Up to 3 representative message snippets (first 256 chars each).
+    pub representative_messages: Vec<String>,
+    /// AI sessions whose transcript entries overlap this cluster's time window.
+    pub correlated_sessions: Vec<CorrelatedSession>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrelatedSession {
+    pub session_id: String,
+    pub project: String,
+    pub tool: String,
+    pub match_count: i64,
+    pub best_snippet: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimilarIncidentsResult {
+    pub query: String,
+    pub total_clusters: usize,
+    pub truncated: bool,
+    pub clusters: Vec<IncidentCluster>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AskHistoryParams {
+    pub query: String,
+    pub hostname: Option<String>,
+    pub app_name: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// Max sessions to return. Default 10, clamp 1..=50.
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AskHistoryResult {
+    pub query: String,
+    pub total_candidates: usize,
+    pub truncated: bool,
+    /// Sessions with transcript hits ranked by match count.
+    pub sessions: Vec<SearchedAiSessionEntry>,
+    /// System (non-AI) log entries from the same time windows as the top sessions.
+    pub context_logs: Vec<LogEntry>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct IncidentContextParams {
+    pub from: String,
+    pub to: String,
+    pub hostname: Option<String>,
+    pub app_name: Option<String>,
+    pub query: Option<String>,
+    pub severity_min: Option<String>,
+    /// Max error log rows to return. Default 50, clamp 1..=200.
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeverityCount {
+    pub severity: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppLogCount {
+    pub app_name: Option<String>,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentContextResult {
+    pub window_from: String,
+    pub window_to: String,
+    pub total_logs: i64,
+    pub by_severity: Vec<SeverityCount>,
+    pub by_app: Vec<AppLogCount>,
+    /// Logs at or above severity_min (default: warning) within the window.
+    pub error_logs: Vec<LogEntry>,
+    pub error_logs_truncated: bool,
+    /// AI sessions active in this window (have transcript entries between from..to).
+    pub ai_sessions: Vec<AiSessionEntry>,
+}
+
 #[cfg(test)]
 #[path = "models_tests.rs"]
 mod tests;
