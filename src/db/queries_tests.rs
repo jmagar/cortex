@@ -1086,3 +1086,213 @@ fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
     assert_eq!(rows[0].first_seen, "2026-05-11T00:00:00Z");
     assert_eq!(rows[0].last_seen, "2026-05-11T00:01:00Z");
 }
+
+// ---------------------------------------------------------------------------
+// RAG v1 tests
+// ---------------------------------------------------------------------------
+
+fn make_app_entry(ts: &str, host: &str, severity: &str, app: &str, msg: &str) -> LogBatchEntry {
+    LogBatchEntry {
+        timestamp: ts.to_string(),
+        hostname: host.to_string(),
+        facility: None,
+        severity: severity.to_string(),
+        app_name: Some(app.to_string()),
+        process_id: None,
+        message: msg.to_string(),
+        raw: msg.to_string(),
+        source_ip: "10.0.0.1:514".to_string(),
+        docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
+        metadata_json: None,
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
+    }
+}
+
+fn make_ai_entry(ts: &str, msg: &str) -> LogBatchEntry {
+    LogBatchEntry {
+        timestamp: ts.to_string(),
+        hostname: "localhost".into(),
+        facility: Some("local0".into()),
+        severity: "info".into(),
+        app_name: Some("codex-transcript".into()),
+        process_id: None,
+        message: msg.to_string(),
+        raw: msg.to_string(),
+        source_ip: "transcript://codex".into(),
+        docker_checkpoint: None,
+        ai_tool: Some("codex".into()),
+        ai_project: Some("/tmp/project".into()),
+        ai_session_id: Some("sess-rag-1".into()),
+        ai_transcript_path: Some("/tmp/project/sess-rag-1.jsonl".into()),
+        metadata_json: None,
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
+    }
+}
+
+#[test]
+fn similar_incidents_clusters_returns_clusters_for_matching_logs() {
+    let (pool, _dir) = test_pool();
+
+    let logs = vec![
+        make_app_entry(
+            "2024-01-15T10:00:00Z",
+            "web-01",
+            "err",
+            "nginx",
+            "upstream connect error timeout",
+        ),
+        make_app_entry(
+            "2024-01-15T10:05:00Z",
+            "web-01",
+            "crit",
+            "nginx",
+            "upstream connect error connection refused",
+        ),
+    ];
+    insert_logs_batch(&pool, &logs).unwrap();
+
+    let params = SimilarIncidentsParams {
+        query: "upstream".into(),
+        hostname: None,
+        app_name: None,
+        severity_min: None,
+        from: None,
+        to: None,
+        window_minutes: Some(30),
+        limit: Some(10),
+    };
+    let result = similar_incidents_clusters(&pool, &params).unwrap();
+    assert!(
+        !result.clusters.is_empty(),
+        "expected at least one cluster"
+    );
+    let cluster = &result.clusters[0];
+    assert_eq!(cluster.hostname, "web-01");
+    assert_eq!(cluster.app_name.as_deref(), Some("nginx"));
+    assert!(cluster.log_count >= 2);
+    // "crit" is more severe than "err"
+    assert_eq!(cluster.severity_peak, "crit");
+}
+
+#[test]
+fn similar_incidents_clusters_filters_by_hostname() {
+    let (pool, _dir) = test_pool();
+
+    let logs = vec![
+        make_app_entry(
+            "2024-01-15T10:00:00Z",
+            "web-01",
+            "err",
+            "nginx",
+            "upstream connect error",
+        ),
+        make_app_entry(
+            "2024-01-15T10:01:00Z",
+            "web-02",
+            "err",
+            "nginx",
+            "upstream connect error",
+        ),
+    ];
+    insert_logs_batch(&pool, &logs).unwrap();
+
+    let params = SimilarIncidentsParams {
+        query: "upstream".into(),
+        hostname: Some("web-01".into()),
+        ..Default::default()
+    };
+    let result = similar_incidents_clusters(&pool, &params).unwrap();
+    assert!(result.clusters.iter().all(|c| c.hostname == "web-01"));
+}
+
+#[test]
+fn incident_context_summary_returns_window_stats() {
+    let (pool, _dir) = test_pool();
+
+    let logs = vec![
+        make_app_entry(
+            "2024-02-01T08:00:00Z",
+            "db-01",
+            "err",
+            "postgres",
+            "FATAL: out of shared memory",
+        ),
+        make_app_entry(
+            "2024-02-01T08:01:00Z",
+            "db-01",
+            "info",
+            "postgres",
+            "database system is ready",
+        ),
+    ];
+    insert_logs_batch(&pool, &logs).unwrap();
+
+    let params = IncidentContextParams {
+        from: "2024-02-01T07:00:00Z".into(),
+        to: "2024-02-01T09:00:00Z".into(),
+        hostname: None,
+        app_name: None,
+        query: None,
+        severity_min: Some("err".into()),
+        limit: Some(10),
+    };
+    let result = incident_context_summary(&pool, &params).unwrap();
+    assert_eq!(result.total_logs, 2);
+    assert!(!result.by_severity.is_empty());
+    // Only the "err" row should be in error_logs (not "info")
+    assert_eq!(result.error_logs.len(), 1);
+    assert_eq!(result.error_logs[0].message, "FATAL: out of shared memory");
+}
+
+#[test]
+fn incident_context_summary_empty_window_returns_zero() {
+    let (pool, _dir) = test_pool();
+
+    let params = IncidentContextParams {
+        from: "2020-01-01T00:00:00Z".into(),
+        to: "2020-01-02T00:00:00Z".into(),
+        ..Default::default()
+    };
+    let result = incident_context_summary(&pool, &params).unwrap();
+    assert_eq!(result.total_logs, 0);
+    assert!(result.error_logs.is_empty());
+    assert!(result.ai_sessions.is_empty());
+}
+
+#[test]
+fn ask_history_sessions_returns_session_hits() {
+    let (pool, _dir) = test_pool();
+
+    let logs = vec![
+        make_ai_entry("2024-03-01T10:00:00Z", "nginx ssl certificate error"),
+        make_ai_entry(
+            "2024-03-01T10:01:00Z",
+            "fixed the certificate by renewing it",
+        ),
+    ];
+    insert_logs_batch(&pool, &logs).unwrap();
+
+    let params = AskHistoryParams {
+        query: "certificate".into(),
+        hostname: None,
+        app_name: None,
+        from: None,
+        to: None,
+        limit: Some(5),
+    };
+    let result = ask_history_sessions(&pool, &params).unwrap();
+    assert!(!result.sessions.is_empty(), "expected session hits");
+    assert_eq!(result.query, "certificate");
+}
