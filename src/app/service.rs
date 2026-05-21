@@ -672,18 +672,21 @@ impl SyslogService {
 
         let incident_id = req.incident_id.clone();
 
-        // Fetch evidence for incidents. Search without filters so any
-        // incident matching the ID is found. The limit is generous because
-        // we filter by incident_id below.
+        // Forward all filter fields from AiAssessRequest so the incident ID
+        // can be reproduced deterministically.  The incident_id is a hash of
+        // the anchor set, which depends on the search terms; omitting terms
+        // here would produce different anchor sets and the hash would never
+        // match.  Use a generous limit (default 200) to cover lower-priority
+        // incidents that fall outside the top-100 default window.
         let invest_req = AiInvestigateRequest {
-            project: None,
-            tool: None,
-            from: None,
-            to: None,
-            limit: Some(100),
-            window_minutes: None,
-            correlation_window_minutes: None,
-            terms: Vec::new(),
+            project: req.project,
+            tool: req.tool,
+            from: req.from,
+            to: req.to,
+            limit: Some(req.limit.unwrap_or(200).max(200)),
+            window_minutes: req.window_minutes,
+            correlation_window_minutes: req.correlation_window_minutes,
+            terms: req.terms,
         };
         let invest_resp = self.investigate_ai_incidents(invest_req).await?;
 
@@ -695,7 +698,8 @@ impl SyslogService {
 
         if matching.is_empty() {
             return Err(ServiceError::InvalidInput(format!(
-                "no incident found with id '{}'; run `syslog ai incidents` to list available ids",
+                "no incident found with id '{}'; run `syslog ai incidents` (with the same \
+                 --project/--tool/--term flags) to list available ids",
                 incident_id
             )));
         }

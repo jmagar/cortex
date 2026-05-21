@@ -1345,3 +1345,36 @@ fn parse_ai_assess_rejects_extra_positional() {
         "assess with two positional args should fail"
     );
 }
+
+#[test]
+fn parse_ai_assess_filter_flags_forwarded() {
+    // Verify that the same filter flags available on `ai incidents` are
+    // also accepted on `ai assess` so the incident_id hash can be reproduced.
+    let cmd = CliCommand::parse(strings(&[
+        "ai",
+        "assess",
+        "inc-abc123",
+        "--project",
+        "axon_rust",
+        "--tool",
+        "claude",
+        "--window-minutes",
+        "10",
+        "--term",
+        "shit",
+        "--term",
+        "broken",
+        "--limit",
+        "300",
+    ]))
+    .unwrap();
+    let CliCommand::Ai(AiCommand::Assess(args)) = cmd else {
+        panic!("expected Assess");
+    };
+    assert_eq!(args.incident_id.as_deref(), Some("inc-abc123"));
+    assert_eq!(args.project.as_deref(), Some("axon_rust"));
+    assert_eq!(args.tool.as_deref(), Some("claude"));
+    assert_eq!(args.window_minutes, Some(10));
+    assert_eq!(args.terms, vec!["shit", "broken"]);
+    assert_eq!(args.limit, Some(300));
+}

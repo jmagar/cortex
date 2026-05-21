@@ -477,9 +477,32 @@ pub struct AiInvestigateResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAssessRequest {
     /// The incident_id to look up — must match a real AbuseIncident.incident_id.
+    /// The incident_id is a deterministic hash of the anchor IDs; these depend on
+    /// the search terms used when the incident was first found.  Pass the same
+    /// filter flags here (project, tool, from, to, window_minutes, terms) as you
+    /// used with `ai incidents` to guarantee the ID can be reproduced.
     pub incident_id: String,
     /// Optional Gemini model override (e.g. "gemini-2.0-flash").
     pub model: Option<String>,
+    // ── Filter fields forwarded to investigate_ai_incidents ──────────────────
+    /// AI project filter (must match the project used when finding the incident).
+    pub project: Option<String>,
+    /// AI tool filter (must match the tool used when finding the incident).
+    pub tool: Option<String>,
+    /// Start of time range (ISO 8601).
+    pub from: Option<String>,
+    /// End of time range (ISO 8601).
+    pub to: Option<String>,
+    /// Grouping window in minutes (must match what was used when finding the incident).
+    pub window_minutes: Option<u32>,
+    /// Correlation window in minutes for nearby log/error fetch.
+    pub correlation_window_minutes: Option<u32>,
+    /// Abuse terms (must include all terms used when finding the incident).
+    #[serde(default)]
+    pub terms: Vec<String>,
+    /// Max incidents to scan when searching for the ID.  Default 200 (generous to
+    /// handle lower-priority incidents not in the top-100 default).
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

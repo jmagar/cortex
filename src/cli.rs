@@ -325,6 +325,15 @@ pub(crate) struct AiAssessArgs {
     pub model: Option<String>,
     /// Emit raw JSON instead of streamed markdown.
     pub json: bool,
+    // ── Filter fields — must match flags used when finding the incident ───────
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    pub terms: Vec<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1178,8 +1187,57 @@ fn parse_ai_assess(args: &[String]) -> Result<CliCommand> {
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--model" => parsed.model = Some(flags.value("--model")?),
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            "--window-minutes" => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    flags.value("--window-minutes")?,
+                )?)
+            }
+            "--correlation-window-minutes" => {
+                parsed.correlation_window_minutes = Some(parse_u32_flag(
+                    "--correlation-window-minutes",
+                    flags.value("--correlation-window-minutes")?,
+                )?)
+            }
+            "--term" => parsed.terms.push(flags.value("--term")?),
             _ if arg.starts_with("--model=") => {
                 parsed.model = Some(value_after_equals(arg, "--model")?)
+            }
+            _ if arg.starts_with("--project=") => {
+                parsed.project = Some(value_after_equals(arg, "--project")?)
+            }
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with("--window-minutes=") => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    value_after_equals(arg, "--window-minutes")?,
+                )?)
+            }
+            _ if arg.starts_with("--correlation-window-minutes=") => {
+                parsed.correlation_window_minutes = Some(parse_u32_flag(
+                    "--correlation-window-minutes",
+                    value_after_equals(arg, "--correlation-window-minutes")?,
+                )?)
+            }
+            _ if arg.starts_with("--term=") => {
+                parsed.terms.push(value_after_equals(arg, "--term")?)
             }
             _ if arg.starts_with('-') => bail!("unknown ai assess option: {arg}"),
             _ => {
