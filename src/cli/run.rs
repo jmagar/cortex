@@ -79,6 +79,9 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             AiCommand::IncidentContext(args) => {
                 dispatch::run_ai_incident_context(&mode, args).await
             }
+            AiCommand::Incidents(args) => dispatch::run_ai_incidents(&mode, args).await,
+            AiCommand::Investigate(args) => dispatch::run_ai_investigate(&mode, args).await,
+            AiCommand::Assess(args) => dispatch::run_ai_assess(&mode, args).await,
         },
         // DB commands (bead 0p8r.9). 4 are HTTP-capable; backup stays LOCAL
         // and bails in HTTP mode with an inline message.

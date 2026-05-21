@@ -14,11 +14,11 @@ use tokio::sync::Semaphore;
 use tower_http::cors::CorsLayer;
 
 use crate::app::{
-    AbuseSearchRequest, AiCheckpointsRequest, AiCorrelateRequest, AiParseErrorsRequest,
-    AiPruneCheckpointsRequest, CorrelateEventsRequest, DbCheckpointRequest, DbIntegrityRequest,
-    DbVacuumRequest, GetErrorsRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListSessionsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
-    SyslogService, TailLogsRequest, UsageBlocksRequest,
+    AbuseSearchRequest, AiCheckpointsRequest, AiCorrelateRequest, AiIncidentRequest,
+    AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest, CorrelateEventsRequest,
+    DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, GetErrorsRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListSessionsRequest, ProjectContextRequest,
+    SearchLogsRequest, SearchSessionsRequest, SyslogService, TailLogsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::db::DbPool;
@@ -226,6 +226,8 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/ai/context", get(ai_context))
         .route("/api/ai/tools", get(ai_tools))
         .route("/api/ai/projects", get(ai_projects))
+        .route("/api/ai/incidents", get(ai_incidents))
+        .route("/api/ai/investigate", get(ai_investigate))
         // --- ai diagnostic + admin (bead 0p8r.3) ---
         .route("/api/ai/checkpoints", get(ai_checkpoints))
         .route("/api/ai/errors", get(ai_parse_errors))
@@ -519,6 +521,22 @@ async fn ai_projects(
     Query(req): Query<ListAiProjectsRequest>,
 ) -> impl IntoResponse {
     respond(state.service.list_ai_projects(req).await)
+}
+
+/// `GET /api/ai/incidents` — scored abuse incident groups.
+async fn ai_incidents(
+    State(state): State<ApiState>,
+    serde_qs::axum::QsQuery(req): serde_qs::axum::QsQuery<AiIncidentRequest>,
+) -> impl IntoResponse {
+    respond(state.service.list_ai_incidents(req).await)
+}
+
+/// `GET /api/ai/investigate` — correlated evidence bundles for abuse incidents.
+async fn ai_investigate(
+    State(state): State<ApiState>,
+    serde_qs::axum::QsQuery(req): serde_qs::axum::QsQuery<AiInvestigateRequest>,
+) -> impl IntoResponse {
+    respond(state.service.investigate_ai_incidents(req).await)
 }
 
 // ─── AI diagnostic + admin (bead 0p8r.3) ─────────────────────────────────────
