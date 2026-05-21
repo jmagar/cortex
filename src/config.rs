@@ -179,6 +179,12 @@ pub struct SyslogConfig {
     /// Internal parsed-message channel capacity.
     #[serde(default = "default_write_channel_capacity")]
     pub write_channel_capacity: usize,
+    /// Optional CIDR allowlist for syslog senders. When non-empty, UDP packets
+    /// and TCP connections from addresses not matching any CIDR are silently
+    /// dropped. Empty = accept all (default).
+    /// Set via `SYSLOG_ALLOWED_SOURCE_CIDRS=10.0.0.0/8,192.168.0.0/16`
+    #[serde(default)]
+    pub allowed_source_cidrs: Vec<String>,
 }
 
 impl SyslogConfig {
@@ -489,6 +495,7 @@ impl Default for SyslogConfig {
             batch_size: default_batch_size(),
             flush_interval: default_flush_interval(),
             write_channel_capacity: default_write_channel_capacity(),
+            allowed_source_cidrs: Vec::new(),
         }
     }
 }
@@ -615,6 +622,10 @@ impl Config {
             "SYSLOG_WRITE_CHANNEL_CAPACITY",
             &mut config.syslog.write_channel_capacity,
         )?;
+        env_override_list(
+            "SYSLOG_ALLOWED_SOURCE_CIDRS",
+            &mut config.syslog.allowed_source_cidrs,
+        );
 
         env_override_str("SYSLOG_MCP_HOST", &mut config.mcp.host);
         env_override_parse("SYSLOG_MCP_PORT", &mut config.mcp.port)?;
@@ -1187,6 +1198,23 @@ pub(crate) fn validate_syslog_config(config: &SyslogConfig) -> anyhow::Result<()
     }
     if config.write_channel_capacity == 0 {
         return Err(anyhow::anyhow!("syslog.write_channel_capacity must be > 0"));
+    }
+    for cidr in &config.allowed_source_cidrs {
+        if let Some((prefix, len)) = cidr.split_once('/') {
+            let prefix_ok = prefix.parse::<std::net::IpAddr>().is_ok();
+            let len_ok = len.parse::<u32>().is_ok();
+            if !prefix_ok || !len_ok {
+                return Err(anyhow::anyhow!(
+                    "SYSLOG_ALLOWED_SOURCE_CIDRS: invalid CIDR entry '{cidr}' — \
+                     expected format is <ip>/<prefix_len> (e.g. 10.0.0.0/8)"
+                ));
+            }
+        } else {
+            return Err(anyhow::anyhow!(
+                "SYSLOG_ALLOWED_SOURCE_CIDRS: invalid entry '{cidr}' — \
+                 missing prefix length (e.g. 10.0.0.0/8)"
+            ));
+        }
     }
     Ok(())
 }

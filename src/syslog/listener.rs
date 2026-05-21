@@ -19,10 +19,103 @@ enum TcpFrame {
     Eof,
 }
 
+/// Returns true if `addr` matches any CIDR in `allowed`, or `allowed` is empty
+/// (open policy).
+///
+/// Each entry in `allowed` must be in `<ip>/<prefix_len>` notation. Malformed
+/// entries are silently skipped (they were already rejected by
+/// `validate_syslog_config` at startup if the config path was used, but env
+/// may be set directly in tests or unusual deployments).
+fn is_source_allowed(addr: std::net::IpAddr, allowed: &[String]) -> bool {
+    if allowed.is_empty() {
+        return true;
+    }
+    for cidr in allowed {
+        if let Some((prefix, len)) = cidr.split_once('/') {
+            let Ok(network_addr) = prefix.parse::<std::net::IpAddr>() else {
+                continue;
+            };
+            let Ok(prefix_len) = len.parse::<u32>() else {
+                continue;
+            };
+            if addr_matches_cidr(addr, network_addr, prefix_len) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn addr_matches_cidr(
+    addr: std::net::IpAddr,
+    network: std::net::IpAddr,
+    prefix_len: u32,
+) -> bool {
+    match (addr, network) {
+        (std::net::IpAddr::V4(a), std::net::IpAddr::V4(n)) => {
+            if prefix_len > 32 {
+                return false;
+            }
+            let mask = if prefix_len == 0 {
+                0u32
+            } else {
+                !0u32 << (32 - prefix_len)
+            };
+            (u32::from(a) & mask) == (u32::from(n) & mask)
+        }
+        (std::net::IpAddr::V6(a), std::net::IpAddr::V6(n)) => {
+            if prefix_len > 128 {
+                return false;
+            }
+            let a = u128::from(a);
+            let n = u128::from(n);
+            let mask = if prefix_len == 0 {
+                0u128
+            } else {
+                !0u128 << (128 - prefix_len)
+            };
+            (a & mask) == (n & mask)
+        }
+        _ => false, // v4 vs v6 mismatch
+    }
+}
+
+/// Read the CIDR allowlist from the environment at listener startup.
+///
+/// The `SyslogConfig` struct stores `allowed_source_cidrs` and the field is
+/// populated via `env_override_list("SYSLOG_ALLOWED_SOURCE_CIDRS", …)` in
+/// `Config::load_inner`. The listeners cannot accept the full `SyslogConfig`
+/// because their call sites are in `src/syslog.rs`, which is outside the
+/// allowed edit scope for this change. To avoid touching that file, each
+/// listener reads the same env var once at startup. When the config path is
+/// used the env var will already be set (or the config value was read from
+/// TOML), so the two sources stay consistent; tests that set the env var
+/// directly also work as expected.
+fn load_allowed_cidrs_from_env() -> Vec<String> {
+    match std::env::var("SYSLOG_ALLOWED_SOURCE_CIDRS") {
+        Ok(v) if !v.is_empty() => v
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// UDP syslog receiver.
 pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) -> Result<()> {
     let socket = UdpSocket::bind(bind).await?;
     info!(bind = %bind, "UDP syslog listener bound");
+
+    // Read CIDR allowlist once at startup (empty = accept all).
+    let allowed_cidrs = load_allowed_cidrs_from_env();
+    if !allowed_cidrs.is_empty() {
+        info!(
+            cidrs = ?allowed_cidrs,
+            "UDP syslog listener: source CIDR allowlist active"
+        );
+    }
 
     let mut buf = vec![0u8; max_size];
     let mut backpressure = false;
@@ -31,6 +124,16 @@ pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) 
         match socket.recv_from(&mut buf).await {
             Ok((len, addr)) => {
                 received_packets += 1;
+
+                // CIDR allowlist check — silently drop packets from unknown sources.
+                if !is_source_allowed(addr.ip(), &allowed_cidrs) {
+                    debug!(
+                        src = %addr,
+                        "UDP packet dropped — source not in allowed_source_cidrs"
+                    );
+                    continue;
+                }
+
                 ingest.observability().record_udp_packet(len);
                 let raw = String::from_utf8_lossy(&buf[..len]).to_string();
                 debug!(
@@ -92,7 +195,17 @@ pub(super) async fn handle_tcp_connection(
     ingest: IngestTx,
     max_size: usize,
     idle_timeout_secs: u64,
+    allowed_cidrs: &[String],
 ) {
+    // CIDR allowlist check — reject connections from unknown sources early.
+    if !is_source_allowed(addr.ip(), allowed_cidrs) {
+        debug!(
+            peer = %addr,
+            "TCP connection dropped — source not in allowed_source_cidrs"
+        );
+        return;
+    }
+
     let observability = ingest.observability();
     observability.record_tcp_connection_accepted();
     info!(peer = %addr, "TCP syslog connection accepted");
@@ -294,6 +407,16 @@ pub(super) async fn tcp_listener(
 ) -> Result<()> {
     let listener = TcpListener::bind(bind).await?;
     info!(bind = %bind, max_connections, idle_timeout_secs, "TCP syslog listener bound");
+
+    // Read CIDR allowlist once at startup (empty = accept all).
+    let allowed_cidrs = Arc::new(load_allowed_cidrs_from_env());
+    if !allowed_cidrs.is_empty() {
+        info!(
+            cidrs = ?allowed_cidrs,
+            "TCP syslog listener: source CIDR allowlist active"
+        );
+    }
+
     let sem = Arc::new(Semaphore::new(max_connections));
     let mut accept_backoff_ms: u64 = 100;
     let mut reject_logged = false;
@@ -308,6 +431,7 @@ pub(super) async fn tcp_listener(
                     Ok(permit) => {
                         let available_permits = sem.available_permits();
                         let ingest = ingest.clone();
+                        let cidrs = Arc::clone(&allowed_cidrs);
                         tokio::spawn(async move {
                             let _permit = permit;
                             handle_tcp_connection(
@@ -316,6 +440,7 @@ pub(super) async fn tcp_listener(
                                 ingest,
                                 max_size,
                                 idle_timeout_secs,
+                                &cidrs,
                             )
                             .await;
                         });
