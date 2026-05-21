@@ -4953,7 +4953,7 @@ pub(super) fn print_ask_history_response(response: &AskHistoryResponse, json: bo
             "\nSystem log context ({} entries):",
             response.context_logs.len()
         );
-        for log in response.context_logs.iter().take(5) {
+        for log in &response.context_logs {
             println!(
                 "  [{}] {} {} {}",
                 log.severity,
@@ -4979,8 +4979,13 @@ pub(super) fn print_incident_context_response(
     for sv in &response.by_severity {
         println!("  {:<10} {}", sv.severity, sv.count);
     }
-    println!("Error logs ({}):", response.error_logs.len());
-    for log in response.error_logs.iter().take(10) {
+    let truncated_note = if response.error_logs_truncated {
+        " (truncated)".to_string()
+    } else {
+        String::new()
+    };
+    println!("Error logs ({}{}):", response.error_logs.len(), truncated_note);
+    for log in &response.error_logs {
         println!(
             "  [{}] {} {} {}",
             log.severity,

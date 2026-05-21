@@ -1232,8 +1232,10 @@ error-level log rows, and AI sessions active in that window. Useful for
 post-incident review of a time range you already know was problematic.
 
 **Required:** `from`, `to` (ISO 8601/RFC3339)
-**Optional:** `hostname`, `app_name`, `query`, `severity_min` (default warning),
+**Optional:** `hostname`, `app_name`, `severity_min` (default warning),
              `limit` (max error log rows, default 50, max 200)
+**Note:** `query` is accepted but reserved for v2 FTS5 filtering; it is
+          currently ignored — omit it for incident_context.
 
 Example: `{"action":"incident_context","from":"2024-01-15T10:00:00Z","to":"2024-01-15T11:00:00Z"}`
 

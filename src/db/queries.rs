@@ -424,6 +424,14 @@ fn search_ai_sessions_sql(
         &params.from,
         &params.to,
     );
+    if let Some(hostname) = &params.hostname {
+        let idx = query_params.push_text(hostname.clone());
+        sql.push_str(&format!(" AND l.hostname = ?{idx}"));
+    }
+    if let Some(app_name) = &params.app_name {
+        let idx = query_params.push_text(app_name.clone());
+        sql.push_str(&format!(" AND l.app_name = ?{idx}"));
+    }
     sql.push_str(&format!(
         " ORDER BY logs_fts.rowid DESC
            LIMIT {}
@@ -1750,20 +1758,25 @@ pub fn similar_incidents_clusters(
     }
     // Apply severity_min filter: include only logs at or above the threshold.
     if let Some(severity_min) = &params.severity_min {
-        if let Some(threshold) = severity_to_num(severity_min) {
-            let levels_in: Vec<String> = SEVERITY_LEVELS[..=threshold as usize]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            let placeholders: Vec<String> = levels_in
-                .iter()
-                .map(|s| {
-                    let idx = query_params.push_text(s.clone());
-                    format!("?{idx}")
-                })
-                .collect();
-            sql.push_str(&format!(" AND l.severity IN ({})", placeholders.join(", ")));
-        }
+        let threshold = severity_to_num(severity_min).ok_or_else(|| {
+            anyhow::anyhow!(
+                "invalid severity_min '{}': must be one of {}",
+                severity_min,
+                SEVERITY_LEVELS.join(", ")
+            )
+        })?;
+        let levels_in: Vec<String> = SEVERITY_LEVELS[..=threshold as usize]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let placeholders: Vec<String> = levels_in
+            .iter()
+            .map(|s| {
+                let idx = query_params.push_text(s.clone());
+                format!("?{idx}")
+            })
+            .collect();
+        sql.push_str(&format!(" AND l.severity IN ({})", placeholders.join(", ")));
     }
 
     sql.push_str(&format!(
@@ -1785,8 +1798,8 @@ pub fn similar_incidents_clusters(
         SELECT hostname, app_name, window_start, window_end, log_count, severities, messages
         FROM bucketed
         ORDER BY log_count DESC, window_start DESC
-        LIMIT {limit}"
-    ));
+        LIMIT {}"
+    , limit + 1));
 
     let mut stmt = conn.prepare(&sql).map_err(|e| {
         tracing::error!(error = %e, "similar_incidents_clusters prepare failed");
@@ -1812,7 +1825,17 @@ pub fn similar_incidents_clusters(
             anyhow::anyhow!("similar_incidents query failed")
         })?;
 
-    let mut clusters: Vec<IncidentCluster> = Vec::new();
+    // Collect raw cluster rows first; keep one extra to detect truncation.
+    struct RawCluster {
+        hostname: String,
+        app_name: Option<String>,
+        window_start: String,
+        window_end: String,
+        log_count: i64,
+        severity_peak: String,
+        representative_messages: Vec<String>,
+    }
+    let mut raw: Vec<RawCluster> = Vec::new();
     for row in rows {
         let (hostname, app_name, window_start, window_end, log_count, severities, messages) =
             row.map_err(|e| {
@@ -1835,11 +1858,7 @@ pub fn similar_incidents_clusters(
             .map(|m| m.to_string())
             .collect();
 
-        // Find AI sessions that overlap this cluster's time window.
-        let correlated_sessions =
-            find_correlated_sessions_in_window(&conn, &window_start, &window_end)?;
-
-        clusters.push(IncidentCluster {
+        raw.push(RawCluster {
             hostname,
             app_name,
             window_start,
@@ -1847,32 +1866,81 @@ pub fn similar_incidents_clusters(
             log_count,
             severity_peak,
             representative_messages,
-            correlated_sessions,
         });
     }
+
+    // Detect truncation (we queried limit+1 rows) and trim to the true limit.
+    let truncated = raw.len() > limit;
+    raw.truncate(limit);
+
+    // Batch-fetch correlated AI sessions for the overall time span of all
+    // clusters in a single query, then assign per-cluster in memory.
+    // This avoids an N+1 pattern (one query per cluster).
+    let all_correlated: Vec<(String, String, CorrelatedSession)> = if raw.is_empty() {
+        Vec::new()
+    } else {
+        let overall_start = raw
+            .iter()
+            .map(|c| c.window_start.as_str())
+            .min()
+            .unwrap_or("")
+            .to_string();
+        let overall_end = raw
+            .iter()
+            .map(|c| c.window_end.as_str())
+            .max()
+            .unwrap_or("")
+            .to_string();
+        find_correlated_sessions_for_span(&conn, &overall_start, &overall_end)?
+    };
+
+    let clusters: Vec<IncidentCluster> = raw
+        .into_iter()
+        .map(|rc| {
+            // Assign sessions that overlap this cluster's window.
+            let correlated_sessions: Vec<CorrelatedSession> = all_correlated
+                .iter()
+                .filter(|(ws, we, _)| ws.as_str() <= rc.window_end.as_str() && we.as_str() >= rc.window_start.as_str())
+                .map(|(_, _, s)| s.clone())
+                .take(5)
+                .collect();
+            IncidentCluster {
+                hostname: rc.hostname,
+                app_name: rc.app_name,
+                window_start: rc.window_start,
+                window_end: rc.window_end,
+                log_count: rc.log_count,
+                severity_peak: rc.severity_peak,
+                representative_messages: rc.representative_messages,
+                correlated_sessions,
+            }
+        })
+        .collect();
 
     let total_clusters = clusters.len();
     Ok(SimilarIncidentsResult {
         query: params.query.clone(),
         total_clusters,
-        truncated: total_clusters >= limit,
+        truncated,
         clusters,
     })
 }
 
-/// Find AI transcript sessions whose entries overlap the given time window.
-/// Returns up to 5 sessions ranked by match count within the window.
-fn find_correlated_sessions_in_window(
+/// Batch variant — fetches all AI
+/// transcript sessions active anywhere in [span_start, span_end] and returns
+/// them as `(session_first_seen, session_last_seen, CorrelatedSession)` tuples
+/// so callers can filter per-cluster in memory without an N+1 query pattern.
+fn find_correlated_sessions_for_span(
     conn: &rusqlite::Connection,
-    window_start: &str,
-    window_end: &str,
-) -> Result<Vec<CorrelatedSession>> {
-    // Subquery for best_snippet avoids a correlated scan per group by
-    // targeting the already-small AI-transcript set within the window.
+    span_start: &str,
+    span_end: &str,
+) -> Result<Vec<(String, String, CorrelatedSession)>> {
     let mut stmt = conn
         .prepare(
             "SELECT l.ai_project, l.ai_tool, l.ai_session_id,
                     COUNT(*) AS match_count,
+                    MIN(l.timestamp) AS first_seen,
+                    MAX(l.timestamp) AS last_seen,
                     (SELECT l2.message
                      FROM logs l2
                      WHERE l2.ai_project = l.ai_project
@@ -1886,22 +1954,32 @@ fn find_correlated_sessions_in_window(
                AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''
                AND l.timestamp BETWEEN ?1 AND ?2
              GROUP BY l.ai_project, l.ai_tool, l.ai_session_id
-             ORDER BY match_count DESC
-             LIMIT 5",
+             ORDER BY match_count DESC",
         )
-        .map_err(|e| anyhow::anyhow!("find_correlated_sessions prepare: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("find_correlated_sessions_for_span prepare: {e}"))?;
 
     let rows = stmt
-        .query_map(rusqlite::params![window_start, window_end], |row| {
-            Ok(CorrelatedSession {
-                project: row.get(0)?,
-                tool: row.get(1)?,
-                session_id: row.get(2)?,
-                match_count: row.get(3)?,
-                best_snippet: row.get(4)?,
-            })
+        .query_map(rusqlite::params![span_start, span_end], |row| {
+            let project: String = row.get(0)?;
+            let tool: String = row.get(1)?;
+            let session_id: String = row.get(2)?;
+            let match_count: i64 = row.get(3)?;
+            let first_seen: String = row.get(4)?;
+            let last_seen: String = row.get(5)?;
+            let best_snippet: Option<String> = row.get(6)?;
+            Ok((
+                first_seen,
+                last_seen,
+                CorrelatedSession {
+                    project,
+                    tool,
+                    session_id,
+                    match_count,
+                    best_snippet,
+                },
+            ))
         })
-        .map_err(|e| anyhow::anyhow!("find_correlated_sessions query: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("find_correlated_sessions_for_span query: {e}"))?;
 
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
@@ -1913,10 +1991,13 @@ pub fn ask_history_sessions(pool: &DbPool, params: &AskHistoryParams) -> Result<
     validate_fts_query(&params.query)?;
 
     // Search AI transcript entries only using the existing grouping query.
+    // Pass through hostname/app_name so the session search is properly scoped.
     let ai_params = SearchAiSessionsParams {
         query: params.query.clone(),
         ai_project: None,
         ai_tool: None,
+        hostname: params.hostname.clone(),
+        app_name: params.app_name.clone(),
         from: params.from.clone(),
         to: params.to.clone(),
         limit: Some(params.limit.unwrap_or(10).clamp(1, 50)),
@@ -2006,26 +2087,51 @@ pub fn incident_context_summary(
         .transpose()?
         .unwrap_or_else(|| severity_to_num("warning").unwrap());
 
-    // Total log count in window.
+    // Build reusable aggregate params with host/app/AI-exclusion filters.
+    // Params: ?1=from, ?2=to, then optional host/app starting at ?3.
+    // All aggregate queries exclude AI transcript rows (ai_project IS NULL or '').
+    let mut agg_params = SqlParams::new(3);
+    agg_params
+        .bindings
+        .push(rusqlite::types::Value::Text(params.from.clone()));
+    agg_params
+        .bindings
+        .push(rusqlite::types::Value::Text(params.to.clone()));
+    let mut agg_host_clause = String::new();
+    let mut agg_app_clause = String::new();
+    if let Some(hostname) = &params.hostname {
+        let idx = agg_params.push_text(hostname.clone());
+        agg_host_clause = format!(" AND hostname = ?{idx}");
+    }
+    if let Some(app_name) = &params.app_name {
+        let idx = agg_params.push_text(app_name.clone());
+        agg_app_clause = format!(" AND app_name = ?{idx}");
+    }
+    let agg_base_filter = format!(
+        "WHERE (ai_project IS NULL OR ai_project = '')
+           AND timestamp BETWEEN ?1 AND ?2{agg_host_clause}{agg_app_clause}"
+    );
+
+    // Total log count in window (system logs only, scoped by host/app).
     let total_logs: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM logs WHERE timestamp BETWEEN ?1 AND ?2",
-            rusqlite::params![params.from, params.to],
+            &format!("SELECT COUNT(*) FROM logs {agg_base_filter}"),
+            rusqlite::params_from_iter(agg_params.bindings.iter()),
             |r| r.get(0),
         )
         .map_err(|e| anyhow::anyhow!("incident_context total_logs: {e}"))?;
 
-    // Counts by severity.
+    // Counts by severity (system logs only, scoped by host/app).
     let mut by_sev_stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT severity, COUNT(*) FROM logs
-             WHERE timestamp BETWEEN ?1 AND ?2
+             {agg_base_filter}
              GROUP BY severity
-             ORDER BY COUNT(*) DESC",
-        )
+             ORDER BY COUNT(*) DESC"
+        ))
         .map_err(|e| anyhow::anyhow!("incident_context by_severity prepare: {e}"))?;
     let by_severity: Vec<SeverityCount> = by_sev_stmt
-        .query_map(rusqlite::params![params.from, params.to], |row| {
+        .query_map(rusqlite::params_from_iter(agg_params.bindings.iter()), |row| {
             Ok(SeverityCount {
                 severity: row.get(0)?,
                 count: row.get(1)?,
@@ -2034,18 +2140,18 @@ pub fn incident_context_summary(
         .map_err(|e| anyhow::anyhow!("incident_context by_severity query: {e}"))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    // Counts by app_name (top 20).
+    // Counts by app_name (top 20, system logs only, scoped by host/app).
     let mut by_app_stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT app_name, COUNT(*) FROM logs
-             WHERE timestamp BETWEEN ?1 AND ?2
+             {agg_base_filter}
              GROUP BY app_name
              ORDER BY COUNT(*) DESC
-             LIMIT 20",
-        )
+             LIMIT 20"
+        ))
         .map_err(|e| anyhow::anyhow!("incident_context by_app prepare: {e}"))?;
     let by_app: Vec<AppLogCount> = by_app_stmt
-        .query_map(rusqlite::params![params.from, params.to], |row| {
+        .query_map(rusqlite::params_from_iter(agg_params.bindings.iter()), |row| {
             Ok(AppLogCount {
                 app_name: row.get(0)?,
                 count: row.get(1)?,
@@ -2099,7 +2205,8 @@ pub fn incident_context_summary(
         let idx = err_params.push_text(app_name.clone());
         err_sql.push_str(&format!(" AND app_name = ?{idx}"));
     }
-    err_sql.push_str(&format!(" ORDER BY timestamp DESC LIMIT {limit}"));
+    // Query limit+1 rows so we can detect true truncation.
+    err_sql.push_str(&format!(" ORDER BY timestamp DESC LIMIT {}", limit + 1));
 
     let mut err_stmt = conn.prepare(&err_sql).map_err(|e| {
         tracing::error!(error = %e, "incident_context error_logs prepare failed");
@@ -2114,9 +2221,10 @@ pub fn incident_context_summary(
             tracing::error!(error = %e, "incident_context error_logs query failed");
             anyhow::anyhow!("incident_context error_logs query failed")
         })?;
-    let error_logs: Vec<super::models::LogEntry> =
+    let mut error_logs: Vec<super::models::LogEntry> =
         error_rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    let error_logs_truncated = error_logs.len() >= limit;
+    let error_logs_truncated = error_logs.len() > limit;
+    error_logs.truncate(limit);
 
     // AI sessions active in the window — query on the already-held conn to
     // avoid a second pool.get() call (which deadlocks on single-connection test pools).

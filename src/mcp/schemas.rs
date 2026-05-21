@@ -58,7 +58,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "query": {
                     "type": "string",
-                    "description": "For action=search, search_sessions, or correlate: FTS5 query. Examples: 'kernel panic', 'OOM AND killer', '\"connection refused\"', 'error*'. Hyphen is the FTS5 NOT operator; search hyphenated terms as phrases, e.g. '\"smoke-test\"'. Use ai_query/log_query for action=ai_correlate."
+                    "description": "FTS5 query string. Required for action=similar_incidents (FTS5 match over system logs) and action=ask_history (FTS5 match over AI transcripts). Also used for action=search, search_sessions, and correlate. Examples: 'kernel panic', 'OOM AND killer', '\"connection refused\"', 'error*'. Hyphen is the FTS5 NOT operator; search hyphenated terms as phrases, e.g. '\"smoke-test\"'. Use ai_query/log_query for action=ai_correlate."
                 },
                 "hostname": {
                     "type": "string",
