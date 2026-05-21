@@ -42,6 +42,9 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `unack_error` | Revoke an acknowledgement so a signature reappears in reports |
 | `notifications_recent` | List recent notification firings |
 | `notifications_test` | Send a test notification via Apprise |
+| `similar_incidents` | FTS5 cluster search — find historical incidents similar to a query |
+| `ask_history` | Search AI transcript history for past work related to a topic |
+| `incident_context` | Full context bundle for a known time window — logs + AI sessions |
 | `help` | Markdown reference for all actions |
 
 ## syslog search

@@ -575,7 +575,8 @@ pub struct IncidentContextParams {
     pub to: String,
     pub hostname: Option<String>,
     pub app_name: Option<String>,
-    pub query: Option<String>,
+    // `query` is accepted at the app layer (IncidentContextRequest) but
+    // deferred to v2 where it will apply FTS5 filtering on error_logs.
     pub severity_min: Option<String>,
     /// Max error log rows to return. Default 50, clamp 1..=200.
     pub limit: Option<u32>,

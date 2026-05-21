@@ -64,6 +64,9 @@ const READ_ONLY_ACTIONS: &[&str] = &[
     "compose_doctor",
     "unaddressed_errors",
     "notifications_recent",
+    "similar_incidents",
+    "ask_history",
+    "incident_context",
 ];
 
 /// Admin/write actions that mutate state or send outbound notifications.
