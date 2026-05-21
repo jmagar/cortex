@@ -433,7 +433,6 @@ pub(crate) struct AiAssessArgs {
     pub limit: Option<u32>,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ConfigCommand {
     Get(ConfigGetArgs),
