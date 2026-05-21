@@ -10,6 +10,8 @@ worktree: /home/jmagar/workspace/syslog-mcp/.worktrees/surface-parity  2025995 [
 pr: "#40 — feat: surface parity — CLI + REST API for all MCP actions — https://github.com/jmagar/syslog-mcp/pull/40"
 ---
 
+# Session: Surface Parity — CLI + REST API for All MCP Actions
+
 ## User Request
 
 Investigate why the syslog-mcp tool surfaces were inconsistent — some features only reachable via MCP, others CLI-only — and build out a complete surface parity plan and implementation bringing CLI, REST API, and MCP to full feature parity.

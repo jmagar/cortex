@@ -142,7 +142,8 @@ OTel exporters back off for a day instead of retrying immediately.
 | Surface                                                | Limit  | Source                                       | On overflow                                   |
 | ------------------------------------------------------ | ------ | -------------------------------------------- | --------------------------------------------- |
 | Merged MCP router (`/mcp`, `/health`, OAuth, fallback) | 64 KiB | `mcp/routes.rs::MCP_BODY_LIMIT_BYTES`         | `413` (no `Retry-After`)                       |
-| Non-MCP API (`/api/*`)                                 | n/a    | All endpoints are `GET`; querystring only.    | n/a                                            |
+| Non-MCP API (`/api/*`) — `GET` routes                 | n/a    | All GET endpoints use querystring only.       | n/a                                            |
+| Non-MCP API (`/api/*`) — `POST` routes                | 64 KiB | `POST /api/errors/ack`, `POST /api/errors/unack`, `POST /api/notifications/test` | `413` (no `Retry-After`) |
 | OTLP (`/v1/logs`, `/v1/metrics`, `/v1/traces`)         | 4 MiB  | `otlp.rs::OTLP_BODY_LIMIT_BYTES`              | `413 + Retry-After: 86400`                     |
 | `/ws/agent` pre-handshake                              | 1 KiB  | `agent-protocol.md` §2                        | WS close `4000` (handshake timeout)            |
 | `/ws/agent` post-handshake per frame                   | 1 MiB  | `agent-protocol.md` §2                        | WS close `1009 Message Too Big`                |
@@ -159,7 +160,7 @@ Two CORS regimes coexist, applied at the router boundary:
    `/mcp` from a different origin.
 2. **Localhost-only (`/api/*`).** Hardcoded to
    `http://localhost:<mcp_port>` and `http://127.0.0.1:<mcp_port>` where
-   `<mcp_port>` is `mcp.port`. Methods: `GET`. Headers: `Any`.
+   `<mcp_port>` is `mcp.port`. Methods: `GET, POST`. Headers: `Any`.
 
 OTLP and `/ws/agent` are server-to-server channels and have **no** CORS
 layer; browsers should never hit them.

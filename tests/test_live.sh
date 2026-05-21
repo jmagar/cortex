@@ -938,7 +938,7 @@ phase_surface_parity_rest() {
     "GET /api/timeline?bucket=1h|points"
     "GET /api/patterns?top_n=5|patterns"
     "GET /api/ingest-rate|buckets"
-    "GET /api/get?id=1|"
+    "GET /api/get?id=1|log"
     "GET /api/errors/unaddressed?limit=5|signatures"
     "GET /api/notifications/recent?limit=5|"
   )

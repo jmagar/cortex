@@ -14,7 +14,7 @@
 
 | File | Changes |
 |------|---------|
-| `src/api.rs` | Add 8 new routes: `/api/source-ips`, `/api/timeline`, `/api/patterns`, `/api/ingest-rate`, `/api/get`, `/api/errors/unaddressed`, `POST /api/errors/ack`, `POST /api/errors/unack`, `/api/notifications/recent`, `POST /api/notifications/test` |
+| `src/api.rs` | Add 10 new routes: `/api/source-ips`, `/api/timeline`, `/api/patterns`, `/api/ingest-rate`, `/api/get`, `/api/errors/unaddressed`, `POST /api/errors/ack`, `POST /api/errors/unack`, `/api/notifications/recent`, `POST /api/notifications/test` |
 | `src/cli.rs` | Add `SourceIps`, `Timeline`, `Patterns`, `IngestRate`, `ErrorSig` subcommands to `CliCommand`; add corresponding arg structs; add print formatters |
 | `src/cli/dispatch.rs` | Add `run_source_ips`, `run_timeline`, `run_patterns`, `run_ingest_rate`, `run_error_sig_list`, `run_error_sig_ack`, `run_error_sig_unack`, `run_notifications_recent`, `run_notifications_test` |
 | `src/cli/dispatch_tests.rs` | Snapshot tests for each new `into_request()` conversion |
@@ -1074,7 +1074,7 @@ git commit -m "feat(cli): add sig list/ack/unack and notify recent/test commands
 
 **Files:**
 - Modify: `docs/contracts/cli-surface.md`
-- Modify: `docs/contracts/mcp-actions.md`
+- Modify: `docs/contracts/mcp-actions-current.md`
 - Modify: `CLAUDE.md`
 
 - [ ] **Step 1: Update CLI surface contract**
