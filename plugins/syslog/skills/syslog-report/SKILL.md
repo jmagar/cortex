@@ -1,6 +1,6 @@
 ---
 name: syslog-report
-description: Generate an actionable markdown report from the syslog MCP server by checking logs from all devices over a recent time window, especially the last 24 hours. Use when the user asks to review homelab or fleet logs, summarize syslog activity, find errors or warnings across devices, identify hosts with issues, correlate events, or produce a daily operational log report from the syslog MCP tool.
+description: Generate a time-bounded markdown report from the syslog MCP server covering fleet activity, errors, stale hosts, correlations, and recommended actions.
 ---
 
 # Syslog Report
@@ -14,6 +14,7 @@ Use the `syslog` MCP tool as the source of truth for recent device logs. Query b
 1. Establish the reporting window.
    - Default to the last 24 hours when the user does not specify a window.
    - Use exact timestamps in the report. If the tool supports relative filters, use `since=24h`; otherwise compute an ISO-8601 start and end time.
+   - Carry the computed `from` and `to` values into every time-filterable query below.
 
 2. Confirm MCP availability and current coverage.
    - Call `syslog action=stats` to capture DB size, time range, retention/storage guard state, and total log count.
@@ -21,15 +22,16 @@ Use the `syslog` MCP tool as the source of truth for recent device logs. Query b
    - If the MCP tool is unavailable, report that no live syslog evidence could be collected and include the failure details.
 
 3. Collect incident candidates.
-   - Call `syslog action=errors` for warning/error summaries grouped by host and severity.
-   - Call `syslog action=search query=error limit=1000` for recent error detail.
-   - Call `syslog action=search query=warning OR warn limit=1000` when warning coverage is not already clear from `errors`.
+   - Call `syslog action=errors from=<start> to=<end>` for warning/error summaries grouped by host and severity.
+   - Call `syslog action=search query=error from=<start> to=<end> limit=1000` for error detail inside the report window.
+   - Call `syslog action=search query="warning OR warn" from=<start> to=<end> limit=1000` when warning coverage is not already clear from `errors`.
    - Call `syslog action=tail n=100` for recent fleet-wide context.
    - Use host/app/time filters when available to narrow noisy hosts or services.
 
 4. Correlate likely related events.
    - Call `syslog action=correlate` around high-severity timestamps or spikes.
    - Prefer small focused windows around incidents over one huge correlation query.
+   - Use `syslog action=timeline from=<start> to=<end> bucket=hour group_by=severity` or a narrower bucket to find spikes before correlation when the incident time is not obvious.
    - Group events by likely shared cause only when timestamps, hosts, apps, or message content support that relationship.
 
 5. Write an actionable markdown report.

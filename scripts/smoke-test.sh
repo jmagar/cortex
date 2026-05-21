@@ -375,6 +375,26 @@ print('ok' if d.get('matches') else 'missing')
     assert_eq "abuse: custom detector finds seeded fixture" "$ABUSE_FOUND" "ok"
 fi
 
+ABUSE_INCIDENTS=$(mcp_call abuse_incidents "project=${AI_SMOKE_PROJECT}" "limit=5" 2>&1)
+assert_no_error "abuse_incidents: no error" "$ABUSE_INCIDENTS"
+ABUSE_INCIDENTS_VALID=$(printf '%s\n' "$ABUSE_INCIDENTS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert isinstance(d.get('incidents'), list), 'incidents not a list'
+assert 'total_incidents' in d, 'missing total_incidents'
+print('ok')" 2>/dev/null || echo "error")
+assert_eq "abuse_incidents: response structure valid" "$ABUSE_INCIDENTS_VALID" "ok"
+
+ABUSE_INVESTIGATE=$(mcp_call abuse_investigate "project=${AI_SMOKE_PROJECT}" "limit=1" 2>&1)
+assert_no_error "abuse_investigate: no error" "$ABUSE_INVESTIGATE"
+ABUSE_INVESTIGATE_VALID=$(printf '%s\n' "$ABUSE_INVESTIGATE" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert isinstance(d.get('evidence'), list), 'evidence not a list'
+assert 'total_incidents' in d, 'missing total_incidents'
+print('ok')" 2>/dev/null || echo "error")
+assert_eq "abuse_investigate: response structure valid" "$ABUSE_INVESTIGATE_VALID" "ok"
+
 AI_CORRELATE=$(mcp_call ai_correlate "project=${AI_SMOKE_PROJECT}" "limit=2" "events_per_anchor=3" 2>&1)
 assert_no_error "ai_correlate: no error" "$AI_CORRELATE"
 AI_CORRELATE_VALID=$(printf '%s\n' "$AI_CORRELATE" | python3 -c "

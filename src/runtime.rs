@@ -7,7 +7,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::app::SyslogService;
-use crate::config::{mcp_bind_is_loopback, AuthMode, Config};
+use crate::config::{mcp_bind_is_loopback, validate_auth_config, AuthMode, Config};
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::ingest::IngestTx;
 use crate::mcp::AuthPolicy;
@@ -108,6 +108,9 @@ impl RuntimeCore {
         enforce_initial_storage_budget: bool,
         is_stdio: bool,
     ) -> Result<Self> {
+        if !is_stdio {
+            validate_auth_config(&config, true)?;
+        }
         reject_unsafe_otlp_oauth_only_exposure(&config, is_stdio)?;
         let pool = Arc::new(db::init_pool(&config.storage)?);
         let storage_state = Arc::new(Mutex::new(None));
@@ -164,6 +167,12 @@ impl RuntimeCore {
 
     pub fn service(&self) -> SyslogService {
         self.service.clone()
+    }
+
+    /// Shared SQLite pool — exposed for callers that need to read startup-time
+    /// metadata (e.g. `api::ApiState::new` caches the schema version).
+    pub fn pool(&self) -> &Arc<DbPool> {
+        &self.pool
     }
 
     /// Build the OTLP router with shared counters and the MCP API token (if any).
@@ -571,12 +580,11 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
     if !auth.admin_email.is_empty() {
         push_var(&mut vars, "SYSLOG_MCP_AUTH_ADMIN_EMAIL", &auth.admin_email);
     }
-    // NOTE: auth.allowed_emails is validated by syslog-mcp's config layer
-    // (validate_auth_config rejects an empty allowlist when OAuth is active)
-    // but lab-auth's AuthConfig has no `allowed_emails` field — it only
-    // enforces `admin_email`. The full email allowlist is a TODO for a future
-    // lab-auth release. Do NOT add a no-op push_var for allowed_emails here;
-    // the entries would be silently ignored by AuthConfigBuilder.build_from_sources.
+    // NOTE: lab-auth does not consume syslog-mcp's TOML `allowed_emails`.
+    // It enforces `admin_email` plus lab-auth-managed allowed users.
+    // syslog-mcp rejects non-empty config-level allowed_emails in OAuth mode
+    // until that list is enforceable. Do NOT add a no-op push_var here; the
+    // entries would be silently ignored by AuthConfigBuilder.build_from_sources.
     push_var(
         &mut vars,
         "SYSLOG_MCP_AUTH_SQLITE_PATH",
@@ -628,7 +636,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
         .resource_path("/mcp")
         .static_token_scopes(vec!["syslog:read".into(), "syslog:admin".into()])
         .disable_static_token_with_oauth(auth.disable_static_token_with_oauth)
-        .enable_dynamic_registration(true)
+        .enable_dynamic_registration(false)
         .build_from_sources(vars)
         .context("failed to build lab-auth AuthConfig from syslog-mcp config")?;
 

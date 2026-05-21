@@ -222,7 +222,7 @@ When installed as a Claude Code plugin, users are prompted for:
 | `no_auth` | no | Explicit local-only no-auth mode |
 | `is_server` | no | Whether this host owns the Docker Compose deployment |
 
-These values are interpolated into `plugins/.mcp.json` via `${user_config.*}` syntax. See [plugin/CONFIG.md](plugin/CONFIG.md) for details.
+These values are interpolated into `plugins/syslog/.mcp.json` via `${user_config.*}` syntax. See [plugin/CONFIG.md](plugin/CONFIG.md) for details.
 
 ## .env.example conventions
 

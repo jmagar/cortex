@@ -3,21 +3,29 @@ mod error;
 pub(crate) mod error_detection;
 mod models;
 mod service;
-mod time;
+pub(crate) mod time;
 
 pub use correlate::severity_at_or_above;
 pub use error::{ServiceError, ServiceResult};
 pub use models::{
+    AbuseIncident,
     AbuseMatch,
     AbuseSearchRequest,
     AbuseSearchResponse,
     // Error detection
     AckErrorRequest,
     AckErrorResponse,
+    AiCheckpointsRequest,
     AiCorrelateRequest,
     AiCorrelateResponse,
     AiCorrelationAnchor,
+    AiIncidentRequest,
+    AiIncidentResponse,
+    AiInvestigateRequest,
+    AiInvestigateResponse,
+    AiParseErrorsRequest,
     AiProjectEntry,
+    AiPruneCheckpointsRequest,
     AiSessionEntry,
     AiToolEntry,
     AnomaliesRequest,
@@ -32,10 +40,13 @@ pub use models::{
     CorrelateEventsResponse,
     CorrelatedHost,
     DbBackupResult,
+    DbCheckpointRequest,
     DbCheckpointResult,
+    DbIntegrityRequest,
     DbIntegrityResult,
     DbMaintenanceStatus,
     DbStats,
+    DbVacuumRequest,
     DbVacuumResult,
     ErrorSignatureEntry,
     ErrorSummaryEntry,
@@ -44,6 +55,10 @@ pub use models::{
     GetLogRequest,
     GetLogResponse,
     HostEntry,
+    IncidentEvent,
+    IncidentEvidence,
+    IncidentRequest,
+    IncidentResponse,
     IngestRateRequest,
     IngestRateResponse,
     ListAiProjectsRequest,
@@ -55,6 +70,7 @@ pub use models::{
     ListHostsResponse,
     ListSessionsRequest,
     ListSessionsResponse,
+    ListSourceIpsRequest,
     ListSourceIpsResponse,
     LogEntry,
     PatternsRequest,
@@ -66,6 +82,9 @@ pub use models::{
     SearchSessionsRequest,
     SearchSessionsResponse,
     SearchedSessionEntry,
+    ServiceJournalEntry,
+    ServiceLogsRequest,
+    ServiceLogsResponse,
     SilentHostsRequest,
     SilentHostsResponse,
     TailLogsRequest,
@@ -79,7 +98,7 @@ pub use models::{
     UsageBlocksRequest,
     UsageBlocksResponse,
 };
-pub use service::SyslogService;
+pub use service::{run_service_logs, SyslogService};
 pub use time::parse_optional_timestamp;
 
 #[cfg(test)]

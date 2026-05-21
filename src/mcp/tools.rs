@@ -1,11 +1,13 @@
+use lab_auth::AuthContext;
 use serde_json::{json, Value};
 
 use crate::app::{
-    AbuseSearchRequest, AiCorrelateRequest, AnomaliesRequest, ClockSkewRequest, CompareRequest,
-    ContextRequest, CorrelateEventsRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
-    SilentHostsRequest, TailLogsRequest, TimelineRequest, UsageBlocksRequest,
+    AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
+    AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
+    GetErrorsRequest, GetLogRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, PatternsRequest,
+    ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
+    TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
 use super::schemas::SYSLOG_ACTIONS;
@@ -16,14 +18,19 @@ pub(super) async fn execute_tool(
     state: &AppState,
     name: &str,
     args: Value,
+    auth: Option<&AuthContext>,
 ) -> anyhow::Result<Value> {
     match name {
-        "syslog" => tool_syslog(state, args).await,
+        "syslog" => tool_syslog(state, args, auth).await,
         _ => Err(anyhow::anyhow!("Unknown tool: {name}")),
     }
 }
 
-async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
+async fn tool_syslog(
+    state: &AppState,
+    args: Value,
+    auth: Option<&AuthContext>,
+) -> anyhow::Result<Value> {
     let action =
         string_arg(&args, "action").ok_or_else(|| anyhow::anyhow!("action is required"))?;
     match action.as_str() {
@@ -38,6 +45,8 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "sessions" => tool_list_sessions(state, args).await,
         "search_sessions" => tool_search_sessions(state, args).await,
         "abuse" => tool_search_abuse(state, args).await,
+        "abuse_incidents" => tool_abuse_incidents(state, args).await,
+        "abuse_investigate" => tool_abuse_investigate(state, args).await,
         "ai_correlate" => tool_ai_correlate(state, args).await,
         "usage_blocks" => tool_usage_blocks(state, args).await,
         "project_context" => tool_project_context(state, args).await,
@@ -56,10 +65,10 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         "compose_status" => tool_compose_status(args).await,
         "compose_doctor" => tool_compose_doctor(args).await,
         "unaddressed_errors" => tool_unaddressed_errors(state, args).await,
-        "ack_error" => tool_ack_error(state, args).await,
-        "unack_error" => tool_unack_error(state, args).await,
+        "ack_error" => tool_ack_error(state, args, auth).await,
+        "unack_error" => tool_unack_error(state, args, auth).await,
         "notifications_recent" => tool_notifications_recent(state, args).await,
-        "notifications_test" => tool_notifications_test(state, args).await,
+        "notifications_test" => tool_notifications_test(state, args, auth).await,
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
             "unknown syslog action: {action}; expected one of {}",
@@ -78,9 +87,12 @@ async fn tool_search_logs(state: &AppState, args: Value) -> anyhow::Result<Value
             severity: string_arg(&args, "severity"),
             app_name: string_arg(&args, "app_name"),
             facility: string_arg(&args, "facility"),
+            exclude_facility: string_arg(&args, "exclude_facility"),
             process_id: string_arg(&args, "process_id"),
             from: string_arg(&args, "from"),
             to: string_arg(&args, "to"),
+            received_from: string_arg(&args, "received_from"),
+            received_to: string_arg(&args, "received_to"),
             limit: u32_arg(&args, "limit")?,
         })
         .await?;
@@ -124,9 +136,17 @@ async fn tool_list_apps(state: &AppState, args: Value) -> anyhow::Result<Value> 
         .service
         .list_apps(ListAppsRequest {
             hostname: string_arg(&args, "hostname"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
+            offset: u32_arg(&args, "offset")?,
         })
         .await?;
-    tracing::debug!(app_count = response.apps.len(), "list_apps completed");
+    tracing::debug!(
+        app_count = response.apps.len(),
+        total = response.total,
+        "list_apps completed"
+    );
     Ok(serde_json::to_value(response)?)
 }
 
@@ -192,6 +212,73 @@ async fn tool_search_abuse(state: &AppState, args: Value) -> anyhow::Result<Valu
             terms,
         })
         .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_abuse_incidents(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let terms = args
+        .get("terms")
+        .map(|v| {
+            if let Some(arr) = v.as_array() {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            } else {
+                v.as_str().map(|s| vec![s.to_string()]).unwrap_or_default()
+            }
+        })
+        .unwrap_or_default();
+    let response = state
+        .service
+        .list_ai_incidents(AiIncidentRequest {
+            project: string_arg(&args, "project"),
+            tool: string_arg(&args, "tool"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
+            window_minutes: u32_arg(&args, "window_minutes")?,
+            terms,
+        })
+        .await?;
+    tracing::debug!(
+        incident_count = response.incidents.len(),
+        total = response.total_incidents,
+        "abuse_incidents completed"
+    );
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_abuse_investigate(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let terms = args
+        .get("terms")
+        .map(|v| {
+            if let Some(arr) = v.as_array() {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            } else {
+                v.as_str().map(|s| vec![s.to_string()]).unwrap_or_default()
+            }
+        })
+        .unwrap_or_default();
+    let response = state
+        .service
+        .investigate_ai_incidents(AiInvestigateRequest {
+            project: string_arg(&args, "project"),
+            tool: string_arg(&args, "tool"),
+            from: string_arg(&args, "from"),
+            to: string_arg(&args, "to"),
+            limit: u32_arg(&args, "limit")?,
+            window_minutes: u32_arg(&args, "window_minutes")?,
+            correlation_window_minutes: u32_arg(&args, "correlation_window_minutes")?,
+            terms,
+        })
+        .await?;
+    tracing::debug!(
+        evidence_count = response.evidence.len(),
+        total_incidents = response.total_incidents,
+        "abuse_investigate completed"
+    );
     Ok(serde_json::to_value(response)?)
 }
 
@@ -269,10 +356,17 @@ async fn tool_list_ai_projects(state: &AppState, args: Value) -> anyhow::Result<
     Ok(serde_json::to_value(response)?)
 }
 
-async fn tool_list_source_ips(state: &AppState, _args: Value) -> anyhow::Result<Value> {
-    let response = state.service.list_source_ips().await?;
+async fn tool_list_source_ips(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let response = state
+        .service
+        .list_source_ips(ListSourceIpsRequest {
+            limit: u32_arg(&args, "limit")?,
+            offset: u32_arg(&args, "offset")?,
+        })
+        .await?;
     tracing::debug!(
         source_ip_count = response.source_ips.len(),
+        total = response.total,
         "list_source_ips completed"
     );
     Ok(serde_json::to_value(response)?)
@@ -522,22 +616,27 @@ fn string_arg(args: &Value, name: &str) -> Option<String> {
     args.get(name).and_then(|v| v.as_str()).map(String::from)
 }
 
-/// Return a stable actor identifier from the app state's auth policy.
+/// Return a stable actor identifier for mutating/admin actions.
 ///
-/// Full per-request OAuth claim extraction requires threading the `AuthContext`
-/// extension through the tool dispatch call chain. Until that plumbing is in
-/// place, this helper at least distinguishes between the three auth modes so
-/// audit logs aren't uniformly `"mcp:bearer"`.
-///
-/// TODO: thread `AuthContext` from routes/rmcp_server into tool handlers and
-/// use `auth_ctx.subject()` here instead.
-fn extract_actor(state: &AppState) -> &'static str {
+/// Mounted MCP requests carry caller identity in `AuthContext`. Prefer the
+/// verified email when available, then the subject. Loopback mode has no
+/// per-request credential, so it falls back to the local trust-boundary actor.
+fn extract_actor(state: &AppState, auth: Option<&AuthContext>) -> String {
+    if let Some(auth) = auth {
+        if let Some(email) = auth.email.as_deref().filter(|email| !email.is_empty()) {
+            return email.to_string();
+        }
+        if !auth.sub.is_empty() {
+            return auth.sub.clone();
+        }
+    }
+
     match &state.auth_policy {
-        super::AuthPolicy::LoopbackDev => "mcp:loopback",
+        super::AuthPolicy::LoopbackDev => "mcp:loopback".to_string(),
         super::AuthPolicy::Mounted {
             auth_state: Some(_),
-        } => "mcp:oauth",
-        super::AuthPolicy::Mounted { auth_state: None } => "mcp:bearer",
+        } => "mcp:oauth".to_string(),
+        super::AuthPolicy::Mounted { auth_state: None } => "mcp:bearer".to_string(),
     }
 }
 
@@ -585,7 +684,11 @@ async fn tool_unaddressed_errors(state: &AppState, args: Value) -> anyhow::Resul
     Ok(serde_json::to_value(resp)?)
 }
 
-async fn tool_ack_error(state: &AppState, args: Value) -> anyhow::Result<Value> {
+async fn tool_ack_error(
+    state: &AppState,
+    args: Value,
+    auth: Option<&AuthContext>,
+) -> anyhow::Result<Value> {
     use crate::app::AckErrorRequest;
     let hash = string_arg(&args, "signature_hash")
         .ok_or_else(|| anyhow::anyhow!("signature_hash is required"))?;
@@ -593,12 +696,16 @@ async fn tool_ack_error(state: &AppState, args: Value) -> anyhow::Result<Value> 
         signature_hash: hash,
         notes: string_arg(&args, "notes"),
     };
-    let actor = extract_actor(state);
-    let resp = state.service.ack_error(req, actor).await?;
+    let actor = extract_actor(state, auth);
+    let resp = state.service.ack_error(req, &actor).await?;
     Ok(serde_json::to_value(resp)?)
 }
 
-async fn tool_unack_error(state: &AppState, args: Value) -> anyhow::Result<Value> {
+async fn tool_unack_error(
+    state: &AppState,
+    args: Value,
+    auth: Option<&AuthContext>,
+) -> anyhow::Result<Value> {
     use crate::app::UnackErrorRequest;
     let hash = string_arg(&args, "signature_hash")
         .ok_or_else(|| anyhow::anyhow!("signature_hash is required"))?;
@@ -606,8 +713,8 @@ async fn tool_unack_error(state: &AppState, args: Value) -> anyhow::Result<Value
         signature_hash: hash,
         reason: string_arg(&args, "reason"),
     };
-    let actor = extract_actor(state);
-    let resp = state.service.unack_error(req, actor).await?;
+    let actor = extract_actor(state, auth);
+    let resp = state.service.unack_error(req, &actor).await?;
     Ok(serde_json::to_value(resp)?)
 }
 
@@ -626,11 +733,15 @@ async fn tool_notifications_recent(state: &AppState, args: Value) -> anyhow::Res
     Ok(serde_json::to_value(firings)?)
 }
 
-async fn tool_notifications_test(state: &AppState, args: Value) -> anyhow::Result<Value> {
+async fn tool_notifications_test(
+    state: &AppState,
+    args: Value,
+    auth: Option<&AuthContext>,
+) -> anyhow::Result<Value> {
     let body = string_arg(&args, "body")
         .unwrap_or_else(|| "Test notification from syslog-mcp".to_string());
-    // Actor is derived from the auth policy, not from caller-supplied args.
-    let actor = extract_actor(state).to_string();
+    // Actor is derived from request auth context, not caller-supplied args.
+    let actor = extract_actor(state, auth);
     // Apprise URLs come exclusively from server config to prevent SSRF.
     // Caller-supplied apprise_url / apprise_urls are intentionally ignored.
     let apprise_url = state.notifications_config.apprise_url.clone();
@@ -641,6 +752,57 @@ async fn tool_notifications_test(state: &AppState, args: Value) -> anyhow::Resul
         .notifications_test(body, actor, apprise_url, apprise_urls)
         .await?;
     Ok(serde_json::json!({ "result": result }))
+}
+
+struct AdminActionHelp {
+    action: &'static str,
+    description: &'static str,
+    parameters: &'static [&'static str],
+}
+
+const ADMIN_ACTION_HELP: &[AdminActionHelp] = &[
+    AdminActionHelp {
+        action: "ack_error",
+        description: "Acknowledge an error signature so it is suppressed from future `unaddressed_errors`\nresults. Writes an audit event and updates the acknowledgement projection. Use\n`unack_error` to revoke.",
+        parameters: &[
+            "`signature_hash` (string, **required**) — the SHA-256 hash from `unaddressed_errors`",
+            "`notes` (string, optional) — acknowledgement notes (max 4096 chars)",
+        ],
+    },
+    AdminActionHelp {
+        action: "unack_error",
+        description: "Revoke an existing acknowledgement on an error signature so it reappears in\n`unaddressed_errors`. Writes an unack audit event; does NOT delete the ack history.",
+        parameters: &[
+            "`signature_hash` (string, **required**) — the SHA-256 hash of the signature",
+            "`reason` (string, optional) — reason for removing the acknowledgement (max 4096 chars)",
+        ],
+    },
+    AdminActionHelp {
+        action: "notifications_test",
+        description: "Send a test notification via the server-configured Apprise URLs. Rate-limited to 10 per minute per actor.\nCaller-supplied Apprise URLs are ignored for security; the server uses its own configured URLs.",
+        parameters: &[
+            "`body` (string, optional) — notification body text (default: test message)",
+        ],
+    },
+];
+
+fn admin_action_help() -> String {
+    let mut help = String::new();
+    for action in ADMIN_ACTION_HELP {
+        help.push_str("---\n\n");
+        help.push_str("## syslog ");
+        help.push_str(action.action);
+        help.push('\n');
+        help.push_str(action.description);
+        help.push_str("\n\n**Parameters:**\n");
+        for parameter in action.parameters {
+            help.push_str("- ");
+            help.push_str(parameter);
+            help.push('\n');
+        }
+        help.push('\n');
+    }
+    help
 }
 
 async fn tool_syslog_help() -> anyhow::Result<Value> {
@@ -661,9 +823,12 @@ phrase matching with quotes, prefix matching with *.
 - `severity` (string, optional) — one of: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`
 - `app_name` (string, optional) — filter by application name, e.g. `sshd`, `dockerd`, `kernel`
 - `facility` (string, optional) — filter by syslog facility name (e.g. `kern`, `auth`, `daemon`)
+- `exclude_facility` (string, optional) — exclude a syslog facility name (e.g. `kern` to suppress kernel noise)
 - `process_id` (string, optional) — filter by process_id (exact match)
 - `from` (string, optional) — start of time range (ISO 8601 / RFC3339, e.g. `2025-01-15T00:00:00Z`)
 - `to` (string, optional) — end of time range (ISO 8601)
+- `received_from` (string, optional) — restrict to entries received after this time (server-side ingestion clock, ISO 8601)
+- `received_to` (string, optional) — restrict to entries received before this time (server-side ingestion clock, ISO 8601)
 - `limit` (integer, optional) — max results (default 100, max 1000)
 
 ---
@@ -742,6 +907,33 @@ Detects abuse in AI transcript rows and returns each hit with surrounding rows f
 - `limit` (integer, optional) — max matches (default 20, max 100)
 - `before`, `after` (integer, optional) — same-session context rows around each hit (default 2, max 20)
 - `terms` (array of strings, optional) — custom detector terms; replaces the built-in list
+
+---
+
+## syslog abuse_incidents
+Groups AI transcript abuse hits into scored incident candidates. Returns incidents ordered by priority score (abuse_count * 10 + density * 2 + term_variety) with priority labels: low / medium / high / critical. Response includes total_incidents, candidate_rows, and truncated metadata.
+
+**Parameters:**
+- `project` (string, optional) — exact project path filter
+- `tool` (string, optional) — AI tool filter
+- `from`, `to` (string, optional) — time range (ISO 8601)
+- `limit` (integer, optional) — max incidents (default 20, max 100)
+- `window_minutes` (integer, optional) — grouping window (default 10, max 120)
+- `terms` (array of strings, optional) — custom detector terms
+
+---
+
+## syslog abuse_investigate
+Expands top abuse incidents into deterministic evidence bundles. Each bundle includes transcript context before/after the incident, the abuse anchor entries, and nearby non-AI syslog/Docker logs.
+
+**Parameters:**
+- `project` (string, optional) — exact project path filter
+- `tool` (string, optional) — AI tool filter
+- `from`, `to` (string, optional) — time range (ISO 8601)
+- `limit` (integer, optional) — max incidents to expand (default 3, max 10)
+- `window_minutes` (integer, optional) — grouping window (default 10, max 120)
+- `correlation_window_minutes` (integer, optional) — minutes before/after incident for nearby log correlation (default 5, max 120)
+- `terms` (array of strings, optional) — custom detector terms
 
 ---
 
@@ -982,27 +1174,6 @@ normalized template, sample message, severity, counts, and acknowledgement state
 
 ---
 
-## syslog ack_error
-Acknowledge an error signature so it is suppressed from future `unaddressed_errors`
-results. Writes an audit event and updates the acknowledgement projection. Use
-`unack_error` to revoke.
-
-**Parameters:**
-- `signature_hash` (string, **required**) — the SHA-256 hash from `unaddressed_errors`
-- `notes` (string, optional) — acknowledgement notes (max 4096 chars)
-
----
-
-## syslog unack_error
-Revoke an existing acknowledgement on an error signature so it reappears in
-`unaddressed_errors`. Writes an unack audit event; does NOT delete the ack history.
-
-**Parameters:**
-- `signature_hash` (string, **required**) — the SHA-256 hash of the signature
-- `reason` (string, optional) — reason for removing the acknowledgement (max 4096 chars)
-
----
-
 ## syslog notifications_recent
 List recent notification firings from the `notification_firings` table.
 
@@ -1011,22 +1182,18 @@ List recent notification firings from the `notification_firings` table.
 - `rule_id` (string, optional) — filter by rule ID (e.g. `oom_kill`, `daily_digest`)
 - `since` (string, optional) — ISO8601 lower bound for `fired_at`
 
----
-
-## syslog notifications_test
-Send a test notification via the server-configured Apprise URLs. Rate-limited to 10 per minute per actor.
-Caller-supplied Apprise URLs are ignored for security; the server uses its own configured URLs.
-
-**Parameters:**
-- `body` (string, optional) — notification body text (default: test message)
-
----
+"#;
+    let help = format!(
+        "{help}{}{}",
+        admin_action_help(),
+        r#"---
 
 ## syslog help
 Returns this markdown documentation.
 
 **Parameters:** none
-"#;
+"#
+    );
     Ok(json!({ "help": help }))
 }
 

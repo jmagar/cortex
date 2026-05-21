@@ -7,6 +7,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-05-20
+
+### Fixed
+
+- **Journalctl timeout**: `command_output` now enforces a 30-second timeout so
+  a wedged user bus or stalled `journalctl` cannot block `syslog ai doctor`
+  indefinitely.
+- **Incident hostname+service conflict**: `syslog incident` now returns a clear
+  error when both `--host` and `--service` are supplied, since journal entries
+  cannot be filtered by remote hostname.
+- **Service-log dropped lines**: Human-readable output of `syslog service logs`
+  now prints a stderr warning when `dropped_lines > 0` (malformed journal
+  lines were previously silently discarded).
+- **HTTP-flags error message**: The error for passing `--http`/`--server`/
+  `--token` to local-only commands now correctly lists `incident` alongside
+  the other query commands.
+- **Docker image tag**: `docker-compose.prod.yml` defaults to `0.27.1` instead
+  of `latest` for reproducible production deploys.
+- **MCP search help**: `syslog help` now documents `exclude_facility`,
+  `received_from`, and `received_to` for the `search` action.
+
+### Refactor
+
+- **Doctor tests**: Moved inline `#[cfg(test)] mod tests` block in `doctor.rs`
+  to the standard sidecar `doctor_tests.rs` per repo layout rule.
+
+## [0.27.0] - 2026-05-20
+
+### Added
+
+- **Self-debugging incident view**: Added `syslog incident --around ...` as a
+  service-layer timeline that combines matching log rows with syslog-owned
+  service journal entries.
+- **Syslog service logs**: Added `syslog service logs SERVICE --json` backed by
+  `SyslogService`, including safe allowlisting for syslog-owned user units.
+- **Search filters**: Added facility exclusion and received-time filtering to
+  search across CLI, API/MCP adapters, service models, and DB queries.
+
+### Changed
+
+- **AI watcher health**: `syslog ai watch-status --json` and `syslog doctor`
+  now report watcher start time, DB schema version/currentness, schema drift,
+  recent indexing failures, schema-like errors, affected paths, and stale
+  indicators.
+
+### Fixed
+
+- **Facility naming**: Facility code 15 now stores `clockd`, matching
+  `syslog_loose` and common syslog facility naming.
+- **Release enforcement**: Pinned CI and crates publish GitHub Actions to full
+  commit SHAs, added version-sync checks to CI/publish, made release
+  changelog checks fail closed, and routed `just publish` through the repo
+  release scripts plus test/clippy gates.
+
+## [0.26.0] - 2026-05-18
+
+### Breaking
+
+- **`SYSLOG_API_ENABLED` removed**: the REST API at `/api/*` is now
+  unconditionally mounted. Container startup requires a non-empty
+  `SYSLOG_API_TOKEN` and fails fast without one. Run
+  `syslog setup repair` BEFORE upgrading the container so the token is
+  provisioned automatically (see `docs/rollout.md`).
+- **`--local` CLI flag removed**: dropped in the cutover series — its
+  behaviour is now the default unless `SYSLOG_USE_HTTP=true` is set
+  (which `setup repair` writes on first install).
+
+### Behavior change
+
+- **CLI defaults to HTTP transport** via `/api/*` for every command
+  with an HTTP backend (queries, AI, DB status/integrity/checkpoint/
+  vacuum). Drift between the container's view of the database and the
+  CLI's view is no longer possible for these commands. To opt out
+  (e.g., for ad-hoc direct-DB queries during incident response),
+  `unset SYSLOG_USE_HTTP` in the shell or remove the line from
+  `~/.syslog-mcp/.env`. The CLI bails with a descriptive error if
+  `--http` is passed to a local-only command (`db backup`,
+  `ai index`/`add`/`doctor`/`smoke-watch`/`watch-status`/`watch`).
+- **`setup repair`** now writes `SYSLOG_USE_HTTP=true` on first install
+  using the same idempotent `entry().or_insert_with()` pattern as
+  `SYSLOG_API_TOKEN`. Existing operator overrides (including
+  `SYSLOG_USE_HTTP=false` and the empty value) are preserved
+  byte-for-byte.
+
+### Added
+
+- **`docs/rollout.md`**: manual rollout playbook with pre-deploy
+  checklist, deploy order, post-deploy verification windows, token
+  rotation, and rollback procedure.
+- **`scripts/smoke-test-http.sh`**: post-deploy smoke harness that
+  exercises every HTTP-supported CLI command plus the local-only
+  fallbacks. Run against a healthy container to verify the cutover.
+
+## [0.25.4] - 2026-05-18
+
+### Changed
+
+- **Doctor orchestration boundaries**: Moved full doctor report collection and
+  formatting out of `main.rs` into a dedicated doctor module.
+- **HTTP CORS header allowlists**: MCP and non-MCP API CORS preflights now
+  allow only the request headers required by browser clients instead of
+  reflecting arbitrary headers.
+
+### Fixed
+
+- **Migration 13 drift recovery**: Startup now tolerates enrichment columns
+  that already exist without a matching migration row and restores missing
+  migration indexes/version metadata.
+- **Review artifact preservation**: Copied the consolidated full-review issue
+  register into tracked docs.
+- **AI analytics query cost**: `search_ai_sessions` now computes session event
+  counts with a grouped join backed by an AI session/host/time index, avoiding a
+  full-history count per grouped result. `ai_correlate` now batches related-log
+  window lookups into one bounded query instead of issuing one database search
+  per anchor.
+- **OTLP deferred endpoint auth parity**: `/v1/traces` now checks the same
+  bearer token policy as `/v1/logs` and `/v1/metrics` before returning its
+  deferred 404 response.
+- **MCP action inventory docs**: Updated the README action list to include
+  unaddressed error and notification administration actions.
+
 ## [0.25.2] - 2026-05-16
 
 ### Changed
@@ -1248,7 +1369,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.25.2...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.27.1...HEAD
+[0.27.1]: https://github.com/jmagar/syslog-mcp/compare/v0.27.0...v0.27.1
+[0.27.0]: https://github.com/jmagar/syslog-mcp/compare/v0.26.0...v0.27.0
+[0.26.0]: https://github.com/jmagar/syslog-mcp/compare/v0.25.4...v0.26.0
+[0.25.4]: https://github.com/jmagar/syslog-mcp/compare/v0.25.3...v0.25.4
+[0.25.3]: https://github.com/jmagar/syslog-mcp/compare/v0.25.2...v0.25.3
 [0.25.2]: https://github.com/jmagar/syslog-mcp/compare/v0.25.1...v0.25.2
 [0.25.1]: https://github.com/jmagar/syslog-mcp/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/jmagar/syslog-mcp/compare/v0.24.1...v0.25.0

@@ -57,6 +57,22 @@ async fn build_auth_policy_returns_loopback_dev_when_explicit_no_auth_non_loopba
     assert!(matches!(policy, AuthPolicy::LoopbackDev));
 }
 
+#[tokio::test]
+async fn runtime_no_auth_ignores_stale_oauth_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut mcp = loopback_mcp();
+    mcp.host = "0.0.0.0".into();
+    mcp.no_auth = true;
+    mcp.auth.mode = AuthMode::OAuth;
+    mcp.auth.allowed_emails = vec!["stale@example.com".into()];
+    let config = test_config(tmp.path(), mcp);
+
+    let runtime = RuntimeCore::for_server(config)
+        .await
+        .expect("no_auth should bypass ignored OAuth config");
+    assert!(matches!(runtime.auth_policy, AuthPolicy::LoopbackDev));
+}
+
 fn oauth_mcp(tmp: &std::path::Path) -> McpConfig {
     let mut mcp = loopback_mcp();
     mcp.auth = AuthConfig {
@@ -143,6 +159,25 @@ async fn runtime_rejects_non_loopback_oauth_without_static_token_before_otlp_mou
         msg.contains("OTLP /v1/logs") && msg.contains("SYSLOG_MCP_TOKEN"),
         "wrong error: {msg}"
     );
+    assert!(
+        !tmp.path().join("syslog.db").exists(),
+        "rejection must occur before db::init_pool runs"
+    );
+}
+
+#[tokio::test]
+async fn runtime_rejects_oauth_allowed_emails_before_db_init() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut mcp = oauth_mcp(tmp.path());
+    mcp.auth.allowed_emails = vec!["ops@example.com".into()];
+    let config = test_config(tmp.path(), mcp);
+
+    let err = match RuntimeCore::for_server(config).await {
+        Ok(_) => panic!("runtime must reject unsupported allowed_emails"),
+        Err(err) => err,
+    };
+    let msg = format!("{err:#}");
+    assert!(msg.contains("allowed_emails"), "wrong error: {msg}");
     assert!(
         !tmp.path().join("syslog.db").exists(),
         "rejection must occur before db::init_pool runs"

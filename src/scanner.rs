@@ -119,6 +119,10 @@ pub struct PruneCheckpointsResult {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AiDoctorReport {
     pub db_path: String,
+    pub db_schema_version: i64,
+    pub db_last_migration_at: Option<String>,
+    pub known_schema_version: i64,
+    pub schema_current: bool,
     pub claude_root: TranscriptRootStatus,
     pub codex_root: TranscriptRootStatus,
     pub checkpoint_count: i64,
@@ -128,6 +132,29 @@ pub struct AiDoctorReport {
     pub parse_error_count: i64,
     pub newest_indexed_path: Option<String>,
     pub newest_indexed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SchemaDriftMigration {
+    pub version: i64,
+    pub applied_at: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AiIndexingHealth {
+    pub db_schema_version: i64,
+    pub db_last_migration_at: Option<String>,
+    pub known_schema_version: i64,
+    pub schema_current: bool,
+    pub schema_drift_detected: bool,
+    pub schema_drift_migrations: Vec<SchemaDriftMigration>,
+    pub last_successful_ingest_at: Option<String>,
+    pub recent_failure_count: i64,
+    pub first_failure_at: Option<String>,
+    pub last_failure_at: Option<String>,
+    pub affected_paths: Vec<String>,
+    pub recent_schema_error_count: i64,
+    pub stale_indicators: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -390,6 +417,7 @@ pub fn index_file_with_options(
         source_kind = detect_explicit_file_source_kind(&canonical_path)?;
     }
     let tool = source_kind.tool_name();
+    let host = local_hostname();
     let mut fallback_project = project_for_file(source_kind, &canonical_path);
     let mut fallback_session_id = if source_kind == SourceKind::CodexSession {
         canonical_path
@@ -523,7 +551,7 @@ pub fn index_file_with_options(
                 }));
                 let entry = LogBatchEntry {
                     timestamp: normalize_timestamp(parsed.timestamp.as_deref())?,
-                    hostname: "localhost".to_string(),
+                    hostname: host.clone(),
                     facility: Some("transcript".to_string()),
                     severity: "info".to_string(),
                     app_name: Some(format!("{tool}-transcript")),
@@ -708,6 +736,13 @@ pub fn prune_checkpoints(
 
 pub fn ai_doctor(pool: &DbPool, db_path: &Path) -> Result<AiDoctorReport> {
     checkpoint::CheckpointStore::new(pool).doctor(db_path)
+}
+
+pub fn ai_indexing_health(
+    pool: &DbPool,
+    process_start_time: Option<&str>,
+) -> Result<AiIndexingHealth> {
+    checkpoint::CheckpointStore::new(pool).indexing_health(process_start_time)
 }
 
 fn flush_chunk(
@@ -1025,6 +1060,21 @@ fn normalize_timestamp(timestamp: Option<&str>) -> Result<String> {
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string()),
     }
+}
+
+fn local_hostname() -> String {
+    let mut buf = vec![0u8; 256];
+    let result = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
+    if result == 0 {
+        let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        if let Ok(name) = std::str::from_utf8(&buf[..len]) {
+            let name = name.trim();
+            if !name.is_empty() && name != "localhost" {
+                return name.to_string();
+            }
+        }
+    }
+    std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
 }
 
 fn log_entry_string_bytes(entry: &LogBatchEntry) -> usize {

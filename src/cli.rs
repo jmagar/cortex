@@ -4,13 +4,11 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
 use syslog_mcp::app::{
-    AbuseSearchRequest, AbuseSearchResponse, AiCorrelateRequest, AiCorrelateResponse,
-    CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
-    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest,
-    GetErrorsResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
-    ListAiToolsResponse, ListHostsResponse, LogEntry, ProjectContextRequest,
-    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
-    SearchSessionsResponse, SyslogService, TailLogsRequest, UsageBlocksRequest,
+    AbuseSearchResponse, AiCorrelateResponse, CorrelateEventsResponse, DbBackupResult,
+    DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult,
+    GetErrorsResponse, IncidentResponse, ListAiProjectsResponse, ListAiToolsResponse,
+    ListHostsResponse, LogEntry, ProjectContextResponse, SearchLogsResponse,
+    SearchSessionsResponse, ServiceLogsRequest, ServiceLogsResponse, SyslogService,
     UsageBlocksResponse,
 };
 use syslog_mcp::compose::{
@@ -18,7 +16,8 @@ use syslog_mcp::compose::{
     ComposeService, ComposeStatus, ComposeTarget, MutationOptions, ProcessRunner,
 };
 use syslog_mcp::scanner::{
-    AiDoctorReport, CheckpointEntry, IndexResult, ParseErrorEntry, PruneCheckpointsResult,
+    AiDoctorReport, AiIndexingHealth, CheckpointEntry, IndexResult, ParseErrorEntry,
+    PruneCheckpointsResult,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,10 +27,12 @@ pub(crate) enum CliCommand {
     Errors(TimeRangeArgs),
     Hosts(OutputArgs),
     Sessions(SessionsArgs),
+    Incident(IncidentArgs),
     Ai(AiCommand),
     Correlate(CorrelateArgs),
     Stats(OutputArgs),
     Compose(ComposeCommand),
+    Service(ServiceCommand),
     Setup(SetupCommand),
     Db(DbCommand),
     Config(ConfigCommand),
@@ -69,6 +70,11 @@ pub(crate) enum ComposeCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ServiceCommand {
+    Logs(ServiceLogsArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SetupCommand {
     Check(SetupArgs),
     Repair(SetupArgs),
@@ -88,7 +94,7 @@ pub(crate) struct PluginHookArgs {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DbCommand {
-    Status(OutputArgs),
+    Status(DbStatusArgs),
     Integrity(DbIntegrityArgs),
     Checkpoint(DbCheckpointArgs),
     Vacuum(DbVacuumArgs),
@@ -104,6 +110,16 @@ pub(crate) struct DbIntegrityArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OutputArgs {
     pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct DbStatusArgs {
+    pub json: bool,
+    /// Opt-in: run the host/container coordination diagnostic phases
+    /// (`data-mount`, `ai-watch-coord`). These shell out to `docker inspect`
+    /// and `systemctl --user show` and add roughly 100-200ms per invocation,
+    /// so the default `db status` path is left untouched.
+    pub check_coord: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +141,11 @@ impl Default for DbCheckpointArgs {
 pub(crate) struct DbVacuumArgs {
     pub full: bool,
     pub pages: u32,
+    /// CLI bool maps to server `Option<bool>` as
+    /// `present → Some(true)`, `absent → None`. The size pre-flight on
+    /// `--full` is bypassed only when the server receives `Some(true)`.
+    /// See [`crate::app::models::DbVacuumRequest`] (bead 0p8r.4 #C3).
+    pub force: bool,
     pub json: bool,
 }
 
@@ -133,6 +154,7 @@ impl Default for DbVacuumArgs {
         Self {
             full: false,
             pages: 1000,
+            force: false,
             json: false,
         }
     }
@@ -170,6 +192,37 @@ pub(crate) struct ComposeLogsArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ServiceLogsArgs {
+    pub service: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub tail: Option<u32>,
+    pub json: bool,
+}
+
+impl Default for ServiceLogsArgs {
+    fn default() -> Self {
+        Self {
+            service: String::new(),
+            from: None,
+            to: None,
+            tail: Some(200),
+            json: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct IncidentArgs {
+    pub around: String,
+    pub minutes: Option<u32>,
+    pub service: Option<String>,
+    pub hostname: Option<String>,
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SessionsArgs {
     pub project: Option<String>,
@@ -188,8 +241,12 @@ pub(crate) struct SearchArgs {
     pub source_ip: Option<String>,
     pub severity: Option<String>,
     pub app_name: Option<String>,
+    pub facility: Option<String>,
+    pub exclude_facility: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
+    pub received_from: Option<String>,
+    pub received_to: Option<String>,
     pub limit: Option<u32>,
     pub json: bool,
 }
@@ -410,10 +467,12 @@ impl CliCommand {
             "errors" => parse_errors(rest),
             "hosts" => parse_hosts(rest),
             "sessions" => parse_sessions(rest),
+            "incident" => parse_incident(rest),
             "ai" => parse_ai(rest),
             "correlate" => parse_correlate(rest),
             "stats" => parse_stats(rest),
             "compose" => parse_compose(rest),
+            "service" => parse_service(rest),
             "setup" => parse_setup(rest),
             "db" => parse_db(rest),
             "config" => parse_config(rest),
@@ -438,280 +497,91 @@ pub(crate) fn run_setup(command: SetupCommand) -> Result<()> {
     }
 }
 
-pub(crate) async fn run(service: SyslogService, command: CliCommand) -> Result<()> {
+/// Top-level dispatch entry point. Built once per CLI invocation by `run_cli`
+/// in `main.rs`. The [`CliMode`] decides whether we hit a local SQLite-backed
+/// [`SyslogService`] or a remote container via [`HttpClient`].
+///
+/// HTTP dispatch is implemented incrementally by bead .7+ — for now, the
+/// `Http` arm returns a clear placeholder error per command. The mode wiring
+/// is in place so .7 can light up commands one by one without touching this
+/// signature.
+pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
+    // Query commands (search/tail/errors/hosts/correlate/stats/sessions) are
+    // mode-agnostic: dispatch::run_X branches on `&CliMode` internally and
+    // wraps the HTTP path in `http_or_cancel` for SIGINT handling. Everything
+    // else (ai/db/compose/setup) still flows through the Local-only path.
     match command {
-        CliCommand::Search(args) => {
-            let json = args.json;
-            let response = service
-                .search_logs(SearchLogsRequest {
-                    query: args.query,
-                    hostname: args.hostname,
-                    source_ip: args.source_ip,
-                    severity: args.severity,
-                    app_name: args.app_name,
-                    facility: None,
-                    process_id: None,
-                    from: args.from,
-                    to: args.to,
-                    limit: args.limit,
-                })
-                .await?;
-            print_search_response(&response, json)?;
-        }
-        CliCommand::Tail(args) => {
-            let json = args.json;
-            let response = service
-                .tail_logs(TailLogsRequest {
-                    hostname: args.hostname,
-                    source_ip: args.source_ip,
-                    app_name: args.app_name,
-                    severity_min: None,
-                    n: args.n,
-                })
-                .await?;
-            print_search_response(&response, json)?;
-        }
-        CliCommand::Errors(args) => {
-            let json = args.json;
-            let response = service
-                .get_errors(GetErrorsRequest {
-                    from: args.from,
-                    to: args.to,
-                    group_by: None,
-                })
-                .await?;
-            print_errors_response(&response, json)?;
-        }
-        CliCommand::Hosts(args) => {
-            let response = service.list_hosts().await?;
-            print_hosts_response(&response, args.json)?;
-        }
-        CliCommand::Sessions(args) => {
-            let json = args.json;
-            let response = service
-                .list_sessions(syslog_mcp::app::ListSessionsRequest {
-                    project: args.project,
-                    tool: args.tool,
-                    hostname: args.hostname,
-                    from: args.from,
-                    to: args.to,
-                    limit: args.limit,
-                })
-                .await?;
-            print_sessions_response(&response, json)?;
-        }
-        CliCommand::Ai(args) => match args {
-            AiCommand::Search(args) => {
-                let json = args.json;
-                let response = service
-                    .search_sessions(SearchSessionsRequest {
-                        query: args.query,
-                        project: args.project,
-                        tool: args.tool,
-                        from: args.from,
-                        to: args.to,
-                        limit: args.limit,
-                    })
-                    .await?;
-                print_search_sessions_response(&response, json)?;
-            }
-            AiCommand::Abuse(args) => {
-                let json = args.json;
-                let response = service
-                    .search_abuse(AbuseSearchRequest {
-                        project: args.project,
-                        tool: args.tool,
-                        from: args.from,
-                        to: args.to,
-                        limit: args.limit,
-                        before: args.before,
-                        after: args.after,
-                        terms: args.terms,
-                    })
-                    .await?;
-                print_abuse_search_response(&response, json)?;
-            }
-            AiCommand::Correlate(args) => {
-                let json = args.json;
-                let response = service
-                    .correlate_ai_logs(AiCorrelateRequest {
-                        project: args.project,
-                        tool: args.tool,
-                        session_id: args.session_id,
-                        ai_query: args.ai_query,
-                        log_query: args.log_query,
-                        hostname: args.hostname,
-                        source_ip: args.source_ip,
-                        app_name: args.app_name,
-                        from: args.from,
-                        to: args.to,
-                        window_minutes: args.window_minutes,
-                        severity_min: args.severity_min,
-                        limit: args.limit,
-                        events_per_anchor: args.events_per_anchor,
-                    })
-                    .await?;
-                print_ai_correlate_response(&response, json)?;
-            }
-            AiCommand::Blocks(args) => {
-                let json = args.json;
-                let response = service
-                    .usage_blocks(UsageBlocksRequest {
-                        project: args.project,
-                        tool: args.tool,
-                        from: args.from,
-                        to: args.to,
-                    })
-                    .await?;
-                print_usage_blocks_response(&response, json)?;
-            }
-            AiCommand::Context(args) => {
-                let json = args.json;
-                let response = service
-                    .project_context(ProjectContextRequest {
-                        project: args.project,
-                        tool: args.tool,
-                        limit: args.limit,
-                    })
-                    .await?;
-                print_project_context_response(&response, json)?;
-            }
-            AiCommand::Tools(args) => {
-                let json = args.json;
-                let response = service
-                    .list_ai_tools(ListAiToolsRequest {
-                        project: args.project,
-                        from: args.from,
-                        to: args.to,
-                    })
-                    .await?;
-                print_ai_tools_response(&response, json)?;
-            }
-            AiCommand::Projects(args) => {
-                let json = args.json;
-                let response = service
-                    .list_ai_projects(ListAiProjectsRequest {
-                        tool: args.tool,
-                        from: args.from,
-                        to: args.to,
-                    })
-                    .await?;
-                print_ai_projects_response(&response, json)?;
-            }
-            AiCommand::Index(args) => {
-                let response = service
-                    .index_ai_roots(args.path, args.force, args.since)
-                    .await?;
-                print_index_response(&response, args.json)?;
-                ensure_index_success(&response)?;
-            }
-            AiCommand::Add(args) => {
-                let response = service.add_ai_file(args.file, args.force).await?;
-                print_index_response(&response, args.json)?;
-                ensure_index_success(&response)?;
-            }
-            AiCommand::Watch(args) => {
-                let options = syslog_mcp::ai_watch::WatchOptions {
-                    path: args.path.map(std::path::PathBuf::from),
-                    debounce: std::time::Duration::from_millis(args.debounce_ms),
-                    settle: std::time::Duration::from_millis(args.settle_ms),
-                    max_retries: args.max_retries,
-                    initial_scan: !args.no_initial_scan,
-                    json: args.json,
-                };
-                syslog_mcp::ai_watch::run(service, options).await?;
-            }
-            AiCommand::Checkpoints(args) => {
-                let response = service
-                    .list_ai_checkpoints(args.errors_only, args.missing_only, args.limit)
-                    .await?;
-                print_checkpoints_response(&response, args.json)?;
-            }
-            AiCommand::Errors(args) => {
-                let response = service.list_ai_parse_errors(args.limit).await?;
-                print_ai_parse_errors_response(&response, args.json)?;
-            }
+        CliCommand::Search(args) => dispatch::run_search(&mode, args).await,
+        CliCommand::Tail(args) => dispatch::run_tail(&mode, args).await,
+        CliCommand::Errors(args) => dispatch::run_errors(&mode, args).await,
+        CliCommand::Hosts(args) => dispatch::run_hosts(&mode, args).await,
+        CliCommand::Incident(args) => dispatch::run_incident(&mode, args).await,
+        CliCommand::Correlate(args) => dispatch::run_correlate(&mode, args).await,
+        CliCommand::Stats(args) => dispatch::run_stats(&mode, args).await,
+        CliCommand::Sessions(args) => dispatch::run_sessions(&mode, args).await,
+        // AI commands (bead 0p8r.8). 10 are HTTP-capable; 6 are LOCAL-only
+        // and bail in HTTP mode with a per-command inline message.
+        CliCommand::Ai(ai) => match ai {
+            AiCommand::Search(args) => dispatch::run_ai_search(&mode, args).await,
+            AiCommand::Abuse(args) => dispatch::run_ai_abuse(&mode, args).await,
+            AiCommand::Correlate(args) => dispatch::run_ai_correlate(&mode, args).await,
+            AiCommand::Blocks(args) => dispatch::run_ai_blocks(&mode, args).await,
+            AiCommand::Context(args) => dispatch::run_ai_context(&mode, args).await,
+            AiCommand::Tools(args) => dispatch::run_ai_tools(&mode, args).await,
+            AiCommand::Projects(args) => dispatch::run_ai_projects(&mode, args).await,
+            AiCommand::Checkpoints(args) => dispatch::run_ai_checkpoints(&mode, args).await,
+            AiCommand::Errors(args) => dispatch::run_ai_errors(&mode, args).await,
             AiCommand::PruneCheckpoints(args) => {
-                let response = service
-                    .prune_ai_checkpoints(args.missing_only, args.dry_run, args.limit)
-                    .await?;
-                print_prune_checkpoints_response(&response, args.json)?;
+                dispatch::run_ai_prune_checkpoints(&mode, args).await
             }
-            AiCommand::Doctor(args) => {
-                let response = service.ai_doctor().await?;
-                print_ai_doctor_response(&response, args.json)?;
-                ensure_ai_doctor_success(&response, args.strict_permissions)?;
-            }
-            AiCommand::WatchStatus(args) => {
-                let response = ai_watch_status()?;
-                print_ai_watch_status_response(&response, args.json)?;
-            }
-            AiCommand::SmokeWatch(args) => {
-                let response = ai_smoke_watch(&service).await?;
-                print_ai_smoke_watch_response(&response, args.json)?;
-                if !response.pruned_missing_checkpoint {
-                    bail!("AI watch smoke checkpoint was not pruned within 30s");
-                }
-            }
+            AiCommand::Index(args) => dispatch::run_ai_index(&mode, args).await,
+            AiCommand::Add(args) => dispatch::run_ai_add(&mode, args).await,
+            AiCommand::Doctor(args) => dispatch::run_ai_doctor(&mode, args).await,
+            AiCommand::SmokeWatch(args) => dispatch::run_ai_smoke_watch(&mode, args).await,
+            AiCommand::WatchStatus(args) => dispatch::run_ai_watch_status(&mode, args).await,
+            AiCommand::Watch(args) => dispatch::run_ai_watch(&mode, args).await,
         },
-        CliCommand::Correlate(args) => {
-            let json = args.json;
-            let response = service
-                .correlate_events(CorrelateEventsRequest {
-                    reference_time: args.reference_time,
-                    window_minutes: args.window_minutes,
-                    severity_min: args.severity_min,
-                    hostname: args.hostname,
-                    source_ip: args.source_ip,
-                    query: args.query,
-                    limit: args.limit,
-                })
-                .await?;
-            print_correlate_response(&response, json)?;
-        }
-        CliCommand::Stats(args) => {
-            let response = service.get_stats().await?;
-            print_stats_response(&response, args.json)?;
-        }
-        CliCommand::Db(args) => match args {
-            DbCommand::Status(args) => {
-                let response = service.db_status().await?;
-                print_db_status_response(&response, args.json)?;
-            }
-            DbCommand::Integrity(args) => {
-                let response = service.db_integrity(args.quick).await?;
-                print_db_integrity_response(&response, args.json)?;
-                if !response.ok {
-                    bail!("database integrity check failed");
-                }
-            }
-            DbCommand::Checkpoint(args) => {
-                let response = service.db_checkpoint(args.mode).await?;
-                print_db_checkpoint_response(&response, args.json)?;
-                if response.busy != 0 {
-                    bail!("database WAL checkpoint was busy");
-                }
-            }
-            DbCommand::Vacuum(args) => {
-                let response = service.db_vacuum(args.full, args.pages).await?;
-                print_db_vacuum_response(&response, args.json)?;
-            }
-            DbCommand::Backup(args) => {
-                let response = service.db_backup(args.output.map(PathBuf::from)).await?;
-                print_db_backup_response(&response, args.json)?;
-            }
+        // DB commands (bead 0p8r.9). 4 are HTTP-capable; backup stays LOCAL
+        // and bails in HTTP mode with an inline message.
+        CliCommand::Db(db) => match db {
+            DbCommand::Status(args) => dispatch::run_db_status(&mode, args).await,
+            DbCommand::Integrity(args) => dispatch::run_db_integrity(&mode, args).await,
+            DbCommand::Checkpoint(args) => dispatch::run_db_checkpoint(&mode, args).await,
+            DbCommand::Vacuum(args) => dispatch::run_db_vacuum(&mode, args).await,
+            DbCommand::Backup(args) => dispatch::run_db_backup(&mode, args).await,
         },
-        CliCommand::Compose(_) => {
-            bail!("compose commands must run through run_compose");
-        }
-        CliCommand::Setup(_) => {
-            bail!("setup commands must run through run_setup");
+        // Compose/Setup/Config are local-only and main::run_cli reroutes them BEFORE
+        // calling run(). If we reach here, the front door was bypassed —
+        // bail with a clear internal-error message rather than a placeholder.
+        CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
+            bail!(
+                "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"
+            )
         }
         CliCommand::Config(_) => {
-            bail!("config commands must run through run_config");
+            bail!("internal: config commands must be dispatched by main::run_cli before reaching cli::run()")
         }
     }
-    Ok(())
+}
+
+/// CLI transport mode resolved from global flags + env. Built once per
+/// invocation; passed by value into [`run`].
+///
+/// `Local` keeps the full sqlx + rusqlite + FTS5 stack linked into the host
+/// binary — acknowledged limitation, tracked for the v0.30 successor (bead
+/// .12 doc note + epic acceptance criteria).
+pub(crate) enum CliMode {
+    Local(SyslogService),
+    Http(http_client::HttpClient),
+}
+
+impl std::fmt::Debug for CliMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Local(_) => f.write_str("CliMode::Local(SyslogService)"),
+            Self::Http(_) => f.write_str("CliMode::Http(HttpClient)"),
+        }
+    }
 }
 
 pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
@@ -726,7 +596,9 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
         }
         ComposeCommand::Doctor(args) => {
             let status = service.status(&args.target)?;
-            print_compose_status_response(&status, args.json)?;
+            let coordination = run_coordination_phases();
+            print_compose_doctor_response(&status, &coordination, args.json)?;
+            ensure_doctor_coordination_ok(&coordination)?;
             syslog_mcp::compose::ensure_doctor_ready(&status)
         }
         ComposeCommand::Up(args) => print_compose_command_response(
@@ -758,6 +630,27 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
     }
 }
 
+/// DB-free entry point for `syslog service ...` — avoids opening the SQLite
+/// pool so this command remains usable when the DB is corrupted/locked/full.
+pub async fn run_service_no_db(command: CliCommand) -> Result<()> {
+    let CliCommand::Service(command) = command else {
+        bail!("internal: run_service_no_db called with non-service command");
+    };
+    match command {
+        ServiceCommand::Logs(args) => {
+            let json = args.json;
+            let report = syslog_mcp::app::run_service_logs(ServiceLogsRequest {
+                service: args.service,
+                from: args.from,
+                to: args.to,
+                tail: args.tail,
+            })
+            .await?;
+            print_service_logs_response(&report, json)
+        }
+    }
+}
+
 fn parse_search(args: &[String]) -> Result<CliCommand> {
     let mut parsed = SearchArgs::default();
     let mut query = Vec::new();
@@ -769,8 +662,14 @@ fn parse_search(args: &[String]) -> Result<CliCommand> {
             "--source-ip" => parsed.source_ip = Some(flags.value("--source-ip")?),
             "--severity" => parsed.severity = Some(flags.value("--severity")?),
             "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--facility" => parsed.facility = Some(flags.value("--facility")?),
+            "--exclude-facility" => {
+                parsed.exclude_facility = Some(flags.value("--exclude-facility")?)
+            }
             "--from" => parsed.from = Some(flags.value("--from")?),
             "--to" => parsed.to = Some(flags.value("--to")?),
+            "--received-from" => parsed.received_from = Some(flags.value("--received-from")?),
+            "--received-to" => parsed.received_to = Some(flags.value("--received-to")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "-h" | "--help" => bail!("use `syslog --help` for usage"),
             _ if arg.starts_with("--hostname=") => {
@@ -785,10 +684,22 @@ fn parse_search(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--app-name=") => {
                 parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
             }
+            _ if arg.starts_with("--facility=") => {
+                parsed.facility = Some(value_after_equals(arg, "--facility")?)
+            }
+            _ if arg.starts_with("--exclude-facility=") => {
+                parsed.exclude_facility = Some(value_after_equals(arg, "--exclude-facility")?)
+            }
             _ if arg.starts_with("--from=") => {
                 parsed.from = Some(value_after_equals(arg, "--from")?)
             }
             _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--received-from=") => {
+                parsed.received_from = Some(value_after_equals(arg, "--received-from")?)
+            }
+            _ if arg.starts_with("--received-to=") => {
+                parsed.received_to = Some(value_after_equals(arg, "--received-to")?)
+            }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
                     "--limit",
@@ -801,6 +712,105 @@ fn parse_search(args: &[String]) -> Result<CliCommand> {
     }
     parsed.query = (!query.is_empty()).then(|| query.join(" "));
     Ok(CliCommand::Search(parsed))
+}
+
+fn parse_service(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("service requires a subcommand"))?;
+    match subcommand.as_str() {
+        "logs" => parse_service_logs(rest),
+        _ => bail!("unknown service subcommand: {subcommand}"),
+    }
+}
+
+fn parse_service_logs(args: &[String]) -> Result<CliCommand> {
+    let (service, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("service logs requires a service name"))?;
+    if service.starts_with('-') {
+        bail!("service logs requires a service name");
+    }
+    let mut parsed = ServiceLogsArgs {
+        service: service.clone(),
+        ..Default::default()
+    };
+    let mut flags = FlagCursor::new(rest);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--tail" | "-n" => parsed.tail = Some(parse_u32_flag(&arg, flags.value(&arg)?)?),
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--tail=") => {
+                parsed.tail = Some(parse_u32_flag(
+                    "--tail",
+                    value_after_equals(arg, "--tail")?,
+                )?)
+            }
+            _ if arg.starts_with("-n=") => {
+                parsed.tail = Some(parse_u32_flag("-n", value_after_equals(arg, "-n")?)?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown service logs option: {arg}"),
+            _ => bail!("unexpected service logs argument: {arg}"),
+        }
+    }
+    Ok(CliCommand::Service(ServiceCommand::Logs(parsed)))
+}
+
+fn parse_incident(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = IncidentArgs {
+        minutes: Some(5),
+        limit: Some(500),
+        ..Default::default()
+    };
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--around" => parsed.around = flags.value("--around")?,
+            "--minutes" => {
+                parsed.minutes = Some(parse_u32_flag("--minutes", flags.value("--minutes")?)?)
+            }
+            "--service" => parsed.service = Some(flags.value("--service")?),
+            "--hostname" | "--host" => parsed.hostname = Some(flags.value(&arg)?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--around=") => {
+                parsed.around = value_after_equals(arg, "--around")?
+            }
+            _ if arg.starts_with("--minutes=") => {
+                parsed.minutes = Some(parse_u32_flag(
+                    "--minutes",
+                    value_after_equals(arg, "--minutes")?,
+                )?)
+            }
+            _ if arg.starts_with("--service=") => {
+                parsed.service = Some(value_after_equals(arg, "--service")?)
+            }
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--host=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--host")?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown incident option: {arg}"),
+            _ => bail!("unexpected incident argument: {arg}"),
+        }
+    }
+    if parsed.around.is_empty() {
+        bail!("incident requires --around <RFC3339>");
+    }
+    Ok(CliCommand::Incident(parsed))
 }
 
 fn parse_tail(args: &[String]) -> Result<CliCommand> {
@@ -1380,17 +1390,21 @@ fn parse_ai_doctor(args: &[String]) -> Result<CliCommand> {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct AiWatchStatusReport {
+pub(super) struct AiWatchStatusReport {
     service: String,
     active: Option<String>,
     enabled: Option<String>,
     main_pid: Option<u32>,
     exec_start: Option<String>,
+    exec_main_start_timestamp: Option<String>,
+    process_start_time: Option<String>,
+    db_path: String,
+    health: AiIndexingHealth,
     latest_journal: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct AiSmokeWatchReport {
+pub(super) struct AiSmokeWatchReport {
     session_id: String,
     transcript_path: PathBuf,
     ingested: bool,
@@ -1405,7 +1419,7 @@ struct AiSmokeWatchTarget {
     body: String,
 }
 
-async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWatchReport> {
+pub(super) async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWatchReport> {
     let doctor = service.ai_doctor().await?;
     let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
     let session_id = format!("syslogsmokewatch{stamp}{}", std::process::id());
@@ -1420,7 +1434,7 @@ async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWatchReport> {
     let mut ingested = false;
     for _ in 0..30 {
         let response = service
-            .search_sessions(SearchSessionsRequest {
+            .search_sessions(syslog_mcp::app::SearchSessionsRequest {
                 query: session_id.clone(),
                 project: Some(target.project.clone()),
                 tool: Some(target.tool.into()),
@@ -1536,7 +1550,7 @@ fn smoke_watch_target(
     bail!("no writable AI transcript root is available for smoke-watch");
 }
 
-fn ai_watch_status() -> Result<AiWatchStatusReport> {
+pub(super) async fn ai_watch_status(service: &SyslogService) -> Result<AiWatchStatusReport> {
     const SERVICE: &str = "syslog-ai-watch.service";
     let active = systemctl_user_output(&["is-active", SERVICE]).ok();
     let enabled = systemctl_user_output(&["is-enabled", SERVICE]).ok();
@@ -1545,6 +1559,13 @@ fn ai_watch_status() -> Result<AiWatchStatusReport> {
         .and_then(|value| value.parse::<u32>().ok())
         .filter(|pid| *pid > 0);
     let exec_start = systemctl_user_output(&["show", "-p", "ExecStart", "--value", SERVICE]).ok();
+    let exec_main_start_timestamp =
+        systemctl_user_output(&["show", "-p", "ExecMainStartTimestamp", "--value", SERVICE]).ok();
+    let process_start_time = syslog_mcp::doctor::ai_watcher_process_start_time();
+    let doctor = service.ai_doctor().await?;
+    let health = service
+        .ai_indexing_health(process_start_time.clone())
+        .await?;
     let latest_journal = command_output(
         "journalctl",
         &[
@@ -1566,6 +1587,10 @@ fn ai_watch_status() -> Result<AiWatchStatusReport> {
         enabled,
         main_pid,
         exec_start,
+        exec_main_start_timestamp,
+        process_start_time,
+        db_path: doctor.db_path,
+        health,
         latest_journal,
     })
 }
@@ -1659,16 +1684,26 @@ fn parse_db(args: &[String]) -> Result<CliCommand> {
         .split_first()
         .ok_or_else(|| anyhow!("db requires a subcommand"))?;
     match subcommand.as_str() {
-        "status" => Ok(CliCommand::Db(DbCommand::Status(parse_output_args(
-            "db status",
-            rest,
-        )?))),
+        "status" => parse_db_status(rest),
         "integrity" => parse_db_integrity(rest),
         "checkpoint" => parse_db_checkpoint(rest),
         "vacuum" => parse_db_vacuum(rest),
         "backup" => parse_db_backup(rest),
         _ => bail!("unknown db subcommand: {subcommand}"),
     }
+}
+
+fn parse_db_status(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = DbStatusArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--check-coord" => parsed.check_coord = true,
+            _ => bail!("unknown db status option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Db(DbCommand::Status(parsed)))
 }
 
 fn parse_db_integrity(args: &[String]) -> Result<CliCommand> {
@@ -1709,6 +1744,7 @@ fn parse_db_vacuum(args: &[String]) -> Result<CliCommand> {
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--full" => parsed.full = true,
+            "--force" => parsed.force = true,
             "--pages" => parsed.pages = parse_u32_flag("--pages", flags.value("--pages")?)?,
             _ if arg.starts_with("--pages=") => {
                 parsed.pages = parse_u32_flag("--pages", value_after_equals(arg, "--pages")?)?
@@ -2219,7 +2255,7 @@ enum SetupMode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum SetupStatus {
+pub(super) enum SetupStatus {
     Ok,
     Warn,
     Error,
@@ -2227,10 +2263,10 @@ enum SetupStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct SetupPhase {
-    name: &'static str,
-    status: SetupStatus,
-    detail: String,
+pub(super) struct SetupPhase {
+    pub(super) name: &'static str,
+    pub(super) status: SetupStatus,
+    pub(super) detail: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2361,7 +2397,13 @@ fn setup_report(mode: SetupMode) -> Result<SetupReport> {
         },
     );
     phases.push(mcp_port_phase());
-    phases.push(data_mount_phase(data_dir.as_path(), env_path.as_path()));
+    // data_mount_phase intentionally NOT included here (bead syslog-mcp-0p8r.11).
+    // Post-cutover (SYSLOG_USE_HTTP=true is the default), the CLI no longer
+    // opens SQLite directly, so the SessionStart cost of docker inspect is no
+    // longer paying for itself. Drift detection is preserved via:
+    //   - `syslog compose doctor`           (always runs coord phases)
+    //   - `syslog db status --check-coord`  (opt-in)
+    // See bead syslog-mcp-0p8r.13 for the coord-phase wiring.
 
     let has_errors = phases
         .iter()
@@ -2373,119 +2415,6 @@ fn setup_report(mode: SetupMode) -> Result<SetupReport> {
         phases,
         has_errors,
     })
-}
-
-/// Verify the running syslog-mcp container's `/data` mount points at the same
-/// directory the CLI uses (`setup_data_dir()`). When the two diverge, every
-/// host-side `syslog` query reads a different SQLite file than the container
-/// writes to. This regressed once because `docker compose up` was invoked
-/// without `--env-file`, so `${SYSLOG_MCP_DATA_VOLUME}` defaulted to a named
-/// volume; this check exists so that footgun fails loudly at session start.
-///
-/// Status semantics:
-/// - **Skipped**: docker missing/unreachable, or container not present/running.
-/// - **Ok**: bind mount source matches `data_dir` (canonicalized).
-/// - **Error**: container is running with a mount that doesn't match — every
-///   CLI query is reading the wrong DB. Repair: `syslog compose up`.
-fn data_mount_phase(data_dir: &std::path::Path, env_path: &std::path::Path) -> SetupPhase {
-    let name = "data-mount";
-    let container =
-        std::env::var("SYSLOG_MCP_CONTAINER_NAME").unwrap_or_else(|_| "syslog-mcp".to_string());
-
-    // Resolve what the CLI thinks the host-side DB directory is:
-    //  1. SYSLOG_MCP_DATA_VOLUME from process env (set by direnv/shell)
-    //  2. SYSLOG_MCP_DATA_VOLUME parsed from the plugin .env file
-    //  3. fall back to the plugin data_dir
-    let expected_dir = std::env::var("SYSLOG_MCP_DATA_VOLUME")
-        .ok()
-        .or_else(|| read_env_value(env_path, "SYSLOG_MCP_DATA_VOLUME"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| data_dir.to_path_buf());
-
-    let output = match Command::new("docker")
-        .args([
-            "inspect",
-            "--format",
-            "{{range .Mounts}}{{if eq .Destination \"/data\"}}{{.Type}}|{{.Source}}{{end}}{{end}}|{{.State.Running}}",
-            &container,
-        ])
-        .output()
-    {
-        Ok(o) => o,
-        Err(error) => {
-            return SetupPhase {
-                name,
-                status: SetupStatus::Skipped,
-                detail: format!("docker not available: {error}"),
-            };
-        }
-    };
-    if !output.status.success() {
-        return SetupPhase {
-            name,
-            status: SetupStatus::Skipped,
-            detail: format!("container '{container}' not present (docker inspect failed)"),
-        };
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    // Format: "<type>|<source>|<running>" or "|<running>" if no /data mount.
-    let parts: Vec<&str> = stdout.split('|').collect();
-    let running = parts.last().is_some_and(|s| *s == "true");
-    if !running {
-        return SetupPhase {
-            name,
-            status: SetupStatus::Skipped,
-            detail: format!("container '{container}' not running"),
-        };
-    }
-    if parts.len() < 3 || parts[0].is_empty() {
-        return SetupPhase {
-            name,
-            status: SetupStatus::Error,
-            detail: format!("container '{container}' has no /data mount — run `syslog compose up`"),
-        };
-    }
-    let mount_type = parts[0];
-    let mount_source = parts[1];
-    let expected = expected_dir
-        .canonicalize()
-        .unwrap_or_else(|_| expected_dir.clone());
-    let actual = PathBuf::from(mount_source)
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(mount_source));
-    if mount_type != "bind" {
-        return SetupPhase {
-            name,
-            status: SetupStatus::Error,
-            detail: format!(
-                "container /data is a {} (expected bind to {}). \
-                 CLI and container are writing different DBs. \
-                 Repair: `syslog compose up` (recreates with --env-file)",
-                mount_type,
-                expected_dir.display()
-            ),
-        };
-    }
-    if actual != expected {
-        return SetupPhase {
-            name,
-            status: SetupStatus::Error,
-            detail: format!(
-                "container /data bind source ({}) does not match SYSLOG_MCP_DATA_VOLUME ({}). \
-                 CLI and container are writing different DBs. Repair: `syslog compose up`",
-                mount_source,
-                expected_dir.display()
-            ),
-        };
-    }
-    SetupPhase {
-        name,
-        status: SetupStatus::Ok,
-        detail: format!(
-            "bind {} -> /data matches SYSLOG_MCP_DATA_VOLUME",
-            mount_source
-        ),
-    }
 }
 
 /// Minimal `.env` parser: reads KEY=VALUE lines, ignores comments and quotes.
@@ -2603,7 +2532,7 @@ fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<()> {
     Ok(())
 }
 
-fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()> {
+pub(super) fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2661,7 +2590,7 @@ fn indent_multiline(value: &str) -> String {
     value.replace('\n', "\n    ")
 }
 
-fn print_errors_response(response: &GetErrorsResponse, json: bool) -> Result<()> {
+pub(super) fn print_errors_response(response: &GetErrorsResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2672,7 +2601,7 @@ fn print_errors_response(response: &GetErrorsResponse, json: bool) -> Result<()>
     Ok(())
 }
 
-fn print_hosts_response(response: &ListHostsResponse, json: bool) -> Result<()> {
+pub(super) fn print_hosts_response(response: &ListHostsResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2686,7 +2615,7 @@ fn print_hosts_response(response: &ListHostsResponse, json: bool) -> Result<()> 
     Ok(())
 }
 
-fn print_sessions_response(
+pub(super) fn print_sessions_response(
     response: &syslog_mcp::app::ListSessionsResponse,
     json: bool,
 ) -> Result<()> {
@@ -2711,7 +2640,10 @@ fn print_sessions_response(
     Ok(())
 }
 
-fn print_search_sessions_response(response: &SearchSessionsResponse, json: bool) -> Result<()> {
+pub(super) fn print_search_sessions_response(
+    response: &SearchSessionsResponse,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2748,7 +2680,10 @@ fn print_search_sessions_response(response: &SearchSessionsResponse, json: bool)
     Ok(())
 }
 
-fn print_abuse_search_response(response: &AbuseSearchResponse, json: bool) -> Result<()> {
+pub(super) fn print_abuse_search_response(
+    response: &AbuseSearchResponse,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2789,7 +2724,10 @@ fn print_abuse_search_response(response: &AbuseSearchResponse, json: bool) -> Re
     Ok(())
 }
 
-fn print_ai_correlate_response(response: &AiCorrelateResponse, json: bool) -> Result<()> {
+pub(super) fn print_ai_correlate_response(
+    response: &AiCorrelateResponse,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2827,7 +2765,10 @@ fn print_ai_correlate_response(response: &AiCorrelateResponse, json: bool) -> Re
     Ok(())
 }
 
-fn print_usage_blocks_response(response: &UsageBlocksResponse, json: bool) -> Result<()> {
+pub(super) fn print_usage_blocks_response(
+    response: &UsageBlocksResponse,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2855,7 +2796,10 @@ fn print_usage_blocks_response(response: &UsageBlocksResponse, json: bool) -> Re
     Ok(())
 }
 
-fn print_project_context_response(response: &ProjectContextResponse, json: bool) -> Result<()> {
+pub(super) fn print_project_context_response(
+    response: &ProjectContextResponse,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2879,7 +2823,7 @@ fn print_project_context_response(response: &ProjectContextResponse, json: bool)
     Ok(())
 }
 
-fn print_ai_tools_response(response: &ListAiToolsResponse, json: bool) -> Result<()> {
+pub(super) fn print_ai_tools_response(response: &ListAiToolsResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2903,7 +2847,10 @@ fn print_ai_tools_response(response: &ListAiToolsResponse, json: bool) -> Result
     Ok(())
 }
 
-fn print_ai_projects_response(response: &ListAiProjectsResponse, json: bool) -> Result<()> {
+pub(super) fn print_ai_projects_response(
+    response: &ListAiProjectsResponse,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2930,7 +2877,7 @@ fn print_ai_projects_response(response: &ListAiProjectsResponse, json: bool) -> 
     Ok(())
 }
 
-fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Result<()> {
+pub(super) fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2960,7 +2907,10 @@ fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Resul
     Ok(())
 }
 
-fn print_ai_parse_errors_response(response: &[ParseErrorEntry], json: bool) -> Result<()> {
+pub(super) fn print_ai_parse_errors_response(
+    response: &[ParseErrorEntry],
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2985,7 +2935,10 @@ fn print_ai_parse_errors_response(response: &[ParseErrorEntry], json: bool) -> R
     Ok(())
 }
 
-fn print_prune_checkpoints_response(response: &PruneCheckpointsResult, json: bool) -> Result<()> {
+pub(super) fn print_prune_checkpoints_response(
+    response: &PruneCheckpointsResult,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -2999,11 +2952,25 @@ fn print_prune_checkpoints_response(response: &PruneCheckpointsResult, json: boo
     Ok(())
 }
 
-fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) -> Result<()> {
+pub(super) fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
     println!("db_path: {}", response.db_path);
+    println!(
+        "db_schema_version: {}/{} ({})",
+        response.db_schema_version,
+        response.known_schema_version,
+        if response.schema_current {
+            "current"
+        } else {
+            "behind"
+        }
+    );
+    println!(
+        "db_last_migration_at: {}",
+        response.db_last_migration_at.as_deref().unwrap_or("-")
+    );
     println!(
         "claude_root: {} ({}, readable={}, writable={}, owner={:?}:{:?}, mode={:?}, strict_ok={})",
         response.claude_root.path,
@@ -3053,7 +3020,10 @@ fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) -> Result<()>
     Ok(())
 }
 
-fn print_ai_watch_status_response(response: &AiWatchStatusReport, json: bool) -> Result<()> {
+pub(super) fn print_ai_watch_status_response(
+    response: &AiWatchStatusReport,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -3071,6 +3041,37 @@ fn print_ai_watch_status_response(response: &AiWatchStatusReport, json: bool) ->
         "exec_start: {}",
         response.exec_start.as_deref().unwrap_or("-")
     );
+    println!(
+        "process_start_time: {}",
+        response.process_start_time.as_deref().unwrap_or("-")
+    );
+    println!("db_path: {}", response.db_path);
+    println!(
+        "db_schema_version: {}/{}",
+        response.health.db_schema_version, response.health.known_schema_version
+    );
+    println!(
+        "schema_drift_detected: {}",
+        response.health.schema_drift_detected
+    );
+    println!(
+        "last_successful_ingest_at: {}",
+        response
+            .health
+            .last_successful_ingest_at
+            .as_deref()
+            .unwrap_or("-")
+    );
+    println!(
+        "recent_failure_count: {}",
+        response.health.recent_failure_count
+    );
+    if !response.health.stale_indicators.is_empty() {
+        println!(
+            "stale_indicators: {}",
+            response.health.stale_indicators.join(", ")
+        );
+    }
     if !response.latest_journal.is_empty() {
         println!("latest_journal:");
         for line in &response.latest_journal {
@@ -3080,7 +3081,67 @@ fn print_ai_watch_status_response(response: &AiWatchStatusReport, json: bool) ->
     Ok(())
 }
 
-fn print_ai_smoke_watch_response(response: &AiSmokeWatchReport, json: bool) -> Result<()> {
+fn print_service_logs_response(report: &ServiceLogsResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(report);
+    }
+    if report.dropped_lines > 0 {
+        eprintln!(
+            "warning: {} malformed journal line(s) dropped",
+            report.dropped_lines
+        );
+    }
+    if report.entries.is_empty() {
+        println!("{}: 0 journal entries", report.service);
+        return Ok(());
+    }
+    for entry in &report.entries {
+        let timestamp = entry.timestamp.as_deref().unwrap_or("-");
+        let ident = entry
+            .syslog_identifier
+            .as_deref()
+            .or(entry.unit.as_deref())
+            .unwrap_or("-");
+        let message = entry.message.as_deref().unwrap_or("");
+        println!("{timestamp} {ident}: {message}");
+    }
+    Ok(())
+}
+
+pub(super) fn print_incident_response(response: &IncidentResponse, json: bool) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "incident around {} +/- {}m: {} event(s){}",
+        response.around,
+        response.window_minutes,
+        response.event_count,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    for warning in &response.warnings {
+        println!("warn: {warning}");
+    }
+    for event in &response.events {
+        let host = event.host.as_deref().unwrap_or("-");
+        let severity = event.severity.as_deref().unwrap_or("-");
+        let app = event.app.as_deref().unwrap_or("-");
+        println!(
+            "{} {} {} {} {}: {}",
+            event.timestamp, event.source, host, severity, app, event.message
+        );
+    }
+    Ok(())
+}
+
+pub(super) fn print_ai_smoke_watch_response(
+    response: &AiSmokeWatchReport,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -3098,7 +3159,7 @@ fn print_ai_smoke_watch_response(response: &AiSmokeWatchReport, json: bool) -> R
     Ok(())
 }
 
-fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
+pub(super) fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -3123,7 +3184,7 @@ fn print_index_response(response: &IndexResult, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn ensure_index_success(response: &IndexResult) -> Result<()> {
+pub(super) fn ensure_index_success(response: &IndexResult) -> Result<()> {
     if response.file_errors.is_empty()
         && response.storage_blocked_chunks == 0
         && response.parse_errors == 0
@@ -3153,7 +3214,10 @@ fn ensure_index_success(response: &IndexResult) -> Result<()> {
     }
 }
 
-fn ensure_ai_doctor_success(response: &AiDoctorReport, strict_permissions: bool) -> Result<()> {
+pub(super) fn ensure_ai_doctor_success(
+    response: &AiDoctorReport,
+    strict_permissions: bool,
+) -> Result<()> {
     if strict_permissions
         && ((response.claude_root.exists && !response.claude_root.strict_ok)
             || (response.codex_root.exists && !response.codex_root.strict_ok))
@@ -3175,7 +3239,10 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-fn print_correlate_response(response: &CorrelateEventsResponse, json: bool) -> Result<()> {
+pub(super) fn print_correlate_response(
+    response: &CorrelateEventsResponse,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -3202,7 +3269,7 @@ fn print_correlate_response(response: &CorrelateEventsResponse, json: bool) -> R
     Ok(())
 }
 
-fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
+pub(super) fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
     if json {
         return print_json(stats);
     }
@@ -3223,9 +3290,25 @@ fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_db_status_response(status: &DbMaintenanceStatus, json: bool) -> Result<()> {
+#[derive(Debug, Clone, Serialize)]
+struct DbStatusReport<'a> {
+    #[serde(flatten)]
+    status: &'a DbMaintenanceStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coordination: Option<&'a [SetupPhase]>,
+}
+
+pub(super) fn print_db_status_response(
+    status: &DbMaintenanceStatus,
+    coordination: Option<&[SetupPhase]>,
+    json: bool,
+) -> Result<()> {
     if json {
-        return print_json(status);
+        let report = DbStatusReport {
+            status,
+            coordination,
+        };
+        return print_json(&report);
     }
     println!("db_path: {}", status.db_path.display());
     println!("page_count: {}", status.page_count);
@@ -3256,10 +3339,17 @@ fn print_db_status_response(status: &DbMaintenanceStatus, json: bool) -> Result<
             .map(|value| value.to_string())
             .unwrap_or_else(|| "not checked".to_string())
     );
+    if let Some(phases) = coordination {
+        println!();
+        println!("coordination:");
+        for phase in phases {
+            println!("  {:?} {} — {}", phase.status, phase.name, phase.detail);
+        }
+    }
     Ok(())
 }
 
-fn print_db_integrity_response(response: &DbIntegrityResult, json: bool) -> Result<()> {
+pub(super) fn print_db_integrity_response(response: &DbIntegrityResult, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -3270,7 +3360,10 @@ fn print_db_integrity_response(response: &DbIntegrityResult, json: bool) -> Resu
     Ok(())
 }
 
-fn print_db_checkpoint_response(response: &DbCheckpointResult, json: bool) -> Result<()> {
+pub(super) fn print_db_checkpoint_response(
+    response: &DbCheckpointResult,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -3281,7 +3374,7 @@ fn print_db_checkpoint_response(response: &DbCheckpointResult, json: bool) -> Re
     Ok(())
 }
 
-fn print_db_vacuum_response(response: &DbVacuumResult, json: bool) -> Result<()> {
+pub(super) fn print_db_vacuum_response(response: &DbVacuumResult, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -3298,7 +3391,7 @@ fn print_db_vacuum_response(response: &DbVacuumResult, json: bool) -> Result<()>
     Ok(())
 }
 
-fn print_db_backup_response(response: &DbBackupResult, json: bool) -> Result<()> {
+pub(super) fn print_db_backup_response(response: &DbBackupResult, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -3332,6 +3425,49 @@ fn print_compose_status_response(status: &ComposeStatus, json: bool) -> Result<(
         println!("{:?}: {} - {}", diag.severity, diag.code, diag.message);
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ComposeDoctorReport<'a> {
+    #[serde(flatten)]
+    status: &'a ComposeStatus,
+    coordination: &'a [SetupPhase],
+}
+
+fn print_compose_doctor_response(
+    status: &ComposeStatus,
+    coordination: &[SetupPhase],
+    json: bool,
+) -> Result<()> {
+    if json {
+        let report = ComposeDoctorReport {
+            status,
+            coordination,
+        };
+        return print_json(&report);
+    }
+    print_compose_status_response(status, false)?;
+    println!();
+    println!("coordination:");
+    for phase in coordination {
+        println!("  {:?} {} — {}", phase.status, phase.name, phase.detail);
+    }
+    Ok(())
+}
+
+fn ensure_doctor_coordination_ok(phases: &[SetupPhase]) -> Result<()> {
+    let failures: Vec<String> = phases
+        .iter()
+        .filter(|p| matches!(p.status, SetupStatus::Error))
+        .map(|p| format!("{} — {}", p.name, p.detail))
+        .collect();
+    if failures.is_empty() {
+        return Ok(());
+    }
+    bail!(
+        "compose doctor coordination check failed: {}",
+        failures.join("; ")
+    );
 }
 
 fn print_compose_command_response(result: &ComposeCommandResult, json: bool) -> Result<()> {
@@ -4062,6 +4198,636 @@ fn print_config_unset(
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Drift guard: host/container coordination diagnostics
+// ---------------------------------------------------------------------------
+//
+// The CLI and the running container must agree on:
+//   1. The host-side directory bind-mounted at `/data` (data-mount).
+//   2. The `SYSLOG_MCP_DB_PATH` the host-side `syslog-ai-watch.service` writes
+//      to via systemd `Environment` / `EnvironmentFiles`.
+//
+// Both checks shell out to `docker inspect` and `systemctl --user show`; in
+// `compose doctor` we hit them once and share the results via `DoctorCache`
+// so the multi-phase output doesn't re-fork them. This phase adds roughly
+// 100-200ms per invocation, which is why `db status --check-coord` is opt-in.
+
+/// Result of `docker inspect syslog-mcp` for the `/data` mount.
+#[derive(Debug, Clone)]
+struct ContainerMountInfo {
+    mount_type: Option<String>,
+    mount_source: Option<String>,
+    running: bool,
+}
+
+#[derive(Debug, Clone)]
+struct SystemctlEnv {
+    /// Inline `Environment=` KEY=VALUE pairs (from `-p Environment`).
+    inline: Vec<(String, String)>,
+    /// Paths from `EnvironmentFiles=`.
+    files: Vec<PathBuf>,
+    /// True when `systemctl show` succeeded but the unit was not found.
+    unit_missing: bool,
+}
+
+#[derive(Debug, Default)]
+struct DoctorCache {
+    container_inspect: Option<Result<ContainerMountInfo, String>>,
+    systemctl_env: Option<Result<SystemctlEnv, String>>,
+}
+
+impl DoctorCache {
+    fn container_inspect(&mut self, container: &str) -> Result<ContainerMountInfo, String> {
+        if let Some(cached) = &self.container_inspect {
+            return cached.clone();
+        }
+        let result = docker_inspect_data_mount(container);
+        self.container_inspect = Some(result.clone());
+        result
+    }
+
+    fn systemctl_env(&mut self, unit: &str) -> Result<SystemctlEnv, String> {
+        if let Some(cached) = &self.systemctl_env {
+            return cached.clone();
+        }
+        let result = systemctl_show_env(unit);
+        self.systemctl_env = Some(result.clone());
+        result
+    }
+}
+
+/// Run both coordination phases (data-mount + ai-watch-coord) with a shared
+/// cache so the underlying `docker inspect` only fires once.
+pub(super) fn run_coordination_phases() -> Vec<SetupPhase> {
+    let data_dir = setup_data_dir();
+    let env_path = data_dir.join(".env");
+    let mut cache = DoctorCache::default();
+    vec![
+        data_mount_phase_cached(data_dir.as_path(), env_path.as_path(), &mut cache),
+        ai_watch_coordination_phase(env_path.as_path(), &mut cache),
+    ]
+}
+
+fn docker_inspect_data_mount(container: &str) -> Result<ContainerMountInfo, String> {
+    let output = Command::new("docker")
+        .args([
+            "inspect",
+            "--format",
+            "{{range .Mounts}}{{if eq .Destination \"/data\"}}{{.Type}}|{{.Source}}{{end}}{{end}}|{{.State.Running}}",
+            container,
+        ])
+        .output()
+        .map_err(|error| format!("docker not available: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "container '{container}' not present (docker inspect failed: {})",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let parts: Vec<&str> = stdout.split('|').collect();
+    let running = parts.last().is_some_and(|s| *s == "true");
+    if parts.len() < 3 || parts[0].is_empty() {
+        return Ok(ContainerMountInfo {
+            mount_type: None,
+            mount_source: None,
+            running,
+        });
+    }
+    Ok(ContainerMountInfo {
+        mount_type: Some(parts[0].to_string()),
+        mount_source: Some(parts[1].to_string()),
+        running,
+    })
+}
+
+fn systemctl_show_env(unit: &str) -> Result<SystemctlEnv, String> {
+    // Reuse the shared --user wrapper so we pick up the
+    // DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR fallback for headless
+    // hosts where the user bus isn't auto-discovered.
+    let stdout = systemctl_user_output(&[
+        "show",
+        unit,
+        "-p",
+        "Environment",
+        "-p",
+        "EnvironmentFiles",
+        "-p",
+        "LoadState",
+        "--no-pager",
+    ])
+    .map_err(|error| error.to_string())?;
+    Ok(parse_systemctl_env_output(&stdout))
+}
+
+/// Parse `systemctl --user show -p Environment -p EnvironmentFiles -p LoadState`
+/// output into a `SystemctlEnv`. Lines look like:
+///
+/// ```text
+/// Environment=KEY1=val1 KEY2=val2
+/// EnvironmentFiles=/etc/foo (ignore_errors=no)
+/// LoadState=loaded
+/// ```
+///
+/// Uses `split_once('=')` everywhere — values may legitimately contain `=`.
+fn parse_systemctl_env_output(stdout: &str) -> SystemctlEnv {
+    let mut inline = Vec::new();
+    let mut files = Vec::new();
+    let mut unit_missing = false;
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key {
+            "Environment" => {
+                inline.extend(parse_systemctl_env_inline(value));
+            }
+            "EnvironmentFiles" => {
+                for path in parse_systemctl_env_files(value) {
+                    files.push(path);
+                }
+            }
+            "LoadState" if value.trim() == "not-found" => {
+                unit_missing = true;
+            }
+            _ => {}
+        }
+    }
+    SystemctlEnv {
+        inline,
+        files,
+        unit_missing,
+    }
+}
+
+/// Parse the inline value of `Environment=...`. Each space-separated token is
+/// a `KEY=VALUE` pair; `VALUE` may contain `=`, so we use `split_once('=')`.
+fn parse_systemctl_env_inline(value: &str) -> Vec<(String, String)> {
+    value
+        .split_whitespace()
+        .filter_map(|entry| {
+            let (k, v) = entry.split_once('=')?;
+            Some((k.to_string(), v.to_string()))
+        })
+        .collect()
+}
+
+/// Parse the inline value of `EnvironmentFiles=...`. systemd renders this as
+/// a space-separated list of `<path> (ignore_errors=<bool>)` pairs. We take
+/// just the path token.
+fn parse_systemctl_env_files(value: &str) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for token in value.split_whitespace() {
+        if token.starts_with('(') {
+            continue;
+        }
+        if token.is_empty() {
+            continue;
+        }
+        paths.push(PathBuf::from(token));
+    }
+    paths
+}
+
+/// Look up `SYSLOG_MCP_DB_PATH` from the systemctl-rendered env. Inline
+/// `Environment=` values take precedence; otherwise we walk each
+/// `EnvironmentFiles` entry. Missing files are skipped (not fatal).
+fn lookup_systemd_db_path(env: &SystemctlEnv) -> Option<String> {
+    if let Some((_, value)) = env.inline.iter().find(|(k, _)| k == "SYSLOG_MCP_DB_PATH") {
+        return Some(value.clone());
+    }
+    for path in &env.files {
+        if let Some(value) = read_env_value(path, "SYSLOG_MCP_DB_PATH") {
+            return Some(value);
+        }
+    }
+    None
+}
+
+// data_mount_phase (uncached wrapper) removed by bead syslog-mcp-0p8r.11.
+// Sole caller was setup_report (SessionStart hook), which no longer needs it
+// post-cutover. All remaining callers (compose doctor, db status --check-coord)
+// use data_mount_phase_cached so the docker inspect result can be shared with
+// ai_watch_coordination_phase within a single invocation.
+
+/// Cached variant of `data_mount_phase`. See module-level note for why we
+/// share `docker inspect` across phases.
+fn data_mount_phase_cached(
+    data_dir: &std::path::Path,
+    env_path: &std::path::Path,
+    cache: &mut DoctorCache,
+) -> SetupPhase {
+    let name = "data-mount";
+    let container =
+        std::env::var("SYSLOG_MCP_CONTAINER_NAME").unwrap_or_else(|_| "syslog-mcp".to_string());
+
+    let expected_dir = std::env::var("SYSLOG_MCP_DATA_VOLUME")
+        .ok()
+        .or_else(|| read_env_value(env_path, "SYSLOG_MCP_DATA_VOLUME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| data_dir.to_path_buf());
+
+    let info = match cache.container_inspect(&container) {
+        Ok(info) => info,
+        Err(detail) => {
+            // Distinguish "container absent" (Skipped per doctor spec —
+            // ai-watch absent style) from "docker enumeration failed"
+            // (Warn — could not enumerate inputs). docker inspect on a
+            // missing container reports "No such object" / "no such
+            // container"; anything else is a probe failure.
+            let lower = detail.to_ascii_lowercase();
+            let status = if lower.contains("no such object") || lower.contains("no such container")
+            {
+                SetupStatus::Skipped
+            } else {
+                SetupStatus::Warn
+            };
+            return SetupPhase {
+                name,
+                status,
+                detail,
+            };
+        }
+    };
+    if !info.running {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Skipped,
+            detail: format!("container '{container}' not running"),
+        };
+    }
+    let Some(mount_source) = info.mount_source else {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Error,
+            detail: format!("container '{container}' has no /data mount — run `syslog compose up`"),
+        };
+    };
+    let mount_type = info.mount_type.unwrap_or_default();
+    if mount_type != "bind" {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Error,
+            detail: format!(
+                "container /data is a {} (expected bind to {}). \
+                 CLI and container are writing different DBs. \
+                 Repair: `syslog compose up` (recreates with --env-file)",
+                mount_type,
+                expected_dir.display()
+            ),
+        };
+    }
+    let expected = match canonicalize_with_warning(&expected_dir) {
+        Ok(path) => path,
+        Err(detail) => {
+            return SetupPhase {
+                name,
+                status: SetupStatus::Warn,
+                detail,
+            };
+        }
+    };
+    let actual_source = PathBuf::from(&mount_source);
+    let actual = match canonicalize_with_warning(&actual_source) {
+        Ok(path) => path,
+        Err(detail) => {
+            return SetupPhase {
+                name,
+                status: SetupStatus::Warn,
+                detail,
+            };
+        }
+    };
+    if actual != expected {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Error,
+            detail: format!(
+                "container /data bind source ({}) does not match SYSLOG_MCP_DATA_VOLUME ({}). \
+                 CLI and container are writing different DBs. Repair: `syslog compose up`",
+                mount_source,
+                expected_dir.display()
+            ),
+        };
+    }
+    SetupPhase {
+        name,
+        status: SetupStatus::Ok,
+        detail: format!(
+            "bind {} -> /data matches SYSLOG_MCP_DATA_VOLUME",
+            mount_source
+        ),
+    }
+}
+
+/// Verify the host systemd `syslog-ai-watch.service`'s effective
+/// `SYSLOG_MCP_DB_PATH` resolves to the same canonical host path as the
+/// container's `/data` bind source. A mismatch means the host ai-watch
+/// service is writing checkpoints to a DB the container will never read.
+///
+/// Status semantics (per epic decisions):
+/// - `Skipped` — ai-watch unit not installed or not loadable. Only valid
+///   skipped reason.
+/// - `Ok` — canonical paths match.
+/// - `Warning` — could not enumerate the inputs (docker/systemctl failed,
+///   canonicalize ENOENT/EACCES). The drift bug was a silent literal-string
+///   compare fallback; we never do that — always warn with the OS error.
+/// - `Error` — both sides resolved and the canonical paths differ.
+fn ai_watch_coordination_phase(env_path: &std::path::Path, cache: &mut DoctorCache) -> SetupPhase {
+    let name = "ai-watch-coord";
+    let unit = std::env::var("SYSLOG_AI_WATCH_UNIT")
+        .unwrap_or_else(|_| "syslog-ai-watch.service".to_string());
+    let container =
+        std::env::var("SYSLOG_MCP_CONTAINER_NAME").unwrap_or_else(|_| "syslog-mcp".to_string());
+
+    let env = match cache.systemctl_env(&unit) {
+        Ok(env) => env,
+        Err(detail) => {
+            // systemctl enumeration failed (binary missing, bus error,
+            // permission denied, etc.); per the doctor spec this is
+            // `warn` — `skipped` is reserved for "ai-watch absent".
+            return SetupPhase {
+                name,
+                status: SetupStatus::Warn,
+                detail,
+            };
+        }
+    };
+    if env.unit_missing {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Skipped,
+            detail: format!("systemd unit {unit} is not installed"),
+        };
+    }
+    let Some(ai_db_path) = lookup_systemd_db_path(&env) else {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Warn,
+            detail: format!(
+                "could not find SYSLOG_MCP_DB_PATH in {unit} (Environment/EnvironmentFiles)"
+            ),
+        };
+    };
+    let info = match cache.container_inspect(&container) {
+        Ok(info) => info,
+        Err(detail) => {
+            return SetupPhase {
+                name,
+                status: SetupStatus::Warn,
+                detail: format!("could not inspect container: {detail}"),
+            };
+        }
+    };
+    if !info.running {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Warn,
+            detail: format!("container '{container}' not running"),
+        };
+    }
+    let Some(mount_source) = info.mount_source else {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Warn,
+            detail: format!("container '{container}' has no /data mount"),
+        };
+    };
+
+    // ai-watch points at the SQLite *file*; container exposes the parent dir.
+    let ai_path = PathBuf::from(&ai_db_path);
+    let ai_dir = ai_path.parent().map(PathBuf::from).unwrap_or(ai_path);
+    let canonical_ai = match canonicalize_with_warning(&ai_dir) {
+        Ok(path) => path,
+        Err(detail) => {
+            // NEVER silently compare literal strings on canonicalize failure
+            // — that was the original drift bug.
+            let _ = env_path; // env_path reserved for future plugin .env cross-checks.
+            return SetupPhase {
+                name,
+                status: SetupStatus::Warn,
+                detail,
+            };
+        }
+    };
+    let mount_pathbuf = PathBuf::from(&mount_source);
+    let canonical_container = match canonicalize_with_warning(&mount_pathbuf) {
+        Ok(path) => path,
+        Err(detail) => {
+            return SetupPhase {
+                name,
+                status: SetupStatus::Warn,
+                detail,
+            };
+        }
+    };
+    if canonical_ai == canonical_container {
+        return SetupPhase {
+            name,
+            status: SetupStatus::Ok,
+            detail: format!(
+                "ai-watch SYSLOG_MCP_DB_PATH ({}) and container /data bind ({}) resolve to {}",
+                ai_db_path,
+                mount_source,
+                canonical_ai.display()
+            ),
+        };
+    }
+    SetupPhase {
+        name,
+        status: SetupStatus::Error,
+        detail: format!(
+            "ai-watch SYSLOG_MCP_DB_PATH canonicalizes to {} but container /data bind canonicalizes to {} — \
+             host service and container are writing different DBs",
+            canonical_ai.display(),
+            canonical_container.display()
+        ),
+    }
+}
+
+/// Canonicalize a path, returning a structured warning string on ENOENT /
+/// EACCES instead of falling back to the literal path. The literal-fallback
+/// pattern is the drift bug we're guarding against.
+fn canonicalize_with_warning(path: &std::path::Path) -> Result<PathBuf, String> {
+    std::fs::canonicalize(path)
+        .map_err(|err| format!("could not canonicalize {}: {err}", path.display()))
+}
+
+// REST HTTP client used by --http subcommand mode (bead 0p8r.5). The module
+// lives under `src/cli/http_client.rs`; Rust 2018+ auto-resolves `mod foo;`
+// in `src/cli.rs` to either `src/cli/foo.rs` or `src/cli/foo/mod.rs`.
+#[allow(dead_code)]
+pub(crate) mod http_client;
+
+// Per-arm dispatch for query commands (bead 0p8r.7). Holds the `run_X` free
+// functions, the `http_or_cancel` SIGINT helper, and `Cli*Args::into_request`
+// conversions shared between the Local and HTTP arms.
+pub(crate) mod dispatch;
+
+// ─── Global flag plumbing (bead 0p8r.6) ─────────────────────────────────────
+
+/// Env var that opts a process into HTTP transport without passing `--http`.
+/// Accepts `1` or `true` (case-insensitive). Any other value is treated as
+/// unset to avoid surprising "I typoed `falze`" silent flips.
+pub(crate) const ENV_USE_HTTP: &str = "SYSLOG_USE_HTTP";
+
+/// Global CLI flags that apply to every subcommand. Stripped from the raw
+/// arg list by [`GlobalFlags::extract`] **before** subcommand parsing so the
+/// per-command parsers (which we did NOT touch in this bead) keep matching
+/// only the flags they already know about.
+///
+/// `--http` is a bare bool. `--server` and `--token` accept either a separate
+/// arg (`--server URL`) or `=`-glued form (`--server=URL`). Passing `--server`
+/// or `--token` implies HTTP mode even without an explicit `--http`.
+///
+/// `SYSLOG_API_TOKEN` alone does **not** flip the default to HTTP — that
+/// would silently change behaviour for users who already exported the token
+/// from earlier deploys (locked decision, eng-review #C6).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct GlobalFlags {
+    pub force_http: bool,
+    pub server: Option<String>,
+    pub token: Option<String>,
+}
+
+impl GlobalFlags {
+    /// Strip global flags out of `args` in-place and return them.
+    ///
+    /// Unknown args are left in place untouched so the existing per-subcommand
+    /// parsers see exactly what they used to. We deliberately allow both
+    /// `syslog --http search foo` and `syslog search --http foo` — the
+    /// stripper walks the whole vec, not just a prefix.
+    ///
+    /// `--server` / `--token` without a following value error out; an empty
+    /// value (e.g. `--token=`) is also an error so a stray trailing `=` does
+    /// not silently produce HTTP mode with a blank token.
+    pub(crate) fn extract(args: &mut Vec<String>) -> Result<Self> {
+        let mut out = GlobalFlags::default();
+        let mut i = 0;
+        while i < args.len() {
+            // Two flag families: bare "--http", and value-bearing
+            // "--server"/"--token" which accept "--flag VALUE" or "--flag=VALUE".
+            let arg = args[i].as_str();
+            if arg == "--http" {
+                out.force_http = true;
+                args.remove(i);
+                continue;
+            }
+            if let Some(value) = strip_eq_prefix(arg, "--server") {
+                if value.is_empty() {
+                    bail!("--server requires a value");
+                }
+                out.server = Some(value.to_string());
+                args.remove(i);
+                continue;
+            }
+            if arg == "--server" {
+                if i + 1 >= args.len() {
+                    bail!("--server requires a value");
+                }
+                let value = args.remove(i + 1);
+                if value.trim().is_empty() {
+                    bail!("--server requires a non-empty value");
+                }
+                out.server = Some(value);
+                args.remove(i);
+                continue;
+            }
+            if let Some(value) = strip_eq_prefix(arg, "--token") {
+                if value.is_empty() {
+                    bail!("--token requires a value");
+                }
+                out.token = Some(value.to_string());
+                args.remove(i);
+                continue;
+            }
+            if arg == "--token" {
+                if i + 1 >= args.len() {
+                    bail!("--token requires a value");
+                }
+                let value = args.remove(i + 1);
+                if value.trim().is_empty() {
+                    bail!("--token requires a non-empty value");
+                }
+                out.token = Some(value);
+                args.remove(i);
+                continue;
+            }
+            i += 1;
+        }
+        Ok(out)
+    }
+
+    /// Returns `Some(trigger_label)` if HTTP mode was requested via any of:
+    /// `--http`, `--server`, `--token`, or `SYSLOG_USE_HTTP=1|true`. Returns
+    /// `None` for the default Local mode. The label is the literal flag the
+    /// user passed, used verbatim in error messages.
+    ///
+    /// Note: `SYSLOG_API_TOKEN` being set does NOT trigger HTTP — only the
+    /// explicit opt-ins above do (locked decision).
+    pub(crate) fn http_trigger(&self) -> Option<&'static str> {
+        if let Some(flag) = self.http_flag_trigger() {
+            return Some(flag);
+        }
+        if env_opts_into_http() {
+            return Some("SYSLOG_USE_HTTP=1");
+        }
+        None
+    }
+
+    /// Like [`http_trigger`] but only considers explicit command-line FLAGS,
+    /// ignoring the `SYSLOG_USE_HTTP` env var. Used by local-only commands
+    /// (`compose`, `setup`) that must not bail just because operators have
+    /// `SYSLOG_USE_HTTP=true` written into `~/.syslog-mcp/.env`.
+    pub(crate) fn http_flag_trigger(&self) -> Option<&'static str> {
+        if self.force_http {
+            return Some("--http");
+        }
+        if self.server.is_some() {
+            return Some("--server");
+        }
+        if self.token.is_some() {
+            return Some("--token");
+        }
+        None
+    }
+
+    /// Build an [`HttpClient`] from these flags. On discovery failure, wraps
+    /// the underlying error with a prefix naming the trigger so the operator
+    /// knows exactly which knob put them into HTTP mode — this is the
+    /// fail-closed contract from eng-review #C6.
+    pub(crate) fn build_http_client(
+        &self,
+        trigger: &'static str,
+    ) -> Result<http_client::HttpClient> {
+        http_client::HttpClient::discover(self.server.clone(), self.token.clone())
+            .map_err(|err| anyhow!("HTTP mode requested via {trigger} but discovery failed: {err}"))
+    }
+}
+
+/// Returns `true` when `SYSLOG_USE_HTTP` is set to `1` or `true`
+/// (case-insensitive). Any other value — including empty string, `0`, `false`,
+/// or typos — is treated as unset.
+fn env_opts_into_http() -> bool {
+    match std::env::var(ENV_USE_HTTP) {
+        Ok(v) => {
+            let v = v.trim();
+            v.eq_ignore_ascii_case("1") || v.eq_ignore_ascii_case("true")
+        }
+        Err(_) => false,
+    }
+}
+
+/// If `arg` matches `flag=...` return the suffix; otherwise `None`.
+fn strip_eq_prefix<'a>(arg: &'a str, flag: &str) -> Option<&'a str> {
+    arg.strip_prefix(flag)
+        .and_then(|rest| rest.strip_prefix('='))
 }
 
 #[cfg(test)]

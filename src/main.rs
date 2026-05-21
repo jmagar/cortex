@@ -1,8 +1,7 @@
 use anyhow::Result;
 use axum::Router;
 use rmcp::{transport::stdio, ServiceExt};
-use serde::Serialize;
-use syslog_mcp::{api, logging, mcp, runtime::RuntimeCore};
+use syslog_mcp::{api, doctor, logging, mcp, runtime::RuntimeCore};
 use tracing::info;
 
 mod cli;
@@ -26,10 +25,10 @@ async fn main() -> Result<()> {
     match mode {
         Mode::ServeMcp => serve_mcp().await,
         Mode::StdioMcp => serve_stdio_mcp().await,
-        Mode::Cli(command) => run_cli(*command).await,
+        Mode::Cli(invocation) => run_cli(*invocation).await,
         Mode::Setup(command) => run_setup(command).await,
-        Mode::DoctorBinary(command) => run_binary_doctor(command).await,
-        Mode::DoctorFull(command) => run_doctor_full(command).await,
+        Mode::DoctorBinary(command) => doctor::run_binary_doctor(command.json).await,
+        Mode::DoctorFull(command) => doctor::run_full_doctor(command.json).await,
         Mode::Help => unreachable!("handled before logging initialization"),
         Mode::Version => unreachable!("handled before logging initialization"),
     }
@@ -42,18 +41,58 @@ async fn serve_stdio_mcp() -> Result<()> {
     Ok(())
 }
 
-async fn run_cli(command: cli::CliCommand) -> Result<()> {
-    if matches!(command, cli::CliCommand::Compose(_)) {
-        return cli::run_compose(command);
+async fn run_cli(invocation: CliInvocation) -> Result<()> {
+    let CliInvocation { command, flags } = invocation;
+
+    // `compose`, `setup`, and `service` stay on the local-only path: they
+    // manage local host state (systemd units, Docker compose stacks, on-disk
+    // config, user journal logs) that has no HTTP analogue. Reject explicit
+    // HTTP-mode FLAGS up front, but
+    // silently ignore the `SYSLOG_USE_HTTP` env trigger — `setup repair`
+    // writes that into `~/.syslog-mcp/.env` as the post-cutover default, and
+    // bailing on it would break the very command operators run to repair.
+    if matches!(
+        command,
+        cli::CliCommand::Compose(_) | cli::CliCommand::Setup(_) | cli::CliCommand::Service(_)
+    ) {
+        if let Some(trigger) = flags.http_flag_trigger() {
+            let command_name = match command {
+                cli::CliCommand::Compose(_) => "compose",
+                cli::CliCommand::Setup(_) => "setup",
+                cli::CliCommand::Service(_) => "service",
+                _ => unreachable!("guarded by matches! above"),
+            };
+            anyhow::bail!(
+                "{} has no effect on `{}` (local-only command); remove --http / --server / --token",
+                trigger,
+                command_name,
+            );
+        }
+        return match command {
+            cli::CliCommand::Compose(_) => cli::run_compose(command),
+            // `service` is a pure-journal surface — don't open SQLite for it.
+            // The watcher/DB might be the very thing the operator is debugging.
+            cli::CliCommand::Service(_) => cli::run_service_no_db(command).await,
+            cli::CliCommand::Setup(cmd) => cli::run_setup(cmd),
+            _ => unreachable!("guarded by matches! above"),
+        };
     }
-    if let cli::CliCommand::Setup(command) = command {
-        return cli::run_setup(command);
-    }
+
     if let cli::CliCommand::Config(command) = command {
         return cli::run_config(command);
     }
-    let runtime = RuntimeCore::load_query_only().await?;
-    cli::run(runtime.service(), command).await
+
+    // Build CliMode ONCE per invocation, matching the per-invocation reqwest
+    // Client rule from bead .5. For Local mode we lazily load the runtime so
+    // HTTP-mode invocations don't pay the SQLite-open cost.
+    let mode = match flags.http_trigger() {
+        Some(trigger) => cli::CliMode::Http(flags.build_http_client(trigger)?),
+        None => {
+            let runtime = RuntimeCore::load_query_only().await?;
+            cli::CliMode::Local(runtime.service())
+        }
+    };
+    cli::run(mode, command).await
 }
 
 async fn run_setup(command: SetupCommand) -> Result<()> {
@@ -96,38 +135,6 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
     Ok(())
 }
 
-async fn run_binary_doctor(command: DoctorBinaryCommand) -> Result<()> {
-    let report = BinaryDoctorReport::collect();
-    if command.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!("current_exe: {}", report.current_exe);
-        println!(
-            "path_syslog: {}",
-            report.path_syslog.as_deref().unwrap_or("-")
-        );
-        println!("repo_version: {}", report.repo_version);
-        println!(
-            "container_version: {}",
-            report.container_version.as_deref().unwrap_or("-")
-        );
-        println!(
-            "runtime_current: {}",
-            report
-                .runtime_current
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "-".to_string())
-        );
-        if let Some(error) = &report.runtime_current_error {
-            println!("runtime_current_error: {}", error);
-        }
-    }
-    if report.runtime_current == Some(false) {
-        anyhow::bail!("running syslog container is not current");
-    }
-    Ok(())
-}
-
 fn parse_doctor_full_command(args: &[String]) -> Result<DoctorFullCommand> {
     let mut json = false;
     for arg in args {
@@ -141,361 +148,6 @@ fn parse_doctor_full_command(args: &[String]) -> Result<DoctorFullCommand> {
         }
     }
     Ok(DoctorFullCommand { json })
-}
-
-async fn run_doctor_full(command: DoctorFullCommand) -> Result<()> {
-    use std::collections::HashSet;
-    use syslog_mcp::compose::{
-        CliDockerInspect, ComposeDefaults, ComposeService, ComposeTarget, DiagnosticSeverity,
-        ProcessRunner,
-    };
-    use syslog_mcp::setup::SetupStatus;
-
-    // (status, name, detail) — elapsed omitted from display for cleanliness.
-    type Phase = (SetupStatus, String, String);
-
-    fn status_label(s: &SetupStatus) -> &'static str {
-        match s {
-            SetupStatus::Ok => "Ok   ",
-            SetupStatus::Warn => "Warn ",
-            SetupStatus::Error => "Error",
-            SetupStatus::Skipped => "Skip ",
-        }
-    }
-
-    fn diag_status(sev: &DiagnosticSeverity) -> SetupStatus {
-        match sev {
-            DiagnosticSeverity::Error | DiagnosticSeverity::Unsafe => SetupStatus::Error,
-            DiagnosticSeverity::Warning => SetupStatus::Warn,
-            DiagnosticSeverity::Info => SetupStatus::Ok,
-        }
-    }
-
-    /// Truncate multi-line text to the most meaningful single line.
-    fn first_meaningful_line(text: &str) -> &str {
-        text.lines().find(|l| !l.trim().is_empty()).unwrap_or(text)
-    }
-
-    /// Print a section: header with pass/warn/error counts, then only non-Ok phases.
-    fn print_section(header: &str, phases: &[Phase]) -> usize {
-        let errors = phases
-            .iter()
-            .filter(|(s, ..)| matches!(s, SetupStatus::Error))
-            .count();
-        let warnings = phases
-            .iter()
-            .filter(|(s, ..)| matches!(s, SetupStatus::Warn))
-            .count();
-        let passed = phases
-            .iter()
-            .filter(|(s, ..)| matches!(s, SetupStatus::Ok | SetupStatus::Skipped))
-            .count();
-
-        let counts = match (passed, errors, warnings) {
-            (_, 0, 0) => format!("{passed} passed"),
-            (0, e, 0) => format!("{e} error"),
-            (0, 0, w) => format!("{w} warning"),
-            (0, e, w) => format!("{e} error, {w} warning"),
-            (_, e, 0) => format!("{passed} passed · {e} error"),
-            (_, 0, w) => format!("{passed} passed · {w} warning"),
-            (_, e, w) => format!("{passed} passed · {e} error, {w} warning"),
-        };
-        println!("{:<18} {}", header, counts);
-        for (status, name, detail) in phases {
-            if matches!(status, SetupStatus::Ok | SetupStatus::Skipped) {
-                continue;
-            }
-            println!(
-                "  {}  {:<26}  {}",
-                status_label(status),
-                name,
-                first_meaningful_line(detail)
-            );
-        }
-        errors
-    }
-
-    if command.json {
-        // JSON: aggregate raw sub-reports; don't apply the text-mode fixups.
-        let setup = syslog_mcp::setup::run_setup_doctor()
-            .await
-            .map(|r| serde_json::to_value(&r).unwrap_or_default())
-            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-
-        let compose_svc =
-            ComposeService::new(CliDockerInspect, ProcessRunner, ComposeDefaults::default());
-        let compose = compose_svc
-            .status(&ComposeTarget::default())
-            .map(|r| serde_json::to_value(&r).unwrap_or_default())
-            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-
-        let binary = BinaryDoctorReport::collect();
-
-        let ai = match RuntimeCore::load_query_only().await {
-            Ok(runtime) => runtime
-                .service()
-                .ai_doctor()
-                .await
-                .map(|r| serde_json::to_value(&r).unwrap_or_default())
-                .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
-            Err(e) => serde_json::json!({"error": e.to_string()}),
-        };
-
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "setup":   setup,
-                "compose": compose,
-                "binary":  binary,
-                "ai":      ai,
-            }))?
-        );
-
-        let setup_errors = setup
-            .get("blocking_errors")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        // Dev-mode checks don't count as real errors in the JSON exit code either.
-        let setup_dev_errors = ["debug-wrapper-content", "debug-compose-content"]
-            .iter()
-            .filter(|name| {
-                setup
-                    .get("phases")
-                    .and_then(|p| p.as_array())
-                    .is_some_and(|phases| {
-                        phases.iter().any(|ph| {
-                            ph.get("name").and_then(|n| n.as_str()) == Some(name)
-                                && matches!(
-                                    ph.get("status").and_then(|s| s.as_str()),
-                                    Some("error")
-                                )
-                        })
-                    })
-            })
-            .count() as u64;
-        let compose_errors = compose
-            .get("diagnostics")
-            .and_then(|v| v.as_array())
-            .map(|d| {
-                d.iter()
-                    .filter(|diag| {
-                        matches!(
-                            diag.get("severity").and_then(|s| s.as_str()),
-                            Some("error") | Some("unsafe")
-                        )
-                    })
-                    .count() as u64
-            })
-            .unwrap_or(0);
-        let binary_errors = if binary.runtime_current == Some(false) {
-            1u64
-        } else {
-            0
-        };
-        let total = setup_errors.saturating_sub(setup_dev_errors) + compose_errors + binary_errors;
-        if total > 0 {
-            anyhow::bail!("doctor found {total} error(s)");
-        }
-        return Ok(());
-    }
-
-    // ── Text mode ─────────────────────────────────────────────────────────────
-    let mut total_errors: usize = 0;
-
-    // 1. Setup -----------------------------------------------------------------
-    let mut setup_phases: Vec<Phase> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    match syslog_mcp::setup::run_setup_doctor().await {
-        Ok(report) => {
-            for phase in &report.phases {
-                // Skip runtime-current — the Binary section covers it more clearly.
-                if phase.name == "runtime-current" {
-                    continue;
-                }
-                // Skip duplicates (setup doctor embeds ai-watch-service phases which
-                // repeat some top-level phases like ai-transcript-root-permissions).
-                if !seen.insert(phase.name.to_string()) {
-                    continue;
-                }
-                // Dev-mode checks always fail when the production binary is
-                // installed instead of the debug wrapper. Downgrade to Warn and
-                // replace the cryptic file-content error with a clearer message.
-                let (status, detail) = match phase.name {
-                    "debug-wrapper-content" if matches!(phase.status, SetupStatus::Error) => (
-                        SetupStatus::Warn,
-                        "production binary installed (not the dev wrapper — expected in production)"
-                            .to_string(),
-                    ),
-                    "debug-compose-content" if matches!(phase.status, SetupStatus::Error) => (
-                        SetupStatus::Warn,
-                        "override uses production config (not the debug build override — expected in production)"
-                            .to_string(),
-                    ),
-                    _ => (phase.status.clone(), phase.detail.clone()),
-                };
-                setup_phases.push((status, phase.name.to_string(), detail));
-            }
-        }
-        Err(e) => {
-            setup_phases.push((SetupStatus::Error, "setup_doctor".into(), e.to_string()));
-        }
-    }
-    total_errors += print_section("Setup", &setup_phases);
-
-    // 2. Compose ---------------------------------------------------------------
-    let mut compose_phases: Vec<Phase> = Vec::new();
-    let compose_svc =
-        ComposeService::new(CliDockerInspect, ProcessRunner, ComposeDefaults::default());
-    match compose_svc.status(&ComposeTarget::default()) {
-        Ok(status) => {
-            let running = status
-                .status
-                .as_deref()
-                .is_some_and(|s| !s.to_ascii_lowercase().contains("exit") && s != "stopped");
-            compose_phases.push((
-                if running {
-                    SetupStatus::Ok
-                } else {
-                    SetupStatus::Error
-                },
-                "status".into(),
-                format!(
-                    "{} ({})",
-                    status.status.as_deref().unwrap_or("unknown"),
-                    status.health.as_deref().unwrap_or("no healthcheck")
-                ),
-            ));
-            // data_volume bind-mount check.
-            match status.data_mounts.iter().find(|m| m.target == "/data") {
-                Some(m) => {
-                    let src = m
-                        .source
-                        .as_ref()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_default();
-                    compose_phases.push((
-                        if m.kind == "bind" {
-                            SetupStatus::Ok
-                        } else {
-                            SetupStatus::Error
-                        },
-                        "data_volume".into(),
-                        format!("{} {} → /data", m.kind, src),
-                    ));
-                }
-                None if running => {
-                    compose_phases.push((
-                        SetupStatus::Error,
-                        "data_volume".into(),
-                        "no /data mount".into(),
-                    ));
-                }
-                None => {}
-            }
-            for diag in &status.diagnostics {
-                compose_phases.push((
-                    diag_status(&diag.severity),
-                    diag.code.clone(),
-                    diag.message.clone(),
-                ));
-            }
-        }
-        Err(e) => {
-            compose_phases.push((SetupStatus::Error, "compose_status".into(), e.to_string()));
-        }
-    }
-    total_errors += print_section("Compose", &compose_phases);
-
-    // 3. Binary ----------------------------------------------------------------
-    let binary = BinaryDoctorReport::collect();
-    let (bin_status, bin_detail) = match binary.runtime_current {
-        Some(true) => (
-            SetupStatus::Ok,
-            format!(
-                "container {} == repo {}",
-                binary.container_version.as_deref().unwrap_or("-"),
-                binary.repo_version
-            ),
-        ),
-        Some(false) => (
-            SetupStatus::Error,
-            format!(
-                "container {} != repo {} — run: syslog compose up",
-                binary.container_version.as_deref().unwrap_or("-"),
-                binary.repo_version
-            ),
-        ),
-        None => (
-            SetupStatus::Warn,
-            binary
-                .runtime_current_error
-                .as_deref()
-                .map(first_meaningful_line)
-                .unwrap_or("could not determine container version")
-                .to_string(),
-        ),
-    };
-    total_errors += print_section(
-        "Binary",
-        &[(bin_status, "runtime_current".into(), bin_detail)],
-    );
-
-    // 4. AI Transcripts --------------------------------------------------------
-    let mut ai_phases: Vec<Phase> = Vec::new();
-    match RuntimeCore::load_query_only().await {
-        Ok(runtime) => match runtime.service().ai_doctor().await {
-            Ok(ai) => {
-                for (name, root) in [
-                    ("claude_root", &ai.claude_root),
-                    ("codex_root", &ai.codex_root),
-                ] {
-                    let (s, detail) = if root.exists && root.readable {
-                        (SetupStatus::Ok, root.path.clone())
-                    } else if !root.exists {
-                        (SetupStatus::Warn, format!("{} (missing)", root.path))
-                    } else {
-                        (SetupStatus::Warn, format!("{} (not readable)", root.path))
-                    };
-                    ai_phases.push((s, name.into(), detail));
-                }
-                ai_phases.push((
-                    if ai.checkpoint_error_count > 0 || ai.missing_checkpoint_count > 0 {
-                        SetupStatus::Warn
-                    } else {
-                        SetupStatus::Ok
-                    },
-                    "checkpoints".into(),
-                    format!(
-                        "{} indexed, {} errors, {} missing",
-                        ai.checkpoint_count, ai.checkpoint_error_count, ai.missing_checkpoint_count
-                    ),
-                ));
-                if ai.parse_error_count > 0 {
-                    ai_phases.push((
-                        SetupStatus::Warn,
-                        "parse_errors".into(),
-                        format!("{} parse errors", ai.parse_error_count),
-                    ));
-                }
-            }
-            Err(e) => {
-                ai_phases.push((SetupStatus::Error, "ai_doctor".into(), e.to_string()));
-            }
-        },
-        Err(e) => {
-            ai_phases.push((SetupStatus::Error, "db_connect".into(), e.to_string()));
-        }
-    }
-    total_errors += print_section("AI Transcripts", &ai_phases);
-
-    // ── Summary ───────────────────────────────────────────────────────────────
-    println!();
-    if total_errors == 0 {
-        println!("All checks passed.");
-    } else {
-        anyhow::bail!("{total_errors} error(s) found");
-    }
-    Ok(())
 }
 
 async fn serve_mcp() -> Result<()> {
@@ -513,7 +165,6 @@ async fn serve_mcp() -> Result<()> {
         pool_size = runtime.config.storage.pool_size,
         wal_mode = runtime.config.storage.wal_mode,
         mcp_auth_enabled = runtime.config.mcp.api_token.is_some(),
-        api_enabled = runtime.config.api.enabled,
         docker_ingest_enabled = runtime.config.docker_ingest.enabled,
         docker_ingest_hosts = runtime.config.docker_ingest.hosts.len(),
         "Configuration loaded"
@@ -523,14 +174,30 @@ async fn serve_mcp() -> Result<()> {
     let _maintenance = runtime.spawn_maintenance_tasks();
 
     let mut app: Router = mcp::router(runtime.mcp_state());
-    if runtime.config.api.enabled {
-        app = app.merge(api::router(api::ApiState {
-            service: runtime.service(),
-            config: runtime.config.api.clone(),
-            cors_port: runtime.config.mcp.port,
-            auth_policy: runtime.auth_policy().clone(),
-        })?);
+    // /api/* is always-on. The container fails to start without
+    // SYSLOG_API_TOKEN — `api::router` enforces that explicitly with a
+    // recovery hint pointing at `syslog setup repair`.
+    {
+        let api_state = api::ApiState::new(
+            runtime.service(),
+            runtime.config.api.clone(),
+            runtime.config.mcp.port,
+            syslog_mcp::config::mcp_bind_is_loopback(&runtime.config),
+            runtime.config.mcp.allowed_origins.clone(),
+            runtime.auth_policy().clone(),
+            runtime.pool(),
+        )?;
+        app = app.merge(api::router(api_state)?);
         info!("Non-MCP API mounted under /api");
+    }
+    if syslog_mcp::config::api_token_plaintext_exposure(&runtime.config) {
+        tracing::warn!(
+            bind = %runtime.config.mcp.bind_addr(),
+            public_url = ?runtime.config.mcp.auth.public_url,
+            "SYSLOG_API_TOKEN will traverse the wire in plaintext: non-loopback bind with no \
+             https:// public URL configured. Front the listener with a TLS-terminating reverse \
+             proxy (e.g. SWAG) and set SYSLOG_MCP_PUBLIC_URL=https://..."
+        );
     }
     app = app.merge(runtime.otlp_router());
     info!("OTLP receiver mounted at /v1/logs (and /v1/metrics, /v1/traces → 404)");
@@ -563,12 +230,23 @@ async fn serve_mcp() -> Result<()> {
 enum Mode {
     ServeMcp,
     StdioMcp,
-    Cli(Box<cli::CliCommand>),
+    Cli(Box<CliInvocation>),
     Setup(SetupCommand),
     DoctorBinary(DoctorBinaryCommand),
     DoctorFull(DoctorFullCommand),
     Help,
     Version,
+}
+
+/// Pairs a parsed [`cli::CliCommand`] with the [`cli::GlobalFlags`] that came
+/// alongside it on the command line. Built by [`Mode::parse`] so `run_cli`
+/// can construct the [`cli::CliMode`] (Local vs Http) exactly once per
+/// invocation — matching the per-invocation `reqwest::Client` rule from
+/// bead .5.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CliInvocation {
+    command: cli::CliCommand,
+    flags: cli::GlobalFlags,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -599,19 +277,48 @@ struct DoctorBinaryCommand {
 
 impl Mode {
     fn parse(args: Vec<String>) -> Result<Self> {
-        match args.as_slice() {
-            [] => Ok(Self::ServeMcp),
-            [flag] if flag == "--help" || flag == "-h" || flag == "help" => Ok(Self::Help),
-            [flag] if flag == "--version" || flag == "-V" || flag == "version" => Ok(Self::Version),
-            [command] if command == "mcp" => Ok(Self::StdioMcp),
-            [serve, service] if serve == "serve" && service == "mcp" => Ok(Self::ServeMcp),
+        // `--help` / `--version` MUST bypass everything else: no global flag
+        // extraction, no env reads, no service construction. Per bead .6
+        // contract these work even with `SYSLOG_API_TOKEN` unset.
+        if let Some(first) = args.first() {
+            if first == "--help" || first == "-h" || first == "help" {
+                return Ok(Self::Help);
+            }
+            if first == "--version" || first == "-V" || first == "version" {
+                return Ok(Self::Version);
+            }
+        }
+
+        // Strip CLI-only global flags (`--http`, `--server`, `--token`) from
+        // the arg list before subcommand dispatch so they work in any
+        // position: `syslog --http search foo` AND `syslog search --http foo`.
+        // Non-CLI modes (serve/mcp/setup/doctor) reject them below — the
+        // flags imply HTTP transport, which only applies to the query CLI.
+        let mut remaining = args.clone();
+        let global = cli::GlobalFlags::extract(&mut remaining)?;
+
+        match remaining.as_slice() {
+            [] if global == cli::GlobalFlags::default() => Ok(Self::ServeMcp),
+            [command] if command == "mcp" && global == cli::GlobalFlags::default() => {
+                Ok(Self::StdioMcp)
+            }
+            [serve, service]
+                if serve == "serve"
+                    && service == "mcp"
+                    && global == cli::GlobalFlags::default() =>
+            {
+                Ok(Self::ServeMcp)
+            }
             [command, rest @ ..]
                 if command == "setup"
-                    && rest.first().map(String::as_str) != Some("plugin-hook") =>
+                    && rest.first().map(String::as_str) != Some("plugin-hook")
+                    && global == cli::GlobalFlags::default() =>
             {
                 Ok(Self::Setup(parse_setup_command(rest)?))
             }
-            [command, rest @ ..] if command == "doctor" => {
+            [command, rest @ ..]
+                if command == "doctor" && global == cli::GlobalFlags::default() =>
+            {
                 if rest.first().map(String::as_str) == Some("binary") {
                     Ok(Self::DoctorBinary(parse_doctor_command(rest)?))
                 } else {
@@ -626,11 +333,13 @@ impl Mode {
                         | "errors"
                         | "hosts"
                         | "sessions"
+                        | "incident"
                         | "ai"
                         | "correlate"
                         | "stats"
                         | "db"
                         | "compose"
+                        | "service"
                         | "setup"
                         | "config"
                 ) =>
@@ -638,7 +347,23 @@ impl Mode {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
                 cli_args.push(command.clone());
                 cli_args.extend(rest.iter().cloned());
-                Ok(Self::Cli(Box::new(cli::CliCommand::parse(cli_args)?)))
+                let command = cli::CliCommand::parse(cli_args)?;
+                Ok(Self::Cli(Box::new(CliInvocation {
+                    command,
+                    flags: global,
+                })))
+            }
+            _ if global != cli::GlobalFlags::default() => {
+                // Global HTTP flags only apply to CLI query commands. Surface
+                // a precise error rather than letting them be silently
+                // ignored for `serve mcp`, `setup`, etc.
+                anyhow::bail!(
+                    "--http / --server / --token only apply to CLI query commands \
+                     (search, tail, errors, hosts, sessions, ai, correlate, stats, incident, db); \
+                     compose, service, and setup are local-only and reject HTTP flags; \
+                     got: {}",
+                    args.join(" ")
+                );
             }
             _ => {
                 print_usage();
@@ -811,89 +536,6 @@ fn parse_doctor_command(args: &[String]) -> Result<DoctorBinaryCommand> {
     Ok(DoctorBinaryCommand { json })
 }
 
-#[derive(Debug, Serialize)]
-struct BinaryDoctorReport {
-    current_exe: String,
-    path_syslog: Option<String>,
-    repo_version: String,
-    container_version: Option<String>,
-    runtime_current: Option<bool>,
-    runtime_current_error: Option<String>,
-}
-
-impl BinaryDoctorReport {
-    fn collect() -> Self {
-        let current_exe = std::env::current_exe()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|error| format!("unknown: {error}"));
-        let path_syslog = command_stdout("sh", &["-c", "command -v syslog"]);
-        let container_version =
-            command_stdout("docker", &["exec", "syslog-mcp", "syslog", "--version"]);
-        let (runtime_current, runtime_current_error) = runtime_current_status();
-        Self {
-            current_exe,
-            path_syslog,
-            repo_version: env!("CARGO_PKG_VERSION").to_string(),
-            container_version,
-            runtime_current,
-            runtime_current_error,
-        }
-    }
-}
-
-fn runtime_current_status() -> (Option<bool>, Option<String>) {
-    let Some(script) = runtime_current_script_path() else {
-        return (
-            None,
-            Some("scripts/check-runtime-current.sh not found".into()),
-        );
-    };
-    match std::process::Command::new("bash").arg(script).output() {
-        Ok(output) if output.status.success() => (Some(true), None),
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            (
-                Some(false),
-                Some(format!("{stdout}{stderr}").trim().to_string()),
-            )
-        }
-        Err(error) => (None, Some(error.to_string())),
-    }
-}
-
-fn runtime_current_script_path() -> Option<std::path::PathBuf> {
-    if let Some(path) = std::env::var_os("SYSLOG_RUNTIME_CHECK_SCRIPT")
-        .map(std::path::PathBuf::from)
-        .filter(|path| path.exists())
-    {
-        return Some(path);
-    }
-
-    let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            candidates.push(exe_dir.join("scripts/check-runtime-current.sh"));
-            candidates.push(exe_dir.join("../scripts/check-runtime-current.sh"));
-            candidates.push(exe_dir.join("../../scripts/check-runtime-current.sh"));
-            candidates.push(exe_dir.join("../../../scripts/check-runtime-current.sh"));
-        }
-    }
-    candidates.push(std::path::PathBuf::from("scripts/check-runtime-current.sh"));
-
-    candidates.into_iter().find(|path| path.exists())
-}
-
-fn command_stdout(command: &str, args: &[&str]) -> Option<String> {
-    std::process::Command::new(command)
-        .args(args)
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
 fn print_usage() {
     eprintln!(
         "Usage:
@@ -908,11 +550,12 @@ fn print_usage() {
   syslog doctor binary [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
-  syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]
+  syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]
   syslog tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
   syslog errors [--from TIME] [--to TIME] [--json]
   syslog hosts [--json]
   syslog sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
+  syslog incident --around TIME [--minutes N] [--service SERVICE] [--host HOST] [--limit N] [--json]
   syslog ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]
   syslog ai abuse [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]
   syslog ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--from TIME] [--to TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]
@@ -929,16 +572,17 @@ fn print_usage() {
   syslog ai doctor [--strict-permissions] [--json]
   syslog ai watch-status [--json]
   syslog ai smoke-watch [--json]
-  syslog db status [--json]
+  syslog db status [--check-coord] [--json]
   syslog db integrity [--quick] [--json]
   syslog db checkpoint [--mode passive|full|restart|truncate] [--json]
-  syslog db vacuum [--pages N|--full] [--json]
+  syslog db vacuum [--pages N|--full] [--force] [--json]
   syslog db backup [--output PATH] [--json]
   syslog compose doctor [--json]
   syslog compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]
   syslog compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]
   syslog compose down --yes [--dry-run] [--allow-cwd-target] [--json]
   syslog compose logs [--tail N] [--json]
+  syslog service logs SERVICE [--from TIME] [--to TIME] [--tail N] [--json]
   syslog setup check|repair [--json]
   syslog setup plugin-hook [--no-repair] [--json]
   syslog config get KEY [--env|--toml] [--toml-path PATH] [--json]
@@ -948,8 +592,18 @@ fn print_usage() {
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
   syslog stats [--json]
 
+Global CLI flags (apply to query commands above; not valid for serve/mcp/setup/doctor):
+  --http              Route this invocation through the container's REST API instead of opening the local SQLite DB.
+                      Fails closed: if no token/server is discoverable, the CLI exits non-zero (never silently uses local).
+  --server URL        Override the API base URL (implies --http). Default: SYSLOG_MCP_URL or http://127.0.0.1:3100
+  --token TOKEN       Override the bearer token (implies --http). Default: SYSLOG_API_TOKEN
+
 Environment:
   SYSLOG_MCP_DB_PATH  SQLite database path used by both transports
+  SYSLOG_USE_HTTP     Set to 1 or true to default to HTTP mode without passing --http (fail-closed if discovery fails).
+                      SYSLOG_API_TOKEN alone does NOT trigger HTTP — must explicitly opt in via --http or SYSLOG_USE_HTTP=1.
+  SYSLOG_MCP_URL      Default API base URL for --http mode (overridden by --server)
+  SYSLOG_API_TOKEN    Bearer token for --http mode (overridden by --token)
   RUST_LOG            Log filter; stdio logs always go to stderr"
     );
 }

@@ -310,10 +310,7 @@ mod tests {
         use axum::{routing::post, Router};
         use tokio::net::TcpListener;
 
-        let app = Router::new().route(
-            "/notify/",
-            post(move || async move { axum::http::StatusCode::from(status_code) }),
-        );
+        let app = Router::new().route("/notify/", post(move || async move { status_code }));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let handle = tokio::spawn(async move {

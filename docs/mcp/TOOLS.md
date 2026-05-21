@@ -14,6 +14,8 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
 | `abuse` | Abuse hits in AI transcripts with same-session context |
+| `abuse_incidents` | Groups abuse hits into scored incident candidates |
+| `abuse_investigate` | Expands incidents into deterministic evidence bundles |
 | `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
 | `usage_blocks` | AI activity in deterministic 5-hour windows |
 | `project_context` | Summary for one AI project path |
@@ -101,6 +103,22 @@ Optional arguments: `project`, `tool`, `from`, `to`, `limit`, `before`, `after`,
 
 `terms` replaces the built-in abuse detector list when provided. `before`
 and `after` default to 2 and are capped at 20.
+
+## syslog abuse_incidents
+
+Groups AI transcript abuse hits into scored incident candidates by `(project, tool, session_id, hostname)` within a configurable time window. Returns incidents ordered by priority score with labels: `low` / `medium` / `high` / `critical`.
+
+Response includes `incidents`, `total_incidents`, `candidate_rows`, `candidate_cap`, `candidate_window_truncated`, `truncated`.
+
+Optional arguments: `project`, `tool`, `from`, `to`, `limit` (default 20, max 100), `window_minutes` (default 10, max 120), `terms`.
+
+## syslog abuse_investigate
+
+Expands the top abuse incidents into deterministic evidence bundles. Each bundle includes transcript context before and after the incident, the abuse anchor entries, and nearby non-AI syslog/Docker logs in the correlation window.
+
+Response includes `evidence` (array of bundles), `total_incidents`, `truncated`.
+
+Optional arguments: `project`, `tool`, `from`, `to`, `limit` (default 3, max 10), `window_minutes`, `correlation_window_minutes` (default 5, max 120), `terms`.
 
 ## syslog ai_correlate
 

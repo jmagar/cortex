@@ -80,6 +80,7 @@ async fn numeric_args_reject_out_of_range_values() {
         &h.state,
         "syslog",
         json!({"action": "tail", "n": u64::from(u32::MAX) + 1}),
+        None,
     )
     .await
     .unwrap_err();
@@ -95,7 +96,9 @@ async fn numeric_args_reject_wrong_type_values() {
         json!({"action": "correlate", "reference_time": "2026-01-01T00:00:00Z", "window_minutes": "5"}),
         json!({"action": "correlate", "reference_time": "2026-01-01T00:00:00Z", "limit": null}),
     ] {
-        let err = execute_tool(&h.state, "syslog", args).await.unwrap_err();
+        let err = execute_tool(&h.state, "syslog", args, None)
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("must be an unsigned integer"));
     }
 }
@@ -151,7 +154,7 @@ async fn schema_actions_are_dispatchable() {
             }
             _ => json!({"action": action}),
         };
-        let result = execute_tool(&h.state, "syslog", args).await;
+        let result = execute_tool(&h.state, "syslog", args, None).await;
         if *action == "compose_doctor" {
             if let Err(error) = result {
                 assert!(
@@ -232,8 +235,8 @@ async fn public_action_references_cover_schema_registry() {
         ("docs/mcp/TOOLS.md", include_str!("../../docs/mcp/TOOLS.md")),
         ("docs/mcp/TESTS.md", include_str!("../../docs/mcp/TESTS.md")),
         (
-            "plugins/skills/syslog/SKILL.md",
-            include_str!("../../plugins/skills/syslog/SKILL.md"),
+            "plugins/syslog/skills/syslog/SKILL.md",
+            include_str!("../../plugins/syslog/skills/syslog/SKILL.md"),
         ),
     ] {
         for action in SYSLOG_ACTIONS {
@@ -249,12 +252,12 @@ async fn public_action_references_cover_schema_registry() {
 #[tokio::test]
 async fn syslog_tool_requires_known_action() {
     let h = TestHarness::new();
-    let missing = execute_tool(&h.state, "syslog", json!({}))
+    let missing = execute_tool(&h.state, "syslog", json!({}), None)
         .await
         .unwrap_err();
     assert!(missing.to_string().contains("action is required"));
 
-    let unknown = execute_tool(&h.state, "syslog", json!({"action": "reboot"}))
+    let unknown = execute_tool(&h.state, "syslog", json!({"action": "reboot"}), None)
         .await
         .unwrap_err();
     assert!(unknown.to_string().contains("unknown syslog action"));
@@ -276,7 +279,9 @@ async fn compose_action_rejects_target_override() {
             args.as_object_mut()
                 .unwrap()
                 .insert(key.into(), json!("override-value"));
-            let err = execute_tool(&h.state, "syslog", args).await.unwrap_err();
+            let err = execute_tool(&h.state, "syslog", args, None)
+                .await
+                .unwrap_err();
             assert!(
                 err.to_string().contains("target override"),
                 "expected target override rejection for {action}.{key}, got: {err}"

@@ -48,6 +48,79 @@ pub struct DbBackupResult {
     pub size_bytes: u64,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceLogsRequest {
+    pub service: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub tail: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceLogsResponse {
+    pub service: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub tail: Option<u32>,
+    pub entries: Vec<ServiceJournalEntry>,
+    /// Count of journal lines that failed JSON parsing and were skipped.
+    /// Non-zero values indicate journal corruption or an unexpected format
+    /// — the surface still returns the entries that did parse rather than
+    /// failing the whole request.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub dropped_lines: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceJournalEntry {
+    pub timestamp: Option<String>,
+    pub realtime_timestamp_us: Option<String>,
+    pub unit: Option<String>,
+    pub priority: Option<String>,
+    pub syslog_identifier: Option<String>,
+    pub pid: Option<String>,
+    pub message: Option<String>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IncidentRequest {
+    pub around: String,
+    pub minutes: Option<u32>,
+    pub service: Option<String>,
+    pub hostname: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentResponse {
+    pub around: String,
+    pub window_minutes: u32,
+    pub window_from: String,
+    pub window_to: String,
+    pub event_count: usize,
+    pub truncated: bool,
+    pub warnings: Vec<String>,
+    pub events: Vec<IncidentEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentEvent {
+    pub timestamp: String,
+    pub source: String,
+    pub host: Option<String>,
+    pub severity: Option<String>,
+    pub app: Option<String>,
+    pub message: String,
+    pub log_id: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub id: i64,
@@ -90,6 +163,7 @@ impl From<db::LogEntry> for LogEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListSessionsRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -143,6 +217,7 @@ impl From<db::AiSessionEntry> for AiSessionEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SearchSessionsRequest {
     pub query: String,
     pub project: Option<String>,
@@ -207,6 +282,11 @@ pub struct SearchSessionsResponse {
     pub candidate_window_truncated: bool,
     pub truncated: bool,
     pub sessions: Vec<SearchedSessionEntry>,
+    /// Set by the REST handler when the caller-supplied `limit` exceeded the
+    /// server-side hard cap and was clamped down. Omitted from MCP/non-REST
+    /// responses, where no clamp is applied at this layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_clamped_to: Option<u32>,
 }
 
 impl From<db::SearchAiSessionsResult> for SearchSessionsResponse {
@@ -218,11 +298,13 @@ impl From<db::SearchAiSessionsResult> for SearchSessionsResponse {
             candidate_window_truncated: value.candidate_window_truncated,
             truncated: value.truncated,
             sessions: value.sessions.into_iter().map(Into::into).collect(),
+            limit_clamped_to: None,
         }
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AbuseSearchRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -262,6 +344,10 @@ pub struct AbuseSearchResponse {
     pub candidate_window_truncated: bool,
     pub truncated: bool,
     pub matches: Vec<AbuseMatch>,
+    /// Set by the REST handler when the caller-supplied `limit` exceeded the
+    /// server-side hard cap and was clamped down. Omitted on MCP responses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_clamped_to: Option<u32>,
 }
 
 impl From<db::AiAbuseResult> for AbuseSearchResponse {
@@ -273,11 +359,123 @@ impl From<db::AiAbuseResult> for AbuseSearchResponse {
             candidate_window_truncated: value.candidate_window_truncated,
             truncated: value.truncated,
             matches: value.matches.into_iter().map(Into::into).collect(),
+            limit_clamped_to: None,
         }
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiIncidentRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiIncidentResponse {
+    pub incidents: Vec<AbuseIncident>,
+    pub total_incidents: usize,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AbuseIncident {
+    pub incident_id: String,
+    pub project: String,
+    pub tool: String,
+    pub session_id: String,
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub duration_secs: i64,
+    pub abuse_count: usize,
+    pub terms: Vec<String>,
+    pub anchor_ids: Vec<i64>,
+    pub priority_score: f64,
+    pub priority_label: String,
+    pub window_minutes: u32,
+}
+
+impl From<db::AbuseIncident> for AbuseIncident {
+    fn from(v: db::AbuseIncident) -> Self {
+        Self {
+            incident_id: v.incident_id,
+            project: v.project,
+            tool: v.tool,
+            session_id: v.session_id,
+            hostname: v.hostname,
+            first_seen: v.first_seen,
+            last_seen: v.last_seen,
+            duration_secs: v.duration_secs,
+            abuse_count: v.abuse_count,
+            terms: v.terms,
+            anchor_ids: v.anchor_ids,
+            priority_score: v.priority_score,
+            priority_label: v.priority_label,
+            window_minutes: v.window_minutes,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiInvestigateRequest {
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentEvidence {
+    pub incident: AbuseIncident,
+    pub transcript_before: Vec<LogEntry>,
+    pub transcript_before_truncated: bool,
+    pub transcript_after: Vec<LogEntry>,
+    pub transcript_after_truncated: bool,
+    pub anchors: Vec<LogEntry>,
+    pub nearby_logs: Vec<LogEntry>,
+    pub nearby_logs_truncated: bool,
+    pub nearby_errors: Vec<LogEntry>,
+}
+
+impl From<db::IncidentEvidence> for IncidentEvidence {
+    fn from(v: db::IncidentEvidence) -> Self {
+        Self {
+            incident: v.incident.into(),
+            transcript_before: v.transcript_before.into_iter().map(Into::into).collect(),
+            transcript_before_truncated: v.transcript_before_truncated,
+            transcript_after: v.transcript_after.into_iter().map(Into::into).collect(),
+            transcript_after_truncated: v.transcript_after_truncated,
+            anchors: v.anchors.into_iter().map(Into::into).collect(),
+            nearby_logs: v.nearby_logs.into_iter().map(Into::into).collect(),
+            nearby_logs_truncated: v.nearby_logs_truncated,
+            nearby_errors: v.nearby_errors.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiInvestigateResponse {
+    pub evidence: Vec<IncidentEvidence>,
+    pub total_incidents: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AiCorrelateRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -315,9 +513,15 @@ pub struct AiCorrelateResponse {
     pub related_limit_per_anchor: usize,
     pub total_related_events: usize,
     pub anchors: Vec<AiCorrelationAnchor>,
+    /// Set by the REST handler when the caller-supplied `events_per_anchor`
+    /// exceeded the server-side hard cap of 50 and was clamped down. Omitted
+    /// on MCP responses, which use the service-layer clamp (200) only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events_per_anchor_clamped_to: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UsageBlocksRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -366,6 +570,7 @@ impl From<db::AiUsageBlocksResult> for UsageBlocksResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectContextRequest {
     pub project: String,
     pub tool: Option<String>,
@@ -402,6 +607,7 @@ impl From<db::AiProjectContext> for ProjectContextResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListAiToolsRequest {
     pub project: Option<String>,
     pub from: Option<String>,
@@ -447,6 +653,7 @@ impl From<db::ListAiToolsResult> for ListAiToolsResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListAiProjectsRequest {
     pub tool: Option<String>,
     pub from: Option<String>,
@@ -494,6 +701,7 @@ impl From<db::ListAiProjectsResult> for ListAiProjectsResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SearchLogsRequest {
     pub query: Option<String>,
     pub hostname: Option<String>,
@@ -501,9 +709,12 @@ pub struct SearchLogsRequest {
     pub severity: Option<String>,
     pub app_name: Option<String>,
     pub facility: Option<String>,
+    pub exclude_facility: Option<String>,
     pub process_id: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
+    pub received_from: Option<String>,
+    pub received_to: Option<String>,
     pub limit: Option<u32>,
 }
 
@@ -514,6 +725,7 @@ pub struct SearchLogsResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TailLogsRequest {
     pub hostname: Option<String>,
     pub source_ip: Option<String>,
@@ -545,6 +757,7 @@ impl From<db::ErrorSummaryEntry> for ErrorSummaryEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GetErrorsRequest {
     pub from: Option<String>,
     pub to: Option<String>,
@@ -582,6 +795,7 @@ pub struct ListHostsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CorrelateEventsRequest {
     pub reference_time: String,
     pub window_minutes: Option<u32>,
@@ -652,11 +866,19 @@ impl From<db::DbStats> for DbStats {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAppsRequest {
     pub hostname: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// Page size. Default 500, max 5000.
+    pub limit: Option<u32>,
+    /// Page offset. Default 0.
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListAppsResponse {
     pub apps: Vec<AppEntry>,
+    /// Total distinct app names matching the filter (across all pages).
+    pub total: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -680,9 +902,19 @@ impl From<db::AppEntry> for AppEntry {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListSourceIpsRequest {
+    /// Page size. Default 500, max 5000.
+    pub limit: Option<u32>,
+    /// Page offset. Default 0.
+    pub offset: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSourceIpsResponse {
     pub source_ips: Vec<SourceIpEntry>,
+    /// Total distinct source IPs in the database (across all pages).
+    pub total: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1141,6 +1373,95 @@ pub struct UnackErrorResponse {
     pub signature_hash: String,
     pub unacked_at: String,
     pub actor: String,
+}
+
+// ── AI checkpoint inventory + prune request structs (bead 0p8r.3) ────────────
+//
+// These are typed request shapes shared between the REST handlers in
+// `src/api.rs` and the future HTTP client in bead 0p8r.5. The corresponding
+// service methods (`list_ai_checkpoints`, `list_ai_parse_errors`,
+// `prune_ai_checkpoints` in `src/app/service.rs:609,628,638`) keep their
+// loose primitive signatures — handlers unpack the request into positional
+// args before calling the service.
+//
+// `deny_unknown_fields` on all three: typo'd POST/JSON fields must surface
+// as 400, not be silently dropped (eng-review #A1 echo).
+
+/// Query parameters for `GET /api/ai/checkpoints`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiCheckpointsRequest {
+    /// Restrict to checkpoints with persisted parse errors.
+    #[serde(default)]
+    pub errors_only: bool,
+    /// Restrict to checkpoints whose source file is missing on disk.
+    #[serde(default)]
+    pub missing_only: bool,
+    pub limit: Option<u32>,
+}
+
+/// Query parameters for `GET /api/ai/errors`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiParseErrorsRequest {
+    pub limit: Option<u32>,
+}
+
+/// JSON body for `POST /api/ai/prune-checkpoints`.
+///
+/// `dry_run` is intentionally `bool` (not `Option<bool>`): the handler
+/// pre-validates the JSON body contains the key before deserialization
+/// (eng-review C3). Defaulting silently to `false` would let `POST {}`
+/// mass-delete checkpoints — instead the handler returns 400.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiPruneCheckpointsRequest {
+    /// REQUIRED — must be specified explicitly. See struct docs.
+    pub dry_run: bool,
+    #[serde(default)]
+    pub missing_only: bool,
+    pub limit: Option<u32>,
+}
+
+/// Query parameters for `GET /api/db/integrity`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbIntegrityRequest {
+    /// Use the fast `PRAGMA quick_check` path. `false` (or absent) runs full
+    /// `PRAGMA integrity_check`.
+    #[serde(default)]
+    pub quick: bool,
+}
+
+/// JSON body for `POST /api/db/checkpoint`.
+///
+/// `mode` is validated at the handler entry against
+/// `{passive, full, restart, truncate}` (bead 0p8r.4 #A17) — SQLite would
+/// also reject unknown modes, but explicit handler-side validation produces
+/// a clearer 400 with the allowed list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbCheckpointRequest {
+    pub mode: String,
+}
+
+/// JSON body for `POST /api/db/vacuum`.
+///
+/// `force` is intentionally `Option<bool>` (not `bool` with serde default):
+/// the size pre-flight on `full == true` is bypassed ONLY when the body
+/// explicitly carries `"force": true`. `None` and `Some(false)` both leave
+/// the pre-flight in force, defending against accidental
+/// `POST {"full":true}` on a multi-GB DB. See bead 0p8r.4 (eng-review C3).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbVacuumRequest {
+    #[serde(default)]
+    pub full: bool,
+    #[serde(default)]
+    pub incremental_pages: u32,
+    /// Must be `Some(true)` to bypass the 2 GB size pre-flight on full
+    /// VACUUM. See struct docs.
+    pub force: Option<bool>,
 }
 
 #[cfg(test)]

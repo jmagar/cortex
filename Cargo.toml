@@ -1,6 +1,6 @@
 [package]
 name = "syslog-mcp"
-version = "0.25.3"
+version = "0.27.1"
 edition = "2021"
 rust-version = "1.86"
 description = "Syslog receiver + MCP server for homelab log intelligence"
@@ -46,6 +46,14 @@ bytes = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Query-string serializer/deserializer that handles `Vec<String>` from repeated
+# `?terms[]=a&terms[]=b` params (and `terms=a&terms=b`), unlike the default
+# `serde_urlencoded` axum 0.8 wires into `Query<T>`. Used by the axum extractor
+# on `GET /api/ai/abuse` so the wire shape matches `AbuseSearchRequest`
+# directly (bead 0p8r.15). The reqwest client also uses it to serialize the
+# same request via `Url::query_pairs_mut` so both ends share the type.
+serde_qs = { version = "1.0", features = ["axum"] }
+
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
@@ -75,8 +83,15 @@ getrandom = "0.3"
 
 futures-util = "0.3"
 
-# HTTP client for Apprise notifications
+# HTTP client for Apprise notifications and CLI REST routing (bead 0p8r.5).
+# NOTE: default-features=false omits gzip/brotli/deflate decompression — fine
+# for loopback `/api/*` calls. If the CLI ever points at a reverse proxy that
+# gzips responses, parsing will silently break; re-enable the relevant feature.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# CLI HTTP client: surfaces field path + preview when responses don't match
+# Response struct shape (bead 0p8r.5).
+serde_path_to_error = "0.1"
 
 # OTLP HTTP receiver — message types only, no gRPC transport
 opentelemetry-proto = { version = "0.31", default-features = false, features = [
@@ -98,3 +113,5 @@ rmcp = { version = "1.6.0", default-features = false, features = [
   "client",
   "transport-child-process",
 ] }
+# Mock HTTP server for CLI HTTP client tests (bead 0p8r.5).
+wiremock = "0.6"

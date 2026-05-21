@@ -76,10 +76,10 @@ methods as the MCP actions.
 
 | Surface | Present | Path |
 | --- | --- | --- |
-| Skills | yes | `plugins/skills/` |
+| Skills | yes | `plugins/syslog/skills/` |
 | Agents | no | -- |
 | Commands | no | -- |
-| Hooks | yes | `plugins/hooks/` |
+| Hooks | yes | `plugins/syslog/hooks/` |
 | Channels | no | -- |
 | Output styles | no | -- |
 | Schedules | no | -- |

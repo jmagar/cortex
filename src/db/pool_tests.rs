@@ -309,6 +309,47 @@ fn migration_13_adds_enrichment_columns() {
 }
 
 #[test]
+fn migration_13_tolerates_existing_columns_without_version_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migration-13-drift.db");
+    let config = crate::config::StorageConfig {
+        db_path: db_path.clone(),
+        wal_mode: true,
+        pool_size: 1,
+        ..Default::default()
+    };
+    let pool = init_pool(&config).expect("initial init_pool ok");
+    drop(pool);
+
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute("DELETE FROM schema_migrations WHERE version = 13", [])
+        .unwrap();
+    conn.execute("DROP INDEX idx_logs_event_action_time", [])
+        .unwrap();
+    drop(conn);
+
+    let pool = init_pool(&config).expect("re-init should repair migration drift");
+    let conn = pool.get().unwrap();
+    let version_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 13",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version_count, 1, "migration 13 row not restored");
+
+    let index_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_logs_event_action_time'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(index_count, 1, "migration 13 index not restored");
+}
+
+#[test]
 fn transcript_import_identity_enforces_uniqueness() {
     let dir = tempfile::tempdir().unwrap();
     let config = crate::config::StorageConfig {

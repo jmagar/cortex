@@ -18,9 +18,9 @@ This repo currently ships the Claude Code plugin manifest at
 | File | Platform | Status |
 | --- | --- | --- |
 | `.claude-plugin/plugin.json` | Claude Code | Current plugin manifest |
-| `plugins/.mcp.json` | Claude Code | MCP server template referenced by the manifest |
-| `plugins/hooks/hooks.json` | Claude Code | SessionStart and ConfigChange hook registration |
-| `plugins/skills/` | Claude Code | Plugin skill surfaces |
+| `plugins/syslog/.mcp.json` | Claude Code | MCP server template referenced by the manifest |
+| `plugins/syslog/hooks/hooks.json` | Claude Code | SessionStart and ConfigChange hook registration |
+| `plugins/syslog/skills/` | Claude Code | Plugin skill surfaces |
 
 This repo does not currently ship tracked Codex or Gemini manifest files. It
 does ship `server.json` for MCP Registry metadata. Do not copy older Codex or
@@ -33,8 +33,8 @@ The current manifest declares:
 
 | Field | Purpose |
 | --- | --- |
-| `mcpServers` | Points Claude Code at `./plugins/.mcp.json` |
-| `hooks` | Runs `plugins/hooks/hooks.json` |
+| `mcpServers` | Points Claude Code at `./plugins/syslog/.mcp.json` |
+| `hooks` | Runs `plugins/syslog/hooks/hooks.json` |
 | `skills` | Exposes repo-local plugin skills |
 | `userConfig.server_url` | Base HTTP URL for the running syslog-mcp server |
 | `userConfig.api_token` | Required Bearer token used by the plugin MCP client; enforced by the server unless `no_auth=true` |
@@ -45,7 +45,7 @@ The current manifest declares:
 | `userConfig.auth_mode` and OAuth fields | Optional OAuth/JWT configuration |
 | `userConfig.docker_ingest_*` | Optional docker-socket-proxy log ingestion |
 
-`plugins/.mcp.json` interpolates these values with `${user_config.*}`
+`plugins/syslog/.mcp.json` interpolates these values with `${user_config.*}`
 placeholders. Keep docs and validation scripts aligned with that syntax.
 
 ## Version synchronization

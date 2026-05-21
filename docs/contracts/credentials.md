@@ -75,9 +75,8 @@ them. They are **not** redacted and **are** safe to log.
 
 | Name | Env var | Purpose |
 |------|---------|---------|
-| Bootstrap admin email | `SYSLOG_MCP_AUTH_ADMIN_EMAIL` | Single Google account permitted to log in via OAuth when no DB-backed allowlist row exists. Used to bootstrap. |
+| Bootstrap admin email | `SYSLOG_MCP_AUTH_ADMIN_EMAIL` | Single Google account permitted to log in via OAuth. This is the only enforced OAuth email gate in V1. |
 | OAuth public URL | `SYSLOG_MCP_PUBLIC_URL` | Externally reachable base URL for issuer/audience derivation. |
-| OAuth email allowlist | `SYSLOG_MCP_AUTH_ALLOWED_EMAILS` | Additional emails allowed via OAuth (augments `admin_email`). |
 | OAuth allowed redirect URIs | `SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS` | Non-loopback redirect URIs accepted by lab-auth (loopback is implicit). |
 | Authelia source-IP gate | `SYSLOG_MCP_AUTHELIA_SOURCE_IP` | Optional prefix that gates Authelia severity reclassification (anti-spoof). |
 | AdGuard source-IP gate | `SYSLOG_MCP_ADGUARD_SOURCE_IP` | Same gating for the AdGuard parser tag classification. |

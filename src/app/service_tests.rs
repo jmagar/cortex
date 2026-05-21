@@ -62,6 +62,86 @@ fn ai_entry(ts: &str, msg: &str) -> LogBatchEntry {
     }
 }
 
+#[test]
+fn normalize_syslog_owned_service_rejects_arbitrary_units() {
+    assert_eq!(
+        normalize_syslog_owned_service("syslog-ai-watch").unwrap(),
+        "syslog-ai-watch.service"
+    );
+
+    let err = normalize_syslog_owned_service("ssh").unwrap_err();
+    assert!(err.to_string().contains("unsupported syslog-owned service"));
+}
+
+#[test]
+fn parse_journal_json_lines_extracts_service_log_fields() {
+    let raw = r#"{"__REALTIME_TIMESTAMP":"1780000000123456","_SYSTEMD_USER_UNIT":"syslog-ai-watch.service","PRIORITY":"3","SYSLOG_IDENTIFIER":"syslog","_PID":"42","MESSAGE":"AI transcript indexing failed","__CURSOR":"cursor-1"}"#;
+
+    let (entries, dropped) = parse_journal_json_lines(raw);
+    assert_eq!(dropped, 0);
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].unit.as_deref(), Some("syslog-ai-watch.service"));
+    assert_eq!(entries[0].priority.as_deref(), Some("3"));
+    assert_eq!(entries[0].syslog_identifier.as_deref(), Some("syslog"));
+    assert_eq!(entries[0].pid.as_deref(), Some("42"));
+    assert_eq!(
+        entries[0].message.as_deref(),
+        Some("AI transcript indexing failed")
+    );
+    assert_eq!(entries[0].cursor.as_deref(), Some("cursor-1"));
+    assert!(entries[0].timestamp.is_some());
+}
+
+#[tokio::test]
+async fn incident_returns_ordered_db_events_for_window() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry(
+                "2026-01-01T00:00:00.000Z",
+                "host-a",
+                "info",
+                "before",
+                "10.0.0.1:514",
+            ),
+            entry(
+                "2026-01-01T00:05:00.000Z",
+                "host-a",
+                "err",
+                "middle",
+                "10.0.0.1:514",
+            ),
+            entry(
+                "2026-01-01T00:11:00.000Z",
+                "host-a",
+                "warning",
+                "after",
+                "10.0.0.1:514",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let response = service
+        .incident(IncidentRequest {
+            around: "2026-01-01T00:05:00Z".into(),
+            minutes: Some(5),
+            service: None,
+            hostname: Some("host-a".into()),
+            limit: Some(10),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.window_from, "2026-01-01T00:00:00.000Z");
+    assert_eq!(response.window_to, "2026-01-01T00:10:00.000Z");
+    assert_eq!(response.events.len(), 2);
+    assert_eq!(response.events[0].message, "before");
+    assert_eq!(response.events[1].message, "middle");
+}
+
 #[tokio::test]
 async fn correlate_events_normalizes_window_groups_and_truncates() {
     let (service, pool, _dir) = test_service();
@@ -161,6 +241,69 @@ async fn correlate_ai_logs_cross_references_non_ai_logs_only() {
         "container failed during deployment"
     );
     assert!(response.anchors[0].related[0].ai_project.is_none());
+}
+
+#[tokio::test]
+async fn correlate_ai_logs_batches_related_windows_with_per_anchor_caps() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[
+            ai_entry("2026-01-01T00:00:00Z", "deploy failure near host-a"),
+            entry(
+                "2026-01-01T00:00:10Z",
+                "host-a",
+                "err",
+                "deploy failed on host-a",
+                "10.0.0.1:514",
+            ),
+            entry(
+                "2026-01-01T00:00:20Z",
+                "host-a",
+                "warning",
+                "deploy warning on host-a",
+                "10.0.0.1:514",
+            ),
+            ai_entry("2026-01-01T00:10:00Z", "deploy failure near host-b"),
+            entry(
+                "2026-01-01T00:10:10Z",
+                "host-b",
+                "err",
+                "deploy failed on host-b",
+                "10.0.0.2:514",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let response = service
+        .correlate_ai_logs(AiCorrelateRequest {
+            project: Some("/tmp/project".into()),
+            tool: Some("codex".into()),
+            ai_query: Some("deploy".into()),
+            log_query: Some("deploy".into()),
+            window_minutes: Some(1),
+            severity_min: Some("warning".into()),
+            limit: Some(2),
+            events_per_anchor: Some(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.total_anchors, 2);
+    assert_eq!(response.related_limit_per_anchor, 1);
+    assert_eq!(response.total_related_events, 2);
+    let truncated_count = response
+        .anchors
+        .iter()
+        .filter(|anchor| anchor.related_truncated)
+        .count();
+    assert_eq!(truncated_count, 1);
+    assert!(response
+        .anchors
+        .iter()
+        .all(|anchor| anchor.related.len() == 1));
 }
 
 #[tokio::test]

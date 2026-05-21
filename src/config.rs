@@ -286,14 +286,12 @@ pub struct AuthConfig {
     /// via `SYSLOG_MCP_GOOGLE_CLIENT_SECRET`.
     #[serde(default)]
     pub google_client_secret: Option<String>,
-    /// Single bootstrap admin email permitted to log in via Google OAuth.
-    /// Supplements `allowed_emails`. Overridable via
+    /// Single admin email permitted to log in via Google OAuth. Overridable via
     /// `SYSLOG_MCP_AUTH_ADMIN_EMAIL`.
     #[serde(default)]
     pub admin_email: String,
-    /// Email allowlist that augments the (future) DB-backed allowlist. MUST be
-    /// non-empty (or `admin_email` set) when `mode == OAuth` — without an
-    /// allowlist any Google account that completes OAuth would gain access.
+    /// Future multi-user email allowlist. Parsed for schema compatibility, but
+    /// rejected as the only OAuth gate until lab-auth enforces it.
     #[serde(default)]
     pub allowed_emails: Vec<String>,
     /// Path to the auth SQLite store. Relative paths are resolved against the
@@ -344,10 +342,8 @@ impl McpConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct ApiConfig {
-    /// Enable the non-MCP JSON API. Disabled by default.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Required bearer token when the non-MCP API is enabled.
+    /// Required bearer token for the always-on non-MCP JSON API.
+    /// Provisioned by `syslog setup repair`. The server fails to start without it.
     #[serde(default)]
     pub api_token: Option<String>,
 }
@@ -707,7 +703,6 @@ impl Config {
             &mut config.mcp.auth.disable_static_token_with_oauth,
         )?;
 
-        env_override_bool("SYSLOG_API_ENABLED", &mut config.api.enabled)?;
         env_override_opt_str("SYSLOG_API_TOKEN", &mut config.api.api_token);
 
         env_override_opt_str(
@@ -999,22 +994,24 @@ fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()> {
+pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()> {
     if token_is_set_but_blank(&config.mcp.api_token) {
         return Err(anyhow::anyhow!("mcp.api_token must not be empty"));
     }
-    if config.api.enabled {
-        match config.api.api_token.as_deref() {
-            Some(token) if !token.trim().is_empty() => {}
-            Some(_) => return Err(anyhow::anyhow!("api.api_token must not be empty")),
-            None => {
-                return Err(anyhow::anyhow!(
-                    "SYSLOG_API_TOKEN is required when SYSLOG_API_ENABLED=true"
-                ));
-            }
-        }
-    } else if token_is_set_but_blank(&config.api.api_token) {
+    if token_is_set_but_blank(&config.api.api_token) {
         return Err(anyhow::anyhow!("api.api_token must not be empty"));
+    }
+    // Note: SYSLOG_API_TOKEN being entirely unset is enforced at
+    // route-mount time by `api::router` (anyhow::bail) rather than here.
+    // Failing in `Config::load()` would break stdio-mode invocations
+    // (which call `load_for_stdio()` with check_bind=false but still hit
+    // this function) and the broad swath of tests that build Config
+    // without exporting the token. The route-mount bail still fires
+    // during server startup before any request is served, so operators
+    // see the same error early.
+
+    if config.mcp.no_auth {
+        return Ok(());
     }
 
     // ---- OAuth prerequisites ----------------------------------------------
@@ -1036,19 +1033,23 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
                 "SYSLOG_MCP_GOOGLE_CLIENT_SECRET is required when SYSLOG_MCP_AUTH_MODE=oauth"
             ));
         }
-        // Empty allowlist + empty admin_email → ANY Google account that
-        // completes OAuth would gain access. Reject at startup. (DB-row
-        // allowlist is checked at runtime once the auth store is available.)
         let admin_blank = auth.admin_email.trim().is_empty();
-        let allowlist_blank = auth
+        let allowed_emails_set = auth
             .allowed_emails
             .iter()
-            .all(|entry| entry.trim().is_empty());
-        if admin_blank && allowlist_blank {
+            .any(|entry| !entry.trim().is_empty());
+        if allowed_emails_set {
             return Err(anyhow::anyhow!(
-                "[mcp.auth] requires at least one entry in `allowed_emails` (or a non-empty \
-                 `admin_email`) when SYSLOG_MCP_AUTH_MODE=oauth — without an allowlist any \
-                 Google account that completes OAuth would gain access"
+                "[mcp.auth].allowed_emails is not passed to lab-auth; remove \
+                 `allowed_emails` and use `admin_email` or lab-auth-managed allowed_users until \
+                 syslog-mcp can enforce the config list"
+            ));
+        }
+        if admin_blank {
+            return Err(anyhow::anyhow!(
+                "[mcp.auth] requires a non-empty `admin_email` when \
+                 SYSLOG_MCP_AUTH_MODE=oauth — `allowed_emails` is parsed but not passed to \
+                 lab-auth yet"
             ));
         }
     }
@@ -1060,10 +1061,6 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     // ---- Non-loopback safety gate -----------------------------------------
     // Skip in stdio / query-only mode: no HTTP port is bound so the gate is
     // irrelevant. `check_bind` is false when called from Config::load_for_stdio.
-    if config.mcp.no_auth {
-        return Ok(());
-    }
-
     let bind_is_loopback = mcp_bind_is_loopback(config);
     if check_bind && !bind_is_loopback {
         let has_static_token = config
@@ -1094,10 +1091,25 @@ fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()>
     Ok(())
 }
 
-pub(crate) fn mcp_bind_is_loopback(config: &Config) -> bool {
+pub fn mcp_bind_is_loopback(config: &Config) -> bool {
     IpAddr::from_str(&config.mcp.host)
         .map(|ip| ip.is_loopback())
         .unwrap_or(false)
+}
+
+/// Returns true when the MCP HTTP listener is bound to a non-loopback address
+/// AND the operator-facing public URL is plain http:// (or absent). In that
+/// case `SYSLOG_API_TOKEN` traverses the wire in plaintext. SWAG TLS
+/// termination is the operator's responsibility — this helper just makes the
+/// trade-off observable at startup.
+pub fn api_token_plaintext_exposure(config: &Config) -> bool {
+    if mcp_bind_is_loopback(config) {
+        return false;
+    }
+    !matches!(
+        config.mcp.auth.public_url.as_deref(),
+        Some(url) if url.trim_start().to_ascii_lowercase().starts_with("https://"),
+    )
 }
 
 fn option_is_blank(value: &Option<String>) -> bool {

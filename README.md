@@ -24,7 +24,7 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md).
 
@@ -58,6 +58,11 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `compare` | Side-by-side comparison of two time ranges |
 | `compose_status` | Redacted read-only Compose deployment diagnostics |
 | `compose_doctor` | Alias for Compose deployment health diagnostics |
+| `unaddressed_errors` | Repeating unacknowledged error signatures |
+| `ack_error` | Acknowledge an error signature |
+| `unack_error` | Revoke an error acknowledgement |
+| `notifications_recent` | Recent notification firings |
+| `notifications_test` | Send a test notification via Apprise |
 | `help` | Markdown reference for all actions |
 
 ### `syslog search`
@@ -463,7 +468,7 @@ Useful installer controls:
 ```bash
 SYSLOG_INSTALL_DRY_RUN=1 ./install.sh
 SYSLOG_INSTALL_PREFIX=/opt/syslog-mcp ./install.sh
-SYSLOG_VERSION=0.25.2 ./install.sh
+SYSLOG_VERSION=0.25.4 ./install.sh
 SYSLOG_INSTALL_SKIP_SETUP=1 ./install.sh
 ```
 

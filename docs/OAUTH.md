@@ -1,6 +1,6 @@
 # OAuth Authentication
 
-syslog-mcp supports Google OAuth 2.0 as an alternative to the static bearer token. Both modes leave `/health` unauthenticated and honour the same scope-based tool dispatch.
+syslog-mcp supports Google OAuth 2.0 for MCP clients. Both bearer and OAuth modes leave `/health` unauthenticated and honour the same scope-based tool dispatch.
 
 ---
 
@@ -10,8 +10,8 @@ syslog-mcp supports Google OAuth 2.0 as an alternative to the static bearer toke
                          ┌────────────────────────────────────┐
 Client (browser/Claude)  │  syslog-mcp HTTP :3100             │
                          │                                    │
-  GET /auth/google/... ──▶  OAuth router (bearer_only_router) │
-  POST /token         ──▶  RS256 JWT issuance (lab-auth)     │
+  GET /authorize      ──▶  OAuth router (lab-auth)            │
+  POST /token         ──▶  RS256 JWT issuance (lab-auth)      │
                          │                                    │
   POST /mcp           ──▶  AuthLayer (lab-auth middleware)    │
     Bearer JWT        ──▶    RS256 verify → AuthContext       │
@@ -30,9 +30,8 @@ OAuth discovery endpoints (mounted when AUTH_MODE=oauth):
   GET /auth/google/callback
   POST /token
 
-NOT mounted in any mode:
+Intentionally not mounted:
   POST /register   (dynamic client registration — disabled)
-  GET  /auth/login (browser HTML login page — headless server)
 ```
 
 ### Auth flow (authorization_code grant)
@@ -42,7 +41,7 @@ NOT mounted in any mode:
 3. Client fetches `/.well-known/oauth-authorization-server` for the full metadata document.
 4. Client constructs an `/authorize` URL (PKCE S256, `scope=syslog:read`), opens in browser.
 5. User authenticates with Google; Google redirects to `/auth/google/callback`.
-6. Server validates email against allowlist, issues an RS256 access token (1h TTL) and a refresh token (8h TTL).
+6. Server validates the Google email against `admin_email` plus any lab-auth `allowed_users` rows, issues an RS256 access token (1h TTL) and a refresh token (8h TTL).
 7. Client uses `POST /token?grant_type=refresh_token` to obtain new access tokens without re-prompting.
 
 ---
@@ -81,11 +80,13 @@ public_url = "https://syslog.example.com"
 google_client_id = "..."         # overridden by SYSLOG_MCP_GOOGLE_CLIENT_ID
 google_client_secret = "..."     # overridden by SYSLOG_MCP_GOOGLE_CLIENT_SECRET
 
-# Single admin email (bootstrap allowlist)
+# Bootstrap config-backed OAuth email
 admin_email = "you@example.com"
 
-# Additional allowed emails
-allowed_emails = ["colleague@example.com"]
+# Reserved for future config-backed multi-user enforcement. Do not set in OAuth
+# mode today: startup rejects non-empty allowed_emails until syslog-mcp passes
+# or enforces that list.
+allowed_emails = []
 
 # File paths (relative to the syslog DB directory)
 sqlite_path = "auth.db"
@@ -104,11 +105,12 @@ disable_static_token_with_oauth = true   # default: true
 ## Gotchas
 
 - **Refresh token TTL is 8h**, not lab-auth's default of 30d. This suits the read-only homelab profile. Adjust via `[mcp.auth].refresh_token_ttl_secs`.
-- **Allowlist is required**. Without `admin_email` or `allowed_emails`, startup fails with a config error — any Google account would gain access otherwise.
-- **`disable_static_token_with_oauth` defaults to `true`**. When OAuth is active, `SYSLOG_MCP_TOKEN` is rejected by default. Set `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in config.toml for break-glass bearer access.
+- **`admin_email` is required**. It is the only config-backed OAuth email gate syslog-mcp passes into lab-auth today. lab-auth also honors rows in its `allowed_users` table. Startup rejects OAuth configs with a blank `admin_email`, and also rejects non-empty config-level `allowed_emails` until syslog-mcp can pass or enforce that list.
+- **`disable_static_token_with_oauth` defaults to `true` for `/mcp`**. OAuth-mode `/mcp` rejects `SYSLOG_MCP_TOKEN` by default. Set `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in config.toml for break-glass bearer access.
+- **Non-loopback OAuth deployments still need `SYSLOG_MCP_TOKEN` for OTLP `/v1/logs` unless OTLP exposure is loopback-only or service auth is explicitly disabled behind an upstream auth layer.** OTLP ingest does not accept OAuth JWTs today.
 - **Stdio mode always uses LoopbackDev**. `cargo run -- mcp` ignores the auth config entirely — no credentials are needed or enforced.
 - **Docker bind-mount ownership**. `auth.db` and `auth-jwt.pem` are written by the container UID. Host-side backup scripts may need `sudo` or a sidecar copy step.
-- **`/register` and `/auth/login` are never mounted**. syslog-mcp uses the headless (`bearer_only_router`) subset of lab-auth's OAuth routes — no browser login page, no dynamic client registration.
+- **`/register` is never mounted**. syslog-mcp supports authorization-code OAuth routes but disables dynamic client registration.
 - **RFC 9700 refresh-token rotation** is not yet implemented. The same refresh token is returned on each `POST /token?grant_type=refresh_token` call. This is tracked as known debt in CHANGELOG.md.
 
 ---
@@ -117,15 +119,20 @@ disable_static_token_with_oauth = true   # default: true
 
 **How do I revoke a user's access?**
 
-Delete their row from `auth.db`:
+For the configured `admin_email`, replace `admin_email` with the remaining authorized account and restart. Future authorization attempts by the removed account will fail at the callback unless the email is still present in lab-auth's `allowed_users` table.
+
+Also remove any DB allowlist row and existing refresh/browser-session rows. `refresh_tokens` is keyed by Google subject, not email, so derive the subject from `browser_sessions` first:
 
 ```sql
--- Connect to auth.db (WAL-safe: stop the server first or use .backup)
-DELETE FROM refresh_tokens WHERE sub = 'user@example.com';
-DELETE FROM allowed_users  WHERE email = 'user@example.com';
+BEGIN;
+DELETE FROM allowed_users WHERE lower(email) = lower('user@example.com');
+DELETE FROM refresh_tokens
+WHERE subject IN (
+  SELECT subject FROM browser_sessions WHERE lower(email) = lower('user@example.com')
+);
+DELETE FROM browser_sessions WHERE lower(email) = lower('user@example.com');
+COMMIT;
 ```
-
-Remove them from `allowed_emails` in config.toml and restart. Future authorization attempts will fail at the callback.
 
 **How do I rotate the JWT signing key?**
 
@@ -140,9 +147,11 @@ All existing access tokens become invalid immediately (they reference the old `k
 
 **How do I add a new allowed user without restarting?**
 
-Add their email to the `allowed_emails` list in config.toml and send `SIGHUP` (or restart). The email allowlist is checked at callback time — no DB entry is needed in advance.
+Not through syslog-mcp config in V1. Config-level OAuth user changes are restart-only, and non-empty `[mcp.auth].allowed_emails` is rejected at startup because syslog-mcp does not pass or enforce that config list yet. lab-auth-managed `allowed_users` rows are still part of the enforced OAuth allowlist.
 
 **How do I check which emails are currently allowed?**
+
+Inspect the configured `[mcp.auth].admin_email` value in `config.toml` or the `SYSLOG_MCP_AUTH_ADMIN_EMAIL` environment variable, then inspect lab-auth's DB allowlist:
 
 ```sql
 SELECT email, created_at FROM allowed_users ORDER BY created_at;

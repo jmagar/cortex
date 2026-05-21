@@ -9,9 +9,40 @@ use crate::config::StorageConfig;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
+pub const KNOWN_SCHEMA_VERSION: i64 = 14;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SchemaVersionInfo {
+    pub version: i64,
+    pub last_migration_at: Option<String>,
+    pub known_version: i64,
+}
+
 fn shared_scheduled_thread_pool() -> Arc<ScheduledThreadPool> {
     static POOL: OnceLock<Arc<ScheduledThreadPool>> = OnceLock::new();
     Arc::clone(POOL.get_or_init(|| Arc::new(ScheduledThreadPool::new(1))))
+}
+
+pub fn read_schema_version_info(pool: &DbPool) -> Result<SchemaVersionInfo> {
+    let conn = pool.get()?;
+    read_schema_version_info_conn(&conn)
+}
+
+/// Probe `schema_migrations` from an already-borrowed connection. Used by
+/// callers that do not own a [`DbPool`] (e.g. the scanner's checkpoint store).
+pub fn read_schema_version_info_conn(conn: &Connection) -> Result<SchemaVersionInfo> {
+    let (version, last_migration_at): (Option<i64>, Option<String>) = conn
+        .query_row(
+            "SELECT MAX(version), MAX(applied_at) FROM schema_migrations",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|err| anyhow::anyhow!("schema_migrations probe failed: {err}"))?;
+    Ok(SchemaVersionInfo {
+        version: version.unwrap_or(0),
+        last_migration_at,
+        known_version: KNOWN_SCHEMA_VERSION,
+    })
 }
 
 /// Initialize the database pool and schema
@@ -538,40 +569,34 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     // Migration 13: enrichment-framework columns + partial indexes.
     // Spec: docs/superpowers/specs/2026-05-16-enrichment-framework-design.md §5
     // Contract: docs/contracts/db-additions.sql Epic B section
-    let already_applied_13: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM schema_migrations WHERE version = 13",
+    if !migration_applied(&conn, 13)? {
+        apply_migration_13(&conn)?;
+        tracing::info!("Migration 13: added enrichment columns + partial indexes");
+    }
+
+    let already_applied_14: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM schema_migrations WHERE version = 14",
         [],
         |r| r.get(0),
     )?;
-    if already_applied_13 == 0 {
-        // Wrap in an explicit transaction so a partial failure leaves the DB clean.
-        // rusqlite::Connection::execute_batch() calls sqlite3_exec() which runs
-        // each statement in its own implicit auto-commit — it is NOT atomic across
-        // the batch. A failed ALTER or CREATE INDEX mid-batch would leave some
-        // columns present but the version row absent, causing the next startup to
-        // error on duplicate ALTER TABLE. BEGIN IMMEDIATE / COMMIT makes the whole
-        // batch atomic.
+    if already_applied_14 == 0 {
+        tracing::info!(
+            "Migration 14: starting CREATE INDEX idx_logs_ai_session_host_time \
+             — may take time on large AI transcript databases"
+        );
+        let started = std::time::Instant::now();
         conn.execute_batch(
-            "BEGIN IMMEDIATE;
-             ALTER TABLE logs ADD COLUMN http_status  INTEGER;
-             ALTER TABLE logs ADD COLUMN auth_outcome TEXT;
-             ALTER TABLE logs ADD COLUMN dns_blocked  INTEGER;
-             ALTER TABLE logs ADD COLUMN event_action TEXT;
-             ALTER TABLE logs ADD COLUMN parse_error  TEXT;
-
-             CREATE INDEX IF NOT EXISTS idx_logs_http_status_time
-                 ON logs(http_status, timestamp) WHERE http_status IS NOT NULL;
-             CREATE INDEX IF NOT EXISTS idx_logs_auth_outcome_time
-                 ON logs(auth_outcome, timestamp) WHERE auth_outcome IS NOT NULL;
-             CREATE INDEX IF NOT EXISTS idx_logs_dns_blocked_time
-                 ON logs(dns_blocked, timestamp) WHERE dns_blocked IS NOT NULL;
-             CREATE INDEX IF NOT EXISTS idx_logs_event_action_time
-                 ON logs(event_action, timestamp) WHERE event_action IS NOT NULL;
-
-             INSERT INTO schema_migrations (version) VALUES (13);
-             COMMIT;",
+            "CREATE INDEX IF NOT EXISTS idx_logs_ai_session_host_time
+                 ON logs(ai_project, ai_tool, ai_session_id, hostname, timestamp)
+                 WHERE ai_project IS NOT NULL
+                   AND ai_tool IS NOT NULL
+                   AND ai_session_id IS NOT NULL;
+             INSERT INTO schema_migrations (version) VALUES (14);",
         )?;
-        tracing::info!("Migration 13: added enrichment columns + partial indexes");
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "Migration 14: AI session host/time index created"
+        );
     }
 
     conn.execute_batch(
@@ -581,6 +606,11 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
          CREATE INDEX IF NOT EXISTS idx_logs_ai_session
              ON logs(ai_tool, ai_project, ai_session_id)
              WHERE ai_tool IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS idx_logs_ai_session_host_time
+             ON logs(ai_project, ai_tool, ai_session_id, hostname, timestamp)
+             WHERE ai_project IS NOT NULL
+               AND ai_tool IS NOT NULL
+               AND ai_session_id IS NOT NULL;
          CREATE INDEX IF NOT EXISTS idx_logs_ai_transcript_path
              ON logs(ai_transcript_path)
              WHERE ai_transcript_path IS NOT NULL;",
@@ -588,6 +618,71 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
 
     tracing::info!(path = %config.db_path.display(), "Database initialized");
     Ok(pool)
+}
+
+fn migration_applied(conn: &Connection, version: i64) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM schema_migrations WHERE version = ?1",
+        [version],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count > 0)
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+        [table, column],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count > 0)
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_type: &str,
+) -> rusqlite::Result<()> {
+    if !column_exists(conn, table, column)? {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {column_type};"
+        ))?;
+    }
+    Ok(())
+}
+
+fn apply_migration_13(conn: &Connection) -> rusqlite::Result<()> {
+    // Explicit transaction keeps index/version updates atomic, while each ALTER is
+    // guarded so manually repaired or partially migrated DBs can converge instead
+    // of failing on duplicate columns with no version row.
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = (|| {
+        add_column_if_missing(conn, "logs", "http_status", "INTEGER")?;
+        add_column_if_missing(conn, "logs", "auth_outcome", "TEXT")?;
+        add_column_if_missing(conn, "logs", "dns_blocked", "INTEGER")?;
+        add_column_if_missing(conn, "logs", "event_action", "TEXT")?;
+        add_column_if_missing(conn, "logs", "parse_error", "TEXT")?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_logs_http_status_time
+                 ON logs(http_status, timestamp) WHERE http_status IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_auth_outcome_time
+                 ON logs(auth_outcome, timestamp) WHERE auth_outcome IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_dns_blocked_time
+                 ON logs(dns_blocked, timestamp) WHERE dns_blocked IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_event_action_time
+                 ON logs(event_action, timestamp) WHERE event_action IS NOT NULL;
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (13);",
+        )
+    })();
+
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT;"),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
 }
 
 fn configure_connection_pragmas(conn: &mut Connection, wal_mode: bool) -> rusqlite::Result<()> {

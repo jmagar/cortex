@@ -47,11 +47,12 @@ server_name = "syslog-mcp"
 # Everything else below is TOML-only by design.
 # ----------------------------------------------------------------------------
 [mcp.auth]
-# Bootstrap admin email permitted to log in via Google OAuth. Supplements
-# `allowed_emails`. At least one of these MUST be non-empty when OAuth is
-# active — without an allowlist any Google account that completes OAuth
-# would gain access.
+# Bootstrap admin email permitted to log in via Google OAuth. This is the only
+# config-backed OAuth email gate syslog-mcp passes into lab-auth in V1.
 admin_email = ""
+# Reserved for future config-backed multi-user enforcement. Keep empty in OAuth
+# mode today; startup rejects non-empty values because syslog-mcp does not pass
+# this list into lab-auth.
 allowed_emails = []
 
 # Path policy. Relative paths are resolved against the directory containing
@@ -65,8 +66,7 @@ refresh_token_ttl_secs = 28800 # 8h (intentionally shorter than lab-auth's 30d d
 auth_code_ttl_secs = 300       # 5m
 
 # Per-process rate limits for OAuth endpoints.
-# /register is not mounted (bearer_only_router excludes it), so only
-# authorize_rpm applies.
+# /register is not mounted, so only authorize_rpm applies.
 authorize_rpm = 60
 
 # When OAuth is active, also reject requests carrying SYSLOG_MCP_TOKEN. Set

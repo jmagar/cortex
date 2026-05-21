@@ -3,22 +3,26 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{TimeDelta, Utc};
+use tokio::process::Command;
 use tokio::sync::Semaphore;
 
 use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
     AbuseSearchRequest, AbuseSearchResponse, AiCorrelateRequest, AiCorrelateResponse,
-    AiCorrelationAnchor, AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest,
+    AiCorrelationAnchor, AiIncidentRequest, AiIncidentResponse, AiInvestigateRequest,
+    AiInvestigateResponse, AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest,
     ClockSkewResponse, CompareRequest, CompareResponse, ContextRequest, ContextResponse,
     CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
     DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest,
-    GetErrorsResponse, GetLogRequest, GetLogResponse, IngestRateRequest, IngestRateResponse,
-    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
-    ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
+    GetErrorsResponse, GetLogRequest, GetLogResponse, IncidentEvent, IncidentRequest,
+    IncidentResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
+    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
+    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
     ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
-    TailLogsRequest, TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
+    SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry, ServiceLogsRequest,
+    ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse, TailLogsRequest, TimelineRequest,
+    TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
@@ -27,7 +31,234 @@ use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy}
 use crate::scanner;
 
 const DB_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
+const SYSLOG_OWNED_USER_SERVICES: &[&str] = &[
+    "syslog-ai-watch.service",
+    "syslog-ai-index.service",
+    "syslog-mcp.service",
+];
 
+fn normalize_syslog_owned_service(service: &str) -> ServiceResult<String> {
+    let unit = if service.ends_with(".service") {
+        service.to_string()
+    } else {
+        format!("{service}.service")
+    };
+    if SYSLOG_OWNED_USER_SERVICES.contains(&unit.as_str()) {
+        Ok(unit)
+    } else {
+        Err(ServiceError::InvalidInput(format!(
+            "unsupported syslog-owned service '{service}'; expected one of {}",
+            SYSLOG_OWNED_USER_SERVICES.join(", ")
+        )))
+    }
+}
+
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+
+async fn command_output(program: &str, args: &[String]) -> ServiceResult<String> {
+    let mut command = Command::new(program);
+    command.args(args).kill_on_drop(true);
+    if program == "journalctl" && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
+            command
+                .env("XDG_RUNTIME_DIR", runtime_dir)
+                .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
+        }
+    }
+    let output = tokio::time::timeout(COMMAND_TIMEOUT, command.output())
+        .await
+        .map_err(|_| {
+            ServiceError::Internal(anyhow::anyhow!(
+                "{} {} timed out after {}s",
+                program,
+                args.join(" "),
+                COMMAND_TIMEOUT.as_secs()
+            ))
+        })?
+        .map_err(anyhow::Error::from)?;
+    if !output.status.success() {
+        return Err(ServiceError::Internal(anyhow::anyhow!(
+            "{} {} failed: {}",
+            program,
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn inferred_user_bus_env() -> Option<(PathBuf, String)> {
+    let runtime_dir = PathBuf::from(format!("/run/user/{}", current_uid()));
+    let bus = runtime_dir.join("bus");
+    bus.exists()
+        .then(|| (runtime_dir, format!("unix:path={}", bus.display())))
+}
+
+fn current_uid() -> u32 {
+    #[cfg(unix)]
+    {
+        unsafe { libc::geteuid() }
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+/// Parse journalctl `-o json` output into entries, tolerating malformed lines.
+///
+/// Returns `(entries, dropped)` so callers can surface a warning when the
+/// journal contains corrupt rows — `service logs` is a self-debugging surface
+/// and must not nuke a 5000-line response because one line failed to parse.
+fn parse_journal_json_lines(raw: &str) -> (Vec<ServiceJournalEntry>, usize) {
+    let mut entries = Vec::new();
+    let mut dropped: usize = 0;
+    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
+        match parse_journal_json_line(line) {
+            Ok(entry) => entries.push(entry),
+            Err(_) => dropped = dropped.saturating_add(1),
+        }
+    }
+    (entries, dropped)
+}
+
+fn parse_journal_json_line(line: &str) -> ServiceResult<ServiceJournalEntry> {
+    let value: serde_json::Value = serde_json::from_str(line).map_err(anyhow::Error::from)?;
+    Ok(ServiceJournalEntry {
+        timestamp: journal_string(&value, "__REALTIME_TIMESTAMP")
+            .and_then(|micros| journal_realtime_timestamp(&micros)),
+        realtime_timestamp_us: journal_string(&value, "__REALTIME_TIMESTAMP"),
+        unit: journal_string(&value, "_SYSTEMD_USER_UNIT")
+            .or_else(|| journal_string(&value, "_SYSTEMD_UNIT")),
+        priority: journal_string(&value, "PRIORITY"),
+        syslog_identifier: journal_string(&value, "SYSLOG_IDENTIFIER"),
+        pid: journal_string(&value, "_PID"),
+        message: journal_string(&value, "MESSAGE"),
+        cursor: journal_string(&value, "__CURSOR"),
+    })
+}
+
+fn journal_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    match value.get(key)? {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Array(values) => values.iter().find_map(|value| match value {
+            serde_json::Value::String(value) => Some(value.clone()),
+            _ => None,
+        }),
+        other => Some(other.to_string()),
+    }
+}
+
+fn journal_realtime_timestamp(micros: &str) -> Option<String> {
+    let micros = micros.parse::<i64>().ok()?;
+    let secs = micros.div_euclid(1_000_000);
+    let nanos = micros.rem_euclid(1_000_000) as u32 * 1_000;
+    chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nanos).map(super::time::rfc3339_z)
+}
+
+fn service_app_filter(service: &str) -> String {
+    service
+        .strip_suffix(".service")
+        .unwrap_or(service)
+        .to_string()
+}
+
+fn incident_event_from_log(log: db::LogEntry) -> IncidentEvent {
+    let source = if log.ai_tool.is_some()
+        || log.facility.as_deref() == Some("transcript")
+        || log.source_ip.starts_with("transcript://")
+    {
+        "transcript"
+    } else if log.source_ip.starts_with("docker://") || log.source_ip.starts_with("docker-event://")
+    {
+        "docker"
+    } else {
+        "syslog"
+    };
+    IncidentEvent {
+        timestamp: log.timestamp,
+        source: source.to_string(),
+        host: Some(log.hostname),
+        severity: Some(log.severity),
+        app: log.app_name,
+        message: log.message,
+        log_id: Some(log.id),
+    }
+}
+
+fn incident_event_from_journal(entry: ServiceJournalEntry) -> Option<IncidentEvent> {
+    Some(IncidentEvent {
+        timestamp: entry.timestamp?,
+        source: "service-log".to_string(),
+        host: entry.unit,
+        severity: entry.priority,
+        app: entry.syslog_identifier,
+        message: entry.message.unwrap_or_default(),
+        log_id: None,
+    })
+}
+
+fn incident_sort_key(timestamp: &str) -> i64 {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map(|dt| dt.timestamp_micros())
+        .unwrap_or(i64::MAX)
+}
+
+/// Read a syslog-owned service's journal via `journalctl`. Free function so
+/// callers can invoke it without standing up a [`SyslogService`] (and the
+/// SQLite pool that backs it) — `syslog service logs` is a self-debugging
+/// surface that must work when the DB is corrupted, locked, or full.
+pub async fn run_service_logs(req: ServiceLogsRequest) -> ServiceResult<ServiceLogsResponse> {
+    let service = normalize_syslog_owned_service(&req.service)?;
+    let mut args = vec![
+        "--user".to_string(),
+        "-u".to_string(),
+        service.clone(),
+        "--no-pager".to_string(),
+        "--output".to_string(),
+        "json".to_string(),
+    ];
+    if let Some(from) = &req.from {
+        args.push("--since".to_string());
+        args.push(from.clone());
+    }
+    if let Some(to) = &req.to {
+        args.push("--until".to_string());
+        args.push(to.clone());
+    }
+    let tail = req.tail.map(|tail| tail.clamp(1, 5_000));
+    if let Some(tail) = tail {
+        args.push("-n".to_string());
+        args.push(tail.to_string());
+    }
+
+    let raw = command_output("journalctl", &args).await?;
+    let (entries, dropped_lines) = parse_journal_json_lines(&raw);
+    if dropped_lines > 0 {
+        tracing::warn!(
+            service = %service,
+            dropped_lines,
+            "service_logs: skipped malformed journal lines"
+        );
+    }
+    Ok(ServiceLogsResponse {
+        service,
+        from: req.from,
+        to: req.to,
+        tail,
+        entries,
+        dropped_lines,
+    })
+}
+
+/// Service-layer entry point bridging request structs to SQLite.
+///
+/// `Clone` is cheap — every field is either `Arc`-wrapped or a small `Copy`
+/// scalar — and the type is intentionally Clone-friendly so callers like
+/// `ai_watch::run` can take ownership without forcing a borrow through async
+/// task boundaries (bead 0p8r.24). The other 5 LOCAL-only command dispatchers
+/// take `&SyslogService` because they don't move the service into a spawned
+/// task; both patterns are correct.
 #[derive(Clone)]
 pub struct SyslogService {
     pool: Arc<DbPool>,
@@ -45,6 +276,111 @@ impl SyslogService {
             db_permits: Arc::new(Semaphore::new(permits)),
             acquire_timeout: DB_ACQUIRE_TIMEOUT,
         }
+    }
+
+    pub async fn service_logs(
+        &self,
+        req: ServiceLogsRequest,
+    ) -> ServiceResult<ServiceLogsResponse> {
+        run_service_logs(req).await
+    }
+
+    pub async fn incident(&self, req: IncidentRequest) -> ServiceResult<IncidentResponse> {
+        if req.hostname.is_some() && req.service.is_some() {
+            return Err(ServiceError::InvalidInput(
+                "hostname and service cannot be combined: journal entries are always local \
+                 and cannot be filtered by remote hostname"
+                    .into(),
+            ));
+        }
+        let around_dt = parse_required_timestamp(&req.around, "around")?;
+        let window = req.minutes.unwrap_or(5).clamp(1, 120);
+        let delta = TimeDelta::try_minutes(i64::from(window))
+            .ok_or_else(|| ServiceError::InvalidInput("duration overflow".into()))?;
+        let from = rfc3339_z(around_dt - delta);
+        let to = rfc3339_z(around_dt + delta);
+        let limit = req.limit.unwrap_or(500).clamp(1, 2_000);
+        let app_name = req.service.as_deref().map(service_app_filter);
+        let params = SearchParams {
+            query: None,
+            hostname: req.hostname.clone(),
+            source_ip: None,
+            severity: None,
+            severity_in: None,
+            app_name,
+            facility: None,
+            exclude_facility: None,
+            process_id: None,
+            from: Some(from.clone()),
+            to: Some(to.clone()),
+            received_from: None,
+            received_to: None,
+            limit: Some(limit + 1),
+            ai_tool: None,
+            ai_project: None,
+            ai_session_id: None,
+            exclude_ai: false,
+        };
+        let mut rows = self
+            .run_db(move |pool| db::search_logs(pool, &params))
+            .await?;
+        let mut truncated = rows.len() > limit as usize;
+        rows.truncate(limit as usize);
+
+        let mut events: Vec<IncidentEvent> =
+            rows.into_iter().map(incident_event_from_log).collect();
+        let mut warnings = Vec::new();
+
+        if let Some(service) = req.service {
+            match self
+                .service_logs(ServiceLogsRequest {
+                    service,
+                    from: Some(from.clone()),
+                    to: Some(to.clone()),
+                    tail: Some(limit.saturating_add(1)),
+                })
+                .await
+            {
+                Ok(report) => {
+                    if report.dropped_lines > 0 {
+                        warnings.push(format!(
+                            "service_logs: dropped {} malformed journal line(s)",
+                            report.dropped_lines
+                        ));
+                    }
+                    let mut dropped_timestamps: usize = 0;
+                    for entry in report.entries {
+                        match incident_event_from_journal(entry) {
+                            Some(event) => events.push(event),
+                            None => dropped_timestamps = dropped_timestamps.saturating_add(1),
+                        }
+                    }
+                    if dropped_timestamps > 0 {
+                        warnings.push(format!(
+                            "service_logs: dropped {dropped_timestamps} entries with unparseable timestamps"
+                        ));
+                    }
+                }
+                Err(error) => warnings.push(format!("service_logs: {error}")),
+            }
+        }
+
+        events.sort_by_key(|event| incident_sort_key(&event.timestamp));
+        if events.len() > limit as usize {
+            truncated = true;
+            events.truncate(limit as usize);
+        }
+
+        Ok(IncidentResponse {
+            around: req.around,
+            window_minutes: window,
+            window_from: from,
+            window_to: to,
+            event_count: events.len(),
+            truncated,
+            warnings,
+            events,
+        })
     }
 
     async fn run_db<F, T>(&self, f: F) -> ServiceResult<T>
@@ -88,9 +424,12 @@ impl SyslogService {
             severity_in: None,
             app_name: req.app_name,
             facility: req.facility,
+            exclude_facility: req.exclude_facility,
             process_id: req.process_id,
             from: parse_optional_timestamp(req.from.as_deref(), "from")?,
             to: parse_optional_timestamp(req.to.as_deref(), "to")?,
+            received_from: parse_optional_timestamp(req.received_from.as_deref(), "received_from")?,
+            received_to: parse_optional_timestamp(req.received_to.as_deref(), "received_to")?,
             limit: req.limit,
             ai_tool: None,
             ai_project: None,
@@ -226,6 +565,68 @@ impl SyslogService {
         Ok(result.into())
     }
 
+    pub async fn list_ai_incidents(
+        &self,
+        req: AiIncidentRequest,
+    ) -> ServiceResult<AiIncidentResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let result = self
+            .run_db(move |pool| {
+                db::search_ai_incidents(
+                    pool,
+                    &db::AiIncidentParams {
+                        ai_project: req.project,
+                        ai_tool: req.tool,
+                        from,
+                        to,
+                        limit: req.limit,
+                        window_minutes: req.window_minutes,
+                        terms: req.terms,
+                    },
+                )
+            })
+            .await?;
+        Ok(AiIncidentResponse {
+            incidents: result.incidents.into_iter().map(Into::into).collect(),
+            total_incidents: result.total_incidents,
+            candidate_rows: result.candidate_rows,
+            candidate_cap: result.candidate_cap,
+            candidate_window_truncated: result.candidate_window_truncated,
+            truncated: result.truncated,
+        })
+    }
+
+    pub async fn investigate_ai_incidents(
+        &self,
+        req: AiInvestigateRequest,
+    ) -> ServiceResult<AiInvestigateResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let result = self
+            .run_db(move |pool| {
+                db::investigate_ai_incidents(
+                    pool,
+                    &db::AiInvestigateParams {
+                        ai_project: req.project,
+                        ai_tool: req.tool,
+                        from,
+                        to,
+                        limit: req.limit,
+                        window_minutes: req.window_minutes,
+                        correlation_window_minutes: req.correlation_window_minutes,
+                        terms: req.terms,
+                    },
+                )
+            })
+            .await?;
+        Ok(AiInvestigateResponse {
+            evidence: result.evidence.into_iter().map(Into::into).collect(),
+            total_incidents: result.total_incidents,
+            truncated: result.truncated,
+        })
+    }
+
     pub async fn correlate_ai_logs(
         &self,
         req: AiCorrelateRequest,
@@ -237,6 +638,11 @@ impl SyslogService {
         let anchor_limit = req.limit.unwrap_or(10).clamp(1, 50);
         let severity_min = req.severity_min.unwrap_or_else(|| "warning".into());
         let severity_levels = severity_at_or_above(&severity_min)?;
+
+        // Both DB calls share one connection snapshot inside a single spawn_blocking
+        // boundary, eliminating the double cross-thread wakeup and the intermediate
+        // allocation that was required to transfer anchor rows back to the async task
+        // just to build window params and re-enter spawn_blocking.
         let anchor_params = db::AiCorrelateParams {
             ai_project: req.project,
             ai_tool: req.tool,
@@ -246,48 +652,75 @@ impl SyslogService {
             to,
             limit: Some(anchor_limit),
         };
-        let mut anchors = self
-            .run_db(move |pool| db::search_ai_anchors(pool, &anchor_params))
-            .await?;
-        let anchors_truncated = anchors.len() > anchor_limit as usize;
-        anchors.truncate(anchor_limit as usize);
+        let log_query = req.log_query;
+        let hostname = req.hostname;
+        let source_ip = req.source_ip;
+        let app_name = req.app_name;
 
-        let mut correlated = Vec::with_capacity(anchors.len());
+        type CorrelateDbResult = (
+            bool,
+            Vec<(db::LogEntry, String, String)>,
+            Vec<db::AiRelatedLogsForAnchor>,
+        );
+        let (anchors_truncated, anchor_entries, related_by_anchor) = self
+            .run_db(move |pool| -> anyhow::Result<CorrelateDbResult> {
+                let mut anchors = db::search_ai_anchors(pool, &anchor_params)?;
+                let anchors_truncated = anchors.len() > anchor_limit as usize;
+                anchors.truncate(anchor_limit as usize);
+
+                let delta = TimeDelta::try_minutes(i64::from(window))
+                    .ok_or_else(|| anyhow::anyhow!("window_minutes overflow"))?;
+
+                let mut anchor_entries = Vec::with_capacity(anchors.len());
+                let mut windows = Vec::with_capacity(anchors.len());
+                for (anchor_index, anchor) in anchors.into_iter().enumerate() {
+                    let ref_dt = parse_required_timestamp(&anchor.timestamp, "anchor.timestamp")
+                        .map_err(anyhow::Error::from)?;
+                    let window_from = rfc3339_z(ref_dt - delta);
+                    let window_to = rfc3339_z(ref_dt + delta);
+                    windows.push(db::AiRelatedWindow {
+                        anchor_index,
+                        window_from: window_from.clone(),
+                        window_to: window_to.clone(),
+                    });
+                    anchor_entries.push((anchor, window_from, window_to));
+                }
+
+                let related_params = db::AiRelatedLogsParams {
+                    windows,
+                    query: log_query,
+                    hostname,
+                    source_ip,
+                    severity_in: severity_levels,
+                    app_name,
+                    limit_per_anchor: related_limit,
+                };
+                let related_by_anchor = db::search_ai_related_logs(pool, &related_params)?;
+                Ok((anchors_truncated, anchor_entries, related_by_anchor))
+            })
+            .await?;
+
+        let mut by_anchor: std::collections::HashMap<usize, db::AiRelatedLogsForAnchor> =
+            related_by_anchor
+                .into_iter()
+                .map(|group| (group.anchor_index, group))
+                .collect();
+
+        let mut correlated = Vec::with_capacity(anchor_entries.len());
         let mut total_related_events = 0usize;
-        for anchor in anchors {
-            let ref_dt = parse_required_timestamp(&anchor.timestamp, "anchor.timestamp")?;
-            let delta = TimeDelta::try_minutes(i64::from(window))
-                .ok_or_else(|| ServiceError::InvalidInput("duration overflow".into()))?;
-            let window_from = rfc3339_z(ref_dt - delta);
-            let window_to = rfc3339_z(ref_dt + delta);
-            let search_params = SearchParams {
-                query: req.log_query.clone(),
-                hostname: req.hostname.clone(),
-                source_ip: req.source_ip.clone(),
-                severity: None,
-                severity_in: Some(severity_levels.clone()),
-                app_name: req.app_name.clone(),
-                facility: None,
-                process_id: None,
-                from: Some(window_from.clone()),
-                to: Some(window_to.clone()),
-                limit: Some(related_limit + 1),
-                ai_tool: None,
-                ai_project: None,
-                ai_session_id: None,
-                exclude_ai: true,
-            };
-            let mut related = self
-                .run_db(move |pool| db::search_logs(pool, &search_params))
-                .await?;
-            let related_truncated = related.len() > related_limit as usize;
-            related.truncate(related_limit as usize);
-            total_related_events += related.len();
+        for (anchor_index, (anchor, window_from, window_to)) in
+            anchor_entries.into_iter().enumerate()
+        {
+            let (related_logs, related_truncated) = by_anchor
+                .remove(&anchor_index)
+                .map(|group| (group.logs, group.truncated))
+                .unwrap_or((Vec::new(), false));
+            total_related_events += related_logs.len();
             correlated.push(AiCorrelationAnchor {
                 entry: anchor.into(),
                 window_from,
                 window_to,
-                related: related.into_iter().map(Into::into).collect(),
+                related: related_logs.into_iter().map(Into::into).collect(),
                 related_truncated,
             });
         }
@@ -302,6 +735,7 @@ impl SyslogService {
             related_limit_per_anchor: related_limit as usize,
             total_related_events,
             anchors: correlated,
+            events_per_anchor_clamped_to: None,
         })
     }
 
@@ -393,9 +827,12 @@ impl SyslogService {
             severity_in: Some(severity_levels),
             app_name: None,
             facility: None,
+            exclude_facility: None,
             process_id: None,
             from: Some(from.clone()),
             to: Some(to.clone()),
+            received_from: None,
+            received_to: None,
             limit: Some(limit + 1),
             ai_tool: None,
             ai_project: None,
@@ -488,6 +925,20 @@ impl SyslogService {
                 log_frames,
                 checkpointed_frames,
             })
+        })
+        .await
+    }
+
+    /// Read the live `page_count * page_size` (logical size, in bytes) via a
+    /// fresh PRAGMA pair. Used by the `POST /api/db/vacuum` pre-flight in
+    /// `src/api.rs::db_vacuum` so the 2GB guard cannot be defeated by a stale
+    /// startup snapshot (bead 0p8r.17). Cheap enough to call per-request:
+    /// two `PRAGMA` reads on a held connection inside `spawn_blocking`.
+    pub async fn db_logical_size_bytes(&self) -> ServiceResult<u64> {
+        self.run_db(move |pool| {
+            let page_count = db::db_pragma_i64(pool, "page_count")?;
+            let page_size = db::db_pragma_i64(pool, "page_size")?;
+            Ok((page_count.max(0) as u64).saturating_mul(page_size.max(0) as u64))
         })
         .await
     }
@@ -660,19 +1111,55 @@ impl SyslogService {
             .await
     }
 
+    pub async fn ai_indexing_health(
+        &self,
+        process_start_time: Option<String>,
+    ) -> ServiceResult<scanner::AiIndexingHealth> {
+        self.run_db(move |pool| scanner::ai_indexing_health(pool, process_start_time.as_deref()))
+            .await
+    }
+
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {
-        let apps = self
-            .run_db(move |pool| db::list_apps(pool, req.hostname.as_deref()))
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let result = self
+            .run_db(move |pool| {
+                db::list_apps(
+                    pool,
+                    &db::ListAppsParams {
+                        hostname: req.hostname.as_deref(),
+                        from: from.as_deref(),
+                        to: to.as_deref(),
+                        limit: req.limit.unwrap_or(500) as usize,
+                        offset: req.offset.unwrap_or(0) as usize,
+                    },
+                )
+            })
             .await?;
         Ok(ListAppsResponse {
-            apps: apps.into_iter().map(Into::into).collect(),
+            apps: result.apps.into_iter().map(Into::into).collect(),
+            total: result.total,
         })
     }
 
-    pub async fn list_source_ips(&self) -> ServiceResult<ListSourceIpsResponse> {
-        let source_ips = self.run_db(db::list_source_ips).await?;
+    pub async fn list_source_ips(
+        &self,
+        req: ListSourceIpsRequest,
+    ) -> ServiceResult<ListSourceIpsResponse> {
+        let result = self
+            .run_db(move |pool| {
+                db::list_source_ips(
+                    pool,
+                    &db::ListSourceIpsParams {
+                        limit: req.limit.unwrap_or(500) as usize,
+                        offset: req.offset.unwrap_or(0) as usize,
+                    },
+                )
+            })
+            .await?;
         Ok(ListSourceIpsResponse {
-            source_ips: source_ips.into_iter().map(Into::into).collect(),
+            source_ips: result.source_ips.into_iter().map(Into::into).collect(),
+            total: result.total,
         })
     }
 

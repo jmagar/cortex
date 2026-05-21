@@ -94,7 +94,6 @@ fn defaults_are_applied_without_env_vars() {
         "SYSLOG_MCP_RECOVERY_FREE_DISK_MB",
         "SYSLOG_MCP_CLEANUP_INTERVAL_SECS",
         "SYSLOG_MCP_CLEANUP_CHUNK_SIZE",
-        "SYSLOG_API_ENABLED",
         "SYSLOG_API_TOKEN",
         "SYSLOG_WRITE_CHANNEL_CAPACITY",
         "SYSLOG_DOCKER_INGEST_ENABLED",
@@ -137,7 +136,6 @@ fn defaults_are_applied_without_env_vars() {
     assert_eq!(cfg.storage.cleanup_interval_secs, 60);
     assert_eq!(cfg.storage.cleanup_chunk_size, 2_000);
     assert!(cfg.mcp.api_token.is_none());
-    assert!(!cfg.api.enabled);
     assert!(cfg.api.api_token.is_none());
     assert!(!cfg.docker_ingest.enabled);
     assert!(cfg.docker_ingest.hosts.is_empty());
@@ -258,82 +256,16 @@ fn env_var_can_clear_mcp_allowed_hosts_and_origins() {
 
 #[test]
 #[serial]
-fn api_enabled_requires_separate_token() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_API_ENABLED", "true");
-    std::env::remove_var("SYSLOG_API_TOKEN");
-    let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_API_ENABLED");
-
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("SYSLOG_API_TOKEN"));
-}
-
-#[test]
-#[serial]
-fn api_token_is_separate_from_mcp_token() {
-    std::env::set_var("SYSLOG_API_ENABLED", "true");
+fn api_token_loads_independently_of_mcp_token() {
     std::env::set_var("SYSLOG_API_TOKEN", "api-token");
     std::env::set_var("SYSLOG_MCP_TOKEN", "mcp-token");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_API_ENABLED");
     std::env::remove_var("SYSLOG_API_TOKEN");
     std::env::remove_var("SYSLOG_MCP_TOKEN");
 
-    let cfg = result.expect("Config::load() should accept separately authenticated API");
-    assert!(cfg.api.enabled);
+    let cfg = result.expect("Config::load() should accept distinct API + MCP tokens");
     assert_eq!(cfg.api.api_token, Some("api-token".into()));
     assert_eq!(cfg.mcp.api_token, Some("mcp-token".into()));
-}
-
-#[test]
-#[serial]
-fn api_enabled_accepts_common_truthy_values() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    for value in ["1", "yes", "Y", "on", "TRUE"] {
-        std::env::set_var("SYSLOG_API_ENABLED", value);
-        std::env::set_var("SYSLOG_API_TOKEN", "api-token");
-        let result = Config::load();
-        std::env::remove_var("SYSLOG_API_ENABLED");
-        std::env::remove_var("SYSLOG_API_TOKEN");
-
-        let cfg = result.unwrap_or_else(|err| panic!("value {value} should parse: {err}"));
-        assert!(cfg.api.enabled);
-    }
-    std::env::remove_var("SYSLOG_MCP_HOST");
-}
-
-#[test]
-#[serial]
-fn api_enabled_accepts_common_falsy_values() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    for value in ["0", "no", "N", "off", "FALSE"] {
-        std::env::set_var("SYSLOG_API_ENABLED", value);
-        std::env::remove_var("SYSLOG_API_TOKEN");
-        let result = Config::load();
-        std::env::remove_var("SYSLOG_API_ENABLED");
-
-        let cfg = result.unwrap_or_else(|err| panic!("value {value} should parse: {err}"));
-        assert!(!cfg.api.enabled);
-    }
-    std::env::remove_var("SYSLOG_MCP_HOST");
-}
-
-#[test]
-#[serial]
-fn api_enabled_rejects_invalid_bool_values() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_API_ENABLED", "maybe");
-    let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_API_ENABLED");
-
-    assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("SYSLOG_API_ENABLED"));
 }
 
 #[test]
@@ -346,9 +278,8 @@ fn auth_validation_rejects_blank_mcp_token() {
 }
 
 #[test]
-fn auth_validation_rejects_blank_api_token_when_enabled() {
+fn auth_validation_rejects_blank_api_token() {
     let mut cfg = Config::default();
-    cfg.api.enabled = true;
     cfg.api.api_token = Some("\t".into());
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
@@ -627,7 +558,7 @@ fn valid_oauth_config_without_token() -> Config {
     cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
     cfg.mcp.auth.google_client_id = Some("id".into());
     cfg.mcp.auth.google_client_secret = Some("secret".into());
-    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+    cfg.mcp.auth.admin_email = "admin@example.com".into();
     cfg
 }
 
@@ -763,7 +694,7 @@ fn oauth_mode_rejects_missing_public_url() {
     cfg.mcp.auth.mode = AuthMode::OAuth;
     cfg.mcp.auth.google_client_id = Some("id".into());
     cfg.mcp.auth.google_client_secret = Some("secret".into());
-    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+    cfg.mcp.auth.admin_email = "admin@example.com".into();
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(err.to_string().contains("SYSLOG_MCP_PUBLIC_URL"));
@@ -775,7 +706,7 @@ fn oauth_mode_rejects_missing_google_client_id() {
     cfg.mcp.auth.mode = AuthMode::OAuth;
     cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
     cfg.mcp.auth.google_client_secret = Some("secret".into());
-    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+    cfg.mcp.auth.admin_email = "admin@example.com".into();
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(err.to_string().contains("SYSLOG_MCP_GOOGLE_CLIENT_ID"));
@@ -787,7 +718,7 @@ fn oauth_mode_rejects_missing_google_client_secret() {
     cfg.mcp.auth.mode = AuthMode::OAuth;
     cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
     cfg.mcp.auth.google_client_id = Some("id".into());
-    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+    cfg.mcp.auth.admin_email = "admin@example.com".into();
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(err.to_string().contains("SYSLOG_MCP_GOOGLE_CLIENT_SECRET"));
@@ -806,13 +737,13 @@ fn oauth_mode_rejects_empty_allowlist_and_admin() {
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(
-        err.to_string().contains("allowed_emails"),
+        err.to_string().contains("admin_email"),
         "wrong error: {err}"
     );
 }
 
 #[test]
-fn oauth_mode_accepts_non_empty_allowlist() {
+fn oauth_mode_rejects_allowed_emails_without_admin_until_enforced() {
     let mut cfg = loopback_config_with_token();
     cfg.mcp.auth.mode = AuthMode::OAuth;
     cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
@@ -820,7 +751,11 @@ fn oauth_mode_accepts_non_empty_allowlist() {
     cfg.mcp.auth.google_client_secret = Some("secret".into());
     cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
 
-    validate_auth_config(&cfg, true).expect("valid oauth config");
+    let err = validate_auth_config(&cfg, true).unwrap_err();
+    assert!(
+        err.to_string().contains("allowed_emails"),
+        "wrong error: {err}"
+    );
 }
 
 #[test]
@@ -836,6 +771,23 @@ fn oauth_mode_accepts_admin_email_alone() {
 }
 
 #[test]
+fn oauth_mode_rejects_allowed_emails_even_with_admin_until_enforced() {
+    let mut cfg = loopback_config_with_token();
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    cfg.mcp.auth.admin_email = "admin@example.com".into();
+    cfg.mcp.auth.allowed_emails = vec!["ops@example.com".into()];
+
+    let err = validate_auth_config(&cfg, true).unwrap_err();
+    assert!(
+        err.to_string().contains("allowed_emails"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
 fn bearer_and_oauth_can_coexist() {
     // Static token + OAuth fully configured = both pass validation.
     let mut cfg = loopback_config_with_token();
@@ -843,7 +795,7 @@ fn bearer_and_oauth_can_coexist() {
     cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
     cfg.mcp.auth.google_client_id = Some("id".into());
     cfg.mcp.auth.google_client_secret = Some("secret".into());
-    cfg.mcp.auth.allowed_emails = vec!["admin@example.com".into()];
+    cfg.mcp.auth.admin_email = "admin@example.com".into();
 
     validate_auth_config(&cfg, true).expect("bearer + oauth coexistence");
     assert!(cfg.mcp.api_token.is_some());
@@ -865,6 +817,18 @@ fn explicit_no_auth_allows_non_loopback_bind_without_token() {
     cfg.mcp.api_token = None;
     cfg.mcp.no_auth = true;
     validate_auth_config(&cfg, true).expect("gateway-protected no-auth mode");
+}
+
+#[test]
+fn explicit_no_auth_ignores_stale_oauth_fields() {
+    let mut cfg = Config::default();
+    cfg.mcp.host = "0.0.0.0".into();
+    cfg.mcp.api_token = None;
+    cfg.mcp.no_auth = true;
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.allowed_emails = vec!["stale@example.com".into()];
+
+    validate_auth_config(&cfg, true).expect("no_auth bypasses unused OAuth config");
 }
 
 #[test]
@@ -983,5 +947,23 @@ fn repo_local_config_uses_repo_local_db_path() {
         cfg.storage.db_path,
         std::path::PathBuf::from("data/syslog.db"),
         "repo config.toml should use a writable repo-local DB path for local dev"
+    );
+}
+
+#[test]
+fn repo_local_oauth_config_rejects_allowed_emails_until_enforced() {
+    let mut cfg: Config =
+        toml::from_str(include_str!("../config.toml")).expect("repo config.toml should parse");
+    cfg.mcp.auth.mode = AuthMode::OAuth;
+    cfg.mcp.auth.public_url = Some("https://syslog.example.com".into());
+    cfg.mcp.auth.google_client_id = Some("id".into());
+    cfg.mcp.auth.google_client_secret = Some("secret".into());
+    cfg.mcp.auth.admin_email = "admin@example.com".into();
+    cfg.mcp.auth.allowed_emails = vec!["ops@example.com".into()];
+
+    let err = validate_auth_config(&cfg, true).unwrap_err();
+    assert!(
+        err.to_string().contains("allowed_emails"),
+        "wrong error: {err}"
     );
 }

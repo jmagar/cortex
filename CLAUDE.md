@@ -8,7 +8,7 @@
 **Syslog Intelligence for Homelabs** — Receives RFC 3164/5424 syslog from all homelab hosts (UDP/TCP), ingests Docker logs via socket proxy, stores everything in SQLite with FTS5, and exposes a comprehensive `syslog` MCP tool for AI agents.
 
 **Status**: Active development, Production-ready
-**Version**: 0.25.3
+**Version**: 0.27.1
 
 ## Key Files
 
@@ -23,6 +23,7 @@
 | `src/cli.rs` | Standalone CLI binary (`syslog` command) |
 | `src/compose.rs` | Docker Compose lifecycle management |
 | `src/scanner.rs` | AI transcript indexer (Claude/Codex sessions) |
+| `src/doctor.rs` | Self-debugging diagnostics — binary, DB, and AI-watch health |
 
 ## Project Structure
 
@@ -76,7 +77,9 @@ syslog-mcp/
 │   ├── logging/                 # Structured service logging
 │   ├── scanner/                 # AI transcript scanner
 │   │   ├── claude.rs            # Claude transcript parsing
-│   │   └── codex.rs             # Codex transcript parsing
+│   │   ├── codex.rs             # Codex transcript parsing
+│   │   └── checkpoint.rs        # Scan progress checkpointing
+│   ├── doctor.rs                # Self-debugging diagnostics (binary, DB, AI-watch)
 │   └── docker_ingest/           # Docker remote ingestion
 ├── bin/                         # Installed binaries (syslog)
 ├── config/                      # Deployment config templates
@@ -126,6 +129,7 @@ AI Agents (Claude/Codex/Gemini)
 - **RuntimeCore Lifecycle**: Centralized management of background tasks (retention, storage guardrails).
 - **Transaction Pattern**: All batch inserts use explicit SQLx transactions for atomicity.
 - **Storage Guardrails**: Automated cleanup of oldest logs when DB size or disk space limits are breached.
+- **Self-Debugging Surfaces**: `syslog ai doctor` checks binary-vs-container version parity, DB health, and AI-watch coordination in one command. CI-safe and idempotent.
 
 ### Transaction Pattern (Rust/SQLx)
 
@@ -159,6 +163,54 @@ bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of
 | `just fmt` | Format code | `just fmt` |
 | `just test-live` | Run live integration tests | `just test-live` |
 | `just up` / `just down` | Start/stop Docker Compose | `just up` |
+| `just validate-skills` | Validate plugin skill manifests | `just validate-skills` |
+| `just gen-token` | Generate a random API token | `just gen-token` |
+| `just build-plugin` | Copy release binary into bin/ | `just build-plugin` |
+| `just publish [bump]` | Version bump + tag + push | `just publish patch` |
+| `just setup` | Initialize .env from .env.example | `just setup` |
+| `syslog ai doctor` | Self-debug: binary vs container version, DB health, AI-watch | `syslog ai doctor` |
+| `syslog db status` | DB size, WAL, page count, drift check | `syslog db status` |
+| `syslog db integrity` | SQLite integrity_check | `syslog db integrity --quick` |
+| `syslog db vacuum` | Reclaim DB space | `syslog db vacuum` |
+| `syslog db backup` | Backup DB to path | `syslog db backup --output /tmp/out.db` |
+| `syslog setup check` | Validate config and env | `syslog setup check` |
+| `syslog setup repair` | Auto-fix missing config | `syslog setup repair` |
+| `syslog compose status` | Container running status | `syslog compose status` |
+| `syslog compose doctor` | Full coordination diagnostics | `syslog compose doctor` |
+
+## Diagnostics: host/container drift
+
+Two coordination diagnostics guard against the CLI and the container talking
+to different SQLite files:
+
+- `data-mount` — verifies the host directory bind-mounted at `/data` matches
+  `SYSLOG_MCP_DATA_VOLUME`.
+- `ai-watch-coord` — verifies the host systemd `syslog-ai-watch.service`
+  resolves `SYSLOG_MCP_DB_PATH` to the same canonical directory as the
+  container's `/data` bind.
+
+Where they run:
+
+- `syslog compose doctor` — always runs both phases. `--json` includes them
+  under a `coordination` array. A canonical mismatch is fatal (exit 1).
+- `syslog db status --check-coord` — opt-in. Adds both phases to the JSON
+  payload under `coordination`. The default `syslog db status` path is
+  unchanged (no shell-outs).
+
+Both phases shell out to `docker inspect` and `systemctl --user show`, which
+adds roughly 100-200ms per invocation. Within a single `compose doctor`
+invocation the results are cached so each shell-out fires only once.
+
+Status semantics for these phases:
+
+- `ok` — canonical paths match.
+- `skipped` — ai-watch unit is not installed/loadable, or container is not
+  running (data-mount only). Reserved for "ai-watch absent" — never used to
+  hide failures.
+- `warn` — could not enumerate inputs (docker/systemctl failed, canonicalize
+  hit `ENOENT` / `EACCES`). Emits the OS error verbatim; we never silently
+  fall back to literal-string compare.
+- `error` — both sides resolved and the canonical paths differ.
 
 ## Dependencies
 
@@ -169,3 +221,51 @@ bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of
 | `tokio` | Async runtime |
 | `serde` | Serialization/Deserialization |
 | `tracing` | Observability and logging |
+
+
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
+## Beads Issue Tracker
+
+This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
+
+### Quick Reference
+
+```bash
+bd ready              # Find available work
+bd show <id>          # View issue details
+bd update <id> --claim  # Claim work
+bd close <id>         # Complete work
+```
+
+### Rules
+
+- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
+- Run `bd prime` for detailed command reference and session close protocol
+- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+
+## Session Completion
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd dolt push
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds
+<!-- END BEADS INTEGRATION -->

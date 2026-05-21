@@ -35,7 +35,7 @@
 #
 # Examples:
 #   # Docker mode (default — builds image, runs tests, tears down)
-#   SYSLOG_MCP_TOKEN=ci-integration-token bash tests/test_live.sh
+#   SYSLOG_MCP_TOKEN=ci-integration-value bash tests/test_live.sh
 #
 #   # HTTP mode — test an already-running server
 #   bash tests/test_live.sh --mode http --url http://192.168.1.10:3100
@@ -57,6 +57,7 @@ AI_SMOKE_FIXTURE="tests/fixtures/ai-session-smoke.jsonl"
 AI_SMOKE_PROJECT="/tmp/syslog-mcp-ai-smoke"
 AI_SMOKE_QUERY='"ai-smoke-authentication"'
 AI_SEEDED=false
+CLI_PARITY_CONTAINER=""
 
 # ---------------------------------------------------------------------------
 # Counters
@@ -380,7 +381,7 @@ phase_auth() {
   # Test: wrong token → 401
   status="$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
     -X POST "${BASE_URL}/mcp" \
-    -H "Authorization: Bearer intentionally-wrong-token-for-testing" \
+    -H "Authorization: Bearer intentionally-wrong-value-for-testing" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' 2>/dev/null)" || status=0
@@ -544,6 +545,16 @@ phase_tools() {
     assert_jq "syslog abuse — custom detector finds seeded fixture" "${abuse_result}" '.matches | length >= 1' "true"
   fi
 
+  local abuse_incidents_result
+  abuse_incidents_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"abuse_incidents","project":$project,"limit":5}')")" || abuse_incidents_result=""
+  assert_jq "syslog abuse_incidents — incidents field is array" "${abuse_incidents_result}" '.incidents | type' "array"
+  assert_jq "syslog abuse_incidents — total_incidents present" "${abuse_incidents_result}" '.total_incidents != null'
+
+  local abuse_investigate_result
+  abuse_investigate_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"abuse_investigate","project":$project,"limit":1}')")" || abuse_investigate_result=""
+  assert_jq "syslog abuse_investigate — evidence field is array" "${abuse_investigate_result}" '.evidence | type' "array"
+  assert_jq "syslog abuse_investigate — total_incidents present" "${abuse_investigate_result}" '.total_incidents != null'
+
   local ai_correlate_result
   ai_correlate_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"ai_correlate","project":$project,"limit":2,"events_per_anchor":3}')")" || ai_correlate_result=""
   assert_jq "syslog ai_correlate — anchors field is array" "${ai_correlate_result}" '.anchors | type' "array"
@@ -695,9 +706,15 @@ run_docker_mode() {
     "--tmpfs" "/data:rw,noexec,nosuid,size=64m,uid=1000,gid=1000"
   )
 
-  if [[ -n "${TOKEN}" ]]; then
-    docker_args+=("-e" "SYSLOG_MCP_TOKEN=${TOKEN}")
+  # /api/* is always mounted post-v0.26, so the container will refuse to
+  # start without SYSLOG_API_TOKEN. Fail fast here with a clear message
+  # instead of leaving the user to debug a crash inside docker run.
+  if [[ -z "${TOKEN}" ]]; then
+    log_error "TOKEN must be set for docker-mode live tests (the server requires SYSLOG_API_TOKEN to start)"
+    return 2
   fi
+  docker_args+=("-e" "SYSLOG_MCP_TOKEN=${TOKEN}")
+  docker_args+=("-e" "SYSLOG_API_TOKEN=${TOKEN}")
 
   # Remove storage budget env vars that conflict with tmpfs size limits
   docker_args+=(
@@ -712,6 +729,7 @@ run_docker_mode() {
     log_error "docker run failed"
     return 2
   fi
+  CLI_PARITY_CONTAINER="${CONTAINER_NAME}"
 
   # Discover the mapped port (since we used -p 0:3100)
   local mapped_port
@@ -784,13 +802,116 @@ run_http_mode() {
 }
 
 # ---------------------------------------------------------------------------
-# Run all four test phases
+# Phase 5 — CLI parity (bead syslog-mcp-0p8r.10)
+# For each HTTP-supported CLI command, run both local + --http transports
+# and assert their JSON shapes agree after filtering volatile fields. This
+# is the load-bearing check that the cutover (default → HTTP) does not
+# silently change query output.
+#
+# We only run this phase when:
+#   - the `syslog` binary is on PATH (host CLI installed)
+#   - a SYSLOG_API_TOKEN value is available (env or --token arg)
+# Otherwise the phase is skipped cleanly with a single SKIP entry.
+# ---------------------------------------------------------------------------
+phase_cli_parity() {
+  section "Phase 5 — CLI parity (local vs --http)"
+
+  local cli_token="${SYSLOG_API_TOKEN:-${TOKEN:-}}"
+  if [[ -z "${cli_token}" ]]; then
+    _skip "cli parity phase" "no SYSLOG_API_TOKEN / TOKEN available"
+    return 0
+  fi
+
+  local cli_bin=""
+  if [[ -z "${CLI_PARITY_CONTAINER}" ]]; then
+    if ! cli_bin="$(command -v "${SYSLOG_BIN:-syslog}" 2>/dev/null)"; then
+      _skip "cli parity phase" "syslog binary not on PATH (set SYSLOG_BIN)"
+      return 0
+    fi
+  fi
+
+  # jq filter that strips fields known to vary between calls:
+  #   - timestamps/dates (server-side `now()`-style fields)
+  #   - elapsed_ms / duration counters
+  #   - request-scoped ids (run_id, request_id)
+  # Recursively walks the structure and deletes the keys wherever found.
+  local jq_strip='
+    def strip:
+      if type == "object" then
+        with_entries(
+          select(.key | test("^(generated_at|elapsed_ms|duration_ms|started_at|finished_at|request_id|run_id|timestamp|ts)$") | not)
+        ) | map_values(strip)
+      elif type == "array" then map(strip)
+      else . end;
+    strip
+  '
+
+  # Pair: (label, args...). Each command is run twice and the filtered JSON
+  # is diffed. `hosts` is the simplest command and is the canary.
+  local pairs=(
+    "hosts|hosts"
+    "stats|stats"
+    "tail -n 1|tail -n 1"
+    "errors|errors"
+    "search --limit 1|search --limit 1"
+    "sessions --limit 1|sessions --limit 1"
+    "db status|db status"
+  )
+
+  local pair label args local_out http_out filtered_local filtered_http diff
+  for pair in "${pairs[@]}"; do
+    label="${pair%%|*}"
+    args="${pair#*|}"
+    if [[ -n "${CLI_PARITY_CONTAINER}" ]]; then
+      # shellcheck disable=SC2086  # word splitting on $args is intentional
+      local_out="$(docker exec "${CLI_PARITY_CONTAINER}" env -u SYSLOG_USE_HTTP RUST_LOG=off syslog ${args} --json 2>&1)"
+    else
+      # shellcheck disable=SC2086  # word splitting on $args is intentional
+      local_out="$(env -u SYSLOG_USE_HTTP RUST_LOG=off "${cli_bin}" ${args} --json 2>&1)"
+    fi
+    if [[ $? -ne 0 ]]; then
+      _fail "cli parity: local ${label} (exit non-zero)"
+      printf '  stderr: %s\n' "${local_out:0:300}" >&2
+      continue
+    fi
+    if [[ -n "${CLI_PARITY_CONTAINER}" ]]; then
+      # shellcheck disable=SC2086  # word splitting on $args is intentional
+      http_out="$(docker exec "${CLI_PARITY_CONTAINER}" env RUST_LOG=off syslog --http --server "http://127.0.0.1:3100" --token "${cli_token}" ${args} --json 2>&1)"
+    else
+      # shellcheck disable=SC2086
+      http_out="$(RUST_LOG=off "${cli_bin}" --http --server "${BASE_URL}" --token "${cli_token}" ${args} --json 2>&1)"
+    fi
+    if [[ $? -ne 0 ]]; then
+      _fail "cli parity: http ${label} (exit non-zero)"
+      printf '  stderr: %s\n' "${http_out:0:300}" >&2
+      continue
+    fi
+    if ! filtered_local="$(jq -S "${jq_strip}" <<<"${local_out}" 2>/dev/null)"; then
+      _fail "cli parity: local ${label} (stdout not JSON)"
+      continue
+    fi
+    if ! filtered_http="$(jq -S "${jq_strip}" <<<"${http_out}" 2>/dev/null)"; then
+      _fail "cli parity: http ${label} (stdout not JSON)"
+      continue
+    fi
+    if diff="$(diff <(printf '%s\n' "${filtered_local}") <(printf '%s\n' "${filtered_http}"))"; then
+      _pass "cli parity: ${label}"
+    else
+      _fail "cli parity: ${label} (filtered JSON differs)"
+      printf '  diff (truncated):\n%s\n' "$(printf '%s\n' "${diff}" | head -20)" >&2
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Run all test phases
 # ---------------------------------------------------------------------------
 run_test_phases() {
   phase_health
   phase_auth
   phase_protocol
   phase_tools
+  phase_cli_parity
 }
 
 # ---------------------------------------------------------------------------

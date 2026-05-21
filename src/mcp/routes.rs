@@ -4,22 +4,21 @@ use std::time::Instant;
 
 use axum::{
     extract::State,
-    http::{HeaderValue, Method, StatusCode},
+    http::{header, HeaderName, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Json},
     routing::get,
     Router,
 };
 use serde_json::json;
-use tower_http::{
-    cors::{Any, CorsLayer},
-    limit::RequestBodyLimitLayer,
-};
+use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
 
 use super::rmcp_server::allowed_origins;
 use super::{build_auth_layer, streamable_http_config, streamable_http_service};
 use super::{AppState, AuthPolicy};
 
 const MCP_BODY_LIMIT_BYTES: u64 = 65_536;
+const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
+const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
 
 /// Build the MCP router
 pub fn router(state: AppState) -> Router {
@@ -59,8 +58,9 @@ pub fn router(state: AppState) -> Router {
     // Locked Decision: OAuth router only when auth_state: Some(_).
     // bearer-only (auth_state: None) and LoopbackDev have no OAuth routes.
     //
-    // Locked Decision: /register and /auth/login are NOT in bearer_only_router
-    // (confirmed by lab-auth's BEARER_ONLY_ROUTER_FORBIDDEN_PATHS snapshot test).
+    // Locked Decision: use lab-auth's headless subset. /register and
+    // /auth/login are NOT in bearer_only_router (confirmed by lab-auth's
+    // BEARER_ONLY_ROUTER_FORBIDDEN_PATHS snapshot test).
     let oauth_router: Option<Router> = if let AuthPolicy::Mounted {
         auth_state: Some(ref state_arc),
     } = state.auth_policy
@@ -68,11 +68,8 @@ pub fn router(state: AppState) -> Router {
         tracing::info!(
             "OAuth router mounted: /.well-known/oauth-authorization-server, \
                  /.well-known/oauth-protected-resource, /mcp/.well-known/*, \
-                 /jwks, /authorize, /auth/google/callback, /token, /register"
+                 /jwks, /authorize, /auth/google/callback, /token"
         );
-        // Use the full router() so /register (DCR) is available for MCP clients.
-        // bearer_only_router excludes /register unconditionally; full router gates
-        // it on enable_dynamic_registration which we set true in build_auth_policy.
         let auth_state = state_arc.as_ref().clone();
         let path_based_discovery = Router::new()
             .route(
@@ -89,7 +86,7 @@ pub fn router(state: AppState) -> Router {
             )
             .with_state(auth_state.clone());
 
-        Some(lab_auth::routes::router(auth_state).merge(path_based_discovery))
+        Some(lab_auth::routes::bearer_only_router(auth_state).merge(path_based_discovery))
     } else {
         None
     };
@@ -145,7 +142,13 @@ fn cors_layer(config: &crate::config::McpConfig) -> CorsLayer {
     CorsLayer::new()
         .allow_origin(origins)
         .allow_methods([Method::POST, Method::GET])
-        .allow_headers(Any)
+        .allow_headers([
+            header::ACCEPT,
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            HeaderName::from_static(MCP_PROTOCOL_VERSION_HEADER),
+            HeaderName::from_static(MCP_SESSION_ID_HEADER),
+        ])
 }
 
 /// Health check — lightweight probe that verifies DB connectivity without
