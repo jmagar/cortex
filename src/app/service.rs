@@ -53,6 +53,8 @@ fn normalize_syslog_owned_service(service: &str) -> ServiceResult<String> {
     }
 }
 
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+
 async fn command_output(program: &str, args: &[String]) -> ServiceResult<String> {
     let mut command = Command::new(program);
     command.args(args).kill_on_drop(true);
@@ -63,7 +65,17 @@ async fn command_output(program: &str, args: &[String]) -> ServiceResult<String>
                 .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
         }
     }
-    let output = command.output().await.map_err(anyhow::Error::from)?;
+    let output = tokio::time::timeout(COMMAND_TIMEOUT, command.output())
+        .await
+        .map_err(|_| {
+            ServiceError::Internal(anyhow::anyhow!(
+                "{} {} timed out after {}s",
+                program,
+                args.join(" "),
+                COMMAND_TIMEOUT.as_secs()
+            ))
+        })?
+        .map_err(anyhow::Error::from)?;
     if !output.status.success() {
         return Err(ServiceError::Internal(anyhow::anyhow!(
             "{} {} failed: {}",
@@ -274,6 +286,13 @@ impl SyslogService {
     }
 
     pub async fn incident(&self, req: IncidentRequest) -> ServiceResult<IncidentResponse> {
+        if req.hostname.is_some() && req.service.is_some() {
+            return Err(ServiceError::InvalidInput(
+                "hostname and service cannot be combined: journal entries are always local \
+                 and cannot be filtered by remote hostname"
+                    .into(),
+            ));
+        }
         let around_dt = parse_required_timestamp(&req.around, "around")?;
         let window = req.minutes.unwrap_or(5).clamp(1, 120);
         let delta = TimeDelta::try_minutes(i64::from(window))

@@ -823,9 +823,12 @@ phrase matching with quotes, prefix matching with *.
 - `severity` (string, optional) — one of: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`
 - `app_name` (string, optional) — filter by application name, e.g. `sshd`, `dockerd`, `kernel`
 - `facility` (string, optional) — filter by syslog facility name (e.g. `kern`, `auth`, `daemon`)
+- `exclude_facility` (string, optional) — exclude a syslog facility name (e.g. `kern` to suppress kernel noise)
 - `process_id` (string, optional) — filter by process_id (exact match)
 - `from` (string, optional) — start of time range (ISO 8601 / RFC3339, e.g. `2025-01-15T00:00:00Z`)
 - `to` (string, optional) — end of time range (ISO 8601)
+- `received_from` (string, optional) — restrict to entries received after this time (server-side ingestion clock, ISO 8601)
+- `received_to` (string, optional) — restrict to entries received before this time (server-side ingestion clock, ISO 8601)
 - `limit` (integer, optional) — max results (default 100, max 1000)
 
 ---

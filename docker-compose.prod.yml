@@ -20,7 +20,7 @@ x-common-service: &common-service
 services:
   syslog-mcp:
     <<: *common-service
-    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}
+    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-0.27.0}
     container_name: syslog-mcp
     user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"
     env_file:

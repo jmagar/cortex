@@ -354,7 +354,7 @@ impl Mode {
                 // ignored for `serve mcp`, `setup`, etc.
                 anyhow::bail!(
                     "--http / --server / --token only apply to CLI query commands \
-                     (search, tail, errors, hosts, sessions, ai, correlate, stats, db); \
+                     (search, tail, errors, hosts, sessions, ai, correlate, stats, incident, db); \
                      compose, service, and setup are local-only and reject HTTP flags; \
                      got: {}",
                     args.join(" ")
