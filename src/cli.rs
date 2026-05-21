@@ -21,13 +21,122 @@ use syslog_mcp::scanner::{
     PruneCheckpointsResult,
 };
 
-mod args;
-pub(crate) use args::*;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CliCommand {
+    Search(SearchArgs),
+    Tail(TailArgs),
+    Errors(TimeRangeArgs),
+    Hosts(OutputArgs),
+    Sessions(SessionsArgs),
+    Incident(IncidentArgs),
+    Ai(AiCommand),
+    Correlate(CorrelateArgs),
+    Stats(OutputArgs),
+    Compose(ComposeCommand),
+    Service(ServiceCommand),
+    Setup(SetupCommand),
+    Db(DbCommand),
+    Config(ConfigCommand),
+    // Surface parity (Task 5/6)
+    SourceIps(SourceIpsArgs),
+    Timeline(TimelineArgs),
+    Patterns(PatternsArgs),
+    IngestRate(IngestRateArgs),
+    Sig(SigCommand),
+    Notify(NotifyCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SigCommand {
+    List(SigListArgs),
+    Ack(SigAckArgs),
+    Unack(SigUnackArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NotifyCommand {
+    Recent(NotifyRecentArgs),
+    Test(NotifyTestArgs),
+}
 
 pub(crate) mod run;
 #[allow(unused_imports)]
 pub(crate) use run::ENV_USE_HTTP;
 pub(crate) use run::{run, CliMode, GlobalFlags};
+
+// ─── Surface parity arg structs (Task 5/6) ──────────────────────────────────
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SourceIpsArgs {
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TimelineArgs {
+    pub bucket: Option<String>,
+    pub group_by: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub hostname: Option<String>,
+    pub app_name: Option<String>,
+    pub severity_min: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PatternsArgs {
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub hostname: Option<String>,
+    pub app_name: Option<String>,
+    pub severity_min: Option<String>,
+    pub scan_limit: Option<u32>,
+    pub top_n: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct IngestRateArgs {
+    pub by_host: bool,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SigListArgs {
+    pub limit: Option<u32>,
+    pub include_acknowledged: bool,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SigAckArgs {
+    pub signature_hash: String,
+    pub notes: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SigUnackArgs {
+    pub signature_hash: String,
+    pub reason: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct NotifyRecentArgs {
+    pub limit: Option<i64>,
+    pub rule_id: Option<String>,
+    pub since: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct NotifyTestArgs {
+    pub body: Option<String>,
+    pub json: bool,
+}
 
 impl CliCommand {
     pub(crate) fn parse(args: Vec<String>) -> Result<Self> {
@@ -49,6 +158,12 @@ impl CliCommand {
             "setup" => parse_setup(rest),
             "db" => parse_db(rest),
             "config" => parse_config(rest),
+            "source-ips" => parse_source_ips(rest),
+            "timeline" => parse_timeline(rest),
+            "patterns" => parse_patterns(rest),
+            "ingest-rate" => parse_ingest_rate(rest),
+            "sig" => parse_sig(rest),
+            "notify" => parse_notify(rest),
             _ => bail!("unknown CLI command: {command}"),
         }
     }
@@ -70,7 +185,106 @@ pub(crate) fn run_setup(command: SetupCommand) -> Result<()> {
     }
 }
 
-// run(), CliMode, GlobalFlags, ENV_USE_HTTP, strip_eq_prefix are in cli/run.rs.
+/// Top-level dispatch entry point. Built once per CLI invocation by `run_cli`
+/// in `main.rs`. The [`CliMode`] decides whether we hit a local SQLite-backed
+/// [`SyslogService`] or a remote container via [`HttpClient`].
+///
+/// HTTP dispatch is implemented incrementally by bead .7+ — for now, the
+/// `Http` arm returns a clear placeholder error per command. The mode wiring
+/// is in place so .7 can light up commands one by one without touching this
+/// signature.
+pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
+    // Query commands (search/tail/errors/hosts/correlate/stats/sessions) are
+    // mode-agnostic: dispatch::run_X branches on `&CliMode` internally and
+    // wraps the HTTP path in `http_or_cancel` for SIGINT handling. Everything
+    // else (ai/db/compose/setup) still flows through the Local-only path.
+    match command {
+        CliCommand::Search(args) => dispatch::run_search(&mode, args).await,
+        CliCommand::Tail(args) => dispatch::run_tail(&mode, args).await,
+        CliCommand::Errors(args) => dispatch::run_errors(&mode, args).await,
+        CliCommand::Hosts(args) => dispatch::run_hosts(&mode, args).await,
+        CliCommand::Incident(args) => dispatch::run_incident(&mode, args).await,
+        CliCommand::Correlate(args) => dispatch::run_correlate(&mode, args).await,
+        CliCommand::Stats(args) => dispatch::run_stats(&mode, args).await,
+        CliCommand::Sessions(args) => dispatch::run_sessions(&mode, args).await,
+        // AI commands (bead 0p8r.8). 10 are HTTP-capable; 6 are LOCAL-only
+        // and bail in HTTP mode with a per-command inline message.
+        CliCommand::Ai(ai) => match ai {
+            AiCommand::Search(args) => dispatch::run_ai_search(&mode, args).await,
+            AiCommand::Abuse(args) => dispatch::run_ai_abuse(&mode, args).await,
+            AiCommand::Correlate(args) => dispatch::run_ai_correlate(&mode, args).await,
+            AiCommand::Blocks(args) => dispatch::run_ai_blocks(&mode, args).await,
+            AiCommand::Context(args) => dispatch::run_ai_context(&mode, args).await,
+            AiCommand::Tools(args) => dispatch::run_ai_tools(&mode, args).await,
+            AiCommand::Projects(args) => dispatch::run_ai_projects(&mode, args).await,
+            AiCommand::Checkpoints(args) => dispatch::run_ai_checkpoints(&mode, args).await,
+            AiCommand::Errors(args) => dispatch::run_ai_errors(&mode, args).await,
+            AiCommand::PruneCheckpoints(args) => {
+                dispatch::run_ai_prune_checkpoints(&mode, args).await
+            }
+            AiCommand::Index(args) => dispatch::run_ai_index(&mode, args).await,
+            AiCommand::Add(args) => dispatch::run_ai_add(&mode, args).await,
+            AiCommand::Doctor(args) => dispatch::run_ai_doctor(&mode, args).await,
+            AiCommand::SmokeWatch(args) => dispatch::run_ai_smoke_watch(&mode, args).await,
+            AiCommand::WatchStatus(args) => dispatch::run_ai_watch_status(&mode, args).await,
+            AiCommand::Watch(args) => dispatch::run_ai_watch(&mode, args).await,
+        },
+        // DB commands (bead 0p8r.9). 4 are HTTP-capable; backup stays LOCAL
+        // and bails in HTTP mode with an inline message.
+        CliCommand::Db(db) => match db {
+            DbCommand::Status(args) => dispatch::run_db_status(&mode, args).await,
+            DbCommand::Integrity(args) => dispatch::run_db_integrity(&mode, args).await,
+            DbCommand::Checkpoint(args) => dispatch::run_db_checkpoint(&mode, args).await,
+            DbCommand::Vacuum(args) => dispatch::run_db_vacuum(&mode, args).await,
+            DbCommand::Backup(args) => dispatch::run_db_backup(&mode, args).await,
+        },
+        // Compose/Setup/Config are local-only and main::run_cli reroutes them BEFORE
+        // calling run(). If we reach here, the front door was bypassed —
+        // bail with a clear internal-error message rather than a placeholder.
+        CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
+            bail!(
+                "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"
+            )
+        }
+        CliCommand::Config(_) => {
+            bail!("internal: config commands must be dispatched by main::run_cli before reaching cli::run()")
+        }
+        // Surface parity (Task 5/6)
+        CliCommand::SourceIps(args) => dispatch::run_source_ips(&mode, args).await,
+        CliCommand::Timeline(args) => dispatch::run_timeline(&mode, args).await,
+        CliCommand::Patterns(args) => dispatch::run_patterns(&mode, args).await,
+        CliCommand::IngestRate(args) => dispatch::run_ingest_rate(&mode, args).await,
+        CliCommand::Sig(cmd) => match cmd {
+            SigCommand::List(args) => dispatch::run_sig_list(&mode, args).await,
+            SigCommand::Ack(args) => dispatch::run_sig_ack(&mode, args).await,
+            SigCommand::Unack(args) => dispatch::run_sig_unack(&mode, args).await,
+        },
+        CliCommand::Notify(cmd) => match cmd {
+            NotifyCommand::Recent(args) => dispatch::run_notify_recent(&mode, args).await,
+            NotifyCommand::Test(args) => dispatch::run_notify_test(&mode, args).await,
+        },
+    }
+}
+
+/// CLI transport mode resolved from global flags + env. Built once per
+/// invocation; passed by value into [`run`].
+///
+/// `Local` keeps the full sqlx + rusqlite + FTS5 stack linked into the host
+/// binary — acknowledged limitation, tracked for the v0.30 successor (bead
+/// .12 doc note + epic acceptance criteria).
+pub(crate) enum CliMode {
+    Local(SyslogService),
+    Http(http_client::HttpClient),
+}
+
+impl std::fmt::Debug for CliMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Local(_) => f.write_str("CliMode::Local(SyslogService)"),
+            Self::Http(_) => f.write_str("CliMode::Http(HttpClient)"),
+        }
+    }
+}
 
 pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
     let CliCommand::Compose(command) = command else {
@@ -1173,6 +1387,277 @@ fn parse_stats(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Stats(parse_output_args("stats", args)?))
 }
 
+// ─── Surface parity parsers (Task 5/6) ──────────────────────────────────────
+
+fn parse_source_ips(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SourceIpsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            "--offset" => {
+                parsed.offset = Some(parse_u32_flag("--offset", flags.value("--offset")?)?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with("--offset=") => {
+                parsed.offset = Some(parse_u32_flag(
+                    "--offset",
+                    value_after_equals(arg, "--offset")?,
+                )?)
+            }
+            _ => bail!("unknown source-ips option: {arg}"),
+        }
+    }
+    Ok(CliCommand::SourceIps(parsed))
+}
+
+fn parse_timeline(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = TimelineArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--bucket" => parsed.bucket = Some(flags.value("--bucket")?),
+            "--group-by" => parsed.group_by = Some(flags.value("--group-by")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
+            _ if arg.starts_with("--bucket=") => {
+                parsed.bucket = Some(value_after_equals(arg, "--bucket")?)
+            }
+            _ if arg.starts_with("--group-by=") => {
+                parsed.group_by = Some(value_after_equals(arg, "--group-by")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--severity-min=") => {
+                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
+            }
+            _ => bail!("unknown timeline option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Timeline(parsed))
+}
+
+fn parse_patterns(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = PatternsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
+            "--scan-limit" => {
+                parsed.scan_limit =
+                    Some(parse_u32_flag("--scan-limit", flags.value("--scan-limit")?)?)
+            }
+            "--top-n" => parsed.top_n = Some(parse_u32_flag("--top-n", flags.value("--top-n")?)?),
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--severity-min=") => {
+                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
+            }
+            _ if arg.starts_with("--scan-limit=") => {
+                parsed.scan_limit = Some(parse_u32_flag(
+                    "--scan-limit",
+                    value_after_equals(arg, "--scan-limit")?,
+                )?)
+            }
+            _ if arg.starts_with("--top-n=") => {
+                parsed.top_n = Some(parse_u32_flag(
+                    "--top-n",
+                    value_after_equals(arg, "--top-n")?,
+                )?)
+            }
+            _ => bail!("unknown patterns option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Patterns(parsed))
+}
+
+fn parse_ingest_rate(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = IngestRateArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--by-host" => parsed.by_host = true,
+            _ => bail!("unknown ingest-rate option: {arg}"),
+        }
+    }
+    Ok(CliCommand::IngestRate(parsed))
+}
+
+fn parse_sig(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("sig requires a subcommand (list|ack|unack)"))?;
+    match subcommand.as_str() {
+        "list" => parse_sig_list(rest),
+        "ack" => parse_sig_ack(rest),
+        "unack" => parse_sig_unack(rest),
+        _ => bail!("unknown sig subcommand: {subcommand}"),
+    }
+}
+
+fn parse_sig_list(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SigListArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--include-acknowledged" => parsed.include_acknowledged = true,
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ => bail!("unknown sig list option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Sig(SigCommand::List(parsed)))
+}
+
+fn parse_sig_ack(args: &[String]) -> Result<CliCommand> {
+    let (hash, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("sig ack requires a signature hash"))?;
+    if hash.starts_with('-') {
+        bail!("sig ack requires a signature hash as the first positional argument");
+    }
+    let mut parsed = SigAckArgs {
+        signature_hash: hash.clone(),
+        ..Default::default()
+    };
+    let mut flags = FlagCursor::new(rest);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--notes" => parsed.notes = Some(flags.value("--notes")?),
+            _ if arg.starts_with("--notes=") => {
+                parsed.notes = Some(value_after_equals(arg, "--notes")?)
+            }
+            _ => bail!("unknown sig ack option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Sig(SigCommand::Ack(parsed)))
+}
+
+fn parse_sig_unack(args: &[String]) -> Result<CliCommand> {
+    let (hash, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("sig unack requires a signature hash"))?;
+    if hash.starts_with('-') {
+        bail!("sig unack requires a signature hash as the first positional argument");
+    }
+    let mut parsed = SigUnackArgs {
+        signature_hash: hash.clone(),
+        ..Default::default()
+    };
+    let mut flags = FlagCursor::new(rest);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--reason" => parsed.reason = Some(flags.value("--reason")?),
+            _ if arg.starts_with("--reason=") => {
+                parsed.reason = Some(value_after_equals(arg, "--reason")?)
+            }
+            _ => bail!("unknown sig unack option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Sig(SigCommand::Unack(parsed)))
+}
+
+fn parse_notify(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("notify requires a subcommand (recent|test)"))?;
+    match subcommand.as_str() {
+        "recent" => parse_notify_recent(rest),
+        "test" => parse_notify_test(rest),
+        _ => bail!("unknown notify subcommand: {subcommand}"),
+    }
+}
+
+fn parse_notify_recent(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = NotifyRecentArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--rule-id" => parsed.rule_id = Some(flags.value("--rule-id")?),
+            "--since" => parsed.since = Some(flags.value("--since")?),
+            "--limit" => {
+                let v = flags.value("--limit")?;
+                parsed.limit = Some(
+                    v.parse::<i64>()
+                        .map_err(|e| anyhow!("--limit must be a number: {e}"))?,
+                );
+            }
+            _ if arg.starts_with("--rule-id=") => {
+                parsed.rule_id = Some(value_after_equals(arg, "--rule-id")?)
+            }
+            _ if arg.starts_with("--since=") => {
+                parsed.since = Some(value_after_equals(arg, "--since")?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                let v = value_after_equals(arg, "--limit")?;
+                parsed.limit = Some(
+                    v.parse::<i64>()
+                        .map_err(|e| anyhow!("--limit must be a number: {e}"))?,
+                );
+            }
+            _ => bail!("unknown notify recent option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Notify(NotifyCommand::Recent(parsed)))
+}
+
+fn parse_notify_test(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = NotifyTestArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--body" => parsed.body = Some(flags.value("--body")?),
+            _ if arg.starts_with("--body=") => {
+                parsed.body = Some(value_after_equals(arg, "--body")?)
+            }
+            _ => bail!("unknown notify test option: {arg}"),
+        }
+    }
+    Ok(CliCommand::Notify(NotifyCommand::Test(parsed)))
+}
+
 fn parse_db(args: &[String]) -> Result<CliCommand> {
     let (subcommand, rest) = args
         .split_first()
@@ -2021,7 +2506,7 @@ fn print_plugin_hook_report(report: &PluginHookReport, json: bool) -> Result<()>
     Ok(())
 }
 
-fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<()> {
+pub(super) fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
