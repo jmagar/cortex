@@ -378,10 +378,7 @@ fn collect_compose_section() -> DoctorSection {
                 Some(m) if m.kind == "volume" => {
                     let actual = m.volume_name.as_deref().unwrap_or("unknown");
                     let (phase_status, detail) = if actual == expected_volume {
-                        (
-                            SetupStatus::Ok,
-                            format!("volume {actual} -> /data"),
-                        )
+                        (SetupStatus::Ok, format!("volume {actual} -> /data"))
                     } else {
                         (
                             SetupStatus::Error,

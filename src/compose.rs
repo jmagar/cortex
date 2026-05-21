@@ -1328,10 +1328,7 @@ fn container_info_from_inspect(value: serde_json::Value) -> Result<ContainerInfo
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
-                    volume_name: m
-                        .get("Name")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
+                    volume_name: m.get("Name").and_then(|v| v.as_str()).map(str::to_string),
                 })
                 .collect()
         })
