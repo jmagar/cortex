@@ -705,6 +705,34 @@ allow_insecure_http = true
 
 ---
 
+## Security Model
+
+### Syslog ingest is unauthenticated by design
+
+The UDP and TCP syslog listeners (port 1514) accept log frames from **any reachable host** with no authentication. This matches the RFC 3164/5424 syslog protocol design and is intentional for homelab deployments where the network perimeter is the trust boundary.
+
+Consequences:
+- **`hostname` in stored records is caller-controlled** for vendor formats (CEF/UniFi). Any host on the network can claim any hostname. Use `source_ip` for trusted origin identification.
+- **Log injection is possible** from any host that can reach port 1514. Do not use syslog-mcp for security-critical audit trails without network-level access controls.
+- **Retention exemption**: `severity=err` and above are excluded from time-based purge. A host flooding with high-severity frames can exhaust disk space.
+
+**Mitigations**: Bind the syslog port to a specific interface, use a firewall rule to restrict sources, or set `SYSLOG_ALLOWED_SOURCE_CIDRS` (comma-separated CIDR list) to allowlist sending hosts.
+
+### MCP API authentication
+
+The MCP query API (port 3100, default loopback) supports two auth modes:
+
+| Mode | Config | Effect |
+|------|--------|--------|
+| Bearer token | `SYSLOG_MCP_TOKEN=<token>` | Static token grants both `syslog:read` and `syslog:admin` scope |
+| Google OAuth | `SYSLOG_MCP_AUTH_MODE=oauth` | OAuth users authenticated via `SYSLOG_MCP_AUTH_ADMIN_EMAIL` |
+
+**Important**: The static bearer token grants full admin scope. Do not share it with read-only collaborators — use OAuth mode with a read-only token scope instead.
+
+The MCP port defaults to `127.0.0.1:3100` (loopback only). To expose it on a network interface, set `SYSLOG_MCP_HOST=0.0.0.0` and configure a TLS-terminating reverse proxy in front of it.
+
+---
+
 ## Command modes
 
 ```bash

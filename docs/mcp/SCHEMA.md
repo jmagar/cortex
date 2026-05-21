@@ -11,6 +11,8 @@ syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument s
 - `sessions`
 - `search_sessions`
 - `abuse`
+- `abuse_incidents`
+- `abuse_investigate`
 - `ai_correlate`
 - `usage_blocks`
 - `project_context`
@@ -55,6 +57,8 @@ json!({
                     "sessions",
                     "search_sessions",
                     "abuse",
+                    "abuse_incidents",
+                    "abuse_investigate",
                     "ai_correlate",
                     "usage_blocks",
                     "project_context",
