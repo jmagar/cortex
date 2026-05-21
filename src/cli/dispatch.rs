@@ -623,6 +623,14 @@ pub(super) async fn run_ai_assess(mode: &CliMode, args: AiAssessArgs) -> Result<
     let req = AiAssessRequest {
         incident_id,
         model: args.model,
+        project: args.project,
+        tool: args.tool,
+        from: args.from,
+        to: args.to,
+        window_minutes: args.window_minutes,
+        correlation_window_minutes: args.correlation_window_minutes,
+        terms: args.terms,
+        limit: args.limit,
     };
     let response = service.run_gemini_assess(req).await?;
     if args.json {

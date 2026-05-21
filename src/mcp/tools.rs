@@ -941,6 +941,14 @@ Expands top abuse incidents into deterministic evidence bundles. Each bundle inc
 
 ---
 
+## syslog assess (CLI only)
+Frustration assessment for a specific incident. Fetches the evidence bundle for a given
+`incident_id`, formats it as an 8-section assessment prompt, and streams the result through
+the Gemini CLI. Not available as an MCP action because it spawns a subprocess on the host
+machine — use `syslog ai assess <incident_id>` from the CLI instead.
+
+---
+
 ## syslog ai_correlate
 Cross-reference AI transcript anchor rows against nearby non-AI logs in the same database.
 Related rows explicitly exclude AI transcript rows, so the result surfaces host, Docker, OTLP, and syslog context around the AI session instead of duplicating transcript rows.
