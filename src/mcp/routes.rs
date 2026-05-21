@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use axum::{
     extract::State,
-    http::{header, HeaderName, HeaderValue, Method, StatusCode},
+    http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Json},
     routing::get,
     Router,
@@ -172,8 +172,21 @@ async fn health_minimal(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 /// Full health payload including OTLP counters and ingest observability.
-/// Requires authentication (auth layer applied to all non-/health routes).
-async fn health_full(State(state): State<AppState>) -> impl IntoResponse {
+/// Auth-gated when auth is configured: requires the static bearer token.
+/// Both /health routes live outside the MCP auth layer, so this handler
+/// enforces auth explicitly rather than relying on middleware.
+async fn health_full(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    if let AuthPolicy::Mounted { .. } = &state.auth_policy {
+        if let Some(expected) = state.config.api_token.as_deref() {
+            let provided = headers
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "));
+            if provided != Some(expected) {
+                return StatusCode::UNAUTHORIZED.into_response();
+            }
+        }
+    }
     let started = Instant::now();
     let logs_received = state.otlp_counters.logs_received.load(Ordering::Relaxed);
     let decode_errors = state.otlp_counters.decode_errors.load(Ordering::Relaxed);

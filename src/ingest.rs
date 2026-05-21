@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 
 use crate::config::{StorageConfig, SyslogConfig};
 use crate::db::{self, DbPool};
@@ -22,10 +23,14 @@ pub(crate) struct IngestTx {
     tx: mpsc::Sender<db::LogBatchEntry>,
     observability: Arc<RuntimeObservability>,
     channel_capacity: usize,
-    /// Shutdown signal. Sending `true` tells the batch writer and all syslog
-    /// listeners to drain and exit. `watch` is used (not `oneshot`) so that
-    /// multiple listeners can subscribe to the same signal.
+    /// Shutdown signal. Sending `true` tells the batch writer to drain and
+    /// exit. `watch` is used so the signal can be sent once and received by
+    /// the writer regardless of clone count. `Arc` is needed because
+    /// `watch::Sender` is not `Clone`.
     shutdown_tx: Arc<watch::Sender<bool>>,
+    /// Handle for the batch writer task. Stored so `shutdown` can await the
+    /// writer's actual completion rather than sleeping a fixed duration.
+    writer_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 struct WriterTuning {
@@ -98,15 +103,21 @@ impl IngestTx {
         Arc::clone(&self.observability)
     }
 
-    /// Signal all listeners and the batch writer to drain and exit, then wait
-    /// up to `timeout` for the writer to finish flushing. Called from main after
-    /// the HTTP server finishes draining its connections.
+    /// Signal the batch writer to drain and exit, then await its completion
+    /// up to `timeout`. Listener tasks hold their own `IngestTx` clones; this
+    /// drops only the one sender held by `RuntimeCore`. The mpsc channel remains
+    /// open until all listener clones are also dropped (by their task futures
+    /// completing), but the `shutdown_tx` signal causes the writer to drain
+    /// and return before that happens.
     pub(crate) async fn shutdown(self, timeout: std::time::Duration) {
         let _ = self.shutdown_tx.send(true);
-        // Drop our tx clone so the writer's channel sees EOF once all listeners exit.
+        // Drop our tx clone — not strictly required since the shutdown arm in
+        // the writer doesn't wait for EOF, but good hygiene.
+        let handle = self.writer_handle.lock().unwrap().take();
         drop(self.tx);
-        // Give the batch writer time to flush the residual batch.
-        tokio::time::sleep(timeout).await;
+        if let Some(handle) = handle {
+            let _ = tokio::time::timeout(timeout, handle).await;
+        }
     }
 
     /// Test-only constructor: builds an `IngestTx` from a raw sender so tests
@@ -122,6 +133,7 @@ impl IngestTx {
             observability,
             channel_capacity,
             shutdown_tx: Arc::new(shutdown_tx),
+            writer_handle: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -143,7 +155,7 @@ fn start_writer(
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     observability.set_queue_capacity(channel_capacity);
     let writer_observability = Arc::clone(&observability);
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let context = syslog::writer::WriterContext::new(
             pool,
             storage,
@@ -166,6 +178,7 @@ fn start_writer(
         observability,
         channel_capacity,
         shutdown_tx: Arc::new(shutdown_tx),
+        writer_handle: Arc::new(Mutex::new(Some(handle))),
     }
 }
 

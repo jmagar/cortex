@@ -162,9 +162,15 @@ pub(super) async fn handle_tcp_connection(
                 match ingest.try_send(entry) {
                     Ok(()) => {}
                     Err(crate::ingest::TrySendErr::Full) => {
-                        // Packet dropped on backpressure; TCP sender sees no error,
-                        // which is intentional — we shed load rather than stall the
-                        // connection. The backpressure log above already captures this.
+                        // Unlike UDP, TCP is reliable — the sender had no indication
+                        // this line was dropped. Emit an explicit warn per TCP drop so
+                        // the loss is observable; the batch backpressure log above marks
+                        // the window start but doesn't count individual drops.
+                        warn!(
+                            peer = %addr,
+                            line_count,
+                            "TCP syslog line dropped — write channel full"
+                        );
                     }
                     Err(crate::ingest::TrySendErr::Closed) => {
                         break "write_channel_closed";

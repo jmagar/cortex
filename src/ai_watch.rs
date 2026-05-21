@@ -495,11 +495,7 @@ async fn process_pending(
     let now = Instant::now();
     let paths = pending.debounced_paths(now, options.debounce);
     for path in paths {
-        // stable() calls std::fs::symlink_metadata — use block_in_place so the
-        // Tokio runtime can schedule other tasks on this thread's siblings while
-        // the syscall runs, rather than blocking a worker thread directly.
-        let stability = tokio::task::block_in_place(|| pending.stable(&path, now, options.settle));
-        match stability {
+        match pending.stable(&path, now, options.settle) {
             Ok(PendingState::Stable) => {
                 let outcome = process_file(service, options, &path).await;
                 if outcome.retry {

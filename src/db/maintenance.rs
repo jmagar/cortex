@@ -77,10 +77,10 @@ pub fn db_integrity_check(pool: &DbPool, quick: bool) -> Result<Vec<String>> {
     Ok(messages)
 }
 
-/// Type-safe PRAGMA identifier. Only constructible from `'static` str so that
-/// runtime-injected values can never reach the SQL string interpolation in
-/// `db_pragma_i64` / `db_pragma_string`.
-pub struct PragmaName(pub &'static str);
+/// Type-safe PRAGMA identifier. The `pub(crate)` field prevents external crates
+/// from constructing arbitrary values — only crate-internal code can build one,
+/// and only from `'static` str literals, enforcing the SQL interpolation contract.
+pub(crate) struct PragmaName(pub(crate) &'static str);
 
 /// Reads a trusted, hardcoded integer PRAGMA.
 pub(crate) fn db_pragma_i64(pool: &DbPool, pragma: PragmaName) -> Result<i64> {
