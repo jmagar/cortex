@@ -1116,7 +1116,7 @@ fn make_app_entry(ts: &str, host: &str, severity: &str, app: &str, msg: &str) ->
     }
 }
 
-fn make_ai_entry(ts: &str, msg: &str) -> LogBatchEntry {
+fn make_rag_ai_entry(ts: &str, msg: &str) -> LogBatchEntry {
     LogBatchEntry {
         timestamp: ts.to_string(),
         hostname: "localhost".into(),
@@ -1174,10 +1174,7 @@ fn similar_incidents_clusters_returns_clusters_for_matching_logs() {
         limit: Some(10),
     };
     let result = similar_incidents_clusters(&pool, &params).unwrap();
-    assert!(
-        !result.clusters.is_empty(),
-        "expected at least one cluster"
-    );
+    assert!(!result.clusters.is_empty(), "expected at least one cluster");
     let cluster = &result.clusters[0];
     assert_eq!(cluster.hostname, "web-01");
     assert_eq!(cluster.app_name.as_deref(), Some("nginx"));
@@ -1244,7 +1241,6 @@ fn incident_context_summary_returns_window_stats() {
         to: "2024-02-01T09:00:00Z".into(),
         hostname: None,
         app_name: None,
-        query: None,
         severity_min: Some("err".into()),
         limit: Some(10),
     };
@@ -1276,8 +1272,8 @@ fn ask_history_sessions_returns_session_hits() {
     let (pool, _dir) = test_pool();
 
     let logs = vec![
-        make_ai_entry("2024-03-01T10:00:00Z", "nginx ssl certificate error"),
-        make_ai_entry(
+        make_rag_ai_entry("2024-03-01T10:00:00Z", "nginx ssl certificate error"),
+        make_rag_ai_entry(
             "2024-03-01T10:01:00Z",
             "fixed the certificate by renewing it",
         ),

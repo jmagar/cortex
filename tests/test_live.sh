@@ -26,6 +26,7 @@
 #   syslog anomalies, syslog compare, syslog compose_status,
 #   syslog compose_doctor, syslog unaddressed_errors, syslog ack_error,
 #   syslog unack_error, syslog notifications_recent, syslog notifications_test,
+#   syslog similar_incidents, syslog ask_history, syslog incident_context,
 #   syslog help
 #
 # Exit codes:

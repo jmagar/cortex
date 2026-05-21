@@ -1260,8 +1260,7 @@ Returns this markdown documentation.
 // ---------------------------------------------------------------------------
 
 async fn tool_similar_incidents(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let query =
-        string_arg(&args, "query").ok_or_else(|| anyhow::anyhow!("query is required"))?;
+    let query = string_arg(&args, "query").ok_or_else(|| anyhow::anyhow!("query is required"))?;
     let response = state
         .service
         .similar_incidents(SimilarIncidentsRequest {
@@ -1283,8 +1282,7 @@ async fn tool_similar_incidents(state: &AppState, args: Value) -> anyhow::Result
 }
 
 async fn tool_ask_history(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let query =
-        string_arg(&args, "query").ok_or_else(|| anyhow::anyhow!("query is required"))?;
+    let query = string_arg(&args, "query").ok_or_else(|| anyhow::anyhow!("query is required"))?;
     let response = state
         .service
         .ask_history(AskHistoryRequest {
