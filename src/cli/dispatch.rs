@@ -23,10 +23,11 @@ use std::future::Future;
 use std::path::PathBuf;
 use syslog_mcp::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateRequest,
-    AiParseErrorsRequest, AiPruneCheckpointsRequest, CorrelateEventsRequest, DbCheckpointRequest,
-    DbIntegrityRequest, DbVacuumRequest, GetErrorsRequest, IncidentRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListSessionsRequest, ListSourceIpsRequest,
-    PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
+    AiParseErrorsRequest, AiPruneCheckpointsRequest, AskHistoryRequest, CorrelateEventsRequest,
+    DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, GetErrorsRequest,
+    IncidentContextRequest, IncidentRequest, IngestRateRequest, ListAiProjectsRequest,
+    ListAiToolsRequest, ListSessionsRequest, ListSourceIpsRequest, PatternsRequest,
+    ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, SimilarIncidentsRequest,
     TailLogsRequest, TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest,
     UsageBlocksRequest,
 };
@@ -716,7 +717,45 @@ pub(super) async fn run_db_backup(mode: &CliMode, args: DbBackupArgs) -> Result<
     print_db_backup_response(&response, args.json)
 }
 
-// ─── Surface parity (Task 5/6) ──────────────────────────────────────────────
+// ─── RAG v1 dispatch (LOCAL-only) ────────────────────────────────────────────
+
+pub(super) async fn run_ai_similar_incidents(mode: &CliMode, args: AiSimilarArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let service = match mode {
+        CliMode::Http(_) => bail!("similar_incidents currently runs locally only; omit --http."),
+        CliMode::Local(service) => service,
+    };
+    let response = service.similar_incidents(req).await?;
+    print_similar_incidents_response(&response, json)
+}
+
+pub(super) async fn run_ai_ask_history(mode: &CliMode, args: AiAskHistoryArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let service = match mode {
+        CliMode::Http(_) => bail!("ask_history currently runs locally only; omit --http."),
+        CliMode::Local(service) => service,
+    };
+    let response = service.ask_history(req).await?;
+    print_ask_history_response(&response, json)
+}
+
+pub(super) async fn run_ai_incident_context(
+    mode: &CliMode,
+    args: AiIncidentContextArgs,
+) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let service = match mode {
+        CliMode::Http(_) => bail!("incident_context currently runs locally only; omit --http."),
+        CliMode::Local(service) => service,
+    };
+    let response = service.incident_context(req).await?;
+    print_incident_context_response(&response, json)
+}
+
+// ─── Surface parity (source-ips, timeline, patterns, ingest-rate, sig, notify) ─
 
 impl SourceIpsArgs {
     pub(super) fn into_request(self) -> ListSourceIpsRequest {
@@ -883,7 +922,8 @@ pub(super) async fn run_ingest_rate(mode: &CliMode, args: IngestRateArgs) -> Res
     let b = &response.buckets;
     println!(
         "ingest rate (per_sec): 1m={:.2} 5m={:.2} 15m={:.2}  (counts 1m={} 5m={} 15m={}; write_blocked={})",
-        b.per_sec_1m, b.per_sec_5m, b.per_sec_15m, b.last_1m, b.last_5m, b.last_15m, response.write_blocked
+        b.per_sec_1m, b.per_sec_5m, b.per_sec_15m, b.last_1m, b.last_5m, b.last_15m,
+        response.write_blocked
     );
     if let Some(hosts) = &response.by_host {
         for h in hosts {
@@ -1005,7 +1045,6 @@ pub(super) async fn run_notify_recent(mode: &CliMode, args: NotifyRecentArgs) ->
             if json {
                 return super::print_json(&firings);
             }
-            // Returned as a JSON array of objects matching FiringRow shape.
             let arr = firings.as_array().cloned().ok_or_else(|| {
                 anyhow::anyhow!(
                     "unexpected response shape: expected JSON array, got {}",

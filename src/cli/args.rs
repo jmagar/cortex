@@ -416,6 +416,42 @@ pub(crate) struct AiPruneCheckpointsArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiSimilarArgs {
+    pub query: String,
+    pub hostname: Option<String>,
+    pub app_name: Option<String>,
+    pub severity_min: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub window_minutes: Option<u32>,
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiAskHistoryArgs {
+    pub query: String,
+    pub hostname: Option<String>,
+    pub app_name: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AiIncidentContextArgs {
+    pub from: String,
+    pub to: String,
+    pub hostname: Option<String>,
+    pub app_name: Option<String>,
+    pub query: Option<String>,
+    pub severity_min: Option<String>,
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SourceIpsArgs {
     pub limit: Option<u32>,
     pub offset: Option<u32>,
