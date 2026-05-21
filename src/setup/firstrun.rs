@@ -357,8 +357,7 @@ pub(crate) fn installed_compose_asset() -> String {
     // (`compose/docker-compose.yml` vs `.env` in the parent), so rewrite the
     // env_file path. Panic if the template stops matching: a silent no-op
     // here would ship a compose file pointing at a non-existent env file.
-    let installed =
-        super::COMPOSE_ASSET.replace("      - path: .env\n", "      - path: ../.env\n");
+    let installed = super::COMPOSE_ASSET.replace("      - path: .env\n", "      - path: ../.env\n");
     assert_ne!(
         installed,
         super::COMPOSE_ASSET,
@@ -484,13 +483,15 @@ fn ensure_network_phase(phases: &mut Vec<SetupPhase>, env: Option<&BTreeMap<Stri
         Ok(output) if output.status.success() => {
             phases.push(timer.finish(SetupStatus::Ok, format!("created {network}")))
         }
-        Ok(output) => phases.push(timer.finish(
-            SetupStatus::Error,
-            String::from_utf8_lossy(&output.stderr)
-                .lines()
-                .next()
-                .unwrap_or("docker network create failed"),
-        )),
+        Ok(output) => phases.push(
+            timer.finish(
+                SetupStatus::Error,
+                String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .next()
+                    .unwrap_or("docker network create failed"),
+            ),
+        ),
         Err(err) => phases.push(timer.finish(SetupStatus::Error, err.to_string())),
     }
 }

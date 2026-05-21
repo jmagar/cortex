@@ -46,11 +46,7 @@ fn is_source_allowed(addr: std::net::IpAddr, allowed: &[String]) -> bool {
     false
 }
 
-fn addr_matches_cidr(
-    addr: std::net::IpAddr,
-    network: std::net::IpAddr,
-    prefix_len: u32,
-) -> bool {
+fn addr_matches_cidr(addr: std::net::IpAddr, network: std::net::IpAddr, prefix_len: u32) -> bool {
     match (addr, network) {
         (std::net::IpAddr::V4(a), std::net::IpAddr::V4(n)) => {
             if prefix_len > 32 {

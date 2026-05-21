@@ -434,13 +434,15 @@ impl RuntimeCore {
                                         .unwrap_or_else(|_| "[]".to_string());
                                 let hostname = std::env::var("HOSTNAME")
                                     .unwrap_or_else(|_| "localhost".to_string());
-                                if let Some(params) = crate::notifications::rules::evaluate_disk_fill(
-                                    &hostname,
-                                    free_bytes,
-                                    critical_bytes,
-                                    warn_bytes,
-                                    &urls_json,
-                                ) {
+                                if let Some(params) =
+                                    crate::notifications::rules::evaluate_disk_fill(
+                                        &hostname,
+                                        free_bytes,
+                                        critical_bytes,
+                                        warn_bytes,
+                                        &urls_json,
+                                    )
+                                {
                                     let pool_n = Arc::clone(&storage_pool);
                                     let result = tokio::task::spawn_blocking(move || {
                                         let conn = pool_n.get()?;

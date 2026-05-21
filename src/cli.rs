@@ -23,462 +23,10 @@ use syslog_mcp::scanner::{
 mod args;
 pub(crate) use args::*;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AiCommand {
-    Search(AiSearchArgs),
-    Abuse(AiAbuseArgs),
-    Correlate(AiCorrelateArgs),
-    Blocks(AiBlocksArgs),
-    Context(AiContextArgs),
-    Tools(AiListArgs),
-    Projects(AiListArgs),
-    Index(AiIndexArgs),
-    Add(AiAddArgs),
-    Watch(AiWatchArgs),
-    Checkpoints(AiCheckpointsArgs),
-    Errors(AiErrorsArgs),
-    PruneCheckpoints(AiPruneCheckpointsArgs),
-    Doctor(AiDoctorArgs),
-    WatchStatus(OutputArgs),
-    SmokeWatch(OutputArgs),
-    SimilarIncidents(AiSimilarArgs),
-    AskHistory(AiAskHistoryArgs),
-    IncidentContext(AiIncidentContextArgs),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ComposeCommand {
-    Status(ComposeArgs),
-    Doctor(ComposeArgs),
-    Up(ComposeMutationArgs),
-    Down(ComposeMutationArgs),
-    Restart(ComposeMutationArgs),
-    Pull(ComposeMutationArgs),
-    Logs(ComposeLogsArgs),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ServiceCommand {
-    Logs(ServiceLogsArgs),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SetupCommand {
-    Check(SetupArgs),
-    Repair(SetupArgs),
-    PluginHook(PluginHookArgs),
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SetupArgs {
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct PluginHookArgs {
-    pub json: bool,
-    pub no_repair: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DbCommand {
-    Status(DbStatusArgs),
-    Integrity(DbIntegrityArgs),
-    Checkpoint(DbCheckpointArgs),
-    Vacuum(DbVacuumArgs),
-    Backup(DbBackupArgs),
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct DbIntegrityArgs {
-    pub quick: bool,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct OutputArgs {
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct DbStatusArgs {
-    pub json: bool,
-    /// Opt-in: run the host/container coordination diagnostic phases
-    /// (`data-mount`, `ai-watch-coord`). These shell out to `docker inspect`
-    /// and `systemctl --user show` and add roughly 100-200ms per invocation,
-    /// so the default `db status` path is left untouched.
-    pub check_coord: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DbCheckpointArgs {
-    pub mode: String,
-    pub json: bool,
-}
-
-impl Default for DbCheckpointArgs {
-    fn default() -> Self {
-        Self {
-            mode: "passive".into(),
-            json: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DbVacuumArgs {
-    pub full: bool,
-    pub pages: u32,
-    /// CLI bool maps to server `Option<bool>` as
-    /// `present → Some(true)`, `absent → None`. The size pre-flight on
-    /// `--full` is bypassed only when the server receives `Some(true)`.
-    /// See [`crate::app::models::DbVacuumRequest`] (bead 0p8r.4 #C3).
-    pub force: bool,
-    pub json: bool,
-}
-
-impl Default for DbVacuumArgs {
-    fn default() -> Self {
-        Self {
-            full: false,
-            pages: 1000,
-            force: false,
-            json: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct DbBackupArgs {
-    pub output: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiDoctorArgs {
-    pub json: bool,
-    pub strict_permissions: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ComposeArgs {
-    pub target: ComposeTarget,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ComposeMutationArgs {
-    pub target: ComposeTarget,
-    pub options: MutationOptions,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ComposeLogsArgs {
-    pub target: ComposeTarget,
-    pub tail: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ServiceLogsArgs {
-    pub service: String,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub tail: Option<u32>,
-    pub json: bool,
-}
-
-impl Default for ServiceLogsArgs {
-    fn default() -> Self {
-        Self {
-            service: String::new(),
-            from: None,
-            to: None,
-            tail: Some(200),
-            json: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct IncidentArgs {
-    pub around: String,
-    pub minutes: Option<u32>,
-    pub service: Option<String>,
-    pub hostname: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SessionsArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub hostname: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SearchArgs {
-    pub query: Option<String>,
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
-    pub severity: Option<String>,
-    pub app_name: Option<String>,
-    pub facility: Option<String>,
-    pub exclude_facility: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub received_from: Option<String>,
-    pub received_to: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct TailArgs {
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
-    pub app_name: Option<String>,
-    pub n: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct TimeRangeArgs {
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CorrelateArgs {
-    pub reference_time: String,
-    pub window_minutes: Option<u32>,
-    pub severity_min: Option<String>,
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
-    pub query: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiSearchArgs {
-    pub query: String,
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAbuseArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: Option<u32>,
-    pub before: Option<u32>,
-    pub after: Option<u32>,
-    pub terms: Vec<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiCorrelateArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub session_id: Option<String>,
-    pub ai_query: Option<String>,
-    pub log_query: Option<String>,
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
-    pub app_name: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub window_minutes: Option<u32>,
-    pub severity_min: Option<String>,
-    pub limit: Option<u32>,
-    pub events_per_anchor: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiBlocksArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiContextArgs {
-    pub project: String,
-    pub tool: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiListArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiIndexArgs {
-    pub path: Option<String>,
-    pub force: bool,
-    pub since: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAddArgs {
-    pub file: String,
-    pub force: bool,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AiWatchArgs {
-    pub path: Option<String>,
-    pub debounce_ms: u64,
-    pub settle_ms: u64,
-    pub max_retries: u8,
-    pub no_initial_scan: bool,
-    pub json: bool,
-}
-
-impl Default for AiWatchArgs {
-    fn default() -> Self {
-        Self {
-            path: None,
-            debounce_ms: 750,
-            settle_ms: 500,
-            max_retries: 5,
-            no_initial_scan: false,
-            json: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiCheckpointsArgs {
-    pub errors_only: bool,
-    pub missing_only: bool,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiErrorsArgs {
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiPruneCheckpointsArgs {
-    pub missing_only: bool,
-    pub dry_run: bool,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiSimilarArgs {
-    pub query: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
-    pub severity_min: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub window_minutes: Option<u32>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAskHistoryArgs {
-    pub query: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiIncidentContextArgs {
-    pub from: String,
-    pub to: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
-    pub query: Option<String>,
-    pub severity_min: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ConfigCommand {
-    Get(ConfigGetArgs),
-    Set(ConfigSetArgs),
-    Unset(ConfigUnsetArgs),
-    List(ConfigListArgs),
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum ConfigTarget {
-    #[default]
-    Auto,
-    Env,
-    Toml,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ConfigGetArgs {
-    pub key: String,
-    pub target: ConfigTarget,
-    pub toml_path: Option<PathBuf>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ConfigSetArgs {
-    pub key: String,
-    pub value: String,
-    pub target: ConfigTarget,
-    pub toml_path: Option<PathBuf>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ConfigUnsetArgs {
-    pub key: String,
-    pub target: ConfigTarget,
-    pub toml_path: Option<PathBuf>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ConfigListArgs {
-    pub target: ConfigTarget,
-    pub toml_path: Option<PathBuf>,
-    pub json: bool,
-}
+pub(crate) mod run;
+#[allow(unused_imports)]
+pub(crate) use run::ENV_USE_HTTP;
+pub(crate) use run::{run, CliMode, GlobalFlags};
 
 impl CliCommand {
     pub(crate) fn parse(args: Vec<String>) -> Result<Self> {
@@ -521,99 +69,7 @@ pub(crate) fn run_setup(command: SetupCommand) -> Result<()> {
     }
 }
 
-/// Top-level dispatch entry point. Built once per CLI invocation by `run_cli`
-/// in `main.rs`. The [`CliMode`] decides whether we hit a local SQLite-backed
-/// [`SyslogService`] or a remote container via [`HttpClient`].
-///
-/// HTTP dispatch is implemented incrementally by bead .7+ — for now, the
-/// `Http` arm returns a clear placeholder error per command. The mode wiring
-/// is in place so .7 can light up commands one by one without touching this
-/// signature.
-pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
-    // Query commands (search/tail/errors/hosts/correlate/stats/sessions) are
-    // mode-agnostic: dispatch::run_X branches on `&CliMode` internally and
-    // wraps the HTTP path in `http_or_cancel` for SIGINT handling. Everything
-    // else (ai/db/compose/setup) still flows through the Local-only path.
-    match command {
-        CliCommand::Search(args) => dispatch::run_search(&mode, args).await,
-        CliCommand::Tail(args) => dispatch::run_tail(&mode, args).await,
-        CliCommand::Errors(args) => dispatch::run_errors(&mode, args).await,
-        CliCommand::Hosts(args) => dispatch::run_hosts(&mode, args).await,
-        CliCommand::Incident(args) => dispatch::run_incident(&mode, args).await,
-        CliCommand::Correlate(args) => dispatch::run_correlate(&mode, args).await,
-        CliCommand::Stats(args) => dispatch::run_stats(&mode, args).await,
-        CliCommand::Sessions(args) => dispatch::run_sessions(&mode, args).await,
-        // AI commands (bead 0p8r.8). 10 are HTTP-capable; 6 are LOCAL-only
-        // and bail in HTTP mode with a per-command inline message.
-        CliCommand::Ai(ai) => match ai {
-            AiCommand::Search(args) => dispatch::run_ai_search(&mode, args).await,
-            AiCommand::Abuse(args) => dispatch::run_ai_abuse(&mode, args).await,
-            AiCommand::Correlate(args) => dispatch::run_ai_correlate(&mode, args).await,
-            AiCommand::Blocks(args) => dispatch::run_ai_blocks(&mode, args).await,
-            AiCommand::Context(args) => dispatch::run_ai_context(&mode, args).await,
-            AiCommand::Tools(args) => dispatch::run_ai_tools(&mode, args).await,
-            AiCommand::Projects(args) => dispatch::run_ai_projects(&mode, args).await,
-            AiCommand::Checkpoints(args) => dispatch::run_ai_checkpoints(&mode, args).await,
-            AiCommand::Errors(args) => dispatch::run_ai_errors(&mode, args).await,
-            AiCommand::PruneCheckpoints(args) => {
-                dispatch::run_ai_prune_checkpoints(&mode, args).await
-            }
-            AiCommand::Index(args) => dispatch::run_ai_index(&mode, args).await,
-            AiCommand::Add(args) => dispatch::run_ai_add(&mode, args).await,
-            AiCommand::Doctor(args) => dispatch::run_ai_doctor(&mode, args).await,
-            AiCommand::SmokeWatch(args) => dispatch::run_ai_smoke_watch(&mode, args).await,
-            AiCommand::WatchStatus(args) => dispatch::run_ai_watch_status(&mode, args).await,
-            AiCommand::Watch(args) => dispatch::run_ai_watch(&mode, args).await,
-            AiCommand::SimilarIncidents(args) => {
-                dispatch::run_ai_similar_incidents(&mode, args).await
-            }
-            AiCommand::AskHistory(args) => dispatch::run_ai_ask_history(&mode, args).await,
-            AiCommand::IncidentContext(args) => {
-                dispatch::run_ai_incident_context(&mode, args).await
-            }
-        },
-        // DB commands (bead 0p8r.9). 4 are HTTP-capable; backup stays LOCAL
-        // and bails in HTTP mode with an inline message.
-        CliCommand::Db(db) => match db {
-            DbCommand::Status(args) => dispatch::run_db_status(&mode, args).await,
-            DbCommand::Integrity(args) => dispatch::run_db_integrity(&mode, args).await,
-            DbCommand::Checkpoint(args) => dispatch::run_db_checkpoint(&mode, args).await,
-            DbCommand::Vacuum(args) => dispatch::run_db_vacuum(&mode, args).await,
-            DbCommand::Backup(args) => dispatch::run_db_backup(&mode, args).await,
-        },
-        // Compose/Setup/Config are local-only and main::run_cli reroutes them BEFORE
-        // calling run(). If we reach here, the front door was bypassed —
-        // bail with a clear internal-error message rather than a placeholder.
-        CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
-            bail!(
-                "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"
-            )
-        }
-        CliCommand::Config(_) => {
-            bail!("internal: config commands must be dispatched by main::run_cli before reaching cli::run()")
-        }
-    }
-}
-
-/// CLI transport mode resolved from global flags + env. Built once per
-/// invocation; passed by value into [`run`].
-///
-/// `Local` keeps the full sqlx + rusqlite + FTS5 stack linked into the host
-/// binary — acknowledged limitation, tracked for the v0.30 successor (bead
-/// .12 doc note + epic acceptance criteria).
-pub(crate) enum CliMode {
-    Local(SyslogService),
-    Http(http_client::HttpClient),
-}
-
-impl std::fmt::Debug for CliMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Local(_) => f.write_str("CliMode::Local(SyslogService)"),
-            Self::Http(_) => f.write_str("CliMode::Http(HttpClient)"),
-        }
-    }
-}
+// run(), CliMode, GlobalFlags, ENV_USE_HTTP, strip_eq_prefix are in cli/run.rs.
 
 pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
     let CliCommand::Compose(command) = command else {
@@ -1421,146 +877,6 @@ fn parse_ai_doctor(args: &[String]) -> Result<CliCommand> {
         }
     }
     Ok(CliCommand::Ai(AiCommand::Doctor(parsed)))
-}
-
-fn parse_ai_similar(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiSimilarArgs::default();
-    let mut query_parts = Vec::new();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
-            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
-            "--window-minutes" => {
-                parsed.window_minutes = Some(parse_u32_flag(
-                    "--window-minutes",
-                    flags.value("--window-minutes")?,
-                )?)
-            }
-            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
-            }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
-            }
-            _ if arg.starts_with("--severity-min=") => {
-                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
-            }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
-            }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
-            _ if arg.starts_with("--window-minutes=") => {
-                parsed.window_minutes = Some(parse_u32_flag(
-                    "--window-minutes",
-                    value_after_equals(arg, "--window-minutes")?,
-                )?)
-            }
-            _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag(
-                    "--limit",
-                    value_after_equals(arg, "--limit")?,
-                )?)
-            }
-            _ if arg.starts_with('-') => bail!("unknown ai similar option: {arg}"),
-            _ => query_parts.push(arg),
-        }
-    }
-    parsed.query = query_parts.join(" ");
-    if parsed.query.is_empty() {
-        bail!("ai similar requires a query");
-    }
-    Ok(CliCommand::Ai(AiCommand::SimilarIncidents(parsed)))
-}
-
-fn parse_ai_ask_history(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiAskHistoryArgs::default();
-    let mut query_parts = Vec::new();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
-            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
-            }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
-            }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
-            }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
-            _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag(
-                    "--limit",
-                    value_after_equals(arg, "--limit")?,
-                )?)
-            }
-            _ if arg.starts_with('-') => bail!("unknown ai ask-history option: {arg}"),
-            _ => query_parts.push(arg),
-        }
-    }
-    parsed.query = query_parts.join(" ");
-    if parsed.query.is_empty() {
-        bail!("ai ask-history requires a query");
-    }
-    Ok(CliCommand::Ai(AiCommand::AskHistory(parsed)))
-}
-
-fn parse_ai_incident_context(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiIncidentContextArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--from" => parsed.from = flags.value("--from")?,
-            "--to" => parsed.to = flags.value("--to")?,
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
-            "--query" => parsed.query = Some(flags.value("--query")?),
-            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
-            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--from=") => parsed.from = value_after_equals(arg, "--from")?,
-            _ if arg.starts_with("--to=") => parsed.to = value_after_equals(arg, "--to")?,
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
-            }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
-            }
-            _ if arg.starts_with("--query=") => {
-                parsed.query = Some(value_after_equals(arg, "--query")?)
-            }
-            _ if arg.starts_with("--severity-min=") => {
-                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
-            }
-            _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag(
-                    "--limit",
-                    value_after_equals(arg, "--limit")?,
-                )?)
-            }
-            _ if arg.starts_with('-') => bail!("unknown ai incident-context option: {arg}"),
-            _ => bail!("unexpected positional argument for ai incident-context: {arg}"),
-        }
-    }
-    if parsed.from.is_empty() {
-        bail!("ai incident-context requires --from");
-    }
-    if parsed.to.is_empty() {
-        bail!("ai incident-context requires --to");
-    }
-    Ok(CliCommand::Ai(AiCommand::IncidentContext(parsed)))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -4876,9 +4192,145 @@ pub(crate) mod dispatch;
 
 // ENV_USE_HTTP, GlobalFlags, env_opts_into_http, strip_eq_prefix are in cli/run.rs.
 
-// ---------------------------------------------------------------------------
-// RAG v1 print functions
-// ---------------------------------------------------------------------------
+fn parse_ai_similar(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiSimilarArgs::default();
+    let mut query_parts = Vec::new();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--window-minutes" => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    flags.value("--window-minutes")?,
+                )?)
+            }
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--severity-min=") => {
+                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--window-minutes=") => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    value_after_equals(arg, "--window-minutes")?,
+                )?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai similar option: {arg}"),
+            _ => query_parts.push(arg),
+        }
+    }
+    parsed.query = query_parts.join(" ");
+    if parsed.query.is_empty() {
+        bail!("ai similar requires a query");
+    }
+    Ok(CliCommand::Ai(AiCommand::SimilarIncidents(parsed)))
+}
+
+fn parse_ai_ask_history(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiAskHistoryArgs::default();
+    let mut query_parts = Vec::new();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai ask-history option: {arg}"),
+            _ => query_parts.push(arg),
+        }
+    }
+    parsed.query = query_parts.join(" ");
+    if parsed.query.is_empty() {
+        bail!("ai ask-history requires a query");
+    }
+    Ok(CliCommand::Ai(AiCommand::AskHistory(parsed)))
+}
+
+fn parse_ai_incident_context(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = AiIncidentContextArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--from" => parsed.from = flags.value("--from")?,
+            "--to" => parsed.to = flags.value("--to")?,
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--query" => parsed.query = Some(flags.value("--query")?),
+            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--from=") => parsed.from = value_after_equals(arg, "--from")?,
+            _ if arg.starts_with("--to=") => parsed.to = value_after_equals(arg, "--to")?,
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--query=") => {
+                parsed.query = Some(value_after_equals(arg, "--query")?)
+            }
+            _ if arg.starts_with("--severity-min=") => {
+                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown ai incident-context option: {arg}"),
+            _ => bail!("unexpected positional argument for ai incident-context: {arg}"),
+        }
+    }
+    if parsed.from.is_empty() {
+        bail!("ai incident-context requires --from");
+    }
+    if parsed.to.is_empty() {
+        bail!("ai incident-context requires --to");
+    }
+    Ok(CliCommand::Ai(AiCommand::IncidentContext(parsed)))
+}
 
 pub(super) fn print_similar_incidents_response(
     response: &SimilarIncidentsResponse,

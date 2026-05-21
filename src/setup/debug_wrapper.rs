@@ -3,9 +3,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use super::{
-    check_file_phase, host_local_report_input, setup_path_value, setup_report,
-    DebugComposeAction, DebugWrapperAction, PhaseTimer, SetupPhase, SetupReport, SetupReportInput,
-    SetupStatus,
+    check_file_phase, host_local_report_input, setup_path_value, setup_report, DebugComposeAction,
+    DebugWrapperAction, PhaseTimer, SetupPhase, SetupReport, SetupReportInput, SetupStatus,
 };
 
 pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<SetupReport> {
@@ -105,7 +104,10 @@ pub async fn run_debug_compose_setup(action: DebugComposeAction) -> io::Result<S
                 &override_path,
                 "run syslog setup debug-compose install",
             ));
-            phases.push(check_debug_compose_content_phase(&override_path, &repo_path));
+            phases.push(check_debug_compose_content_phase(
+                &override_path,
+                &repo_path,
+            ));
         }
     }
 

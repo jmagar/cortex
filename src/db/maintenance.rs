@@ -538,13 +538,12 @@ fn reconcile_hosts(pool: &DbPool, hostnames: &[String]) -> Result<()> {
     for hostname in hostnames {
         // One query: count + timestamp bounds in a single pass over the index.
         // MIN/MAX return NULL when count=0, so timestamps are Option<String>.
-        let (count, first_seen, last_seen): (i64, Option<String>, Option<String>) = tx
-            .query_row(
-                "SELECT COUNT(*), MIN(received_at), MAX(received_at)
+        let (count, first_seen, last_seen): (i64, Option<String>, Option<String>) = tx.query_row(
+            "SELECT COUNT(*), MIN(received_at), MAX(received_at)
                  FROM logs WHERE hostname = ?1",
-                [hostname],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )?;
+            [hostname],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
 
         match (count, first_seen, last_seen) {
             (0, _, _) | (_, None, _) | (_, _, None) => {
