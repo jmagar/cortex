@@ -10,19 +10,21 @@ use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
     AbuseSearchRequest, AbuseSearchResponse, AiCorrelateRequest, AiCorrelateResponse,
     AiCorrelationAnchor, AiIncidentRequest, AiIncidentResponse, AiInvestigateRequest,
-    AiInvestigateResponse, AiSessionEntry, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest,
-    ClockSkewResponse, CompareRequest, CompareResponse, ContextRequest, ContextResponse,
-    CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
-    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsRequest,
-    GetErrorsResponse, GetLogRequest, GetLogResponse, IncidentEvent, IncidentRequest,
+    AiInvestigateResponse, AiSessionEntry, AnomaliesRequest, AnomaliesResponse, AskHistoryRequest,
+    AskHistoryResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse,
+    ContextRequest, ContextResponse, CorrelateEventsRequest, CorrelateEventsResponse,
+    DbBackupResult, DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats,
+    DbVacuumResult, GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse,
+    IncidentContextRequest, IncidentContextResponse, IncidentEvent, IncidentRequest,
     IncidentResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
     ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
     ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
     ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
     ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
     SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry, ServiceLogsRequest,
-    ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse, TailLogsRequest, TimelineRequest,
-    TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
+    ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest,
+    SimilarIncidentsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
+    UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
@@ -539,6 +541,8 @@ impl SyslogService {
             query: req.query,
             ai_project: req.project,
             ai_tool: req.tool,
+            hostname: None,
+            app_name: None,
             from,
             to,
             limit: req.limit,
@@ -1763,6 +1767,84 @@ impl SyslogService {
                 "Apprise delivery failed: {e}"
             ))),
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // RAG v1 methods
+    // -------------------------------------------------------------------------
+
+    pub async fn similar_incidents(
+        &self,
+        req: SimilarIncidentsRequest,
+    ) -> ServiceResult<SimilarIncidentsResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let severity_min = validate_optional_severity(req.severity_min)?;
+        let result = self
+            .run_db(move |pool| {
+                db::similar_incidents_clusters(
+                    pool,
+                    &db::SimilarIncidentsParams {
+                        query: req.query,
+                        hostname: req.hostname,
+                        app_name: req.app_name,
+                        severity_min,
+                        from,
+                        to,
+                        window_minutes: req.window_minutes,
+                        limit: req.limit,
+                    },
+                )
+            })
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn ask_history(&self, req: AskHistoryRequest) -> ServiceResult<AskHistoryResponse> {
+        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let result = self
+            .run_db(move |pool| {
+                db::ask_history_sessions(
+                    pool,
+                    &db::AskHistoryParams {
+                        query: req.query,
+                        hostname: req.hostname,
+                        app_name: req.app_name,
+                        from,
+                        to,
+                        limit: req.limit,
+                    },
+                )
+            })
+            .await?;
+        Ok(result.into())
+    }
+
+    pub async fn incident_context(
+        &self,
+        req: IncidentContextRequest,
+    ) -> ServiceResult<IncidentContextResponse> {
+        // Both from and to are required — validate and normalize to rfc3339_z format.
+        let from = rfc3339_z(parse_required_timestamp(&req.from, "from")?);
+        let to = rfc3339_z(parse_required_timestamp(&req.to, "to")?);
+        let result = self
+            .run_db(move |pool| {
+                db::incident_context_summary(
+                    pool,
+                    &db::IncidentContextParams {
+                        from,
+                        to,
+                        hostname: req.hostname,
+                        app_name: req.app_name,
+                        // req.query accepted but deferred to v2 FTS integration
+                        severity_min: req.severity_min,
+                        limit: req.limit,
+                    },
+                )
+            })
+            .await?;
+        Ok(result.into())
     }
 }
 

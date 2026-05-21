@@ -11,6 +11,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use crate::mcp::AuthPolicy;
 use axum::{
     extract::{ConnectInfo, State},
     http::{header::RETRY_AFTER, HeaderMap, HeaderValue, StatusCode},
@@ -20,7 +21,6 @@ use axum::{
     Router,
 };
 use bytes::Bytes;
-use crate::mcp::AuthPolicy;
 use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest,
     common::v1::{any_value::Value as AnyValueKind, AnyValue},

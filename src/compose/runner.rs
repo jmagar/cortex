@@ -2,10 +2,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 
-use super::types::{
-    CommandOutput, CommandRunner, ComposeInvocation, TimeoutCleanupStatus,
-};
 use super::format::redact_sensitive;
+use super::types::{CommandOutput, CommandRunner, ComposeInvocation, TimeoutCleanupStatus};
 
 pub struct ProcessRunner;
 

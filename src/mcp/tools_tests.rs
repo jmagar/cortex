@@ -152,6 +152,12 @@ async fn schema_actions_are_dispatchable() {
             "ack_error" | "unack_error" => {
                 json!({"action": action, "signature_hash": "0000000000000000000000000000000000000000000000000000000000000000"})
             }
+            // RAG v1 actions require query or time range.
+            "similar_incidents" => json!({"action": action, "query": "test"}),
+            "ask_history" => json!({"action": action, "query": "test"}),
+            "incident_context" => {
+                json!({"action": action, "from": "2026-01-01T00:00:00Z", "to": "2026-01-01T01:00:00Z"})
+            }
             _ => json!({"action": action}),
         };
         let result = execute_tool(&h.state, "syslog", args, None).await;
