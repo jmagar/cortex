@@ -6,7 +6,7 @@ use axum::extract::connect_info::MockConnectInfo;
 use axum::http::Request;
 use tower::util::ServiceExt;
 
-use crate::config::{ApiConfig, NotificationsConfig, StorageConfig};
+use crate::config::{ApiConfig, StorageConfig};
 use crate::db::{self, DbPool, LogBatchEntry};
 use crate::mcp::AuthPolicy;
 
@@ -67,7 +67,6 @@ fn test_state_full(
         allowed_origins,
         auth_policy,
         &pool,
-        NotificationsConfig::default(),
     )
     .expect("ApiState::new should succeed against a fresh pool")
     .with_isolated_maintenance_permit();
@@ -758,7 +757,6 @@ async fn cors_localhost_defaults_suppressed_on_external_bind() {
         vec![],
         AuthPolicy::Mounted { auth_state: None },
         &pool,
-        NotificationsConfig::default(),
     )
     .unwrap()
     .with_isolated_maintenance_permit();

@@ -186,7 +186,6 @@ async fn serve_mcp() -> Result<()> {
             runtime.config.mcp.allowed_origins.clone(),
             runtime.auth_policy().clone(),
             runtime.pool(),
-            runtime.config.notifications.clone(),
         )?;
         app = app.merge(api::router(api_state)?);
         info!("Non-MCP API mounted under /api");
@@ -349,12 +348,6 @@ impl Mode {
                         | "service"
                         | "setup"
                         | "config"
-                        | "source-ips"
-                        | "timeline"
-                        | "patterns"
-                        | "ingest-rate"
-                        | "sig"
-                        | "notify"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
@@ -604,15 +597,6 @@ fn print_usage() {
   syslog config list [--env|--toml] [--toml-path PATH] [--json]
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
   syslog stats [--json]
-  syslog source-ips [--limit N] [--offset N] [--json]
-  syslog timeline [--bucket 1m|5m|1h|1d] [--group-by hostname|severity|app] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]
-  syslog patterns [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--scan-limit N] [--top-n N] [--json]
-  syslog ingest-rate [--by-host] [--json]
-  syslog sig list [--include-acknowledged] [--limit N] [--json]
-  syslog sig ack HASH [--notes TEXT] [--json]
-  syslog sig unack HASH [--reason TEXT] [--json]
-  syslog notify recent [--rule-id ID] [--since TIME] [--limit N] [--json]
-  syslog notify test [--body TEXT] [--json]
 
 Global CLI flags (apply to query commands above; not valid for serve/mcp/setup/doctor):
   --http              Route this invocation through the container's REST API instead of opening the local SQLite DB.

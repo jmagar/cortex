@@ -62,7 +62,8 @@ use url::Url;
 
 use syslog_mcp::app::{
     AbuseSearchRequest, AbuseSearchResponse, AckErrorRequest, AckErrorResponse,
-    AiCheckpointsRequest, AiCorrelateRequest, AiCorrelateResponse, AiParseErrorsRequest,
+    AiCheckpointsRequest, AiCorrelateRequest, AiCorrelateResponse, AiIncidentRequest,
+    AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiParseErrorsRequest,
     AiPruneCheckpointsRequest, CorrelateEventsRequest, CorrelateEventsResponse,
     DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest, DbIntegrityResult,
     DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult, GetErrorsRequest,
