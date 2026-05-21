@@ -1,8 +1,10 @@
 [advisories]
 ignore = [
-  # lab-auth requires RS256 for Google OAuth/JWK validation and its local JWT
-  # signing path. RUSTSEC-2023-0071 has no patched rsa release; keep the audit
-  # gate active for all other advisories and revisit when upstream RSA support
-  # has a patched migration path.
+  # RUSTSEC-2023-0071: Marvin Attack timing side-channel in rsa crate PKCS#1 v1.5 decryption.
+  # Reachable transitively via lab-auth (git-pinned SHA 87cec32).
+  # Current usage: RS256 JWT signing (local, not exposed) and signature verification
+  # (on caller-supplied JWTs). Verification is not on the PKCS#1 v1.5 decryption path
+  # that is vulnerable. REMOVE THIS IGNORE when lab-auth migrates to RustCrypto's
+  # hardened rsa path, or if lab-auth ever adds RSA key-exchange / PKCS#1 v1.5 decrypt.
   "RUSTSEC-2023-0071",
 ]
