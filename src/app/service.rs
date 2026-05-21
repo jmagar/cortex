@@ -219,10 +219,16 @@ pub async fn run_service_logs(req: ServiceLogsRequest) -> ServiceResult<ServiceL
         "json".to_string(),
     ];
     if let Some(from) = &req.from {
+        // Validate as RFC 3339 before passing to journalctl to prevent
+        // argument injection (e.g. "--rotate", "--vacuum-size=1").
+        chrono::DateTime::parse_from_rfc3339(from)
+            .map_err(|_| ServiceError::InvalidInput(format!("invalid `from` timestamp: {from}")))?;
         args.push("--since".to_string());
         args.push(from.clone());
     }
     if let Some(to) = &req.to {
+        chrono::DateTime::parse_from_rfc3339(to)
+            .map_err(|_| ServiceError::InvalidInput(format!("invalid `to` timestamp: {to}")))?;
         args.push("--until".to_string());
         args.push(to.clone());
     }
@@ -873,11 +879,11 @@ impl SyslogService {
     pub async fn db_status(&self) -> ServiceResult<DbMaintenanceStatus> {
         let storage = self.storage.clone();
         self.run_db(move |pool| {
-            let page_count = db::db_pragma_i64(pool, "page_count")?;
-            let freelist_count = db::db_pragma_i64(pool, "freelist_count")?;
-            let page_size = db::db_pragma_i64(pool, "page_size")?;
-            let auto_vacuum = db::db_pragma_i64(pool, "auto_vacuum")?;
-            let journal_mode = db::db_pragma_string(pool, "journal_mode")?;
+            let page_count = db::db_pragma_i64(pool, db::PragmaName("page_count"))?;
+            let freelist_count = db::db_pragma_i64(pool, db::PragmaName("freelist_count"))?;
+            let page_size = db::db_pragma_i64(pool, db::PragmaName("page_size"))?;
+            let auto_vacuum = db::db_pragma_i64(pool, db::PragmaName("auto_vacuum"))?;
+            let journal_mode = db::db_pragma_string(pool, db::PragmaName("journal_mode"))?;
             let logical_size_bytes =
                 ((page_count - freelist_count).max(0) * page_size).max(0) as u64;
             let physical_size_bytes = db::physical_size_bytes(&storage.db_path)?;
@@ -936,8 +942,8 @@ impl SyslogService {
     /// two `PRAGMA` reads on a held connection inside `spawn_blocking`.
     pub async fn db_logical_size_bytes(&self) -> ServiceResult<u64> {
         self.run_db(move |pool| {
-            let page_count = db::db_pragma_i64(pool, "page_count")?;
-            let page_size = db::db_pragma_i64(pool, "page_size")?;
+            let page_count = db::db_pragma_i64(pool, db::PragmaName("page_count"))?;
+            let page_size = db::db_pragma_i64(pool, db::PragmaName("page_size"))?;
             Ok((page_count.max(0) as u64).saturating_mul(page_size.max(0) as u64))
         })
         .await

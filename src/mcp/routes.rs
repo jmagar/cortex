@@ -22,8 +22,9 @@ const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
 
 /// Build the MCP router
 pub fn router(state: AppState) -> Router {
-    // Authenticated RMCP Streamable HTTP endpoint. /health is mounted separately
-    // so Docker HEALTHCHECK, docker-compose health probes, and SWAG can reach it.
+    // Authenticated RMCP Streamable HTTP endpoint.
+    // /health is unauthenticated — Docker HEALTHCHECK, Compose, and SWAG reach it.
+    // /health/full is auth-gated and returns OTLP counters + ingest observability.
     let rmcp_config = streamable_http_config(&state.config);
     let mcp_service =
         Router::new().nest_service("/mcp", streamable_http_service(state.clone(), rmcp_config));
@@ -109,7 +110,9 @@ pub fn router(state: AppState) -> Router {
     // producing Router<()>, merge the oauth Router<()>, then re-add the health route
     // (which requires AppState) and call .with_state(state) at the end.
     let health_state = state.clone();
-    let health_route = Router::new().route("/health", get(health));
+    let health_route = Router::new()
+        .route("/health", get(health_minimal))
+        .route("/health/full", get(health_full));
 
     let base_with_state: Router<()> = Router::new()
         .merge(authenticated)
@@ -151,10 +154,26 @@ fn cors_layer(config: &crate::config::McpConfig) -> CorsLayer {
         ])
 }
 
-/// Health check — lightweight probe that verifies DB connectivity without
-/// running COUNT(*) over the entire logs table. Also surfaces OTLP receiver
-/// counters so operators can see ingest activity at a glance.
-async fn health(State(state): State<AppState>) -> impl IntoResponse {
+/// Minimal liveness probe — unauthenticated, safe for Docker HEALTHCHECK and
+/// Compose health gates. Returns 200 when DB is reachable, 503 otherwise.
+/// Does not expose counters or ingest metrics.
+async fn health_minimal(State(state): State<AppState>) -> impl IntoResponse {
+    match state.service.health_check().await {
+        Ok(()) => Json(json!({"status": "ok"})).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Health check failed");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"status": "error"})),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Full health payload including OTLP counters and ingest observability.
+/// Requires authentication (auth layer applied to all non-/health routes).
+async fn health_full(State(state): State<AppState>) -> impl IntoResponse {
     let started = Instant::now();
     let logs_received = state.otlp_counters.logs_received.load(Ordering::Relaxed);
     let decode_errors = state.otlp_counters.decode_errors.load(Ordering::Relaxed);
@@ -180,7 +199,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
                 "Health check failed"
             );
             (
-                StatusCode::INTERNAL_SERVER_ERROR,
+                StatusCode::SERVICE_UNAVAILABLE,
                 Json(json!({
                     "status": "error",
                     "otlp_logs_received": logs_received,

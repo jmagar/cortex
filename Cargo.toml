@@ -38,7 +38,6 @@ bollard = { version = "0.19", default-features = false, features = [
   "http",
   "chrono",
 ] }
-hyper = { version = "1", features = ["client"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 bytes = "1"
 

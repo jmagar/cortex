@@ -20,6 +20,7 @@ use axum::{
     Router,
 };
 use bytes::Bytes;
+use crate::mcp::AuthPolicy;
 use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest,
     common::v1::{any_value::Value as AnyValueKind, AnyValue},
@@ -51,6 +52,7 @@ pub struct OtlpState {
     pub(crate) ingest: IngestTx,
     pub api_token: Option<String>,
     pub counters: Arc<OtlpCounters>,
+    pub auth_policy: AuthPolicy,
 }
 
 impl OtlpState {
@@ -58,11 +60,13 @@ impl OtlpState {
         ingest: IngestTx,
         api_token: Option<String>,
         counters: Arc<OtlpCounters>,
+        auth_policy: AuthPolicy,
     ) -> Self {
         Self {
             ingest,
             api_token,
             counters,
+            auth_policy,
         }
     }
 }
@@ -452,8 +456,15 @@ fn any_value_to_string(v: &AnyValue) -> Option<String> {
 }
 
 fn is_authorized(state: &OtlpState, headers: &HeaderMap) -> bool {
-    let Some(expected) = state.api_token.as_deref() else {
+    // LoopbackDev: loopback bind is the trust boundary, no token required.
+    if matches!(state.auth_policy, AuthPolicy::LoopbackDev) {
         return true;
+    }
+    // Mounted auth: require the static bearer token. If none is configured
+    // (OAuth-only deployment), OTLP is denied — there is no OAuth flow for
+    // machine-to-machine OTLP exporters.
+    let Some(expected) = state.api_token.as_deref() else {
+        return false;
     };
     let Some(auth) = headers
         .get(axum::http::header::AUTHORIZATION)
