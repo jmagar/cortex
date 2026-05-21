@@ -516,9 +516,7 @@ async fn collect_ai_section() -> DoctorSection {
                                 ));
                             }
                         }
-                        if health.recent_failure_count > 0
-                            || health.recent_schema_error_count > 0
-                        {
+                        if health.recent_failure_count > 0 || health.recent_schema_error_count > 0 {
                             phases.push(DoctorPhase::new(
                                 SetupStatus::Warn,
                                 "ai_watch_recent_failures",
