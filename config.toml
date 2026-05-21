@@ -81,3 +81,11 @@ allowed_client_redirect_uris = []
 enabled = false
 reconnect_initial_ms = 1000
 reconnect_max_ms = 30000
+
+[notifications]
+enabled = true
+apprise_url = "http://100.120.242.29:8766"
+dispatcher_interval_secs = 30
+evaluator_interval_secs = 30
+dedup_window_secs = 3600
+max_retry_attempts = 8
