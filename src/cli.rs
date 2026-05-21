@@ -1393,25 +1393,14 @@ fn parse_source_ips(args: &[String]) -> Result<CliCommand> {
     let mut parsed = SourceIpsArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            "--offset" => {
-                parsed.offset = Some(parse_u32_flag("--offset", flags.value("--offset")?)?)
-            }
-            _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag(
-                    "--limit",
-                    value_after_equals(arg, "--limit")?,
-                )?)
-            }
-            _ if arg.starts_with("--offset=") => {
-                parsed.offset = Some(parse_u32_flag(
-                    "--offset",
-                    value_after_equals(arg, "--offset")?,
-                )?)
-            }
-            _ => bail!("unknown source-ips option: {arg}"),
+        if arg == "--json" {
+            parsed.json = true;
+        } else if let Some(v) = flags.match_value(&arg, "--limit")? {
+            parsed.limit = Some(parse_u32_flag("--limit", v)?);
+        } else if let Some(v) = flags.match_value(&arg, "--offset")? {
+            parsed.offset = Some(parse_u32_flag("--offset", v)?);
+        } else {
+            bail!("unknown source-ips option: {arg}");
         }
     }
     Ok(CliCommand::SourceIps(parsed))
@@ -1421,35 +1410,24 @@ fn parse_timeline(args: &[String]) -> Result<CliCommand> {
     let mut parsed = TimelineArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--bucket" => parsed.bucket = Some(flags.value("--bucket")?),
-            "--group-by" => parsed.group_by = Some(flags.value("--group-by")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
-            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
-            _ if arg.starts_with("--bucket=") => {
-                parsed.bucket = Some(value_after_equals(arg, "--bucket")?)
-            }
-            _ if arg.starts_with("--group-by=") => {
-                parsed.group_by = Some(value_after_equals(arg, "--group-by")?)
-            }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
-            }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
-            }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
-            }
-            _ if arg.starts_with("--severity-min=") => {
-                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
-            }
-            _ => bail!("unknown timeline option: {arg}"),
+        if arg == "--json" {
+            parsed.json = true;
+        } else if let Some(v) = flags.match_value(&arg, "--bucket")? {
+            parsed.bucket = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--group-by")? {
+            parsed.group_by = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--from")? {
+            parsed.from = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--to")? {
+            parsed.to = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--hostname")? {
+            parsed.hostname = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--app-name")? {
+            parsed.app_name = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--severity-min")? {
+            parsed.severity_min = Some(v);
+        } else {
+            bail!("unknown timeline option: {arg}");
         }
     }
     Ok(CliCommand::Timeline(parsed))
@@ -1459,44 +1437,24 @@ fn parse_patterns(args: &[String]) -> Result<CliCommand> {
     let mut parsed = PatternsArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
-            "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
-            "--scan-limit" => {
-                parsed.scan_limit =
-                    Some(parse_u32_flag("--scan-limit", flags.value("--scan-limit")?)?)
-            }
-            "--top-n" => parsed.top_n = Some(parse_u32_flag("--top-n", flags.value("--top-n")?)?),
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
-            }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
-            }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
-            }
-            _ if arg.starts_with("--severity-min=") => {
-                parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
-            }
-            _ if arg.starts_with("--scan-limit=") => {
-                parsed.scan_limit = Some(parse_u32_flag(
-                    "--scan-limit",
-                    value_after_equals(arg, "--scan-limit")?,
-                )?)
-            }
-            _ if arg.starts_with("--top-n=") => {
-                parsed.top_n = Some(parse_u32_flag(
-                    "--top-n",
-                    value_after_equals(arg, "--top-n")?,
-                )?)
-            }
-            _ => bail!("unknown patterns option: {arg}"),
+        if arg == "--json" {
+            parsed.json = true;
+        } else if let Some(v) = flags.match_value(&arg, "--from")? {
+            parsed.from = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--to")? {
+            parsed.to = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--hostname")? {
+            parsed.hostname = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--app-name")? {
+            parsed.app_name = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--severity-min")? {
+            parsed.severity_min = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--scan-limit")? {
+            parsed.scan_limit = Some(parse_u32_flag("--scan-limit", v)?);
+        } else if let Some(v) = flags.match_value(&arg, "--top-n")? {
+            parsed.top_n = Some(parse_u32_flag("--top-n", v)?);
+        } else {
+            bail!("unknown patterns option: {arg}");
         }
     }
     Ok(CliCommand::Patterns(parsed))
@@ -1531,17 +1489,14 @@ fn parse_sig_list(args: &[String]) -> Result<CliCommand> {
     let mut parsed = SigListArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--include-acknowledged" => parsed.include_acknowledged = true,
-            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag(
-                    "--limit",
-                    value_after_equals(arg, "--limit")?,
-                )?)
-            }
-            _ => bail!("unknown sig list option: {arg}"),
+        if arg == "--json" {
+            parsed.json = true;
+        } else if arg == "--include-acknowledged" {
+            parsed.include_acknowledged = true;
+        } else if let Some(v) = flags.match_value(&arg, "--limit")? {
+            parsed.limit = Some(parse_u32_flag("--limit", v)?);
+        } else {
+            bail!("unknown sig list option: {arg}");
         }
     }
     Ok(CliCommand::Sig(SigCommand::List(parsed)))
@@ -1560,13 +1515,12 @@ fn parse_sig_ack(args: &[String]) -> Result<CliCommand> {
     };
     let mut flags = FlagCursor::new(rest);
     while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--notes" => parsed.notes = Some(flags.value("--notes")?),
-            _ if arg.starts_with("--notes=") => {
-                parsed.notes = Some(value_after_equals(arg, "--notes")?)
-            }
-            _ => bail!("unknown sig ack option: {arg}"),
+        if arg == "--json" {
+            parsed.json = true;
+        } else if let Some(v) = flags.match_value(&arg, "--notes")? {
+            parsed.notes = Some(v);
+        } else {
+            bail!("unknown sig ack option: {arg}");
         }
     }
     Ok(CliCommand::Sig(SigCommand::Ack(parsed)))
@@ -1585,13 +1539,12 @@ fn parse_sig_unack(args: &[String]) -> Result<CliCommand> {
     };
     let mut flags = FlagCursor::new(rest);
     while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--reason" => parsed.reason = Some(flags.value("--reason")?),
-            _ if arg.starts_with("--reason=") => {
-                parsed.reason = Some(value_after_equals(arg, "--reason")?)
-            }
-            _ => bail!("unknown sig unack option: {arg}"),
+        if arg == "--json" {
+            parsed.json = true;
+        } else if let Some(v) = flags.match_value(&arg, "--reason")? {
+            parsed.reason = Some(v);
+        } else {
+            bail!("unknown sig unack option: {arg}");
         }
     }
     Ok(CliCommand::Sig(SigCommand::Unack(parsed)))
@@ -1612,31 +1565,16 @@ fn parse_notify_recent(args: &[String]) -> Result<CliCommand> {
     let mut parsed = NotifyRecentArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--rule-id" => parsed.rule_id = Some(flags.value("--rule-id")?),
-            "--since" => parsed.since = Some(flags.value("--since")?),
-            "--limit" => {
-                let v = flags.value("--limit")?;
-                parsed.limit = Some(
-                    v.parse::<i64>()
-                        .map_err(|e| anyhow!("--limit must be a number: {e}"))?,
-                );
-            }
-            _ if arg.starts_with("--rule-id=") => {
-                parsed.rule_id = Some(value_after_equals(arg, "--rule-id")?)
-            }
-            _ if arg.starts_with("--since=") => {
-                parsed.since = Some(value_after_equals(arg, "--since")?)
-            }
-            _ if arg.starts_with("--limit=") => {
-                let v = value_after_equals(arg, "--limit")?;
-                parsed.limit = Some(
-                    v.parse::<i64>()
-                        .map_err(|e| anyhow!("--limit must be a number: {e}"))?,
-                );
-            }
-            _ => bail!("unknown notify recent option: {arg}"),
+        if arg == "--json" {
+            parsed.json = true;
+        } else if let Some(v) = flags.match_value(&arg, "--rule-id")? {
+            parsed.rule_id = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--since")? {
+            parsed.since = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--limit")? {
+            parsed.limit = Some(parse_i64_flag("--limit", v)?);
+        } else {
+            bail!("unknown notify recent option: {arg}");
         }
     }
     Ok(CliCommand::Notify(NotifyCommand::Recent(parsed)))
@@ -1646,13 +1584,12 @@ fn parse_notify_test(args: &[String]) -> Result<CliCommand> {
     let mut parsed = NotifyTestArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--body" => parsed.body = Some(flags.value("--body")?),
-            _ if arg.starts_with("--body=") => {
-                parsed.body = Some(value_after_equals(arg, "--body")?)
-            }
-            _ => bail!("unknown notify test option: {arg}"),
+        if arg == "--json" {
+            parsed.json = true;
+        } else if let Some(v) = flags.match_value(&arg, "--body")? {
+            parsed.body = Some(v);
+        } else {
+            bail!("unknown notify test option: {arg}");
         }
     }
     Ok(CliCommand::Notify(NotifyCommand::Test(parsed)))
@@ -2206,6 +2143,24 @@ impl<'a> FlagCursor<'a> {
         self.index += 1;
         Ok(value)
     }
+
+    /// Resolve a value for `flag` from either `--flag value` (consumes next
+    /// token) or `--flag=value`. Returns `Ok(Some(value))` when `arg` matches
+    /// `flag` in either form, `Ok(None)` when it doesn't match, and `Err` if
+    /// the value is missing or empty. Lets a single match/`if let` arm cover
+    /// both flag styles in the surface-parity parsers below.
+    fn match_value(&mut self, arg: &str, flag: &str) -> Result<Option<String>> {
+        if arg == flag {
+            return Ok(Some(self.value(flag)?));
+        }
+        if let Some(rest) = arg.strip_prefix(flag).and_then(|s| s.strip_prefix('=')) {
+            if rest.is_empty() {
+                bail!("{flag} requires a value");
+            }
+            return Ok(Some(rest.to_string()));
+        }
+        Ok(None)
+    }
 }
 
 fn value_after_equals(arg: String, flag: &str) -> Result<String> {
@@ -2223,6 +2178,12 @@ fn parse_u32_flag(flag: &str, value: String) -> Result<u32> {
     value
         .parse::<u32>()
         .map_err(|_| anyhow!("{flag} must be an unsigned integer"))
+}
+
+fn parse_i64_flag(flag: &str, value: String) -> Result<i64> {
+    value
+        .parse::<i64>()
+        .map_err(|e| anyhow!("{flag} must be a number: {e}"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
