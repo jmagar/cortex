@@ -800,7 +800,11 @@ pub(super) async fn run_source_ips(mode: &CliMode, args: SourceIpsArgs) -> Resul
     if json {
         return super::print_json(&response);
     }
-    println!("{} source IP(s) (total {}):", response.source_ips.len(), response.total);
+    println!(
+        "{} source IP(s) (total {}):",
+        response.source_ips.len(),
+        response.total
+    );
     for ip in &response.source_ips {
         println!(
             "  {:<20} logs={} hosts={} last_seen={}",
@@ -820,10 +824,21 @@ pub(super) async fn run_timeline(mode: &CliMode, args: TimelineArgs) -> Result<(
     if json {
         return super::print_json(&response);
     }
-    println!("bucket={}{}", response.bucket,
-        response.group_by.as_deref().map(|g| format!(" group_by={g}")).unwrap_or_default());
+    println!(
+        "bucket={}{}",
+        response.bucket,
+        response
+            .group_by
+            .as_deref()
+            .map(|g| format!(" group_by={g}"))
+            .unwrap_or_default()
+    );
     for pt in &response.points {
-        let group = pt.group.as_deref().map(|g| format!(" [{g}]")).unwrap_or_default();
+        let group = pt
+            .group
+            .as_deref()
+            .map(|g| format!(" [{g}]"))
+            .unwrap_or_default();
         println!("  {}  {:>8}{}", pt.bucket, pt.count, group);
     }
     Ok(())
@@ -843,7 +858,11 @@ pub(super) async fn run_patterns(mode: &CliMode, args: PatternsArgs) -> Result<(
         "{} pattern(s) (scanned {} logs{})",
         response.patterns.len(),
         response.scanned,
-        if response.truncated { ", truncated" } else { "" }
+        if response.truncated {
+            ", truncated"
+        } else {
+            ""
+        }
     );
     for p in &response.patterns {
         println!("  {:>6}  {}", p.count, p.template);
@@ -980,15 +999,19 @@ pub(super) async fn run_notify_recent(mode: &CliMode, args: NotifyRecentArgs) ->
             }
         }
         CliMode::Http(client) => {
-            let firings = http_or_cancel(client.notifications_recent(limit, args.rule_id, args.since)).await?;
+            let firings =
+                http_or_cancel(client.notifications_recent(limit, args.rule_id, args.since))
+                    .await?;
             if json {
                 return super::print_json(&firings);
             }
             // Returned as a JSON array of objects matching FiringRow shape.
-            let arr = firings
-                .as_array()
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("unexpected response shape: expected JSON array, got {}", firings))?;
+            let arr = firings.as_array().cloned().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unexpected response shape: expected JSON array, got {}",
+                    firings
+                )
+            })?;
             if arr.is_empty() {
                 println!("No recent notification firings.");
                 return Ok(());
@@ -1002,9 +1025,7 @@ pub(super) async fn run_notify_recent(mode: &CliMode, args: NotifyRecentArgs) ->
                     .and_then(|v| v.as_i64())
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| "-".to_string());
-                println!(
-                    "{fired_at} rule={rule_id} host={hostname} status={status}"
-                );
+                println!("{fired_at} rule={rule_id} host={hostname} status={status}");
             }
         }
     }
