@@ -5,12 +5,11 @@ use std::path::PathBuf;
 use std::process::Command;
 use syslog_mcp::app::{
     AbuseSearchResponse, AiCorrelateResponse, AiIncidentResponse, AiInvestigateResponse,
-    CorrelateEventsResponse, DbBackupResult,
-    DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult,
-    GetErrorsResponse, IncidentResponse, ListAiProjectsResponse, ListAiToolsResponse,
-    ListHostsResponse, LogEntry, ProjectContextResponse, SearchLogsResponse,
-    SearchSessionsResponse, ServiceLogsRequest, ServiceLogsResponse, SyslogService,
-    UsageBlocksResponse,
+    CorrelateEventsResponse, DbBackupResult, DbCheckpointResult, DbIntegrityResult,
+    DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsResponse, IncidentResponse,
+    ListAiProjectsResponse, ListAiToolsResponse, ListHostsResponse, LogEntry,
+    ProjectContextResponse, SearchLogsResponse, SearchSessionsResponse, ServiceLogsRequest,
+    ServiceLogsResponse, SyslogService, UsageBlocksResponse,
 };
 use syslog_mcp::compose::{
     CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
@@ -1215,18 +1214,12 @@ fn parse_ai_assess(args: &[String]) -> Result<CliCommand> {
                 )?)
             }
             "--term" => terms.push(flags.value("--term")?),
-            _ if arg.starts_with("--model=") => {
-                model = Some(value_after_equals(arg, "--model")?)
-            }
+            _ if arg.starts_with("--model=") => model = Some(value_after_equals(arg, "--model")?),
             _ if arg.starts_with("--project=") => {
                 project = Some(value_after_equals(arg, "--project")?)
             }
-            _ if arg.starts_with("--tool=") => {
-                tool = Some(value_after_equals(arg, "--tool")?)
-            }
-            _ if arg.starts_with("--from=") => {
-                from = Some(value_after_equals(arg, "--from")?)
-            }
+            _ if arg.starts_with("--tool=") => tool = Some(value_after_equals(arg, "--tool")?),
+            _ if arg.starts_with("--from=") => from = Some(value_after_equals(arg, "--from")?),
             _ if arg.starts_with("--to=") => to = Some(value_after_equals(arg, "--to")?),
             _ if arg.starts_with("--limit=") => {
                 limit = Some(parse_u32_flag(
@@ -1256,7 +1249,8 @@ fn parse_ai_assess(args: &[String]) -> Result<CliCommand> {
             }
         }
     }
-    let incident_id = incident_id.ok_or_else(|| anyhow!("ai assess requires an <incident_id> argument"))?;
+    let incident_id =
+        incident_id.ok_or_else(|| anyhow!("ai assess requires an <incident_id> argument"))?;
     Ok(CliCommand::Ai(AiCommand::Assess(AiAssessArgs {
         incident_id,
         model,
@@ -2989,10 +2983,7 @@ pub(super) fn print_abuse_search_response(
     Ok(())
 }
 
-pub(super) fn print_ai_incidents_response(
-    response: &AiIncidentResponse,
-    json: bool,
-) -> Result<()> {
+pub(super) fn print_ai_incidents_response(response: &AiIncidentResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
@@ -3000,7 +2991,11 @@ pub(super) fn print_ai_incidents_response(
         "{} incident(s) of {} total{}{}",
         response.incidents.len(),
         response.total_incidents,
-        if response.truncated { " (truncated)" } else { "" },
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        },
         if response.candidate_window_truncated {
             format!(
                 "\nwarning: candidate scan capped at {} rows; narrow with --project/--tool/--from/--to",
@@ -3046,7 +3041,11 @@ pub(super) fn print_ai_investigate_response(
         "{} evidence bundle(s) of {} total incident(s){}",
         response.evidence.len(),
         response.total_incidents,
-        if response.truncated { " (truncated)" } else { "" }
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
     );
     for ev in &response.evidence {
         let inc = &ev.incident;
@@ -3072,7 +3071,12 @@ pub(super) fn print_ai_investigate_response(
         if !ev.nearby_errors.is_empty() {
             println!("  nearby errors:");
             for e in &ev.nearby_errors {
-                println!("    [{}] ({}) {}", local_ts(&e.timestamp), e.severity, e.message);
+                println!(
+                    "    [{}] ({}) {}",
+                    local_ts(&e.timestamp),
+                    e.severity,
+                    e.message
+                );
             }
         }
     }

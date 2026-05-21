@@ -475,7 +475,8 @@ impl HttpClient {
     ) -> Result<AiInvestigateResponse> {
         let qs = serde_qs::to_string(req)
             .context("failed to serialize AiInvestigateRequest as query string")?;
-        self.get_json_with_raw_query("/api/ai/investigate", &qs).await
+        self.get_json_with_raw_query("/api/ai/investigate", &qs)
+            .await
     }
 
     // ─── REST surface: bead 0p8r.3 (AI diagnostic + admin) ──────────────────
