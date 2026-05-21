@@ -76,18 +76,19 @@ fn search_args_into_request_snapshot() {
         source_ip: Some("10.0.0.1".into()),
         severity: Some("error".into()),
         app_name: Some("nginx".into()),
+        facility: Some("auth".into()),
+        exclude_facility: Some("transcript".into()),
         from: Some("2026-01-01T00:00:00Z".into()),
         to: Some("2026-01-02T00:00:00Z".into()),
+        received_from: Some("2026-01-01T00:00:30Z".into()),
+        received_to: Some("2026-01-02T00:00:30Z".into()),
         limit: Some(50),
         json: true, // not propagated to Request — verified by snapshot below
     };
     let req = args.into_request();
-    // Pinning fields: facility/process_id must remain None (only the
-    // service-level `syslog` CLI exposes those; the REST surface and CLI
-    // share this constructor).
     assert_eq!(
         format!("{req:?}"),
-        "SearchLogsRequest { query: Some(\"foo\"), hostname: Some(\"h1\"), source_ip: Some(\"10.0.0.1\"), severity: Some(\"error\"), app_name: Some(\"nginx\"), facility: None, process_id: None, from: Some(\"2026-01-01T00:00:00Z\"), to: Some(\"2026-01-02T00:00:00Z\"), limit: Some(50) }"
+        "SearchLogsRequest { query: Some(\"foo\"), hostname: Some(\"h1\"), source_ip: Some(\"10.0.0.1\"), severity: Some(\"error\"), app_name: Some(\"nginx\"), facility: Some(\"auth\"), exclude_facility: Some(\"transcript\"), process_id: None, from: Some(\"2026-01-01T00:00:00Z\"), to: Some(\"2026-01-02T00:00:00Z\"), received_from: Some(\"2026-01-01T00:00:30Z\"), received_to: Some(\"2026-01-02T00:00:30Z\"), limit: Some(50) }"
     );
 }
 

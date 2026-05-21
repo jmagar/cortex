@@ -8,7 +8,7 @@
 **Syslog Intelligence for Homelabs** — Receives RFC 3164/5424 syslog from all homelab hosts (UDP/TCP), ingests Docker logs via socket proxy, stores everything in SQLite with FTS5, and exposes a comprehensive `syslog` MCP tool for AI agents.
 
 **Status**: Active development, Production-ready
-**Version**: 0.25.3
+**Version**: 0.27.1
 
 ## Key Files
 
@@ -23,6 +23,7 @@
 | `src/cli.rs` | Standalone CLI binary (`syslog` command) |
 | `src/compose.rs` | Docker Compose lifecycle management |
 | `src/scanner.rs` | AI transcript indexer (Claude/Codex sessions) |
+| `src/doctor.rs` | Self-debugging diagnostics — binary, DB, and AI-watch health |
 
 ## Project Structure
 
@@ -76,7 +77,9 @@ syslog-mcp/
 │   ├── logging/                 # Structured service logging
 │   ├── scanner/                 # AI transcript scanner
 │   │   ├── claude.rs            # Claude transcript parsing
-│   │   └── codex.rs             # Codex transcript parsing
+│   │   ├── codex.rs             # Codex transcript parsing
+│   │   └── checkpoint.rs        # Scan progress checkpointing
+│   ├── doctor.rs                # Self-debugging diagnostics (binary, DB, AI-watch)
 │   └── docker_ingest/           # Docker remote ingestion
 ├── bin/                         # Installed binaries (syslog)
 ├── config/                      # Deployment config templates
@@ -126,6 +129,7 @@ AI Agents (Claude/Codex/Gemini)
 - **RuntimeCore Lifecycle**: Centralized management of background tasks (retention, storage guardrails).
 - **Transaction Pattern**: All batch inserts use explicit SQLx transactions for atomicity.
 - **Storage Guardrails**: Automated cleanup of oldest logs when DB size or disk space limits are breached.
+- **Self-Debugging Surfaces**: `syslog ai doctor` checks binary-vs-container version parity, DB health, and AI-watch coordination in one command. CI-safe and idempotent.
 
 ### Transaction Pattern (Rust/SQLx)
 
@@ -159,6 +163,20 @@ bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of
 | `just fmt` | Format code | `just fmt` |
 | `just test-live` | Run live integration tests | `just test-live` |
 | `just up` / `just down` | Start/stop Docker Compose | `just up` |
+| `just validate-skills` | Validate plugin skill manifests | `just validate-skills` |
+| `just gen-token` | Generate a random API token | `just gen-token` |
+| `just build-plugin` | Copy release binary into bin/ | `just build-plugin` |
+| `just publish [bump]` | Version bump + tag + push | `just publish patch` |
+| `just setup` | Initialize .env from .env.example | `just setup` |
+| `syslog ai doctor` | Self-debug: binary vs container version, DB health, AI-watch | `syslog ai doctor` |
+| `syslog db status` | DB size, WAL, page count, drift check | `syslog db status` |
+| `syslog db integrity` | SQLite integrity_check | `syslog db integrity --quick` |
+| `syslog db vacuum` | Reclaim DB space | `syslog db vacuum` |
+| `syslog db backup` | Backup DB to path | `syslog db backup --output /tmp/out.db` |
+| `syslog setup check` | Validate config and env | `syslog setup check` |
+| `syslog setup repair` | Auto-fix missing config | `syslog setup repair` |
+| `syslog compose status` | Container running status | `syslog compose status` |
+| `syslog compose doctor` | Full coordination diagnostics | `syslog compose doctor` |
 
 ## Diagnostics: host/container drift
 

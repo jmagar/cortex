@@ -131,15 +131,22 @@ check_docker() {
   status_line compose_dir "$COMPOSE_DIR"
   canonical_compose_dir="$(realpath_or_echo "$COMPOSE_DIR")"
   canonical_default_dir="$(realpath_or_echo "$DEFAULT_COMPOSE_DIR")"
-  if [[ "$ALLOW_LEGACY" != "true" && "$canonical_compose_dir" != "$canonical_default_dir" ]]; then
+
+  image="$(compose_image)"
+  [[ -n "$image" ]] || image="$(docker inspect "$cid" --format '{{.Config.Image}}')"
+
+  # Dev images are built from the repo working dir, not ~/.syslog-mcp/compose — allow automatically.
+  local is_local_image="false"
+  if [[ "$image" == "syslog-mcp:dev" || "$image" == "syslog-mcp:local-debug" ]]; then
+    is_local_image="true"
+  fi
+  if [[ "$ALLOW_LEGACY" != "true" && "$is_local_image" != "true" && "$canonical_compose_dir" != "$canonical_default_dir" ]]; then
     echo "FAIL: running container belongs to non-canonical Compose dir: $COMPOSE_DIR"
     echo "fix: migrate to $DEFAULT_COMPOSE_DIR or rerun with --allow-legacy for an intentional local/debug deployment"
     return 1
   fi
 
-  image="$(compose_image)"
-  [[ -n "$image" ]] || image="$(docker inspect "$cid" --format '{{.Config.Image}}')"
-  if [[ "$ALLOW_LOCAL_IMAGE" != "true" && "$image" != ghcr.io/jmagar/syslog-mcp:* && "$image" != "syslog-mcp:local-debug" ]]; then
+  if [[ "$ALLOW_LOCAL_IMAGE" != "true" && "$image" != ghcr.io/jmagar/syslog-mcp:* && "$image" != "syslog-mcp:local-debug" && "$image" != "syslog-mcp:dev" ]]; then
     echo "FAIL: running container uses unsupported image: $image"
     echo "fix: use ghcr.io/jmagar/syslog-mcp:<version>, syslog-mcp:local-debug, or rerun with --allow-local-image for an intentional custom deployment"
     return 1

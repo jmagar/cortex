@@ -360,7 +360,36 @@ fn collect_compose_section() -> DoctorSection {
                     status.health.as_deref().unwrap_or("no healthcheck")
                 ),
             ));
+            let expected_volume = std::env::var("SYSLOG_MCP_VOLUME_NAME")
+                .unwrap_or_else(|_| "syslog-mcp-data".to_string());
             match status.data_mounts.iter().find(|m| m.target == "/data") {
+                Some(m) if m.kind == "bind" => {
+                    let src = m
+                        .source
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
+                    phases.push(DoctorPhase::new(
+                        SetupStatus::Ok,
+                        "data_volume",
+                        format!("bind {} -> /data", src),
+                    ));
+                }
+                Some(m) if m.kind == "volume" => {
+                    let actual = m.volume_name.as_deref().unwrap_or("unknown");
+                    let (phase_status, detail) = if actual == expected_volume {
+                        (SetupStatus::Ok, format!("volume {actual} -> /data"))
+                    } else {
+                        (
+                            SetupStatus::Error,
+                            format!(
+                                "volume {actual} -> /data (expected '{expected_volume}' — \
+                                 stale volume from previous deployment)"
+                            ),
+                        )
+                    };
+                    phases.push(DoctorPhase::new(phase_status, "data_volume", detail));
+                }
                 Some(m) => {
                     let src = m
                         .source
@@ -368,11 +397,7 @@ fn collect_compose_section() -> DoctorSection {
                         .map(|p| p.display().to_string())
                         .unwrap_or_default();
                     phases.push(DoctorPhase::new(
-                        if m.kind == "bind" {
-                            SetupStatus::Ok
-                        } else {
-                            SetupStatus::Error
-                        },
+                        SetupStatus::Ok,
                         "data_volume",
                         format!("{} {} -> /data", m.kind, src),
                     ));
@@ -418,14 +443,23 @@ fn collect_binary_section() -> DoctorSection {
                 binary.repo_version
             ),
         ),
-        Some(false) => (
-            SetupStatus::Error,
-            format!(
-                "container {} != repo {} - run: syslog compose up",
-                binary.container_version.as_deref().unwrap_or("-"),
-                binary.repo_version
-            ),
-        ),
+        Some(false) => {
+            let detail = if let Some(reason) = binary
+                .runtime_current_error
+                .as_deref()
+                .map(first_meaningful_line)
+                .filter(|s| !s.is_empty())
+            {
+                reason.to_string()
+            } else {
+                format!(
+                    "container {} != repo {} - run: syslog compose up",
+                    binary.container_version.as_deref().unwrap_or("-"),
+                    binary.repo_version
+                )
+            };
+            (SetupStatus::Error, detail)
+        }
         None => (
             SetupStatus::Warn,
             binary
@@ -461,6 +495,20 @@ async fn collect_ai_section() -> DoctorSection {
                     phases.push(DoctorPhase::new(status, name, detail));
                 }
                 phases.push(DoctorPhase::new(
+                    if ai.schema_current {
+                        SetupStatus::Ok
+                    } else {
+                        SetupStatus::Warn
+                    },
+                    "db_schema",
+                    format!(
+                        "version {}/{} last_migration={}",
+                        ai.db_schema_version,
+                        ai.known_schema_version,
+                        ai.db_last_migration_at.as_deref().unwrap_or("-")
+                    ),
+                ));
+                phases.push(DoctorPhase::new(
                     if ai.checkpoint_error_count > 0 || ai.missing_checkpoint_count > 0 {
                         SetupStatus::Warn
                     } else {
@@ -479,6 +527,59 @@ async fn collect_ai_section() -> DoctorSection {
                         format!("{} parse errors", ai.parse_error_count),
                     ));
                 }
+                // Always collect indexing-health diagnostics — these are the
+                // most useful surfaces during a watcher outage when the start
+                // timestamp is unavailable (`n/a`) or parsing failed. Only the
+                // schema-drift comparison requires a known watcher start time.
+                let process_start_time = ai_watcher_process_start_time();
+                if process_start_time.is_none() && ai_watcher_is_active() {
+                    // Watcher is up but we couldn't read its start time: the
+                    // schema-drift comparison silently skips below, so a
+                    // wedged-with-stale-schema watcher would otherwise report
+                    // healthy. Surface that explicitly.
+                    phases.push(DoctorPhase::new(
+                        SetupStatus::Warn,
+                        "ai_watch_start_unknown",
+                        "watcher is active but ExecMainStartTimestamp could not be parsed; schema-drift check skipped",
+                    ));
+                }
+                match runtime
+                    .service()
+                    .ai_indexing_health(process_start_time.clone())
+                    .await
+                {
+                    Ok(health) => {
+                        if let Some(start) = process_start_time.as_deref() {
+                            if health.schema_drift_detected {
+                                phases.push(DoctorPhase::new(
+                                    SetupStatus::Error,
+                                    "ai_watch_schema_drift",
+                                    format!(
+                                        "watcher started {start}; {} migration(s) applied later; fix: systemctl --user restart syslog-ai-watch.service",
+                                        health.schema_drift_migrations.len()
+                                    ),
+                                ));
+                            }
+                        }
+                        if health.recent_failure_count > 0 || health.recent_schema_error_count > 0 {
+                            phases.push(DoctorPhase::new(
+                                SetupStatus::Warn,
+                                "ai_watch_recent_failures",
+                                format!(
+                                    "{} parse/index failures in last hour, {} schema-like errors, affected_paths={}",
+                                    health.recent_failure_count,
+                                    health.recent_schema_error_count,
+                                    health.affected_paths.len()
+                                ),
+                            ));
+                        }
+                    }
+                    Err(error) => phases.push(DoctorPhase::new(
+                        SetupStatus::Warn,
+                        "ai_watch_health",
+                        error.to_string(),
+                    )),
+                }
             }
             Err(error) => phases.push(DoctorPhase::new(
                 SetupStatus::Error,
@@ -493,6 +594,108 @@ async fn collect_ai_section() -> DoctorSection {
         )),
     }
     DoctorSection::new("AI Transcripts", phases)
+}
+
+pub fn ai_watcher_process_start_time() -> Option<String> {
+    const SERVICE: &str = "syslog-ai-watch.service";
+    // systemd 247+ renders ExecMainStartTimestamp as `@<unix_seconds>` when
+    // passed `--timestamp=unix` — locale/TZ-independent. Older systemd
+    // ignores the flag and returns the human form, parsed by the fallback.
+    if let Some(usec) = systemctl_unix_timestamp(SERVICE) {
+        return Some(usec);
+    }
+    let output = std::process::Command::new("systemctl")
+        .arg("--user")
+        .args(["show", "-p", "ExecMainStartTimestamp", "--value", SERVICE])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_systemctl_timestamp_utc(String::from_utf8_lossy(&output.stdout).trim())
+}
+
+/// Best-effort check: is `syslog-ai-watch.service` loaded and active right
+/// now? Used to distinguish "watcher down, start time legitimately n/a" from
+/// "watcher running but start-time parsing failed" — the latter is a
+/// diagnostic the operator needs to see.
+fn ai_watcher_is_active() -> bool {
+    let Ok(output) = std::process::Command::new("systemctl")
+        .arg("--user")
+        .args(["is-active", "syslog-ai-watch.service"])
+        .output()
+    else {
+        return false;
+    };
+    output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "active"
+}
+
+fn systemctl_unix_timestamp(service: &str) -> Option<String> {
+    let output = std::process::Command::new("systemctl")
+        .arg("--user")
+        .args([
+            "show",
+            "-p",
+            "ExecMainStartTimestamp",
+            "--value",
+            "--timestamp=unix",
+            service,
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let Some(stripped) = raw.strip_prefix('@') else {
+        // Non-empty stdout without `@` prefix means systemd accepted the
+        // call but `--timestamp=unix` was a no-op (pre-247 quietly emits the
+        // human form). Caller falls back to the legacy parser; log so a
+        // diagnosing operator can tell the difference from "unit not found".
+        if !raw.is_empty() {
+            tracing::debug!(
+                service,
+                raw = %raw,
+                "systemctl --timestamp=unix not supported; using legacy parser"
+            );
+        }
+        return None;
+    };
+    let secs: i64 = stripped.split('.').next()?.parse().ok()?;
+    let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0)?;
+    Some(crate::app::time::rfc3339_z(dt))
+}
+
+/// Parse the human-readable `ExecMainStartTimestamp` form emitted by older
+/// systemd versions, e.g. `Mon 2026-05-20 17:32:11 EDT`. Returns the time as
+/// an RFC3339 millis+Z string so downstream comparisons match the format
+/// SQLite stores for `applied_at`.
+///
+/// This is intentionally a fallback — prefer `systemctl --timestamp=unix`
+/// when available, since this parser only knows a handful of US timezone
+/// abbreviations and may return `None` on other locales.
+pub(crate) fn parse_systemctl_timestamp_utc(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw == "n/a" {
+        return None;
+    }
+    let (prefix, tz) = raw.rsplit_once(' ')?;
+    let naive = chrono::NaiveDateTime::parse_from_str(prefix, "%a %Y-%m-%d %H:%M:%S").ok()?;
+    let offset_seconds = match tz {
+        "UTC" | "GMT" | "Z" => 0,
+        "EST" => -5 * 3600,
+        "EDT" => -4 * 3600,
+        "CST" => -6 * 3600,
+        "CDT" => -5 * 3600,
+        "MST" => -7 * 3600,
+        "MDT" => -6 * 3600,
+        "PST" => -8 * 3600,
+        "PDT" => -7 * 3600,
+        _ => return None,
+    };
+    let utc = naive - chrono::TimeDelta::seconds(i64::from(offset_seconds));
+    let dt = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(utc, chrono::Utc);
+    Some(crate::app::time::rfc3339_z(dt))
 }
 
 fn status_label(s: &SetupStatus) -> &'static str {
@@ -570,48 +773,5 @@ fn command_stdout(command: &str, args: &[&str]) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn section_counts_errors_warnings_and_passes() {
-        let section = DoctorSection::new(
-            "Test",
-            vec![
-                DoctorPhase::new(SetupStatus::Ok, "ok", "ok"),
-                DoctorPhase::new(SetupStatus::Skipped, "skip", "skip"),
-                DoctorPhase::new(SetupStatus::Warn, "warn", "warn"),
-                DoctorPhase::new(SetupStatus::Error, "error", "error"),
-            ],
-        );
-
-        assert_eq!(section.passed_count(), 2);
-        assert_eq!(section.warning_count(), 1);
-        assert_eq!(section.error_count(), 1);
-    }
-
-    #[test]
-    fn json_error_count_ignores_expected_production_dev_wrapper_errors() {
-        let report = JsonDoctorReport {
-            setup: serde_json::json!({
-                "blocking_errors": 2,
-                "phases": [
-                    {"name": "debug-wrapper-content", "status": "error"},
-                    {"name": "debug-compose-content", "status": "error"}
-                ]
-            }),
-            compose: serde_json::json!({"diagnostics": []}),
-            binary: BinaryDoctorReport {
-                current_exe: "syslog".into(),
-                path_syslog: None,
-                repo_version: "0.0.0".into(),
-                container_version: None,
-                runtime_current: Some(true),
-                runtime_current_error: None,
-            },
-            ai: serde_json::json!({}),
-        };
-
-        assert_eq!(report.error_count(), 0);
-    }
-}
+#[path = "doctor_tests.rs"]
+mod tests;

@@ -7,8 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-05-20
+
 ### Fixed
 
+- **Journalctl timeout**: `command_output` now enforces a 30-second timeout so
+  a wedged user bus or stalled `journalctl` cannot block `syslog ai doctor`
+  indefinitely.
+- **Incident hostname+service conflict**: `syslog incident` now returns a clear
+  error when both `--host` and `--service` are supplied, since journal entries
+  cannot be filtered by remote hostname.
+- **Service-log dropped lines**: Human-readable output of `syslog service logs`
+  now prints a stderr warning when `dropped_lines > 0` (malformed journal
+  lines were previously silently discarded).
+- **HTTP-flags error message**: The error for passing `--http`/`--server`/
+  `--token` to local-only commands now correctly lists `incident` alongside
+  the other query commands.
+- **Docker image tag**: `docker-compose.prod.yml` defaults to `0.27.1` instead
+  of `latest` for reproducible production deploys.
+- **MCP search help**: `syslog help` now documents `exclude_facility`,
+  `received_from`, and `received_to` for the `search` action.
+
+### Refactor
+
+- **Doctor tests**: Moved inline `#[cfg(test)] mod tests` block in `doctor.rs`
+  to the standard sidecar `doctor_tests.rs` per repo layout rule.
+
+## [0.27.0] - 2026-05-20
+
+### Added
+
+- **Self-debugging incident view**: Added `syslog incident --around ...` as a
+  service-layer timeline that combines matching log rows with syslog-owned
+  service journal entries.
+- **Syslog service logs**: Added `syslog service logs SERVICE --json` backed by
+  `SyslogService`, including safe allowlisting for syslog-owned user units.
+- **Search filters**: Added facility exclusion and received-time filtering to
+  search across CLI, API/MCP adapters, service models, and DB queries.
+
+### Changed
+
+- **AI watcher health**: `syslog ai watch-status --json` and `syslog doctor`
+  now report watcher start time, DB schema version/currentness, schema drift,
+  recent indexing failures, schema-like errors, affected paths, and stale
+  indicators.
+
+### Fixed
+
+- **Facility naming**: Facility code 15 now stores `clockd`, matching
+  `syslog_loose` and common syslog facility naming.
 - **Release enforcement**: Pinned CI and crates publish GitHub Actions to full
   commit SHAs, added version-sync checks to CI/publish, made release
   changelog checks fail closed, and routed `just publish` through the repo
@@ -1322,13 +1369,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.27.1...HEAD
+[0.27.1]: https://github.com/jmagar/syslog-mcp/compare/v0.27.0...v0.27.1
+[0.27.0]: https://github.com/jmagar/syslog-mcp/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/jmagar/syslog-mcp/compare/v0.25.4...v0.26.0
 [0.25.4]: https://github.com/jmagar/syslog-mcp/compare/v0.25.3...v0.25.4
 [0.25.3]: https://github.com/jmagar/syslog-mcp/compare/v0.25.2...v0.25.3
-=======
-[0.25.3]: https://github.com/jmagar/syslog-mcp/compare/v0.25.2...v0.25.3
->>>>>>> 5a815f8 (fix: harden oauth allowlist validation)
 [0.25.2]: https://github.com/jmagar/syslog-mcp/compare/v0.25.1...v0.25.2
 [0.25.1]: https://github.com/jmagar/syslog-mcp/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/jmagar/syslog-mcp/compare/v0.24.1...v0.25.0

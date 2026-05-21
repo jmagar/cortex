@@ -229,6 +229,54 @@ fn mark_error_sets_last_error_and_successful_import_clears_it() {
 }
 
 #[test]
+fn indexing_health_reports_schema_drift_and_recent_failures() {
+    let (pool, _dir) = test_pool();
+    let store = CheckpointStore::new(&pool);
+    let source_id = store
+        .ensure_source("/tmp/session.jsonl", "explicit_file")
+        .unwrap();
+    store
+        .mark_error(source_id, "no such table: transcript_sources")
+        .unwrap();
+    store
+        .record_parse_error(source_id, 1, "no such table: transcript_sources", None)
+        .unwrap();
+
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "UPDATE schema_migrations SET applied_at = ?1",
+        params!["2025-12-31T23:59:00.000Z"],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE schema_migrations SET applied_at = ?1 WHERE version = ?2",
+        params!["2026-01-01T00:10:00.000Z", crate::db::KNOWN_SCHEMA_VERSION],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE transcript_parse_errors SET seen_at = ?1 WHERE source_id = ?2",
+        params!["9999-01-01T00:00:00.000Z", source_id],
+    )
+    .unwrap();
+    drop(conn);
+
+    let health = store.indexing_health(Some("2026-01-01T00:00:00Z")).unwrap();
+
+    assert!(health.schema_current);
+    assert!(health.schema_drift_detected);
+    assert_eq!(health.schema_drift_migrations.len(), 1);
+    assert_eq!(health.recent_failure_count, 1);
+    assert_eq!(health.recent_schema_error_count, 2);
+    assert_eq!(health.affected_paths, vec!["/tmp/session.jsonl"]);
+    assert!(health
+        .stale_indicators
+        .contains(&"schema_drift".to_string()));
+    assert!(health
+        .stale_indicators
+        .contains(&"recent_schema_errors".to_string()));
+}
+
+#[test]
 fn record_imports_ignores_duplicate_record_keys() {
     let (pool, _dir) = test_pool();
     let store = CheckpointStore::new(&pool);

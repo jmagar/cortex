@@ -380,12 +380,18 @@ pub struct SearchParams {
     pub app_name: Option<String>,
     /// Filter by syslog facility name (e.g. `kern`, `auth`, `daemon`)
     pub facility: Option<String>,
+    /// Exclude a syslog facility while keeping rows with unknown facility.
+    pub exclude_facility: Option<String>,
     /// Filter by process_id (exact match)
     pub process_id: Option<String>,
     /// Start of time range (ISO 8601)
     pub from: Option<String>,
     /// End of time range (ISO 8601)
     pub to: Option<String>,
+    /// Start of receive-time range (ISO 8601)
+    pub received_from: Option<String>,
+    /// End of receive-time range (ISO 8601)
+    pub received_to: Option<String>,
     /// Max results to return
     pub limit: Option<u32>,
     pub ai_tool: Option<String>,

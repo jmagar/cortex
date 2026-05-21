@@ -119,6 +119,10 @@ pub struct PruneCheckpointsResult {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AiDoctorReport {
     pub db_path: String,
+    pub db_schema_version: i64,
+    pub db_last_migration_at: Option<String>,
+    pub known_schema_version: i64,
+    pub schema_current: bool,
     pub claude_root: TranscriptRootStatus,
     pub codex_root: TranscriptRootStatus,
     pub checkpoint_count: i64,
@@ -128,6 +132,29 @@ pub struct AiDoctorReport {
     pub parse_error_count: i64,
     pub newest_indexed_path: Option<String>,
     pub newest_indexed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SchemaDriftMigration {
+    pub version: i64,
+    pub applied_at: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AiIndexingHealth {
+    pub db_schema_version: i64,
+    pub db_last_migration_at: Option<String>,
+    pub known_schema_version: i64,
+    pub schema_current: bool,
+    pub schema_drift_detected: bool,
+    pub schema_drift_migrations: Vec<SchemaDriftMigration>,
+    pub last_successful_ingest_at: Option<String>,
+    pub recent_failure_count: i64,
+    pub first_failure_at: Option<String>,
+    pub last_failure_at: Option<String>,
+    pub affected_paths: Vec<String>,
+    pub recent_schema_error_count: i64,
+    pub stale_indicators: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -708,6 +735,13 @@ pub fn prune_checkpoints(
 
 pub fn ai_doctor(pool: &DbPool, db_path: &Path) -> Result<AiDoctorReport> {
     checkpoint::CheckpointStore::new(pool).doctor(db_path)
+}
+
+pub fn ai_indexing_health(
+    pool: &DbPool,
+    process_start_time: Option<&str>,
+) -> Result<AiIndexingHealth> {
+    checkpoint::CheckpointStore::new(pool).indexing_health(process_start_time)
 }
 
 fn flush_chunk(

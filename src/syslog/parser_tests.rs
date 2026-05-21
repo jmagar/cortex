@@ -202,6 +202,14 @@ fn test_parse_syslog_rfc5424_with_structured_data() {
     assert!(parsed.message.contains("test message body"));
 }
 
+#[test]
+fn test_parse_syslog_facility_15_uses_clockd_name() {
+    let raw = "<120>Oct 11 22:14:15 mymachine clockd: test message";
+    let parsed = parse_syslog(raw, "192.168.1.1:514".to_string());
+    assert_eq!(parsed.severity, "emerg");
+    assert_eq!(parsed.facility.as_deref(), Some("clockd"));
+}
+
 /// Missing PRI (no <N> prefix) must default to severity "info" (numeric 6).
 #[test]
 fn test_parse_syslog_missing_pri_defaults_to_info() {

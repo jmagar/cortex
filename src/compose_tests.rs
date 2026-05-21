@@ -101,6 +101,7 @@ fn labelled_container() -> ContainerInfo {
             )),
             target: "/data".into(),
             kind: "bind".into(),
+            volume_name: None,
         }],
         ports: vec![PortInfo {
             private_port: 3100,
@@ -146,6 +147,7 @@ fn mcp_projection_omits_host_paths_and_image_ids() {
             source: Some(PathBuf::from("/home/jmagar/private/data")),
             target: "/data".into(),
             kind: "bind".into(),
+            volume_name: None,
         }],
         ports: vec![PortInfo {
             private_port: 3100,
@@ -434,13 +436,13 @@ fn status_reports_systemd_check_failures_as_diagnostics() {
 }
 
 #[test]
-fn status_errors_when_data_volume_is_named_not_bind() {
-    // Regression guard: if SYSLOG_MCP_DATA_VOLUME is not substituted in the
-    // compose invocation (missing --env-file), Docker creates a named volume
-    // instead of a bind mount and the container writes to a separate database
-    // from the CLI. The status check must detect and surface this as an Error.
+fn status_errors_when_data_volume_has_unexpected_name() {
+    // Regression guard: if the container was started with a stale COMPOSE_PROJECT_NAME
+    // the named volume gets an unexpected prefix (e.g. "compose_syslog-mcp-data" instead
+    // of "syslog-mcp-data"). The status check must detect and surface this as an Error.
     let mut container = labelled_container();
-    container.mounts[0].kind = "volume".into(); // simulate named-volume drift
+    container.mounts[0].kind = "volume".into();
+    container.mounts[0].volume_name = Some("compose_syslog-mcp-data".into()); // wrong prefix
     let service = ComposeService::new(
         FakeInspector {
             container: Some(container),
@@ -455,9 +457,31 @@ fn status_errors_when_data_volume_is_named_not_bind() {
     let drift = status
         .diagnostics
         .iter()
-        .find(|d| d.code == "data_volume_not_bind")
+        .find(|d| d.code == "data_volume_unexpected")
         .expect("drift diagnostic must be present");
     assert_eq!(drift.severity, DiagnosticSeverity::Error);
+    assert!(drift.message.contains("compose_syslog-mcp-data"));
+
+    // Sanity: a named volume with the correct name should NOT produce an error.
+    let mut good_container = labelled_container();
+    good_container.mounts[0].kind = "volume".into();
+    good_container.mounts[0].volume_name = Some("syslog-mcp-data".into()); // correct name
+    let good_service = ComposeService::new(
+        FakeInspector {
+            container: Some(good_container),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let good_status = good_service.status(&ComposeTarget::default()).unwrap();
+    assert!(
+        good_status
+            .diagnostics
+            .iter()
+            .all(|d| d.code != "data_volume_unexpected"),
+        "correct named volume must not produce drift error"
+    );
 }
 
 #[test]

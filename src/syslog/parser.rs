@@ -7,7 +7,7 @@ use crate::ingest_metadata::bounded_metadata_json;
 /// Syslog facility names (RFC 5424).
 const FACILITIES: &[&str] = &[
     "kern", "user", "mail", "daemon", "auth", "syslog", "lpr", "news", "uucp", "cron", "authpriv",
-    "ftp", "ntp", "audit", "alert", "clock", "local0", "local1", "local2", "local3", "local4",
+    "ftp", "ntp", "audit", "alert", "clockd", "local0", "local1", "local2", "local3", "local4",
     "local5", "local6", "local7",
 ];
 
