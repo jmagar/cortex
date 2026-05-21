@@ -617,11 +617,8 @@ pub(super) async fn run_ai_assess(mode: &CliMode, args: AiAssessArgs) -> Result<
         }
         CliMode::Local(service) => service,
     };
-    let incident_id = args
-        .incident_id
-        .ok_or_else(|| anyhow::anyhow!("incident_id is required"))?;
     let req = AiAssessRequest {
-        incident_id,
+        incident_id: args.incident_id,
         model: args.model,
         project: args.project,
         tool: args.tool,

@@ -317,10 +317,10 @@ pub(crate) struct AiInvestigateArgs {
     pub json: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AiAssessArgs {
     /// The incident_id to assess (e.g. "inc-00000000deadbeef"). Required positional.
-    pub incident_id: Option<String>,
+    pub incident_id: String,
     /// Gemini model override, e.g. "gemini-2.0-flash". Defaults to Gemini CLI default.
     pub model: Option<String>,
     /// Emit raw JSON instead of streamed markdown.
@@ -1181,77 +1181,95 @@ fn parse_ai_investigate(args: &[String]) -> Result<CliCommand> {
 }
 
 fn parse_ai_assess(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiAssessArgs::default();
+    let mut incident_id: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut json = false;
+    let mut project: Option<String> = None;
+    let mut tool: Option<String> = None;
+    let mut from: Option<String> = None;
+    let mut to: Option<String> = None;
+    let mut limit: Option<u32> = None;
+    let mut window_minutes: Option<u32> = None;
+    let mut correlation_window_minutes: Option<u32> = None;
+    let mut terms: Vec<String> = Vec::new();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--model" => parsed.model = Some(flags.value("--model")?),
-            "--project" => parsed.project = Some(flags.value("--project")?),
-            "--tool" => parsed.tool = Some(flags.value("--tool")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
-            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            "--json" => json = true,
+            "--model" => model = Some(flags.value("--model")?),
+            "--project" => project = Some(flags.value("--project")?),
+            "--tool" => tool = Some(flags.value("--tool")?),
+            "--from" => from = Some(flags.value("--from")?),
+            "--to" => to = Some(flags.value("--to")?),
+            "--limit" => limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "--window-minutes" => {
-                parsed.window_minutes = Some(parse_u32_flag(
+                window_minutes = Some(parse_u32_flag(
                     "--window-minutes",
                     flags.value("--window-minutes")?,
                 )?)
             }
             "--correlation-window-minutes" => {
-                parsed.correlation_window_minutes = Some(parse_u32_flag(
+                correlation_window_minutes = Some(parse_u32_flag(
                     "--correlation-window-minutes",
                     flags.value("--correlation-window-minutes")?,
                 )?)
             }
-            "--term" => parsed.terms.push(flags.value("--term")?),
+            "--term" => terms.push(flags.value("--term")?),
             _ if arg.starts_with("--model=") => {
-                parsed.model = Some(value_after_equals(arg, "--model")?)
+                model = Some(value_after_equals(arg, "--model")?)
             }
             _ if arg.starts_with("--project=") => {
-                parsed.project = Some(value_after_equals(arg, "--project")?)
+                project = Some(value_after_equals(arg, "--project")?)
             }
             _ if arg.starts_with("--tool=") => {
-                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+                tool = Some(value_after_equals(arg, "--tool")?)
             }
             _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+                from = Some(value_after_equals(arg, "--from")?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--to=") => to = Some(value_after_equals(arg, "--to")?),
             _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag(
+                limit = Some(parse_u32_flag(
                     "--limit",
                     value_after_equals(arg, "--limit")?,
                 )?)
             }
             _ if arg.starts_with("--window-minutes=") => {
-                parsed.window_minutes = Some(parse_u32_flag(
+                window_minutes = Some(parse_u32_flag(
                     "--window-minutes",
                     value_after_equals(arg, "--window-minutes")?,
                 )?)
             }
             _ if arg.starts_with("--correlation-window-minutes=") => {
-                parsed.correlation_window_minutes = Some(parse_u32_flag(
+                correlation_window_minutes = Some(parse_u32_flag(
                     "--correlation-window-minutes",
                     value_after_equals(arg, "--correlation-window-minutes")?,
                 )?)
             }
-            _ if arg.starts_with("--term=") => {
-                parsed.terms.push(value_after_equals(arg, "--term")?)
-            }
+            _ if arg.starts_with("--term=") => terms.push(value_after_equals(arg, "--term")?),
             _ if arg.starts_with('-') => bail!("unknown ai assess option: {arg}"),
             _ => {
-                if parsed.incident_id.is_some() {
+                if incident_id.is_some() {
                     bail!("ai assess: unexpected extra argument: {arg}");
                 }
-                parsed.incident_id = Some(arg);
+                incident_id = Some(arg);
             }
         }
     }
-    if parsed.incident_id.is_none() {
-        bail!("ai assess requires an <incident_id> argument");
-    }
-    Ok(CliCommand::Ai(AiCommand::Assess(parsed)))
+    let incident_id = incident_id.ok_or_else(|| anyhow!("ai assess requires an <incident_id> argument"))?;
+    Ok(CliCommand::Ai(AiCommand::Assess(AiAssessArgs {
+        incident_id,
+        model,
+        json,
+        project,
+        tool,
+        from,
+        to,
+        window_minutes,
+        correlation_window_minutes,
+        terms,
+        limit,
+    })))
 }
 
 fn parse_ai_correlate(args: &[String]) -> Result<CliCommand> {
