@@ -271,3 +271,26 @@ quick read:
 - `/register` is a public, unauthenticated endpoint **by design** — OAuth
   2.0 Dynamic Client Registration is how MCP clients self-onboard. The
   `register_rpm` knob is the mitigation against abuse.
+
+## Surface Parity Additions (2026-05-21)
+
+These routes mirror existing MCP actions through the REST surface — pure
+plumbing, no new behaviour. All require the standard bearer token.
+
+| Method | Path | Body / Query | Service method |
+|---|---|---|---|
+| GET | `/api/source-ips` | `?limit=N&offset=N` | `list_source_ips` |
+| GET | `/api/timeline` | `?bucket=...&group_by=...&from=...&to=...&hostname=...&app_name=...&severity_min=...` | `timeline` |
+| GET | `/api/patterns` | filter + `&scan_limit=N&top_n=N` | `patterns` |
+| GET | `/api/ingest-rate` | `?by_host=true` | `ingest_rate` |
+| GET | `/api/get` | `?id=N` | `get_log` |
+| GET | `/api/errors/unaddressed` | `?limit=N&include_acknowledged=true` | `unaddressed_errors` |
+| POST | `/api/errors/ack` | `{"signature_hash":"...","notes":"..."}` | `ack_error` (actor=`api`) |
+| POST | `/api/errors/unack` | `{"signature_hash":"...","reason":"..."}` | `unack_error` (actor=`api`) |
+| GET | `/api/notifications/recent` | `?limit=N&rule_id=...&since=...` | `notifications_recent` |
+| POST | `/api/notifications/test` | `{"body":"..."}` | `notifications_test` (apprise URLs server-side) |
+
+The `/api/notifications/test` route uses the server's configured apprise URLs
+(`config.notifications.apprise_url` / `apprise_urls`); callers cannot override
+them on the wire. Rate-limited to 10 test notifications per minute per
+`actor`, where actor is hard-coded to `"api"` for REST requests.

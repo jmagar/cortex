@@ -279,3 +279,31 @@ Exit codes: `0`, `2` (apprise unreachable; HTTP error code in JSON output).
 - **`agent status` ambiguity**: a single subcommand serves both server-side and client-side contexts. **Locked: the running binary's environment disambiguates** — presence of `/var/lib/syslog-agent/host_id` plus a configured agent daemon implies client form; absence implies server form (queries DB). An explicit `--server` flag is reserved for future use if the heuristic ever fails.
 - **`pollers reset` granularity**: spec C §14.4 lists `unifi`, `adguard`, `all` but is silent on whether `unifi` resets events + alarms together. **Locked: `--source unifi` resets BOTH `unifi-events` and `unifi-alarms` instances.** Use the lower-level SQL (`DELETE FROM poller_checkpoints WHERE poller = 'unifi-alarms'`) for surgical resets.
 - **`digest send-now` confirm**: spec E doesn't specify whether `send-now` is dangerous. **Locked: requires `--confirm` to actually POST** — protects against an operator wiring it into a cron entry by mistake before they've validated the template.
+
+## 8. Surface Parity Additions (2026-05-21)
+
+These commands add CLI surface for actions that already existed in MCP and the
+service layer. Pure plumbing — no new behaviour. Added by the surface-parity
+plan (`docs/superpowers/plans/2026-05-21-surface-parity.md`).
+
+| Subcommand | Side | Talks to | Mirrors MCP action |
+|---|---|---|---|
+| `syslog source-ips [--limit N] [--offset N]` | both | local SQLite / REST `/api/source-ips` | `source_ips` |
+| `syslog timeline [--bucket ...] [--group-by ...] [filters]` | both | local SQLite / REST `/api/timeline` | `timeline` |
+| `syslog patterns [filters] [--scan-limit N] [--top-n N]` | both | local SQLite / REST `/api/patterns` | `patterns` |
+| `syslog ingest-rate [--by-host]` | both | local SQLite / REST `/api/ingest-rate` | `ingest_rate` |
+| `syslog sig list [--include-acknowledged] [--limit N]` | both | local SQLite / REST `/api/errors/unaddressed` | `unaddressed_errors` |
+| `syslog sig ack HASH [--notes TEXT]` | both | local SQLite / REST `/api/errors/ack` | `ack_error` |
+| `syslog sig unack HASH [--reason TEXT]` | both | local SQLite / REST `/api/errors/unack` | `unack_error` |
+| `syslog notify recent [--rule-id ID] [--since TIME] [--limit N]` | both | local SQLite / REST `/api/notifications/recent` | `notifications_recent` |
+| `syslog notify test [--body TEXT]` | client only (`--http`) | REST `POST /api/notifications/test` | `notifications_test` |
+
+Notes:
+
+- `notify test` is HTTP-only because the apprise URL configuration is owned by
+  the running server process. Local-mode CLI is missing the runtime config; we
+  fail closed rather than send a notification from a process that has no
+  apprise URLs.
+- `sig ack`/`sig unack` set `actor = "cli"` in local mode and `actor = "api"`
+  in HTTP mode (the REST handler hard-codes "api" since bearer auth does not
+  carry per-user identity).
