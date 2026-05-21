@@ -418,14 +418,23 @@ fn collect_binary_section() -> DoctorSection {
                 binary.repo_version
             ),
         ),
-        Some(false) => (
-            SetupStatus::Error,
-            format!(
-                "container {} != repo {} - run: syslog compose up",
-                binary.container_version.as_deref().unwrap_or("-"),
-                binary.repo_version
-            ),
-        ),
+        Some(false) => {
+            let detail = if let Some(reason) = binary
+                .runtime_current_error
+                .as_deref()
+                .map(first_meaningful_line)
+                .filter(|s| !s.is_empty())
+            {
+                reason.to_string()
+            } else {
+                format!(
+                    "container {} != repo {} - run: syslog compose up",
+                    binary.container_version.as_deref().unwrap_or("-"),
+                    binary.repo_version
+                )
+            };
+            (SetupStatus::Error, detail)
+        }
         None => (
             SetupStatus::Warn,
             binary
