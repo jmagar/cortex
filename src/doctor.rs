@@ -498,6 +498,17 @@ async fn collect_ai_section() -> DoctorSection {
                 // timestamp is unavailable (`n/a`) or parsing failed. Only the
                 // schema-drift comparison requires a known watcher start time.
                 let process_start_time = ai_watcher_process_start_time();
+                if process_start_time.is_none() && ai_watcher_is_active() {
+                    // Watcher is up but we couldn't read its start time: the
+                    // schema-drift comparison silently skips below, so a
+                    // wedged-with-stale-schema watcher would otherwise report
+                    // healthy. Surface that explicitly.
+                    phases.push(DoctorPhase::new(
+                        SetupStatus::Warn,
+                        "ai_watch_start_unknown",
+                        "watcher is active but ExecMainStartTimestamp could not be parsed; schema-drift check skipped",
+                    ));
+                }
                 match runtime
                     .service()
                     .ai_indexing_health(process_start_time.clone())
@@ -553,14 +564,11 @@ async fn collect_ai_section() -> DoctorSection {
 
 pub fn ai_watcher_process_start_time() -> Option<String> {
     const SERVICE: &str = "syslog-ai-watch.service";
-    // Prefer the unambiguous `ExecMainStartTimestampMonotonic` property
-    // (microseconds since boot) joined with `/proc/stat`'s btime, but the
-    // most portable approach is `systemctl show --timestamp=unix` (systemd
-    // 247+), which renders `ExecMainStartTimestamp` as `@<unix_seconds>`.
-    // If neither is available, fall back to parsing the human-readable form.
-    let usec = systemctl_unix_timestamp(SERVICE);
-    if usec.is_some() {
-        return usec;
+    // systemd 247+ renders ExecMainStartTimestamp as `@<unix_seconds>` when
+    // passed `--timestamp=unix` — locale/TZ-independent. Older systemd
+    // ignores the flag and returns the human form, parsed by the fallback.
+    if let Some(usec) = systemctl_unix_timestamp(SERVICE) {
+        return Some(usec);
     }
     let output = std::process::Command::new("systemctl")
         .arg("--user")
@@ -571,6 +579,21 @@ pub fn ai_watcher_process_start_time() -> Option<String> {
         return None;
     }
     parse_systemctl_timestamp_utc(String::from_utf8_lossy(&output.stdout).trim())
+}
+
+/// Best-effort check: is `syslog-ai-watch.service` loaded and active right
+/// now? Used to distinguish "watcher down, start time legitimately n/a" from
+/// "watcher running but start-time parsing failed" — the latter is a
+/// diagnostic the operator needs to see.
+fn ai_watcher_is_active() -> bool {
+    let Ok(output) = std::process::Command::new("systemctl")
+        .arg("--user")
+        .args(["is-active", "syslog-ai-watch.service"])
+        .output()
+    else {
+        return false;
+    };
+    output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "active"
 }
 
 fn systemctl_unix_timestamp(service: &str) -> Option<String> {
@@ -590,7 +613,20 @@ fn systemctl_unix_timestamp(service: &str) -> Option<String> {
         return None;
     }
     let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stripped = raw.strip_prefix('@')?;
+    let Some(stripped) = raw.strip_prefix('@') else {
+        // Non-empty stdout without `@` prefix means systemd accepted the
+        // call but `--timestamp=unix` was a no-op (pre-247 quietly emits the
+        // human form). Caller falls back to the legacy parser; log so a
+        // diagnosing operator can tell the difference from "unit not found".
+        if !raw.is_empty() {
+            tracing::debug!(
+                service,
+                raw = %raw,
+                "systemctl --timestamp=unix not supported; using legacy parser"
+            );
+        }
+        return None;
+    };
     let secs: i64 = stripped.split('.').next()?.parse().ok()?;
     let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0)?;
     Some(crate::app::time::rfc3339_z(dt))
@@ -604,7 +640,7 @@ fn systemctl_unix_timestamp(service: &str) -> Option<String> {
 /// This is intentionally a fallback — prefer `systemctl --timestamp=unix`
 /// when available, since this parser only knows a handful of US timezone
 /// abbreviations and may return `None` on other locales.
-pub fn parse_systemctl_timestamp_utc(raw: &str) -> Option<String> {
+pub(crate) fn parse_systemctl_timestamp_utc(raw: &str) -> Option<String> {
     let raw = raw.trim();
     if raw.is_empty() || raw == "n/a" {
         return None;
@@ -705,6 +741,24 @@ fn command_stdout(command: &str, args: &[&str]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_systemctl_timestamp_utc_accepts_us_tz_abbrev() {
+        // Legacy human-readable form, EDT → UTC, formatted as RFC3339 millis+Z.
+        assert_eq!(
+            parse_systemctl_timestamp_utc("Tue 2026-05-19 22:30:09 EDT").as_deref(),
+            Some("2026-05-20T02:30:09.000Z")
+        );
+    }
+
+    #[test]
+    fn parse_systemctl_timestamp_utc_rejects_unknown_tz() {
+        // Non-US TZ abbreviations are not in the fallback table; caller falls
+        // through to None and surfaces `ai_watch_start_unknown` upstream.
+        assert!(parse_systemctl_timestamp_utc("Mon 2026-05-19 22:30:09 CEST").is_none());
+        assert!(parse_systemctl_timestamp_utc("").is_none());
+        assert!(parse_systemctl_timestamp_utc("n/a").is_none());
+    }
 
     #[test]
     fn section_counts_errors_warnings_and_passes() {

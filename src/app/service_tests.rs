@@ -77,7 +77,8 @@ fn normalize_syslog_owned_service_rejects_arbitrary_units() {
 fn parse_journal_json_lines_extracts_service_log_fields() {
     let raw = r#"{"__REALTIME_TIMESTAMP":"1780000000123456","_SYSTEMD_USER_UNIT":"syslog-ai-watch.service","PRIORITY":"3","SYSLOG_IDENTIFIER":"syslog","_PID":"42","MESSAGE":"AI transcript indexing failed","__CURSOR":"cursor-1"}"#;
 
-    let entries = parse_journal_json_lines(raw).unwrap();
+    let (entries, dropped) = parse_journal_json_lines(raw);
+    assert_eq!(dropped, 0);
 
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].unit.as_deref(), Some("syslog-ai-watch.service"));

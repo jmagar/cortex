@@ -93,11 +93,21 @@ fn current_uid() -> u32 {
     }
 }
 
-fn parse_journal_json_lines(raw: &str) -> ServiceResult<Vec<ServiceJournalEntry>> {
-    raw.lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(parse_journal_json_line)
-        .collect()
+/// Parse journalctl `-o json` output into entries, tolerating malformed lines.
+///
+/// Returns `(entries, dropped)` so callers can surface a warning when the
+/// journal contains corrupt rows — `service logs` is a self-debugging surface
+/// and must not nuke a 5000-line response because one line failed to parse.
+fn parse_journal_json_lines(raw: &str) -> (Vec<ServiceJournalEntry>, usize) {
+    let mut entries = Vec::new();
+    let mut dropped: usize = 0;
+    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
+        match parse_journal_json_line(line) {
+            Ok(entry) => entries.push(entry),
+            Err(_) => dropped = dropped.saturating_add(1),
+        }
+    }
+    (entries, dropped)
 }
 
 fn parse_journal_json_line(line: &str) -> ServiceResult<ServiceJournalEntry> {
@@ -211,13 +221,21 @@ pub async fn run_service_logs(req: ServiceLogsRequest) -> ServiceResult<ServiceL
     }
 
     let raw = command_output("journalctl", &args).await?;
-    let entries = parse_journal_json_lines(&raw)?;
+    let (entries, dropped_lines) = parse_journal_json_lines(&raw);
+    if dropped_lines > 0 {
+        tracing::warn!(
+            service = %service,
+            dropped_lines,
+            "service_logs: skipped malformed journal lines"
+        );
+    }
     Ok(ServiceLogsResponse {
         service,
         from: req.from,
         to: req.to,
         tail,
         entries,
+        dropped_lines,
     })
 }
 
@@ -252,11 +270,6 @@ impl SyslogService {
         &self,
         req: ServiceLogsRequest,
     ) -> ServiceResult<ServiceLogsResponse> {
-        // Delegate to the free function — `service_logs` is pure shell-out
-        // to journalctl and does not touch `self.pool`. Exposing it as a
-        // free function lets callers (e.g. the CLI dispatch path) invoke
-        // it without first opening SQLite, which would defeat the
-        // self-debugging surface when the DB is corrupted/locked/full.
         run_service_logs(req).await
     }
 
@@ -310,12 +323,24 @@ impl SyslogService {
                 .await
             {
                 Ok(report) => {
-                    events.extend(
-                        report
-                            .entries
-                            .into_iter()
-                            .filter_map(incident_event_from_journal),
-                    );
+                    if report.dropped_lines > 0 {
+                        warnings.push(format!(
+                            "service_logs: dropped {} malformed journal line(s)",
+                            report.dropped_lines
+                        ));
+                    }
+                    let mut dropped_timestamps: usize = 0;
+                    for entry in report.entries {
+                        match incident_event_from_journal(entry) {
+                            Some(event) => events.push(event),
+                            None => dropped_timestamps = dropped_timestamps.saturating_add(1),
+                        }
+                    }
+                    if dropped_timestamps > 0 {
+                        warnings.push(format!(
+                            "service_logs: dropped {dropped_timestamps} entries with unparseable timestamps"
+                        ));
+                    }
                 }
                 Err(error) => warnings.push(format!("service_logs: {error}")),
             }

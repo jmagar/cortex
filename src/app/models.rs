@@ -64,6 +64,16 @@ pub struct ServiceLogsResponse {
     pub to: Option<String>,
     pub tail: Option<u32>,
     pub entries: Vec<ServiceJournalEntry>,
+    /// Count of journal lines that failed JSON parsing and were skipped.
+    /// Non-zero values indicate journal corruption or an unexpected format
+    /// — the surface still returns the entries that did parse rather than
+    /// failing the whole request.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub dropped_lines: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

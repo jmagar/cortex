@@ -1,0 +1,59 @@
+name: syslog-mcp
+
+x-common-service: &common-service
+  networks:
+    - jakenet
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  ulimits:
+    nofile:
+      soft: 65535
+      hard: 65535
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+      compress: "true"
+
+services:
+  syslog-mcp:
+    <<: *common-service
+    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}
+    container_name: syslog-mcp
+    user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/udp"
+      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/tcp"
+      - "${SYSLOG_MCP_PORT:-3100}:3100/tcp"
+    volumes:
+      - ${SYSLOG_MCP_DATA_VOLUME:-syslog-mcp-data}:/data
+    # The container listens on SYSLOG_PORT (default 1514). To serve host port
+    # 514, set SYSLOG_HOST_PORT=514 while leaving SYSLOG_PORT at 1514, or add
+    # host-level firewall/NAT redirects from 514 to 1514.
+    # NET_BIND_SERVICE is only needed if the container itself binds port 514.
+    # cap_add:
+    #   - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3100/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+volumes:
+  syslog-mcp-data:
+
+networks:
+  jakenet:
+    name: ${DOCKER_NETWORK:-jakenet}
+    external: true
