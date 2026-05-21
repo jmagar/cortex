@@ -31,6 +31,44 @@ use crate::notifications::apprise::{AppriseClient, AppriseError, NotifyType};
 
 const CLAIM_LIMIT: i64 = 50;
 
+/// Run a blocking read-only DB operation on a pooled connection.
+///
+/// Centralizes the `Arc::clone` + `spawn_blocking` + `pool.get()` boilerplate
+/// for operations that do not need a transaction (single reads or single
+/// auto-committed writes).
+async fn db_read<F, T>(pool: &Arc<DbPool>, f: F) -> Result<T>
+where
+    F: FnOnce(&rusqlite::Connection) -> Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    let pool = Arc::clone(pool);
+    tokio::task::spawn_blocking(move || -> Result<T> {
+        let conn = pool.get()?;
+        f(&conn)
+    })
+    .await?
+}
+
+/// Run a blocking DB operation inside an explicit transaction.
+///
+/// Centralizes the `Arc::clone` + `spawn_blocking` + `pool.get()` +
+/// `conn.transaction()` + `tx.commit()` boilerplate for multi-statement
+/// writes that must be atomic.
+async fn db_tx<F>(pool: &Arc<DbPool>, f: F) -> Result<()>
+where
+    F: FnOnce(&rusqlite::Transaction<'_>) -> Result<()> + Send + 'static,
+{
+    let pool = Arc::clone(pool);
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let mut conn = pool.get()?;
+        let tx = conn.transaction()?;
+        f(&tx)?;
+        tx.commit()?;
+        Ok(())
+    })
+    .await?
+}
+
 /// Run one dispatcher cycle.
 pub(crate) async fn run_dispatch_cycle(
     pool: Arc<DbPool>,
@@ -39,14 +77,10 @@ pub(crate) async fn run_dispatch_cycle(
     cfg: &NotificationsConfig,
 ) -> Result<u64> {
     // Claim pending rows (read-only, no permit needed)
-    let rows = {
-        let pool_r = Arc::clone(&pool);
-        tokio::task::spawn_blocking(move || {
-            let conn = pool_r.get()?;
-            outbox_claim_pending(&conn, CLAIM_LIMIT).map_err(anyhow::Error::from)
-        })
-        .await??
-    };
+    let rows = db_read(&pool, |conn| {
+        outbox_claim_pending(conn, CLAIM_LIMIT).map_err(anyhow::Error::from)
+    })
+    .await?;
 
     let mut dispatched = 0u64;
 
@@ -62,28 +96,24 @@ pub(crate) async fn run_dispatch_cycle(
 
         // --- Dedup check (within permit) ---
         let is_dedup = {
-            let pool_d = Arc::clone(&pool);
             let rule_id = row.rule_id.clone();
             let hostname = row.hostname.clone();
             let dedup_key = row.dedup_key.clone();
             let dedup_secs = cfg.dedup_window_secs;
-            tokio::task::spawn_blocking(move || -> Result<bool> {
-                let conn = pool_d.get()?;
-                firings_recent_dedup_check(&conn, &rule_id, &hostname, &dedup_key, dedup_secs)
+            db_read(&pool, move |conn| {
+                firings_recent_dedup_check(conn, &rule_id, &hostname, &dedup_key, dedup_secs)
                     .map_err(anyhow::Error::from)
             })
-            .await??
+            .await?
         };
 
         if is_dedup {
-            let pool_dd = Arc::clone(&pool);
             let row_id = row.id;
-            tokio::task::spawn_blocking(move || -> Result<()> {
-                let conn = pool_dd.get()?;
-                outbox_mark_dropped(&conn, row_id, "dedup_suppressed")?;
+            db_read(&pool, move |conn| {
+                outbox_mark_dropped(conn, row_id, "dedup_suppressed")?;
                 Ok(())
             })
-            .await??;
+            .await?;
             drop(permit);
             tracing::debug!(
                 rule_id = %row.rule_id,
@@ -99,23 +129,19 @@ pub(crate) async fn run_dispatch_cycle(
             if let Some(hash) = row.dedup_key.strip_prefix("error_sig:") {
                 let hash_owned = hash.to_string();
                 let normalizer_version = crate::app::error_detection::NORMALIZER_VERSION;
-                let pool_ack = Arc::clone(&pool);
-                let is_acked = tokio::task::spawn_blocking(move || -> Result<bool> {
-                    let conn = pool_ack.get()?;
-                    is_signature_acked(&conn, &hash_owned, normalizer_version)
+                let is_acked = db_read(&pool, move |conn| {
+                    is_signature_acked(conn, &hash_owned, normalizer_version)
                         .map_err(anyhow::Error::from)
                 })
-                .await??;
+                .await?;
 
                 if is_acked {
-                    let pool_dd = Arc::clone(&pool);
                     let row_id = row.id;
-                    tokio::task::spawn_blocking(move || -> Result<()> {
-                        let conn = pool_dd.get()?;
-                        outbox_mark_dropped(&conn, row_id, "error_signature_acked")?;
+                    db_read(&pool, move |conn| {
+                        outbox_mark_dropped(conn, row_id, "error_signature_acked")?;
                         Ok(())
                     })
-                    .await??;
+                    .await?;
                     drop(permit);
                     tracing::debug!(
                         rule_id = %row.rule_id,
@@ -153,14 +179,12 @@ pub(crate) async fn run_dispatch_cycle(
                 tracing::error!("dispatcher: maintenance semaphore closed, aborting");
                 break;
             };
-            let pool_dd = Arc::clone(&pool);
             let row_id = row.id;
-            tokio::task::spawn_blocking(move || -> Result<()> {
-                let conn = pool_dd.get()?;
-                outbox_mark_dropped(&conn, row_id, "no_apprise_urls")?;
+            db_read(&pool, move |conn| {
+                outbox_mark_dropped(conn, row_id, "no_apprise_urls")?;
                 Ok(())
             })
-            .await??;
+            .await?;
             drop(permit3);
             continue;
         }
@@ -190,7 +214,6 @@ pub(crate) async fn run_dispatch_cycle(
         match delivery_result {
             Ok(Ok(resp)) => {
                 // Success (200/207)
-                let pool_s = Arc::clone(&pool);
                 let sc = resp.status_code as i64;
                 let (rid, sev, host, dk) = (
                     rule_id.clone(),
@@ -198,12 +221,10 @@ pub(crate) async fn run_dispatch_cycle(
                     hostname.clone(),
                     dedup_key.clone(),
                 );
-                tokio::task::spawn_blocking(move || -> Result<()> {
-                    let mut conn = pool_s.get()?;
-                    let tx = conn.transaction()?;
-                    outbox_mark_sent(&tx, row_id, Some(sc))?;
+                db_tx(&pool, move |tx| {
+                    outbox_mark_sent(tx, row_id, Some(sc))?;
                     firings_insert(
-                        &tx,
+                        tx,
                         FiringInsertParams {
                             outbox_id: row_id,
                             rule_id: &rid,
@@ -214,10 +235,9 @@ pub(crate) async fn run_dispatch_cycle(
                             dedup_key: &dk,
                         },
                     )?;
-                    tx.commit()?;
                     Ok(())
                 })
-                .await??;
+                .await?;
                 drop(permit3);
                 dispatched += 1;
                 tracing::info!(
@@ -229,7 +249,6 @@ pub(crate) async fn run_dispatch_cycle(
             }
             Ok(Err(AppriseError::Permanent { code, .. })) => {
                 // 4xx — dead-letter immediately
-                let pool_dl = Arc::clone(&pool);
                 let error_msg = format!("permanent HTTP {code}");
                 let (rid, sev, host, dk) = (
                     rule_id.clone(),
@@ -237,12 +256,10 @@ pub(crate) async fn run_dispatch_cycle(
                     hostname.clone(),
                     dedup_key.clone(),
                 );
-                tokio::task::spawn_blocking(move || -> Result<()> {
-                    let mut conn = pool_dl.get()?;
-                    let tx = conn.transaction()?;
-                    outbox_mark_dead(&tx, row_id, Some(code as i64), &error_msg)?;
+                db_tx(&pool, move |tx| {
+                    outbox_mark_dead(tx, row_id, Some(code as i64), &error_msg)?;
                     firings_insert(
-                        &tx,
+                        tx,
                         FiringInsertParams {
                             outbox_id: row_id,
                             rule_id: &rid,
@@ -253,10 +270,9 @@ pub(crate) async fn run_dispatch_cycle(
                             dedup_key: &dk,
                         },
                     )?;
-                    tx.commit()?;
                     Ok(())
                 })
-                .await??;
+                .await?;
                 drop(permit3);
                 tracing::warn!(
                     rule_id = %rule_id,
@@ -276,19 +292,16 @@ pub(crate) async fn run_dispatch_cycle(
                 if attempt_count + 1 >= cfg.max_retry_attempts {
                     // Exhausted retries — dead-letter
                     let dead_msg = format!("max retries: {error_msg}");
-                    let pool_dl = Arc::clone(&pool);
                     let (rid, sev, host, dk) = (
                         rule_id.clone(),
                         severity.clone(),
                         hostname.clone(),
                         dedup_key.clone(),
                     );
-                    tokio::task::spawn_blocking(move || -> Result<()> {
-                        let mut conn = pool_dl.get()?;
-                        let tx = conn.transaction()?;
-                        outbox_mark_dead(&tx, row_id, None, &dead_msg)?;
+                    db_tx(&pool, move |tx| {
+                        outbox_mark_dead(tx, row_id, None, &dead_msg)?;
                         firings_insert(
-                            &tx,
+                            tx,
                             FiringInsertParams {
                                 outbox_id: row_id,
                                 rule_id: &rid,
@@ -299,10 +312,9 @@ pub(crate) async fn run_dispatch_cycle(
                                 dedup_key: &dk,
                             },
                         )?;
-                        tx.commit()?;
                         Ok(())
                     })
-                    .await??;
+                    .await?;
                     drop(permit3);
                     tracing::warn!(
                         rule_id = %rule_id,
@@ -316,14 +328,12 @@ pub(crate) async fn run_dispatch_cycle(
                     // 1s tier, not 5s.
                     let next_at = backoff_next_attempt_at(attempt_count);
                     let next_at_log = next_at.clone();
-                    let pool_r = Arc::clone(&pool);
                     let err_clone = error_msg.clone();
-                    tokio::task::spawn_blocking(move || -> Result<()> {
-                        let conn = pool_r.get()?;
-                        outbox_schedule_retry(&conn, row_id, &next_at, &err_clone, None)?;
+                    db_read(&pool, move |conn| {
+                        outbox_schedule_retry(conn, row_id, &next_at, &err_clone, None)?;
                         Ok(())
                     })
-                    .await??;
+                    .await?;
                     drop(permit3);
                     tracing::debug!(
                         rule_id = %rule_id,
