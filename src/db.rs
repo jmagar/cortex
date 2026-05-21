@@ -30,10 +30,12 @@ pub use models::{
     AiIncidentResult, AiInvestigateParams, AiInvestigateResult, AiProjectContext,
     AiProjectContextParams, AiProjectInventoryEntry, AiRelatedLogsForAnchor, AiRelatedLogsParams,
     AiRelatedWindow, AiSessionEntry, AiToolInventoryEntry, AiUsageBlock, AiUsageBlocksParams,
-    AiUsageBlocksResult, DbStats, DockerCheckpoint, ErrorSummaryEntry, HostEntry, IncidentEvidence,
-    ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams,
-    ListAiToolsResult, LogBatchEntry, LogEntry, SearchAiSessionsParams, SearchAiSessionsResult,
-    SearchParams, SearchedAiSessionEntry,
+    AiUsageBlocksResult, AppLogCount, AskHistoryParams, AskHistoryResult, CorrelatedSession,
+    DbStats, DockerCheckpoint, ErrorSummaryEntry, HostEntry, IncidentCluster, IncidentContextParams,
+    IncidentContextResult, IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult,
+    ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogBatchEntry, LogEntry,
+    SearchAiSessionsParams, SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
+    SeverityCount, SimilarIncidentsParams, SimilarIncidentsResult,
 };
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
 pub use pool::{
@@ -41,8 +43,9 @@ pub use pool::{
     KNOWN_SCHEMA_VERSION,
 };
 pub use queries::{
-    get_error_summary, get_stats, investigate_ai_incidents, list_ai_projects, list_ai_sessions,
-    list_ai_tools, list_hosts, search_ai_abuse, search_ai_anchors, search_ai_incidents,
-    search_ai_related_logs, search_ai_sessions, search_logs, severity_to_num, tail_logs,
+    ask_history_sessions, get_error_summary, get_stats, incident_context_summary,
+    investigate_ai_incidents, list_ai_projects, list_ai_sessions, list_ai_tools, list_hosts,
+    search_ai_abuse, search_ai_anchors, search_ai_incidents, search_ai_related_logs,
+    search_ai_sessions, search_logs, severity_to_num, similar_incidents_clusters, tail_logs,
     validate_fts_query, SEVERITY_LEVELS,
 };
