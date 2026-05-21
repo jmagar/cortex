@@ -19,7 +19,7 @@ RUN --mount=type=cache,id=syslog-cargo-registry-v2,target=/usr/local/cargo/regis
 
 # Build real binary
 COPY src/ src/
-COPY docker-compose.yml ./
+COPY docker-compose.yml docker-compose.prod.yml ./
 COPY config/Dockerfile config/Dockerfile
 RUN --mount=type=cache,id=syslog-cargo-registry-v2,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=syslog-cargo-git-v2,target=/usr/local/cargo/git,sharing=locked \
