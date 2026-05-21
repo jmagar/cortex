@@ -36,7 +36,9 @@ pub use models::{
     SearchParams, SearchedAiSessionEntry,
 };
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
-pub use pool::{init_pool, DbPool};
+pub use pool::{
+    init_pool, read_schema_version_info, DbPool, SchemaVersionInfo, KNOWN_SCHEMA_VERSION,
+};
 pub use queries::{
     get_error_summary, get_stats, investigate_ai_incidents, list_ai_projects, list_ai_sessions,
     list_ai_tools, list_hosts, search_ai_abuse, search_ai_anchors, search_ai_incidents,

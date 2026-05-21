@@ -44,29 +44,36 @@ async fn serve_stdio_mcp() -> Result<()> {
 async fn run_cli(invocation: CliInvocation) -> Result<()> {
     let CliInvocation { command, flags } = invocation;
 
-    // `compose` and `setup` stay on the local-only path: they manage local
-    // host state (systemd units, Docker compose stacks, on-disk config) that
-    // has no HTTP analogue. Reject explicit HTTP-mode FLAGS up front, but
+    // `compose`, `setup`, and `service` stay on the local-only path: they
+    // manage local host state (systemd units, Docker compose stacks, on-disk
+    // config, user journal logs) that has no HTTP analogue. Reject explicit
+    // HTTP-mode FLAGS up front, but
     // silently ignore the `SYSLOG_USE_HTTP` env trigger — `setup repair`
     // writes that into `~/.syslog-mcp/.env` as the post-cutover default, and
     // bailing on it would break the very command operators run to repair.
     if matches!(
         command,
-        cli::CliCommand::Compose(_) | cli::CliCommand::Setup(_)
+        cli::CliCommand::Compose(_) | cli::CliCommand::Setup(_) | cli::CliCommand::Service(_)
     ) {
         if let Some(trigger) = flags.http_flag_trigger() {
+            let command_name = match command {
+                cli::CliCommand::Compose(_) => "compose",
+                cli::CliCommand::Setup(_) => "setup",
+                cli::CliCommand::Service(_) => "service",
+                _ => unreachable!("guarded by matches! above"),
+            };
             anyhow::bail!(
                 "{} has no effect on `{}` (local-only command); remove --http / --server / --token",
                 trigger,
-                if matches!(command, cli::CliCommand::Compose(_)) {
-                    "compose"
-                } else {
-                    "setup"
-                },
+                command_name,
             );
         }
         return match command {
             cli::CliCommand::Compose(_) => cli::run_compose(command),
+            cli::CliCommand::Service(_) => {
+                let runtime = RuntimeCore::load_query_only().await?;
+                cli::run_service(&runtime.service(), command).await
+            }
             cli::CliCommand::Setup(cmd) => cli::run_setup(cmd),
             _ => unreachable!("guarded by matches! above"),
         };
@@ -323,11 +330,13 @@ impl Mode {
                         | "errors"
                         | "hosts"
                         | "sessions"
+                        | "incident"
                         | "ai"
                         | "correlate"
                         | "stats"
                         | "db"
                         | "compose"
+                        | "service"
                         | "setup"
                 ) =>
             {
@@ -347,7 +356,7 @@ impl Mode {
                 anyhow::bail!(
                     "--http / --server / --token only apply to CLI query commands \
                      (search, tail, errors, hosts, sessions, ai, correlate, stats, db); \
-                     compose and setup are local-only and reject HTTP flags; \
+                     compose, service, and setup are local-only and reject HTTP flags; \
                      got: {}",
                     args.join(" ")
                 );
@@ -537,11 +546,12 @@ fn print_usage() {
   syslog doctor binary [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
-  syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]
+  syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]
   syslog tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
   syslog errors [--from TIME] [--to TIME] [--json]
   syslog hosts [--json]
   syslog sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
+  syslog incident --around TIME [--minutes N] [--service SERVICE] [--host HOST] [--limit N] [--json]
   syslog ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]
   syslog ai abuse [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]
   syslog ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--from TIME] [--to TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]
@@ -568,6 +578,7 @@ fn print_usage() {
   syslog compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]
   syslog compose down --yes [--dry-run] [--allow-cwd-target] [--json]
   syslog compose logs [--tail N] [--json]
+  syslog service logs SERVICE [--from TIME] [--to TIME] [--tail N] [--json]
   syslog setup check|repair [--json]
   syslog setup plugin-hook [--no-repair] [--json]
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]

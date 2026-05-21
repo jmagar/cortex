@@ -1,9 +1,8 @@
 services:
   syslog-mcp:
-    # Default to the published image so plugin deploys can `docker compose pull`
-    # without source. Override with --build (or `docker compose build`) for local
-    # source development.
-    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}
+    # Default to building from the local source tree. Uncomment image to use a
+    # published image instead.
+    # image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-latest}
     # syslog-setup-build-stanza-start
     build:
       context: .

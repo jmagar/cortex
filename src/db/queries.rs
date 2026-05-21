@@ -616,9 +616,12 @@ pub fn search_ai_related_logs(
         severity_in: Some(params.severity_in.clone()),
         app_name: params.app_name.clone(),
         facility: None,
+        exclude_facility: None,
         process_id: None,
         from: None,
         to: None,
+        received_from: None,
+        received_to: None,
         limit: None,
         ai_tool: None,
         ai_project: None,
@@ -1568,6 +1571,14 @@ fn append_filters(
         bindings.push(rusqlite::types::Value::Text(f.clone()));
         *idx += 1;
     }
+    if let Some(ref f) = params.exclude_facility {
+        sql.push_str(&format!(
+            " AND (l.facility IS NULL OR l.facility != ?{})",
+            *idx
+        ));
+        bindings.push(rusqlite::types::Value::Text(f.clone()));
+        *idx += 1;
+    }
     if let Some(ref pid) = params.process_id {
         sql.push_str(&format!(" AND l.process_id = ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(pid.clone()));
@@ -1580,6 +1591,16 @@ fn append_filters(
     }
     if let Some(ref to) = params.to {
         sql.push_str(&format!(" AND l.timestamp <= ?{}", *idx));
+        bindings.push(rusqlite::types::Value::Text(to.clone()));
+        *idx += 1;
+    }
+    if let Some(ref from) = params.received_from {
+        sql.push_str(&format!(" AND l.received_at >= ?{}", *idx));
+        bindings.push(rusqlite::types::Value::Text(from.clone()));
+        *idx += 1;
+    }
+    if let Some(ref to) = params.received_to {
+        sql.push_str(&format!(" AND l.received_at <= ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
         *idx += 1;
     }

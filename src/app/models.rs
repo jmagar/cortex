@@ -48,6 +48,69 @@ pub struct DbBackupResult {
     pub size_bytes: u64,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceLogsRequest {
+    pub service: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub tail: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceLogsResponse {
+    pub service: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub tail: Option<u32>,
+    pub entries: Vec<ServiceJournalEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceJournalEntry {
+    pub timestamp: Option<String>,
+    pub realtime_timestamp_us: Option<String>,
+    pub unit: Option<String>,
+    pub priority: Option<String>,
+    pub syslog_identifier: Option<String>,
+    pub pid: Option<String>,
+    pub message: Option<String>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IncidentRequest {
+    pub around: String,
+    pub minutes: Option<u32>,
+    pub service: Option<String>,
+    pub hostname: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentResponse {
+    pub around: String,
+    pub window_minutes: u32,
+    pub window_from: String,
+    pub window_to: String,
+    pub event_count: usize,
+    pub truncated: bool,
+    pub warnings: Vec<String>,
+    pub events: Vec<IncidentEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentEvent {
+    pub timestamp: String,
+    pub source: String,
+    pub host: Option<String>,
+    pub severity: Option<String>,
+    pub app: Option<String>,
+    pub message: String,
+    pub log_id: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub id: i64,
@@ -636,9 +699,12 @@ pub struct SearchLogsRequest {
     pub severity: Option<String>,
     pub app_name: Option<String>,
     pub facility: Option<String>,
+    pub exclude_facility: Option<String>,
     pub process_id: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
+    pub received_from: Option<String>,
+    pub received_to: Option<String>,
     pub limit: Option<u32>,
 }
 

@@ -7,8 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-05-20
+
+### Added
+
+- **Self-debugging incident view**: Added `syslog incident --around ...` as a
+  service-layer timeline that combines matching log rows with syslog-owned
+  service journal entries.
+- **Syslog service logs**: Added `syslog service logs SERVICE --json` backed by
+  `SyslogService`, including safe allowlisting for syslog-owned user units.
+- **Search filters**: Added facility exclusion and received-time filtering to
+  search across CLI, API/MCP adapters, service models, and DB queries.
+
+### Changed
+
+- **AI watcher health**: `syslog ai watch-status --json` and `syslog doctor`
+  now report watcher start time, DB schema version/currentness, schema drift,
+  recent indexing failures, schema-like errors, affected paths, and stale
+  indicators.
+
 ### Fixed
 
+- **Facility naming**: Facility code 15 now stores `clockd`, matching
+  `syslog_loose` and common syslog facility naming.
 - **Release enforcement**: Pinned CI and crates publish GitHub Actions to full
   commit SHAs, added version-sync checks to CI/publish, made release
   changelog checks fail closed, and routed `just publish` through the repo
@@ -1322,7 +1343,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/jmagar/syslog-mcp/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/jmagar/syslog-mcp/compare/v0.25.4...v0.26.0
 [0.25.4]: https://github.com/jmagar/syslog-mcp/compare/v0.25.3...v0.25.4
 [0.25.3]: https://github.com/jmagar/syslog-mcp/compare/v0.25.2...v0.25.3

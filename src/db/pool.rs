@@ -9,9 +9,34 @@ use crate::config::StorageConfig;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
+pub const KNOWN_SCHEMA_VERSION: i64 = 14;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SchemaVersionInfo {
+    pub version: i64,
+    pub last_migration_at: Option<String>,
+    pub known_version: i64,
+}
+
 fn shared_scheduled_thread_pool() -> Arc<ScheduledThreadPool> {
     static POOL: OnceLock<Arc<ScheduledThreadPool>> = OnceLock::new();
     Arc::clone(POOL.get_or_init(|| Arc::new(ScheduledThreadPool::new(1))))
+}
+
+pub fn read_schema_version_info(pool: &DbPool) -> Result<SchemaVersionInfo> {
+    let conn = pool.get()?;
+    let (version, last_migration_at): (Option<i64>, Option<String>) = conn
+        .query_row(
+            "SELECT MAX(version), MAX(applied_at) FROM schema_migrations",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|err| anyhow::anyhow!("schema_migrations probe failed: {err}"))?;
+    Ok(SchemaVersionInfo {
+        version: version.unwrap_or(0),
+        last_migration_at,
+        known_version: KNOWN_SCHEMA_VERSION,
+    })
 }
 
 /// Initialize the database pool and schema

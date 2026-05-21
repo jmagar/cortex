@@ -87,9 +87,12 @@ async fn tool_search_logs(state: &AppState, args: Value) -> anyhow::Result<Value
             severity: string_arg(&args, "severity"),
             app_name: string_arg(&args, "app_name"),
             facility: string_arg(&args, "facility"),
+            exclude_facility: string_arg(&args, "exclude_facility"),
             process_id: string_arg(&args, "process_id"),
             from: string_arg(&args, "from"),
             to: string_arg(&args, "to"),
+            received_from: string_arg(&args, "received_from"),
+            received_to: string_arg(&args, "received_to"),
             limit: u32_arg(&args, "limit")?,
         })
         .await?;

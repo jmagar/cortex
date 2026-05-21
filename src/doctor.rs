@@ -461,6 +461,20 @@ async fn collect_ai_section() -> DoctorSection {
                     phases.push(DoctorPhase::new(status, name, detail));
                 }
                 phases.push(DoctorPhase::new(
+                    if ai.schema_current {
+                        SetupStatus::Ok
+                    } else {
+                        SetupStatus::Warn
+                    },
+                    "db_schema",
+                    format!(
+                        "version {}/{} last_migration={}",
+                        ai.db_schema_version,
+                        ai.known_schema_version,
+                        ai.db_last_migration_at.as_deref().unwrap_or("-")
+                    ),
+                ));
+                phases.push(DoctorPhase::new(
                     if ai.checkpoint_error_count > 0 || ai.missing_checkpoint_count > 0 {
                         SetupStatus::Warn
                     } else {
@@ -479,6 +493,45 @@ async fn collect_ai_section() -> DoctorSection {
                         format!("{} parse errors", ai.parse_error_count),
                     ));
                 }
+                if let Some(process_start_time) = ai_watcher_process_start_time() {
+                    match runtime
+                        .service()
+                        .ai_indexing_health(Some(process_start_time.clone()))
+                        .await
+                    {
+                        Ok(health) => {
+                            if health.schema_drift_detected {
+                                phases.push(DoctorPhase::new(
+                                    SetupStatus::Error,
+                                    "ai_watch_schema_drift",
+                                    format!(
+                                        "watcher started {process_start_time}; {} migration(s) applied later; fix: systemctl --user restart syslog-ai-watch.service",
+                                        health.schema_drift_migrations.len()
+                                    ),
+                                ));
+                            }
+                            if health.recent_failure_count > 0
+                                || health.recent_schema_error_count > 0
+                            {
+                                phases.push(DoctorPhase::new(
+                                    SetupStatus::Warn,
+                                    "ai_watch_recent_failures",
+                                    format!(
+                                        "{} parse/index failures in last hour, {} schema-like errors, affected_paths={}",
+                                        health.recent_failure_count,
+                                        health.recent_schema_error_count,
+                                        health.affected_paths.len()
+                                    ),
+                                ));
+                            }
+                        }
+                        Err(error) => phases.push(DoctorPhase::new(
+                            SetupStatus::Warn,
+                            "ai_watch_health",
+                            error.to_string(),
+                        )),
+                    }
+                }
             }
             Err(error) => phases.push(DoctorPhase::new(
                 SetupStatus::Error,
@@ -493,6 +546,46 @@ async fn collect_ai_section() -> DoctorSection {
         )),
     }
     DoctorSection::new("AI Transcripts", phases)
+}
+
+fn ai_watcher_process_start_time() -> Option<String> {
+    const SERVICE: &str = "syslog-ai-watch.service";
+    let output = std::process::Command::new("systemctl")
+        .arg("--user")
+        .args(["show", "-p", "ExecMainStartTimestamp", "--value", SERVICE])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_systemctl_timestamp_utc(String::from_utf8_lossy(&output.stdout).trim())
+}
+
+fn parse_systemctl_timestamp_utc(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw == "n/a" {
+        return None;
+    }
+    let (prefix, tz) = raw.rsplit_once(' ')?;
+    let naive = chrono::NaiveDateTime::parse_from_str(prefix, "%a %Y-%m-%d %H:%M:%S").ok()?;
+    let offset_seconds = match tz {
+        "UTC" | "GMT" | "Z" => 0,
+        "EST" => -5 * 3600,
+        "EDT" => -4 * 3600,
+        "CST" => -6 * 3600,
+        "CDT" => -5 * 3600,
+        "MST" => -7 * 3600,
+        "MDT" => -6 * 3600,
+        "PST" => -8 * 3600,
+        "PDT" => -7 * 3600,
+        _ => return None,
+    };
+    let utc = naive - chrono::TimeDelta::seconds(i64::from(offset_seconds));
+    Some(
+        chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(utc, chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string(),
+    )
 }
 
 fn status_label(s: &SetupStatus) -> &'static str {

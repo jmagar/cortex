@@ -102,11 +102,23 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "facility": {
                     "type": "string",
-                    "description": "For action=search: syslog facility filter, e.g. kern, auth, daemon."
+                    "description": "For action=search: syslog facility filter, e.g. kern, auth, daemon, clockd."
+                },
+                "exclude_facility": {
+                    "type": "string",
+                    "description": "For action=search: exclude one syslog facility while retaining rows with unknown facility."
                 },
                 "process_id": {
                     "type": "string",
                     "description": "For action=search: exact process_id filter."
+                },
+                "received_from": {
+                    "type": "string",
+                    "description": "For action=search: filter rows with received_at >= this timestamp."
+                },
+                "received_to": {
+                    "type": "string",
+                    "description": "For action=search: filter rows with received_at <= this timestamp."
                 },
                 "from": {
                     "type": "string",
