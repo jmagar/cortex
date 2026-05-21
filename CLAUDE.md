@@ -172,7 +172,7 @@ bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of
 | `syslog db status` | DB size, WAL, page count, drift check | `syslog db status` |
 | `syslog db integrity` | SQLite integrity_check | `syslog db integrity --quick` |
 | `syslog db vacuum` | Reclaim DB space | `syslog db vacuum` |
-| `syslog db backup` | Backup DB to path | `syslog db backup /tmp/out.db` |
+| `syslog db backup` | Backup DB to path | `syslog db backup --output /tmp/out.db` |
 | `syslog setup check` | Validate config and env | `syslog setup check` |
 | `syslog setup repair` | Auto-fix missing config | `syslog setup repair` |
 | `syslog compose status` | Container running status | `syslog compose status` |

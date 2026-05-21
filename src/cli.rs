@@ -2883,6 +2883,12 @@ fn print_service_logs_response(report: &ServiceLogsResponse, json: bool) -> Resu
     if json {
         return print_json(report);
     }
+    if report.dropped_lines > 0 {
+        eprintln!(
+            "warning: {} malformed journal line(s) dropped",
+            report.dropped_lines
+        );
+    }
     if report.entries.is_empty() {
         println!("{}: 0 journal entries", report.service);
         return Ok(());
@@ -2896,12 +2902,6 @@ fn print_service_logs_response(report: &ServiceLogsResponse, json: bool) -> Resu
             .unwrap_or("-");
         let message = entry.message.as_deref().unwrap_or("");
         println!("{timestamp} {ident}: {message}");
-    }
-    if report.dropped_lines > 0 {
-        eprintln!(
-            "warning: {} malformed journal line(s) dropped",
-            report.dropped_lines
-        );
     }
     Ok(())
 }
