@@ -78,6 +78,10 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         };
     }
 
+    if let cli::CliCommand::Config(command) = command {
+        return cli::run_config(command);
+    }
+
     // Build CliMode ONCE per invocation, matching the per-invocation reqwest
     // Client rule from bead .5. For Local mode we lazily load the runtime so
     // HTTP-mode invocations don't pay the SQLite-open cost.
@@ -337,6 +341,7 @@ impl Mode {
                         | "compose"
                         | "service"
                         | "setup"
+                        | "config"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
@@ -580,6 +585,10 @@ fn print_usage() {
   syslog service logs SERVICE [--from TIME] [--to TIME] [--tail N] [--json]
   syslog setup check|repair [--json]
   syslog setup plugin-hook [--no-repair] [--json]
+  syslog config get KEY [--env|--toml] [--toml-path PATH] [--json]
+  syslog config set KEY VALUE [--env|--toml] [--toml-path PATH] [--json]
+  syslog config unset KEY [--env|--toml] [--toml-path PATH] [--json]
+  syslog config list [--env|--toml] [--toml-path PATH] [--json]
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
   syslog stats [--json]
 

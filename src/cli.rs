@@ -35,6 +35,7 @@ pub(crate) enum CliCommand {
     Service(ServiceCommand),
     Setup(SetupCommand),
     Db(DbCommand),
+    Config(ConfigCommand),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -407,6 +408,54 @@ pub(crate) struct AiPruneCheckpointsArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ConfigCommand {
+    Get(ConfigGetArgs),
+    Set(ConfigSetArgs),
+    Unset(ConfigUnsetArgs),
+    List(ConfigListArgs),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ConfigTarget {
+    #[default]
+    Auto,
+    Env,
+    Toml,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ConfigGetArgs {
+    pub key: String,
+    pub target: ConfigTarget,
+    pub toml_path: Option<PathBuf>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ConfigSetArgs {
+    pub key: String,
+    pub value: String,
+    pub target: ConfigTarget,
+    pub toml_path: Option<PathBuf>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ConfigUnsetArgs {
+    pub key: String,
+    pub target: ConfigTarget,
+    pub toml_path: Option<PathBuf>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ConfigListArgs {
+    pub target: ConfigTarget,
+    pub toml_path: Option<PathBuf>,
+    pub json: bool,
+}
+
 impl CliCommand {
     pub(crate) fn parse(args: Vec<String>) -> Result<Self> {
         let (command, rest) = args
@@ -426,6 +475,7 @@ impl CliCommand {
             "service" => parse_service(rest),
             "setup" => parse_setup(rest),
             "db" => parse_db(rest),
+            "config" => parse_config(rest),
             _ => bail!("unknown CLI command: {command}"),
         }
     }
@@ -500,13 +550,16 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             DbCommand::Vacuum(args) => dispatch::run_db_vacuum(&mode, args).await,
             DbCommand::Backup(args) => dispatch::run_db_backup(&mode, args).await,
         },
-        // Compose/Setup are local-only and main::run_cli reroutes them BEFORE
+        // Compose/Setup/Config are local-only and main::run_cli reroutes them BEFORE
         // calling run(). If we reach here, the front door was bypassed —
         // bail with a clear internal-error message rather than a placeholder.
         CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
             bail!(
                 "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"
             )
+        }
+        CliCommand::Config(_) => {
+            bail!("internal: config commands must be dispatched by main::run_cli before reaching cli::run()")
         }
     }
 }
@@ -1794,6 +1847,155 @@ fn parse_plugin_hook_args(args: &[String]) -> Result<PluginHookArgs> {
         }
     }
     Ok(parsed)
+}
+
+fn parse_config(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("config requires a subcommand (get|set|unset|list)"))?;
+    match subcommand.as_str() {
+        "get" => Ok(CliCommand::Config(ConfigCommand::Get(parse_config_get(
+            rest,
+        )?))),
+        "set" => Ok(CliCommand::Config(ConfigCommand::Set(parse_config_set(
+            rest,
+        )?))),
+        "unset" => Ok(CliCommand::Config(ConfigCommand::Unset(
+            parse_config_unset(rest)?,
+        ))),
+        "list" | "ls" => Ok(CliCommand::Config(ConfigCommand::List(parse_config_list(
+            rest,
+        )?))),
+        other => bail!("unknown config subcommand: {other}"),
+    }
+}
+
+fn parse_config_get(args: &[String]) -> Result<ConfigGetArgs> {
+    let mut parsed = ConfigGetArgs::default();
+    let mut positionals = Vec::new();
+    parse_config_flags(
+        args,
+        &mut parsed.target,
+        &mut parsed.toml_path,
+        &mut parsed.json,
+        &mut positionals,
+        "get",
+    )?;
+    match positionals.len() {
+        1 => parsed.key = positionals.into_iter().next().unwrap(),
+        0 => bail!("config get requires a KEY"),
+        _ => bail!("config get expects exactly one KEY"),
+    }
+    Ok(parsed)
+}
+
+fn parse_config_set(args: &[String]) -> Result<ConfigSetArgs> {
+    let mut parsed = ConfigSetArgs::default();
+    let mut positionals = Vec::new();
+    parse_config_flags(
+        args,
+        &mut parsed.target,
+        &mut parsed.toml_path,
+        &mut parsed.json,
+        &mut positionals,
+        "set",
+    )?;
+    match positionals.len() {
+        2 => {
+            let mut iter = positionals.into_iter();
+            parsed.key = iter.next().unwrap();
+            parsed.value = iter.next().unwrap();
+        }
+        1 => {
+            let only = positionals.into_iter().next().unwrap();
+            let (k, v) = only
+                .split_once('=')
+                .ok_or_else(|| anyhow!("config set requires KEY VALUE or KEY=VALUE"))?;
+            if k.is_empty() {
+                bail!("config set KEY must not be empty");
+            }
+            parsed.key = k.to_string();
+            parsed.value = v.to_string();
+        }
+        0 => bail!("config set requires KEY VALUE"),
+        _ => bail!("config set expects KEY VALUE (got too many positionals)"),
+    }
+    Ok(parsed)
+}
+
+fn parse_config_unset(args: &[String]) -> Result<ConfigUnsetArgs> {
+    let mut parsed = ConfigUnsetArgs::default();
+    let mut positionals = Vec::new();
+    parse_config_flags(
+        args,
+        &mut parsed.target,
+        &mut parsed.toml_path,
+        &mut parsed.json,
+        &mut positionals,
+        "unset",
+    )?;
+    match positionals.len() {
+        1 => parsed.key = positionals.into_iter().next().unwrap(),
+        0 => bail!("config unset requires a KEY"),
+        _ => bail!("config unset expects exactly one KEY"),
+    }
+    Ok(parsed)
+}
+
+fn parse_config_list(args: &[String]) -> Result<ConfigListArgs> {
+    let mut parsed = ConfigListArgs::default();
+    let mut positionals = Vec::new();
+    parse_config_flags(
+        args,
+        &mut parsed.target,
+        &mut parsed.toml_path,
+        &mut parsed.json,
+        &mut positionals,
+        "list",
+    )?;
+    if !positionals.is_empty() {
+        bail!("config list does not take positional arguments");
+    }
+    Ok(parsed)
+}
+
+fn parse_config_flags(
+    args: &[String],
+    target: &mut ConfigTarget,
+    toml_path: &mut Option<PathBuf>,
+    json: &mut bool,
+    positionals: &mut Vec<String>,
+    sub: &str,
+) -> Result<()> {
+    let mut flags = FlagCursor::new(args);
+    let mut target_set = false;
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => *json = true,
+            "--env" => {
+                if target_set && !matches!(target, ConfigTarget::Env) {
+                    bail!("--env and --toml are mutually exclusive");
+                }
+                *target = ConfigTarget::Env;
+                target_set = true;
+            }
+            "--toml" => {
+                if target_set && !matches!(target, ConfigTarget::Toml) {
+                    bail!("--env and --toml are mutually exclusive");
+                }
+                *target = ConfigTarget::Toml;
+                target_set = true;
+            }
+            "--toml-path" => *toml_path = Some(PathBuf::from(flags.value("--toml-path")?)),
+            _ if arg.starts_with("--toml-path=") => {
+                *toml_path = Some(PathBuf::from(value_after_equals(arg, "--toml-path")?));
+            }
+            "-h" | "--help" => bail!("use `syslog --help` for usage"),
+            _ if arg.starts_with('-') => bail!("unknown config {sub} option: {arg}"),
+            _ => positionals.push(arg),
+        }
+    }
+    Ok(())
 }
 
 fn parse_compose_args(args: &[String]) -> Result<ComposeArgs> {
@@ -3300,6 +3502,702 @@ fn ensure_command_success(output: &CommandOutput) -> Result<()> {
         output.timed_out,
         output.stderr
     )
+}
+
+// ---------------------------------------------------------------------------
+// `syslog config` — edit `.env` and `config.toml` from the CLI.
+
+pub(crate) fn run_config(command: ConfigCommand) -> Result<()> {
+    match command {
+        ConfigCommand::Get(args) => run_config_get(args),
+        ConfigCommand::Set(args) => run_config_set(args),
+        ConfigCommand::Unset(args) => run_config_unset(args),
+        ConfigCommand::List(args) => run_config_list(args),
+    }
+}
+
+fn run_config_get(args: ConfigGetArgs) -> Result<()> {
+    let target = resolve_target(&args.key, args.target)?;
+    match target {
+        ConfigTarget::Env => {
+            let path = env_file_path()?;
+            let value = read_env_kv(&path, &args.key)?;
+            print_config_value(&args.key, value.as_deref(), "env", &path, args.json)
+        }
+        ConfigTarget::Toml => {
+            let path = toml_file_path(args.toml_path.as_deref());
+            let value = read_toml_value(&path, &args.key)?;
+            print_config_value(&args.key, value.as_deref(), "toml", &path, args.json)
+        }
+        ConfigTarget::Auto => unreachable!("resolve_target never returns Auto"),
+    }
+}
+
+fn run_config_set(args: ConfigSetArgs) -> Result<()> {
+    let target = resolve_target(&args.key, args.target)?;
+    match target {
+        ConfigTarget::Env => {
+            validate_env_key(&args.key)?;
+            let path = env_file_path()?;
+            let previous = read_env_kv(&path, &args.key)?;
+            write_env_value(&path, &args.key, &args.value)?;
+            print_config_set(
+                &args.key,
+                previous.as_deref(),
+                &args.value,
+                "env",
+                &path,
+                args.json,
+            )
+        }
+        ConfigTarget::Toml => {
+            let path = toml_file_path(args.toml_path.as_deref());
+            let previous = read_toml_value(&path, &args.key)?;
+            let stored = write_toml_value(&path, &args.key, &args.value)?;
+            print_config_set(
+                &args.key,
+                previous.as_deref(),
+                &stored,
+                "toml",
+                &path,
+                args.json,
+            )
+        }
+        ConfigTarget::Auto => unreachable!("resolve_target never returns Auto"),
+    }
+}
+
+fn run_config_unset(args: ConfigUnsetArgs) -> Result<()> {
+    let target = resolve_target(&args.key, args.target)?;
+    match target {
+        ConfigTarget::Env => {
+            let path = env_file_path()?;
+            let removed = remove_env_value(&path, &args.key)?;
+            print_config_unset(&args.key, removed.as_deref(), "env", &path, args.json)
+        }
+        ConfigTarget::Toml => {
+            let path = toml_file_path(args.toml_path.as_deref());
+            let removed = remove_toml_value(&path, &args.key)?;
+            print_config_unset(&args.key, removed.as_deref(), "toml", &path, args.json)
+        }
+        ConfigTarget::Auto => unreachable!("resolve_target never returns Auto"),
+    }
+}
+
+fn run_config_list(args: ConfigListArgs) -> Result<()> {
+    let mut env_entries: Option<(PathBuf, Vec<(String, String)>)> = None;
+    let mut toml_entries: Option<(PathBuf, Vec<(String, String)>)> = None;
+
+    if matches!(args.target, ConfigTarget::Auto | ConfigTarget::Env) {
+        let path = env_file_path()?;
+        let entries = list_env_entries(&path)?;
+        env_entries = Some((path, entries));
+    }
+    if matches!(args.target, ConfigTarget::Auto | ConfigTarget::Toml) {
+        let path = toml_file_path(args.toml_path.as_deref());
+        let entries = list_toml_entries(&path)?;
+        toml_entries = Some((path, entries));
+    }
+
+    if args.json {
+        let mut env_json = serde_json::Map::new();
+        let mut toml_json = serde_json::Map::new();
+        if let Some((_, entries)) = &env_entries {
+            for (k, v) in entries {
+                env_json.insert(k.clone(), serde_json::Value::String(v.clone()));
+            }
+        }
+        if let Some((_, entries)) = &toml_entries {
+            for (k, v) in entries {
+                toml_json.insert(k.clone(), serde_json::Value::String(v.clone()));
+            }
+        }
+        let payload = serde_json::json!({
+            "env": {
+                "path": env_entries.as_ref().map(|(p, _)| p.display().to_string()),
+                "values": env_json,
+            },
+            "toml": {
+                "path": toml_entries.as_ref().map(|(p, _)| p.display().to_string()),
+                "values": toml_json,
+            },
+        });
+        print_json(&payload)?;
+        return Ok(());
+    }
+
+    if let Some((path, entries)) = &env_entries {
+        println!("# .env  ({})", path.display());
+        if entries.is_empty() {
+            println!("# (empty or missing)");
+        } else {
+            for (k, v) in entries {
+                println!("{k}={v}");
+            }
+        }
+        if toml_entries.is_some() {
+            println!();
+        }
+    }
+    if let Some((path, entries)) = &toml_entries {
+        println!("# config.toml  ({})", path.display());
+        if entries.is_empty() {
+            println!("# (empty or missing)");
+        } else {
+            for (k, v) in entries {
+                println!("{k} = {v}");
+            }
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Routing + path resolution
+
+fn resolve_target(key: &str, explicit: ConfigTarget) -> Result<ConfigTarget> {
+    if !matches!(explicit, ConfigTarget::Auto) {
+        return Ok(explicit);
+    }
+    if key.contains('.') {
+        return Ok(ConfigTarget::Toml);
+    }
+    if looks_like_env_key(key) {
+        return Ok(ConfigTarget::Env);
+    }
+    bail!(
+        "could not infer target for key `{key}`: use a dotted TOML path (e.g. `syslog.host`), \
+         an UPPER_CASE env var name, or pass --env / --toml explicitly"
+    );
+}
+
+fn looks_like_env_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && key
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
+}
+
+fn validate_env_key(key: &str) -> Result<()> {
+    if !looks_like_env_key(key) {
+        bail!("invalid env key `{key}`: expected UPPER_CASE letters, digits, and underscores");
+    }
+    Ok(())
+}
+
+fn env_file_path() -> Result<PathBuf> {
+    let home = syslog_mcp::setup::syslog_home_dir()
+        .map_err(|e| anyhow!("could not determine syslog home for .env: {e}"))?;
+    Ok(home.join(".env"))
+}
+
+fn toml_file_path(override_path: Option<&std::path::Path>) -> PathBuf {
+    override_path
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("config.toml"))
+}
+
+// ---------------------------------------------------------------------------
+// .env read/write (comment-preserving, in-order)
+
+fn read_env_kv(path: &std::path::Path, key: &str) -> Result<Option<String>> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => bail!("failed to read {}: {e}", path.display()),
+    };
+    for line in contents.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trimmed.split_once('=') {
+            if k.trim() == key {
+                return Ok(Some(v.trim().to_string()));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn write_env_value(path: &std::path::Path, key: &str, value: &str) -> Result<()> {
+    if value.contains('\n') || value.contains('\r') {
+        bail!("env values cannot contain newlines");
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| anyhow!("failed to create {}: {e}", parent.display()))?;
+        }
+    }
+    let original = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => bail!("failed to read {}: {e}", path.display()),
+    };
+
+    let mut out = String::new();
+    let mut replaced = false;
+    let mut had_trailing_newline = original.ends_with('\n');
+    for line in original.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if let Some((k, _)) = trimmed.split_once('=') {
+            if k.trim() == key {
+                out.push_str(&format!("{key}={value}"));
+                out.push('\n');
+                replaced = true;
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !replaced {
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(&format!("{key}={value}"));
+        out.push('\n');
+        had_trailing_newline = true;
+    }
+    if !had_trailing_newline && out.ends_with('\n') && original.is_empty() {
+        // first-time write: keep the final newline
+    }
+
+    write_env_file(path, &out)
+}
+
+fn remove_env_value(path: &std::path::Path, key: &str) -> Result<Option<String>> {
+    let original = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => bail!("failed to read {}: {e}", path.display()),
+    };
+    let mut out = String::new();
+    let mut removed: Option<String> = None;
+    for line in original.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if let Some((k, v)) = trimmed.split_once('=') {
+            if k.trim() == key {
+                removed = Some(v.trim().to_string());
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if removed.is_some() {
+        write_env_file(path, &out)?;
+    }
+    Ok(removed)
+}
+
+fn write_env_file(path: &std::path::Path, contents: &str) -> Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|e| anyhow!("failed to open {}: {e}", path.display()))?;
+    file.write_all(contents.as_bytes())
+        .map_err(|e| anyhow!("failed to write {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| anyhow!("failed to chmod {}: {e}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn list_env_entries(path: &std::path::Path) -> Result<Vec<(String, String)>> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => bail!("failed to read {}: {e}", path.display()),
+    };
+    let mut entries = Vec::new();
+    for line in contents.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trimmed.split_once('=') {
+            entries.push((k.trim().to_string(), v.trim().to_string()));
+        }
+    }
+    Ok(entries)
+}
+
+// ---------------------------------------------------------------------------
+// config.toml read/write (formatting-preserving via toml_edit)
+
+fn load_toml_document(path: &std::path::Path) -> Result<toml_edit::DocumentMut> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => bail!("failed to read {}: {e}", path.display()),
+    };
+    contents
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| anyhow!("failed to parse {}: {e}", path.display()))
+}
+
+fn read_toml_value(path: &std::path::Path, key: &str) -> Result<Option<String>> {
+    let segments = parse_toml_key(key)?;
+    let doc = load_toml_document(path)?;
+    let mut item: &toml_edit::Item = doc.as_item();
+    for segment in &segments {
+        match item.get(segment) {
+            Some(next) => item = next,
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(format_toml_item(item)))
+}
+
+fn write_toml_value(path: &std::path::Path, key: &str, raw_value: &str) -> Result<String> {
+    let segments = parse_toml_key(key)?;
+    let mut doc = load_toml_document(path)?;
+    let value = parse_user_value(raw_value)?;
+
+    {
+        let (last, parents) = segments.split_last().expect("non-empty segments");
+        let mut current: &mut toml_edit::Item = doc.as_item_mut();
+        for segment in parents {
+            match current.get(segment).map(classify_toml_item) {
+                Some(TomlItemKind::Table) | Some(TomlItemKind::InlineTable) => {}
+                Some(TomlItemKind::Other) => {
+                    bail!(
+                        "cannot set `{key}`: `{segment}` already exists as a non-table value \
+                         (set or unset it directly first)"
+                    );
+                }
+                None => {
+                    if current.is_table() {
+                        current
+                            .as_table_mut()
+                            .expect("checked")
+                            .insert(segment, toml_edit::Item::Table(toml_edit::Table::new()));
+                    } else {
+                        bail!("cannot create `{key}`: parent is not a table");
+                    }
+                }
+            }
+            current = current
+                .get_mut(segment)
+                .ok_or_else(|| anyhow!("cannot descend into `{segment}`"))?;
+        }
+        if current.is_table() {
+            current
+                .as_table_mut()
+                .expect("checked")
+                .insert(last, toml_edit::Item::Value(value.clone()));
+        } else if current.is_inline_table() {
+            current
+                .as_inline_table_mut()
+                .expect("checked")
+                .insert(last, value.clone());
+        } else {
+            bail!("cannot set `{key}`: parent is not a table");
+        }
+    }
+
+    write_toml_file(path, &doc.to_string())?;
+    Ok(format_value(&value))
+}
+
+fn remove_toml_value(path: &std::path::Path, key: &str) -> Result<Option<String>> {
+    let segments = parse_toml_key(key)?;
+    let mut doc = load_toml_document(path)?;
+
+    let removed: Option<String> = {
+        let (last, parents) = segments.split_last().expect("non-empty segments");
+        let mut current: &mut toml_edit::Item = doc.as_item_mut();
+        let mut missing = false;
+        for segment in parents {
+            let next_kind = current.get(segment).map(classify_toml_item);
+            match next_kind {
+                Some(TomlItemKind::Table) | Some(TomlItemKind::InlineTable) => {
+                    current = current.get_mut(segment).expect("checked above");
+                }
+                Some(_) => bail!("cannot descend into `{segment}`: not a table"),
+                None => {
+                    missing = true;
+                    break;
+                }
+            }
+        }
+        if missing {
+            None
+        } else if current.is_table() {
+            current
+                .as_table_mut()
+                .expect("checked")
+                .remove(last)
+                .map(|item| format_toml_item(&item))
+        } else if current.is_inline_table() {
+            current
+                .as_inline_table_mut()
+                .expect("checked")
+                .remove(last)
+                .map(|val| format_value(&val))
+        } else {
+            bail!("cannot unset `{key}`: parent is not a table");
+        }
+    };
+
+    if removed.is_some() {
+        write_toml_file(path, &doc.to_string())?;
+    }
+    Ok(removed)
+}
+
+enum TomlItemKind {
+    Table,
+    InlineTable,
+    Other,
+}
+
+fn classify_toml_item(item: &toml_edit::Item) -> TomlItemKind {
+    if item.is_table() {
+        TomlItemKind::Table
+    } else if item.is_inline_table() {
+        TomlItemKind::InlineTable
+    } else {
+        TomlItemKind::Other
+    }
+}
+
+fn list_toml_entries(path: &std::path::Path) -> Result<Vec<(String, String)>> {
+    let doc = load_toml_document(path)?;
+    let mut out = Vec::new();
+    flatten_toml(doc.as_item(), "", &mut out);
+    Ok(out)
+}
+
+fn flatten_toml(item: &toml_edit::Item, prefix: &str, out: &mut Vec<(String, String)>) {
+    match item {
+        toml_edit::Item::Table(table) => {
+            for (key, child) in table.iter() {
+                let next = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                flatten_toml(child, &next, out);
+            }
+        }
+        toml_edit::Item::Value(toml_edit::Value::InlineTable(table)) => {
+            for (key, child) in table.iter() {
+                let next = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                out.push((next, format_value(child)));
+            }
+        }
+        toml_edit::Item::Value(value) => {
+            out.push((prefix.to_string(), format_value(value)));
+        }
+        toml_edit::Item::ArrayOfTables(_) | toml_edit::Item::None => {
+            out.push((prefix.to_string(), format_toml_item(item)));
+        }
+    }
+}
+
+fn parse_toml_key(key: &str) -> Result<Vec<String>> {
+    if key.is_empty() {
+        bail!("TOML key must not be empty");
+    }
+    let segments: Vec<String> = key.split('.').map(|s| s.to_string()).collect();
+    for seg in &segments {
+        if seg.is_empty() {
+            bail!("TOML key segment must not be empty in `{key}`");
+        }
+    }
+    Ok(segments)
+}
+
+fn parse_user_value(raw: &str) -> Result<toml_edit::Value> {
+    if let Ok(item) = format!("__x = {raw}").parse::<toml_edit::DocumentMut>() {
+        if let Some(value) = item.get("__x").and_then(|i| i.as_value()).cloned() {
+            return Ok(value);
+        }
+    }
+    let trimmed = raw.trim();
+    // Bracket/brace shorthand must be valid TOML — refuse to silently coerce
+    // `[a, b]` or `{ a = 1 }` to a string when the user clearly intended an
+    // array or inline table.
+    if let Some(first) = trimmed.chars().next() {
+        if matches!(first, '[' | '{') {
+            bail!(
+                "value `{raw}` looks like a TOML array/inline-table but failed to parse; \
+                 quote each element (e.g. `[\"a\", \"b\"]`) or pass it as a quoted string"
+            );
+        }
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        "true" => return Ok(toml_edit::Value::from(true)),
+        "false" => return Ok(toml_edit::Value::from(false)),
+        _ => {}
+    }
+    if let Ok(n) = trimmed.parse::<i64>() {
+        return Ok(toml_edit::Value::from(n));
+    }
+    if let Ok(n) = trimmed.parse::<f64>() {
+        if n.is_finite() {
+            return Ok(toml_edit::Value::from(n));
+        }
+    }
+    Ok(toml_edit::Value::from(raw))
+}
+
+fn format_toml_item(item: &toml_edit::Item) -> String {
+    match item {
+        toml_edit::Item::Value(v) => format_value(v),
+        toml_edit::Item::Table(_) | toml_edit::Item::ArrayOfTables(_) => {
+            item.to_string().trim().to_string()
+        }
+        toml_edit::Item::None => String::new(),
+    }
+}
+
+fn format_value(value: &toml_edit::Value) -> String {
+    let mut cloned = value.clone();
+    let decor = cloned.decor_mut();
+    decor.set_prefix("");
+    decor.set_suffix("");
+    cloned.to_string()
+}
+
+fn write_toml_file(path: &std::path::Path, contents: &str) -> Result<()> {
+    use std::io::Write;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| anyhow!("failed to create {}: {e}", parent.display()))?;
+        }
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    let mut file = options
+        .open(path)
+        .map_err(|e| anyhow!("failed to open {}: {e}", path.display()))?;
+    file.write_all(contents.as_bytes())
+        .map_err(|e| anyhow!("failed to write {}: {e}", path.display()))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Output helpers
+
+fn print_config_value(
+    key: &str,
+    value: Option<&str>,
+    target: &str,
+    path: &std::path::Path,
+    json: bool,
+) -> Result<()> {
+    if json {
+        print_json(&serde_json::json!({
+            "key": key,
+            "value": value,
+            "target": target,
+            "path": path.display().to_string(),
+            "found": value.is_some(),
+        }))?;
+        if value.is_none() {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+    match value {
+        Some(v) => println!("{v}"),
+        None => {
+            eprintln!("{key} not set in {} ({})", path.display(), target);
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+fn print_config_set(
+    key: &str,
+    previous: Option<&str>,
+    value: &str,
+    target: &str,
+    path: &std::path::Path,
+    json: bool,
+) -> Result<()> {
+    if json {
+        print_json(&serde_json::json!({
+            "key": key,
+            "previous": previous,
+            "value": value,
+            "target": target,
+            "path": path.display().to_string(),
+        }))?;
+        return Ok(());
+    }
+    match previous {
+        Some(prev) if prev != value => println!(
+            "{key} = {value}  (was {prev}) [{target}: {}]",
+            path.display()
+        ),
+        Some(_) => println!(
+            "{key} = {value}  (unchanged) [{target}: {}]",
+            path.display()
+        ),
+        None => println!("{key} = {value}  (new) [{target}: {}]", path.display()),
+    }
+    Ok(())
+}
+
+fn print_config_unset(
+    key: &str,
+    removed: Option<&str>,
+    target: &str,
+    path: &std::path::Path,
+    json: bool,
+) -> Result<()> {
+    if json {
+        print_json(&serde_json::json!({
+            "key": key,
+            "removed": removed,
+            "target": target,
+            "path": path.display().to_string(),
+            "found": removed.is_some(),
+        }))?;
+        return Ok(());
+    }
+    match removed {
+        Some(v) => println!("removed {key} (was {v}) [{target}: {}]", path.display()),
+        None => {
+            eprintln!("{key} not set in {} ({})", path.display(), target);
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
