@@ -11,7 +11,7 @@ use crate::app::{
     TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
-use super::schemas::SYSLOG_ACTIONS;
+use super::actions;
 use super::AppState;
 
 /// Execute a tool by name
@@ -76,7 +76,7 @@ async fn tool_syslog(
         "help" => tool_syslog_help().await,
         _ => Err(anyhow::anyhow!(
             "unknown syslog action: {action}; expected one of {}",
-            SYSLOG_ACTIONS.join(", ")
+            actions::action_names().join(", ")
         )),
     }
 }

@@ -171,7 +171,7 @@ async fn serve_mcp() -> Result<()> {
     );
 
     runtime.start_syslog().await?;
-    let _maintenance = runtime.spawn_maintenance_tasks();
+    let maintenance = runtime.spawn_maintenance_tasks();
 
     let mut app: Router = mcp::router(runtime.mcp_state());
     // /api/* is always-on. The container fails to start without
@@ -186,6 +186,7 @@ async fn serve_mcp() -> Result<()> {
             runtime.config.mcp.allowed_origins.clone(),
             runtime.auth_policy().clone(),
             runtime.pool(),
+            runtime.config.mcp.static_token_is_admin,
         )?;
         app = app.merge(api::router(api_state)?);
         info!("Non-MCP API mounted under /api");
@@ -223,10 +224,15 @@ async fn serve_mcp() -> Result<()> {
     .with_graceful_shutdown(shutdown_signal())
     .await?;
 
-    // HTTP connections are drained. Now signal the syslog listeners and batch
-    // writer to drain and exit, then checkpoint the WAL so the next startup
-    // doesn't replay a large WAL file.
-    info!("HTTP server stopped; draining ingest pipeline");
+    // HTTP connections are drained. Now drain in order:
+    // 1. Cooperatively cancel maintenance background tasks (purge, storage,
+    //    error_scan); wait up to 10 s for them to exit cleanly.
+    // 2. Drain the ingest pipeline (batch writer flush) then checkpoint WAL.
+    info!("HTTP server stopped; shutting down maintenance tasks");
+    maintenance
+        .shutdown(std::time::Duration::from_secs(10))
+        .await;
+    info!("Maintenance tasks done; draining ingest pipeline");
     runtime.shutdown(std::time::Duration::from_secs(5)).await;
 
     Ok(())

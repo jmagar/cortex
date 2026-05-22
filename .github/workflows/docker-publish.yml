@@ -16,8 +16,34 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Gate: run CI checks before pushing an image for tag releases.
+  # On branch/PR pushes the Docker build also runs (for image smoke testing),
+  # but it skips `cargo publish`-equivalent ops. The check job is a no-op for
+  # non-tag pushes (it still runs, ensuring we never ship a broken image on tags).
+  check:
+    name: Pre-publish CI gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
   build-and-push:
     runs-on: ubuntu-latest
+    needs: [check]
     permissions:
       contents: read
       packages: write

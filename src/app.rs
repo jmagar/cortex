@@ -2,6 +2,7 @@ mod correlate;
 mod error;
 pub(crate) mod error_detection;
 mod models;
+mod os_adapter;
 mod service;
 pub(crate) mod time;
 
@@ -111,6 +112,7 @@ pub use models::{
     UsageBlocksRequest,
     UsageBlocksResponse,
 };
+pub use os_adapter::SystemOsAdapter;
 pub use service::{run_service_logs, SyslogService};
 pub use time::parse_optional_timestamp;
 

@@ -22,6 +22,7 @@ fn test_state_with_token(token: Option<String>) -> (AppState, Arc<db::DbPool>, t
                 allowed_hosts: Vec::new(),
                 allowed_origins: Vec::new(),
                 auth: Default::default(),
+                static_token_is_admin: false,
             },
             notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
@@ -132,7 +133,7 @@ async fn schema_actions_are_dispatchable() {
         }],
     )
     .unwrap();
-    for action in SYSLOG_ACTIONS {
+    for action in &super::actions::action_names() {
         let args = match *action {
             "correlate" => {
                 json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"})
@@ -206,7 +207,7 @@ async fn schema_actions_are_dispatchable() {
 async fn public_action_references_cover_schema_registry() {
     let help = tool_syslog_help().await.unwrap();
     let help = help["help"].as_str().unwrap().to_ascii_lowercase();
-    for action in SYSLOG_ACTIONS {
+    for action in &super::actions::action_names() {
         assert!(
             help.contains(&format!("## syslog {action}")),
             "help text missing action section: {action}"
@@ -227,7 +228,7 @@ async fn public_action_references_cover_schema_registry() {
             include_str!("../../tests/mcporter/test-tools.sh"),
         ),
     ] {
-        for action in SYSLOG_ACTIONS {
+        for action in &super::actions::action_names() {
             assert!(
                 content.contains(&format!("syslog {action}"))
                     || content.contains(&format!("mcp_call {action}"))
@@ -245,7 +246,7 @@ async fn public_action_references_cover_schema_registry() {
             include_str!("../../plugins/syslog/skills/syslog/SKILL.md"),
         ),
     ] {
-        for action in SYSLOG_ACTIONS {
+        for action in &super::actions::action_names() {
             assert!(
                 content.contains(&format!("`{action}`"))
                     || content.contains(&format!("syslog {action}")),

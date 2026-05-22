@@ -17,7 +17,7 @@ fn tool_definitions_include_expected_public_tools() {
         .iter()
         .map(|value| value.as_str().unwrap())
         .collect();
-    assert_eq!(actions, SYSLOG_ACTIONS);
+    assert_eq!(actions, super::actions::action_names());
 }
 
 #[test]

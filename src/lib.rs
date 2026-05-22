@@ -146,6 +146,7 @@ pub mod testing {
                 public_url: public_url.map(|u| u.to_string()),
                 ..Default::default()
             },
+            static_token_is_admin: false,
         }
     }
 
