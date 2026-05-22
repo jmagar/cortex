@@ -75,7 +75,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utils
 anyhow = "1"
 libc = "0.2"
-lru = "0.12"
+lru = "0.14"
 rustix = { version = "0.38", features = ["fs"] }
 regex = "1"
 sha2 = "0.10"
