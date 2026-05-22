@@ -46,47 +46,203 @@ pub(super) struct ActionSpec {
 /// No other file needs to change for basic action registration.
 pub(super) const ACTION_SPECS: &[ActionSpec] = &[
     // ── Read-only queries ──────────────────────────────────────────────────
-    ActionSpec { name: "search",            scope: Scope::Read,  description: "Full-text search over syslog messages" },
-    ActionSpec { name: "tail",              scope: Scope::Read,  description: "Stream the most recent log entries" },
-    ActionSpec { name: "errors",            scope: Scope::Read,  description: "List recent error-level log entries" },
-    ActionSpec { name: "hosts",             scope: Scope::Read,  description: "Enumerate all known source hostnames" },
-    ActionSpec { name: "correlate",         scope: Scope::Read,  description: "Correlate events across hosts/services" },
-    ActionSpec { name: "stats",             scope: Scope::Read,  description: "Aggregate log statistics" },
-    ActionSpec { name: "status",            scope: Scope::Read,  description: "Server health and ingestion status" },
-    ActionSpec { name: "apps",              scope: Scope::Read,  description: "Enumerate all known application names" },
-    ActionSpec { name: "sessions",          scope: Scope::Read,  description: "List AI transcript sessions" },
-    ActionSpec { name: "search_sessions",   scope: Scope::Read,  description: "Full-text search over AI transcript sessions" },
-    ActionSpec { name: "abuse",             scope: Scope::Read,  description: "Detect resource-abuse patterns in AI sessions" },
-    ActionSpec { name: "abuse_incidents",   scope: Scope::Read,  description: "List detected abuse incidents" },
-    ActionSpec { name: "abuse_investigate", scope: Scope::Read,  description: "Deep-dive investigation of an abuse incident" },
-    ActionSpec { name: "ai_correlate",      scope: Scope::Read,  description: "Correlate AI transcript events with syslog" },
-    ActionSpec { name: "usage_blocks",      scope: Scope::Read,  description: "Summarise AI session usage by project" },
-    ActionSpec { name: "project_context",   scope: Scope::Read,  description: "Full project context from AI transcripts" },
-    ActionSpec { name: "list_ai_tools",     scope: Scope::Read,  description: "List AI tools observed in transcripts" },
-    ActionSpec { name: "list_ai_projects",  scope: Scope::Read,  description: "List AI projects with transcript activity" },
-    ActionSpec { name: "source_ips",        scope: Scope::Read,  description: "Enumerate unique source IP addresses" },
-    ActionSpec { name: "timeline",          scope: Scope::Read,  description: "Log volume over time (bucketed)" },
-    ActionSpec { name: "patterns",          scope: Scope::Read,  description: "Recurring message patterns" },
-    ActionSpec { name: "context",           scope: Scope::Read,  description: "Contextual log entries around a pivot" },
-    ActionSpec { name: "get",               scope: Scope::Read,  description: "Fetch a single log entry by ID" },
-    ActionSpec { name: "ingest_rate",       scope: Scope::Read,  description: "Current log ingestion rate" },
-    ActionSpec { name: "silent_hosts",      scope: Scope::Read,  description: "Hosts that have gone silent" },
-    ActionSpec { name: "clock_skew",        scope: Scope::Read,  description: "Detect clock skew between hosts" },
-    ActionSpec { name: "anomalies",         scope: Scope::Read,  description: "Detect log-volume anomalies" },
-    ActionSpec { name: "compare",           scope: Scope::Read,  description: "Compare log patterns between time windows" },
-    ActionSpec { name: "compose_status",    scope: Scope::Read,  description: "Docker Compose stack status" },
-    ActionSpec { name: "compose_doctor",    scope: Scope::Read,  description: "Docker Compose coordination diagnostics" },
-    ActionSpec { name: "unaddressed_errors",scope: Scope::Read,  description: "List unacknowledged error signatures" },
-    ActionSpec { name: "notifications_recent", scope: Scope::Read, description: "Recent notification firings" },
-    ActionSpec { name: "similar_incidents", scope: Scope::Read,  description: "Find similar past incidents" },
-    ActionSpec { name: "ask_history",       scope: Scope::Read,  description: "Query AI transcript history" },
-    ActionSpec { name: "incident_context",  scope: Scope::Read,  description: "Full context for an incident" },
+    ActionSpec {
+        name: "search",
+        scope: Scope::Read,
+        description: "Full-text search over syslog messages",
+    },
+    ActionSpec {
+        name: "tail",
+        scope: Scope::Read,
+        description: "Stream the most recent log entries",
+    },
+    ActionSpec {
+        name: "errors",
+        scope: Scope::Read,
+        description: "List recent error-level log entries",
+    },
+    ActionSpec {
+        name: "hosts",
+        scope: Scope::Read,
+        description: "Enumerate all known source hostnames",
+    },
+    ActionSpec {
+        name: "correlate",
+        scope: Scope::Read,
+        description: "Correlate events across hosts/services",
+    },
+    ActionSpec {
+        name: "stats",
+        scope: Scope::Read,
+        description: "Aggregate log statistics",
+    },
+    ActionSpec {
+        name: "status",
+        scope: Scope::Read,
+        description: "Server health and ingestion status",
+    },
+    ActionSpec {
+        name: "apps",
+        scope: Scope::Read,
+        description: "Enumerate all known application names",
+    },
+    ActionSpec {
+        name: "sessions",
+        scope: Scope::Read,
+        description: "List AI transcript sessions",
+    },
+    ActionSpec {
+        name: "search_sessions",
+        scope: Scope::Read,
+        description: "Full-text search over AI transcript sessions",
+    },
+    ActionSpec {
+        name: "abuse",
+        scope: Scope::Read,
+        description: "Detect resource-abuse patterns in AI sessions",
+    },
+    ActionSpec {
+        name: "abuse_incidents",
+        scope: Scope::Read,
+        description: "List detected abuse incidents",
+    },
+    ActionSpec {
+        name: "abuse_investigate",
+        scope: Scope::Read,
+        description: "Deep-dive investigation of an abuse incident",
+    },
+    ActionSpec {
+        name: "ai_correlate",
+        scope: Scope::Read,
+        description: "Correlate AI transcript events with syslog",
+    },
+    ActionSpec {
+        name: "usage_blocks",
+        scope: Scope::Read,
+        description: "Summarise AI session usage by project",
+    },
+    ActionSpec {
+        name: "project_context",
+        scope: Scope::Read,
+        description: "Full project context from AI transcripts",
+    },
+    ActionSpec {
+        name: "list_ai_tools",
+        scope: Scope::Read,
+        description: "List AI tools observed in transcripts",
+    },
+    ActionSpec {
+        name: "list_ai_projects",
+        scope: Scope::Read,
+        description: "List AI projects with transcript activity",
+    },
+    ActionSpec {
+        name: "source_ips",
+        scope: Scope::Read,
+        description: "Enumerate unique source IP addresses",
+    },
+    ActionSpec {
+        name: "timeline",
+        scope: Scope::Read,
+        description: "Log volume over time (bucketed)",
+    },
+    ActionSpec {
+        name: "patterns",
+        scope: Scope::Read,
+        description: "Recurring message patterns",
+    },
+    ActionSpec {
+        name: "context",
+        scope: Scope::Read,
+        description: "Contextual log entries around a pivot",
+    },
+    ActionSpec {
+        name: "get",
+        scope: Scope::Read,
+        description: "Fetch a single log entry by ID",
+    },
+    ActionSpec {
+        name: "ingest_rate",
+        scope: Scope::Read,
+        description: "Current log ingestion rate",
+    },
+    ActionSpec {
+        name: "silent_hosts",
+        scope: Scope::Read,
+        description: "Hosts that have gone silent",
+    },
+    ActionSpec {
+        name: "clock_skew",
+        scope: Scope::Read,
+        description: "Detect clock skew between hosts",
+    },
+    ActionSpec {
+        name: "anomalies",
+        scope: Scope::Read,
+        description: "Detect log-volume anomalies",
+    },
+    ActionSpec {
+        name: "compare",
+        scope: Scope::Read,
+        description: "Compare log patterns between time windows",
+    },
+    ActionSpec {
+        name: "compose_status",
+        scope: Scope::Read,
+        description: "Docker Compose stack status",
+    },
+    ActionSpec {
+        name: "compose_doctor",
+        scope: Scope::Read,
+        description: "Docker Compose coordination diagnostics",
+    },
+    ActionSpec {
+        name: "unaddressed_errors",
+        scope: Scope::Read,
+        description: "List unacknowledged error signatures",
+    },
+    ActionSpec {
+        name: "notifications_recent",
+        scope: Scope::Read,
+        description: "Recent notification firings",
+    },
+    ActionSpec {
+        name: "similar_incidents",
+        scope: Scope::Read,
+        description: "Find similar past incidents",
+    },
+    ActionSpec {
+        name: "ask_history",
+        scope: Scope::Read,
+        description: "Query AI transcript history",
+    },
+    ActionSpec {
+        name: "incident_context",
+        scope: Scope::Read,
+        description: "Full context for an incident",
+    },
     // ── Admin / write actions ──────────────────────────────────────────────
-    ActionSpec { name: "ack_error",         scope: Scope::Admin, description: "Acknowledge an error signature" },
-    ActionSpec { name: "unack_error",       scope: Scope::Admin, description: "Revoke an error signature acknowledgement" },
-    ActionSpec { name: "notifications_test",scope: Scope::Admin, description: "Send a test notification via Apprise" },
+    ActionSpec {
+        name: "ack_error",
+        scope: Scope::Admin,
+        description: "Acknowledge an error signature",
+    },
+    ActionSpec {
+        name: "unack_error",
+        scope: Scope::Admin,
+        description: "Revoke an error signature acknowledgement",
+    },
+    ActionSpec {
+        name: "notifications_test",
+        scope: Scope::Admin,
+        description: "Send a test notification via Apprise",
+    },
     // ── Informational (auth required, no scope gate) ───────────────────────
-    ActionSpec { name: "help",              scope: Scope::InfoOnly, description: "List available actions and their parameters" },
+    ActionSpec {
+        name: "help",
+        scope: Scope::InfoOnly,
+        description: "List available actions and their parameters",
+    },
 ];
 
 /// All action names in registration order. Used to populate the JSON schema

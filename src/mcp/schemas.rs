@@ -15,9 +15,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
         .map(|n| format!("syslog {n}"))
         .collect::<Vec<_>>()
         .join(", ");
-    let description = format!(
-        "Query syslog-mcp logs with action-based subcommands: {action_desc}."
-    );
+    let description =
+        format!("Query syslog-mcp logs with action-based subcommands: {action_desc}.");
     vec![json!({
         "name": "syslog",
         "description": description,

@@ -75,9 +75,7 @@ impl OsAdapter for SystemOsAdapter {
             // When the environment does not provide `DBUS_SESSION_BUS_ADDRESS`,
             // infer it from the XDG runtime directory so it works under
             // systemd --user.
-            if program == "journalctl"
-                && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none()
-            {
+            if program == "journalctl" && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
                 if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
                     command
                         .env("XDG_RUNTIME_DIR", runtime_dir)

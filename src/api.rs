@@ -897,13 +897,11 @@ fn respond<T: serde::Serialize>(result: crate::app::ServiceResult<T>) -> axum::r
         Err(crate::app::ServiceError::NotFound(msg)) => {
             (StatusCode::NOT_FOUND, Json(json!({"error": msg}))).into_response()
         }
-        Err(crate::app::ServiceError::DatabaseTimeout) => {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"error": "database_timeout"})),
-            )
-                .into_response()
-        }
+        Err(crate::app::ServiceError::DatabaseTimeout) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "database_timeout"})),
+        )
+            .into_response(),
         Err(crate::app::ServiceError::ConstraintViolation { message }) => {
             tracing::warn!(error = %message, "Constraint violation in API request");
             (

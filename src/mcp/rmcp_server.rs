@@ -26,7 +26,6 @@ pub struct SyslogRmcpServer {
     state: AppState,
 }
 
-
 impl SyslogRmcpServer {
     pub fn new(state: AppState) -> Self {
         Self { state }

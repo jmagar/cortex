@@ -25,8 +25,8 @@ use super::models::{
     SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
     TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
-use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::os_adapter::{OsAdapter, SystemOsAdapter};
+use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
 use crate::config::StorageConfig;
 use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy};

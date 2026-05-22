@@ -38,10 +38,7 @@ fn typed_variants_display_correctly() {
         .to_string(),
         "constraint violation: UNIQUE constraint failed: logs.id"
     );
-    assert_eq!(
-        ServiceError::RowNotFound.to_string(),
-        "row not found"
-    );
+    assert_eq!(ServiceError::RowNotFound.to_string(), "row not found");
     assert_eq!(
         ServiceError::NotFound("no such host".into()).to_string(),
         "no such host"
