@@ -52,3 +52,6 @@ fn parse_notify_test(args: &[String]) -> Result<CliCommand> {
     }
     Ok(CliCommand::Notify(NotifyCommand::Test(parsed)))
 }
+#[cfg(test)]
+#[path = "notify_tests.rs"]
+mod tests;
