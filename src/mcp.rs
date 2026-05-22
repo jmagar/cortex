@@ -7,6 +7,7 @@ use crate::config::{McpConfig, NotificationsConfig};
 use crate::observability::RuntimeObservability;
 use crate::otlp::OtlpCounters;
 
+mod actions;
 mod rmcp_server;
 mod routes;
 mod schemas;
@@ -105,26 +106,44 @@ pub struct AppState {
 /// explicit call to `with_static_token_scopes`, a static-bearer request would
 /// produce an `AuthContext` with no scopes and fail every scope check.
 /// We therefore call `with_static_token_scopes` unconditionally so that the
-/// bearer-only path grants the same scopes as the OAuth path.
+/// bearer-only path grants the configured scopes for the static token.
+///
+/// # Static token admin opt-in
+/// By default, static bearer tokens receive only `syslog:read`. Set
+/// `static_token_is_admin = true` (via `SYSLOG_MCP_STATIC_TOKEN_ADMIN=true`
+/// or `[mcp] static_token_is_admin = true` in config.toml) to also grant
+/// `syslog:admin`. OAuth tokens are unaffected — their scopes come from the
+/// JWT claims.
 pub fn build_auth_layer(
     policy: &AuthPolicy,
     static_token: Option<Arc<str>>,
     resource_url: Option<Arc<str>>,
+    static_token_is_admin: bool,
 ) -> Option<AuthLayer> {
     match policy {
         AuthPolicy::LoopbackDev => None,
-        AuthPolicy::Mounted { auth_state } => Some(
-            AuthLayer::new()
-                .with_static_token(static_token)
-                .with_auth_state(auth_state.clone())
-                // When auth_state is None (bearer-only), with_auth_state does not
-                // populate static_token_scopes (it only copies from Some(AuthState)).
-                // Explicitly set here so static bearer tokens receive full scopes
-                // in both bearer-only and OAuth modes.
-                .with_static_token_scopes(vec!["syslog:read".into(), "syslog:admin".into()])
-                .with_resource_url(resource_url)
-                .with_allow_session_cookie(false),
-        ),
+        AuthPolicy::Mounted { auth_state } => {
+            // Default: static bearer tokens receive read-only scope.
+            // Opt-in: set SYSLOG_MCP_STATIC_TOKEN_ADMIN=true to also grant admin.
+            // OAuth tokens gate admin via the scope claims in the JWT.
+            let static_scopes: Vec<String> = if static_token_is_admin {
+                vec!["syslog:read".to_string(), "syslog:admin".to_string()]
+            } else {
+                vec!["syslog:read".to_string()]
+            };
+            Some(
+                AuthLayer::new()
+                    .with_static_token(static_token)
+                    .with_auth_state(auth_state.clone())
+                    // When auth_state is None (bearer-only), with_auth_state does not
+                    // populate static_token_scopes (it only copies from Some(AuthState)).
+                    // Explicitly set here so static bearer tokens receive the configured
+                    // scopes in both bearer-only and OAuth modes.
+                    .with_static_token_scopes(static_scopes)
+                    .with_resource_url(resource_url)
+                    .with_allow_session_cookie(false),
+            )
+        }
     }
 }
 

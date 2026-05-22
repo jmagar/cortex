@@ -144,11 +144,16 @@ pub struct ApiState {
     /// `SHARED_MAINTENANCE_PERMIT` docs for the dual-permit rationale
     /// (eng-review C2) and the test-isolation rationale.
     pub maintenance_permit: Arc<Semaphore>,
+    /// When `true`, the static bearer token (`SYSLOG_MCP_TOKEN`) is granted
+    /// `syslog:admin` scope in addition to `syslog:read`. Mirrors
+    /// [`crate::config::McpConfig::static_token_is_admin`]. Default: `false`.
+    pub static_token_is_admin: bool,
 }
 
 impl ApiState {
     /// Build an `ApiState`, querying the SQLite schema version once at
     /// startup. Caching avoids per-request DB hits on `/api/version`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         service: SyslogService,
         config: ApiConfig,
@@ -157,6 +162,7 @@ impl ApiState {
         allowed_origins: Vec<String>,
         auth_policy: AuthPolicy,
         pool: &DbPool,
+        static_token_is_admin: bool,
     ) -> anyhow::Result<Self> {
         let schema_version = read_schema_version(pool)?;
         let version_info = Arc::new(VersionInfo {
@@ -174,6 +180,7 @@ impl ApiState {
             version_info,
             full_vacuum_size_guard_bytes: FULL_VACUUM_SIZE_GUARD_BYTES,
             maintenance_permit: shared_maintenance_permit(),
+            static_token_is_admin,
         })
     }
 
@@ -263,6 +270,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         &forced_policy,
         state.config.api_token.as_deref().map(Arc::<str>::from),
         None,
+        state.static_token_is_admin,
     ) {
         routes.layer(layer)
     } else {
@@ -888,6 +896,24 @@ fn respond<T: serde::Serialize>(result: crate::app::ServiceResult<T>) -> axum::r
         }
         Err(crate::app::ServiceError::NotFound(msg)) => {
             (StatusCode::NOT_FOUND, Json(json!({"error": msg}))).into_response()
+        }
+        Err(crate::app::ServiceError::DatabaseTimeout) => {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error": "database_timeout"})),
+            )
+                .into_response()
+        }
+        Err(crate::app::ServiceError::ConstraintViolation { message }) => {
+            tracing::warn!(error = %message, "Constraint violation in API request");
+            (
+                StatusCode::CONFLICT,
+                Json(json!({"error": "constraint_violation", "detail": message})),
+            )
+                .into_response()
+        }
+        Err(crate::app::ServiceError::RowNotFound) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "not_found"}))).into_response()
         }
         Err(crate::app::ServiceError::Internal(err)) => {
             tracing::error!(error = %err, "API request failed");

@@ -144,6 +144,22 @@ pub(super) async fn flush_batch(
     let pool = Arc::clone(&context.pool);
     // Enrichment runs in the async context (cheap regex/JSON work) so the
     // spawn_blocking call below stays focused on the SQL write.
+    // Two enrichment frameworks run in sequence on every entry.
+    // They write to NON-OVERLAPPING fields, so running both is safe:
+    //
+    //   enrich_entry() (src/syslog/enrichment.rs — legacy framework):
+    //     severity, app_name, ai_tool, ai_project, ai_session_id,
+    //     ai_transcript_path
+    //
+    //   pipeline.dispatch() (src/enrich/ — new framework, Arch-H5):
+    //     http_status, auth_outcome, dns_blocked, event_action, parse_error
+    //
+    // Migration path: once equivalence tests confirm the new framework
+    // covers all fields written by enrich_entry(), remove the legacy call.
+    // Until then, both calls are required. The double-parse inside each
+    // framework (metadata_json parsed twice per entry) was fixed in the
+    // new framework's dispatch() — it now parses once and passes a
+    // reference to all helpers (Arch-H5 partial fix, 2026-05-22).
     let batch_to_write: Vec<db::LogBatchEntry> = std::mem::take(batch)
         .into_iter()
         .map(|e| {

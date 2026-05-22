@@ -1,59 +1,32 @@
 use crate::db::SEVERITY_LEVELS;
 use serde_json::{json, Value};
 
-pub(super) const SYSLOG_ACTIONS: &[&str] = &[
-    "search",
-    "tail",
-    "errors",
-    "hosts",
-    "apps",
-    "sessions",
-    "search_sessions",
-    "abuse",
-    "abuse_incidents",
-    "abuse_investigate",
-    "ai_correlate",
-    "usage_blocks",
-    "project_context",
-    "list_ai_tools",
-    "list_ai_projects",
-    "correlate",
-    "stats",
-    "status",
-    "source_ips",
-    "timeline",
-    "patterns",
-    "context",
-    "get",
-    "ingest_rate",
-    "silent_hosts",
-    "clock_skew",
-    "anomalies",
-    "compare",
-    "compose_status",
-    "compose_doctor",
-    "unaddressed_errors",
-    "ack_error",
-    "unack_error",
-    "notifications_recent",
-    "notifications_test",
-    "similar_incidents",
-    "ask_history",
-    "incident_context",
-    "help",
-];
+use super::actions;
 
 /// Define the public MCP tool surface.
+///
+/// The action `enum` list is derived from [`actions::ACTION_SPECS`] so it
+/// stays in sync with the scope-gating table automatically. Previously it was
+/// a separate `SYSLOG_ACTIONS` const that could drift.
 pub(super) fn tool_definitions() -> Vec<Value> {
+    let action_names: Vec<&str> = actions::action_names();
+    let action_desc = action_names
+        .iter()
+        .map(|n| format!("syslog {n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let description = format!(
+        "Query syslog-mcp logs with action-based subcommands: {action_desc}."
+    );
     vec![json!({
         "name": "syslog",
-        "description": "Query syslog-mcp logs with action-based subcommands: syslog search, syslog tail, syslog errors, syslog hosts, syslog correlate, syslog stats, syslog status, syslog apps, syslog sessions, syslog search_sessions, syslog abuse, syslog abuse_incidents, syslog abuse_investigate, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects, syslog source_ips, syslog timeline, syslog patterns, syslog context, syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew, syslog anomalies, syslog compare, syslog compose_status, syslog compose_doctor, syslog unaddressed_errors, syslog ack_error, syslog unack_error, syslog notifications_recent, syslog notifications_test, syslog similar_incidents, syslog ask_history, syslog incident_context, and syslog help.",
+        "description": description,
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": SYSLOG_ACTIONS,
+                    "enum": action_names,
                     "description": "Action to run. Supported actions are listed in the enum."
                 },
                 "query": {

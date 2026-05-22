@@ -186,6 +186,7 @@ async fn serve_mcp() -> Result<()> {
             runtime.config.mcp.allowed_origins.clone(),
             runtime.auth_policy().clone(),
             runtime.pool(),
+            runtime.config.mcp.static_token_is_admin,
         )?;
         app = app.merge(api::router(api_state)?);
         info!("Non-MCP API mounted under /api");

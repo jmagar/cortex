@@ -67,6 +67,7 @@ fn test_state_full(
         allowed_origins,
         auth_policy,
         &pool,
+        false, // static_token_is_admin: read-only in tests
     )
     .expect("ApiState::new should succeed against a fresh pool")
     .with_isolated_maintenance_permit();
@@ -757,6 +758,7 @@ async fn cors_localhost_defaults_suppressed_on_external_bind() {
         vec![],
         AuthPolicy::Mounted { auth_state: None },
         &pool,
+        false, // static_token_is_admin: read-only in tests
     )
     .unwrap()
     .with_isolated_maintenance_permit();

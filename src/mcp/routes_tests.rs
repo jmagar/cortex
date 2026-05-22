@@ -25,6 +25,7 @@ fn test_state_no_auth() -> (AppState, tempfile::TempDir) {
                 allowed_hosts: Vec::new(),
                 allowed_origins: Vec::new(),
                 auth: Default::default(),
+            static_token_is_admin: false,
             },
             notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
@@ -52,6 +53,7 @@ fn test_state_with_token(token: String) -> (AppState, tempfile::TempDir) {
                 allowed_hosts: Vec::new(),
                 allowed_origins: Vec::new(),
                 auth: Default::default(),
+            static_token_is_admin: false,
             },
             notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
@@ -638,6 +640,7 @@ async fn test_state_with_oauth() -> (AppState, tempfile::TempDir) {
                 public_url: Some("https://syslog.example.com".into()),
                 ..Default::default()
             },
+            static_token_is_admin: false,
         },
         notifications_config: crate::config::NotificationsConfig::default(),
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
