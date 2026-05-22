@@ -15,15 +15,10 @@ use crate::{
     app::SyslogService,
     config::{McpConfig, StorageConfig},
     db::{self, DbPool, LogBatchEntry},
-    mcp::{
-        schemas::SYSLOG_ACTIONS, streamable_http_config, streamable_http_service, AppState,
-        AuthPolicy,
-    },
+    mcp::{streamable_http_config, streamable_http_service, AppState, AuthPolicy},
 };
 
-use super::{
-    allowed_hosts, allowed_origins, is_validation_error, required_scope_for, ADMIN_ACTIONS,
-};
+use super::{actions, allowed_hosts, allowed_origins, is_validation_error, required_scope_for};
 
 fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -40,6 +35,7 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
             auth: Default::default(),
+            static_token_is_admin: false,
         },
         notifications_config: crate::config::NotificationsConfig::default(),
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
@@ -65,6 +61,7 @@ fn mounted_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
             auth: Default::default(),
+            static_token_is_admin: false,
         },
         notifications_config: crate::config::NotificationsConfig::default(),
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
@@ -245,6 +242,7 @@ fn allowed_hosts_include_bracketed_ipv6_authority_variants() {
         allowed_hosts: vec!["[fd00::1]".into(), "syslog.example.com:443".into()],
         allowed_origins: Vec::new(),
         auth: Default::default(),
+        static_token_is_admin: false,
     };
 
     let hosts = allowed_hosts(&config);
@@ -499,6 +497,7 @@ fn public_url_host_added_to_allowed_hosts() {
             public_url: Some("https://syslog.example.com".into()),
             ..Default::default()
         },
+        static_token_is_admin: false,
     };
 
     let hosts = allowed_hosts(&config);
@@ -524,6 +523,7 @@ fn public_url_origin_added_to_allowed_origins() {
             public_url: Some("https://syslog.example.com".into()),
             ..Default::default()
         },
+        static_token_is_admin: false,
     };
 
     let origins = allowed_origins(&config);
@@ -549,6 +549,7 @@ fn public_url_non_standard_port_included_in_host_and_origin() {
             public_url: Some("https://syslog.example.com:8443".into()),
             ..Default::default()
         },
+        static_token_is_admin: false,
     };
 
     let hosts = allowed_hosts(&config);
@@ -588,6 +589,7 @@ fn public_url_standard_https_port_host_variants() {
             public_url: Some("https://syslog.example.com".into()),
             ..Default::default()
         },
+        static_token_is_admin: false,
     };
 
     let hosts = allowed_hosts(&config);
@@ -664,10 +666,12 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
     let auth = auth_ctx_with_scopes(vec!["syslog:read"]);
     let router = rmcp_router_with_auth(state, auth);
 
-    for action in SYSLOG_ACTIONS
+    for action in actions::ACTION_SPECS
         .iter()
-        .copied()
-        .filter(|action| *action != "help" && !ADMIN_ACTIONS.contains(action))
+        .map(|s| s.name)
+        .filter(|action| {
+            *action != "help" && actions::required_scope_for(action) != Some("syslog:admin")
+        })
     {
         let (status, response) = post_rmcp(
             router.clone(),
@@ -691,7 +695,11 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
     }
 
     // Admin actions must be denied for syslog:read-only callers.
-    for action in ADMIN_ACTIONS {
+    for action in actions::ACTION_SPECS
+        .iter()
+        .map(|s| s.name)
+        .filter(|a| actions::required_scope_for(a) == Some("syslog:admin"))
+    {
         let (status, response) = post_rmcp(
             router.clone(),
             jsonrpc_request(
@@ -716,10 +724,12 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
 
 #[test]
 fn public_read_actions_require_syslog_read_scope() {
-    for action in SYSLOG_ACTIONS
+    for action in actions::ACTION_SPECS
         .iter()
-        .copied()
-        .filter(|action| *action != "help" && !ADMIN_ACTIONS.contains(action))
+        .map(|s| s.name)
+        .filter(|action| {
+            *action != "help" && actions::required_scope_for(action) != Some("syslog:admin")
+        })
     {
         assert_eq!(
             required_scope_for(action),
@@ -728,7 +738,11 @@ fn public_read_actions_require_syslog_read_scope() {
         );
     }
     // Admin actions require syslog:admin, not syslog:read
-    for action in ADMIN_ACTIONS {
+    for action in actions::ACTION_SPECS
+        .iter()
+        .map(|s| s.name)
+        .filter(|a| actions::required_scope_for(a) == Some("syslog:admin"))
+    {
         assert_eq!(
             required_scope_for(action),
             Some("syslog:admin"),
@@ -889,9 +903,9 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
     let auth = auth_ctx_with_scopes(vec![]);
     let router = rmcp_router_with_auth(state, auth);
 
-    for action in SYSLOG_ACTIONS
+    for action in actions::ACTION_SPECS
         .iter()
-        .copied()
+        .map(|s| s.name)
         .filter(|action| *action != "help")
     {
         let (status, response) = post_rmcp(
@@ -910,7 +924,7 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
         );
         let msg = response["error"]["message"].as_str().unwrap_or("");
         // Read actions require syslog:read; admin actions require syslog:admin.
-        let expected_scope = if ADMIN_ACTIONS.contains(&action) {
+        let expected_scope = if actions::required_scope_for(&action) == Some("syslog:admin") {
             "syslog:admin"
         } else {
             "syslog:read"

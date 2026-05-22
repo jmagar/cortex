@@ -18,60 +18,13 @@ use serde_json::{Map, Value};
 use crate::app::ServiceError;
 use crate::config::McpConfig;
 
+use super::actions;
 use super::{schemas::tool_definitions, tools::execute_tool, AppState, AuthPolicy};
 
 #[derive(Clone)]
 pub struct SyslogRmcpServer {
     state: AppState,
 }
-
-const READ_SCOPE: &str = "syslog:read";
-const ADMIN_SCOPE: &str = "syslog:admin";
-const DENY_SCOPE: &str = "syslog:__deny__";
-/// Public read-only MCP actions. Must mirror non-`help` entries in
-/// [`crate::mcp::schemas::SYSLOG_ACTIONS`]; drift is covered by
-/// `public_read_actions_require_syslog_read_scope` in `rmcp_server_tests.rs`.
-const READ_ONLY_ACTIONS: &[&str] = &[
-    "search",
-    "tail",
-    "errors",
-    "hosts",
-    "correlate",
-    "stats",
-    "status",
-    "apps",
-    "sessions",
-    "search_sessions",
-    "abuse",
-    "abuse_incidents",
-    "abuse_investigate",
-    "ai_correlate",
-    "usage_blocks",
-    "project_context",
-    "list_ai_tools",
-    "list_ai_projects",
-    "source_ips",
-    "timeline",
-    "patterns",
-    "context",
-    "get",
-    "ingest_rate",
-    "silent_hosts",
-    "clock_skew",
-    "anomalies",
-    "compare",
-    "compose_status",
-    "compose_doctor",
-    "unaddressed_errors",
-    "notifications_recent",
-    "similar_incidents",
-    "ask_history",
-    "incident_context",
-];
-
-/// Admin/write actions that mutate state or send outbound notifications.
-/// These require `syslog:admin` scope.
-const ADMIN_ACTIONS: &[&str] = &["ack_error", "unack_error", "notifications_test"];
 
 impl SyslogRmcpServer {
     pub fn new(state: AppState) -> Self {
@@ -378,32 +331,17 @@ fn check_scope(auth: &AuthContext, required_scope: &str, action: &str) -> Result
 
 /// Map a syslog tool action to the minimum required scope.
 ///
-/// Returns `None` for informational actions that require AuthContext (when
-/// Mounted) but no specific scope — e.g. `help`.
-/// Returns `Some(scope)` for actions that require an explicit scope grant.
+/// Map an action name to the MCP scope required to invoke it.
 ///
-/// Unknown actions return `Some("syslog:__deny__")` — a sentinel scope that
-/// is never granted to any caller, so unmapped actions are unconditionally
-/// rejected. This is fail-closed: a future action added to the dispatcher
-/// but not added here will be denied, not silently permitted with read access.
+/// Delegates to [`actions::required_scope_for`] — the single authoritative
+/// source. Kept as a local wrapper so call sites inside this module are
+/// unchanged.
 ///
-/// Note: `None` does NOT deny — it bypasses the scope check and relies on
-/// `execute_tool` to reject invalid actions. `Some("syslog:__deny__")` is
-/// the correct mechanism to guarantee rejection at the auth layer.
+/// - `None` for `InfoOnly` actions (auth context required, no scope gate).
+/// - `Some(READ_SCOPE)` / `Some(ADMIN_SCOPE)` for normal actions.
+/// - `Some(DENY_SCOPE)` for unknown actions (fail-closed).
 fn required_scope_for(action: &str) -> Option<&'static str> {
-    if action == "help" {
-        // Informational — AuthContext required when Mounted, but no scope gate.
-        None
-    } else if READ_ONLY_ACTIONS.contains(&action) {
-        Some(READ_SCOPE)
-    } else if ADMIN_ACTIONS.contains(&action) {
-        // State-mutating or outbound-notification actions require admin scope.
-        Some(ADMIN_SCOPE)
-    } else {
-        // Default: unknown actions use an ungrantable sentinel scope so they
-        // are denied at the auth layer rather than falling through to dispatch.
-        Some(DENY_SCOPE)
-    }
+    actions::required_scope_for(action)
 }
 
 pub(super) fn allowed_hosts(config: &McpConfig) -> Vec<String> {

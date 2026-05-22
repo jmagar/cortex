@@ -24,6 +24,10 @@ use syslog_mcp::scanner::{
 mod args;
 pub(crate) use args::*;
 
+/// Per-subcommand parser modules.
+/// See `src/cli/commands/` for the extracted implementations.
+pub(crate) mod commands;
+
 pub(crate) mod run;
 #[allow(unused_imports)]
 pub(crate) use run::ENV_USE_HTTP;
@@ -133,12 +137,15 @@ pub async fn run_service_no_db(command: CliCommand) -> Result<()> {
     match command {
         ServiceCommand::Logs(args) => {
             let json = args.json;
-            let report = syslog_mcp::app::run_service_logs(ServiceLogsRequest {
-                service: args.service,
-                from: args.from,
-                to: args.to,
-                tail: args.tail,
-            })
+            let report = syslog_mcp::app::run_service_logs(
+                ServiceLogsRequest {
+                    service: args.service,
+                    from: args.from,
+                    to: args.to,
+                    tail: args.tail,
+                },
+                &syslog_mcp::app::SystemOsAdapter,
+            )
             .await?;
             print_service_logs_response(&report, json)
         }
@@ -1699,7 +1706,7 @@ fn parse_output_args(command: &str, args: &[String]) -> Result<OutputArgs> {
     Ok(parsed)
 }
 
-struct FlagCursor<'a> {
+pub(crate) struct FlagCursor<'a> {
     args: &'a [String],
     index: usize,
 }
@@ -1753,7 +1760,7 @@ fn value_after_equals(arg: String, flag: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
-fn parse_u32_flag(flag: &str, value: String) -> Result<u32> {
+pub(crate) fn parse_u32_flag(flag: &str, value: String) -> Result<u32> {
     value
         .parse::<u32>()
         .map_err(|_| anyhow!("{flag} must be an unsigned integer"))
@@ -4489,7 +4496,7 @@ pub(super) fn print_incident_context_response(
     Ok(())
 }
 
-fn parse_i64_flag(flag: &str, value: String) -> Result<i64> {
+pub(crate) fn parse_i64_flag(flag: &str, value: String) -> Result<i64> {
     value
         .parse::<i64>()
         .map_err(|e| anyhow!("{flag} must be a number: {e}"))
@@ -4579,126 +4586,14 @@ fn parse_ingest_rate(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::IngestRate(parsed))
 }
 
+// parse_sig extracted to src/cli/commands/sig.rs (Q-C1)
 fn parse_sig(args: &[String]) -> Result<CliCommand> {
-    let (subcommand, rest) = args
-        .split_first()
-        .ok_or_else(|| anyhow!("sig requires a subcommand (list|ack|unack)"))?;
-    match subcommand.as_str() {
-        "list" => parse_sig_list(rest),
-        "ack" => parse_sig_ack(rest),
-        "unack" => parse_sig_unack(rest),
-        _ => bail!("unknown sig subcommand: {subcommand}"),
-    }
+    commands::sig::parse_sig(args)
 }
 
-fn parse_sig_list(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = SigListArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        if arg == "--json" {
-            parsed.json = true;
-        } else if arg == "--include-acknowledged" {
-            parsed.include_acknowledged = true;
-        } else if let Some(v) = flags.match_value(&arg, "--limit")? {
-            parsed.limit = Some(parse_u32_flag("--limit", v)?);
-        } else {
-            bail!("unknown sig list option: {arg}");
-        }
-    }
-    Ok(CliCommand::Sig(SigCommand::List(parsed)))
-}
-
-fn parse_sig_ack(args: &[String]) -> Result<CliCommand> {
-    let (hash, rest) = args
-        .split_first()
-        .ok_or_else(|| anyhow!("sig ack requires a signature hash"))?;
-    if hash.starts_with('-') {
-        bail!("sig ack requires a signature hash as the first positional argument");
-    }
-    let mut parsed = SigAckArgs {
-        signature_hash: hash.clone(),
-        ..Default::default()
-    };
-    let mut flags = FlagCursor::new(rest);
-    while let Some(arg) = flags.next() {
-        if arg == "--json" {
-            parsed.json = true;
-        } else if let Some(v) = flags.match_value(&arg, "--notes")? {
-            parsed.notes = Some(v);
-        } else {
-            bail!("unknown sig ack option: {arg}");
-        }
-    }
-    Ok(CliCommand::Sig(SigCommand::Ack(parsed)))
-}
-
-fn parse_sig_unack(args: &[String]) -> Result<CliCommand> {
-    let (hash, rest) = args
-        .split_first()
-        .ok_or_else(|| anyhow!("sig unack requires a signature hash"))?;
-    if hash.starts_with('-') {
-        bail!("sig unack requires a signature hash as the first positional argument");
-    }
-    let mut parsed = SigUnackArgs {
-        signature_hash: hash.clone(),
-        ..Default::default()
-    };
-    let mut flags = FlagCursor::new(rest);
-    while let Some(arg) = flags.next() {
-        if arg == "--json" {
-            parsed.json = true;
-        } else if let Some(v) = flags.match_value(&arg, "--reason")? {
-            parsed.reason = Some(v);
-        } else {
-            bail!("unknown sig unack option: {arg}");
-        }
-    }
-    Ok(CliCommand::Sig(SigCommand::Unack(parsed)))
-}
-
+// parse_notify extracted to src/cli/commands/notify.rs (Q-C1)
 fn parse_notify(args: &[String]) -> Result<CliCommand> {
-    let (subcommand, rest) = args
-        .split_first()
-        .ok_or_else(|| anyhow!("notify requires a subcommand (recent|test)"))?;
-    match subcommand.as_str() {
-        "recent" => parse_notify_recent(rest),
-        "test" => parse_notify_test(rest),
-        _ => bail!("unknown notify subcommand: {subcommand}"),
-    }
-}
-
-fn parse_notify_recent(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = NotifyRecentArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        if arg == "--json" {
-            parsed.json = true;
-        } else if let Some(v) = flags.match_value(&arg, "--rule-id")? {
-            parsed.rule_id = Some(v);
-        } else if let Some(v) = flags.match_value(&arg, "--since")? {
-            parsed.since = Some(v);
-        } else if let Some(v) = flags.match_value(&arg, "--limit")? {
-            parsed.limit = Some(parse_i64_flag("--limit", v)?);
-        } else {
-            bail!("unknown notify recent option: {arg}");
-        }
-    }
-    Ok(CliCommand::Notify(NotifyCommand::Recent(parsed)))
-}
-
-fn parse_notify_test(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = NotifyTestArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        if arg == "--json" {
-            parsed.json = true;
-        } else if let Some(v) = flags.match_value(&arg, "--body")? {
-            parsed.body = Some(v);
-        } else {
-            bail!("unknown notify test option: {arg}");
-        }
-    }
-    Ok(CliCommand::Notify(NotifyCommand::Test(parsed)))
+    commands::notify::parse_notify(args)
 }
 
 fn parse_ai_incidents(args: &[String]) -> Result<CliCommand> {

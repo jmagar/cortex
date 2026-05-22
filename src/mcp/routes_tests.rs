@@ -25,6 +25,7 @@ fn test_state_no_auth() -> (AppState, tempfile::TempDir) {
                 allowed_hosts: Vec::new(),
                 allowed_origins: Vec::new(),
                 auth: Default::default(),
+                static_token_is_admin: false,
             },
             notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
@@ -52,6 +53,7 @@ fn test_state_with_token(token: String) -> (AppState, tempfile::TempDir) {
                 allowed_hosts: Vec::new(),
                 allowed_origins: Vec::new(),
                 auth: Default::default(),
+                static_token_is_admin: false,
             },
             notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
@@ -523,9 +525,10 @@ async fn mounted_cookie_without_bearer_is_rejected() {
 /// Regression test for the bug where `build_auth_layer` built an `AuthLayer`
 /// with `static_token_scopes: Vec::new()` in bearer-only mode because
 /// `AuthLayer::with_auth_state(None)` does not populate scopes.
-/// After the fix, `build_auth_layer` explicitly calls `.with_static_token_scopes`
-/// so the `AuthContext` injected by the layer carries `["syslog:read", "syslog:admin"]`
-/// and scope-gated actions succeed.
+/// After the S-03 fix, `build_auth_layer` explicitly calls `.with_static_token_scopes`
+/// so the `AuthContext` injected by the layer carries `["syslog:read"]` by default
+/// (or `["syslog:read", "syslog:admin"]` when `static_token_is_admin=true`).
+/// `stats` requires only `syslog:read`, so it succeeds with the default token.
 #[tokio::test]
 async fn mounted_static_bearer_valid_token_can_call_scope_gated_action() {
     let h = TestHarness::with_token("static-secret".into());
@@ -545,6 +548,36 @@ async fn mounted_static_bearer_valid_token_can_call_scope_gated_action() {
     assert!(
         response["result"].is_object(),
         "stats result expected; response: {response}"
+    );
+}
+
+/// S-03: Static bearer token without SYSLOG_MCP_STATIC_TOKEN_ADMIN=true
+/// must NOT be able to call admin actions (ack_error, unack_error, notifications_test).
+#[tokio::test]
+async fn static_bearer_token_cannot_call_admin_actions_by_default() {
+    // `static_token_is_admin: false` (the default in test_state_with_token)
+    let h = TestHarness::with_token("static-secret".into());
+    let app = router(h.state);
+    // `ack_error` requires syslog:admin — must be denied for read-only static token
+    let body = jsonrpc_request(
+        30,
+        "tools/call",
+        Some(serde_json::json!({
+            "name": "syslog",
+            "arguments": {"action": "ack_error", "signature_hash": "0000000000000000000000000000000000000000000000000000000000000000"}
+        })),
+    );
+    let (status, response) = mcp_post(app.clone(), body, Some("static-secret")).await;
+    assert_eq!(status, StatusCode::OK, "response: {response}");
+    // Must be denied with a scope error (-32600 / forbidden).
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "static bearer without admin opt-in must be denied for ack_error; response: {response}"
+    );
+    let msg = response["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        msg.contains("requires scope: syslog:admin"),
+        "denial message should name syslog:admin; got: {msg}"
     );
 }
 
@@ -638,6 +671,7 @@ async fn test_state_with_oauth() -> (AppState, tempfile::TempDir) {
                 public_url: Some("https://syslog.example.com".into()),
                 ..Default::default()
             },
+            static_token_is_admin: false,
         },
         notifications_config: crate::config::NotificationsConfig::default(),
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),

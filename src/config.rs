@@ -257,6 +257,18 @@ pub struct McpConfig {
     /// OAuth / JWT authentication policy (consumed by lab-auth at runtime).
     #[serde(default)]
     pub auth: AuthConfig,
+    /// When `true`, the static bearer token (`SYSLOG_MCP_TOKEN`) is granted
+    /// both `syslog:read` and `syslog:admin` scopes. Default is `false` —
+    /// static tokens receive `syslog:read` only, matching OAuth read-only
+    /// tokens. Set `SYSLOG_MCP_STATIC_TOKEN_ADMIN=true` or the TOML field
+    /// `[mcp] static_token_is_admin = true` to opt in to admin grant.
+    ///
+    /// # Security
+    /// Admin actions (VACUUM, Apprise test, error-sig ack/unack) are
+    /// high-impact. Sharing a read-only token with a collaborator should not
+    /// implicitly grant those operations.
+    #[serde(default)]
+    pub static_token_is_admin: bool,
 }
 
 /// Authentication mode for the MCP HTTP endpoint.
@@ -528,6 +540,7 @@ impl Default for McpConfig {
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
             auth: AuthConfig::default(),
+            static_token_is_admin: false,
         }
     }
 }
@@ -631,6 +644,10 @@ impl Config {
         env_override_parse("SYSLOG_MCP_PORT", &mut config.mcp.port)?;
         env_override_bool("NO_AUTH", &mut config.mcp.no_auth)?;
         env_override_bool("SYSLOG_MCP_NO_AUTH", &mut config.mcp.no_auth)?;
+        env_override_bool(
+            "SYSLOG_MCP_STATIC_TOKEN_ADMIN",
+            &mut config.mcp.static_token_is_admin,
+        )?;
         env_override_list("SYSLOG_MCP_ALLOWED_HOSTS", &mut config.mcp.allowed_hosts);
         env_override_list(
             "SYSLOG_MCP_ALLOWED_ORIGINS",

@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{TimeDelta, Utc};
-use tokio::process::Command;
 use tokio::sync::Semaphore;
 
 use super::correlate::{group_by_host, severity_at_or_above};
@@ -26,6 +25,7 @@ use super::models::{
     SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
     TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
+use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
 use crate::config::StorageConfig;
@@ -74,57 +74,9 @@ fn normalize_syslog_owned_service(service: &str) -> ServiceResult<String> {
     }
 }
 
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-
-async fn command_output(program: &str, args: &[String]) -> ServiceResult<String> {
-    let mut command = Command::new(program);
-    command.args(args).kill_on_drop(true);
-    if program == "journalctl" && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
-        if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
-            command
-                .env("XDG_RUNTIME_DIR", runtime_dir)
-                .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
-        }
-    }
-    let output = tokio::time::timeout(COMMAND_TIMEOUT, command.output())
-        .await
-        .map_err(|_| {
-            ServiceError::Internal(anyhow::anyhow!(
-                "{} {} timed out after {}s",
-                program,
-                args.join(" "),
-                COMMAND_TIMEOUT.as_secs()
-            ))
-        })?
-        .map_err(anyhow::Error::from)?;
-    if !output.status.success() {
-        return Err(ServiceError::Internal(anyhow::anyhow!(
-            "{} {} failed: {}",
-            program,
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn inferred_user_bus_env() -> Option<(PathBuf, String)> {
-    let runtime_dir = PathBuf::from(format!("/run/user/{}", current_uid()));
-    let bus = runtime_dir.join("bus");
-    bus.exists()
-        .then(|| (runtime_dir, format!("unix:path={}", bus.display())))
-}
-
-fn current_uid() -> u32 {
-    #[cfg(unix)]
-    {
-        unsafe { libc::geteuid() }
-    }
-    #[cfg(not(unix))]
-    {
-        0
-    }
-}
+// `command_output`, `inferred_user_bus_env`, and `current_uid` were extracted
+// to `os_adapter.rs` as part of Arch-C2. OS-level shell-outs now go through
+// the `OsAdapter` trait so they can be injected in tests.
 
 /// Parse journalctl `-o json` output into entries, tolerating malformed lines.
 ///
@@ -229,7 +181,13 @@ fn incident_sort_key(timestamp: &str) -> i64 {
 /// callers can invoke it without standing up a [`SyslogService`] (and the
 /// SQLite pool that backs it) — `syslog service logs` is a self-debugging
 /// surface that must work when the DB is corrupted, locked, or full.
-pub async fn run_service_logs(req: ServiceLogsRequest) -> ServiceResult<ServiceLogsResponse> {
+///
+/// The `os` parameter is the `OsAdapter` to use for the journalctl shell-out.
+/// Pass `&SystemOsAdapter` for production; inject a mock for tests.
+pub async fn run_service_logs(
+    req: ServiceLogsRequest,
+    os: &(dyn super::os_adapter::OsAdapter + Send + Sync),
+) -> ServiceResult<ServiceLogsResponse> {
     let service = normalize_syslog_owned_service(&req.service)?;
     let mut args = vec![
         "--user".to_string(),
@@ -259,7 +217,7 @@ pub async fn run_service_logs(req: ServiceLogsRequest) -> ServiceResult<ServiceL
         args.push(tail.to_string());
     }
 
-    let raw = command_output("journalctl", &args).await?;
+    let raw = os.run_command("journalctl", &args).await?;
     let (entries, dropped_lines) = parse_journal_json_lines(&raw);
     if dropped_lines > 0 {
         tracing::warn!(
@@ -286,12 +244,28 @@ pub async fn run_service_logs(req: ServiceLogsRequest) -> ServiceResult<ServiceL
 /// task boundaries (bead 0p8r.24). The other 5 LOCAL-only command dispatchers
 /// take `&SyslogService` because they don't move the service into a spawned
 /// task; both patterns are correct.
+/// Facade for all syslog MCP service operations.
+///
+/// # Architecture note (Arch-C2 — partial)
+///
+/// `SyslogService` is a 1,983 LOC god class. The immediate win delivered here
+/// is extracting OS-level shell-outs (`journalctl`, `sqlite3`) behind the
+/// `OsAdapter` trait so they are testable and injectable. The full split into
+/// `LogQueryService`, `AiAnalyticsService`, `MaintenanceService`, and
+/// `AbuseService` sub-structs is deferred to a follow-up bead — it requires
+/// touching every call site in `tools.rs`, `api.rs`, and `routes.rs`.
+///
+/// The `os` field carries an `Arc<dyn OsAdapter>`. Production code sets it to
+/// `SystemOsAdapter`; tests can swap in a `MockOsAdapter` that returns canned
+/// output without spawning real processes.
 #[derive(Clone)]
 pub struct SyslogService {
     pool: Arc<DbPool>,
     storage: StorageConfig,
     db_permits: Arc<Semaphore>,
     acquire_timeout: Duration,
+    /// OS-level adapter for journalctl / systemd shell-outs.
+    os: Arc<dyn OsAdapter + Send + Sync>,
 }
 
 impl SyslogService {
@@ -302,6 +276,24 @@ impl SyslogService {
             storage,
             db_permits: Arc::new(Semaphore::new(permits)),
             acquire_timeout: DB_ACQUIRE_TIMEOUT,
+            os: Arc::new(SystemOsAdapter),
+        }
+    }
+
+    /// Test constructor that injects a custom `OsAdapter`.
+    #[cfg(test)]
+    pub(crate) fn with_os_adapter(
+        pool: Arc<DbPool>,
+        storage: StorageConfig,
+        os: Arc<dyn OsAdapter + Send + Sync>,
+    ) -> Self {
+        let permits = storage.pool_size.max(1) as usize;
+        Self {
+            pool,
+            storage,
+            db_permits: Arc::new(Semaphore::new(permits)),
+            acquire_timeout: DB_ACQUIRE_TIMEOUT,
+            os,
         }
     }
 
@@ -309,7 +301,7 @@ impl SyslogService {
         &self,
         req: ServiceLogsRequest,
     ) -> ServiceResult<ServiceLogsResponse> {
-        run_service_logs(req).await
+        run_service_logs(req, self.os.as_ref()).await
     }
 
     pub async fn incident(&self, req: IncidentRequest) -> ServiceResult<IncidentResponse> {

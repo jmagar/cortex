@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 
 # HTTP / MCP transport
 axum = "0.8"
@@ -74,7 +75,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utils
 anyhow = "1"
 libc = "0.2"
-lru = "0.12"
+lru = "0.16"
 rustix = { version = "0.38", features = ["fs"] }
 regex = "1"
 sha2 = "0.10"

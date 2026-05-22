@@ -60,18 +60,16 @@ jobs:
       - name: Run tests
         run: cargo test
 
-  audit:
-    name: Security Audit
+  deny:
+    name: Dependency Check (cargo-deny)
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      checks: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+      - uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          command: check
+          arguments: --all-features
 
   mcp-integration:
     name: MCP Integration Tests

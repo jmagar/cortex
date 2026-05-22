@@ -45,6 +45,7 @@ pub fn router(state: AppState) -> Router {
         &state.auth_policy,
         state.config.api_token.as_deref().map(Arc::<str>::from),
         resource_url,
+        state.config.static_token_is_admin,
     ) {
         mcp_service.layer(layer)
     } else {

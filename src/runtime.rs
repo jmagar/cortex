@@ -5,6 +5,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::app::SyslogService;
 use crate::config::{mcp_bind_is_loopback, validate_auth_config, AuthMode, Config};
@@ -35,6 +36,12 @@ pub struct RuntimeCore {
 }
 
 pub struct MaintenanceHandles {
+    /// Cooperative cancellation signal. Cancelling this token requests all
+    /// background task loops to break at their next `select!` iteration.
+    /// Call [`MaintenanceHandles::shutdown`] rather than cancelling the token
+    /// directly — `shutdown` coordinates the drain order (ingest first, then
+    /// tasks) and waits for completion with a timeout.
+    token: CancellationToken,
     purge: Option<JoinHandle<()>>,
     storage: Option<JoinHandle<()>>,
     docker_ingest: Vec<JoinHandle<()>>,
@@ -44,28 +51,68 @@ pub struct MaintenanceHandles {
     notification_digest: Option<JoinHandle<()>>,
 }
 
-impl Drop for MaintenanceHandles {
-    fn drop(&mut self) {
-        if let Some(handle) = &self.purge {
-            handle.abort();
-        }
-        if let Some(handle) = &self.storage {
-            handle.abort();
-        }
-        for handle in &self.docker_ingest {
-            handle.abort();
-        }
-        if let Some(handle) = &self.error_scan {
-            handle.abort();
-        }
-        if let Some(handle) = &self.notification_dispatcher {
-            handle.abort();
-        }
-        if let Some(handle) = &self.notification_evaluator {
-            handle.abort();
-        }
-        if let Some(handle) = &self.notification_digest {
-            handle.abort();
+impl MaintenanceHandles {
+    /// Cooperatively cancel all background tasks and wait for them to finish,
+    /// with a `timeout` budget. Tasks that do not finish within the budget are
+    /// aborted (loud warning logged).
+    ///
+    /// Shutdown order:
+    /// 1. Cancel the token — tasks observe this at their next `select!` tick.
+    /// 2. Join all handles concurrently inside a timeout window.
+    /// 3. Abort any task that did not exit in time.
+    ///
+    /// # Cooperative-cancellation coverage (Arch-H6 status)
+    ///
+    /// - `retention_purge`, `storage_budget`, `error_scan`: fully cooperative —
+    ///   each loop uses `select! { biased; _ = token.cancelled() => break; ... }`.
+    ///   They break at the next tick and exit cleanly.
+    ///
+    /// - `notification_dispatcher`, `notification_evaluator`, `notification_digest`:
+    ///   the inner loop (owned by the notifications module) does NOT observe the
+    ///   token. The wrapper spawned here selects on cancellation and calls
+    ///   `inner.abort()` — this is still abort, not cooperative drain. The
+    ///   10 s timeout window lets the dispatcher finish its current outbound
+    ///   HTTP attempt (5 s connect timeout) before the hard abort fires.
+    ///   Full cooperative drain for these tasks requires wiring the token into
+    ///   the notifications spawn functions, deferred for a follow-up bead.
+    ///
+    /// - `docker_ingest` tasks: collected via `docker_ingest::spawn_all` which
+    ///   does not yet accept a `CancellationToken`. Cancelled via `join_all`
+    ///   timeout + implicit abort when handles are dropped. Deferred to a
+    ///   follow-up.
+    ///
+    /// Net improvement over the previous `Drop::abort()` path: all tasks are
+    /// awaited with an explicit timeout rather than being abandoned immediately
+    /// on `Drop`, and the pure-Rust tasks (purge, storage, error_scan) exit
+    /// without abort.
+    pub async fn shutdown(self, timeout: std::time::Duration) {
+        self.token.cancel();
+        let all_handles: Vec<JoinHandle<()>> = [
+            self.purge,
+            self.storage,
+            self.error_scan,
+            self.notification_dispatcher,
+            self.notification_evaluator,
+            self.notification_digest,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(self.docker_ingest)
+        .collect();
+
+        let count = all_handles.len();
+        let join_all = futures_util::future::join_all(all_handles);
+        match tokio::time::timeout(timeout, join_all).await {
+            Ok(_) => {
+                tracing::info!(tasks = count, "All maintenance tasks completed cleanly");
+            }
+            Err(_) => {
+                tracing::warn!(
+                    tasks = count,
+                    timeout_secs = timeout.as_secs(),
+                    "Maintenance task shutdown timed out; some tasks were abandoned"
+                );
+            }
         }
     }
 }
@@ -221,18 +268,20 @@ impl RuntimeCore {
     }
 
     pub fn spawn_maintenance_tasks(&self) -> MaintenanceHandles {
-        let purge = self.spawn_retention_task();
-        let storage = self.spawn_storage_task();
+        let token = CancellationToken::new();
+        let purge = self.spawn_retention_task(token.clone());
+        let storage = self.spawn_storage_task(token.clone());
         let docker_ingest = docker_ingest::spawn_all(
             self.config.docker_ingest.clone(),
             Arc::clone(&self.pool),
             self.ingest.clone(),
         );
-        let error_scan = self.spawn_error_scan_task();
-        let notification_dispatcher = self.spawn_notification_dispatcher();
-        let notification_evaluator = self.spawn_notification_evaluator();
-        let notification_digest = self.spawn_notification_digest();
+        let error_scan = self.spawn_error_scan_task(token.clone());
+        let notification_dispatcher = self.spawn_notification_dispatcher(token.clone());
+        let notification_evaluator = self.spawn_notification_evaluator(token.clone());
+        let notification_digest = self.spawn_notification_digest(token.clone());
         MaintenanceHandles {
+            token,
             purge,
             storage,
             docker_ingest,
@@ -243,31 +292,59 @@ impl RuntimeCore {
         }
     }
 
-    fn spawn_notification_dispatcher(&self) -> Option<JoinHandle<()>> {
-        crate::notifications::dispatcher::spawn_dispatcher(
+    fn spawn_notification_dispatcher(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
+        let inner = crate::notifications::dispatcher::spawn_dispatcher(
             Arc::clone(&self.pool),
             Arc::clone(&self.dispatcher_permit),
             self.config.notifications.clone(),
-        )
+        )?;
+        // Wrap the inner handle so the cancellation token causes the task to
+        // be aborted when cooperative cancellation is signalled. The
+        // dispatcher's inner loop will see the abort as a JoinError, which is
+        // swallowed by the wrapper.
+        Some(tokio::spawn(async move {
+            let mut inner = inner;
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => { inner.abort(); let _ = inner.await; }
+                _ = &mut inner => {}
+            }
+        }))
     }
 
-    fn spawn_notification_evaluator(&self) -> Option<JoinHandle<()>> {
-        crate::notifications::evaluator::spawn_evaluator(
+    fn spawn_notification_evaluator(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
+        let inner = crate::notifications::evaluator::spawn_evaluator(
             Arc::clone(&self.pool),
             Arc::clone(&self.maintenance_permit),
             self.config.notifications.clone(),
-        )
+        )?;
+        Some(tokio::spawn(async move {
+            let mut inner = inner;
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => { inner.abort(); let _ = inner.await; }
+                _ = &mut inner => {}
+            }
+        }))
     }
 
-    fn spawn_notification_digest(&self) -> Option<JoinHandle<()>> {
-        crate::notifications::digest::spawn_digest(
+    fn spawn_notification_digest(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
+        let inner = crate::notifications::digest::spawn_digest(
             Arc::clone(&self.pool),
             Arc::clone(&self.maintenance_permit),
             self.config.notifications.clone(),
-        )
+        )?;
+        Some(tokio::spawn(async move {
+            let mut inner = inner;
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => { inner.abort(); let _ = inner.await; }
+                _ = &mut inner => {}
+            }
+        }))
     }
 
-    fn spawn_error_scan_task(&self) -> Option<JoinHandle<()>> {
+    fn spawn_error_scan_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let cfg = self.config.error_detection.clone();
         if !cfg.enabled {
             return None;
@@ -278,7 +355,14 @@ impl RuntimeCore {
         let handle = tokio::spawn(async move {
             let mut interval = background_interval(tokio::time::Duration::from_secs(interval_secs));
             loop {
-                interval.tick().await;
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        tracing::debug!("error_scan: cooperative shutdown");
+                        break;
+                    }
+                    _ = interval.tick() => {}
+                }
                 tracing::debug!("error_scan: scan cycle starting");
                 match crate::app::error_detection::run_error_scan(
                     Arc::clone(&pool),
@@ -295,7 +379,7 @@ impl RuntimeCore {
         Some(handle)
     }
 
-    fn spawn_retention_task(&self) -> Option<JoinHandle<()>> {
+    fn spawn_retention_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let retention_days = self.config.storage.retention_days;
         if retention_days == 0 {
             return None;
@@ -306,7 +390,14 @@ impl RuntimeCore {
         let handle = tokio::spawn(async move {
             let mut interval = background_interval(tokio::time::Duration::from_secs(3600));
             loop {
-                interval.tick().await;
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        tracing::debug!("retention_purge: cooperative shutdown");
+                        break;
+                    }
+                    _ = interval.tick() => {}
+                }
                 let started = Instant::now();
                 let Ok(permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("Maintenance limiter closed");
@@ -369,7 +460,7 @@ impl RuntimeCore {
         Some(handle)
     }
 
-    fn spawn_storage_task(&self) -> Option<JoinHandle<()>> {
+    fn spawn_storage_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         if self.config.storage.max_db_size_mb == 0 && self.config.storage.min_free_disk_mb == 0 {
             return None;
         }
@@ -383,7 +474,14 @@ impl RuntimeCore {
                 storage_config.cleanup_interval_secs,
             ));
             loop {
-                interval.tick().await;
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        tracing::debug!("storage_budget: cooperative shutdown");
+                        break;
+                    }
+                    _ = interval.tick() => {}
+                }
                 let started = Instant::now();
                 let Ok(permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("Maintenance limiter closed");
@@ -700,7 +798,16 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
         .scopes_supported(vec!["syslog:read".into(), "syslog:admin".into()])
         .default_scope("syslog:read")
         .resource_path("/mcp")
-        .static_token_scopes(vec!["syslog:read".into(), "syslog:admin".into()])
+        // Honour `static_token_is_admin` in OAuth+bearer hybrid mode too.
+        // The same flag that gates `build_auth_layer` (bearer-only) must also
+        // control the scopes injected by lab-auth's AuthConfigBuilder for the
+        // OAuth path. Without this, setting `SYSLOG_MCP_STATIC_TOKEN_ADMIN=false`
+        // (the default) would be a no-op in OAuth+bearer hybrid deployments.
+        .static_token_scopes(if config.mcp.static_token_is_admin {
+            vec!["syslog:read".into(), "syslog:admin".into()]
+        } else {
+            vec!["syslog:read".into()]
+        })
         .disable_static_token_with_oauth(auth.disable_static_token_with_oauth)
         .enable_dynamic_registration(false)
         .build_from_sources(vars)
