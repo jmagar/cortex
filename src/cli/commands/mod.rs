@@ -14,10 +14,10 @@
 //!
 //! Extracted so far:
 //! - `sig` — error-signature commands (`list`, `ack`, `unack`)
-//! - `notify` — notification commands (`recent`)
+//! - `notify` — notification commands (`recent`, `test`)
 //!
 //! Remaining (each is ~50-100 LOC of parse functions):
 //! db, setup, compose, ai, config, source-ips, timeline, patterns, etc.
 
-pub mod notify;
-pub mod sig;
+pub(crate) mod notify;
+pub(crate) mod sig;

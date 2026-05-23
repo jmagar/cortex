@@ -1158,12 +1158,12 @@ fn setup_report_phase_list_does_not_include_data_mount_post_cutover() {
     // Source-grep guard: ensure setup_report's push-list does not call
     // data_mount_phase. The function itself is intentionally retained because
     // compose doctor / db status --check-coord still use it.
-    let source = include_str!("cli.rs");
+    let source = include_str!("cli/setup.rs");
 
     // Find the setup_report fn body.
     let start = source
         .find("fn setup_report(mode: SetupMode)")
-        .expect("setup_report fn signature should exist in cli.rs");
+        .expect("setup_report fn signature should exist in cli/setup.rs");
     // Take the next ~5000 chars — generous bound around the fn body.
     let window_end = (start + 5000).min(source.len());
     let body = &source[start..window_end];
