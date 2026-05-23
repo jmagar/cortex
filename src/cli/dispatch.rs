@@ -1,4 +1,3 @@
-#![allow(unused_imports)]
 //! Per-arm dispatch for query commands (bead 0p8r.7).
 //!
 //! For each of the 7 query commands (search/tail/errors/hosts/correlate/
@@ -21,38 +20,15 @@
 
 use anyhow::{bail, Result};
 use std::future::Future;
-use std::path::PathBuf;
 use syslog_mcp::app::{
-    AbuseSearchRequest, AckErrorRequest, AiAssessRequest, AiCheckpointsRequest, AiCorrelateRequest,
-    AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
-    AskHistoryRequest, CorrelateEventsRequest, DbCheckpointRequest, DbIntegrityRequest,
-    DbVacuumRequest, GetErrorsRequest, IncidentContextRequest, IncidentRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListSessionsRequest, ListSourceIpsRequest,
-    PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
-    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UnackErrorRequest,
-    UnaddressedErrorsRequest, UsageBlocksRequest,
+    CorrelateEventsRequest, GetErrorsRequest, IncidentRequest, ListSessionsRequest,
+    SearchLogsRequest, TailLogsRequest,
 };
 
 use super::{
-    ai_smoke_watch, ai_watch_status, ensure_ai_doctor_success, ensure_index_success,
-    print_abuse_search_response, print_ai_correlate_response, print_ai_doctor_response,
-    print_ai_incidents_response, print_ai_investigate_response, print_ai_parse_errors_response,
-    print_ai_projects_response, print_ai_smoke_watch_response, print_ai_tools_response,
-    print_ai_watch_status_response, print_ask_history_response, print_checkpoints_response,
-    print_correlate_response, print_db_backup_response, print_db_checkpoint_response,
-    print_db_integrity_response, print_db_status_response, print_db_vacuum_response,
-    print_errors_response, print_hosts_response, print_incident_context_response,
-    print_incident_response, print_index_response, print_project_context_response,
-    print_prune_checkpoints_response, print_search_response, print_search_sessions_response,
-    print_sessions_response, print_similar_incidents_response, print_stats_response,
-    print_usage_blocks_response, run_coordination_phases, AiAbuseArgs, AiAddArgs, AiAskHistoryArgs,
-    AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs, AiDoctorArgs,
-    AiErrorsArgs, AiIncidentContextArgs, AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs,
-    AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliMode,
-    CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs,
-    IncidentArgs, IngestRateArgs, NotifyRecentArgs, NotifyTestArgs, OutputArgs, PatternsArgs,
-    SearchArgs, SessionsArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs,
-    TimeRangeArgs, TimelineArgs,
+    print_correlate_response, print_errors_response, print_hosts_response, print_incident_response,
+    print_search_response, print_sessions_response, print_stats_response, CliMode, CorrelateArgs,
+    IncidentArgs, SearchArgs, SessionsArgs, TailArgs, TimeRangeArgs,
 };
 
 // ─── Arg → Request conversions ──────────────────────────────────────────────

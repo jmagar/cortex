@@ -26,9 +26,9 @@ mod args_config;
 pub(crate) use args::*;
 pub(crate) use args_config::*;
 
-pub(crate) mod commands;
+mod commands;
 
-pub(crate) mod run;
+mod run;
 #[allow(unused_imports)]
 pub(crate) use run::ENV_USE_HTTP;
 pub(crate) use run::{run, CliMode, GlobalFlags};
@@ -117,7 +117,7 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
 
 /// DB-free entry point for `syslog service ...` — avoids opening the SQLite
 /// pool so this command remains usable when the DB is corrupted/locked/full.
-pub async fn run_service_no_db(command: CliCommand) -> Result<()> {
+pub(crate) async fn run_service_no_db(command: CliCommand) -> Result<()> {
     let CliCommand::Service(command) = command else {
         bail!("internal: run_service_no_db called with non-service command");
     };
@@ -139,12 +139,12 @@ pub async fn run_service_no_db(command: CliCommand) -> Result<()> {
     }
 }
 
-pub(crate) mod dispatch;
+mod dispatch;
 mod dispatch_ai;
 mod dispatch_db;
 mod dispatch_surface;
 #[allow(dead_code)]
-pub(crate) mod http_client;
+mod http_client;
 
 #[cfg(test)]
 #[path = "cli_tests.rs"]

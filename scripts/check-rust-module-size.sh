@@ -47,8 +47,6 @@ count_file() {
       $line =~ s/\s+$//;
       next if $line eq "";
       next if $line =~ m{^//};
-      next if $line =~ m{^//!};
-      next if $line =~ m{^///};
       $count++;
     }
     print "$count\n";
@@ -117,7 +115,7 @@ tracked_files() {
     return
   fi
 
-  local path file
+  local path
   for path in "$@"; do
     if [[ -f "$path" ]]; then
       git ls-files --cached --others --exclude-standard --error-unmatch "$path" 2>/dev/null || true
