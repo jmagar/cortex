@@ -81,6 +81,11 @@ if [ -f "server.json" ]; then
   [ -n "$v" ] && versions+=("server.json=$v") && files_checked+=("server.json")
 fi
 
+if [ -f "mcpb/manifest.json" ]; then
+  v=$(python3 -c "import json; print(json.load(open('mcpb/manifest.json')).get('version',''))" 2>/dev/null)
+  [ -n "$v" ] && versions+=("mcpb/manifest.json=$v") && files_checked+=("mcpb/manifest.json")
+fi
+
 # Need at least one version source
 if [ ${#versions[@]} -eq 0 ]; then
   echo "[version-sync] No version-bearing files found — skipping"

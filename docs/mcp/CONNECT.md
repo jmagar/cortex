@@ -74,9 +74,9 @@ claude mcp add --transport http \
 
 ## Direct stdio clients
 
-Use `syslog mcp` for local query-only access. It exposes the same one read-only
-`syslog` tool with eight actions as HTTP, but it does not receive syslog, start
-`/mcp`, run cleanup jobs, or require `SYSLOG_MCP_TOKEN`.
+Use `syslog mcp` for local query-only access. It exposes the same query-oriented
+`syslog` tool actions as HTTP, but it does not receive syslog, start `/mcp`,
+run cleanup jobs, or require `SYSLOG_MCP_TOKEN`.
 
 ```json
 {
@@ -94,6 +94,25 @@ Use `syslog mcp` for local query-only access. It exposes the same one read-only
 ```
 
 The daemon must still be running somewhere to ingest logs into that database.
+
+## MCPB bundle
+
+Build a Linux MCP Bundle from the existing stdio server:
+
+```bash
+just build-mcpb
+```
+
+The generated `dist/syslog-mcp-<version>-linux.mcpb` bundles the release
+`syslog` binary and launches it as:
+
+```bash
+server/syslog mcp
+```
+
+The bundle is query-only. It reads `syslog.db` from the configured data
+directory and does not start the syslog listener, HTTP MCP server, REST API,
+Docker Compose, or deployment flows.
 
 ## stdio bridge to HTTP
 
