@@ -1,6 +1,3 @@
-<!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-11 | Updated: 2026-05-16 -->
-
 # syslog-mcp
 
 ## Purpose
@@ -8,7 +5,7 @@
 **Syslog Intelligence for Homelabs** — Receives RFC 3164/5424 syslog from all homelab hosts (UDP/TCP), ingests Docker logs via socket proxy, stores everything in SQLite with FTS5, and exposes a comprehensive `syslog` MCP tool for AI agents.
 
 **Status**: Active development, Production-ready
-**Version**: 0.27.1
+**Version**: 0.29.0
 
 ## Key Files
 
@@ -24,6 +21,8 @@
 | `src/compose.rs` | Docker Compose lifecycle management |
 | `src/scanner.rs` | AI transcript indexer (Claude/Codex sessions) |
 | `src/doctor.rs` | Self-debugging diagnostics — binary, DB, and AI-watch health |
+| `src/deploy.rs` | CLI remote deploy — provisions syslog-mcp on remote hosts |
+| `src/api.rs` | HTTP API surface — all routes for CLI HTTP transport |
 
 ## Project Structure
 
@@ -46,6 +45,10 @@ syslog-mcp/
 │   ├── observability.rs         # Tracing and metrics
 │   ├── logging.rs               # Service log setup
 │   ├── app.rs / db.rs / mcp.rs / syslog.rs / docker_ingest.rs   # Module entrypoints
+│   ├── deploy.rs                # CLI remote deploy
+│   ├── cli/                     # CLI command implementations
+│   ├── compose/                 # Docker Compose helpers
+│   ├── setup/                   # First-run setup internals
 │   ├── app/                     # Service Layer (business logic)
 │   │   ├── service.rs           # SyslogService implementation
 │   │   ├── models.rs            # Request/response types
@@ -72,8 +75,8 @@ syslog-mcp/
 │   │   ├── listener.rs          # UDP/TCP listeners
 │   │   ├── writer.rs            # Batch writer
 │   │   └── enrichment.rs        # Log enrichment (legacy path)
-│   ├── enrich/                  # Enrichment framework — structured field extraction at ingest (PR #26)
-│   ├── notifications/           # Push notification dispatch (PR #25)
+│   ├── enrich/                  # Enrichment framework — structured field extraction at ingest
+│   ├── notifications/           # Push notification dispatch (Apprise, digest, rules)
 │   ├── logging/                 # Structured service logging
 │   ├── scanner/                 # AI transcript scanner
 │   │   ├── claude.rs            # Claude transcript parsing
@@ -163,6 +166,7 @@ bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of
 | `just fmt` | Format code | `just fmt` |
 | `just test-live` | Run live integration tests | `just test-live` |
 | `just up` / `just down` | Start/stop Docker Compose | `just up` |
+| `just build` | Cargo release build | `just build` |
 | `just validate-skills` | Validate plugin skill manifests | `just validate-skills` |
 | `just gen-token` | Generate a random API token | `just gen-token` |
 | `just build-plugin` | Copy release binary into bin/ | `just build-plugin` |
