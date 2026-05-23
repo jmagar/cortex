@@ -100,6 +100,9 @@ build-plugin: release
     fi
     install -m 755 "$target_dir/release/syslog" bin/syslog
 
+build-mcpb:
+    bash scripts/build-mcpb.sh
+
 # Publish: bump version, tag, push (triggers crates.io + Docker publish)
 publish bump="patch":
     #!/usr/bin/env bash

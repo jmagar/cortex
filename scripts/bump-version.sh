@@ -19,6 +19,7 @@ VERSION_FILES=(
     "${REPO_ROOT}/.claude-plugin/plugin.json"
     "${REPO_ROOT}/.codex-plugin/plugin.json"
     "${REPO_ROOT}/gemini-extension.json"
+    "${REPO_ROOT}/mcpb/manifest.json"
 )
 
 current_version() {

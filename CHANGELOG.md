@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-05-23
+
+### Added
+
+- **MCPB packaging**: Add a Linux MCP Bundle manifest and
+  `scripts/build-mcpb.sh` so the existing `syslog mcp` stdio server can be
+  packed as `dist/syslog-mcp-<version>-linux.mcpb`.
+
 ## [0.28.2] - 2026-05-23
 
 ### Added
