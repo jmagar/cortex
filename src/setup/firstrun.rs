@@ -142,35 +142,54 @@ pub(crate) fn ensure_env_file(path: &Path, data_dir: &Path) -> io::Result<EnvRes
         BTreeMap::new()
     };
     let before = env.len();
+    populate_env_defaults(&mut env, data_dir)?;
 
-    insert_process_or_default(&mut env, "SYSLOG_HOST", "0.0.0.0");
-    insert_process_or_default(&mut env, "SYSLOG_PORT", "1514");
-    insert_process_or_default(&mut env, "SYSLOG_HOST_PORT", "1514");
-    insert_process_or_default(&mut env, "SYSLOG_MCP_HOST", "0.0.0.0");
-    insert_process_or_default(&mut env, "SYSLOG_MCP_PORT", "3100");
-    insert_process_or_default(&mut env, "NO_AUTH", "false");
-    insert_process_or_default(&mut env, "SYSLOG_MCP_AUTH_MODE", "bearer");
-    insert_process_or_default(&mut env, "SYSLOG_MCP_DB_PATH", "/data/syslog.db");
+    write_env(path, &env)?;
+    let added = env.len().saturating_sub(before);
+    Ok(EnvResult {
+        phase: timer.finish(
+            SetupStatus::Ok,
+            format!("{} {} keys; added {added}", path.display(), env.len()),
+        ),
+        values: env,
+    })
+}
+
+pub(crate) fn default_env_for_data_dir(data_dir: &Path) -> io::Result<BTreeMap<String, String>> {
+    let mut env = BTreeMap::new();
+    populate_env_defaults(&mut env, data_dir)?;
+    Ok(env)
+}
+
+fn populate_env_defaults(env: &mut BTreeMap<String, String>, data_dir: &Path) -> io::Result<()> {
+    insert_process_or_default(env, "SYSLOG_HOST", "0.0.0.0");
+    insert_process_or_default(env, "SYSLOG_PORT", "1514");
+    insert_process_or_default(env, "SYSLOG_HOST_PORT", "1514");
+    insert_process_or_default(env, "SYSLOG_MCP_HOST", "0.0.0.0");
+    insert_process_or_default(env, "SYSLOG_MCP_PORT", "3100");
+    insert_process_or_default(env, "NO_AUTH", "false");
+    insert_process_or_default(env, "SYSLOG_MCP_AUTH_MODE", "bearer");
+    insert_process_or_default(env, "SYSLOG_MCP_DB_PATH", "/data/syslog.db");
     insert_process_or_default(
-        &mut env,
+        env,
         "SYSLOG_MCP_DATA_VOLUME",
         &data_dir.display().to_string(),
     );
-    insert_process_or_default(&mut env, "SYSLOG_MCP_MAX_DB_SIZE_MB", "8192");
-    insert_process_or_default(&mut env, "SYSLOG_MCP_RETENTION_DAYS", "90");
-    insert_process_or_default(&mut env, "SYSLOG_BATCH_SIZE", "100");
-    insert_process_or_default(&mut env, "SYSLOG_WRITE_CHANNEL_CAPACITY", "10000");
-    insert_process_or_default(&mut env, "SYSLOG_DOCKER_INGEST_ENABLED", "false");
-    insert_process_or_default(&mut env, "RUST_LOG", "info");
-    insert_process_or_default(&mut env, "COMPOSE_PROJECT_NAME", "syslog-jmagar-lab");
-    insert_process_or_default(&mut env, "DOCKER_NETWORK", "syslog-mcp");
-    insert_process_optional(&mut env, "SYSLOG_DOCKER_HOSTS");
-    insert_process_optional(&mut env, "SYSLOG_MCP_PUBLIC_URL");
-    insert_process_optional(&mut env, "SYSLOG_MCP_GOOGLE_CLIENT_ID");
-    insert_process_optional(&mut env, "SYSLOG_MCP_GOOGLE_CLIENT_SECRET");
-    insert_process_optional(&mut env, "SYSLOG_MCP_AUTH_ADMIN_EMAIL");
-    insert_process_optional(&mut env, "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS");
-    insert_process_optional(&mut env, "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH");
+    insert_process_or_default(env, "SYSLOG_MCP_MAX_DB_SIZE_MB", "8192");
+    insert_process_or_default(env, "SYSLOG_MCP_RETENTION_DAYS", "90");
+    insert_process_or_default(env, "SYSLOG_BATCH_SIZE", "100");
+    insert_process_or_default(env, "SYSLOG_WRITE_CHANNEL_CAPACITY", "10000");
+    insert_process_or_default(env, "SYSLOG_DOCKER_INGEST_ENABLED", "false");
+    insert_process_or_default(env, "RUST_LOG", "info");
+    insert_process_or_default(env, "COMPOSE_PROJECT_NAME", "syslog-jmagar-lab");
+    insert_process_or_default(env, "DOCKER_NETWORK", "syslog-mcp");
+    insert_process_optional(env, "SYSLOG_DOCKER_HOSTS");
+    insert_process_optional(env, "SYSLOG_MCP_PUBLIC_URL");
+    insert_process_optional(env, "SYSLOG_MCP_GOOGLE_CLIENT_ID");
+    insert_process_optional(env, "SYSLOG_MCP_GOOGLE_CLIENT_SECRET");
+    insert_process_optional(env, "SYSLOG_MCP_AUTH_ADMIN_EMAIL");
+    insert_process_optional(env, "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS");
+    insert_process_optional(env, "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH");
 
     let (uid, gid) = current_uid_gid();
     env.entry("SYSLOG_UID".to_string()).or_insert(uid);
@@ -207,16 +226,7 @@ pub(crate) fn ensure_env_file(path: &Path, data_dir: &Path) -> io::Result<EnvRes
     // string or `false` — survives byte-for-byte. Operator intent wins.
     env.entry("SYSLOG_USE_HTTP".to_string())
         .or_insert_with(|| "true".to_string());
-
-    write_env(path, &env)?;
-    let added = env.len().saturating_sub(before);
-    Ok(EnvResult {
-        phase: timer.finish(
-            SetupStatus::Ok,
-            format!("{} {} keys; added {added}", path.display(), env.len()),
-        ),
-        values: env,
-    })
+    Ok(())
 }
 
 fn insert_process_or_default(env: &mut BTreeMap<String, String>, key: &str, default: &str) {
@@ -258,15 +268,7 @@ pub(crate) fn write_env(path: &Path, env: &BTreeMap<String, String>) -> io::Resu
     #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
 
-    let mut out = String::new();
-    out.push_str("# syslog-mcp runtime environment.\n");
-    out.push_str("# Managed by `syslog setup`; secrets are preserved on repair.\n");
-    for (key, value) in env {
-        out.push_str(key);
-        out.push('=');
-        out.push_str(value);
-        out.push('\n');
-    }
+    let out = render_env(env);
 
     // Atomic write: temp file in the same directory (so rename(2) stays on
     // the same filesystem), fsync, then rename over the target. A kill
@@ -335,6 +337,19 @@ pub(crate) fn write_env(path: &Path, env: &BTreeMap<String, String>) -> io::Resu
     Ok(())
 }
 
+pub(crate) fn render_env(env: &BTreeMap<String, String>) -> String {
+    let mut out = String::new();
+    out.push_str("# syslog-mcp runtime environment.\n");
+    out.push_str("# Managed by `syslog setup`; secrets are preserved on repair.\n");
+    for (key, value) in env {
+        out.push_str(key);
+        out.push('=');
+        out.push_str(value);
+        out.push('\n');
+    }
+    out
+}
+
 fn write_compose_assets(compose_dir: &Path) -> io::Result<SetupPhase> {
     let timer = PhaseTimer::start("compose-assets");
     std::fs::create_dir_all(compose_dir.join("config"))?;
@@ -364,6 +379,10 @@ pub(crate) fn installed_compose_asset() -> String {
         "installed compose asset transform failed: expected `      - path: .env\\n` was not found in docker-compose.prod.yml"
     );
     installed
+}
+
+pub(crate) fn dockerfile_asset() -> &'static str {
+    super::DOCKERFILE_ASSET
 }
 
 fn command_phase<const N: usize>(name: &'static str, args: [&str; N]) -> SetupPhase {

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-05-23
+
+### Added
+
+- **Remote deploy CLI**: Add `syslog deploy remote <host>` for SSH-based
+  Compose deployment without adding REST or MCP mutation surfaces.
+
 ## [0.28.1] - 2026-05-23
 
 ### Added
