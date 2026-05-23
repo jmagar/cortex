@@ -65,6 +65,16 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `notifications_test` | Send a test notification via Apprise |
 | `help` | Markdown reference for all actions |
 
+## Prompts
+
+The MCP server also exposes reusable prompts for common infrastructure debugging
+workflows: `infra.incident-triage`, `infra.host-health`,
+`infra.service-outage`, `infra.security-auth-review`,
+`infra.noise-reduction`, and `infra.agent-change-correlation`.
+
+For the prompt catalog and argument reference, see
+[`docs/mcp/PROMPTS.md`](docs/mcp/PROMPTS.md).
+
 ### `syslog search`
 
 Full-text search across all syslog messages with optional filters. Uses SQLite FTS5 with porter stemming.

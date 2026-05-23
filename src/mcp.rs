@@ -8,6 +8,7 @@ use crate::observability::RuntimeObservability;
 use crate::otlp::OtlpCounters;
 
 mod actions;
+mod prompts;
 mod rmcp_server;
 mod routes;
 mod schemas;

@@ -298,6 +298,105 @@ async fn rmcp_tools_list_exposes_one_action_tool() {
 }
 
 #[tokio::test]
+async fn rmcp_initialize_advertises_prompts_capability() {
+    let (state, _pool, _dir) = test_state();
+    let (status, response) = post_rmcp(
+        rmcp_router(state),
+        jsonrpc_request(
+            13,
+            "initialize",
+            Some(json!({
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "syslog-test", "version": "1.0"}
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["capabilities"]["prompts"].is_object(),
+        "initialize should advertise prompts capability; response: {response}"
+    );
+}
+
+#[tokio::test]
+async fn rmcp_prompts_list_exposes_infra_debugging_prompts() {
+    let (state, _pool, _dir) = test_state();
+    let (status, response) = post_rmcp(
+        rmcp_router(state),
+        jsonrpc_request(14, "prompts/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let prompts = response["result"]["prompts"].as_array().unwrap();
+    let names: Vec<&str> = prompts
+        .iter()
+        .filter_map(|prompt| prompt["name"].as_str())
+        .collect();
+    assert!(names.contains(&"infra.incident-triage"));
+    assert!(names.contains(&"infra.host-health"));
+    assert!(names.contains(&"infra.service-outage"));
+    assert!(names.contains(&"infra.security-auth-review"));
+    assert!(names.contains(&"infra.noise-reduction"));
+    assert!(names.contains(&"infra.agent-change-correlation"));
+    assert!(
+        prompts.iter().any(|prompt| prompt["arguments"]
+            .as_array()
+            .is_some_and(|args| !args.is_empty())),
+        "prompts should advertise arguments; response: {response}"
+    );
+}
+
+#[tokio::test]
+async fn rmcp_prompts_get_renders_argument_aware_prompt() {
+    let (state, _pool, _dir) = test_state();
+    let (status, response) = post_rmcp(
+        rmcp_router(state),
+        jsonrpc_request(
+            15,
+            "prompts/get",
+            Some(json!({
+                "name": "infra.service-outage",
+                "arguments": {
+                    "service": "plex",
+                    "host": "tootie",
+                    "window": "last 45 minutes"
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["result"]["description"],
+        "Debug a service, app, or container outage from logs and correlated host events."
+    );
+    let text = response["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap();
+    assert!(text.contains("service `plex`"));
+    assert!(text.contains("Host: tootie"));
+    assert!(text.contains("Window: last 45 minutes"));
+    assert!(text.contains("action=correlate"));
+}
+
+#[tokio::test]
+async fn rmcp_prompts_get_rejects_unknown_prompt() {
+    let (state, _pool, _dir) = test_state();
+    let (status, response) = post_rmcp(
+        rmcp_router(state),
+        jsonrpc_request(16, "prompts/get", Some(json!({"name": "infra.not-real"}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response["error"]["code"], -32602);
+    assert!(response["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("unknown prompt")));
+}
+
+#[tokio::test]
 async fn rmcp_get_stats_works_against_temp_db() {
     let (state, _pool, _dir) = test_state();
     let (status, response) = post_rmcp(
@@ -661,6 +760,17 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
     assert!(
         response["result"]["resources"].is_array(),
         "resources/list should succeed under LoopbackDev; response: {response}"
+    );
+
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(13, "prompts/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["prompts"].is_array(),
+        "prompts/list should succeed under LoopbackDev; response: {response}"
     );
 
     // tools/call should succeed without AuthContext under LoopbackDev.
@@ -1029,6 +1139,32 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
         "resources/read with missing AuthContext should be forbidden; response: {response}"
     );
 
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(75, "prompts/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "prompts/list with missing AuthContext should be forbidden; response: {response}"
+    );
+
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(
+            76,
+            "prompts/get",
+            Some(json!({"name": "infra.incident-triage"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "prompts/get with missing AuthContext should be forbidden; response: {response}"
+    );
+
     // help must also be denied.
     let (status, response) = post_rmcp(
         router.clone(),
@@ -1121,6 +1257,47 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
             .as_str()
             .is_some_and(|text| text.contains("\"name\": \"syslog\"")),
         "resources/read should return schema JSON; response: {response}"
+    );
+}
+
+#[tokio::test]
+async fn mounted_policy_with_auth_context_permits_prompts() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec![]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router.clone(),
+        jsonrpc_request(83, "prompts/list", Some(json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["prompts"]
+            .as_array()
+            .is_some_and(|prompts| {
+                prompts
+                    .iter()
+                    .any(|prompt| prompt["name"] == "infra.incident-triage")
+            }),
+        "prompts/list should expose infra prompts; response: {response}"
+    );
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            84,
+            "prompts/get",
+            Some(json!({"name": "infra.incident-triage"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["messages"][0]["content"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Incident summary")),
+        "prompts/get should render prompt text; response: {response}"
     );
 }
 
