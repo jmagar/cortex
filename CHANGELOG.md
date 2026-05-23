@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Deploy CLI**: Add `syslog deploy preflight` and `syslog deploy local`
   as operator-facing names for the existing local Compose setup/reconcile path.
+- **MCP Apps query widget contract**: Expose a `ui://syslog/query-widget`
+  resource, advertise it through `syslog` tool metadata, and return structured
+  tool data alongside readable JSON text for UI-capable MCP hosts.
 
 ### Changed
 
