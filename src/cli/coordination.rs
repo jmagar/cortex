@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -22,8 +23,8 @@ pub(crate) struct SystemctlEnv {
 
 #[derive(Debug, Default)]
 pub(crate) struct DoctorCache {
-    container_inspect: Option<Result<ContainerMountInfo, String>>,
-    systemctl_env: Option<Result<SystemctlEnv, String>>,
+    container_inspect: HashMap<String, Result<ContainerMountInfo, String>>,
+    systemctl_env: HashMap<String, Result<SystemctlEnv, String>>,
 }
 
 impl DoctorCache {
@@ -31,20 +32,21 @@ impl DoctorCache {
         &mut self,
         container: &str,
     ) -> Result<ContainerMountInfo, String> {
-        if let Some(cached) = &self.container_inspect {
+        if let Some(cached) = self.container_inspect.get(container) {
             return cached.clone();
         }
         let result = docker_inspect_data_mount(container);
-        self.container_inspect = Some(result.clone());
+        self.container_inspect
+            .insert(container.to_string(), result.clone());
         result
     }
 
     pub(crate) fn systemctl_env(&mut self, unit: &str) -> Result<SystemctlEnv, String> {
-        if let Some(cached) = &self.systemctl_env {
+        if let Some(cached) = self.systemctl_env.get(unit) {
             return cached.clone();
         }
         let result = systemctl_show_env(unit);
-        self.systemctl_env = Some(result.clone());
+        self.systemctl_env.insert(unit.to_string(), result.clone());
         result
     }
 }

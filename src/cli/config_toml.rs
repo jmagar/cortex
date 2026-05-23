@@ -1,4 +1,6 @@
 use anyhow::{anyhow, bail, Result};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 // ---------------------------------------------------------------------------
 // config.toml read/write (formatting-preserving via toml_edit)
 
@@ -169,7 +171,7 @@ pub(crate) fn flatten_toml(item: &toml_edit::Item, prefix: &str, out: &mut Vec<(
                 } else {
                     format!("{prefix}.{key}")
                 };
-                out.push((next, format_value(child)));
+                flatten_toml_value(child, &next, out);
             }
         }
         toml_edit::Item::Value(value) => {
@@ -178,6 +180,21 @@ pub(crate) fn flatten_toml(item: &toml_edit::Item, prefix: &str, out: &mut Vec<(
         toml_edit::Item::ArrayOfTables(_) | toml_edit::Item::None => {
             out.push((prefix.to_string(), format_toml_item(item)));
         }
+    }
+}
+
+fn flatten_toml_value(value: &toml_edit::Value, prefix: &str, out: &mut Vec<(String, String)>) {
+    if let toml_edit::Value::InlineTable(table) = value {
+        for (key, child) in table.iter() {
+            let next = if prefix.is_empty() {
+                key.to_string()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            flatten_toml_value(child, &next, out);
+        }
+    } else {
+        out.push((prefix.to_string(), format_value(value)));
     }
 }
 
@@ -254,14 +271,52 @@ pub(crate) fn write_toml_file(path: &std::path::Path, contents: &str) -> Result<
                 .map_err(|e| anyhow!("failed to create {}: {e}", parent.display()))?;
         }
     }
+    let temp_path = atomic_write_path(path);
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    let mut file = options
-        .open(path)
-        .map_err(|e| anyhow!("failed to open {}: {e}", path.display()))?;
-    file.write_all(contents.as_bytes())
-        .map_err(|e| anyhow!("failed to write {}: {e}", path.display()))?;
-    Ok(())
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        let mode = std::fs::metadata(path)
+            .map(|metadata| metadata.mode() & 0o777)
+            .unwrap_or(0o644);
+        options.mode(mode);
+    }
+    let write_result = (|| -> Result<()> {
+        let mut file = options
+            .open(&temp_path)
+            .map_err(|e| anyhow!("failed to open {}: {e}", temp_path.display()))?;
+        file.write_all(contents.as_bytes())
+            .map_err(|e| anyhow!("failed to write {}: {e}", temp_path.display()))?;
+        file.sync_all()
+            .map_err(|e| anyhow!("failed to sync {}: {e}", temp_path.display()))?;
+        std::fs::rename(&temp_path, path).map_err(|e| {
+            anyhow!(
+                "failed to replace {} with {}: {e}",
+                path.display(),
+                temp_path.display()
+            )
+        })?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+fn atomic_write_path(path: &Path) -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("config.toml");
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    parent.join(format!(".{file_name}.tmp.{}.{}", std::process::id(), count))
 }
 
 #[cfg(test)]

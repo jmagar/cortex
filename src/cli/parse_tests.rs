@@ -8,3 +8,19 @@ fn parse_routes_stats() {
         CliCommand::Stats(OutputArgs::default())
     );
 }
+
+#[test]
+fn parse_rejects_missing_command() {
+    let err = parse_command(Vec::new()).unwrap_err().to_string();
+
+    assert!(err.contains("CLI command is required"));
+}
+
+#[test]
+fn parse_rejects_unknown_command() {
+    let err = parse_command(vec!["wat".to_string()])
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("unknown CLI command: wat"));
+}

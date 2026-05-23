@@ -225,9 +225,6 @@ pub(crate) fn ensure_command_success(output: &CommandOutput) -> Result<()> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// `syslog config` — edit `.env` and `config.toml` from the CLI.
-
 #[cfg(test)]
 #[path = "output_ops_tests.rs"]
 mod tests;

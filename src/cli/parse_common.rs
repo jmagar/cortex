@@ -23,7 +23,7 @@ impl<'a> FlagCursor<'a> {
             .get(self.index)
             .ok_or_else(|| anyhow!("{flag} requires a value"))?
             .clone();
-        if value.starts_with('-') {
+        if value.starts_with('-') && value.parse::<i64>().is_err() {
             bail!("{flag} requires a value");
         }
         self.index += 1;

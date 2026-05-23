@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::config_toml::{list_toml_entries, read_toml_value, remove_toml_value, write_toml_value};
 use super::output_common::print_json;
@@ -307,25 +308,52 @@ fn remove_env_value(path: &std::path::Path, key: &str) -> Result<Option<String>>
 
 fn write_env_file(path: &std::path::Path, contents: &str) -> Result<()> {
     use std::io::Write;
+    let temp_path = atomic_write_path(path);
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    let mut file = options
-        .open(path)
-        .map_err(|e| anyhow!("failed to open {}: {e}", path.display()))?;
-    file.write_all(contents.as_bytes())
-        .map_err(|e| anyhow!("failed to write {}: {e}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| anyhow!("failed to chmod {}: {e}", path.display()))?;
+    let write_result = (|| -> Result<()> {
+        let mut file = options
+            .open(&temp_path)
+            .map_err(|e| anyhow!("failed to open {}: {e}", temp_path.display()))?;
+        file.write_all(contents.as_bytes())
+            .map_err(|e| anyhow!("failed to write {}: {e}", temp_path.display()))?;
+        file.sync_all()
+            .map_err(|e| anyhow!("failed to sync {}: {e}", temp_path.display()))?;
+        std::fs::rename(&temp_path, path).map_err(|e| {
+            anyhow!(
+                "failed to replace {} with {}: {e}",
+                path.display(),
+                temp_path.display()
+            )
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| anyhow!("failed to chmod {}: {e}", path.display()))?;
+        }
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
     }
-    Ok(())
+    write_result
+}
+
+fn atomic_write_path(path: &Path) -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or(".env");
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    parent.join(format!(".{file_name}.tmp.{}.{}", std::process::id(), count))
 }
 
 fn list_env_entries(path: &std::path::Path) -> Result<Vec<(String, String)>> {
