@@ -1,0 +1,64 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "syslog-mcp",
+  "display_name": "Syslog MCP",
+  "version": "0.28.2",
+  "description": "Query local syslog-mcp SQLite logs through a bundled stdio MCP server.",
+  "long_description": "Syslog MCP packages the existing syslog mcp stdio entrypoint as a local MCP Bundle. It is query-only: it reads the configured SQLite database and does not start syslog listeners, HTTP servers, Docker Compose, REST, or deploy flows.",
+  "author": {
+    "name": "jmagar",
+    "url": "https://github.com/jmagar"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jmagar/syslog-mcp"
+  },
+  "documentation": "https://github.com/jmagar/syslog-mcp/tree/main/docs/mcp",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/syslog",
+    "mcp_config": {
+      "command": "${__dirname}/server/syslog",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "SYSLOG_MCP_DB_PATH": "${user_config.data_dir}/syslog.db",
+        "SYSLOG_MCP_RETENTION_DAYS": "0",
+        "SYSLOG_MCP_MAX_DB_SIZE_MB": "0",
+        "SYSLOG_MCP_RECOVERY_DB_SIZE_MB": "0",
+        "SYSLOG_MCP_MIN_FREE_DISK_MB": "0",
+        "SYSLOG_MCP_RECOVERY_FREE_DISK_MB": "0",
+        "RUST_LOG": "warn"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "syslog",
+      "description": "Search, tail, summarize, and inspect logs from the configured local syslog-mcp SQLite database."
+    }
+  ],
+  "keywords": [
+    "syslog",
+    "mcp",
+    "logging",
+    "homelab"
+  ],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": [
+      "linux"
+    ]
+  },
+  "user_config": {
+    "data_dir": {
+      "type": "directory",
+      "title": "Data directory",
+      "description": "Directory containing syslog.db plus WAL/SHM sidecars. The bundled stdio server reads this database as SYSLOG_MCP_DB_PATH=<data_dir>/syslog.db.",
+      "required": true,
+      "default": "${HOME}/.syslog-mcp/data"
+    }
+  }
+}

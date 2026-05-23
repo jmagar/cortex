@@ -23,6 +23,7 @@ All version-bearing files must match. Update together:
 | `.codex-plugin/plugin.json` | `"version": "X.Y.Z"` |
 | `gemini-extension.json` | `"version": "X.Y.Z"` |
 | `server.json` | `"version": "X.Y.Z"` |
+| `mcpb/manifest.json` | `"version": "X.Y.Z"` |
 | `CHANGELOG.md` | New entry under `## X.Y.Z` |
 
 ## Publish workflow
@@ -50,6 +51,7 @@ Steps executed:
 | crates.io | `cargo publish` via GitHub Actions | `v*` tag push |
 | GHCR | Docker image build and push | `v*` tag push |
 | MCP Registry | `server.json` under `tv.tootie/syslog-mcp` namespace | manual update |
+| MCPB | `dist/syslog-mcp-X.Y.Z-linux.mcpb` | `just build-mcpb` |
 
 ## server.json
 
@@ -70,6 +72,18 @@ MCP Registry metadata at repo root:
   ]
 }
 ```
+
+## MCPB artifact
+
+Run before publishing a release:
+
+```bash
+just build-mcpb
+npx --yes @anthropic-ai/mcpb info dist/syslog-mcp-X.Y.Z-linux.mcpb
+```
+
+The unsigned MCPB is a Linux bundle for local stdio clients. Signing is a
+separate distribution step once signing keys are available.
 
 ## Verification
 
