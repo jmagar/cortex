@@ -1,6 +1,7 @@
 use super::dispatch::http_or_cancel;
 
 use anyhow::{bail, Result};
+use std::io::Write;
 use syslog_mcp::app::{
     AbuseSearchRequest, AiAssessRequest, AiCheckpointsRequest, AiCorrelateRequest,
     AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
@@ -493,11 +494,24 @@ pub(crate) async fn run_ai_assess(mode: &CliMode, args: AiAssessArgs) -> Result<
         terms: args.terms,
         limit: args.limit,
     };
-    let response = service.run_gemini_assess(req).await?;
     if args.json {
+        let response = service.run_gemini_assess(req).await?;
         println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
-        println!("{}", response.assessment);
+        let mut streamed = false;
+        let response = service
+            .run_gemini_assess_with_delta(req, |delta| {
+                streamed = true;
+                print!("{delta}");
+                std::io::stdout().flush()?;
+                Ok(())
+            })
+            .await?;
+        if !streamed {
+            println!("{}", response.assessment);
+        } else if !response.assessment.ends_with('\n') {
+            println!();
+        }
         eprintln!(
             "\n[assessed incident={} anchors={} bundles={}]",
             response.incident_id,

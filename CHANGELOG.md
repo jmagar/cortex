@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   triage, host health checks, service outages, security auth review, log noise
   reduction, and AI-agent change correlation.
 
+- **Headless Gemini assessment runner**: `syslog ai assess` now runs Gemini in
+  an isolated temporary HOME, installs the bundled
+  `syslog-frustration-assessment` skill, parses `stream-json` output, streams
+  assistant deltas in text mode, rejects unexpected tool calls, and exposes
+  syslog-specific Gemini command/model/home/timeout environment knobs.
+
 ## [0.29.0] - 2026-05-23
 
 ### Added
