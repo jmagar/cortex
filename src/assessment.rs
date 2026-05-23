@@ -66,7 +66,7 @@ impl GeminiAssessConfig {
                 "--prompt".to_string(),
                 String::new(),
                 "--approval-mode".to_string(),
-                "yolo".to_string(),
+                "plan".to_string(),
                 "--extensions".to_string(),
                 "none".to_string(),
                 "--output-format".to_string(),
@@ -589,6 +589,10 @@ mod tests {
         assert_eq!(spec.program, "gemini");
         assert_eq!(spec.output_mode, "stream-json");
         assert!(spec.args.windows(2).any(|w| w == ["--prompt", ""]));
+        assert!(spec
+            .args
+            .windows(2)
+            .any(|w| w == ["--approval-mode", "plan"]));
         assert!(spec.args.windows(2).any(|w| w == ["--extensions", "none"]));
         assert!(spec
             .args
