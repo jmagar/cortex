@@ -227,12 +227,12 @@ async fn post_rmcp(router: Router, body: Value) -> (StatusCode, Value) {
 }
 
 fn content_json(response: &Value) -> Value {
-    if let Some(structured) = response["result"].get("structuredContent") {
-        return structured.clone();
-    }
-
     let text = response["result"]["content"][0]["text"].as_str().unwrap();
     serde_json::from_str(text).unwrap()
+}
+
+fn structured_json(response: &Value) -> &Value {
+    &response["result"]["structuredContent"]
 }
 
 #[test]
@@ -343,11 +343,9 @@ async fn rmcp_search_logs_works_against_seeded_data() {
     let result = content_json(&response);
     assert_eq!(result["count"], 1);
     assert_eq!(result["logs"][0]["hostname"], "host-a");
-    assert_eq!(response["result"]["structuredContent"]["count"], 1);
-    assert_eq!(
-        response["result"]["structuredContent"]["logs"][0]["message"],
-        "disk full"
-    );
+    let structured = structured_json(&response);
+    assert_eq!(structured["count"], 1);
+    assert_eq!(structured["logs"][0]["message"], "disk full");
     assert!(
         response["result"]["content"][0]["text"]
             .as_str()

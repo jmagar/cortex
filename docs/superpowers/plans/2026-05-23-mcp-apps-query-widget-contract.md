@@ -33,7 +33,7 @@
 **Files:**
 - Modify: `src/mcp/rmcp_server_tests.rs`
 
-- [ ] **Step 1: Update `content_json()` to prefer structuredContent**
+- [ ] **Step 1: Keep `content_json()` on text JSON and add a structured helper**
 
 Replace the current helper:
 
@@ -48,12 +48,12 @@ with:
 
 ```rust
 fn content_json(response: &Value) -> Value {
-    if let Some(structured) = response["result"].get("structuredContent") {
-        return structured.clone();
-    }
-
     let text = response["result"]["content"][0]["text"].as_str().unwrap();
     serde_json::from_str(text).unwrap()
+}
+
+fn structured_json(response: &Value) -> &Value {
+    &response["result"]["structuredContent"]
 }
 ```
 
@@ -82,11 +82,9 @@ In `rmcp_search_logs_works_against_seeded_data`, after:
 add:
 
 ```rust
-    assert_eq!(response["result"]["structuredContent"]["count"], 1);
-    assert_eq!(
-        response["result"]["structuredContent"]["logs"][0]["message"],
-        "disk full"
-    );
+    let structured = structured_json(&response);
+    assert_eq!(structured["count"], 1);
+    assert_eq!(structured["logs"][0]["message"], "disk full");
     assert!(
         response["result"]["content"][0]["text"]
             .as_str()
@@ -100,7 +98,8 @@ add:
 Run:
 
 ```bash
-cargo test mcp::rmcp_server_tests::rmcp_tools_list_exposes_one_action_tool mcp::rmcp_server_tests::rmcp_search_logs_works_against_seeded_data
+cargo test rmcp_tools_list_exposes_one_action_tool
+cargo test rmcp_search_logs_works_against_seeded_data
 ```
 
 Expected: FAIL because `_meta.ui.resourceUri` and `structuredContent` are not implemented yet.
@@ -210,7 +209,8 @@ with:
 Run:
 
 ```bash
-cargo test mcp::rmcp_server_tests::rmcp_tools_list_exposes_one_action_tool mcp::rmcp_server_tests::rmcp_search_logs_works_against_seeded_data
+cargo test rmcp_tools_list_exposes_one_action_tool
+cargo test rmcp_search_logs_works_against_seeded_data
 ```
 
 Expected: PASS.
@@ -296,7 +296,8 @@ async fn mounted_policy_with_auth_context_permits_query_widget_resource() {
 Run:
 
 ```bash
-cargo test mcp::rmcp_server_tests::mounted_policy_with_auth_context_permits_schema_resources mcp::rmcp_server_tests::mounted_policy_with_auth_context_permits_query_widget_resource
+cargo test mounted_policy_with_auth_context_permits_schema_resources
+cargo test mounted_policy_with_auth_context_permits_query_widget_resource
 ```
 
 Expected: FAIL because `QUERY_WIDGET_RESOURCE_URI`, `MCP_APP_HTML_MIME_TYPE`, and query-widget resource handling are not implemented yet.
@@ -443,7 +444,8 @@ with:
 Run:
 
 ```bash
-cargo test mcp::rmcp_server_tests::mounted_policy_with_auth_context_permits_schema_resources mcp::rmcp_server_tests::mounted_policy_with_auth_context_permits_query_widget_resource
+cargo test mounted_policy_with_auth_context_permits_schema_resources
+cargo test mounted_policy_with_auth_context_permits_query_widget_resource
 ```
 
 Expected: PASS.
@@ -455,6 +457,7 @@ Expected: PASS.
 **Files:**
 - Modify: `src/mcp/rmcp_server.rs`
 - Modify: `src/mcp/rmcp_server_tests.rs`
+- Modify: `CHANGELOG.md`
 - Create: `src/mcp/ui/query_widget.html`
 
 - [ ] **Step 1: Run all rmcp server tests**
@@ -462,7 +465,7 @@ Expected: PASS.
 Run:
 
 ```bash
-cargo test mcp::rmcp_server_tests
+cargo test mcp::rmcp_server::tests
 ```
 
 Expected: PASS.
@@ -503,7 +506,7 @@ Run:
 
 ```bash
 git status --short
-git add docs/superpowers/plans/2026-05-23-mcp-apps-query-widget-contract.md src/mcp/rmcp_server.rs src/mcp/rmcp_server_tests.rs src/mcp/ui/query_widget.html
+git add CHANGELOG.md docs/superpowers/plans/2026-05-23-mcp-apps-query-widget-contract.md src/mcp/rmcp_server.rs src/mcp/rmcp_server_tests.rs src/mcp/ui/query_widget.html
 git commit -m "feat: add MCP Apps query widget contract"
 ```
 
