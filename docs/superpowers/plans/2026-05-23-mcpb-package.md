@@ -20,8 +20,8 @@
 | `scripts/check-version-sync.sh` | Modify | Include `mcpb/manifest.json` in version parity checks. |
 | `docs/mcp/CONNECT.md` | Modify | Document MCPB install/build path beside direct stdio. |
 | `docs/mcp/PUBLISH.md` | Modify | Document MCPB release artifact generation. |
-| `CHANGELOG.md` | Modify | Add `0.28.2` entry for MCPB packaging. |
-| `Cargo.toml`, `Cargo.lock`, `.claude-plugin/plugin.json`, `server.json` | Modify | Patch version bump to `0.28.2`. |
+| `CHANGELOG.md` | Modify | Add `0.29.0` entry for MCPB packaging. |
+| `Cargo.toml`, `Cargo.lock`, `.claude-plugin/plugin.json`, `server.json` | Modify | Minor version bump to `0.29.0`. |
 
 ## Tasks
 
@@ -40,7 +40,7 @@ Add this file:
   "manifest_version": "0.4",
   "name": "syslog-mcp",
   "display_name": "Syslog MCP",
-  "version": "0.28.2",
+  "version": "0.29.0",
   "description": "Query local syslog-mcp SQLite logs through a bundled stdio MCP server.",
   "long_description": "Syslog MCP packages the existing syslog mcp stdio entrypoint as a local MCP Bundle. It is query-only: it reads the configured SQLite database and does not start syslog listeners, HTTP servers, Docker Compose, REST, or deploy flows.",
   "author": {
@@ -197,7 +197,7 @@ scripts/build-mcpb.sh
 Expected:
 
 ```text
-Built dist/syslog-mcp-0.28.2-linux.mcpb
+Built dist/syslog-mcp-0.29.0-linux.mcpb
 ```
 
 ### Task 3: Wire Project Commands And Version Checks
@@ -247,22 +247,22 @@ Expected: exits `0` and includes `mcpb/manifest.json` in the checked file count.
 - Modify: `docs/mcp/CONNECT.md`
 - Modify: `docs/mcp/PUBLISH.md`
 
-- [ ] **Step 1: Bump patch version**
+- [ ] **Step 1: Bump minor version**
 
 Run:
 
 ```bash
-scripts/bump-version.sh patch
+scripts/bump-version.sh minor
 ```
 
-Expected: version-bearing files move from `0.28.1` to `0.28.2`.
+Expected: version-bearing files move from `0.28.x` to `0.29.0`.
 
 - [ ] **Step 2: Add changelog entry**
 
 Add this entry near the top of `CHANGELOG.md`:
 
 ```markdown
-## [0.28.2] - 2026-05-23
+## [0.29.0] - 2026-05-23
 
 - **MCPB packaging**: Add a Linux MCP Bundle manifest and `scripts/build-mcpb.sh`
   so the existing `syslog mcp` stdio server can be packed as
@@ -273,7 +273,7 @@ Add this entry near the top of `CHANGELOG.md`:
 
 In `docs/mcp/CONNECT.md`, add a section near direct stdio clients:
 
-```markdown
+````markdown
 ## MCPB bundle
 
 Build a Linux MCP Bundle from the existing stdio server:
@@ -292,13 +292,13 @@ server/syslog mcp
 The bundle is query-only. It reads `syslog.db` from the configured data
 directory and does not start the syslog listener, HTTP MCP server, REST API,
 Docker Compose, or deployment flows.
-```
+````
 
 - [ ] **Step 4: Document release artifact**
 
 In `docs/mcp/PUBLISH.md`, add:
 
-```markdown
+````markdown
 ### MCPB artifact
 
 Run before publishing a release:
@@ -310,7 +310,7 @@ npx --yes @anthropic-ai/mcpb verify dist/syslog-mcp-<version>-linux.mcpb || true
 
 The unsigned MCPB is a Linux bundle for local stdio clients. Signing is a
 separate distribution step once signing keys are available.
-```
+````
 
 ### Task 5: Verification, Session Note, PR
 
@@ -326,7 +326,7 @@ npx --yes @anthropic-ai/mcpb validate mcpb/manifest.json
 scripts/build-mcpb.sh
 ```
 
-Expected: both pass and `dist/syslog-mcp-0.28.2-linux.mcpb` exists.
+Expected: both pass and `dist/syslog-mcp-0.29.0-linux.mcpb` exists.
 
 - [ ] **Step 2: Run repo gates**
 
