@@ -946,11 +946,11 @@ phase_surface_parity_rest() {
     "GET /api/clock-skew|hosts"
     "GET /api/anomalies|hosts"
     "GET /api/apps?limit=10|apps"
-    "GET /api/similar-incidents?query=test&window_minutes=30|"
-    "GET /api/incident-context?from=2026-01-01T00:00:00Z&to=2026-12-31T23:59:59Z|"
-    "GET /api/ai/ask-history?query=test|"
-    "GET /api/ai/incidents?limit=5|"
-    "GET /api/ai/investigate?limit=5|"
+    "GET /api/similar-incidents?query=test&window_minutes=30|clusters"
+    "GET /api/incident-context?from=2026-01-01T00:00:00Z&to=2026-12-31T23:59:59Z|error_logs"
+    "GET /api/ai/ask-history?query=test|sessions"
+    "GET /api/ai/incidents?limit=5|incidents"
+    "GET /api/ai/investigate?limit=5|evidence"
   )
 
   local route_pair label path field response
