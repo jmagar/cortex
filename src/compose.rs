@@ -28,6 +28,7 @@ pub(crate) use docker::{
     DockerUnavailableError,
 };
 #[cfg(test)]
+#[allow(unused_imports)]
 pub(crate) use format::{status_from_target, unresolved_status};
 #[cfg(test)]
 pub(crate) use mutation::{

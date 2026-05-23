@@ -343,9 +343,9 @@ fn setup_path_value(path: &Path) -> io::Result<String> {
     Ok(raw)
 }
 
-struct EnvResult {
-    phase: SetupPhase,
-    values: BTreeMap<String, String>,
+pub(crate) struct EnvResult {
+    pub(crate) phase: SetupPhase,
+    pub(crate) values: BTreeMap<String, String>,
 }
 
 pub fn syslog_home_dir() -> io::Result<PathBuf> {

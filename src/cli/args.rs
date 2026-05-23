@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-
+use super::args_config::ConfigCommand;
 use syslog_mcp::compose::{ComposeTarget, MutationOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -561,52 +560,4 @@ pub(crate) struct AiAssessArgs {
     pub correlation_window_minutes: Option<u32>,
     pub terms: Vec<String>,
     pub limit: Option<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ConfigCommand {
-    Get(ConfigGetArgs),
-    Set(ConfigSetArgs),
-    Unset(ConfigUnsetArgs),
-    List(ConfigListArgs),
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum ConfigTarget {
-    #[default]
-    Auto,
-    Env,
-    Toml,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ConfigGetArgs {
-    pub key: String,
-    pub target: ConfigTarget,
-    pub toml_path: Option<PathBuf>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ConfigSetArgs {
-    pub key: String,
-    pub value: String,
-    pub target: ConfigTarget,
-    pub toml_path: Option<PathBuf>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ConfigUnsetArgs {
-    pub key: String,
-    pub target: ConfigTarget,
-    pub toml_path: Option<PathBuf>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ConfigListArgs {
-    pub target: ConfigTarget,
-    pub toml_path: Option<PathBuf>,
-    pub json: bool,
 }
