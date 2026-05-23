@@ -752,10 +752,7 @@ struct AppsQuery {
     offset: Option<u32>,
 }
 
-async fn apps(
-    State(state): State<ApiState>,
-    Query(query): Query<AppsQuery>,
-) -> impl IntoResponse {
+async fn apps(State(state): State<ApiState>, Query(query): Query<AppsQuery>) -> impl IntoResponse {
     respond(
         state
             .service
@@ -940,9 +937,8 @@ async fn ai_investigate(
 /// spawn unbounded `docker inspect` subprocesses. Mirrors the helper in
 /// `src/mcp/tools.rs:412-433` (`compose_status`).
 async fn compose_status_inner() -> anyhow::Result<crate::compose::ComposeStatus> {
-    static COMPOSE_REST_DIAGNOSTICS: std::sync::OnceLock<
-        std::sync::Arc<tokio::sync::Semaphore>,
-    > = std::sync::OnceLock::new();
+    static COMPOSE_REST_DIAGNOSTICS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
     let permit = COMPOSE_REST_DIAGNOSTICS
         .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)))
         .clone()
@@ -976,9 +972,9 @@ async fn compose_doctor() -> impl IntoResponse {
     let status = match compose_status_inner().await {
         Ok(s) => s,
         Err(e) => {
-            return respond::<crate::compose::ComposeMcpStatus>(Err(
-                ServiceError::Internal(anyhow::anyhow!("compose doctor status: {e}")),
-            ));
+            return respond::<crate::compose::ComposeMcpStatus>(Err(ServiceError::Internal(
+                anyhow::anyhow!("compose doctor status: {e}"),
+            )));
         }
     };
     if let Err(e) = crate::compose::ensure_doctor_ready(&status) {

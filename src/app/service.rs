@@ -282,6 +282,7 @@ impl SyslogService {
 
     /// Test constructor that injects a custom `OsAdapter`.
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn with_os_adapter(
         pool: Arc<DbPool>,
         storage: StorageConfig,

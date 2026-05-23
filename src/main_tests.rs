@@ -292,3 +292,16 @@ fn mode_parse_rejects_http_flag_on_serve_mcp() {
         "expected guard message, got: {msg}"
     );
 }
+
+#[test]
+fn mode_parse_accepts_new_surface_parity_subcommands() {
+    // All five surface-parity subcommands parse at the top level with no
+    // flags — `compare`'s required-flag validation lives in
+    // `CompareArgs::into_request()`, not the top-level parser, so a bare
+    // `compare` is accepted by `Mode::parse` even though running it would
+    // later bail.
+    for cmd in &["silent-hosts", "clock-skew", "anomalies", "compare", "apps"] {
+        let result = Mode::parse(vec![(*cmd).to_string()]);
+        assert!(result.is_ok(), "Mode::parse rejected '{cmd}': {result:?}");
+    }
+}

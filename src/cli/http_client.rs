@@ -64,15 +64,17 @@ use syslog_mcp::app::{
     AbuseSearchRequest, AbuseSearchResponse, AckErrorRequest, AckErrorResponse,
     AiCheckpointsRequest, AiCorrelateRequest, AiCorrelateResponse, AiIncidentRequest,
     AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiParseErrorsRequest,
-    AiPruneCheckpointsRequest, CorrelateEventsRequest, CorrelateEventsResponse,
-    DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest, DbIntegrityResult,
-    DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult, GetErrorsRequest,
-    GetErrorsResponse, GetLogRequest, GetLogResponse, IngestRateRequest, IngestRateResponse,
-    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
-    ListHostsResponse, ListSessionsRequest, ListSessionsResponse, ListSourceIpsRequest,
-    ListSourceIpsResponse, PatternsRequest, PatternsResponse, ProjectContextRequest,
-    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
-    SearchSessionsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, UnackErrorRequest,
+    AiPruneCheckpointsRequest, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest,
+    ClockSkewResponse, CompareRequest, CompareResponse, CorrelateEventsRequest,
+    CorrelateEventsResponse, DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest,
+    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult,
+    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, IngestRateRequest,
+    IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
+    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, PatternsRequest,
+    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
+    SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, UnackErrorRequest,
     UnackErrorResponse, UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest,
     UsageBlocksResponse,
 };
@@ -594,6 +596,28 @@ impl HttpClient {
         }
         self.post_json("/api/notifications/test", &Payload { body })
             .await
+    }
+
+    // ─── Surface parity gap closure (2026-05-22) ────────────────────────────
+
+    pub async fn silent_hosts(&self, req: &SilentHostsRequest) -> Result<SilentHostsResponse> {
+        self.get_json("/api/silent-hosts", Some(req)).await
+    }
+
+    pub async fn clock_skew(&self, req: &ClockSkewRequest) -> Result<ClockSkewResponse> {
+        self.get_json("/api/clock-skew", Some(req)).await
+    }
+
+    pub async fn anomalies(&self, req: &AnomaliesRequest) -> Result<AnomaliesResponse> {
+        self.get_json("/api/anomalies", Some(req)).await
+    }
+
+    pub async fn compare(&self, req: &CompareRequest) -> Result<CompareResponse> {
+        self.get_json("/api/compare", Some(req)).await
+    }
+
+    pub async fn list_apps(&self, req: &ListAppsRequest) -> Result<ListAppsResponse> {
+        self.get_json("/api/apps", Some(req)).await
     }
 }
 

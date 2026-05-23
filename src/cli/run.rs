@@ -108,6 +108,12 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             NotifyCommand::Recent(args) => dispatch::run_notify_recent(&mode, args).await,
             NotifyCommand::Test(args) => dispatch::run_notify_test(&mode, args).await,
         },
+        // Surface parity gap closure (2026-05-22)
+        CliCommand::SilentHosts(args) => dispatch::run_silent_hosts(&mode, args).await,
+        CliCommand::ClockSkew(args) => dispatch::run_clock_skew(&mode, args).await,
+        CliCommand::Anomalies(args) => dispatch::run_anomalies(&mode, args).await,
+        CliCommand::Compare(args) => dispatch::run_compare(&mode, args).await,
+        CliCommand::Apps(args) => dispatch::run_apps(&mode, args).await,
         CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
             bail!(
                 "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"
