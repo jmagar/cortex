@@ -153,14 +153,43 @@ fn mode_parse_accepts_deploy_namespace() {
         .unwrap(),
         Mode::Deploy(_)
     ));
+    assert!(matches!(
+        Mode::parse(vec![
+            "deploy".into(),
+            "remote".into(),
+            "tootie".into(),
+            "--dry-run".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Deploy(_)
+    ));
 }
 
 #[test]
 fn mode_parse_rejects_unknown_deploy_subcommand() {
+    let err = Mode::parse(vec!["deploy".into(), "bogus".into()]).unwrap_err();
+    assert!(err.to_string().contains("unknown deploy subcommand: bogus"));
+}
+
+#[test]
+fn mode_parse_rejects_remote_deploy_without_host() {
     let err = Mode::parse(vec!["deploy".into(), "remote".into()]).unwrap_err();
+    assert!(err.to_string().contains("deploy remote requires a host"));
+}
+
+#[test]
+fn mode_parse_rejects_remote_deploy_with_multiple_hosts() {
+    let err = Mode::parse(vec![
+        "deploy".into(),
+        "remote".into(),
+        "host-a".into(),
+        "host-b".into(),
+    ])
+    .unwrap_err();
     assert!(err
         .to_string()
-        .contains("unknown deploy subcommand: remote"));
+        .contains("deploy remote accepts exactly one host"));
 }
 
 #[test]

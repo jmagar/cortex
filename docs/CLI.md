@@ -451,20 +451,28 @@ timer state, active/enabled watcher state, and container freshness via
 
 ### `syslog deploy`
 
-Run the local Compose-backed deployment workflow using operator-facing names.
-These commands call the same setup engine as `syslog setup check` and
-`syslog setup repair`.
+Run the Compose-backed deployment workflow using operator-facing names.
+`preflight` and `local` call the same setup engine as `syslog setup check`
+and `syslog setup repair`; `remote` uses SSH plus the shared setup assets.
 
 ```bash
 syslog deploy preflight
 syslog deploy preflight --json
 syslog deploy local
 syslog deploy local --dry-run --json
+syslog deploy remote tootie --dry-run
+syslog deploy remote tootie --json
 ```
 
 `deploy preflight` and `deploy local --dry-run` do not mutate Docker state.
 `deploy local` repairs `~/.syslog-mcp/.env`, rewrites managed Compose assets,
 pulls the configured image, starts the stack, and checks `/health`.
+`deploy remote` uses SSH and Docker Compose on the target host. Non-dry-run
+remote deploy writes/replaces `~/.syslog-mcp/.env`, the managed Compose YAML,
+and `config/Dockerfile` on the target; set token/env values in the local
+environment before running it when you need to preserve specific values. It is
+CLI-only, requires an explicit host argument, and does not add REST or MCP
+deploy mutation surfaces.
 
 ### `syslog setup ai-index-timer`
 

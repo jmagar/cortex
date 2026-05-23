@@ -21,6 +21,9 @@ pub use ai_watch::run_ai_watch_service_setup;
 pub use debug_wrapper::{run_debug_compose_setup, run_debug_wrapper_setup};
 pub use doctor::run_setup_doctor;
 pub use firstrun::run_setup;
+pub(crate) use firstrun::{
+    default_env_for_data_dir, dockerfile_asset, installed_compose_asset, render_env,
+};
 
 // Test-only re-exports of private items accessed via `use super::*` in setup_tests.rs.
 #[cfg(test)]
@@ -37,7 +40,7 @@ pub(crate) use debug_wrapper::{
     debug_wrapper_script,
 };
 #[cfg(test)]
-pub(crate) use firstrun::{ensure_env_file, installed_compose_asset, parse_env, write_env};
+pub(crate) use firstrun::{ensure_env_file, parse_env, write_env};
 #[cfg(test)]
 pub(crate) use systemd::inferred_user_bus_env;
 
@@ -194,24 +197,24 @@ struct SetupReportInput {
     mcp_url: String,
 }
 
-struct PhaseTimer {
+pub(crate) struct PhaseTimer {
     name: &'static str,
     start: Instant,
 }
 
 impl PhaseTimer {
-    fn start(name: &'static str) -> Self {
+    pub(crate) fn start(name: &'static str) -> Self {
         Self {
             name,
             start: Instant::now(),
         }
     }
 
-    fn finish(self, status: SetupStatus, detail: impl Into<String>) -> SetupPhase {
+    pub(crate) fn finish(self, status: SetupStatus, detail: impl Into<String>) -> SetupPhase {
         self.finish_with_issue(status, None, detail)
     }
 
-    fn finish_with_issue(
+    pub(crate) fn finish_with_issue(
         self,
         status: SetupStatus,
         issue_kind: Option<SetupIssueKind>,

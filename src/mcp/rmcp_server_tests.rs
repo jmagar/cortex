@@ -231,6 +231,10 @@ fn content_json(response: &Value) -> Value {
     serde_json::from_str(text).unwrap()
 }
 
+fn structured_json(response: &Value) -> &Value {
+    &response["result"]["structuredContent"]
+}
+
 #[test]
 fn allowed_hosts_include_bracketed_ipv6_authority_variants() {
     let mut config = McpConfig {
@@ -283,6 +287,14 @@ async fn rmcp_tools_list_exposes_one_action_tool() {
         .collect();
     assert_eq!(names, vec!["syslog"]);
     assert_eq!(tools[0]["inputSchema"]["required"], json!(["action"]));
+    assert_eq!(
+        tools[0]["_meta"]["ui"]["resourceUri"],
+        super::QUERY_WIDGET_RESOURCE_URI
+    );
+    assert_eq!(
+        tools[0]["_meta"]["ui"]["visibility"],
+        json!(["model", "app"])
+    );
 }
 
 #[tokio::test]
@@ -331,6 +343,15 @@ async fn rmcp_search_logs_works_against_seeded_data() {
     let result = content_json(&response);
     assert_eq!(result["count"], 1);
     assert_eq!(result["logs"][0]["hostname"], "host-a");
+    let structured = structured_json(&response);
+    assert_eq!(structured["count"], 1);
+    assert_eq!(structured["logs"][0]["message"], "disk full");
+    assert!(
+        response["result"]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("\"message\": \"disk full\"")),
+        "text content should remain readable JSON; response: {response}"
+    );
 }
 
 #[tokio::test]
@@ -1072,10 +1093,17 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let resources = response["result"]["resources"].as_array().unwrap();
-    assert_eq!(
-        resources[0]["uri"],
-        super::SCHEMA_RESOURCE_URI,
+    let uris: Vec<&str> = resources
+        .iter()
+        .filter_map(|resource| resource["uri"].as_str())
+        .collect();
+    assert!(
+        uris.contains(&super::SCHEMA_RESOURCE_URI),
         "resources/list should expose schema resource; response: {response}"
+    );
+    assert!(
+        uris.contains(&super::QUERY_WIDGET_RESOURCE_URI),
+        "resources/list should expose query widget resource; response: {response}"
     );
 
     let (status, response) = post_rmcp(
@@ -1093,6 +1121,38 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
             .as_str()
             .is_some_and(|text| text.contains("\"name\": \"syslog\"")),
         "resources/read should return schema JSON; response: {response}"
+    );
+}
+
+#[tokio::test]
+async fn mounted_policy_with_auth_context_permits_query_widget_resource() {
+    let (state, _pool, _dir) = mounted_state();
+    let auth = auth_ctx_with_scopes(vec![]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            83,
+            "resources/read",
+            Some(json!({"uri": super::QUERY_WIDGET_RESOURCE_URI})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["result"]["contents"][0]["uri"],
+        super::QUERY_WIDGET_RESOURCE_URI
+    );
+    assert_eq!(
+        response["result"]["contents"][0]["mimeType"],
+        super::MCP_APP_HTML_MIME_TYPE
+    );
+    assert!(
+        response["result"]["contents"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("data-syslog-query-widget")),
+        "resources/read should return query widget HTML; response: {response}"
     );
 }
 

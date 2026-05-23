@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/build-mcpb.sh` so the existing `syslog mcp` stdio server can be
   packed as `dist/syslog-mcp-<version>-linux.mcpb`.
 
+## [0.28.2] - 2026-05-23
+
+### Added
+
+- **Remote deploy CLI**: Add `syslog deploy remote <host>` for SSH-based
+  Compose deployment without adding REST or MCP mutation surfaces.
+
 ## [0.28.1] - 2026-05-23
 
 ### Added
@@ -35,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Deploy CLI**: Add `syslog deploy preflight` and `syslog deploy local`
   as operator-facing names for the existing local Compose setup/reconcile path.
+- **MCP Apps query widget contract**: Expose a `ui://syslog/query-widget`
+  resource, advertise it through `syslog` tool metadata, and return structured
+  tool data alongside readable JSON text for UI-capable MCP hosts.
 
 ### Changed
 

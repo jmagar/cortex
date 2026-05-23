@@ -51,11 +51,25 @@ syslog setup repair   # rewrite managed assets and restart Compose
 syslog deploy preflight       # operator-facing preflight alias
 syslog deploy local           # operator-facing local deploy/reconcile alias
 syslog deploy local --dry-run # preflight without Docker mutation
+syslog deploy remote host-a --dry-run # SSH preflight for a remote Compose host
+syslog deploy remote host-a           # SSH deploy/reconcile on a remote host
 ```
 
 `syslog setup` also disables and removes stale user-level
 `syslog-mcp.service` units/drop-ins from older releases. The supported
 automated deployment path is Docker Compose only.
+
+### Remote CLI Deploy
+
+`syslog deploy remote <host>` writes/replaces `~/.syslog-mcp/.env`, the
+managed Compose YAML, and `config/Dockerfile` on the SSH target, then runs
+Docker Compose there. Use `--dry-run` first to verify SSH and Docker
+prerequisites. Set token/env values in the local environment before running the
+non-dry-run command when the target must keep specific generated secrets or
+configuration values.
+
+Deploy mutations remain CLI-only. MCP exposes only redacted read-only Compose
+diagnostics.
 
 ## Docker
 
