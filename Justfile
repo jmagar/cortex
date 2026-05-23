@@ -9,6 +9,7 @@ release:
 
 check:
     cargo check
+    bash scripts/check-rust-module-size.sh --limit 500 src/cli.rs src/cli
 
 lint:
     cargo clippy -- -D warnings

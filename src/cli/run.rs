@@ -273,7 +273,7 @@ fn env_opts_into_http() -> bool {
 }
 
 /// If `arg` matches `flag=...` return the suffix; otherwise `None`.
-pub(super) fn strip_eq_prefix<'a>(arg: &'a str, flag: &str) -> Option<&'a str> {
+pub(crate) fn strip_eq_prefix<'a>(arg: &'a str, flag: &str) -> Option<&'a str> {
     arg.strip_prefix(flag)
         .and_then(|rest| rest.strip_prefix('='))
 }

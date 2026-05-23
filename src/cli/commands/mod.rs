@@ -14,17 +14,17 @@
 //!
 //! Extracted so far:
 //! - `sig` — error-signature commands (`list`, `ack`, `unack`)
-//! - `notify` — notification commands (`recent`)
+//! - `notify` — notification commands (`recent`, `test`)
 //! - `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `apps` — surface
 //!   parity gap-closure subcommands (2026-05-22).
 //!
 //! Remaining (each is ~50-100 LOC of parse functions):
 //! db, setup, compose, ai, config, source-ips, timeline, patterns, etc.
 
-pub mod anomalies;
-pub mod apps;
-pub mod clock_skew;
-pub mod compare;
-pub mod notify;
-pub mod sig;
-pub mod silent_hosts;
+pub(crate) mod anomalies;
+pub(crate) mod apps;
+pub(crate) mod clock_skew;
+pub(crate) mod compare;
+pub(crate) mod notify;
+pub(crate) mod sig;
+pub(crate) mod silent_hosts;
