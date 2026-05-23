@@ -3,9 +3,10 @@ use std::{borrow::Cow, net::Ipv6Addr, sync::Arc, time::Instant};
 use lab_auth::AuthContext;
 use rmcp::{
     model::{
-        CallToolRequestParams, CallToolResult, Content, Implementation, ListResourcesResult,
-        ListToolsResult, Meta, PaginatedRequestParams, RawResource, ReadResourceRequestParams,
-        ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerInfo, Tool,
+        CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, GetPromptResult,
+        Implementation, ListPromptsResult, ListResourcesResult, ListToolsResult, Meta,
+        PaginatedRequestParams, RawResource, ReadResourceRequestParams, ReadResourceResult,
+        Resource, ResourceContents, ServerCapabilities, ServerInfo, Tool,
     },
     service::RequestContext,
     transport::streamable_http_server::{
@@ -19,6 +20,7 @@ use crate::app::ServiceError;
 use crate::config::McpConfig;
 
 use super::actions;
+use super::prompts::{get_prompt, prompt_definitions};
 use super::{schemas::tool_definitions, tools::execute_tool, AppState, AuthPolicy};
 
 #[derive(Clone)]
@@ -158,11 +160,43 @@ impl ServerHandler for SyslogRmcpServer {
         }
     }
 
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        require_auth_context(&self.state, &context)?;
+        let prompts = prompt_definitions();
+        tracing::info!(prompt_count = prompts.len(), "MCP prompts listed");
+        Ok(ListPromptsResult {
+            prompts,
+            ..Default::default()
+        })
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResult, ErrorData> {
+        require_auth_context(&self.state, &context)?;
+        let Some((description, messages)) = get_prompt(&request.name, request.arguments.as_ref())
+        else {
+            return Err(ErrorData::invalid_params(
+                format!("unknown prompt: {}", request.name),
+                None,
+            ));
+        };
+        tracing::info!(prompt = %request.name, "MCP prompt rendered");
+        Ok(GetPromptResult::new(messages).with_description(description))
+    }
+
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
+                .enable_prompts()
                 .build(),
         )
         .with_server_info(Implementation::new(

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-05-23
+
+### Added
+
+- **MCP prompts**: Expose infrastructure debugging prompts for incident
+  triage, host health checks, service outages, security auth review, log noise
+  reduction, and AI-agent change correlation.
+
 ## [0.29.0] - 2026-05-23
 
 ### Added
