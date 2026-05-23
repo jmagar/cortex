@@ -105,6 +105,32 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
         DeployCommandKind::Local { dry_run: false } => {
             (syslog_mcp::setup::SetupMode::Repair, "local")
         }
+        DeployCommandKind::Remote { host, dry_run } => {
+            let report = syslog_mcp::deploy::run_remote_deploy(&host, dry_run)?;
+            if command.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("syslog deploy remote {host}");
+                println!("mode: {}", report.mode);
+                println!("host: {}", report.host);
+                println!("home: {}", report.home);
+                println!("env: {}", report.env_path);
+                println!("compose: {}", report.compose_dir);
+                println!("data: {}", report.data_dir);
+                println!("health: {}", report.health_url);
+                println!("mcp: {}", report.mcp_url);
+                for phase in &report.phases {
+                    println!(
+                        "{:?}\t{}\t{}ms\t{}",
+                        phase.status, phase.name, phase.elapsed_ms, phase.detail
+                    );
+                }
+            }
+            if report.has_errors {
+                anyhow::bail!("syslog deploy remote {host} completed with failed phases");
+            }
+            return Ok(());
+        }
     };
     let report = syslog_mcp::setup::run_setup(mode).await?;
     if command.json {
@@ -319,6 +345,7 @@ struct DeployCommand {
 enum DeployCommandKind {
     Preflight,
     Local { dry_run: bool },
+    Remote { host: String, dry_run: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -564,18 +591,24 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
 }
 
 fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
-    let (subcommand, rest) = args
-        .split_first()
-        .ok_or_else(|| anyhow::anyhow!("deploy requires a subcommand: preflight or local"))?;
+    let (subcommand, rest) = args.split_first().ok_or_else(|| {
+        anyhow::anyhow!("deploy requires a subcommand: preflight, local, or remote")
+    })?;
     let mut json = false;
     let mut dry_run = false;
+    let mut host: Option<String> = None;
     for arg in rest {
         match arg.as_str() {
             "--json" => json = true,
-            "--dry-run" if subcommand == "local" => dry_run = true,
+            "--dry-run" if matches!(subcommand.as_str(), "local" | "remote") => dry_run = true,
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
+            }
+            other if subcommand == "remote" && !other.starts_with('-') => {
+                if host.replace(other.to_string()).is_some() {
+                    anyhow::bail!("deploy remote accepts exactly one host");
+                }
             }
             other => anyhow::bail!("unknown deploy {subcommand} argument: {other}"),
         }
@@ -583,6 +616,10 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
     let kind = match subcommand.as_str() {
         "preflight" => DeployCommandKind::Preflight,
         "local" => DeployCommandKind::Local { dry_run },
+        "remote" => DeployCommandKind::Remote {
+            host: host.ok_or_else(|| anyhow::anyhow!("deploy remote requires a host"))?,
+            dry_run,
+        },
         other => anyhow::bail!("unknown deploy subcommand: {other}"),
     };
     Ok(DeployCommand { kind, json })
@@ -651,6 +688,7 @@ fn print_usage() {
   syslog setup doctor [--json]
   syslog deploy preflight [--json]
   syslog deploy local [--dry-run] [--json]
+  syslog deploy remote HOST [--dry-run] [--json]
   syslog doctor [--json]          Run all health checks (setup, compose, binary, AI)
   syslog doctor binary [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
@@ -692,6 +730,7 @@ fn print_usage() {
   syslog setup plugin-hook [--no-repair] [--json]
   syslog deploy preflight [--json]
   syslog deploy local [--dry-run] [--json]
+  syslog deploy remote HOST [--dry-run] [--json]
   syslog config get KEY [--env|--toml] [--toml-path PATH] [--json]
   syslog config set KEY VALUE [--env|--toml] [--toml-path PATH] [--json]
   syslog config unset KEY [--env|--toml] [--toml-path PATH] [--json]
