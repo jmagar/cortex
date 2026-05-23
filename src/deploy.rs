@@ -349,7 +349,15 @@ fn remote_identity_phase(
     host: &str,
 ) -> io::Result<RemoteIdentityPhase> {
     let timer = PhaseTimer::start("remote-identity");
-    let output = runner.run(host, "printf '%s\\n' \"$HOME\" && id -u && id -g", None)?;
+    let output = match runner.run(host, "printf '%s\\n' \"$HOME\" && id -u && id -g", None) {
+        Ok(output) => output,
+        Err(err) => {
+            return Ok(RemoteIdentityPhase {
+                phase: timer.finish(SetupStatus::Error, format!("ssh failed: {err}")),
+                values: None,
+            });
+        }
+    };
     if output.status_success {
         let mut lines = output.stdout.lines();
         let home = lines.next().unwrap_or("$HOME").trim().to_string();
@@ -471,6 +479,7 @@ mod tests {
     struct FakeRemoteRunner {
         commands: Vec<String>,
         fail_contains: Option<&'static str>,
+        error_contains: Option<&'static str>,
     }
 
     impl FakeRemoteRunner {
@@ -482,6 +491,15 @@ mod tests {
             Self {
                 commands: Vec::new(),
                 fail_contains: Some(needle),
+                error_contains: None,
+            }
+        }
+
+        fn error_on(needle: &'static str) -> Self {
+            Self {
+                commands: Vec::new(),
+                fail_contains: None,
+                error_contains: Some(needle),
             }
         }
     }
@@ -494,6 +512,12 @@ mod tests {
             _stdin: Option<&str>,
         ) -> io::Result<RemoteOutput> {
             self.commands.push(format!("{host}: {script}"));
+            if self
+                .error_contains
+                .is_some_and(|needle| script.contains(needle))
+            {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "ssh not found"));
+            }
             if self
                 .fail_contains
                 .is_some_and(|needle| script.contains(needle))
@@ -589,6 +613,22 @@ mod tests {
             .iter()
             .any(|phase| phase.name == "remote-compose-up"
                 && matches!(phase.status, SetupStatus::Skipped)));
+    }
+
+    #[test]
+    fn remote_deploy_reports_identity_spawn_error_as_phase_failure() {
+        let mut runner = FakeRemoteRunner::error_on("id -u");
+        let report = run_remote_deploy_with_runner("host-a", false, &mut runner).unwrap();
+
+        assert!(report.has_errors);
+        let identity = report
+            .phases
+            .iter()
+            .find(|phase| phase.name == "remote-identity")
+            .expect("identity phase should be present");
+        assert!(matches!(identity.status, SetupStatus::Error));
+        assert!(identity.detail.contains("ssh failed"));
+        assert!(!runner.commands.iter().any(|cmd| cmd.contains("up -d")));
     }
 
     #[test]
