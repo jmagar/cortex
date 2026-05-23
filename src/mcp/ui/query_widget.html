@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Syslog Query</title>
+</head>
+<body data-syslog-query-widget>
+  <form aria-label="Syslog query">
+    <label>
+      Query
+      <input name="query" type="search" autocomplete="off" placeholder="error AND sshd">
+    </label>
+    <input name="action" type="hidden" value="search">
+    <button type="submit">Search</button>
+  </form>
+  <output aria-live="polite">Ready to query syslog-mcp logs.</output>
+</body>
+</html>
