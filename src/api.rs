@@ -15,12 +15,14 @@ use tower_http::cors::CorsLayer;
 
 use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateRequest,
-    AiParseErrorsRequest, AiPruneCheckpointsRequest, CorrelateEventsRequest, DbCheckpointRequest,
-    DbIntegrityRequest, DbVacuumRequest, GetErrorsRequest, GetLogRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListSessionsRequest, ListSourceIpsRequest,
-    PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest,
-    SyslogService, TailLogsRequest, TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest,
-    UsageBlocksRequest,
+    AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
+    AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, CorrelateEventsRequest,
+    DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, GetErrorsRequest, GetLogRequest,
+    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, PatternsRequest,
+    ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, ServiceError,
+    SilentHostsRequest, SimilarIncidentsRequest, SyslogService, TailLogsRequest, TimelineRequest,
+    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::db::DbPool;
@@ -237,6 +239,19 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/errors/unack", post(unack_error))
         .route("/api/notifications/recent", get(notifications_recent))
         .route("/api/notifications/test", post(notifications_test))
+        // --- surface parity gap closure (12 new routes) ---
+        .route("/api/silent-hosts", get(silent_hosts))
+        .route("/api/clock-skew", get(clock_skew))
+        .route("/api/anomalies", get(anomalies))
+        .route("/api/compare", get(compare))
+        .route("/api/apps", get(apps))
+        .route("/api/similar-incidents", get(similar_incidents))
+        .route("/api/incident-context", get(incident_context))
+        .route("/api/ai/ask-history", get(ai_ask_history))
+        .route("/api/ai/incidents", get(ai_incidents))
+        .route("/api/ai/investigate", get(ai_investigate))
+        .route("/api/compose/status", get(compose_status))
+        .route("/api/compose/doctor", get(compose_doctor))
         // --- ai session queries ---
         .route("/api/sessions", get(sessions))
         .route("/api/ai/search", get(ai_search))
@@ -637,6 +652,337 @@ async fn notifications_test() -> impl IntoResponse {
         axum::http::StatusCode::NOT_IMPLEMENTED,
         "notifications_test requires server-side apprise config; use MCP notify test instead",
     )
+}
+
+// ─── Surface parity gap closure (12 new handlers) ───────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SilentHostsQuery {
+    silent_minutes: Option<u32>,
+}
+
+async fn silent_hosts(
+    State(state): State<ApiState>,
+    Query(query): Query<SilentHostsQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .silent_hosts(SilentHostsRequest {
+                silent_minutes: query.silent_minutes,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClockSkewQuery {
+    since: Option<String>,
+}
+
+async fn clock_skew(
+    State(state): State<ApiState>,
+    Query(query): Query<ClockSkewQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .clock_skew(ClockSkewRequest { since: query.since })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnomaliesQuery {
+    recent_minutes: Option<u32>,
+    baseline_minutes: Option<u32>,
+}
+
+async fn anomalies(
+    State(state): State<ApiState>,
+    Query(query): Query<AnomaliesQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .anomalies(AnomaliesRequest {
+                recent_minutes: query.recent_minutes,
+                baseline_minutes: query.baseline_minutes,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompareQuery {
+    a_from: String,
+    a_to: String,
+    b_from: String,
+    b_to: String,
+}
+
+async fn compare(
+    State(state): State<ApiState>,
+    Query(query): Query<CompareQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .compare(CompareRequest {
+                a_from: query.a_from,
+                a_to: query.a_to,
+                b_from: query.b_from,
+                b_to: query.b_to,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppsQuery {
+    hostname: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+
+async fn apps(State(state): State<ApiState>, Query(query): Query<AppsQuery>) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .list_apps(ListAppsRequest {
+                hostname: query.hostname,
+                from: query.from,
+                to: query.to,
+                limit: query.limit,
+                offset: query.offset,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SimilarIncidentsQuery {
+    query: String,
+    hostname: Option<String>,
+    app_name: Option<String>,
+    severity_min: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    window_minutes: Option<u32>,
+    limit: Option<u32>,
+}
+
+async fn similar_incidents(
+    State(state): State<ApiState>,
+    Query(q): Query<SimilarIncidentsQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .similar_incidents(SimilarIncidentsRequest {
+                query: q.query,
+                hostname: q.hostname,
+                app_name: q.app_name,
+                severity_min: q.severity_min,
+                from: q.from,
+                to: q.to,
+                window_minutes: q.window_minutes,
+                limit: q.limit,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IncidentContextQuery {
+    from: String,
+    to: String,
+    hostname: Option<String>,
+    app_name: Option<String>,
+    query: Option<String>,
+    severity_min: Option<String>,
+    limit: Option<u32>,
+}
+
+async fn incident_context(
+    State(state): State<ApiState>,
+    Query(q): Query<IncidentContextQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .incident_context(IncidentContextRequest {
+                from: q.from,
+                to: q.to,
+                hostname: q.hostname,
+                app_name: q.app_name,
+                query: q.query,
+                severity_min: q.severity_min,
+                limit: q.limit,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AskHistoryQuery {
+    query: String,
+    hostname: Option<String>,
+    app_name: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    limit: Option<u32>,
+}
+
+async fn ai_ask_history(
+    State(state): State<ApiState>,
+    Query(q): Query<AskHistoryQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .ask_history(AskHistoryRequest {
+                query: q.query,
+                hostname: q.hostname,
+                app_name: q.app_name,
+                from: q.from,
+                to: q.to,
+                limit: q.limit,
+            })
+            .await,
+    )
+}
+
+/// AI incidents — uses `QsQuery` because `terms: Vec<String>` cannot be
+/// deserialized from a URL query string via `axum::extract::Query`
+/// (which uses `serde_urlencoded`). Mirrors `ai_abuse` above.
+#[derive(Debug, Deserialize)]
+struct AiIncidentsQuery {
+    project: Option<String>,
+    tool: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    limit: Option<u32>,
+    window_minutes: Option<u32>,
+    #[serde(default)]
+    terms: Vec<String>,
+}
+
+async fn ai_incidents(
+    State(state): State<ApiState>,
+    serde_qs::axum::QsQuery(q): serde_qs::axum::QsQuery<AiIncidentsQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .list_ai_incidents(AiIncidentRequest {
+                project: q.project,
+                tool: q.tool,
+                from: q.from,
+                to: q.to,
+                limit: q.limit,
+                window_minutes: q.window_minutes,
+                terms: q.terms,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct AiInvestigateQuery {
+    project: Option<String>,
+    tool: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    limit: Option<u32>,
+    window_minutes: Option<u32>,
+    correlation_window_minutes: Option<u32>,
+    #[serde(default)]
+    terms: Vec<String>,
+}
+
+async fn ai_investigate(
+    State(state): State<ApiState>,
+    serde_qs::axum::QsQuery(q): serde_qs::axum::QsQuery<AiInvestigateQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .investigate_ai_incidents(AiInvestigateRequest {
+                project: q.project,
+                tool: q.tool,
+                from: q.from,
+                to: q.to,
+                limit: q.limit,
+                window_minutes: q.window_minutes,
+                correlation_window_minutes: q.correlation_window_minutes,
+                terms: q.terms,
+            })
+            .await,
+    )
+}
+
+/// Run `crate::compose::ComposeService::status()` on a blocking task, gated
+/// by a process-wide semaphore so multiple concurrent REST callers cannot
+/// spawn unbounded `docker inspect` subprocesses. Mirrors the helper in
+/// `src/mcp/tools.rs:412-433` (`compose_status`).
+async fn compose_status_inner() -> anyhow::Result<crate::compose::ComposeStatus> {
+    static COMPOSE_REST_DIAGNOSTICS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    let permit = COMPOSE_REST_DIAGNOSTICS
+        .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)))
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|e| anyhow::anyhow!("compose diagnostics limiter closed: {e}"))?;
+    let service = crate::compose::ComposeService::new(
+        crate::compose::CliDockerInspect,
+        crate::compose::ProcessRunner,
+        crate::compose::ComposeDefaults::default(),
+    );
+    let status = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        service.status(&crate::compose::ComposeTarget::default())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("compose status task failed: {e}"))??;
+    Ok(status)
+}
+
+async fn compose_status() -> impl IntoResponse {
+    match compose_status_inner().await {
+        Ok(status) => respond::<_>(Ok(crate::compose::mcp_projection(&status))),
+        Err(e) => respond::<crate::compose::ComposeMcpStatus>(Err(ServiceError::Internal(
+            anyhow::anyhow!("compose status: {e}"),
+        ))),
+    }
+}
+
+async fn compose_doctor() -> impl IntoResponse {
+    let status = match compose_status_inner().await {
+        Ok(s) => s,
+        Err(e) => {
+            return respond::<crate::compose::ComposeMcpStatus>(Err(ServiceError::Internal(
+                anyhow::anyhow!("compose doctor status: {e}"),
+            )));
+        }
+    };
+    if let Err(e) = crate::compose::ensure_doctor_ready(&status) {
+        return respond::<crate::compose::ComposeMcpStatus>(Err(ServiceError::Internal(
+            anyhow::anyhow!("compose doctor: {e}"),
+        )));
+    }
+    respond::<_>(Ok(crate::compose::mcp_projection(&status)))
 }
 
 // ─── AI session queries ─────────────────────────────────────────────────────

@@ -33,6 +33,12 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "ingest-rate" => parse_ingest_rate(rest),
         "sig" => commands::sig::parse_sig(rest),
         "notify" => commands::notify::parse_notify(rest),
+        // Surface parity gap closure (2026-05-22)
+        "silent-hosts" => commands::silent_hosts::parse_silent_hosts(rest),
+        "clock-skew" => commands::clock_skew::parse_clock_skew(rest),
+        "anomalies" => commands::anomalies::parse_anomalies(rest),
+        "compare" => commands::compare::parse_compare(rest),
+        "apps" => commands::apps::parse_apps(rest),
         _ => bail!("unknown CLI command: {command}"),
     }
 }
