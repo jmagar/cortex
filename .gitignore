@@ -47,6 +47,8 @@ Thumbs.db
 
 # ── Caches (ALL tool caches go here) ─────────────────────────────────────────
 .cache/
+__pycache__/
+*.py[cod]
 
 
 # ── Build artifacts ──────────────────────────────────────────────────────────
