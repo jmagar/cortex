@@ -764,6 +764,35 @@ syslog compose pull            # pull image for resolved Compose project
 syslog compose up              # run docker compose up -d for resolved service
 syslog compose restart         # restart resolved service
 syslog compose logs --tail 20  # bounded compose logs
+
+# Surface parity (2026-05-22) — each is also a REST GET on /api/<command>
+syslog silent-hosts --silent-minutes 60
+syslog clock-skew   --since 2026-05-20T00:00:00Z
+syslog anomalies    --recent-minutes 30 --baseline-minutes 720
+syslog compare      --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:59:59Z \
+                    --b-from 2026-05-21T00:00:00Z --b-to 2026-05-21T23:59:59Z
+syslog apps         --hostname dookie --limit 50
+```
+
+### REST endpoints (2026-05-22 surface parity)
+
+The 12 new routes mirror existing MCP actions one-for-one. All require the
+`SYSLOG_API_TOKEN` bearer; AI endpoints with `terms[]=` parameters are served
+via `serde_qs` to handle repeated keys.
+
+```
+GET  /api/silent-hosts?silent_minutes=60
+GET  /api/clock-skew?since=<RFC3339>
+GET  /api/anomalies?recent_minutes=15&baseline_minutes=360
+GET  /api/compare?a_from=...&a_to=...&b_from=...&b_to=...
+GET  /api/apps?hostname=&from=&to=&limit=&offset=
+GET  /api/similar-incidents?query=...&window_minutes=30
+GET  /api/incident-context?from=...&to=...
+GET  /api/ai/ask-history?query=...
+GET  /api/ai/incidents?terms[]=foo&terms[]=bar
+GET  /api/ai/investigate?correlation_window_minutes=30
+GET  /api/compose/status
+GET  /api/compose/doctor
 ```
 
 `syslog compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, listener conflicts, and destructive `down` without `--yes`.

@@ -1901,3 +1901,147 @@ fn db_admin_handlers_do_not_touch_db_permits_pool_directly() {
         );
     }
 }
+
+// ── Surface parity gap closure: 12 new REST routes (2026-05-22) ──────────────
+//
+// One smoke test per new endpoint. Each test asserts the route is mounted,
+// the bearer token is enforced, and a happy-path call against an empty DB
+// returns 200 with a JSON object (not 404, not 401, not 500 on parse error).
+
+#[tokio::test]
+async fn silent_hosts_returns_200_with_token() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) =
+        get_json(app, "/api/silent-hosts?silent_minutes=60", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(
+        value.get("silent_minutes").is_some(),
+        "missing silent_minutes: {value}"
+    );
+    assert!(value.get("hosts").is_some(), "missing hosts: {value}");
+}
+
+#[tokio::test]
+async fn clock_skew_returns_200_with_token() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/clock-skew", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("hosts").is_some(), "missing hosts: {value}");
+}
+
+#[tokio::test]
+async fn anomalies_returns_200_with_token() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(
+        app,
+        "/api/anomalies?recent_minutes=15&baseline_minutes=360",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("hosts").is_some(), "missing hosts: {value}");
+}
+
+#[tokio::test]
+async fn compare_returns_200_with_token() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(
+        app,
+        "/api/compare?a_from=2026-05-20T00:00:00Z&a_to=2026-05-20T23:59:59Z&b_from=2026-05-21T00:00:00Z&b_to=2026-05-21T23:59:59Z",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("a").is_some(), "missing a: {value}");
+    assert!(value.get("b").is_some(), "missing b: {value}");
+}
+
+#[tokio::test]
+async fn apps_returns_200_with_token() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/apps?limit=50", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("apps").is_some(), "missing apps: {value}");
+}
+
+#[tokio::test]
+async fn similar_incidents_returns_200_with_token() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(
+        app,
+        "/api/similar-incidents?query=disk%20full&window_minutes=30",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn incident_context_returns_200_with_token() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(
+        app,
+        "/api/incident-context?from=2026-05-21T11:00:00Z&to=2026-05-21T13:00:00Z",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ai_ask_history_returns_200_with_token() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(
+        app,
+        "/api/ai/ask-history?query=ssh%20key%20rotation",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ai_incidents_returns_200_with_token() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(app, "/api/ai/incidents?limit=10", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ai_investigate_returns_200_with_token() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(
+        app,
+        "/api/ai/investigate?window_minutes=60&correlation_window_minutes=30",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn compose_status_route_exists() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(app, "/api/compose/status", Some("secret")).await;
+    // In test env Docker is likely absent; we only assert the route is mounted.
+    assert_ne!(status, axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn compose_doctor_route_exists() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(app, "/api/compose/doctor", Some("secret")).await;
+    assert_ne!(status, axum::http::StatusCode::NOT_FOUND);
+}

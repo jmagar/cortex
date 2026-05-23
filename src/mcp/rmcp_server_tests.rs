@@ -924,7 +924,7 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
         );
         let msg = response["error"]["message"].as_str().unwrap_or("");
         // Read actions require syslog:read; admin actions require syslog:admin.
-        let expected_scope = if actions::required_scope_for(&action) == Some("syslog:admin") {
+        let expected_scope = if actions::required_scope_for(action) == Some("syslog:admin") {
             "syslog:admin"
         } else {
             "syslog:read"

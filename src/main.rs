@@ -360,6 +360,11 @@ impl Mode {
                         | "ingest-rate"
                         | "sig"
                         | "notify"
+                        | "silent-hosts"
+                        | "clock-skew"
+                        | "anomalies"
+                        | "compare"
+                        | "apps"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
