@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.4] - 2026-05-22
+
+### Fixed
+
+- **CLI config writes**: Rewrite `.env` and `config.toml` via same-directory
+  temporary files and atomic rename so failed writes cannot truncate live
+  configuration.
+- **CLI review follow-ups**: Key doctor cache entries by container/unit name,
+  recursively flatten nested TOML inline tables, accept negative signed flag
+  values where appropriate, and replace placeholder CLI sidecar tests with
+  behavior-focused coverage.
+
+## [0.27.3] - 2026-05-22
+
+### Refactor
+
+- **CLI modules**: Split the CLI monolith into focused parser, dispatch, output, setup, config, coordination, and AI-watch modules with sidecar tests and a CLI module-size guard.
+
 ## [0.27.2] - 2026-05-21
 
 ## [0.27.1] - 2026-05-20

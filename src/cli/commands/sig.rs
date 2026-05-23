@@ -84,3 +84,6 @@ fn parse_sig_unack(args: &[String]) -> Result<CliCommand> {
     }
     Ok(CliCommand::Sig(SigCommand::Unack(parsed)))
 }
+#[cfg(test)]
+#[path = "sig_tests.rs"]
+mod tests;
