@@ -1,3 +1,4 @@
+use super::super::OutputArgs;
 use super::*;
 
 #[test]

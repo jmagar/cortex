@@ -1,4 +1,5 @@
 use super::dispatch::http_or_cancel;
+use super::output_common::print_json;
 
 use anyhow::{bail, Result};
 use syslog_mcp::app::{
@@ -93,7 +94,7 @@ pub(crate) async fn run_source_ips(mode: &CliMode, args: SourceIpsArgs) -> Resul
         CliMode::Http(client) => http_or_cancel(client.source_ips(&req)).await?,
     };
     if json {
-        return super::print_json(&response);
+        return print_json(&response);
     }
     println!(
         "{} source IP(s) (total {}):",
@@ -117,7 +118,7 @@ pub(crate) async fn run_timeline(mode: &CliMode, args: TimelineArgs) -> Result<(
         CliMode::Http(client) => http_or_cancel(client.timeline(&req)).await?,
     };
     if json {
-        return super::print_json(&response);
+        return print_json(&response);
     }
     println!(
         "bucket={}{}",
@@ -147,7 +148,7 @@ pub(crate) async fn run_patterns(mode: &CliMode, args: PatternsArgs) -> Result<(
         CliMode::Http(client) => http_or_cancel(client.patterns(&req)).await?,
     };
     if json {
-        return super::print_json(&response);
+        return print_json(&response);
     }
     println!(
         "{} pattern(s) (scanned {} logs{})",
@@ -173,7 +174,7 @@ pub(crate) async fn run_ingest_rate(mode: &CliMode, args: IngestRateArgs) -> Res
         CliMode::Http(client) => http_or_cancel(client.ingest_rate(&req)).await?,
     };
     if json {
-        return super::print_json(&response);
+        return print_json(&response);
     }
     let b = &response.buckets;
     println!(
@@ -200,7 +201,7 @@ pub(crate) async fn run_sig_list(mode: &CliMode, args: SigListArgs) -> Result<()
         CliMode::Http(client) => http_or_cancel(client.unaddressed_errors(&req)).await?,
     };
     if json {
-        return super::print_json(&response);
+        return print_json(&response);
     }
     if response.signatures.is_empty() {
         println!("No unaddressed error signatures.");
@@ -238,7 +239,7 @@ pub(crate) async fn run_sig_ack(mode: &CliMode, args: SigAckArgs) -> Result<()> 
         CliMode::Http(client) => http_or_cancel(client.ack_error(&req)).await?,
     };
     if json {
-        return super::print_json(&response);
+        return print_json(&response);
     }
     println!(
         "acknowledged {} at {} by {}",
@@ -255,7 +256,7 @@ pub(crate) async fn run_sig_unack(mode: &CliMode, args: SigUnackArgs) -> Result<
         CliMode::Http(client) => http_or_cancel(client.unack_error(&req)).await?,
     };
     if json {
-        return super::print_json(&response);
+        return print_json(&response);
     }
     println!(
         "unacknowledged {} at {} by {}",
@@ -277,7 +278,7 @@ pub(crate) async fn run_notify_recent(mode: &CliMode, args: NotifyRecentArgs) ->
                 .notifications_recent(limit, args.rule_id, args.since)
                 .await?;
             if json {
-                return super::print_json(&firings);
+                return print_json(&firings);
             }
             if firings.is_empty() {
                 println!("No recent notification firings.");
@@ -299,7 +300,7 @@ pub(crate) async fn run_notify_recent(mode: &CliMode, args: NotifyRecentArgs) ->
                 http_or_cancel(client.notifications_recent(limit, args.rule_id, args.since))
                     .await?;
             if json {
-                return super::print_json(&firings);
+                return print_json(&firings);
             }
             let arr = firings.as_array().cloned().ok_or_else(|| {
                 anyhow::anyhow!(
@@ -333,7 +334,7 @@ pub(crate) async fn run_notify_test(mode: &CliMode, args: NotifyTestArgs) -> Res
         CliMode::Http(client) => {
             let result = http_or_cancel(client.notifications_test(args.body)).await?;
             if json {
-                return super::print_json(&result);
+                return print_json(&result);
             }
             println!("{result}");
         }

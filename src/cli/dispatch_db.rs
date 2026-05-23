@@ -4,11 +4,12 @@ use anyhow::{bail, Result};
 use std::path::PathBuf;
 use syslog_mcp::app::{DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest};
 
-use super::{
+use super::coordination::run_coordination_phases;
+use super::output_ops::{
     print_db_backup_response, print_db_checkpoint_response, print_db_integrity_response,
-    print_db_status_response, print_db_vacuum_response, run_coordination_phases, CliMode,
-    DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs,
+    print_db_status_response, print_db_vacuum_response,
 };
+use super::{CliMode, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs};
 
 // ─── DB Arg → Request conversions (bead 0p8r.9) ─────────────────────────────
 //

@@ -1,4 +1,11 @@
-use super::*;
+use anyhow::{bail, Result};
+use syslog_mcp::app::{IncidentResponse, ServiceLogsResponse};
+use syslog_mcp::scanner::{
+    AiDoctorReport, CheckpointEntry, IndexResult, ParseErrorEntry, PruneCheckpointsResult,
+};
+
+use super::ai_watch::{AiSmokeWatchReport, AiWatchStatusReport};
+use super::output_common::{local_ts, print_json, truncate};
 pub(crate) fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Result<()> {
     if json {
         return print_json(response);

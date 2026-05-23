@@ -1,7 +1,12 @@
-use super::parse_admin::*;
-use super::parse_ai::*;
-use super::parse_logs::*;
-use super::*;
+use anyhow::{anyhow, bail, Result};
+
+use super::parse_admin::{parse_compose, parse_db, parse_service, parse_setup, parse_stats};
+use super::parse_ai::parse_ai;
+use super::parse_logs::{
+    parse_correlate, parse_errors, parse_hosts, parse_incident, parse_ingest_rate, parse_patterns,
+    parse_search, parse_sessions, parse_source_ips, parse_tail, parse_timeline,
+};
+use super::{commands, parse_config, CliCommand};
 
 pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
     let (command, rest) = args

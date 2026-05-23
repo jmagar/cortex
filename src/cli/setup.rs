@@ -1,4 +1,10 @@
-use super::*;
+use anyhow::{bail, Result};
+use serde::Serialize;
+use std::net::TcpListener;
+use std::path::PathBuf;
+
+use super::output_common::print_json;
+use super::{PluginHookArgs, SetupCommand};
 
 pub(crate) fn run_setup(command: SetupCommand) -> Result<()> {
     match command {

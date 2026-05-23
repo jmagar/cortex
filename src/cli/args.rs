@@ -1,4 +1,4 @@
-use super::args_config::*;
+use super::args_config::ConfigCommand;
 use syslog_mcp::compose::{ComposeTarget, MutationOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

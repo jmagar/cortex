@@ -1,5 +1,11 @@
-use super::parse_common::*;
-use super::*;
+use anyhow::{anyhow, bail, Result};
+use std::path::PathBuf;
+
+use super::parse_common::{value_after_equals, FlagCursor};
+use super::{
+    CliCommand, ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget,
+    ConfigUnsetArgs,
+};
 pub(crate) fn parse_config(args: &[String]) -> Result<CliCommand> {
     let (subcommand, rest) = args
         .split_first()

@@ -1,4 +1,8 @@
-use super::*;
+use anyhow::{bail, Result};
+use serde::Serialize;
+use std::path::PathBuf;
+use syslog_mcp::app::SyslogService;
+use syslog_mcp::scanner::{AiDoctorReport, AiIndexingHealth};
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct AiWatchStatusReport {
     pub(crate) service: String,

@@ -1,4 +1,11 @@
-use super::*;
+use anyhow::Result;
+use syslog_mcp::app::{
+    AbuseSearchResponse, AiCorrelateResponse, CorrelateEventsResponse, DbStats, GetErrorsResponse,
+    ListAiProjectsResponse, ListAiToolsResponse, ListHostsResponse, ProjectContextResponse,
+    SearchLogsResponse, SearchSessionsResponse, UsageBlocksResponse,
+};
+
+use super::output_common::{local_ts, print_json, print_log, truncate};
 pub(crate) fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);

@@ -1,4 +1,10 @@
-use super::*;
+use anyhow::Result;
+use syslog_mcp::app::{
+    AiIncidentResponse, AiInvestigateResponse, AskHistoryResponse, IncidentContextResponse,
+    SimilarIncidentsResponse,
+};
+
+use super::output_common::{local_ts, print_json, truncate};
 pub(crate) fn print_similar_incidents_response(
     response: &SimilarIncidentsResponse,
     json: bool,

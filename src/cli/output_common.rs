@@ -1,4 +1,6 @@
-use super::*;
+use anyhow::Result;
+use serde::Serialize;
+use syslog_mcp::app::LogEntry;
 pub(crate) fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())

@@ -8,19 +8,26 @@ use syslog_mcp::app::{
     ProjectContextRequest, SearchSessionsRequest, SimilarIncidentsRequest, UsageBlocksRequest,
 };
 
+use super::ai_watch::{ai_smoke_watch, ai_watch_status};
+use super::output_ai::{
+    ensure_ai_doctor_success, ensure_index_success, print_ai_doctor_response,
+    print_ai_parse_errors_response, print_ai_smoke_watch_response, print_ai_watch_status_response,
+    print_checkpoints_response, print_index_response, print_prune_checkpoints_response,
+};
+use super::output_ai_more::{
+    print_ai_incidents_response, print_ai_investigate_response, print_ask_history_response,
+    print_incident_context_response, print_similar_incidents_response,
+};
+use super::output_logs::{
+    print_abuse_search_response, print_ai_correlate_response, print_ai_projects_response,
+    print_ai_tools_response, print_project_context_response, print_search_sessions_response,
+    print_usage_blocks_response,
+};
 use super::{
-    ai_smoke_watch, ai_watch_status, ensure_ai_doctor_success, ensure_index_success,
-    print_abuse_search_response, print_ai_correlate_response, print_ai_doctor_response,
-    print_ai_incidents_response, print_ai_investigate_response, print_ai_parse_errors_response,
-    print_ai_projects_response, print_ai_smoke_watch_response, print_ai_tools_response,
-    print_ai_watch_status_response, print_ask_history_response, print_checkpoints_response,
-    print_incident_context_response, print_index_response, print_project_context_response,
-    print_prune_checkpoints_response, print_search_sessions_response,
-    print_similar_incidents_response, print_usage_blocks_response, AiAbuseArgs, AiAddArgs,
-    AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs,
-    AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs, AiIncidentsArgs,
-    AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
-    AiSimilarArgs, AiWatchArgs, CliMode, OutputArgs,
+    AiAbuseArgs, AiAddArgs, AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs,
+    AiContextArgs, AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs,
+    AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs,
+    AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliMode, OutputArgs,
 };
 
 // ─── AI Arg → Request conversions (bead 0p8r.8) ─────────────────────────────

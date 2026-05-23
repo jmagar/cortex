@@ -1,30 +1,25 @@
-use anyhow::{anyhow, bail, Result};
-use serde::Serialize;
-use std::net::TcpListener;
-use std::path::PathBuf;
-use std::process::Command;
-use syslog_mcp::app::{
-    AbuseSearchResponse, AiCorrelateResponse, AiIncidentResponse, AiInvestigateResponse,
-    AskHistoryResponse, CorrelateEventsResponse, DbBackupResult, DbCheckpointResult,
-    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult, GetErrorsResponse,
-    IncidentContextResponse, IncidentResponse, ListAiProjectsResponse, ListAiToolsResponse,
-    ListHostsResponse, LogEntry, ProjectContextResponse, SearchLogsResponse,
-    SearchSessionsResponse, ServiceLogsRequest, ServiceLogsResponse, SimilarIncidentsResponse,
-    SyslogService, UsageBlocksResponse,
-};
+use anyhow::{bail, Result};
+use syslog_mcp::app::ServiceLogsRequest;
 use syslog_mcp::compose::{
-    CliDockerInspect, CommandOutput, ComposeCommandResult, ComposeDefaults, ComposeMutation,
-    ComposeService, ComposeStatus, ComposeTarget, ProcessRunner,
-};
-use syslog_mcp::scanner::{
-    AiDoctorReport, AiIndexingHealth, CheckpointEntry, IndexResult, ParseErrorEntry,
-    PruneCheckpointsResult,
+    CliDockerInspect, ComposeDefaults, ComposeMutation, ComposeService, ProcessRunner,
 };
 
 mod args;
 mod args_config;
-pub(crate) use args::*;
-pub(crate) use args_config::*;
+pub(crate) use args::{
+    AiAbuseArgs, AiAddArgs, AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs,
+    AiCommand, AiContextArgs, AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs,
+    AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs,
+    AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliCommand, ComposeArgs, ComposeCommand,
+    ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand,
+    DbIntegrityArgs, DbStatusArgs, DbVacuumArgs, IncidentArgs, IngestRateArgs, NotifyRecentArgs,
+    NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand,
+    ServiceLogsArgs, SessionsArgs, SetupArgs, SetupCommand, SigAckArgs, SigListArgs, SigUnackArgs,
+    SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+};
+pub(crate) use args_config::{
+    ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
+};
 
 mod commands;
 
@@ -51,17 +46,9 @@ mod parse_config;
 mod parse_logs;
 mod setup;
 
-pub(crate) use ai_watch::*;
 pub(crate) use config_cmd::run_config;
-pub(crate) use config_toml::*;
-pub(crate) use coordination::*;
-pub(crate) use output_ai::*;
-pub(crate) use output_ai_more::*;
-pub(crate) use output_common::*;
-pub(crate) use output_logs::*;
-pub(crate) use output_ops::*;
 pub(crate) use parse_common::{parse_i64_flag, parse_u32_flag, FlagCursor};
-pub(crate) use setup::*;
+pub(crate) use setup::run_setup;
 
 impl CliCommand {
     pub(crate) fn parse(args: Vec<String>) -> Result<Self> {
@@ -77,40 +64,40 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
     match command {
         ComposeCommand::Status(args) => {
             let status = service.status(&args.target)?;
-            print_compose_status_response(&status, args.json)
+            output_ops::print_compose_status_response(&status, args.json)
         }
         ComposeCommand::Doctor(args) => {
             let status = service.status(&args.target)?;
-            let coordination = run_coordination_phases();
-            print_compose_doctor_response(&status, &coordination, args.json)?;
-            ensure_doctor_coordination_ok(&coordination)?;
+            let coordination = coordination::run_coordination_phases();
+            output_ops::print_compose_doctor_response(&status, &coordination, args.json)?;
+            output_ops::ensure_doctor_coordination_ok(&coordination)?;
             syslog_mcp::compose::ensure_doctor_ready(&status)
         }
-        ComposeCommand::Up(args) => print_compose_command_response(
+        ComposeCommand::Up(args) => output_ops::print_compose_command_response(
             &service.run_mutation(ComposeMutation::Up, &args.target, &args.options)?,
             args.json,
         ),
-        ComposeCommand::Down(args) => print_compose_command_response(
+        ComposeCommand::Down(args) => output_ops::print_compose_command_response(
             &service.run_mutation(ComposeMutation::Down, &args.target, &args.options)?,
             args.json,
         ),
-        ComposeCommand::Restart(args) => print_compose_command_response(
+        ComposeCommand::Restart(args) => output_ops::print_compose_command_response(
             &service.run_mutation(ComposeMutation::Restart, &args.target, &args.options)?,
             args.json,
         ),
-        ComposeCommand::Pull(args) => print_compose_command_response(
+        ComposeCommand::Pull(args) => output_ops::print_compose_command_response(
             &service.run_mutation(ComposeMutation::Pull, &args.target, &args.options)?,
             args.json,
         ),
         ComposeCommand::Logs(args) => {
             let output = service.logs(&args.target, args.tail)?;
             if args.json {
-                print_json(&output)?;
+                output_common::print_json(&output)?;
             } else {
                 print!("{}", output.stdout);
                 eprint!("{}", output.stderr);
             }
-            ensure_command_success(&output)
+            output_ops::ensure_command_success(&output)
         }
     }
 }
@@ -134,10 +121,28 @@ pub(crate) async fn run_service_no_db(command: CliCommand) -> Result<()> {
                 &syslog_mcp::app::SystemOsAdapter,
             )
             .await?;
-            print_service_logs_response(&report, json)
+            output_ai::print_service_logs_response(&report, json)
         }
     }
 }
+
+#[cfg(test)]
+use ai_watch::smoke_watch_target;
+#[cfg(test)]
+use coordination::{
+    ai_watch_coordination_phase, canonicalize_with_warning, lookup_systemd_db_path,
+    parse_systemctl_env_output, DoctorCache, SystemctlEnv,
+};
+#[cfg(test)]
+use output_ai::ensure_ai_doctor_success;
+#[cfg(test)]
+use output_common::truncate;
+#[cfg(test)]
+use output_ops::ensure_doctor_coordination_ok;
+#[cfg(test)]
+use setup::{SetupPhase, SetupStatus};
+#[cfg(test)]
+use syslog_mcp::scanner::AiDoctorReport;
 
 mod dispatch;
 mod dispatch_ai;

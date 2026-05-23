@@ -1,5 +1,10 @@
-use super::parse_common::*;
-use super::*;
+use anyhow::{anyhow, bail, Result};
+
+use super::parse_common::{parse_u32_flag, value_after_equals, FlagCursor};
+use super::{
+    AiAskHistoryArgs, AiAssessArgs, AiCommand, AiIncidentContextArgs, AiIncidentsArgs,
+    AiInvestigateArgs, AiSimilarArgs, CliCommand,
+};
 pub(crate) fn parse_ai_similar(args: &[String]) -> Result<CliCommand> {
     let mut parsed = AiSimilarArgs::default();
     let mut query_parts = Vec::new();

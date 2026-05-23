@@ -1,4 +1,6 @@
-use super::*;
+use anyhow::{anyhow, bail, Result};
+
+use super::OutputArgs;
 pub(crate) struct FlagCursor<'a> {
     args: &'a [String],
     index: usize,

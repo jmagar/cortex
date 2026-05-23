@@ -1,6 +1,17 @@
-use super::parse_ai_more::*;
-use super::parse_common::*;
-use super::*;
+use anyhow::{anyhow, bail, Result};
+
+use super::parse_ai_more::{
+    parse_ai_ask_history, parse_ai_assess, parse_ai_incident_context, parse_ai_incidents,
+    parse_ai_investigate, parse_ai_similar,
+};
+use super::parse_common::{
+    parse_output_args, parse_positive_u64_flag, parse_u32_flag, value_after_equals, FlagCursor,
+};
+use super::{
+    AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiCommand, AiContextArgs,
+    AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs,
+    AiSearchArgs, AiWatchArgs, CliCommand,
+};
 pub(crate) fn parse_ai(args: &[String]) -> Result<CliCommand> {
     let (subcommand, rest) = args
         .split_first()

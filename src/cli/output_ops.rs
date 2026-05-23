@@ -1,4 +1,12 @@
-use super::*;
+use anyhow::{bail, Result};
+use serde::Serialize;
+use syslog_mcp::app::{
+    DbBackupResult, DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbVacuumResult,
+};
+use syslog_mcp::compose::{CommandOutput, ComposeCommandResult, ComposeStatus};
+
+use super::output_common::print_json;
+use super::setup::{SetupPhase, SetupStatus};
 #[derive(Debug, Clone, Serialize)]
 struct DbStatusReport<'a> {
     #[serde(flatten)]
