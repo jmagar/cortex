@@ -8,7 +8,7 @@ Concise reference. See [CONFIG.md](../CONFIG.md) for full documentation includin
 
 | Path | How | Credentials |
 |------|-----|-------------|
-| **Plugin** | Claude Code connects via HTTP; server mode delegates setup to `syslog setup repair` | `${user_config.*}` in `.mcp.json`; setup writes `~/.syslog-mcp/.env` |
+| **Plugin** | Claude Code connects via HTTP; server mode delegates setup to `syslog setup repair` / `syslog deploy local` | `${user_config.*}` in `.mcp.json`; setup writes `~/.syslog-mcp/.env` |
 | **One-line installer** | `curl .../install.sh \| sh` then `syslog setup` | `~/.syslog-mcp/.env` |
 | **Docker** | `docker compose up -d` | `.env` file |
 | **Bare metal** | `cargo run --release -- serve mcp` or `syslog serve mcp` | `config.toml` or env vars |

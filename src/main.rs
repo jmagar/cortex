@@ -27,6 +27,7 @@ async fn main() -> Result<()> {
         Mode::StdioMcp => serve_stdio_mcp().await,
         Mode::Cli(invocation) => run_cli(*invocation).await,
         Mode::Setup(command) => run_setup(command).await,
+        Mode::Deploy(command) => run_deploy(command).await,
         Mode::DoctorBinary(command) => doctor::run_binary_doctor(command.json).await,
         Mode::DoctorFull(command) => doctor::run_full_doctor(command.json).await,
         Mode::Help => unreachable!("handled before logging initialization"),
@@ -93,6 +94,41 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         }
     };
     cli::run(mode, command).await
+}
+
+async fn run_deploy(command: DeployCommand) -> Result<()> {
+    let (mode, label) = match command.kind {
+        DeployCommandKind::Preflight => (syslog_mcp::setup::SetupMode::Check, "preflight"),
+        DeployCommandKind::Local { dry_run: true } => {
+            (syslog_mcp::setup::SetupMode::Check, "local dry-run")
+        }
+        DeployCommandKind::Local { dry_run: false } => {
+            (syslog_mcp::setup::SetupMode::Repair, "local")
+        }
+    };
+    let report = syslog_mcp::setup::run_setup(mode).await?;
+    if command.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("syslog deploy {label}");
+        println!("mode: {}", report.mode);
+        println!("home: {}", report.home.display());
+        println!("env: {}", report.env_path.display());
+        println!("compose: {}", report.compose_dir.display());
+        println!("data: {}", report.data_dir.display());
+        println!("health: {}", report.health_url);
+        println!("mcp: {}", report.mcp_url);
+        for phase in &report.phases {
+            println!(
+                "{:?}\t{}\t{}ms\t{}",
+                phase.status, phase.name, phase.elapsed_ms, phase.detail
+            );
+        }
+    }
+    if report.has_errors {
+        anyhow::bail!("syslog deploy {label} completed with failed phases");
+    }
+    Ok(())
 }
 
 async fn run_setup(command: SetupCommand) -> Result<()> {
@@ -244,6 +280,7 @@ enum Mode {
     StdioMcp,
     Cli(Box<CliInvocation>),
     Setup(SetupCommand),
+    Deploy(DeployCommand),
     DoctorBinary(DoctorBinaryCommand),
     DoctorFull(DoctorFullCommand),
     Help,
@@ -270,6 +307,18 @@ struct DoctorFullCommand {
 struct SetupCommand {
     kind: SetupCommandKind,
     json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeployCommand {
+    kind: DeployCommandKind,
+    json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeployCommandKind {
+    Preflight,
+    Local { dry_run: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,7 +353,7 @@ impl Mode {
         // Strip CLI-only global flags (`--http`, `--server`, `--token`) from
         // the arg list before subcommand dispatch so they work in any
         // position: `syslog --http search foo` AND `syslog search --http foo`.
-        // Non-CLI modes (serve/mcp/setup/doctor) reject them below — the
+        // Non-CLI modes (serve/mcp/setup/deploy/doctor) reject them below — the
         // flags imply HTTP transport, which only applies to the query CLI.
         let mut remaining = args.clone();
         let global = cli::GlobalFlags::extract(&mut remaining)?;
@@ -327,6 +376,11 @@ impl Mode {
                     && global == cli::GlobalFlags::default() =>
             {
                 Ok(Self::Setup(parse_setup_command(rest)?))
+            }
+            [command, rest @ ..]
+                if command == "deploy" && global == cli::GlobalFlags::default() =>
+            {
+                Ok(Self::Deploy(parse_deploy_command(rest)?))
             }
             [command, rest @ ..]
                 if command == "doctor" && global == cli::GlobalFlags::default() =>
@@ -383,7 +437,7 @@ impl Mode {
                 anyhow::bail!(
                     "--http / --server / --token only apply to CLI query commands \
                      (search, tail, errors, hosts, sessions, ai, correlate, stats, incident, db); \
-                     compose, service, and setup are local-only and reject HTTP flags; \
+                     compose, service, setup, and deploy are local-only and reject HTTP flags; \
                      got: {}",
                     args.join(" ")
                 );
@@ -401,6 +455,7 @@ impl Mode {
             Self::StdioMcp => "warn",
             Self::Cli(_) => "error",
             Self::Setup(_) => "warn",
+            Self::Deploy(_) => "warn",
             Self::DoctorBinary(_) => "warn",
             Self::DoctorFull(_) => "warn",
             Self::Help => "info",
@@ -508,6 +563,31 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     })
 }
 
+fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("deploy requires a subcommand: preflight or local"))?;
+    let mut json = false;
+    let mut dry_run = false;
+    for arg in rest {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--dry-run" if subcommand == "local" => dry_run = true,
+            "--help" | "-h" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            other => anyhow::bail!("unknown deploy {subcommand} argument: {other}"),
+        }
+    }
+    let kind = match subcommand.as_str() {
+        "preflight" => DeployCommandKind::Preflight,
+        "local" => DeployCommandKind::Local { dry_run },
+        other => anyhow::bail!("unknown deploy subcommand: {other}"),
+    };
+    Ok(DeployCommand { kind, json })
+}
+
 fn parse_setup_subcommand_args<'a>(
     name: &str,
     args: impl Iterator<Item = &'a String>,
@@ -569,6 +649,8 @@ fn print_usage() {
   syslog setup debug-wrapper install|remove|check [--json]
   syslog setup debug-compose install|remove|check [--json]
   syslog setup doctor [--json]
+  syslog deploy preflight [--json]
+  syslog deploy local [--dry-run] [--json]
   syslog doctor [--json]          Run all health checks (setup, compose, binary, AI)
   syslog doctor binary [--json]
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
@@ -608,6 +690,8 @@ fn print_usage() {
   syslog service logs SERVICE [--from TIME] [--to TIME] [--tail N] [--json]
   syslog setup check|repair [--json]
   syslog setup plugin-hook [--no-repair] [--json]
+  syslog deploy preflight [--json]
+  syslog deploy local [--dry-run] [--json]
   syslog config get KEY [--env|--toml] [--toml-path PATH] [--json]
   syslog config set KEY VALUE [--env|--toml] [--toml-path PATH] [--json]
   syslog config unset KEY [--env|--toml] [--toml-path PATH] [--json]

@@ -449,6 +449,23 @@ the debug Compose override, transcript-root permissions, disabled legacy index
 timer state, active/enabled watcher state, and container freshness via
 `scripts/check-runtime-current.sh --allow-local-image`.
 
+### `syslog deploy`
+
+Run the local Compose-backed deployment workflow using operator-facing names.
+These commands call the same setup engine as `syslog setup check` and
+`syslog setup repair`.
+
+```bash
+syslog deploy preflight
+syslog deploy preflight --json
+syslog deploy local
+syslog deploy local --dry-run --json
+```
+
+`deploy preflight` and `deploy local --dry-run` do not mutate Docker state.
+`deploy local` repairs `~/.syslog-mcp/.env`, rewrites managed Compose assets,
+pulls the configured image, starts the stack, and checks `/health`.
+
 ### `syslog setup ai-index-timer`
 
 Install, remove, or inspect the optional host-local user-systemd polling

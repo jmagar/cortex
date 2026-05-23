@@ -138,6 +138,32 @@ fn mode_parse_accepts_setup_doctor_namespace() {
 }
 
 #[test]
+fn mode_parse_accepts_deploy_namespace() {
+    assert!(matches!(
+        Mode::parse(vec!["deploy".into(), "preflight".into(), "--json".into()]).unwrap(),
+        Mode::Deploy(_)
+    ));
+    assert!(matches!(
+        Mode::parse(vec![
+            "deploy".into(),
+            "local".into(),
+            "--dry-run".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Deploy(_)
+    ));
+}
+
+#[test]
+fn mode_parse_rejects_unknown_deploy_subcommand() {
+    let err = Mode::parse(vec!["deploy".into(), "remote".into()]).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("unknown deploy subcommand: remote"));
+}
+
+#[test]
 fn mode_parse_rejects_duplicate_ai_watch_service_actions() {
     let err = Mode::parse(vec![
         "setup".into(),
@@ -290,6 +316,16 @@ fn mode_parse_rejects_http_flag_on_serve_mcp() {
     assert!(
         msg.contains("only apply to CLI query commands"),
         "expected guard message, got: {msg}"
+    );
+}
+
+#[test]
+fn mode_parse_rejects_http_flag_on_deploy() {
+    let err = Mode::parse(vec!["--http".into(), "deploy".into(), "local".into()]).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("compose, service, setup, and deploy are local-only"),
+        "expected local-only guard message, got: {msg}"
     );
 }
 

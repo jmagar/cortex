@@ -39,7 +39,7 @@ installer:
 ```text
 plugin userConfig
   --> scripts/plugin-setup.sh exports SYSLOG_* / SYSLOG_MCP_* overrides
-    --> syslog setup repair
+    --> syslog setup repair (same engine as syslog deploy local)
       --> ~/.syslog-mcp/.env + ~/.syslog-mcp/compose/docker-compose.yml
         --> Docker Compose syslog-mcp container
 ```
@@ -69,7 +69,8 @@ database path locally. For remote/Docker/plugin deployments, HTTP keeps the
 ingestion and query surfaces attached to the same running service.
 
 The plugin does not maintain a separate deployment model. Server mode delegates
-to `syslog setup repair`, and the generated Compose assets live under
+to `syslog setup repair` (the same local reconcile path exposed as
+`syslog deploy local`), and the generated Compose assets live under
 `~/.syslog-mcp/compose`. Stale user-level `syslog-mcp.service` units/drop-ins
 from older releases are disabled and removed during repair.
 
