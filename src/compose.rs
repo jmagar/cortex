@@ -28,8 +28,6 @@ pub(crate) use docker::{
     DockerUnavailableError,
 };
 #[cfg(test)]
-pub(crate) use format::{status_from_target, unresolved_status};
-#[cfg(test)]
 pub(crate) use mutation::{
     target_from_container, unresolved_code, DIAG_DOCKER_UNAVAILABLE, DIAG_SYSTEMD_CHECK_FAILED,
     DIAG_TARGET_UNRESOLVED,

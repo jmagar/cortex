@@ -1912,7 +1912,8 @@ fn db_admin_handlers_do_not_touch_db_permits_pool_directly() {
 async fn silent_hosts_returns_200_with_token() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    let (status, value) = get_json(app, "/api/silent-hosts?silent_minutes=60", Some("secret")).await;
+    let (status, value) =
+        get_json(app, "/api/silent-hosts?silent_minutes=60", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(
         value.get("silent_minutes").is_some(),

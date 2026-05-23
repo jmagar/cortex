@@ -1377,3 +1377,91 @@ fn parse_ai_assess_filter_flags_forwarded() {
     assert_eq!(args.terms, vec!["shit", "broken"]);
     assert_eq!(args.limit, Some(300));
 }
+
+// ── Surface parity gap closure (2026-05-22) ─────────────────────────────────
+
+#[test]
+fn parse_silent_hosts_with_minutes_and_json() {
+    let cmd = CliCommand::parse(strings(&[
+        "silent-hosts",
+        "--silent-minutes",
+        "120",
+        "--json",
+    ]))
+    .expect("parse silent-hosts");
+    match cmd {
+        CliCommand::SilentHosts(args) => {
+            assert_eq!(args.silent_minutes, Some(120));
+            assert!(args.json);
+        }
+        other => panic!("expected SilentHosts, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_clock_skew_with_since() {
+    let cmd = CliCommand::parse(strings(&["clock-skew", "--since", "2026-05-20T00:00:00Z"]))
+        .expect("parse clock-skew");
+    match cmd {
+        CliCommand::ClockSkew(args) => {
+            assert_eq!(args.since.as_deref(), Some("2026-05-20T00:00:00Z"));
+            assert!(!args.json);
+        }
+        other => panic!("expected ClockSkew, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_anomalies_with_windows() {
+    let cmd = CliCommand::parse(strings(&[
+        "anomalies",
+        "--recent-minutes",
+        "30",
+        "--baseline-minutes",
+        "720",
+    ]))
+    .expect("parse anomalies");
+    match cmd {
+        CliCommand::Anomalies(args) => {
+            assert_eq!(args.recent_minutes, Some(30));
+            assert_eq!(args.baseline_minutes, Some(720));
+        }
+        other => panic!("expected Anomalies, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_compare_with_ranges() {
+    let cmd = CliCommand::parse(strings(&[
+        "compare",
+        "--a-from",
+        "2026-05-20T00:00:00Z",
+        "--a-to",
+        "2026-05-20T23:59:59Z",
+        "--b-from",
+        "2026-05-21T00:00:00Z",
+        "--b-to",
+        "2026-05-21T23:59:59Z",
+    ]))
+    .expect("parse compare");
+    match cmd {
+        CliCommand::Compare(args) => {
+            assert_eq!(args.a_from.as_deref(), Some("2026-05-20T00:00:00Z"));
+            assert_eq!(args.b_to.as_deref(), Some("2026-05-21T23:59:59Z"));
+        }
+        other => panic!("expected Compare, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_apps_with_hostname_limit() {
+    let cmd = CliCommand::parse(strings(&["apps", "--hostname", "dookie", "--limit", "50"]))
+        .expect("parse apps");
+    match cmd {
+        CliCommand::Apps(args) => {
+            assert_eq!(args.hostname.as_deref(), Some("dookie"));
+            assert_eq!(args.limit, Some(50));
+        }
+        other => panic!("expected Apps, got {other:?}"),
+    }
+}
