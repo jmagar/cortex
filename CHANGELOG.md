@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-05-23
+
+### Added
+
+- **Deploy CLI**: Add `syslog deploy preflight` and `syslog deploy local`
+  as operator-facing names for the existing local Compose setup/reconcile path.
+
+### Changed
+
+- **Plugin deploy config**: Remove the stale `use_docker` user setting now that
+  automated server deployment is Compose-only.
+
 ## [0.27.4] - 2026-05-22
 
 ### Fixed

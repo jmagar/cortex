@@ -478,6 +478,9 @@ Useful setup commands:
 syslog setup          # first-run or normal repair
 syslog setup check    # inspect only; does not mutate files or start services
 syslog setup repair   # repair env/assets and restart the Docker stack
+syslog deploy preflight       # clearer alias for setup check
+syslog deploy local           # clearer local Compose deploy/reconcile command
+syslog deploy local --dry-run # run the deploy preflight without mutating Docker
 syslog setup ai-watch-service install  # host-local real-time transcript watcher
 syslog doctor binary  # check host/container binary freshness
 ```
@@ -522,6 +525,10 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 The plugin deploys the server with Docker Compose through the same `syslog setup`
 path as the one-line installer. You can still build and run the binary locally
 for development, but automated deployment is Compose-only.
+
+`syslog deploy local` is the operator-facing name for the same local
+Compose-backed reconcile path. It exists so deploy workflows do not need to call
+a command named `setup repair` directly.
 
 ### Docker
 
@@ -739,6 +746,8 @@ The MCP port defaults to `127.0.0.1:3100` (loopback only). To expose it on a net
 syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 syslog mcp        # query-only MCP stdio transport
 syslog setup      # install/repair shared ~/.syslog-mcp Docker Compose setup
+syslog deploy preflight  # check deploy prerequisites without mutating Docker
+syslog deploy local      # reconcile local Compose deployment
 syslog stats      # query the SQLite DB directly from the CLI
 syslog db status  # inspect SQLite maintenance state
 syslog db backup  # create a WAL-safe SQLite backup

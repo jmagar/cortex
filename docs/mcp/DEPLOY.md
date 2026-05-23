@@ -48,6 +48,9 @@ Useful setup commands:
 syslog setup          # first run or normal repair
 syslog setup check    # inspect prerequisites and files only
 syslog setup repair   # rewrite managed assets and restart Compose
+syslog deploy preflight       # operator-facing preflight alias
+syslog deploy local           # operator-facing local deploy/reconcile alias
+syslog deploy local --dry-run # preflight without Docker mutation
 ```
 
 `syslog setup` also disables and removes stale user-level
