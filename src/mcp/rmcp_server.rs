@@ -4,7 +4,7 @@ use lab_auth::AuthContext;
 use rmcp::{
     model::{
         CallToolRequestParams, CallToolResult, Content, Implementation, ListResourcesResult,
-        ListToolsResult, PaginatedRequestParams, RawResource, ReadResourceRequestParams,
+        ListToolsResult, Meta, PaginatedRequestParams, RawResource, ReadResourceRequestParams,
         ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerInfo, Tool,
     },
     service::RequestContext,
@@ -127,7 +127,7 @@ impl ServerHandler for SyslogRmcpServer {
     ) -> Result<ListResourcesResult, ErrorData> {
         require_auth_context(&self.state, &context)?;
         Ok(ListResourcesResult {
-            resources: vec![schema_resource()],
+            resources: vec![schema_resource(), query_widget_resource()],
             ..Default::default()
         })
     }
@@ -138,21 +138,24 @@ impl ServerHandler for SyslogRmcpServer {
         context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
         require_auth_context(&self.state, &context)?;
-        if request.uri != SCHEMA_RESOURCE_URI {
-            return Err(ErrorData::invalid_params(
+        match request.uri.as_str() {
+            SCHEMA_RESOURCE_URI => {
+                let schema = tool_definitions();
+                let text = serde_json::to_string_pretty(&schema).map_err(|error| {
+                    ErrorData::internal_error(format!("serialization error: {error}"), None)
+                })?;
+                Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                    text,
+                    SCHEMA_RESOURCE_URI,
+                )
+                .with_mime_type("application/json")]))
+            }
+            QUERY_WIDGET_RESOURCE_URI => Ok(ReadResourceResult::new(vec![query_widget_contents()])),
+            _ => Err(ErrorData::invalid_params(
                 format!("unknown resource: {}", request.uri),
                 None,
-            ));
+            )),
         }
-        let schema = tool_definitions();
-        let text = serde_json::to_string_pretty(&schema).map_err(|error| {
-            ErrorData::internal_error(format!("serialization error: {error}"), None)
-        })?;
-        Ok(ReadResourceResult::new(vec![ResourceContents::text(
-            text,
-            SCHEMA_RESOURCE_URI,
-        )
-        .with_mime_type("application/json")]))
     }
 
     fn get_info(&self) -> ServerInfo {
@@ -189,6 +192,8 @@ pub fn streamable_http_service(
 }
 
 const SCHEMA_RESOURCE_URI: &str = "syslog://schema/mcp-tool";
+pub(super) const QUERY_WIDGET_RESOURCE_URI: &str = "ui://syslog/query-widget";
+pub(super) const MCP_APP_HTML_MIME_TYPE: &str = "text/html;profile=mcp-app";
 
 fn schema_resource() -> Resource {
     Resource::new(
@@ -197,6 +202,36 @@ fn schema_resource() -> Resource {
             .with_mime_type("application/json"),
         None,
     )
+}
+
+fn query_widget_resource() -> Resource {
+    Resource::new(
+        RawResource::new(QUERY_WIDGET_RESOURCE_URI, "syslog query widget")
+            .with_title("Syslog Query")
+            .with_description("Interactive MCP Apps widget for querying syslog-mcp logs")
+            .with_mime_type(MCP_APP_HTML_MIME_TYPE),
+        None,
+    )
+}
+
+fn query_widget_contents() -> ResourceContents {
+    ResourceContents::text(
+        include_str!("ui/query_widget.html"),
+        QUERY_WIDGET_RESOURCE_URI,
+    )
+    .with_mime_type(MCP_APP_HTML_MIME_TYPE)
+}
+
+fn syslog_tool_meta() -> Meta {
+    let mut meta = Map::new();
+    meta.insert(
+        "ui".to_string(),
+        serde_json::json!({
+            "resourceUri": QUERY_WIDGET_RESOURCE_URI,
+            "visibility": ["model", "app"],
+        }),
+    );
+    Meta(meta)
 }
 
 fn rmcp_tool_definitions() -> Result<Vec<Tool>, ErrorData> {
@@ -221,18 +256,26 @@ fn rmcp_tool_from_json(value: Value) -> Result<Tool, ErrorData> {
         .cloned()
         .ok_or_else(|| ErrorData::internal_error("tool definition missing inputSchema", None))?;
 
-    Ok(Tool::new_with_raw(
+    let tool = Tool::new_with_raw(
         Cow::Owned(name.to_string()),
         description,
         Arc::new(input_schema),
-    ))
+    );
+
+    Ok(if name == "syslog" {
+        tool.with_meta(syslog_tool_meta())
+    } else {
+        tool
+    })
 }
 
 fn tool_result_from_json(value: Value) -> Result<CallToolResult, ErrorData> {
     let text = serde_json::to_string_pretty(&value).map_err(|error| {
         ErrorData::internal_error(format!("serialization error: {error}"), None)
     })?;
-    Ok(CallToolResult::success(vec![Content::text(text)]))
+    let mut result = CallToolResult::structured(value);
+    result.content = vec![Content::text(text)];
+    Ok(result)
 }
 
 fn is_validation_error(error: &anyhow::Error) -> bool {
