@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-05-23
+
+### Added
+
+- **Session artifacts**: Add saved CLI refactor and P0/P1 surface parity
+  session notes.
+- **Aurora logo generator**: Add the script used to generate the Aurora server
+  logo pack.
+
+### Changed
+
+- **Python cache hygiene**: Ignore Python bytecode caches so generated
+  `__pycache__` artifacts are not committed.
+
 ## [0.28.0] - 2026-05-23
 
 ### Added

@@ -7,11 +7,11 @@
     "url": "https://github.com/jmagar/syslog-mcp",
     "source": "github"
   },
-  "version": "0.28.0",
+  "version": "0.28.1",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/syslog-mcp:v0.28.0",
+      "identifier": "ghcr.io/jmagar/syslog-mcp:v0.28.1",
       "transport": {
         "type": "stdio"
       },
