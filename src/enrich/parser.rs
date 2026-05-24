@@ -25,6 +25,8 @@ use thiserror::Error;
 /// - `AdguardApi` → `"adguard-api"`
 /// - `UnifiApi` → `"unifi-api"`
 /// - `Agent` → `"agent"` (per-host agent WebSocket)
+/// - `ShellHistory` → `"shell-history"` (local shell history backfill)
+/// - `AgentCommand` → `"agent-command"` (AI agent-launched shell command spool)
 ///
 /// **History:** prior versions of this contract used `snake_case` with a
 /// bare `Syslog` variant. Both were corrected during the cross-cutting audit
@@ -41,6 +43,8 @@ pub enum SourceKind {
     AdguardApi,
     UnifiApi,
     Agent,
+    ShellHistory,
+    AgentCommand,
 }
 
 impl SourceKind {
@@ -57,6 +61,8 @@ impl SourceKind {
             SourceKind::AdguardApi => "adguard-api",
             SourceKind::UnifiApi => "unifi-api",
             SourceKind::Agent => "agent",
+            SourceKind::ShellHistory => "shell-history",
+            SourceKind::AgentCommand => "agent-command",
         }
     }
 

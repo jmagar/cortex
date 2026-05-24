@@ -83,6 +83,17 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         return cli::run_config(command);
     }
 
+    if let cli::CliCommand::AgentCommand(cli::AgentCommandCommand::Wrap(args)) = command {
+        if let Some(trigger) = flags.http_flag_trigger() {
+            anyhow::bail!(
+                "{} has no effect on `agent-command wrap` (wrapper command); remove --http / --server / --token",
+                trigger
+            );
+        }
+        let code = cli::run_agent_command_wrap(args)?;
+        std::process::exit(code);
+    }
+
     // Build CliMode ONCE per invocation, matching the per-invocation reqwest
     // Client rule from bead .5. For Local mode we lazily load the runtime so
     // HTTP-mode invocations don't pay the SQLite-open cost.
@@ -165,6 +176,9 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         }
         SetupCommandKind::AiWatchService(action) => {
             syslog_mcp::setup::run_ai_watch_service_setup(action).await?
+        }
+        SetupCommandKind::AgentCommand(action) => {
+            syslog_mcp::setup::run_agent_command_setup(action).await?
         }
         SetupCommandKind::DebugWrapper(action) => {
             syslog_mcp::setup::run_debug_wrapper_setup(action).await?
@@ -353,6 +367,7 @@ enum SetupCommandKind {
     Main(syslog_mcp::setup::SetupMode),
     AiIndexTimer(syslog_mcp::setup::AiIndexTimerAction),
     AiWatchService(syslog_mcp::setup::AiWatchServiceAction),
+    AgentCommand(syslog_mcp::setup::AgentCommandAction),
     DebugWrapper(syslog_mcp::setup::DebugWrapperAction),
     DebugCompose(syslog_mcp::setup::DebugComposeAction),
     Doctor,
@@ -428,6 +443,8 @@ impl Mode {
                         | "sessions"
                         | "incident"
                         | "ai"
+                        | "shell"
+                        | "agent-command"
                         | "correlate"
                         | "stats"
                         | "db"
@@ -463,7 +480,7 @@ impl Mode {
                 // ignored for `serve mcp`, `setup`, etc.
                 anyhow::bail!(
                     "--http / --server / --token only apply to CLI query commands \
-                     (search, tail, errors, hosts, sessions, ai, correlate, stats, incident, db); \
+                     (search, tail, errors, hosts, sessions, ai, shell, agent-command, correlate, stats, incident, db); \
                      compose, service, setup, and deploy are local-only and reject HTTP flags; \
                      got: {}",
                     args.join(" ")
@@ -538,6 +555,21 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
                 "install" => syslog_mcp::setup::AiWatchServiceAction::Install,
                 "remove" => syslog_mcp::setup::AiWatchServiceAction::Remove,
                 _ => syslog_mcp::setup::AiWatchServiceAction::Check,
+            }),
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
+        Some("agent-command")
+    ) {
+        let _ = iter.next();
+        let (action, json) = parse_setup_subcommand_args("agent-command", iter)?;
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::AgentCommand(match action {
+                "install" => syslog_mcp::setup::AgentCommandAction::Install,
+                "remove" => syslog_mcp::setup::AgentCommandAction::Remove,
+                _ => syslog_mcp::setup::AgentCommandAction::Check,
             }),
             json,
         });
@@ -683,6 +715,7 @@ fn print_usage() {
   syslog setup [check|repair] [--json]
   syslog setup ai-index-timer install|remove|check [--json]
   syslog setup ai-watch-service install|remove|check [--json]
+  syslog setup agent-command install|remove|check [--json]
   syslog setup debug-wrapper install|remove|check [--json]
   syslog setup debug-compose install|remove|check [--json]
   syslog setup doctor [--json]
@@ -718,6 +751,9 @@ fn print_usage() {
   syslog ai doctor [--strict-permissions] [--json]
   syslog ai watch-status [--json]
   syslog ai smoke-watch [--json]
+  syslog shell index --path PATH [--shell zsh] [--json]
+  syslog agent-command ingest-spool --path PATH [--json]
+  syslog agent-command wrap --spool PATH -- COMMAND...
   syslog db status [--check-coord] [--json]
   syslog db integrity [--quick] [--json]
   syslog db checkpoint [--mode passive|full|restart|truncate] [--json]
@@ -730,6 +766,7 @@ fn print_usage() {
   syslog compose logs [--tail N] [--json]
   syslog service logs SERVICE [--from TIME] [--to TIME] [--tail N] [--json]
   syslog setup check|repair [--json]
+  syslog setup agent-command install|remove|check [--json]
   syslog setup plugin-hook [--no-repair] [--json]
   syslog deploy preflight [--json]
   syslog deploy local [--dry-run] [--json]

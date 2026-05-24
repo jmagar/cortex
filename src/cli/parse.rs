@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Result};
 
 use super::parse_admin::{parse_compose, parse_db, parse_service, parse_setup, parse_stats};
 use super::parse_ai::parse_ai;
+use super::parse_command_log::{parse_agent_command, parse_shell};
 use super::parse_logs::{
     parse_correlate, parse_errors, parse_hosts, parse_incident, parse_ingest_rate, parse_patterns,
     parse_search, parse_sessions, parse_source_ips, parse_tail, parse_timeline,
@@ -20,6 +21,8 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "sessions" => parse_sessions(rest),
         "incident" => parse_incident(rest),
         "ai" => parse_ai(rest),
+        "shell" => parse_shell(rest),
+        "agent-command" => parse_agent_command(rest),
         "correlate" => parse_correlate(rest),
         "stats" => parse_stats(rest),
         "compose" => parse_compose(rest),

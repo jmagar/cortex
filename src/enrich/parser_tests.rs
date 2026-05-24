@@ -7,6 +7,8 @@ fn source_kind_as_str_matches_serde() {
     assert_eq!(SourceKind::DockerEvent.as_str(), "docker-event");
     assert_eq!(SourceKind::AdguardApi.as_str(), "adguard-api");
     assert_eq!(SourceKind::UnifiApi.as_str(), "unifi-api");
+    assert_eq!(SourceKind::ShellHistory.as_str(), "shell-history");
+    assert_eq!(SourceKind::AgentCommand.as_str(), "agent-command");
 }
 
 #[test]

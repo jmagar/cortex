@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-05-24
+
+### Added
+
+- **Shell history ingestion**: Add `syslog shell index` for zsh extended
+  history backfill into the main log corpus with `shell-history` source
+  metadata.
+- **Agent command capture**: Add `syslog agent-command` spool ingestion and a
+  `syslog setup agent-command` Claude Code shell-prefix wrapper for Bash tool,
+  hook, and MCP startup command correlation.
+
 ## [0.31.3] - 2026-05-24
 
 ### Fixed
