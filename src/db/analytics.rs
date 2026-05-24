@@ -998,20 +998,23 @@ pub struct ClockSkewEntry {
     pub max_skew_secs: f64,
 }
 
+const CLOCK_SKEW_SQL: &str = "
+    SELECT hostname,
+           COUNT(*),
+           AVG((julianday(received_at) - julianday(timestamp)) * 86400),
+           MIN((julianday(received_at) - julianday(timestamp)) * 86400),
+           MAX((julianday(received_at) - julianday(timestamp)) * 86400)
+      FROM logs INDEXED BY idx_logs_received_at
+     WHERE received_at >= ?1
+     GROUP BY hostname
+     ORDER BY ABS(AVG((julianday(received_at) - julianday(timestamp)) * 86400)) DESC
+     LIMIT ?2";
+
 pub fn clock_skew(pool: &DbPool, since: &str, limit: Option<u32>) -> Result<Vec<ClockSkewEntry>> {
     let conn = pool.get()?;
-    let mut stmt = conn.prepare(
-        "SELECT hostname,
-                COUNT(*),
-                AVG((julianday(received_at) - julianday(timestamp)) * 86400),
-                MIN((julianday(received_at) - julianday(timestamp)) * 86400),
-                MAX((julianday(received_at) - julianday(timestamp)) * 86400)
-         FROM logs
-         WHERE received_at >= ?1
-         GROUP BY hostname
-         ORDER BY ABS(AVG((julianday(received_at) - julianday(timestamp)) * 86400)) DESC",
-    )?;
-    let rows = stmt.query_map(params![since], |r| {
+    let limit = limit.map(i64::from).unwrap_or(i64::MAX);
+    let mut stmt = conn.prepare(CLOCK_SKEW_SQL)?;
+    let rows = stmt.query_map(params![since, limit], |r| {
         Ok(ClockSkewEntry {
             hostname: r.get(0)?,
             samples: r.get(1)?,
@@ -1020,11 +1023,7 @@ pub fn clock_skew(pool: &DbPool, since: &str, limit: Option<u32>) -> Result<Vec<
             max_skew_secs: r.get::<_, Option<f64>>(4)?.unwrap_or(0.0),
         })
     })?;
-    let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    if let Some(limit) = limit {
-        rows.truncate(limit as usize);
-    }
-    Ok(rows)
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 // -----------------------------------------------------------------------------

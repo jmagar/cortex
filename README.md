@@ -847,6 +847,11 @@ GET  /api/compose/status
 GET  /api/compose/doctor
 ```
 
+`/api/compose/status` is a redacted read-only projection and can report
+`runtime_state="docker_unavailable"` when Docker inspection is unavailable from
+inside the container. `/api/compose/doctor` is stricter: unready Docker,
+ownership, or runtime states return HTTP 503 with the same structured projection.
+
 `syslog compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, listener conflicts, and destructive `down` without `--yes`.
 
 See [docs/CLI.md](docs/CLI.md) for the full direct CLI reference, including flags, JSON output, and how CLI commands map to MCP actions.

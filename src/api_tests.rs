@@ -2017,6 +2017,62 @@ async fn ai_incidents_returns_200_with_token() {
 }
 
 #[tokio::test]
+async fn ai_incidents_accepts_supported_terms_encodings() {
+    let (state, pool, _dir) = test_state(Some("secret".into()));
+    db::insert_logs_batch(
+        &pool,
+        &[
+            ai_entry(
+                "2026-05-24T12:00:00Z",
+                "host-a",
+                "info",
+                "tooling transcript row",
+                "/tmp/project",
+                "codex",
+                "sess-1",
+            ),
+            ai_entry(
+                "2026-05-24T12:01:00Z",
+                "host-a",
+                "info",
+                "plain transcript row",
+                "/tmp/project",
+                "codex",
+                "sess-1",
+            ),
+        ],
+    )
+    .unwrap();
+    let app = test_router(state);
+
+    for uri in [
+        "/api/ai/incidents?terms=tooling&limit=1",
+        "/api/ai/incidents?terms[]=tooling&limit=1",
+    ] {
+        let (status, value) = get_json(app.clone(), uri, Some("secret")).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{uri}: {value}");
+        assert_eq!(
+            value["incidents"][0]["terms"],
+            serde_json::json!(["tooling"]),
+            "{uri}: {value}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn ai_incidents_rejects_unsupported_indexed_terms_query() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(
+        app,
+        "/api/ai/incidents?terms%5B0%5D=tooling&limit=1",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn ai_investigate_returns_200_with_token() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
@@ -2027,6 +2083,51 @@ async fn ai_investigate_returns_200_with_token() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ai_investigate_accepts_supported_terms_encodings() {
+    let (state, pool, _dir) = test_state(Some("secret".into()));
+    db::insert_logs_batch(
+        &pool,
+        &[ai_entry(
+            "2026-05-24T12:00:00Z",
+            "host-a",
+            "info",
+            "tooling transcript row",
+            "/tmp/project",
+            "codex",
+            "sess-1",
+        )],
+    )
+    .unwrap();
+    let app = test_router(state);
+
+    for uri in [
+        "/api/ai/investigate?terms=tooling&limit=1",
+        "/api/ai/investigate?terms[]=tooling&limit=1",
+    ] {
+        let (status, value) = get_json(app.clone(), uri, Some("secret")).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{uri}: {value}");
+        assert_eq!(
+            value["evidence"][0]["incident"]["terms"],
+            serde_json::json!(["tooling"]),
+            "{uri}: {value}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn ai_investigate_rejects_unsupported_indexed_terms_query() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(
+        app,
+        "/api/ai/investigate?terms%5B0%5D=tooling&limit=1",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -2044,4 +2145,41 @@ async fn compose_doctor_route_exists() {
     let app = test_router(state);
     let (status, _value) = get_json(app, "/api/compose/doctor", Some("secret")).await;
     assert_ne!(status, axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn compose_doctor_unready_returns_structured_projection() {
+    let status = crate::compose::ComposeStatus {
+        container_name: "syslog-mcp".into(),
+        container_id: None,
+        status: None,
+        health: None,
+        image: None,
+        image_id: None,
+        compose_project: None,
+        compose_working_dir: None,
+        compose_files: Vec::new(),
+        service: None,
+        data_mounts: Vec::new(),
+        ports: Vec::new(),
+        systemd: None,
+        diagnostics: vec![crate::compose::ComposeDiagnostic {
+            severity: crate::compose::DiagnosticSeverity::Error,
+            code: "docker_unavailable".into(),
+            message: "docker inspect failed".into(),
+        }],
+    };
+
+    let response = compose_doctor_unready_response(&status, anyhow::anyhow!("not ready"));
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    );
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["container_name"], "syslog-mcp");
+    assert_eq!(value["ownership"], "unknown");
+    assert_eq!(value["runtime_state"], "docker_unavailable");
+    assert_eq!(value["diagnostics"][0]["code"], "docker_unavailable");
 }
