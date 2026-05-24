@@ -17,9 +17,45 @@ Use `scripts/prompt-headless-eval.sh` for the live path:
 
 ```bash
 scripts/prompt-headless-eval.sh --dry-run --prompt infra.service-outage --arg service=plex
-scripts/prompt-headless-eval.sh --agent codex --prompt infra.after-deploy-check --arg service=syslog-mcp
-scripts/prompt-headless-eval.sh --agent claude --mcp-config /path/to/claude-mcp-config.json --prompt infra.storage-pressure
+scripts/prompt-headless-eval.sh --agent codex --report /tmp/syslog-prompt-eval.json --prompt infra.after-deploy-check --arg service=syslog-mcp
+scripts/prompt-headless-eval.sh --agent claude --mcp-config /path/to/claude-mcp-config.json --report /tmp/syslog-prompt-eval.json --prompt infra.storage-pressure
 ```
+
+The script deliberately has two preflight layers:
+
+- MCP server preflight always calls `prompts/get`, `resources/read`,
+  `tools/list`, and `syslog action=help` over JSON-RPC. This proves the live
+  server exposes prompts, the prompt output schema resource, the `syslog` tool,
+  and action cost metadata. `mcporter` is still useful for tools, but current
+  installed mcporter does not expose first-class MCP resource reads, so resource
+  checks stay as raw JSON-RPC.
+- Agent MCP preflight asks the selected headless agent to call `syslog
+  action=help` using only its configured MCP tools. This fails fast when the
+  agent runtime cannot see syslog-mcp directly. Use `--skip-agent-preflight`
+  only when intentionally evaluating fallback behavior.
+
+Cost controls:
+
+- `--timeout SECS` bounds the full agent run; default is 300 seconds.
+- `--preflight-timeout SECS` bounds the agent MCP preflight; default is 90
+  seconds.
+- `--max-tokens N` fails the run when parsed token usage exceeds the budget;
+  default is 25000 and `0` disables the check. Codex token usage is parsed from
+  its final `tokens used` line.
+- `--max-budget-usd AMOUNT` is passed through to Claude `--print`.
+
+Reports:
+
+- `--report PATH` writes compact JSON with status, prompt, agent, MCP URL,
+  preflight results, token count, verdict, confidence, evidence count, next
+  action count, telemetry gap count, and the validated structured output.
+- Full agent logs and raw/validated outputs are copied to `PATH.artifacts/`
+  when a full agent run is attempted.
+
+If the agent MCP preflight fails, fix the agent's MCP configuration first. In
+the observed Codex environment, the headless run saw `lab`, `codex_apps`,
+`context7`, and `steamy-windows-mcp`, but not `syslog`; the script now stops at
+that point instead of spending a large token budget exploring local fallbacks.
 
 ## Claude Code Headless Surface
 
