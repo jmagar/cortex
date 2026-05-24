@@ -395,11 +395,9 @@ impl GeminiStreamState {
             }
             Some("tool_result") => {}
             Some("error") => bail!("Gemini headless stream error: {value}"),
-            Some("message") => {
-                if value.get("role").and_then(Value::as_str) == Some("assistant") {
-                    if let Some(delta) = message_content(&value) {
-                        self.push_delta(&delta, on_delta)?;
-                    }
+            Some("message") if value.get("role").and_then(Value::as_str) == Some("assistant") => {
+                if let Some(delta) = message_content(&value) {
+                    self.push_delta(&delta, on_delta)?;
                 }
             }
             Some("result") => self.handle_result(&value)?,
