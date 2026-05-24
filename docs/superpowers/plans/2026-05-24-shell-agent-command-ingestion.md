@@ -74,5 +74,5 @@
 - [ ] Run focused tests for `command_log`, `enrich::parser`, and CLI parsing.
 - [ ] Run `cargo fmt`.
 - [ ] Run `cargo test`.
-- [ ] Bump the patch version across all version-bearing files and add `CHANGELOG.md` entry because this is a feature branch push.
+- [ ] Verify the commit prefix, then run the normal bump tooling using the repo policy (`feat!:`/`BREAKING CHANGE` -> major, `feat:` -> minor, everything else -> patch) and add a `CHANGELOG.md` entry.
 - [ ] Commit and push branch, then create PR if GitHub auth/remotes are available.

@@ -1,4 +1,4 @@
-use super::Mode;
+use super::{cli, Mode};
 
 #[test]
 fn mode_parse_accepts_single_binary_transport_commands() {
@@ -151,6 +151,42 @@ fn mode_parse_accepts_command_ingest_namespace() {
         .unwrap(),
         Mode::Cli(_)
     ));
+}
+
+#[test]
+fn mode_parse_preserves_wrapped_command_http_like_flags() {
+    let mode = Mode::parse(vec![
+        "agent-command".into(),
+        "wrap".into(),
+        "--spool".into(),
+        "/tmp/spool.jsonl".into(),
+        "--".into(),
+        "curl".into(),
+        "--http".into(),
+        "--server".into(),
+        "https://example.test".into(),
+        "--token=literal".into(),
+    ])
+    .unwrap();
+
+    let Mode::Cli(invocation) = mode else {
+        panic!("expected CLI mode");
+    };
+    assert_eq!(invocation.flags, cli::GlobalFlags::default());
+    let cli::CliCommand::AgentCommand(cli::AgentCommandCommand::Wrap(args)) = invocation.command
+    else {
+        panic!("expected agent-command wrap");
+    };
+    assert_eq!(
+        args.command,
+        vec![
+            "curl".to_string(),
+            "--http".to_string(),
+            "--server".to_string(),
+            "https://example.test".to_string(),
+            "--token=literal".to_string(),
+        ]
+    );
 }
 
 #[test]

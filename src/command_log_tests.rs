@@ -2,6 +2,7 @@ use std::io::Write;
 
 use crate::config::StorageConfig;
 use crate::db::{init_pool, search_logs, SearchParams};
+use serial_test::serial;
 
 use super::*;
 
@@ -45,6 +46,85 @@ fn command_args_to_shell_command_quotes_multi_arg_invocations() {
     assert_eq!(
         command_args_to_shell_command(&["printf wrappedok >/dev/null".to_string()]),
         "printf wrappedok >/dev/null"
+    );
+}
+
+#[test]
+fn agent_command_ingest_spool_guard_is_argv_scoped() {
+    assert!(is_agent_command_ingest_spool_invocation(&[
+        "/usr/local/bin/syslog".to_string(),
+        "agent-command".to_string(),
+        "ingest-spool".to_string(),
+        "--path".to_string(),
+        "/tmp/spool.jsonl".to_string(),
+    ]));
+    assert!(!is_agent_command_ingest_spool_invocation(&[
+        "echo".to_string(),
+        "agent-command ingest-spool".to_string(),
+    ]));
+    assert!(!is_agent_command_ingest_spool_invocation(&[
+        "syslog".to_string(),
+        "agent-command ingest-spool".to_string(),
+    ]));
+}
+
+#[test]
+fn sanitize_uri_segment_percent_encodes_losslessly() {
+    assert_eq!(sanitize_uri_segment("a/b"), "a%2Fb");
+    assert_eq!(sanitize_uri_segment("a b"), "a%20b");
+    assert_eq!(sanitize_uri_segment("a-b"), "a-b");
+    assert_eq!(sanitize_uri_segment("lambda-λ"), "lambda-%CE%BB");
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn wrapper_executes_multi_arg_commands_without_shell_reparse() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let fake_shell = dir.path().join("fake-shell");
+    let arg_out = dir.path().join("args.txt");
+    let spool_dir = dir.path().join("state");
+    std::fs::create_dir(&spool_dir).unwrap();
+    std::fs::set_permissions(&spool_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let spool = spool_dir.join("agent-command.jsonl");
+    std::fs::write(
+        &fake_shell,
+        "#!/bin/sh\nprintf shell-used >\"$SYSLOG_TEST_ARG_OUT\"\nexit 97\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake_shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let previous_shell = std::env::var_os("SHELL");
+    let previous_out = std::env::var_os("SYSLOG_TEST_ARG_OUT");
+    std::env::set_var("SHELL", &fake_shell);
+    std::env::set_var("SYSLOG_TEST_ARG_OUT", &arg_out);
+
+    let exit_code = run_agent_command_wrapper(
+        &spool,
+        &[
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "printf '%s\\n%s\\n%s\\n' \"$#\" \"$1\" \"$2\" >\"$SYSLOG_TEST_ARG_OUT\"".to_string(),
+            "sh".to_string(),
+            "two words".to_string(),
+            "literal;not-shell".to_string(),
+        ],
+    )
+    .unwrap();
+
+    match previous_shell {
+        Some(value) => std::env::set_var("SHELL", value),
+        None => std::env::remove_var("SHELL"),
+    }
+    match previous_out {
+        Some(value) => std::env::set_var("SYSLOG_TEST_ARG_OUT", value),
+        None => std::env::remove_var("SYSLOG_TEST_ARG_OUT"),
+    }
+    assert_eq!(exit_code, 0);
+    assert_eq!(
+        std::fs::read_to_string(arg_out).unwrap(),
+        "2\ntwo words\nliteral;not-shell\n"
     );
 }
 
@@ -197,4 +277,44 @@ fn imports_agent_spool_as_agent_command_rows() {
     let second = import_agent_command_spool(&pool, &spool).unwrap();
     assert_eq!(second.scanned, 0);
     assert_eq!(second.imported, 0);
+}
+
+#[test]
+fn wrapper_preserves_command_exit_when_spool_append_fails() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let exit_code =
+        run_agent_command_wrapper(dir.path(), &["true".to_string()]).expect("wrapper runs command");
+
+    assert_eq!(exit_code, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn existing_spool_parent_permissions_are_not_mutated() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let parent = dir.path().join("existing-parent");
+    std::fs::create_dir(&parent).unwrap();
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    ensure_private_parent(&parent.join("agent-command.jsonl")).unwrap();
+
+    let mode = std::fs::metadata(&parent).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o755);
+}
+
+#[cfg(unix)]
+#[test]
+fn newly_created_spool_parent_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let parent = dir.path().join("new-parent");
+
+    ensure_private_parent(&parent.join("agent-command.jsonl")).unwrap();
+
+    let mode = std::fs::metadata(&parent).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o700);
 }

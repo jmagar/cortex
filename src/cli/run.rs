@@ -165,7 +165,7 @@ impl GlobalFlags {
     /// Unknown args are left in place untouched so the existing per-subcommand
     /// parsers see exactly what they used to. We deliberately allow both
     /// `syslog --http search foo` and `syslog search --http foo` — the
-    /// stripper walks the whole vec, not just a prefix.
+    /// stripper walks the command args until a `--` wrapped-command sentinel.
     ///
     /// `--server` / `--token` without a following value error out; an empty
     /// value (e.g. `--token=`) is also an error so a stray trailing `=` does
@@ -174,6 +174,9 @@ impl GlobalFlags {
         let mut out = GlobalFlags::default();
         let mut i = 0;
         while i < args.len() {
+            if args[i] == "--" {
+                break;
+            }
             // Two flag families: bare "--http", and value-bearing
             // "--server"/"--token" which accept "--flag VALUE" or "--flag=VALUE".
             let arg = args[i].as_str();
