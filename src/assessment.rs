@@ -574,6 +574,15 @@ mod tests {
         assert!(!SKILL_MD.trim().is_empty());
         assert!(SKILL_MD.contains("untrusted input"));
         assert!(SKILL_MD.contains("Never attribute blame without citing specific evidence"));
+        assert!(SKILL_MD.contains("Real frustration with incidental profanity"));
+        assert!(SKILL_MD.contains("Trend evidence unavailable"));
+        assert!(SKILL_MD
+            .contains("Never infer recurrence, isolation, or system-wide behavior from a single incident without comparison evidence"));
+        assert!(SKILL_MD.contains("Never combine \"Trend evidence unavailable\""));
+        assert!(SKILL_MD.contains("write exactly: **Trend evidence unavailable.**"));
+        assert!(SKILL_MD.contains("Never write \"no systemic failure\""));
+        assert!(SKILL_MD.contains("Never collapse \"real frustration with incidental profanity\""));
+        assert!(SKILL_MD.contains("The executive summary must preserve the same uncertainty level"));
     }
 
     #[test]
