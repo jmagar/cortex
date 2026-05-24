@@ -4,6 +4,7 @@ pub mod ai_watch;
 pub mod api;
 pub mod app;
 pub(crate) mod assessment;
+pub mod command_log;
 pub mod compose;
 pub mod config;
 pub mod deploy;

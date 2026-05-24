@@ -7,15 +7,16 @@ use syslog_mcp::compose::{
 mod args;
 mod args_config;
 pub(crate) use args::{
-    AiAbuseArgs, AiAddArgs, AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs,
-    AiCommand, AiContextArgs, AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs,
-    AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs,
-    AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliCommand, ComposeArgs, ComposeCommand,
-    ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand,
-    DbIntegrityArgs, DbStatusArgs, DbVacuumArgs, IncidentArgs, IngestRateArgs, NotifyRecentArgs,
-    NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand,
-    ServiceLogsArgs, SessionsArgs, SetupArgs, SetupCommand, SigAckArgs, SigListArgs, SigUnackArgs,
-    SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, AiAbuseArgs, AiAddArgs,
+    AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs, AiCommand, AiContextArgs,
+    AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs, AiIncidentsArgs,
+    AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
+    AiSimilarArgs, AiWatchArgs, CliCommand, ComposeArgs, ComposeCommand, ComposeLogsArgs,
+    ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand, DbIntegrityArgs,
+    DbStatusArgs, DbVacuumArgs, IncidentArgs, IngestRateArgs, NotifyRecentArgs, NotifyTestArgs,
+    OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand, ServiceLogsArgs,
+    SessionsArgs, SetupArgs, SetupCommand, ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs,
+    SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
@@ -24,6 +25,7 @@ pub(crate) use args_config::{
 mod commands;
 
 mod run;
+pub(crate) use dispatch_command_log::run_agent_command_wrap;
 #[allow(unused_imports)]
 pub(crate) use run::ENV_USE_HTTP;
 pub(crate) use run::{run, CliMode, GlobalFlags};
@@ -32,6 +34,7 @@ mod ai_watch;
 mod config_cmd;
 mod config_toml;
 mod coordination;
+mod dispatch_command_log;
 mod output_ai;
 mod output_ai_more;
 mod output_common;
@@ -41,6 +44,7 @@ mod parse;
 mod parse_admin;
 mod parse_ai;
 mod parse_ai_more;
+mod parse_command_log;
 mod parse_common;
 mod parse_config;
 mod parse_logs;

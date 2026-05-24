@@ -51,6 +51,8 @@ caught at write time (see §5).
 | `unifi` | `unifi-api` poller (Epic C §4) | spec C | `key`, `_id`, `ip`, `mac`, `ap`, `ssid`, `user`. No parser in V1. If a future parser lands, it writes under `unifi.parsed`. |
 | `otlp` | OTLP ingest (`src/otlp.rs`, existing) | existing code | Carries OpenTelemetry `attributes`, `resource`, `scope` — already populated by today's code. |
 | `agent` | `syslog agent` (Epic A §4.1) | spec A | The agent's free-form `AgentLogEntry.metadata` blob is wrapped wholesale under this key by the server-side ingest handler. **The agent CANNOT write to any other namespace.** This boundary is what prevents a compromised agent from forging parser provenance. |
+| `shell` | shell history import (`src/command_log.rs`) | command-log source | Shell name, user, history path, line number, duration, and timestamp quality for local shell-history rows. Command text is scrubbed before `message`/`raw`; unsanitized command text must not be stored here. |
+| `agent_command` | agent command spool import (`src/command_log.rs`) | command-log source | Claude/agent command metadata: schema version, agent name, command surface, cwd, pid, exit status, duration, finish time, and session id. The wrapper does not capture env/stdout/stderr by default. |
 | `parser` | parser dispatcher (Epic B §4) | spec B | Provenance for the parser that ran: `{"name": "authelia", "version": 1, "match_via": "container_name" \| "app_name" \| "compose_service"}`. Always present when a parser ran. |
 | `source_kind` | enrichment pipeline | log-row-shape.md §5, source-kinds.md | Denormalised string copy of the row's `source_kind` (reconstructed from `source_ip` scheme). Always present. See source-kinds.md for the closed value set. |
 
@@ -202,6 +204,7 @@ mapping is hardcoded:
 | `adguard` | (1) adguard-api poller + (3) adguard parser |
 | `unifi`, `otlp` | (1) transport-specific shaping only |
 | `agent` | (1) ws handler only |
+| `shell`, `agent_command` | command-log import only |
 | `parser` | (3) parser dispatch only |
 | `source_kind` | (4) final enrichment only |
 

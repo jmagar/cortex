@@ -174,6 +174,8 @@ fn to_source_kind(raw: Option<&str>) -> SourceKind {
         Some("adguard-api") => SourceKind::AdguardApi,
         Some("unifi-api") => SourceKind::UnifiApi,
         Some("agent") => SourceKind::Agent,
+        Some("shell-history") => SourceKind::ShellHistory,
+        Some("agent-command") => SourceKind::AgentCommand,
         _ => SourceKind::SyslogTcp,
     }
 }

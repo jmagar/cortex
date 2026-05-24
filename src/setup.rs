@@ -9,6 +9,7 @@ use std::time::Instant;
 const COMPOSE_ASSET: &str = include_str!("../docker-compose.prod.yml");
 const DOCKERFILE_ASSET: &str = include_str!("../config/Dockerfile");
 
+mod agent_command;
 mod ai_index;
 mod ai_watch;
 mod debug_wrapper;
@@ -16,6 +17,7 @@ mod doctor;
 mod firstrun;
 mod systemd;
 
+pub use agent_command::run_agent_command_setup;
 pub use ai_index::run_ai_index_timer_setup;
 pub use ai_watch::run_ai_watch_service_setup;
 pub use debug_wrapper::{run_debug_compose_setup, run_debug_wrapper_setup};
@@ -70,6 +72,13 @@ pub enum AiWatchServiceAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentCommandAction {
+    Install,
+    Remove,
+    Check,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DebugWrapperAction {
     Install,
     Remove,
@@ -109,6 +118,16 @@ impl AiWatchServiceAction {
             Self::Install => "ai-watch-service-install",
             Self::Remove => "ai-watch-service-remove",
             Self::Check => "ai-watch-service-check",
+        }
+    }
+}
+
+impl AgentCommandAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "agent-command-install",
+            Self::Remove => "agent-command-remove",
+            Self::Check => "agent-command-check",
         }
     }
 }

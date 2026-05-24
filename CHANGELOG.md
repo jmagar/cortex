@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.2] - 2026-05-24
+
+### Fixed
+
+- **Agent command setup**: Harden existing telemetry spool files during install
+  and reject symlink or non-file spool targets during setup checks.
+- **Agent command wrapper**: Keep recursion prevention scoped to argv-level
+  `syslog agent-command ingest-spool` invocations, execute wrapped multi-arg
+  commands without shell re-parsing, and preserve wrapped command flags after
+  `--`.
+- **Command source identity**: Percent-encode shell and agent command source
+  URI path segments without lossy character replacement.
+
+## [0.32.1] - 2026-05-24
+
+### Fixed
+
+- **Agent command wrapper**: Preserve wrapped command exit status when telemetry
+  spool append fails, and avoid mutating permissions on existing spool parent
+  directories.
+
+## [0.32.0] - 2026-05-24
+
+### Added
+
+- **Shell history ingestion**: Add `syslog shell index` for zsh extended
+  history backfill into the main log corpus with `shell-history` source
+  metadata.
+- **Agent command capture**: Add `syslog agent-command` spool ingestion and a
+  `syslog setup agent-command` Claude Code shell-prefix wrapper for Bash tool,
+  hook, and MCP startup command correlation.
+
 ## [0.31.3] - 2026-05-24
 
 ### Fixed
@@ -1517,7 +1549,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.31.3...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.32.2...HEAD
+[0.32.2]: https://github.com/jmagar/syslog-mcp/compare/v0.32.1...v0.32.2
+[0.32.1]: https://github.com/jmagar/syslog-mcp/compare/v0.32.0...v0.32.1
+[0.32.0]: https://github.com/jmagar/syslog-mcp/compare/v0.31.3...v0.32.0
 [0.31.3]: https://github.com/jmagar/syslog-mcp/compare/v0.31.2...v0.31.3
 [0.31.2]: https://github.com/jmagar/syslog-mcp/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/jmagar/syslog-mcp/compare/v0.31.0...v0.31.1
