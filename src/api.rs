@@ -873,6 +873,7 @@ async fn ai_ask_history(
 /// deserialized from a URL query string via `axum::extract::Query`
 /// (which uses `serde_urlencoded`). Mirrors `ai_abuse` above.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AiIncidentsQuery {
     project: Option<String>,
     tool: Option<String>,
@@ -905,6 +906,7 @@ async fn ai_incidents(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AiInvestigateQuery {
     project: Option<String>,
     tool: Option<String>,
@@ -985,11 +987,21 @@ async fn compose_doctor() -> impl IntoResponse {
         }
     };
     if let Err(e) = crate::compose::ensure_doctor_ready(&status) {
-        return respond::<crate::compose::ComposeMcpStatus>(Err(ServiceError::Internal(
-            anyhow::anyhow!("compose doctor: {e}"),
-        )));
+        return compose_doctor_unready_response(&status, e);
     }
     respond::<_>(Ok(crate::compose::mcp_projection(&status)))
+}
+
+fn compose_doctor_unready_response(
+    status: &crate::compose::ComposeStatus,
+    error: anyhow::Error,
+) -> axum::response::Response {
+    tracing::warn!(error = %error, "Compose doctor readiness check failed");
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(crate::compose::mcp_projection(status)),
+    )
+        .into_response()
 }
 
 // ─── AI session queries ─────────────────────────────────────────────────────

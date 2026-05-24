@@ -870,6 +870,51 @@ fn search_ai_abuse_truncates_only_when_additional_match_exists() {
 }
 
 #[test]
+fn search_ai_incidents_anchor_plan_avoids_temp_order_sort() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            "codex",
+            "/tmp/project",
+            "sess-1",
+            "tooling transcript row",
+        )],
+    )
+    .unwrap();
+
+    let params = AiIncidentParams {
+        terms: vec!["tooling".into()],
+        limit: Some(1),
+        ..Default::default()
+    };
+    let terms = normalized_abuse_terms(&params.terms);
+    let (sql, bindings) = ai_incident_anchor_sql(&params, &terms, 10_000);
+
+    let conn = pool.get().unwrap();
+    let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+    let plan = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+            row.get::<_, String>(3)
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+        .join("\n");
+
+    assert!(
+        plan.contains("SCAN logs_fts VIRTUAL TABLE"),
+        "incident anchor query must be driven by FTS so broad terms are capped before log-table work; got:\n{plan}"
+    );
+    assert!(
+        !plan.contains("USE TEMP B-TREE"),
+        "incident anchor query must not materialize/sort all FTS matches before LIMIT; got:\n{plan}"
+    );
+}
+
+#[test]
 fn investigate_ai_incidents_exact_id_can_fetch_beyond_top_ten() {
     let (pool, _dir) = test_pool();
     let entries = (0..12)

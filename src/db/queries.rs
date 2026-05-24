@@ -923,46 +923,10 @@ pub fn search_ai_incidents(pool: &DbPool, params: &AiIncidentParams) -> Result<A
     let terms = normalized_abuse_terms(&params.terms);
     const CANDIDATE_CAP: usize = 10_000;
 
+    let (sql, bindings) = ai_incident_anchor_sql(params, &terms, CANDIDATE_CAP);
+
     // Fetch candidate abuse anchor rows (same FTS path as search_ai_abuse,
     // no per-hit context needed here).
-    let mut sql = String::from(
-        "SELECT l.id, l.timestamp, l.hostname,
-                l.ai_tool, l.ai_project, l.ai_session_id, l.message
-         FROM logs_fts
-         JOIN logs l ON l.id = logs_fts.rowid
-         WHERE logs_fts MATCH ?1
-           AND l.ai_project IS NOT NULL AND l.ai_project != ''
-           AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
-           AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
-    );
-    let mut bindings = vec![rusqlite::types::Value::Text(abuse_fts_query(&terms))];
-    let mut idx = 2usize;
-
-    if let Some(project) = &params.ai_project {
-        sql.push_str(&format!(" AND l.ai_project = ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(project.clone()));
-        idx += 1;
-    }
-    if let Some(tool) = &params.ai_tool {
-        sql.push_str(&format!(" AND l.ai_tool = ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(tool.clone()));
-        idx += 1;
-    }
-    if let Some(from) = &params.from {
-        sql.push_str(&format!(" AND l.timestamp >= ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(from.clone()));
-        idx += 1;
-    }
-    if let Some(to) = &params.to {
-        sql.push_str(&format!(" AND l.timestamp <= ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(to.clone()));
-    }
-    let _ = idx;
-    sql.push_str(&format!(
-        " ORDER BY l.timestamp ASC LIMIT {}",
-        CANDIDATE_CAP + 1
-    ));
-
     struct AnchorRow {
         id: i64,
         timestamp: String,
@@ -1129,6 +1093,51 @@ pub fn search_ai_incidents(pool: &DbPool, params: &AiIncidentParams) -> Result<A
         candidate_window_truncated,
         truncated,
     })
+}
+
+fn ai_incident_anchor_sql(
+    params: &AiIncidentParams,
+    terms: &[String],
+    candidate_cap: usize,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let mut sql = String::from(
+        "SELECT l.id, l.timestamp, l.hostname,
+                l.ai_tool, l.ai_project, l.ai_session_id, l.message
+         FROM logs_fts
+         JOIN logs l ON l.id = logs_fts.rowid
+         WHERE logs_fts MATCH ?1
+           AND l.ai_project IS NOT NULL AND l.ai_project != ''
+           AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
+           AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
+    );
+    let mut bindings = vec![rusqlite::types::Value::Text(abuse_fts_query(terms))];
+    let mut idx = 2usize;
+
+    if let Some(project) = &params.ai_project {
+        sql.push_str(&format!(" AND l.ai_project = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(project.clone()));
+        idx += 1;
+    }
+    if let Some(tool) = &params.ai_tool {
+        sql.push_str(&format!(" AND l.ai_tool = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(tool.clone()));
+        idx += 1;
+    }
+    if let Some(from) = &params.from {
+        sql.push_str(&format!(" AND l.timestamp >= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(from.clone()));
+        idx += 1;
+    }
+    if let Some(to) = &params.to {
+        sql.push_str(&format!(" AND l.timestamp <= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(to.clone()));
+    }
+    let _ = idx;
+    sql.push_str(&format!(
+        " ORDER BY logs_fts.rowid ASC LIMIT {}",
+        candidate_cap + 1
+    ));
+    (sql, bindings)
 }
 
 pub fn investigate_ai_incidents(

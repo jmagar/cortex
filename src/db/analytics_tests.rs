@@ -578,6 +578,65 @@ fn project_context_snippets_are_bounded_to_256_chars() {
 }
 
 #[test]
+fn clock_skew_plan_uses_received_at_range_index() {
+    let (pool, _d) = test_pool();
+    let conn = pool.get().unwrap();
+    let sql = format!("EXPLAIN QUERY PLAN {CLOCK_SKEW_SQL}");
+    let mut stmt = conn.prepare(&sql).unwrap();
+    let rows = stmt
+        .query_map(rusqlite::params!["2026-01-01T00:00:00Z", 100_i64], |row| {
+            row.get::<_, String>(3)
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    let plan = rows.join("\n");
+
+    assert!(
+        plan.contains("idx_logs_received_at"),
+        "clock_skew must range-scan received_at; got:\n{plan}"
+    );
+    assert!(
+        !plan.contains("SCAN logs USING INDEX idx_logs_hostname"),
+        "clock_skew must not scan the hostname index for grouped recent windows; got:\n{plan}"
+    );
+}
+
+#[test]
+fn clock_skew_limits_hosts_in_skew_order() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-01-01T00:00:00Z", "h-low", "info", None, "low"),
+            entry("2026-01-01T00:00:00Z", "h-high", "info", None, "high"),
+            entry("2026-01-01T00:00:00Z", "h-mid", "info", None, "mid"),
+        ],
+    )
+    .unwrap();
+
+    let conn = pool.get().unwrap();
+    for (host, received_at) in [
+        ("h-low", "2026-01-01T00:00:10Z"),
+        ("h-high", "2026-01-01T00:10:00Z"),
+        ("h-mid", "2026-01-01T00:01:00Z"),
+    ] {
+        conn.execute(
+            "UPDATE logs SET received_at = ?1 WHERE hostname = ?2",
+            rusqlite::params![received_at, host],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let result = clock_skew(&pool, "2026-01-01T00:00:00Z", Some(2)).unwrap();
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].hostname, "h-high");
+    assert_eq!(result[1].hostname, "h-mid");
+}
+
+#[test]
 fn summarize_range_counts_errors() {
     let (pool, _d) = test_pool();
     insert_logs_batch(

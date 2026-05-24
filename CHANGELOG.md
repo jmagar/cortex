@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.5] - 2026-05-24
+
+### Fixed
+
+- **REST AI incident queries**: Avoid unbounded FTS result sorting for broad
+  incident terms by walking timestamp-ordered log rows and probing FTS by rowid,
+  and reject unsupported indexed `terms[0]=...` query syntax instead of silently
+  ignoring it.
+- **REST Compose doctor**: Return HTTP 503 with the redacted structured Compose
+  projection when Docker/ownership/runtime readiness checks fail, instead of a
+  generic 500 error envelope.
+- **Clock skew analytics**: Force the `received_at` range index and apply host
+  limits in SQL so recent-window clock skew checks stay responsive on large
+  databases.
+
 ## [0.32.4] - 2026-05-24
 
 ### Fixed

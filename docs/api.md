@@ -15,10 +15,11 @@
 
 ## Endpoint matrix
 
-22 routes total. Scope is `read` (mounted via `axum::routing::get`,
+24 routes total. Scope is `read` (mounted via `axum::routing::get`,
 hits read-side `db_permits`) or `admin` (POST + `MAINTENANCE_PERMIT`
 single-flight, audited via `tracing::warn!` before the service call).
-All responses are JSON; error bodies are `{"error": "<message>"}`.
+All responses are JSON; error bodies are `{"error": "<message>"}`
+unless a route documents a structured diagnostic body.
 
 ### Syslog queries (7)
 
@@ -66,7 +67,14 @@ to them by default.
 | POST | `/api/db/checkpoint` | **admin** | body: `{ "mode": "passive" \| "full" \| "restart" \| "truncate" }`. Validated handler-side BEFORE the service call (eng-review #A17). | `DbCheckpointResult` | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention. `caller_ip` audit-logged before service call. |
 | POST | `/api/db/vacuum` | **admin** | body: `{ "full": bool, "force"?: bool, "incremental_pages"?: u32 }`. `force` is `Option<bool>` so the size pre-flight only relaxes on explicit `"force": true`. | `DbVacuumResult` (incl. `after_physical_size_bytes`) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`. Size pre-flight: `full && !force` reads the LIVE `page_count * page_size` (no cached snapshot) on every call and returns 409 if logical size > **2 GB**. `caller_ip` audit-logged before service call. See "VACUUM on large DBs" below. |
 
-**Total: 22 routes** (1 added in bead `.1` + 6 pre-existing + 8 in `.2` + 3 in `.3` + 4 in `.4`).
+### Compose diagnostics (2)
+
+| Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GET | `/api/compose/status` | read | (none) | `ComposeMcpStatus { container_name, ownership, runtime_state, health?, published_ports, diagnostics }` | 200, 401, 500 | Y | Redacted read-only projection. If the container cannot run Docker inspection, this still returns 200 with `runtime_state="docker_unavailable"` and diagnostic code `docker_unavailable`. |
+| GET | `/api/compose/doctor` | read | (none) | `ComposeMcpStatus { container_name, ownership, runtime_state, health?, published_ports, diagnostics }` | 200, 401, **503**, 500 | Y | Strict readiness check. Healthy Compose-owned deployment returns 200; Docker/ownership/runtime unready states return 503 with the same structured projection, not a generic error envelope. |
+
+**Total: 24 routes** (1 added in bead `.1` + 6 pre-existing + 8 in `.2` + 3 in `.3` + 4 in `.4` + 2 compose diagnostics).
 
 ---
 
