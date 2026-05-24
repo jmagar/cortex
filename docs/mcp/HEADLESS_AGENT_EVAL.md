@@ -67,7 +67,6 @@ Important headless flags:
 - `--cd <dir>`, `--add-dir <dir>`: control workspace access.
 - `--sandbox read-only|workspace-write|danger-full-access`: set command
   sandboxing.
-- `--ask-for-approval untrusted|on-request|never`: control approval behavior.
 - `--dangerously-bypass-approvals-and-sandbox`: use only inside an external
   sandbox.
 - `--model`, `--profile`, `--profile-v2`, `--config key=value`, `--enable`,

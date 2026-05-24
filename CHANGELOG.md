@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-05-24
+
+### Fixed
+
+- **Headless prompt eval**: Align the Codex runner with the installed
+  `codex exec` CLI flags and tighten the prompt-output schema resource so
+  strict structured-output clients accept evidence entries.
+- **Prompt smoke tests**: Carry bearer auth into mcporter-backed smoke calls and
+  accept the scope-denied unknown-action response as the expected negative path.
+
 ## [0.31.0] - 2026-05-24
 
 ### Added

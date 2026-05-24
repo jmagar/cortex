@@ -1280,13 +1280,38 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(
-        response["result"]["contents"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("\"verdict\"")
-                && text.contains("\"confidence\"")
-                && text.contains("\"evidence\"")),
-        "resources/read should return prompt output schema JSON; response: {response}"
+    let text = response["result"]["contents"][0]["text"]
+        .as_str()
+        .expect("prompt output schema text");
+    let schema: serde_json::Value =
+        serde_json::from_str(text).expect("prompt output resource is valid JSON schema");
+    assert_eq!(
+        schema["required"],
+        json!([
+            "verdict",
+            "confidence",
+            "evidence",
+            "likely_cause",
+            "not_supported",
+            "next_actions",
+            "telemetry_gaps"
+        ])
+    );
+    assert_eq!(
+        schema["properties"]["evidence"]["items"]["required"],
+        json!([
+            "source",
+            "summary",
+            "timestamp",
+            "host",
+            "app",
+            "severity",
+            "log_id"
+        ])
+    );
+    assert_eq!(
+        schema["properties"]["evidence"]["items"]["properties"]["app"]["type"],
+        json!(["string", "null"])
     );
 }
 

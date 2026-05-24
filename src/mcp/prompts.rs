@@ -347,6 +347,7 @@ Scope:
 - Host focus: {host}
 
 Use the `syslog` MCP tool:
+Cheap first pass:
 1. Search for auth failures, bans, MFA/challenge events, proxy denials, and suspicious source IPs with `action=search` and `limit=5`.
 2. Use structured filters such as `auth_outcome` when available.
 3. Use `action=errors` with `limit=10` and `action=timeline` with `bucket=minute` for suspicious bursts.
@@ -694,6 +695,10 @@ mod tests {
             assert!(
                 text.contains("Escalate only if needed"),
                 "{name} lacks cheap-first escalation guidance"
+            );
+            assert!(
+                text.contains("Cheap first pass:"),
+                "{name} lacks cheap-first pass guidance"
             );
 
             for section in expected_sections {
