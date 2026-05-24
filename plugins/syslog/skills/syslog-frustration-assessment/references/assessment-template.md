@@ -39,7 +39,7 @@ The anchor message at 2026-01-15T14:32:07Z contains "this is fucking broken" in 
 
 ## 7. Recurring Trends
 
-Single incident. No trend data available.
+**Trend evidence unavailable.** This bundle does not include enough comparison evidence to determine recurrence.
 
 ## 8. Follow-Up Actions
 
@@ -47,4 +47,4 @@ No Beads created — the agent error was a one-time failure mode that is address
 
 ---
 
-**Executive Summary:** The user's frustration was real and caused primarily by an agent mistake (running the wrong migration file twice). A concurrent DB restart compounded the failure. The agent acknowledged corrections but did not apply them correctly. Recommend adding a pre-migration file verification step. No Beads created as the issue is isolated and improvement is straightforward.
+**Executive Summary:** The user's frustration was real and caused primarily by an agent mistake (running the wrong migration file twice). A concurrent DB restart compounded the failure. The agent acknowledged corrections but did not apply them correctly. Recommend adding a pre-migration file verification step. No Beads created because the bundle does not show a critical/P1 pattern or enough recurrence evidence.

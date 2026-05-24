@@ -134,6 +134,21 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 | `SYSLOG_API_ENABLED` | no | `false` | no | Enable the non-MCP JSON API |
 | `SYSLOG_API_TOKEN` | yes, when enabled | (none) | **yes** | Bearer token for `/api/*` routes |
 
+### Headless Gemini assessment (`SYSLOG_HEADLESS_*`, `SYSLOG_LLM_*`)
+
+`syslog ai assess` is local-only and starts the Gemini CLI in an isolated
+temporary HOME. It copies Gemini auth files from the configured source HOME,
+installs the bundled `syslog-frustration-assessment` skill into that isolated
+HOME, disables MCP servers/hooks/context-file loading, and parses Gemini's
+`stream-json` output so only assistant text is emitted.
+
+| Variable | Required | Default | Sensitive | Description |
+| --- | --- | --- | --- | --- |
+| `SYSLOG_HEADLESS_GEMINI_CMD` | no | `gemini` | no | Gemini CLI executable path or command name |
+| `SYSLOG_HEADLESS_GEMINI_MODEL` | no | `gemini-3.1-flash-lite-preview` | no | Default model for `syslog ai assess`; `--model` on the CLI overrides this |
+| `SYSLOG_HEADLESS_GEMINI_HOME` | no | `$HOME` | maybe | Source home containing `.gemini` auth files to copy into the isolated runtime HOME |
+| `SYSLOG_LLM_COMPLETION_TIMEOUT_SECS` | no | `120` | no | Hard timeout for the Gemini assessment subprocess |
+
 ### Storage (`SYSLOG_MCP_*`)
 
 | Variable | Required | Default | Sensitive | Description |
