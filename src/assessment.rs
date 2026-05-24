@@ -467,13 +467,13 @@ impl GeminiStreamState {
         if !self.saw_success {
             bail!("Gemini headless stream ended without a success result");
         }
-        if !self.text.trim().is_empty() {
-            return Ok(self.text);
-        }
         if let Some(result) = self.result_text {
             if !result.trim().is_empty() {
                 return Ok(result);
             }
+        }
+        if !self.text.trim().is_empty() {
+            return Ok(self.text);
         }
         bail!("Gemini headless returned no assessment text");
     }
@@ -735,6 +735,35 @@ mod tests {
         parser
             .handle_line(r#"{"type":"result","status":"success"}"#, &mut |_| Ok(()))
             .unwrap();
+        assert_eq!(
+            parser.finish().unwrap(),
+            "# Frustration Assessment\n\nRecovered report."
+        );
+    }
+
+    #[test]
+    fn stream_parser_prefers_write_file_assessment_over_preamble() {
+        let mut parser = GeminiStreamState::default();
+        let mut streamed = String::new();
+        parser
+            .handle_line(
+                r#"{"type":"message","role":"assistant","content":[{"text":"I will write the assessment now."}]}"#,
+                &mut |delta| {
+                    streamed.push_str(delta);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        parser
+            .handle_line(
+                r##"{"type":"tool_use","tool_name":"write_file","parameters":{"file_path":"/tmp/syslog-gemini-headless-x/.gemini/tmp/session/plans/frustration_assessment.md","content":"# Frustration Assessment\n\nRecovered report."}}"##,
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        parser
+            .handle_line(r#"{"type":"result","status":"success"}"#, &mut |_| Ok(()))
+            .unwrap();
+        assert_eq!(streamed, "I will write the assessment now.");
         assert_eq!(
             parser.finish().unwrap(),
             "# Frustration Assessment\n\nRecovered report."
