@@ -182,22 +182,30 @@ where
         }
     }
 
-    stdin_task
-        .await
-        .map_err(|err| anyhow!("failed to join Gemini stdin writer: {err}"))?
-        .map_err(|err| anyhow!("failed to write Gemini stdin: {err}"))?;
-
     let status = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(status) => status.context("failed to wait for Gemini process")?,
         Err(_) => {
             let cleanup = kill_and_wait(&mut child).await;
+            stdin_task.abort();
             stderr_task.abort();
+            let _ = stdin_task.await;
             let _ = stderr_task.await;
             bail!(
                 "Gemini headless timed out waiting for process exit after {} seconds; cleanup: {cleanup}",
                 config.timeout_secs
             );
         }
+    };
+    let stdin_result = match tokio::time::timeout(timeout, stdin_task).await {
+        Ok(joined) => joined
+            .map_err(|err| anyhow!("failed to join Gemini stdin writer: {err}"))
+            .and_then(|result| {
+                result.map_err(|err| anyhow!("failed to write Gemini stdin: {err}"))
+            }),
+        Err(_) => Err(anyhow!(
+            "Gemini headless timed out closing stdin after {} seconds",
+            config.timeout_secs
+        )),
     };
     let stderr = match tokio::time::timeout(timeout, stderr_task).await {
         Ok(joined) => joined
@@ -215,6 +223,8 @@ where
             redacted_stderr_tail(&stderr)
         );
     }
+
+    stdin_result?;
 
     parser.finish()
 }
@@ -708,6 +718,41 @@ mod tests {
             .to_string();
         assert!(err.contains("timed out after 1 seconds"));
         assert!(err.contains("cleanup:"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn gemini_assessment_reports_child_stderr_before_stdin_pipe_error() {
+        let source = tempfile::tempdir().unwrap();
+        fs::create_dir_all(source.path().join(".gemini")).unwrap();
+        fs::write(source.path().join(".gemini").join("settings.json"), "{}").unwrap();
+        let script = source.path().join("fake-gemini.sh");
+        fs::write(
+            &script,
+            "#!/usr/bin/env bash\necho 'simulated gemini failure' >&2\nexit 42\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&script).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&script, perms).unwrap();
+        }
+
+        let config = GeminiAssessConfig {
+            program: script.display().to_string(),
+            model: "gemini-test".into(),
+            source_home: Some(source.path().to_path_buf()),
+            timeout_secs: 5,
+        };
+        let large_prompt = "x".repeat(2 * 1024 * 1024);
+        let err = run_gemini_assessment(&large_prompt, &config, |_| Ok(()))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Gemini headless exited"));
+        assert!(err.contains("simulated gemini failure"));
     }
 
     #[test]
