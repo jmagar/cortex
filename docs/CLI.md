@@ -401,6 +401,57 @@ syslog ai smoke-watch --json
 This is a live command. It requires `syslog-ai-watch.service` to be running and
 writing to the same `SYSLOG_MCP_DB_PATH` used by the CLI process.
 
+### `syslog shell index`
+
+Backfill local shell history into the main log corpus.
+
+```bash
+syslog shell index --path ~/.zsh_history
+syslog shell index --path ~/.zsh_history --shell zsh --json
+```
+
+The importer currently supports zsh extended history lines in the
+`: <epoch>:<duration>;<command>` format. Plain history lines without timestamps
+are counted as skipped because they cannot be correlated reliably. Commands are
+scrubbed before storage, written with `source_kind="shell-history"`, and use
+`source_ip` identities shaped like `shell-history://<hostname>/<user>/<shell>`.
+Rows are deduped by source identity, timestamp, and scrubbed command text, and
+the importer records a private byte-offset cursor under the syslog-mcp state
+directory so repeated imports only read newly appended history.
+
+### `syslog agent-command`
+
+Capture shell commands launched by agent tools, then ingest the private JSONL
+spool into SQLite.
+
+```bash
+syslog setup agent-command install
+export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/syslog-agent-command-wrapper"
+
+syslog agent-command ingest-spool --path ~/.local/state/syslog-mcp/agent-command.jsonl
+syslog agent-command wrap --spool ~/.local/state/syslog-mcp/agent-command.jsonl -- cargo test
+```
+
+`CLAUDE_CODE_SHELL_PREFIX` is the Claude Code hook point for commands spawned by
+Claude Code, including Bash tool calls, hook commands, and stdio MCP server
+startup commands. The generated wrapper executes the original command, preserves
+stdio and exit code, then appends one scrubbed JSONL record. It removes
+`CLAUDE_CODE_SHELL_PREFIX` and sets an internal recursion guard for the child
+process so the wrapper does not wrap itself.
+
+The wrapper does not capture environment variables, stdout, or stderr by
+default. Command strings are scrubbed for known token, secret flag, assignment,
+Authorization header, URL-userinfo, `curl -u`, and private-key forms before they
+reach the spool. The spool directory is created as `0700`, the spool file as
+`0600`, symlink paths are rejected, and import refuses group/world writable
+parents or spools. Wrapper appends and spool imports use the same advisory file
+lock; after a successful import the spool is truncated so repeated imports do
+not rescan already-ingested commands. Imported rows use
+`source_kind="agent-command"`, `facility`
+`agent`, `app_name`/`ai_tool` set to the agent name, `event_action="command"`,
+and `source_ip` identities shaped like
+`agent-command://<hostname>/<agent>/<session_id>`.
+
 ### `syslog setup ai-watch-service`
 
 Install, remove, or inspect the supported host-local user-systemd watcher for
