@@ -94,6 +94,21 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         std::process::exit(code);
     }
 
+    if matches!(
+        command,
+        cli::CliCommand::Shell(_)
+            | cli::CliCommand::AgentCommand(cli::AgentCommandCommand::IngestSpool(_))
+    ) {
+        if let Some(trigger) = flags.http_flag_trigger() {
+            anyhow::bail!(
+                "{} has no effect on local command ingestion; remove --http / --server / --token",
+                trigger
+            );
+        }
+        let runtime = RuntimeCore::load_query_only().await?;
+        return cli::run(cli::CliMode::Local(runtime.service()), command).await;
+    }
+
     // Build CliMode ONCE per invocation, matching the per-invocation reqwest
     // Client rule from bead .5. For Local mode we lazily load the runtime so
     // HTTP-mode invocations don't pay the SQLite-open cost.

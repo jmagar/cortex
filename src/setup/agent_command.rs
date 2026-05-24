@@ -83,13 +83,39 @@ fn install_agent_command_files(
         wrapper_path,
         &agent_command_wrapper_script(syslog_bin, spool_path),
     )?;
-    if !spool_path.exists() {
-        write_private_file(spool_path, "")?;
-    }
+    ensure_agent_command_spool_file(spool_path)?;
     Ok(timer.finish(
         SetupStatus::Ok,
         format!("wrote {}, {}", wrapper_path.display(), spool_path.display()),
     ))
+}
+
+fn ensure_agent_command_spool_file(spool_path: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(spool_path) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("{} must not be a symlink", spool_path.display()),
+                ));
+            }
+            if !file_type.is_file() {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("{} must be a regular file", spool_path.display()),
+                ));
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(spool_path, std::fs::Permissions::from_mode(0o600))?;
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => write_private_file(spool_path, ""),
+        Err(error) => Err(error),
+    }
 }
 
 fn remove_agent_command_wrapper(wrapper_path: &Path) -> io::Result<SetupPhase> {
@@ -132,35 +158,51 @@ fn agent_command_content_phase(
 
 fn agent_command_state_phase(state_dir: &Path, spool_path: &Path) -> SetupPhase {
     let timer = PhaseTimer::start("agent-command-state");
-    if !state_dir.is_dir() {
+    let state_metadata = match std::fs::symlink_metadata(state_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return timer.finish(
+                SetupStatus::Warn,
+                format!(
+                    "missing {}; run syslog setup agent-command install",
+                    state_dir.display()
+                ),
+            );
+        }
+        Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
+    };
+    let state_type = state_metadata.file_type();
+    if state_type.is_symlink() || !state_type.is_dir() {
         return timer.finish(
-            SetupStatus::Warn,
-            format!(
-                "missing {}; run syslog setup agent-command install",
-                state_dir.display()
-            ),
+            SetupStatus::Error,
+            format!("{} must be a real directory", state_dir.display()),
         );
     }
-    if !spool_path.exists() {
+    let spool_metadata = match std::fs::symlink_metadata(spool_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return timer.finish(
+                SetupStatus::Warn,
+                format!(
+                    "missing {}; run syslog setup agent-command install",
+                    spool_path.display()
+                ),
+            );
+        }
+        Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
+    };
+    let spool_type = spool_metadata.file_type();
+    if spool_type.is_symlink() || !spool_type.is_file() {
         return timer.finish(
-            SetupStatus::Warn,
-            format!(
-                "missing {}; run syslog setup agent-command install",
-                spool_path.display()
-            ),
+            SetupStatus::Error,
+            format!("{} must be a regular file", spool_path.display()),
         );
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let state_mode = match std::fs::metadata(state_dir) {
-            Ok(metadata) => metadata.permissions().mode() & 0o777,
-            Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
-        };
-        let spool_mode = match std::fs::metadata(spool_path) {
-            Ok(metadata) => metadata.permissions().mode() & 0o777,
-            Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
-        };
+        let state_mode = state_metadata.permissions().mode() & 0o777;
+        let spool_mode = spool_metadata.permissions().mode() & 0o777;
         if state_mode & 0o077 != 0 || spool_mode & 0o077 != 0 {
             return timer.finish(
                 SetupStatus::Error,
@@ -237,14 +279,15 @@ fn validate_agent_command_binary(path: &Path) -> io::Result<()> {
         ));
     }
     let version_output = String::from_utf8_lossy(&output.stdout);
-    let expected = env!("CARGO_PKG_VERSION");
-    if !version_output.contains(expected) {
+    let expected = format!("syslog-mcp {}", env!("CARGO_PKG_VERSION"));
+    let actual = version_output.trim();
+    if actual != expected {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             format!(
                 "{} is not the current syslog binary: expected version {expected}, got {}",
                 path.display(),
-                version_output.trim()
+                actual
             ),
         ));
     }
@@ -272,26 +315,5 @@ fn claude_settings_shell_prefix(user_home: &Path) -> io::Result<Option<String>> 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn agent_command_env_phase_accepts_claude_settings_json() {
-        let home = tempfile::tempdir().unwrap();
-        let claude_dir = home.path().join(".claude");
-        std::fs::create_dir(&claude_dir).unwrap();
-        let wrapper = home.path().join(".local/bin/syslog-agent-command-wrapper");
-        std::fs::write(
-            claude_dir.join("settings.json"),
-            format!(
-                r#"{{"env":{{"CLAUDE_CODE_SHELL_PREFIX":"{}"}}}}"#,
-                wrapper.display()
-            ),
-        )
-        .unwrap();
-
-        let phase = agent_command_env_phase(&wrapper, home.path());
-
-        assert_eq!(phase.status, SetupStatus::Ok);
-    }
-}
+#[path = "agent_command_tests.rs"]
+mod tests;

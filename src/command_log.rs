@@ -1,7 +1,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitStatus};
 use std::sync::LazyLock;
 use std::time::Instant;
 
@@ -201,20 +201,15 @@ pub fn run_agent_command_wrapper(spool_path: &Path, command_args: &[String]) -> 
     ensure_private_parent(spool_path)?;
 
     let command = command_args_to_shell_command(command_args);
-    if std::env::var("SYSLOG_AGENT_COMMAND_WRAPPER")
-        .ok()
-        .as_deref()
-        == Some("1")
-        || command.contains("agent-command ingest-spool")
-    {
-        return run_command_unwrapped(&command);
+    if should_run_agent_command_unwrapped(command_args) {
+        return run_command_unwrapped(command_args, &command);
     }
     let cwd = std::env::current_dir()
         .ok()
         .map(|path| path.display().to_string());
     let started = Utc::now();
     let timer = Instant::now();
-    let status = command_status(&command).context("run wrapped command")?;
+    let status = command_status(command_args, &command).context("run wrapped command")?;
     let finished = Utc::now();
     let duration_ms = timer.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     let record = AgentCommandSpoolRecord {
@@ -237,7 +232,9 @@ pub fn run_agent_command_wrapper(spool_path: &Path, command_args: &[String]) -> 
         schema_version: 1,
         content_scrubbed: true,
     };
-    append_spool_record(spool_path, &record)?;
+    if let Err(error) = append_spool_record(spool_path, &record) {
+        eprintln!("syslog agent-command: failed to append command record: {error:#}");
+    }
     Ok(status.code().unwrap_or(1))
 }
 
@@ -249,8 +246,10 @@ pub fn scrub_command(command: &str) -> String {
     out
 }
 
-fn run_command_unwrapped(command: &str) -> Result<i32> {
-    Ok(command_status(command)?.code().unwrap_or(1))
+fn run_command_unwrapped(command_args: &[String], fallback_shell_command: &str) -> Result<i32> {
+    Ok(command_status(command_args, fallback_shell_command)?
+        .code()
+        .unwrap_or(1))
 }
 
 fn command_args_to_shell_command(command_args: &[String]) -> String {
@@ -263,6 +262,27 @@ fn command_args_to_shell_command(command_args: &[String]) -> String {
             .collect::<Vec<_>>()
             .join(" ")
     }
+}
+
+fn should_run_agent_command_unwrapped(command_args: &[String]) -> bool {
+    std::env::var("SYSLOG_AGENT_COMMAND_WRAPPER")
+        .ok()
+        .as_deref()
+        == Some("1")
+        || is_agent_command_ingest_spool_invocation(command_args)
+}
+
+fn is_agent_command_ingest_spool_invocation(command_args: &[String]) -> bool {
+    let Some(program) = command_args.first() else {
+        return false;
+    };
+    let program_name = Path::new(program)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(program);
+    program_name == "syslog"
+        && command_args.get(1).map(String::as_str) == Some("agent-command")
+        && command_args.get(2).map(String::as_str) == Some("ingest-spool")
 }
 
 fn shell_quote(value: &str) -> String {
@@ -278,7 +298,22 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-fn command_status(command: &str) -> Result<std::process::ExitStatus> {
+fn command_status(command_args: &[String], fallback_shell_command: &str) -> Result<ExitStatus> {
+    if command_args.len() == 1 {
+        return shell_command_status(fallback_shell_command);
+    }
+    let (program, args) = command_args
+        .split_first()
+        .expect("wrapper validates command args are not empty");
+    Command::new(program)
+        .args(args)
+        .env("SYSLOG_AGENT_COMMAND_WRAPPER", "1")
+        .env_remove("CLAUDE_CODE_SHELL_PREFIX")
+        .status()
+        .with_context(|| format!("run command {}", shell_quote(program)))
+}
+
+fn shell_command_status(command: &str) -> Result<ExitStatus> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
     Command::new(shell)
         .arg("-lc")
@@ -591,13 +626,16 @@ fn ensure_private_parent(path: &Path) -> Result<()> {
         .parent()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
+    let parent_existed = parent.exists();
     fs::create_dir_all(&parent)
         .with_context(|| format!("create spool parent {}", parent.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
-            .with_context(|| format!("chmod spool parent {}", parent.display()))?;
+        if !parent_existed {
+            fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("chmod spool parent {}", parent.display()))?;
+        }
     }
     Ok(())
 }
@@ -690,16 +728,15 @@ fn username() -> Option<String> {
 }
 
 fn sanitize_uri_segment(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect()
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(char::from(*byte));
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 #[cfg(test)]
