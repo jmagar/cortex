@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.4] - 2026-05-24
+
+### Fixed
+
+- **Headless Gemini assessment runner**: Prefer recovered `write_file`
+  assessment content over streamed assistant preamble text, with regression
+  coverage for mixed preamble-plus-file Gemini streams.
+
 ## [0.32.3] - 2026-05-24
 
 ### Fixed
