@@ -39,6 +39,36 @@ fn parse_source_ips_accepts_limit_and_offset() {
     }
 }
 
+#[test]
+fn parse_errors_accepts_limit_for_bounded_agent_output() {
+    let args = strings(&["--from=2026-01-01T00:00:00Z", "--limit", "10", "--json"]);
+
+    let command = parse_errors(&args).unwrap();
+
+    match command {
+        crate::cli::CliCommand::Errors(args) => {
+            assert_eq!(args.from.as_deref(), Some("2026-01-01T00:00:00Z"));
+            assert_eq!(args.limit, Some(10));
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_patterns_accepts_limit_alias_for_top_n() {
+    let args = strings(&["--limit=7"]);
+
+    let command = parse_patterns(&args).unwrap();
+
+    match command {
+        crate::cli::CliCommand::Patterns(args) => {
+            assert_eq!(args.top_n, Some(7));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
 }

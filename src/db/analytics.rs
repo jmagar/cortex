@@ -998,7 +998,7 @@ pub struct ClockSkewEntry {
     pub max_skew_secs: f64,
 }
 
-pub fn clock_skew(pool: &DbPool, since: &str) -> Result<Vec<ClockSkewEntry>> {
+pub fn clock_skew(pool: &DbPool, since: &str, limit: Option<u32>) -> Result<Vec<ClockSkewEntry>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
         "SELECT hostname,
@@ -1020,7 +1020,11 @@ pub fn clock_skew(pool: &DbPool, since: &str) -> Result<Vec<ClockSkewEntry>> {
             max_skew_secs: r.get::<_, Option<f64>>(4)?.unwrap_or(0.0),
         })
     })?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    if let Some(limit) = limit {
+        rows.truncate(limit as usize);
+    }
+    Ok(rows)
 }
 
 // -----------------------------------------------------------------------------

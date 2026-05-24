@@ -21,6 +21,23 @@ fn tool_definitions_include_expected_public_tools() {
 }
 
 #[test]
+fn tool_definition_exposes_agent_cost_metadata() {
+    let tools = tool_definitions();
+    let metadata = tools[0]["x-syslog-action-metadata"].as_array().unwrap();
+    assert_eq!(metadata.len(), super::actions::ACTION_SPECS.len());
+    assert!(metadata
+        .iter()
+        .any(|action| { action["name"] == "status" && action["cost"] == "cheap" }));
+    assert!(metadata
+        .iter()
+        .any(|action| { action["name"] == "patterns" && action["cost"] == "expensive" }));
+    assert_eq!(
+        tools[0]["x-syslog-agent-guidance"]["default_bounds"]["timeline_bucket"],
+        "minute"
+    );
+}
+
+#[test]
 fn schema_source_ips_exposes_pagination() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];

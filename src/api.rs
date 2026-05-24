@@ -375,6 +375,7 @@ struct ErrorQuery {
     from: Option<String>,
     to: Option<String>,
     group_by: Option<String>,
+    limit: Option<u32>,
 }
 
 async fn errors(
@@ -388,6 +389,7 @@ async fn errors(
                 from: query.from,
                 to: query.to,
                 group_by: query.group_by,
+                limit: query.limit,
             })
             .await,
     )
@@ -680,6 +682,7 @@ async fn silent_hosts(
 #[serde(deny_unknown_fields)]
 struct ClockSkewQuery {
     since: Option<String>,
+    limit: Option<u32>,
 }
 
 async fn clock_skew(
@@ -689,7 +692,10 @@ async fn clock_skew(
     respond(
         state
             .service
-            .clock_skew(ClockSkewRequest { since: query.since })
+            .clock_skew(ClockSkewRequest {
+                since: query.since,
+                limit: query.limit,
+            })
             .await,
     )
 }

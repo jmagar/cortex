@@ -504,7 +504,13 @@ impl SyslogService {
         };
         let rows = self
             .run_db(move |pool| {
-                db::get_error_summary(pool, from.as_deref(), to.as_deref(), group_by_app)
+                db::get_error_summary(
+                    pool,
+                    from.as_deref(),
+                    to.as_deref(),
+                    group_by_app,
+                    req.limit.map(|limit| limit.clamp(1, 100)),
+                )
             })
             .await?;
         Ok(GetErrorsResponse {
@@ -1427,7 +1433,10 @@ impl SyslogService {
             None => rfc3339_z(Utc::now() - chrono::Duration::hours(24)),
         };
         let q = since_str.clone();
-        let hosts = self.run_db(move |pool| db::clock_skew(pool, &q)).await?;
+        let limit = req.limit.map(|limit| limit.clamp(1, 100));
+        let hosts = self
+            .run_db(move |pool| db::clock_skew(pool, &q, limit))
+            .await?;
         Ok(ClockSkewResponse {
             since: since_str,
             hosts: hosts.into_iter().map(Into::into).collect(),

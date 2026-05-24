@@ -216,6 +216,7 @@ pub fn get_error_summary(
     from: Option<&str>,
     to: Option<&str>,
     group_by_app: bool,
+    limit: Option<u32>,
 ) -> Result<Vec<ErrorSummaryEntry>> {
     let conn = pool.get()?;
 
@@ -240,7 +241,11 @@ pub fn get_error_summary(
                 count: row.get(3)?,
             })
         })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        if let Some(limit) = limit {
+            rows.truncate(limit as usize);
+        }
+        Ok(rows)
     } else {
         let mut stmt = conn.prepare(
             "SELECT hostname, severity, COUNT(*) as count
@@ -258,7 +263,11 @@ pub fn get_error_summary(
                 count: row.get(2)?,
             })
         })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        if let Some(limit) = limit {
+            rows.truncate(limit as usize);
+        }
+        Ok(rows)
     }
 }
 

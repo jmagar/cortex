@@ -105,10 +105,17 @@ pub(crate) fn parse_errors(args: &[String]) -> Result<CliCommand> {
             "--json" => parsed.json = true,
             "--from" => parsed.from = Some(flags.value("--from")?),
             "--to" => parsed.to = Some(flags.value("--to")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--from=") => {
                 parsed.from = Some(value_after_equals(arg, "--from")?)
             }
             _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
             _ => bail!("unknown errors option: {arg}"),
         }
     }
@@ -328,6 +335,8 @@ pub(crate) fn parse_patterns(args: &[String]) -> Result<CliCommand> {
             parsed.scan_limit = Some(parse_u32_flag("--scan-limit", v)?);
         } else if let Some(v) = flags.match_value(&arg, "--top-n")? {
             parsed.top_n = Some(parse_u32_flag("--top-n", v)?);
+        } else if let Some(v) = flags.match_value(&arg, "--limit")? {
+            parsed.top_n = Some(parse_u32_flag("--limit", v)?);
         } else {
             bail!("unknown patterns option: {arg}");
         }

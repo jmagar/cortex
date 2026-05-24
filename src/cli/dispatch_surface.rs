@@ -364,7 +364,10 @@ impl SilentHostsArgs {
 
 impl ClockSkewArgs {
     pub(crate) fn into_request(self) -> ClockSkewRequest {
-        ClockSkewRequest { since: self.since }
+        ClockSkewRequest {
+            since: self.since,
+            limit: self.limit,
+        }
     }
 }
 

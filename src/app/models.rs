@@ -793,6 +793,8 @@ pub struct GetErrorsRequest {
     pub to: Option<String>,
     /// Secondary grouping key. Currently supports `app_name`.
     pub group_by: Option<String>,
+    /// Max summary rows to return. Defaults to all rows; clamped by service.
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1229,6 +1231,8 @@ impl From<db::SilentHostEntry> for SilentHostEntry {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClockSkewRequest {
     pub since: Option<String>,
+    /// Max host rows to return, sorted by absolute average skew.
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
