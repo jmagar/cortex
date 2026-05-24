@@ -618,6 +618,7 @@ impl SyslogService {
                 db::investigate_ai_incidents(
                     pool,
                     &db::AiInvestigateParams {
+                        incident_id: req.incident_id,
                         ai_project: req.project,
                         ai_tool: req.tool,
                         from,
@@ -1865,6 +1866,7 @@ impl SyslogService {
         let incident_id = req.incident_id.clone();
         let gemini_config = GeminiAssessConfig::from_env(req.model);
         let invest_req = AiInvestigateRequest {
+            incident_id: Some(incident_id.clone()),
             project: req.project,
             tool: req.tool,
             from: req.from,

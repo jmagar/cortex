@@ -443,6 +443,7 @@ impl AiIncidentsArgs {
 impl AiInvestigateArgs {
     pub(crate) fn into_request(self) -> AiInvestigateRequest {
         AiInvestigateRequest {
+            incident_id: None,
             project: self.project,
             tool: self.tool,
             from: self.from,

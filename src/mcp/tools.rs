@@ -269,6 +269,7 @@ async fn tool_abuse_investigate(state: &AppState, args: Value) -> anyhow::Result
     let response = state
         .service
         .investigate_ai_incidents(AiInvestigateRequest {
+            incident_id: None,
             project: string_arg(&args, "project"),
             tool: string_arg(&args, "tool"),
             from: string_arg(&args, "from"),

@@ -427,6 +427,8 @@ impl From<db::AbuseIncident> for AbuseIncident {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiInvestigateRequest {
+    #[serde(default)]
+    pub incident_id: Option<String>,
     pub project: Option<String>,
     pub tool: Option<String>,
     pub from: Option<String>,

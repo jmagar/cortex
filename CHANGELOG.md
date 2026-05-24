@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.3] - 2026-05-24
+
+### Fixed
+
+- **AI incident assessment**: Allow `syslog ai assess <incident_id>` to build
+  evidence for any listed incident ID instead of only incidents in the top 10
+  investigation bundle page.
+- **AI incident CLI docs**: List `syslog ai incidents`, `syslog ai investigate`,
+  and `syslog ai assess` in top-level usage and CLI documentation.
+
 ## [0.31.2] - 2026-05-24
 
 ### Changed
@@ -1507,7 +1517,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.31.2...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.31.3...HEAD
+[0.31.3]: https://github.com/jmagar/syslog-mcp/compare/v0.31.2...v0.31.3
 [0.31.2]: https://github.com/jmagar/syslog-mcp/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/jmagar/syslog-mcp/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/jmagar/syslog-mcp/compare/v0.30.3...v0.31.0
