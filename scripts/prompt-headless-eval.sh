@@ -185,7 +185,6 @@ case "$AGENT" in
         codex exec \
             --cd "$WORKDIR" \
             --sandbox read-only \
-            --ask-for-approval never \
             --output-schema "$SCHEMA_FILE" \
             --output-last-message "$AGENT_OUTPUT" \
             "$(cat "$EVAL_PROMPT")"

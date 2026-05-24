@@ -309,7 +309,15 @@ fn prompt_output_schema() -> Value {
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["source", "summary"],
+                    "required": [
+                        "source",
+                        "summary",
+                        "timestamp",
+                        "host",
+                        "app",
+                        "severity",
+                        "log_id"
+                    ],
                     "properties": {
                         "source": {
                             "type": "string",
@@ -320,13 +328,13 @@ fn prompt_output_schema() -> Value {
                             "description": "Concise evidence summary without raw payload dumps."
                         },
                         "timestamp": {
-                            "type": "string",
+                            "type": ["string", "null"],
                             "description": "RFC3339 timestamp when available."
                         },
-                        "host": { "type": "string" },
-                        "app": { "type": "string" },
-                        "severity": { "type": "string" },
-                        "log_id": { "type": "integer" }
+                        "host": { "type": ["string", "null"] },
+                        "app": { "type": ["string", "null"] },
+                        "severity": { "type": ["string", "null"] },
+                        "log_id": { "type": ["integer", "null"] }
                     }
                 }
             },

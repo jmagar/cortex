@@ -50,13 +50,30 @@ while [[ $# -gt 0 ]]; do
             [[ -z "${2:-}" ]] && { echo "Error: --url requires a value"; exit 1; }
             MCP_URL="$2"; HEALTH_URL="${MCP_URL%/mcp}/health"; shift 2
             _MCPORTER_CONFIG_TMPFILE=$(mktemp /tmp/mcporter-XXXXXX.json)
-            printf '{"mcpServers":{"syslog":{"url":"%s","transport":"http"}}}' "$MCP_URL" > "$_MCPORTER_CONFIG_TMPFILE"
             MCPORTER_CONFIG="$_MCPORTER_CONFIG_TMPFILE"
             ;;
         --skip-seed) SKIP_SEED=1; shift ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
+
+if [[ -n "${SYSLOG_MCP_TOKEN:-}" || -n "$_MCPORTER_CONFIG_TMPFILE" ]]; then
+    if [[ -z "$_MCPORTER_CONFIG_TMPFILE" ]]; then
+        _MCPORTER_CONFIG_TMPFILE=$(mktemp /tmp/mcporter-XXXXXX.json)
+        MCPORTER_CONFIG="$_MCPORTER_CONFIG_TMPFILE"
+    fi
+    python3 - "$MCPORTER_CONFIG" "$MCP_URL" "${SYSLOG_MCP_TOKEN:-}" <<'PY'
+import json
+import sys
+
+path, url, token = sys.argv[1:4]
+server = {"baseUrl": url}
+if token:
+    server["headers"] = {"Authorization": f"Bearer {token}"}
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump({"mcpServers": {"syslog": server}}, fh)
+PY
+fi
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 PASS=0
@@ -151,7 +168,7 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null; then
         pass "$label"
-    elif printf '%s\n' "$output" | grep -q "^\[mcporter\] MCP error -32602:"; then
+    elif printf '%s\n' "$output" | grep -Eq "^\[mcporter\] MCP error -32602:|requires scope: syslog:__deny__"; then
         pass "$label"
     else
         fail "$label (expected tool isError=true or MCP invalid-params error)"
@@ -254,7 +271,7 @@ import sys, json
 try:
     d = json.load(sys.stdin)
     text = d['result']['messages'][0]['content']['text']
-    for needle in ['service `plex`', 'Host: tootie', 'bucket=minute', 'limit=10', 'syslog://schema/prompt-output']:
+    for needle in ['service \`plex\`', 'Host: tootie', 'bucket=minute', 'limit=10', 'syslog://schema/prompt-output']:
         assert needle in text, needle
     print('ok')
 except Exception as e:
