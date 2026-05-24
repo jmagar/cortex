@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-05-23
+
+### Fixed
+
+- **MCP prompt runbooks**: Tighten infrastructure debugging prompts with bounded
+  query guidance, valid `timeline` bucket examples, cheap-first escalation
+  steps, and a consistent operator synthesis format.
+
 ## [0.30.0] - 2026-05-23
 
 ### Added

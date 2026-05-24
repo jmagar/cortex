@@ -39,6 +39,21 @@ const SERVICE_ARG: PromptArgSpec = PromptArgSpec {
     required: false,
 };
 
+const COMMON_INVESTIGATION_RULES: &str = r#"Rules:
+- Start with cheap, narrow calls. Use `limit=5` or `limit=10` for `action=search`, `action=errors`, `action=tail`, `action=patterns`, and `action=correlate`.
+- For `action=timeline`, use `bucket=minute` for recent windows. Valid bucket values are `minute`, `hour`, and `day`.
+- Use `action=context` with small bounds such as `before=3` and `after=3` around representative log ids.
+- Escalate to broad or slower actions only when the cheap pass leaves a specific question: `action=stats`, `action=anomalies`, `action=patterns`, `action=compare`, `action=clock_skew`, `action=ingest_rate`, or wide `action=correlate`.
+- Summarize representative evidence. Do not paste full JSON payloads or unbounded result sets."#;
+
+const SYNTHESIS_FORMAT: &str = r#"Return exactly these sections:
+- Verdict:
+- Evidence:
+- Likely Cause:
+- Not Supported:
+- Next Actions:
+- Telemetry Gaps:"#;
+
 const PROMPTS: &[PromptSpec] = &[
     PromptSpec {
         name: "infra.incident-triage",
@@ -182,18 +197,21 @@ Scope:
 - Service focus: {service}
 
 Use the `syslog` MCP tool to gather evidence before drawing conclusions:
-1. Start with `action=status` and `action=stats` to confirm the database and ingest path are healthy.
-2. Use `action=errors`, `action=timeline`, and `action=anomalies` for the requested window to identify error spikes and affected hosts.
-3. Use `action=correlate` around the first suspicious timestamp, filtered by host/service if supplied.
-4. Use `action=search` for exact error terms, then `action=context` or `action=get` for surrounding events.
-5. Check `action=silent_hosts`, `action=clock_skew`, and `action=ingest_rate` if missing telemetry or bad timestamps could explain the symptoms.
+Cheap first pass:
+1. Use `action=status` to confirm the server is answering.
+2. Use `action=errors` with `limit=10` for the requested window, host, and service filters.
+3. Use `action=timeline` with `bucket=minute` for the same scope to identify the first abnormal minute.
+4. Use `action=search` with `limit=5` for exact error terms found in the first pass.
+5. Use `action=context` with `before=3` and `after=3` around the most representative log ids.
 
-Return:
-- Incident summary with confidence level.
-- Timeline of key events with timestamps, host, app, severity, and log ids when available.
-- Likely root cause versus alternatives still supported by evidence.
-- Concrete next commands or remediation steps.
-- Gaps in telemetry or follow-up queries needed."#
+Escalate only if needed:
+1. Use `action=correlate` with `limit=20` around the earliest suspicious timestamp.
+2. Use `action=anomalies` or `action=compare` when you need baseline context.
+3. Use `action=silent_hosts`, `action=clock_skew`, `action=ingest_rate`, or `action=stats` only when missing telemetry, timestamp drift, ingestion lag, or storage health could explain the symptoms.
+
+{COMMON_INVESTIGATION_RULES}
+
+{SYNTHESIS_FORMAT}"#
     )
 }
 
@@ -204,13 +222,22 @@ fn host_health_prompt(args: &Map<String, serde_json::Value>) -> String {
         r#"Assess health for host `{host}` using syslog-mcp.
 
 Use the `syslog` MCP tool:
-1. `action=hosts` to confirm the host exists and inspect first/last seen.
-2. `action=tail` with `hostname={host}` for the latest events.
-3. `action=errors`, `action=timeline`, and `action=patterns` scoped to `{host}` over {window}.
-4. `action=clock_skew` and `action=silent_hosts` to catch time drift or missing forwarding.
-5. `action=source_ips` if hostname/source identity looks inconsistent.
+Cheap first pass:
+1. Use `action=hosts` to confirm the host exists and inspect first/last seen.
+2. Use `action=tail` with `hostname={host}` and `limit=10` for the latest events.
+3. Use `action=errors` with `hostname={host}` and `limit=10` over {window}.
+4. Use `action=timeline` with `hostname={host}` and `bucket=minute` over {window}.
+5. Use `action=context` with `before=3` and `after=3` around representative error log ids.
 
-Return a concise health verdict, top error patterns, whether forwarding is current, and the safest next operational checks."#
+Escalate only if needed:
+1. Use `action=silent_hosts` if forwarding freshness is unclear.
+2. Use `action=clock_skew` if timestamps do not line up with received time.
+3. Use `action=patterns` with `hostname={host}` and `limit=10` only after identifying noisy apps or repeated errors.
+4. Use `action=source_ips` if hostname/source identity looks inconsistent.
+
+{COMMON_INVESTIGATION_RULES}
+
+{SYNTHESIS_FORMAT}"#
     )
 }
 
@@ -226,13 +253,20 @@ Scope:
 - Window: {window}
 
 Use the `syslog` MCP tool:
-1. Search service-specific logs with `action=search` using `app_name`, `hostname`, and exact error terms where possible.
-2. Use `action=errors`, `action=timeline`, and `action=anomalies` to compare the outage window against baseline behavior.
-3. Use `action=correlate` around the earliest failure to find host, Docker, network, DNS, auth, or proxy events nearby.
-4. Use `action=context` around representative log ids instead of relying on isolated lines.
-5. If this is syslog-mcp itself, also inspect `action=compose_status` and `action=compose_doctor`.
+Cheap first pass:
+1. Use `action=search` with `app_name={service}`, `hostname` if known, and `limit=5`.
+2. Use `action=errors` with `limit=10` for the service and host scope.
+3. Use `action=timeline` with `bucket=minute` for the outage window.
+4. Use `action=context` with `before=3` and `after=3` around representative service failures.
 
-Return the likely failure mode, earliest visible symptom, blast radius, supporting log ids, and a ranked remediation checklist."#
+Escalate only if needed:
+1. Use `action=correlate` with `limit=20` around the earliest failure to find host, Docker, network, DNS, auth, or proxy events nearby.
+2. Use `action=anomalies` or `action=compare` only when baseline behavior matters.
+3. If this is syslog-mcp itself, inspect `action=compose_status` first and `action=compose_doctor` only if the status projection is inconclusive.
+
+{COMMON_INVESTIGATION_RULES}
+
+{SYNTHESIS_FORMAT}"#
     )
 }
 
@@ -253,13 +287,19 @@ Scope:
 - Host focus: {host}
 
 Use the `syslog` MCP tool:
-1. Search for auth failures, bans, MFA/challenge events, proxy denials, and suspicious source IPs with `action=search`.
+1. Search for auth failures, bans, MFA/challenge events, proxy denials, and suspicious source IPs with `action=search` and `limit=5`.
 2. Use structured filters such as `auth_outcome` when available.
-3. Use `action=timeline`, `action=patterns`, and `action=source_ips` to separate repeated noise from targeted activity.
-4. Use `action=correlate` around suspicious bursts to find related service, firewall, DNS, or container events.
-5. Use `action=context` for representative events before making a security claim.
+3. Use `action=errors` with `limit=10` and `action=timeline` with `bucket=minute` for suspicious bursts.
+4. Use `action=context` with `before=3` and `after=3` for representative events before making a security claim.
 
-Return confirmed evidence, suspicious-but-unconfirmed signals, affected accounts/IPs/hosts, immediate containment options, and false-positive considerations."#
+Escalate only if needed:
+1. Use `action=source_ips` when actor or IP identity needs validation.
+2. Use `action=patterns` with `limit=10` to separate repeated noise from targeted activity.
+3. Use `action=correlate` with `limit=20` around suspicious bursts to find related service, firewall, DNS, or container events.
+
+{COMMON_INVESTIGATION_RULES}
+
+{SYNTHESIS_FORMAT}"#
     )
 }
 
@@ -276,12 +316,19 @@ Scope:
 - Service: {service}
 
 Use the `syslog` MCP tool:
-1. `action=patterns` to identify repeated templates and representative messages.
-2. `action=errors` and `action=timeline` to rank noise by severity and volume.
-3. `action=search` and `action=context` for the top patterns so you do not suppress a real incident.
-4. `action=compare` if there is a known normal window to separate regressions from background noise.
+Cheap first pass:
+1. Use `action=errors` with `limit=10` to rank noisy severity groups.
+2. Use `action=timeline` with `bucket=minute` to distinguish bursts from steady background noise.
+3. Use `action=search` with `limit=5` for the top repeated message terms.
+4. Use `action=context` with `before=3` and `after=3` before recommending suppression.
 
-Return a ranked table with pattern, affected hosts/apps, volume, risk of suppressing it, and recommended action: fix source, lower severity, deduplicate, alert only on rate, or leave untouched."#
+Escalate only if needed:
+1. Use `action=patterns` with `limit=10` to identify repeated templates and representative messages.
+2. Use `action=compare` only when there is a known normal window to separate regressions from background noise.
+
+{COMMON_INVESTIGATION_RULES}
+
+{SYNTHESIS_FORMAT}"#
     )
 }
 
@@ -302,12 +349,19 @@ Scope:
 - Service: {service}
 
 Use the `syslog` MCP tool:
-1. `action=usage_blocks`, `action=sessions`, and `action=project_context` to identify relevant AI work.
-2. `action=search_sessions` for deployment, compose, config, migration, auth, or service names.
-3. `action=ai_correlate` to align AI transcript anchors with infrastructure logs.
-4. `action=errors`, `action=timeline`, and `action=correlate` for infrastructure evidence near the same timestamps.
+Cheap first pass:
+1. Use `action=usage_blocks` and `action=sessions` with `limit=10` to identify relevant AI work.
+2. Use `action=search_sessions` with `limit=5` for deployment, compose, config, migration, auth, or service names.
+3. Use `action=errors` with `limit=10` and `action=timeline` with `bucket=minute` for infrastructure evidence near the same timestamps.
 
-Return what changed, whether symptoms started after that change, supporting transcript/log evidence, alternative causes, and a rollback or verification plan."#
+Escalate only if needed:
+1. Use `action=project_context` only for the most relevant project or session.
+2. Use `action=ai_correlate` to align AI transcript anchors with infrastructure logs after you have at least one candidate timestamp.
+3. Use `action=correlate` with `limit=20` around the candidate timestamp.
+
+{COMMON_INVESTIGATION_RULES}
+
+{SYNTHESIS_FORMAT}"#
     )
 }
 
@@ -334,5 +388,107 @@ mod tests {
             assert!(text.contains("syslog"));
             assert!(text.contains("action="));
         }
+    }
+
+    #[test]
+    fn rendered_prompts_reference_only_known_actions() {
+        let known_actions = super::super::actions::action_names();
+        for (name, text) in rendered_prompt_texts() {
+            for action in action_references(&text) {
+                assert!(
+                    known_actions.contains(&action.as_str()),
+                    "{name} references unknown action={action}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rendered_prompts_use_valid_timeline_bucket_guidance() {
+        for (name, text) in rendered_prompt_texts() {
+            assert!(
+                !text.contains("bucket=5m") && !text.contains("`5m`") && !text.contains(" 5m"),
+                "{name} includes invalid timeline bucket guidance"
+            );
+
+            if text.contains("action=timeline") {
+                assert!(
+                    text.contains("bucket=minute"),
+                    "{name} mentions timeline without minute bucket guidance"
+                );
+                assert!(
+                    text.contains("`minute`, `hour`, and `day`"),
+                    "{name} does not spell out valid timeline buckets"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rendered_prompts_require_bounded_queries_and_common_synthesis() {
+        let expected_sections = [
+            "- Verdict:",
+            "- Evidence:",
+            "- Likely Cause:",
+            "- Not Supported:",
+            "- Next Actions:",
+            "- Telemetry Gaps:",
+        ];
+
+        for (name, text) in rendered_prompt_texts() {
+            assert!(
+                text.contains("limit=5"),
+                "{name} lacks small search guidance"
+            );
+            assert!(
+                text.contains("limit=10"),
+                "{name} lacks bounded query guidance"
+            );
+            assert!(
+                text.contains("before=3") && text.contains("after=3"),
+                "{name} lacks bounded context guidance"
+            );
+            assert!(
+                text.contains("Escalate only if needed"),
+                "{name} lacks cheap-first escalation guidance"
+            );
+
+            for section in expected_sections {
+                assert!(text.contains(section), "{name} lacks section {section}");
+            }
+        }
+    }
+
+    fn rendered_prompt_texts() -> Vec<(&'static str, String)> {
+        PROMPTS
+            .iter()
+            .map(|spec| {
+                let (_description, messages) = get_prompt(spec.name, None).unwrap();
+                let text = match &messages[0].content {
+                    rmcp::model::PromptMessageContent::Text { text } => text.clone(),
+                    _ => panic!("expected text prompt"),
+                };
+                (spec.name, text)
+            })
+            .collect()
+    }
+
+    fn action_references(text: &str) -> Vec<String> {
+        let mut actions = Vec::new();
+        let mut rest = text;
+
+        while let Some(index) = rest.find("action=") {
+            let after_marker = &rest[index + "action=".len()..];
+            let action: String = after_marker
+                .chars()
+                .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+                .collect();
+            if !action.is_empty() {
+                actions.push(action);
+            }
+            rest = after_marker;
+        }
+
+        actions
     }
 }

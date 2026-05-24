@@ -5,6 +5,23 @@ workflows. Prompts do not add new data access paths; they guide MCP clients to
 call the existing `syslog` tool actions in a useful order and to report evidence
 before conclusions.
 
+## Execution Rules
+
+Every prompt is written as a bounded investigation runbook:
+
+- Start with cheap, scoped actions such as `status`, `errors`, `tail`, `search`,
+  and `timeline`.
+- Use small result sets first: `limit=5` for searches, `limit=10` for summaries,
+  and `before=3` / `after=3` for `context`.
+- For `timeline`, use `bucket=minute` for recent windows. The supported bucket
+  values are `minute`, `hour`, and `day`.
+- Escalate broader or slower actions only after the first pass produces a
+  specific question. Examples include `stats`, `anomalies`, `patterns`,
+  `compare`, `clock_skew`, `ingest_rate`, and broad `correlate` calls.
+- Summarize representative evidence instead of pasting full JSON payloads.
+- Return a consistent synthesis with `Verdict`, `Evidence`, `Likely Cause`,
+  `Not Supported`, `Next Actions`, and `Telemetry Gaps`.
+
 | Prompt | Purpose | Useful arguments |
 | --- | --- | --- |
 | `infra.incident-triage` | Build a timeline, scope, likely cause, and next actions for an incident | `window`, `host`, `service` |
@@ -27,7 +44,7 @@ before conclusions.
 }
 ```
 
-The rendered prompt asks the client to use actions such as `search`, `errors`,
-`timeline`, `anomalies`, `correlate`, and `context`, then return the likely
-failure mode, earliest visible symptom, blast radius, supporting log ids, and a
-ranked remediation checklist.
+The rendered prompt asks the client to start with bounded `search`, `errors`,
+`timeline`, and `context` calls, then escalate to `anomalies`, `compare`,
+`correlate`, or Compose diagnostics only when the first pass leaves a concrete
+question.

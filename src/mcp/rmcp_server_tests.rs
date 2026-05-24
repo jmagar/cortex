@@ -1296,8 +1296,11 @@ async fn mounted_policy_with_auth_context_permits_prompts() {
     assert!(
         response["result"]["messages"][0]["content"]["text"]
             .as_str()
-            .is_some_and(|text| text.contains("Incident summary")),
-        "prompts/get should render prompt text; response: {response}"
+            .is_some_and(|text| text.contains("Return exactly these sections:")
+                && text.contains("- Verdict:")
+                && text.contains("bucket=minute")
+                && text.contains("limit=10")),
+        "prompts/get should render tightened prompt text; response: {response}"
     );
 }
 
