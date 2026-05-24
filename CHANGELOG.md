@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.3] - 2026-05-24
+
+### Fixed
+
+- **Headless Gemini assessment runner**: Recover Markdown assessments from
+  Gemini `write_file` stream events and reinforce the prompt to return
+  Markdown directly instead of creating artifacts. Also pass a non-empty
+  `--prompt` stub so Gemini does not exit before consuming stdin evidence.
+
 ## [0.32.2] - 2026-05-24
 
 ### Fixed
@@ -1549,7 +1558,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.32.2...HEAD
+[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.32.3...HEAD
+[0.32.3]: https://github.com/jmagar/syslog-mcp/compare/v0.32.2...v0.32.3
 [0.32.2]: https://github.com/jmagar/syslog-mcp/compare/v0.32.1...v0.32.2
 [0.32.1]: https://github.com/jmagar/syslog-mcp/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/jmagar/syslog-mcp/compare/v0.31.3...v0.32.0
