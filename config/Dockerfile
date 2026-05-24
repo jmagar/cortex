@@ -19,6 +19,7 @@ RUN --mount=type=cache,id=syslog-cargo-registry-v2,target=/usr/local/cargo/regis
 
 # Build real binary
 COPY src/ src/
+COPY plugins/syslog/skills/syslog-frustration-assessment/ plugins/syslog/skills/syslog-frustration-assessment/
 COPY docker-compose.yml docker-compose.prod.yml ./
 COPY config/Dockerfile config/Dockerfile
 RUN --mount=type=cache,id=syslog-cargo-registry-v2,target=/usr/local/cargo/registry,sharing=locked \
