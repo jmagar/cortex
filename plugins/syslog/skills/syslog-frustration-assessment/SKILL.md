@@ -21,11 +21,14 @@ Produce a Markdown report with these sections in order:
 
 Classify each incident's frustration signal:
 - **Real frustration** — user genuinely upset by agent behavior or system failure
-- **Incidental** — profanity used casually or as emphasis, not directed at the agent/tool
+- **Real frustration with incidental profanity** — user is genuinely frustrated, but profanity is used as emphasis rather than as a direct attack
+- **Incidental profanity only** — profanity used casually or as emphasis, with no evidence of user frustration
 - **Quoted/referenced** — term appears in code, error messages, or quoted text
 - **False positive** — term matched but context is unrelated to frustration
 
-State your classification and cite the specific anchor messages as evidence.
+State your classification and cite the specific anchor messages as evidence. If the user repeats a corrective instruction after the agent misses or loops on it, classify the signal as real frustration even when the profanity itself is only emphatic.
+
+When the classification is **Real frustration with incidental profanity**, do not summarize it as "real but incidental" or "incidental frustration." Say the frustration was real and the profanity was incidental/emphatic.
 
 ### 2. Timeline
 
@@ -86,7 +89,11 @@ If multiple incidents are present, identify patterns:
 - Same external signal appearing repeatedly
 - Same user frustration trigger
 
-Note whether these are isolated or systemic.
+Do not claim "isolated" or "systemic" unless the evidence bundle contains enough comparison data to support that claim:
+- Use **systemic** only when multiple incidents, sessions, or repeated failures show the same pattern.
+- Use **isolated within this bundle** only when the bundle includes enough nearby or related incidents to rule out repetition.
+- Otherwise write exactly: **Trend evidence unavailable.** This bundle does not include enough comparison evidence to determine recurrence.
+- When using **Trend evidence unavailable**, do not also write that the incident "appears isolated", "seems isolated", or is "not systemic"; those are unsupported recurrence claims.
 
 ### 8. Follow-Up Actions and Bead Creation
 
@@ -104,6 +111,11 @@ Do **not** create Beads for:
 ## Guardrails
 
 - Never attribute blame without citing specific evidence entries
+- Never infer recurrence, isolation, or system-wide behavior from a single incident without comparison evidence
+- Never combine "Trend evidence unavailable" with unsupported isolation/systemic language
+- Never write "no systemic failure" or "not systemic" unless multiple comparison incidents or broad system evidence support that claim
+- Never collapse "real frustration with incidental profanity" into "incidental frustration"
+- Never use "appears" as a substitute for evidence; label uncertain claims as low confidence or unknown
 - Never claim the frustration is "just user error" without ruling out agent and external causes
 - Never create more than 3 Beads per assessment; prefer 0 unless severity clearly warrants it
 - Do not emit raw log content verbatim beyond 2-3 representative lines; paraphrase the rest
@@ -111,5 +123,7 @@ Do **not** create Beads for:
 ## Output Format
 
 Markdown. One H1 title (`# Frustration Assessment — <incident_id>`), then the 8 sections above as H2 headers. End with a one-paragraph executive summary.
+
+The executive summary must preserve the same uncertainty level as the body. If section 7 says **Trend evidence unavailable**, the executive summary must not say "isolated", "systemic", "not systemic", "no systemic failure", or equivalent recurrence language.
 
 See `references/assessment-template.md` for a filled example.

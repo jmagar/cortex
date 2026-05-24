@@ -77,6 +77,7 @@ anyhow = "1"
 libc = "0.2"
 lru = "0.16"
 rustix = { version = "0.38", features = ["fs"] }
+tempfile = "3"
 regex = "1"
 sha2 = "0.10"
 getrandom = "0.3"
@@ -106,7 +107,6 @@ test-support = []
 
 [dev-dependencies]
 syslog-mcp = { path = ".", features = ["test-support"] }
-tempfile = "3"
 serial_test = "3"
 tower = { version = "0.5", features = ["util"] }
 rmcp = { version = "1.6.0", default-features = false, features = [
