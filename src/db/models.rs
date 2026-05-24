@@ -459,6 +459,9 @@ pub struct AiIncidentResult {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiInvestigateParams {
+    /// Optional exact incident ID. When present, locate one matching incident
+    /// within the incident-list cap instead of only the top investigation page.
+    pub incident_id: Option<String>,
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
     pub from: Option<String>,

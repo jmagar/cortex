@@ -870,6 +870,67 @@ fn search_ai_abuse_truncates_only_when_additional_match_exists() {
 }
 
 #[test]
+fn investigate_ai_incidents_exact_id_can_fetch_beyond_top_ten() {
+    let (pool, _dir) = test_pool();
+    let entries = (0..12)
+        .map(|i| {
+            make_ai_entry(
+                &format!("2026-01-01T00:{i:02}:00Z"),
+                "host-a",
+                "codex",
+                "/tmp/project",
+                &format!("sess-{i:02}"),
+                "this shit needs assessment",
+            )
+        })
+        .collect::<Vec<_>>();
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let listed = search_ai_incidents(
+        &pool,
+        &AiIncidentParams {
+            ai_project: Some("/tmp/project".into()),
+            ai_tool: Some("codex".into()),
+            limit: Some(12),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(listed.incidents.len(), 12);
+    let target_id = listed.incidents.last().unwrap().incident_id.clone();
+
+    let top_ten = investigate_ai_incidents(
+        &pool,
+        &AiInvestigateParams {
+            ai_project: Some("/tmp/project".into()),
+            ai_tool: Some("codex".into()),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(!top_ten
+        .evidence
+        .iter()
+        .any(|bundle| bundle.incident.incident_id == target_id));
+
+    let exact = investigate_ai_incidents(
+        &pool,
+        &AiInvestigateParams {
+            incident_id: Some(target_id.clone()),
+            ai_project: Some("/tmp/project".into()),
+            ai_tool: Some("codex".into()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(exact.evidence.len(), 1);
+    assert_eq!(exact.evidence[0].incident.incident_id, target_id);
+    assert_eq!(exact.evidence[0].anchors.len(), 1);
+}
+
+#[test]
 fn ai_session_queries_respect_filters() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(

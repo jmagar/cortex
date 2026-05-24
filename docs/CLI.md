@@ -158,6 +158,48 @@ after each hit. Use repeated `--term WORD` flags to replace the built-in list
 with a custom detector. JSON includes `candidate_rows`, `candidate_cap`,
 `candidate_window_truncated`, `truncated`, and `matches[].{term,entry,before,after}`.
 
+### `syslog ai incidents`
+
+Group abuse hits into scored incident candidates.
+
+```bash
+syslog ai incidents --project /home/jmagar/workspace/syslog-mcp --limit 10
+syslog ai incidents --tool codex --term dang --term heck --json
+```
+
+Use `--window-minutes` to change how nearby abuse hits are grouped into one
+incident. JSON includes `total_incidents`, `candidate_rows`, `candidate_cap`,
+`candidate_window_truncated`, `truncated`, and `incidents[]`.
+
+### `syslog ai investigate`
+
+Expand top incidents into deterministic evidence bundles without calling an LLM.
+
+```bash
+syslog ai investigate --project /home/jmagar/workspace/syslog-mcp --limit 3
+syslog ai investigate --correlation-window-minutes 15 --json
+```
+
+Each evidence bundle includes the incident, anchor transcript rows, same-session
+before/after context, nearby non-AI logs, and nearby warning-or-higher logs.
+The public command expands at most 10 incidents per run.
+
+### `syslog ai assess`
+
+Fetch one incident evidence bundle and run the local Gemini CLI to produce a
+Markdown frustration assessment.
+
+```bash
+syslog ai incidents --limit 10
+syslog ai assess inc-f9a1d8e70cad13e6 --limit 3
+syslog ai assess inc-f9a1d8e70cad13e6 --model gemini-3.1-flash-lite-preview --json
+```
+
+`assess` is local-only and rejects `--http` because it spawns Gemini on the
+local host. It can assess any incident ID returned by `syslog ai incidents`
+within the incident-list cap, even when that incident is outside the top 10
+investigation bundles.
+
 ### `syslog ai blocks`
 
 Bucket AI activity into 5-hour UTC windows.

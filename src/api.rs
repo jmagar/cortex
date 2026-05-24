@@ -925,6 +925,7 @@ async fn ai_investigate(
         state
             .service
             .investigate_ai_incidents(AiInvestigateRequest {
+                incident_id: None,
                 project: q.project,
                 tool: q.tool,
                 from: q.from,

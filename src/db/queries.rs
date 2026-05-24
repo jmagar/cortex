@@ -1136,9 +1136,16 @@ pub fn investigate_ai_incidents(
     params: &AiInvestigateParams,
 ) -> Result<AiInvestigateResult> {
     let limit = params.limit.unwrap_or(3).clamp(1, 10) as usize;
+    let incident_lookup_limit = if params.incident_id.is_some() {
+        100
+    } else {
+        limit as u32
+    };
     let corr_mins = i64::from(params.correlation_window_minutes.unwrap_or(5).clamp(1, 120));
 
-    // Reuse incident grouping to find the top incidents.
+    // Reuse incident grouping to find the top incidents. Exact incident
+    // assessment may target an ID outside the top investigation page, so it
+    // searches up to the incident-list cap and then builds one evidence bundle.
     let incident_result = search_ai_incidents(
         pool,
         &AiIncidentParams {
@@ -1146,18 +1153,27 @@ pub fn investigate_ai_incidents(
             ai_tool: params.ai_tool.clone(),
             from: params.from.clone(),
             to: params.to.clone(),
-            limit: Some(limit as u32),
+            limit: Some(incident_lookup_limit),
             window_minutes: params.window_minutes,
             terms: params.terms.clone(),
         },
     )?;
     let total_incidents = incident_result.total_incidents;
     let truncated = incident_result.truncated;
+    let incidents = if let Some(incident_id) = &params.incident_id {
+        incident_result
+            .incidents
+            .into_iter()
+            .filter(|incident| incident.incident_id == *incident_id)
+            .collect()
+    } else {
+        incident_result.incidents
+    };
 
     let conn = pool.get()?;
-    let mut evidence = Vec::with_capacity(incident_result.incidents.len());
+    let mut evidence = Vec::with_capacity(incidents.len());
 
-    for incident in incident_result.incidents {
+    for incident in incidents {
         const TRANSCRIPT_CAP: usize = 20;
         const NEARBY_CAP: usize = 50;
 
