@@ -10,6 +10,7 @@ use tokio::process::{Child, Command};
 const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-flash-lite-preview";
 const DEFAULT_COMPLETION_TIMEOUT_SECS: u64 = 120;
 const STDERR_TAIL_LIMIT: usize = 4096;
+const GEMINI_STDIN_PROMPT_STUB: &str = "Read the assessment instructions and evidence from stdin.";
 const GEMINI_AUTH_FILES: &[&str] = &[
     "oauth_creds.json",
     "gemini-credentials.json",
@@ -23,6 +24,8 @@ pub(crate) const SKILL_MD: &str =
 pub(crate) const ASSESSMENT_SYSTEM_PROMPT: &str = concat!(
     "Use the syslog-frustration-assessment skill to assess the supplied bounded ",
     "syslog abuse incident evidence bundle.\n\n",
+    "Return the assessment as Markdown in the assistant response. Do not write ",
+    "files, create plans, or persist artifacts.\n\n",
     "You must also follow these instructions directly if native skill activation ",
     "is unavailable:\n\n",
     include_str!("../plugins/syslog/skills/syslog-frustration-assessment/SKILL.md"),
@@ -64,7 +67,7 @@ impl GeminiAssessConfig {
             program: self.program.clone(),
             args: vec![
                 "--prompt".to_string(),
-                String::new(),
+                GEMINI_STDIN_PROMPT_STUB.to_string(),
                 "--approval-mode".to_string(),
                 "plan".to_string(),
                 "--extensions".to_string(),
@@ -391,18 +394,7 @@ impl GeminiStreamState {
         let value: Value = serde_json::from_str(trimmed)
             .map_err(|err| anyhow!("malformed Gemini stream JSON: {err}: {trimmed}"))?;
         match value.get("type").and_then(Value::as_str) {
-            Some("tool_use") => {
-                let tool_name = value
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .or_else(|| value.get("tool_name").and_then(Value::as_str));
-                if !matches!(tool_name, Some("activate_skill") | Some("update_topic")) {
-                    bail!(
-                        "Gemini headless emitted unexpected tool call '{}' in assessment mode; raw event: {value}",
-                        tool_name.unwrap_or("unknown")
-                    );
-                }
-            }
+            Some("tool_use") => self.handle_tool_use(&value)?,
             Some("tool_result") => {}
             Some("error") => bail!("Gemini headless stream error: {value}"),
             Some("message") if value.get("role").and_then(Value::as_str) == Some("assistant") => {
@@ -430,6 +422,34 @@ impl GeminiStreamState {
         }
         self.saw_success = true;
         Ok(())
+    }
+
+    fn handle_tool_use(&mut self, value: &Value) -> Result<()> {
+        let tool_name = value
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| value.get("tool_name").and_then(Value::as_str));
+        match tool_name {
+            Some("activate_skill") | Some("update_topic") => Ok(()),
+            Some("write_file") => {
+                let Some(content) = value
+                    .get("parameters")
+                    .and_then(|params| params.get("content"))
+                    .and_then(Value::as_str)
+                    .filter(|content| !content.trim().is_empty())
+                else {
+                    bail!(
+                        "Gemini headless emitted write_file without assessment content; raw event: {value}"
+                    );
+                };
+                self.result_text = Some(content.to_string());
+                Ok(())
+            }
+            _ => bail!(
+                "Gemini headless emitted unexpected tool call '{}' in assessment mode; raw event: {value}",
+                tool_name.unwrap_or("unknown")
+            ),
+        }
     }
 
     fn push_delta<F>(&mut self, delta: &str, on_delta: &mut F) -> Result<()>
@@ -589,6 +609,7 @@ mod tests {
     fn assessment_prompt_references_skill_and_wraps_evidence() {
         let prompt = build_assessment_prompt(r#"{"incident_id":"inc-1"}"#);
         assert!(prompt.contains("syslog-frustration-assessment"));
+        assert!(prompt.contains("Do not write files"));
         assert!(prompt.contains("Use this skill after running"));
         assert!(prompt.contains("<untrusted-evidence"));
         assert!(prompt.contains(r#""incident_id":"inc-1""#));
@@ -605,7 +626,10 @@ mod tests {
         let spec = config.command_spec().unwrap();
         assert_eq!(spec.program, "gemini");
         assert_eq!(spec.output_mode, "stream-json");
-        assert!(spec.args.windows(2).any(|w| w == ["--prompt", ""]));
+        assert!(spec
+            .args
+            .windows(2)
+            .any(|w| w == ["--prompt", GEMINI_STDIN_PROMPT_STUB]));
         assert!(spec
             .args
             .windows(2)
@@ -697,6 +721,24 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("unexpected tool call"));
+    }
+
+    #[test]
+    fn stream_parser_recovers_markdown_from_write_file_tool_call() {
+        let mut parser = GeminiStreamState::default();
+        parser
+            .handle_line(
+                r##"{"type":"tool_use","tool_name":"write_file","parameters":{"file_path":"/tmp/syslog-gemini-headless-x/.gemini/tmp/session/plans/frustration_assessment.md","content":"# Frustration Assessment\n\nRecovered report."}}"##,
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        parser
+            .handle_line(r#"{"type":"result","status":"success"}"#, &mut |_| Ok(()))
+            .unwrap();
+        assert_eq!(
+            parser.finish().unwrap(),
+            "# Frustration Assessment\n\nRecovered report."
+        );
     }
 
     #[tokio::test]
