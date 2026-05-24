@@ -23,6 +23,31 @@ pub(super) enum Scope {
     InfoOnly,
 }
 
+/// Expected relative cost for agent planning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Cost {
+    /// Lightweight metadata or indexed query; safe as a first-pass action.
+    Cheap,
+    /// Bounded but may scan/aggregate more data; use after narrowing scope.
+    Moderate,
+    /// Broad scan, baseline comparison, or host-level diagnostic; use only
+    /// when a cheap/moderate pass leaves a concrete question.
+    Expensive,
+    /// State-changing operation.
+    Write,
+}
+
+impl Cost {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Cheap => "cheap",
+            Self::Moderate => "moderate",
+            Self::Expensive => "expensive",
+            Self::Write => "write",
+        }
+    }
+}
+
 /// Metadata for a single MCP action.
 #[derive(Debug)]
 pub(super) struct ActionSpec {
@@ -34,6 +59,8 @@ pub(super) struct ActionSpec {
     /// generation; not yet consumed outside this module).
     #[allow(dead_code)]
     pub description: &'static str,
+    /// Relative cost for agent/tool planning.
+    pub cost: Cost,
 }
 
 /// The single authoritative table of all supported MCP actions.
@@ -50,198 +77,237 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         name: "search",
         scope: Scope::Read,
         description: "Full-text search over syslog messages",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "tail",
         scope: Scope::Read,
         description: "Stream the most recent log entries",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "errors",
         scope: Scope::Read,
         description: "List recent error-level log entries",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "hosts",
         scope: Scope::Read,
         description: "Enumerate all known source hostnames",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "correlate",
         scope: Scope::Read,
         description: "Correlate events across hosts/services",
+        cost: Cost::Moderate,
     },
     ActionSpec {
         name: "stats",
         scope: Scope::Read,
         description: "Aggregate log statistics",
+        cost: Cost::Expensive,
     },
     ActionSpec {
         name: "status",
         scope: Scope::Read,
         description: "Server health and ingestion status",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "apps",
         scope: Scope::Read,
         description: "Enumerate all known application names",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "sessions",
         scope: Scope::Read,
         description: "List AI transcript sessions",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "search_sessions",
         scope: Scope::Read,
         description: "Full-text search over AI transcript sessions",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "abuse",
         scope: Scope::Read,
         description: "Detect resource-abuse patterns in AI sessions",
+        cost: Cost::Moderate,
     },
     ActionSpec {
         name: "abuse_incidents",
         scope: Scope::Read,
         description: "List detected abuse incidents",
+        cost: Cost::Moderate,
     },
     ActionSpec {
         name: "abuse_investigate",
         scope: Scope::Read,
         description: "Deep-dive investigation of an abuse incident",
+        cost: Cost::Expensive,
     },
     ActionSpec {
         name: "ai_correlate",
         scope: Scope::Read,
         description: "Correlate AI transcript events with syslog",
+        cost: Cost::Moderate,
     },
     ActionSpec {
         name: "usage_blocks",
         scope: Scope::Read,
         description: "Summarise AI session usage by project",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "project_context",
         scope: Scope::Read,
         description: "Full project context from AI transcripts",
+        cost: Cost::Moderate,
     },
     ActionSpec {
         name: "list_ai_tools",
         scope: Scope::Read,
         description: "List AI tools observed in transcripts",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "list_ai_projects",
         scope: Scope::Read,
         description: "List AI projects with transcript activity",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "source_ips",
         scope: Scope::Read,
         description: "Enumerate unique source IP addresses",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "timeline",
         scope: Scope::Read,
         description: "Log volume over time (bucketed)",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "patterns",
         scope: Scope::Read,
         description: "Recurring message patterns",
+        cost: Cost::Expensive,
     },
     ActionSpec {
         name: "context",
         scope: Scope::Read,
         description: "Contextual log entries around a pivot",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "get",
         scope: Scope::Read,
         description: "Fetch a single log entry by ID",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "ingest_rate",
         scope: Scope::Read,
         description: "Current log ingestion rate",
+        cost: Cost::Expensive,
     },
     ActionSpec {
         name: "silent_hosts",
         scope: Scope::Read,
         description: "Hosts that have gone silent",
+        cost: Cost::Moderate,
     },
     ActionSpec {
         name: "clock_skew",
         scope: Scope::Read,
         description: "Detect clock skew between hosts",
+        cost: Cost::Expensive,
     },
     ActionSpec {
         name: "anomalies",
         scope: Scope::Read,
         description: "Detect log-volume anomalies",
+        cost: Cost::Expensive,
     },
     ActionSpec {
         name: "compare",
         scope: Scope::Read,
         description: "Compare log patterns between time windows",
+        cost: Cost::Expensive,
     },
     ActionSpec {
         name: "compose_status",
         scope: Scope::Read,
         description: "Docker Compose stack status",
+        cost: Cost::Moderate,
     },
     ActionSpec {
         name: "compose_doctor",
         scope: Scope::Read,
         description: "Docker Compose coordination diagnostics",
+        cost: Cost::Expensive,
     },
     ActionSpec {
         name: "unaddressed_errors",
         scope: Scope::Read,
         description: "List unacknowledged error signatures",
+        cost: Cost::Moderate,
     },
     ActionSpec {
         name: "notifications_recent",
         scope: Scope::Read,
         description: "Recent notification firings",
+        cost: Cost::Cheap,
     },
     ActionSpec {
         name: "similar_incidents",
         scope: Scope::Read,
         description: "Find similar past incidents",
+        cost: Cost::Moderate,
     },
     ActionSpec {
         name: "ask_history",
         scope: Scope::Read,
         description: "Query AI transcript history",
+        cost: Cost::Moderate,
     },
     ActionSpec {
         name: "incident_context",
         scope: Scope::Read,
         description: "Full context for an incident",
+        cost: Cost::Moderate,
     },
     // ── Admin / write actions ──────────────────────────────────────────────
     ActionSpec {
         name: "ack_error",
         scope: Scope::Admin,
         description: "Acknowledge an error signature",
+        cost: Cost::Write,
     },
     ActionSpec {
         name: "unack_error",
         scope: Scope::Admin,
         description: "Revoke an error signature acknowledgement",
+        cost: Cost::Write,
     },
     ActionSpec {
         name: "notifications_test",
         scope: Scope::Admin,
         description: "Send a test notification via Apprise",
+        cost: Cost::Write,
     },
     // ── Informational (auth required, no scope gate) ───────────────────────
     ActionSpec {
         name: "help",
         scope: Scope::InfoOnly,
         description: "List available actions and their parameters",
+        cost: Cost::Cheap,
     },
 ];
 

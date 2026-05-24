@@ -340,6 +340,12 @@ async fn rmcp_prompts_list_exposes_infra_debugging_prompts() {
     assert!(names.contains(&"infra.security-auth-review"));
     assert!(names.contains(&"infra.noise-reduction"));
     assert!(names.contains(&"infra.agent-change-correlation"));
+    assert!(names.contains(&"infra.docker-container-regression"));
+    assert!(names.contains(&"infra.network-dns-failure"));
+    assert!(names.contains(&"infra.storage-pressure"));
+    assert!(names.contains(&"infra.auth-bruteforce"));
+    assert!(names.contains(&"infra.syslog-forwarding-gap"));
+    assert!(names.contains(&"infra.after-deploy-check"));
     assert!(
         prompts.iter().any(|prompt| prompt["arguments"]
             .as_array()
@@ -1238,12 +1244,16 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
         "resources/list should expose schema resource; response: {response}"
     );
     assert!(
+        uris.contains(&super::PROMPT_OUTPUT_SCHEMA_RESOURCE_URI),
+        "resources/list should expose prompt output schema resource; response: {response}"
+    );
+    assert!(
         uris.contains(&super::QUERY_WIDGET_RESOURCE_URI),
         "resources/list should expose query widget resource; response: {response}"
     );
 
     let (status, response) = post_rmcp(
-        router,
+        router.clone(),
         jsonrpc_request(
             82,
             "resources/read",
@@ -1255,8 +1265,28 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
     assert!(
         response["result"]["contents"][0]["text"]
             .as_str()
-            .is_some_and(|text| text.contains("\"name\": \"syslog\"")),
+            .is_some_and(|text| text.contains("\"name\": \"syslog\"")
+                && text.contains("x-syslog-action-metadata")),
         "resources/read should return schema JSON; response: {response}"
+    );
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            821,
+            "resources/read",
+            Some(json!({"uri": super::PROMPT_OUTPUT_SCHEMA_RESOURCE_URI})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        response["result"]["contents"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("\"verdict\"")
+                && text.contains("\"confidence\"")
+                && text.contains("\"evidence\"")),
+        "resources/read should return prompt output schema JSON; response: {response}"
     );
 }
 

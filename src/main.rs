@@ -695,7 +695,7 @@ fn print_usage() {
   syslog mcp          Start query-only MCP stdio transport
   syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]
   syslog tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
-  syslog errors [--from TIME] [--to TIME] [--json]
+  syslog errors [--from TIME] [--to TIME] [--limit N] [--json]
   syslog hosts [--json]
   syslog sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
   syslog incident --around TIME [--minutes N] [--service SERVICE] [--host HOST] [--limit N] [--json]

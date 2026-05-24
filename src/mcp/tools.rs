@@ -126,6 +126,7 @@ async fn tool_get_errors(state: &AppState, args: Value) -> anyhow::Result<Value>
             from: string_arg(&args, "from"),
             to: string_arg(&args, "to"),
             group_by: string_arg(&args, "group_by"),
+            limit: u32_arg(&args, "limit")?,
         })
         .await?;
     tracing::debug!(
@@ -450,6 +451,7 @@ async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {
 }
 
 async fn tool_patterns(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let top_n = u32_arg(&args, "top_n")?.or(u32_arg(&args, "limit")?);
     let response = state
         .service
         .patterns(PatternsRequest {
@@ -459,7 +461,7 @@ async fn tool_patterns(state: &AppState, args: Value) -> anyhow::Result<Value> {
             app_name: string_arg(&args, "app_name"),
             severity_min: string_arg(&args, "severity_min"),
             scan_limit: u32_arg(&args, "scan_limit")?,
-            top_n: u32_arg(&args, "top_n")?,
+            top_n,
         })
         .await?;
     tracing::debug!(
@@ -516,6 +518,7 @@ async fn tool_clock_skew(state: &AppState, args: Value) -> anyhow::Result<Value>
         .service
         .clock_skew(ClockSkewRequest {
             since: string_arg(&args, "since"),
+            limit: u32_arg(&args, "limit")?,
         })
         .await?;
     Ok(serde_json::to_value(response)?)
@@ -810,6 +813,38 @@ fn admin_action_help() -> String {
 }
 
 async fn tool_syslog_help() -> anyhow::Result<Value> {
+    let mut cheap = Vec::new();
+    let mut moderate = Vec::new();
+    let mut expensive = Vec::new();
+    let mut write = Vec::new();
+    for spec in actions::ACTION_SPECS {
+        match spec.cost {
+            actions::Cost::Cheap => cheap.push(spec.name),
+            actions::Cost::Moderate => moderate.push(spec.name),
+            actions::Cost::Expensive => expensive.push(spec.name),
+            actions::Cost::Write => write.push(spec.name),
+        }
+    }
+    let cost_guide = format!(
+        r#"## Agent Planning Cost Metadata
+
+Use action cost metadata to keep first-class agents token-efficient:
+- `cheap`: {}.
+- `moderate`: {}.
+- `expensive`: {}.
+- `write`: {}.
+
+Recommended flow: start with cheap bounded calls, use moderate actions after
+the scope is narrowed, and reserve expensive actions for a specific unanswered
+question. Write actions require admin scope and must never be used for read-only
+diagnosis.
+
+"#,
+        cheap.join(", "),
+        moderate.join(", "),
+        expensive.join(", "),
+        write.join(", ")
+    );
     let help = r#"# syslog-mcp Tool Reference
 
 The MCP server exposes one tool, `syslog`. Set the required `action` argument
@@ -858,6 +893,7 @@ Groups by hostname and severity level (and optionally app_name), showing counts.
 - `from` (string, optional) — start of time range (ISO 8601); defaults to all time
 - `to` (string, optional) — end of time range (ISO 8601); defaults to now
 - `group_by` (string, optional) — secondary grouping key. Currently `app_name` is supported; default groups only by hostname+severity.
+- `limit` (integer, optional) — cap summary rows returned (max 100)
 
 ---
 
@@ -1054,6 +1090,7 @@ host distribution.
 - `severity_min` (string, optional) — only cluster entries at or above this severity
 - `scan_limit` (integer, optional) — max messages to read (default 10000, max 50000)
 - `top_n` (integer, optional) — max templates to return (default 20, max 200)
+- `limit` (integer, optional) — alias for `top_n` for agent/CLI ergonomics
 
 ---
 
@@ -1104,6 +1141,7 @@ absolute mean. Surfaces devices with a broken or drifting clock.
 
 **Parameters:**
 - `since` (string, optional) — only sample entries with `received_at >= since` (default last 24h)
+- `limit` (integer, optional) — cap returned host rows (max 100)
 
 ---
 
@@ -1244,7 +1282,7 @@ Response fields: `window_from`, `window_to`, `total_logs`, `by_severity` (array)
 
 "#;
     let help = format!(
-        "{help}{}{}",
+        "{help}\n{cost_guide}{}{}",
         admin_action_help(),
         r#"---
 

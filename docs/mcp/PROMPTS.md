@@ -21,6 +21,9 @@ Every prompt is written as a bounded investigation runbook:
 - Summarize representative evidence instead of pasting full JSON payloads.
 - Return a consistent synthesis with `Verdict`, `Evidence`, `Likely Cause`,
   `Not Supported`, `Next Actions`, and `Telemetry Gaps`.
+- Clients that support structured output can read
+  `syslog://schema/prompt-output` and validate prompt answers against that
+  JSON Schema.
 
 | Prompt | Purpose | Useful arguments |
 | --- | --- | --- |
@@ -30,6 +33,12 @@ Every prompt is written as a bounded investigation runbook:
 | `infra.security-auth-review` | Review auth failures, bans, suspicious IPs, and correlated infrastructure context | `window`, `actor`, `host` |
 | `infra.noise-reduction` | Identify repeated patterns and recommend safe alert tuning or source fixes | `window`, `host`, `service` |
 | `infra.agent-change-correlation` | Correlate AI agent work with infrastructure errors and regressions | `project`, `session_id`, `window`, `host`, `service` |
+| `infra.docker-container-regression` | Investigate container restarts, healthchecks, image pulls, and Compose regressions | `container`, `host`, `service`, `window` |
+| `infra.network-dns-failure` | Debug DNS, proxy, firewall, upstream, and reachability failures | `host`, `service`, `window` |
+| `infra.storage-pressure` | Investigate disk pressure, DB growth, cleanup, and write-block risk | `host`, `service`, `window` |
+| `infra.auth-bruteforce` | Investigate repeated auth failures, bans, suspicious sources, and blast radius | `window`, `actor`, `host`, `service` |
+| `infra.syslog-forwarding-gap` | Investigate stale, missing, spoofed, or delayed syslog forwarding | `host`, `window` |
+| `infra.after-deploy-check` | Verify post-deploy health and identify regressions quickly | `service`, `host`, `window` |
 
 ## Example
 

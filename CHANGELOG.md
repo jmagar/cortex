@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-05-24
+
+### Added
+
+- **Agent-first MCP prompts**: Add focused infrastructure debugging prompts for
+  Docker regressions, DNS failures, storage pressure, auth brute force,
+  forwarding gaps, and after-deploy checks.
+- **Prompt contracts**: Expose action cost metadata, agent planning guidance,
+  and a structured prompt-output schema resource for incident-style answers.
+- **Headless prompt eval**: Add a Codex/Claude headless prompt evaluation
+  runner plus documentation for live MCP prompt rendering and schema scoring.
+
+### Changed
+
+- **Bounded diagnostics**: Add `limit` support for high-volume error and clock
+  skew summaries, accept `limit` as a `patterns` alias, and include prompt
+  coverage in the MCP smoke test.
+
 ## [0.30.1] - 2026-05-23
 
 ### Fixed

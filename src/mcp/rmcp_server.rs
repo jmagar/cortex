@@ -129,7 +129,11 @@ impl ServerHandler for SyslogRmcpServer {
     ) -> Result<ListResourcesResult, ErrorData> {
         require_auth_context(&self.state, &context)?;
         Ok(ListResourcesResult {
-            resources: vec![schema_resource(), query_widget_resource()],
+            resources: vec![
+                schema_resource(),
+                prompt_output_schema_resource(),
+                query_widget_resource(),
+            ],
             ..Default::default()
         })
     }
@@ -151,6 +155,17 @@ impl ServerHandler for SyslogRmcpServer {
                     SCHEMA_RESOURCE_URI,
                 )
                 .with_mime_type("application/json")]))
+            }
+            PROMPT_OUTPUT_SCHEMA_RESOURCE_URI => {
+                let text =
+                    serde_json::to_string_pretty(&prompt_output_schema()).map_err(|error| {
+                        ErrorData::internal_error(format!("serialization error: {error}"), None)
+                    })?;
+                Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                    text,
+                    PROMPT_OUTPUT_SCHEMA_RESOURCE_URI,
+                )
+                .with_mime_type("application/schema+json")]))
             }
             QUERY_WIDGET_RESOURCE_URI => Ok(ReadResourceResult::new(vec![query_widget_contents()])),
             _ => Err(ErrorData::invalid_params(
@@ -226,6 +241,7 @@ pub fn streamable_http_service(
 }
 
 const SCHEMA_RESOURCE_URI: &str = "syslog://schema/mcp-tool";
+const PROMPT_OUTPUT_SCHEMA_RESOURCE_URI: &str = "syslog://schema/prompt-output";
 pub(super) const QUERY_WIDGET_RESOURCE_URI: &str = "ui://syslog/query-widget";
 pub(super) const MCP_APP_HTML_MIME_TYPE: &str = "text/html;profile=mcp-app";
 
@@ -238,6 +254,20 @@ fn schema_resource() -> Resource {
     )
 }
 
+fn prompt_output_schema_resource() -> Resource {
+    Resource::new(
+        RawResource::new(
+            PROMPT_OUTPUT_SCHEMA_RESOURCE_URI,
+            "syslog prompt output schema",
+        )
+        .with_description(
+            "JSON schema for structured incident-style outputs from syslog MCP prompts",
+        )
+        .with_mime_type("application/schema+json"),
+        None,
+    )
+}
+
 fn query_widget_resource() -> Resource {
     Resource::new(
         RawResource::new(QUERY_WIDGET_RESOURCE_URI, "syslog query widget")
@@ -246,6 +276,76 @@ fn query_widget_resource() -> Resource {
             .with_mime_type(MCP_APP_HTML_MIME_TYPE),
         None,
     )
+}
+
+fn prompt_output_schema() -> Value {
+    serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": PROMPT_OUTPUT_SCHEMA_RESOURCE_URI,
+        "title": "SyslogPromptInvestigationResult",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "verdict",
+            "confidence",
+            "evidence",
+            "likely_cause",
+            "not_supported",
+            "next_actions",
+            "telemetry_gaps"
+        ],
+        "properties": {
+            "verdict": {
+                "type": "string",
+                "description": "One sentence conclusion with the current confidence level."
+            },
+            "confidence": {
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+                "description": "Confidence based only on observed evidence."
+            },
+            "evidence": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["source", "summary"],
+                    "properties": {
+                        "source": {
+                            "type": "string",
+                            "description": "Tool action, transcript, or log id used as evidence."
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "Concise evidence summary without raw payload dumps."
+                        },
+                        "timestamp": {
+                            "type": "string",
+                            "description": "RFC3339 timestamp when available."
+                        },
+                        "host": { "type": "string" },
+                        "app": { "type": "string" },
+                        "severity": { "type": "string" },
+                        "log_id": { "type": "integer" }
+                    }
+                }
+            },
+            "likely_cause": { "type": "string" },
+            "not_supported": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Hypotheses considered but not supported by current evidence."
+            },
+            "next_actions": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "telemetry_gaps": {
+                "type": "array",
+                "items": { "type": "string" }
+            }
+        }
+    })
 }
 
 fn query_widget_contents() -> ResourceContents {

@@ -91,6 +91,7 @@ impl TimeRangeArgs {
             from: self.from,
             to: self.to,
             group_by: None,
+            limit: self.limit,
         }
     }
 }

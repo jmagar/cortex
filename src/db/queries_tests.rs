@@ -292,7 +292,7 @@ fn test_error_summary_severity_filter() {
     ];
     insert_logs_batch(&pool, &entries).unwrap();
 
-    let summary = get_error_summary(&pool, None, None, false).unwrap();
+    let summary = get_error_summary(&pool, None, None, false, None).unwrap();
     // Only err and warning should appear (not info, debug)
     assert_eq!(summary.len(), 2);
     let severities: Vec<&str> = summary.iter().map(|e| e.severity.as_str()).collect();

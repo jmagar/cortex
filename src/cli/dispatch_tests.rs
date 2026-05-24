@@ -114,12 +114,13 @@ fn errors_args_into_request_snapshot() {
     let args = TimeRangeArgs {
         from: Some("2026-01-01T00:00:00Z".into()),
         to: None,
+        limit: Some(10),
         json: false,
     };
     let req = args.into_errors_request();
     assert_eq!(
         format!("{req:?}"),
-        "GetErrorsRequest { from: Some(\"2026-01-01T00:00:00Z\"), to: None, group_by: None }"
+        "GetErrorsRequest { from: Some(\"2026-01-01T00:00:00Z\"), to: None, group_by: None, limit: Some(10) }"
     );
 }
 

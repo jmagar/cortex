@@ -276,6 +276,7 @@ pub(crate) struct TailArgs {
 pub(crate) struct TimeRangeArgs {
     pub from: Option<String>,
     pub to: Option<String>,
+    pub limit: Option<u32>,
     pub json: bool,
 }
 
@@ -564,6 +565,7 @@ pub(crate) struct SilentHostsArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ClockSkewArgs {
     pub since: Option<String>,
+    pub limit: Option<u32>,
     pub json: bool,
 }
 

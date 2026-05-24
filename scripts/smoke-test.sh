@@ -78,6 +78,19 @@ mcp_call() {
     mcporter call --config "$MCPORTER_CONFIG" "syslog.syslog" "action=${action}" "$@" 2>&1
 }
 
+mcp_jsonrpc() {
+    local payload="$1"
+    local auth_args=()
+    if [[ -n "${SYSLOG_MCP_TOKEN:-}" ]]; then
+        auth_args=(-H "Authorization: Bearer ${SYSLOG_MCP_TOKEN}")
+    fi
+    curl -fsS -X POST "$MCP_URL" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
+        "${auth_args[@]}" \
+        -d "$payload" 2>&1
+}
+
 json_get() {
     local json="$1" field="$2"
     printf '%s\n' "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d$field)" 2>/dev/null
@@ -202,6 +215,67 @@ assert_eq "Health endpoint responds with ok" "$HEALTH_STATUS" "ok"
 TOOL_LIST=$(mcporter list syslog --config "$MCPORTER_CONFIG" 2>&1)
 TOOL_COUNT=$(printf '%s\n' "$TOOL_LIST" | grep -c "^  function " || true)
 assert_eq "mcporter lists exactly 1 tool (syslog)" "$TOOL_COUNT" "1"
+
+PROMPTS_LIST=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":101,"method":"prompts/list","params":{}}' || true)
+PROMPTS_VALID=$(printf '%s\n' "$PROMPTS_LIST" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    names = {p['name'] for p in d['result']['prompts']}
+    required = {'infra.incident-triage', 'infra.after-deploy-check', 'infra.syslog-forwarding-gap'}
+    assert required <= names, required - names
+    assert len(names) >= 12, len(names)
+    print('ok')
+except Exception as e:
+    print(f'error: {e}')
+")
+assert_eq "prompts/list exposes focused infra prompts" "$PROMPTS_VALID" "ok"
+
+PROMPT_GET_PAYLOAD=$(python3 - <<'PY'
+import json
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": 102,
+    "method": "prompts/get",
+    "params": {
+        "name": "infra.service-outage",
+        "arguments": {
+            "service": "plex",
+            "host": "tootie",
+            "window": "last 45 minutes",
+        },
+    },
+}))
+PY
+)
+PROMPT_GET=$(mcp_jsonrpc "$PROMPT_GET_PAYLOAD" || true)
+PROMPT_VALID=$(printf '%s\n' "$PROMPT_GET" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    text = d['result']['messages'][0]['content']['text']
+    for needle in ['service `plex`', 'Host: tootie', 'bucket=minute', 'limit=10', 'syslog://schema/prompt-output']:
+        assert needle in text, needle
+    print('ok')
+except Exception as e:
+    print(f'error: {e}')
+")
+assert_eq "prompts/get renders bounded argument-aware prompt" "$PROMPT_VALID" "ok"
+
+PROMPT_SCHEMA=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":103,"method":"resources/read","params":{"uri":"syslog://schema/prompt-output"}}' || true)
+PROMPT_SCHEMA_VALID=$(printf '%s\n' "$PROMPT_SCHEMA" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    schema = json.loads(d['result']['contents'][0]['text'])
+    required = set(schema['required'])
+    assert {'verdict', 'confidence', 'evidence', 'likely_cause', 'not_supported', 'next_actions', 'telemetry_gaps'} <= required
+    assert schema['properties']['confidence']['enum'] == ['low', 'medium', 'high']
+    print('ok')
+except Exception as e:
+    print(f'error: {e}')
+")
+assert_eq "prompt output schema resource is available" "$PROMPT_SCHEMA_VALID" "ok"
 
 # ─── Phase 2: Seed test data ─────────────────────────────────────────────────
 echo ""

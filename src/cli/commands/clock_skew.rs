@@ -6,7 +6,7 @@
 use anyhow::{bail, Result};
 
 use super::super::args::{CliCommand, ClockSkewArgs};
-use super::super::FlagCursor;
+use super::super::{parse_u32_flag, FlagCursor};
 
 pub(crate) fn parse_clock_skew(args: &[String]) -> Result<CliCommand> {
     let mut parsed = ClockSkewArgs::default();
@@ -16,6 +16,8 @@ pub(crate) fn parse_clock_skew(args: &[String]) -> Result<CliCommand> {
             parsed.json = true;
         } else if let Some(v) = flags.match_value(&arg, "--since")? {
             parsed.since = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--limit")? {
+            parsed.limit = Some(parse_u32_flag("--limit", v)?);
         } else {
             bail!("unknown clock-skew option: {arg}");
         }
