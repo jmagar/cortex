@@ -1,7 +1,9 @@
 use anyhow::{anyhow, bail, Result};
 use syslog_mcp::app::SyslogService;
 
-use super::args::{AiCommand, CliCommand, DbCommand, NotifyCommand, SigCommand};
+use super::args::{
+    AgentCommandCommand, AiCommand, CliCommand, DbCommand, NotifyCommand, ShellCommand, SigCommand,
+};
 use super::dispatch;
 
 /// Env var that opts a process into HTTP transport without passing `--http`.
@@ -82,6 +84,19 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             AiCommand::Incidents(args) => dispatch::run_ai_incidents(&mode, args).await,
             AiCommand::Investigate(args) => dispatch::run_ai_investigate(&mode, args).await,
             AiCommand::Assess(args) => dispatch::run_ai_assess(&mode, args).await,
+        },
+        CliCommand::Shell(shell) => match shell {
+            ShellCommand::Index(args) => {
+                super::dispatch_command_log::run_shell_index(&mode, args).await
+            }
+        },
+        CliCommand::AgentCommand(command) => match command {
+            AgentCommandCommand::IngestSpool(args) => {
+                super::dispatch_command_log::run_agent_command_ingest_spool(&mode, args).await
+            }
+            AgentCommandCommand::Wrap(_) => {
+                bail!("internal: agent-command wrap must be dispatched before CliMode creation")
+            }
         },
         // DB commands (bead 0p8r.9). 4 are HTTP-capable; backup stays LOCAL
         // and bails in HTTP mode with an inline message.

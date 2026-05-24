@@ -71,6 +71,8 @@ no-match, §7). Renaming an existing value is a major version bump.
 | `otlp` | `src/otlp.rs` | OpenTelemetry logs received on `/v1/logs` |
 | `unifi-api` | UniFi poller (epic C `syslog-mcp-awvr`) | UniFi controller events + alarms poller |
 | `adguard-api` | AdGuard poller (epic C `syslog-mcp-awvr`) | AdGuard Home `/control/querylog` poller |
+| `shell-history` | `src/command_log.rs` | Local shell history backfill, currently zsh extended history |
+| `agent-command` | `src/command_log.rs` | AI agent-launched shell commands imported from a private JSONL spool |
 
 **Removed / renamed during reconciliation:**
 
@@ -106,6 +108,8 @@ percent-encoded as required.
 | `otlp` | `otlp://<peer_ip>` (no port; one exporter, many records) | `otlp://10.0.0.5/plex` (optional path: `service.name`) |
 | `unifi-api` | `unifi://<controller_host>/` (single-site v1; per spec C §14 open question 1) | `unifi://udm-pro.lan/` |
 | `adguard-api` | `adguard://<adguard_host>/` | `adguard://adguard.lan/` |
+| `shell-history` | `shell-history://<hostname>/<user>/<shell>` | `shell-history://dookie/jmagar/zsh` |
+| `agent-command` | `agent-command://<hostname>/<agent>/<session_id>` | `agent-command://dookie/claude-code/019e588f` |
 
 ### Notes on the `agent://` authority
 
@@ -159,6 +163,8 @@ scheme reconstruction):
      directly under `metadata_json.unifi`).
    - `otlp` → `app_name` (= OTLP `service.name`).
    - `agent` → `app_name` exact match, same path as syslog.
+   - `shell-history` / `agent-command` → no parser in V1; the importer
+     writes scrubbed command rows and structured metadata directly.
 
 2. **Retention selector** (`runtime.rs` line 58 / spec C §5 storage
    projection). AdGuard rows tagged via the `adguard-*` prefix get a

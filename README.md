@@ -427,9 +427,42 @@ Imported AI transcript messages are scrubbed for known credential/token patterns
 before storage and FTS indexing. The rows still live in the main `logs` table,
 so raw actions such as `search`, `tail`, `context`, and `get` can return
 scrubbed transcript text and local `ai_transcript_path` values within seconds of
-the transcript write. Scrubbing is best-effort, not a compliance boundary. If
-storage guardrails cannot recover enough space, indexing fails before committing
-additional chunks.
+the transcript write. Scrubbing is best-effort, not a compliance boundary.
+If storage guardrails cannot recover enough space, indexing fails before
+committing additional chunks.
+
+### Shell and agent command history
+
+Local command history can be correlated with system logs without introducing a
+separate table:
+
+```bash
+syslog shell index --path ~/.zsh_history --shell zsh
+syslog setup agent-command install
+export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/syslog-agent-command-wrapper"
+syslog agent-command ingest-spool --path ~/.local/state/syslog-mcp/agent-command.jsonl
+```
+
+`syslog shell index` imports zsh extended history lines with timestamps and
+durations as `source_kind="shell-history"` rows. Plain untimestamped history is
+skipped because it cannot support time-window correlation.
+
+`syslog setup agent-command install` writes a small local wrapper for Claude
+Code's `CLAUDE_CODE_SHELL_PREFIX`. Claude Code invokes that prefix for spawned
+shell commands, including Bash tool calls, hook commands, and stdio MCP server
+startup commands. The wrapper preserves stdio and exit code, appends one
+scrubbed JSONL record under `~/.local/state/syslog-mcp/`, and
+`syslog agent-command ingest-spool` imports those records as
+`source_kind="agent-command"` rows, then truncates the locked spool after a
+successful import so repeated runs only process new commands. The wrapper
+records command text, cwd, duration, exit status, agent name, PID, host/user, and
+`CLAUDE_CODE_SESSION_ID` when present. It does not capture environment
+variables, stdout, or stderr by default.
+
+Both command import paths run the AI scrubber plus command-specific redaction
+for token flags, sensitive assignments, Authorization headers, URL userinfo,
+`curl -u`, and private-key blocks before storage. Scrubbing is best-effort, not
+a compliance boundary.
 
 **Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker ingest entries, `source_ip` identifies the configured Docker ingest host/container/stream and should be trusted only as far as the configured docker-socket-proxy endpoint and network path are trusted. `metadata_json` preserves source-specific context for debugging and correlation, but it is not an authorization boundary. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
 

@@ -29,6 +29,7 @@ use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
 use crate::assessment::{build_assessment_prompt, run_gemini_assessment, GeminiAssessConfig};
+use crate::command_log::{self, CommandLogImportResult};
 use crate::config::StorageConfig;
 use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy};
 use crate::scanner;
@@ -285,6 +286,23 @@ impl SyslogService {
         req: ServiceLogsRequest,
     ) -> ServiceResult<ServiceLogsResponse> {
         run_service_logs(req, self.os.as_ref()).await
+    }
+
+    pub async fn import_shell_history(
+        &self,
+        path: PathBuf,
+        shell: String,
+    ) -> ServiceResult<CommandLogImportResult> {
+        self.run_db(move |pool| command_log::import_zsh_history(pool, &path, &shell))
+            .await
+    }
+
+    pub async fn import_agent_command_spool(
+        &self,
+        path: PathBuf,
+    ) -> ServiceResult<CommandLogImportResult> {
+        self.run_db(move |pool| command_log::import_agent_command_spool(pool, &path))
+            .await
     }
 
     pub async fn incident(&self, req: IncidentRequest) -> ServiceResult<IncidentResponse> {
