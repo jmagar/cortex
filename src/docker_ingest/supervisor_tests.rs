@@ -1,10 +1,13 @@
 use std::time::Duration;
 
+use crate::config::{DockerHostConfig, DockerIngestConfig};
 use crate::db::{DockerCheckpoint, LogBatchEntry};
+use crate::docker_ingest::models::ContainerMeta;
 
 use super::{
-    entry_is_at_or_before_checkpoint, event_task_policy, jittered_reconnect_delay_ms,
-    next_reconnect_backoff_ms, should_reset_reconnect_backoff, DockerEventTaskPolicy, StreamEnd,
+    docker_log_since_unix, entry_is_at_or_before_checkpoint, event_task_policy,
+    jittered_reconnect_delay_ms, next_reconnect_backoff_ms, should_ingest_container,
+    should_reset_reconnect_backoff, DockerEventTaskPolicy, StreamEnd,
     MIN_STREAM_DURATION_FOR_BACKOFF_RESET,
 };
 
@@ -54,6 +57,65 @@ fn checkpoint_filter_skips_only_entries_at_or_before_precise_checkpoint() {
         &docker_entry("2026-05-05T01:02:03.500000001Z"),
         &checkpoint
     ));
+}
+
+#[test]
+fn docker_log_since_uses_checkpoint_when_present() {
+    let checkpoint =
+        chrono::DateTime::parse_from_rfc3339("2026-05-05T01:02:03.500000000Z").unwrap();
+
+    assert_eq!(
+        docker_log_since_unix(Some(&checkpoint), 1_779_690_000),
+        checkpoint.timestamp()
+    );
+}
+
+#[test]
+fn docker_log_since_without_checkpoint_starts_near_now() {
+    assert_eq!(docker_log_since_unix(None, 1_779_690_000), 1_779_689_940);
+}
+
+#[test]
+fn should_ingest_container_honors_global_exclude() {
+    let config = DockerIngestConfig {
+        excluded_containers: vec!["arcane-mcp".into()],
+        ..Default::default()
+    };
+    let host = DockerHostConfig {
+        name: "dookie".into(),
+        base_url: "http://dookie:2375".into(),
+        allow_insecure_http: true,
+        excluded_containers: Vec::new(),
+    };
+    let container = ContainerMeta {
+        id: "abcdef".into(),
+        name: "arcane-mcp".into(),
+        image: "arcane-mcp:latest".into(),
+        compose_project: None,
+        compose_service: None,
+    };
+
+    assert!(!should_ingest_container(&config, &host, &container));
+}
+
+#[test]
+fn should_ingest_container_honors_host_exclude_case_insensitive() {
+    let config = DockerIngestConfig::default();
+    let host = DockerHostConfig {
+        name: "dookie".into(),
+        base_url: "http://dookie:2375".into(),
+        allow_insecure_http: true,
+        excluded_containers: vec!["ARCANE-MCP".into()],
+    };
+    let container = ContainerMeta {
+        id: "abcdef".into(),
+        name: "arcane-mcp".into(),
+        image: "arcane-mcp:latest".into(),
+        compose_project: None,
+        compose_service: None,
+    };
+
+    assert!(!should_ingest_container(&config, &host, &container));
 }
 
 #[test]

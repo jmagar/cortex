@@ -381,6 +381,9 @@ pub struct DockerIngestConfig {
     /// Remote Docker hosts to ingest from.
     #[serde(default)]
     pub hosts: Vec<DockerHostConfig>,
+    /// Container names to skip across all Docker ingest hosts.
+    #[serde(default)]
+    pub excluded_containers: Vec<String>,
     /// Initial reconnect backoff in milliseconds per Docker host.
     #[serde(default = "default_docker_reconnect_initial_ms")]
     pub reconnect_initial_ms: u64,
@@ -395,6 +398,8 @@ pub struct DockerHostConfig {
     pub base_url: String,
     #[serde(default)]
     pub allow_insecure_http: bool,
+    #[serde(default)]
+    pub excluded_containers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -575,6 +580,7 @@ impl Default for DockerIngestConfig {
         Self {
             enabled: false,
             hosts: Vec::new(),
+            excluded_containers: Vec::new(),
             reconnect_initial_ms: default_docker_reconnect_initial_ms(),
             reconnect_max_ms: default_docker_reconnect_max_ms(),
         }
@@ -795,6 +801,10 @@ impl Config {
             "SYSLOG_DOCKER_RECONNECT_MAX_MS",
             &mut config.docker_ingest.reconnect_max_ms,
         )?;
+        env_override_list(
+            "SYSLOG_DOCKER_EXCLUDED_CONTAINERS",
+            &mut config.docker_ingest.excluded_containers,
+        );
         if config.docker_ingest.enabled {
             if let Ok(val) = std::env::var("SYSLOG_DOCKER_HOSTS") {
                 if !val.is_empty() {
@@ -806,6 +816,7 @@ impl Config {
                             name: name.to_string(),
                             base_url: format!("http://{}:2375", name),
                             allow_insecure_http: true,
+                            excluded_containers: Vec::new(),
                         })
                         .collect();
                     for host in &config.docker_ingest.hosts {
