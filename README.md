@@ -24,9 +24,9 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `similar_incidents`, `ask_history`, `incident_context`, or `help`.
 
-For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md).
+For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md). For correlation behavior and AI/non-AI inclusion rules, see [`docs/mcp/CORRELATION.md`](docs/mcp/CORRELATION.md).
 
 | Action | Purpose |
 | --- | --- |
@@ -38,6 +38,8 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
 | `abuse` | Abuse hits in AI transcripts with same-session context |
+| `abuse_incidents` | Groups abuse hits into scored incident candidates |
+| `abuse_investigate` | Expands incidents into deterministic evidence bundles |
 | `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
 | `usage_blocks` | AI activity in 5-hour UTC windows |
 | `project_context` | Summary for one AI project path |
@@ -58,12 +60,15 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `anomalies` | Recent vs baseline volume/error comparison |
 | `compare` | Side-by-side comparison of two time ranges |
 | `compose_status` | Redacted read-only Compose deployment diagnostics |
-| `compose_doctor` | Alias for Compose deployment health diagnostics |
+| `compose_doctor` | Strict Compose deployment health diagnostics |
 | `unaddressed_errors` | Repeating unacknowledged error signatures |
 | `ack_error` | Acknowledge an error signature |
 | `unack_error` | Revoke an error acknowledgement |
 | `notifications_recent` | Recent notification firings |
 | `notifications_test` | Send a test notification via Apprise |
+| `similar_incidents` | FTS5 cluster search over historical system logs |
+| `ask_history` | Search AI transcript history with nearby log context |
+| `incident_context` | Full context bundle for a known time window |
 | `help` | Markdown reference for all actions |
 
 ## Prompts
@@ -783,10 +788,10 @@ The MCP query API (port 3100, default loopback) supports two auth modes:
 
 | Mode | Config | Effect |
 |------|--------|--------|
-| Bearer token | `SYSLOG_MCP_TOKEN=<token>` | Static token grants both `syslog:read` and `syslog:admin` scope |
+| Bearer token | `SYSLOG_MCP_TOKEN=<token>` | Static token grants `syslog:read` by default; set `SYSLOG_MCP_STATIC_TOKEN_ADMIN=true` to also grant `syslog:admin` |
 | Google OAuth | `SYSLOG_MCP_AUTH_MODE=oauth` | OAuth users authenticated via `SYSLOG_MCP_AUTH_ADMIN_EMAIL` |
 
-**Important**: The static bearer token grants full admin scope. Do not share it with read-only collaborators — use OAuth mode with a read-only token scope instead.
+**Important**: Admin actions such as `ack_error`, `unack_error`, and `notifications_test` require `syslog:admin`. Static bearer tokens are read-only unless `SYSLOG_MCP_STATIC_TOKEN_ADMIN=true` is explicitly set.
 
 The MCP port defaults to `127.0.0.1:3100` (loopback only). To expose it on a network interface, set `SYSLOG_MCP_HOST=0.0.0.0` and configure a TLS-terminating reverse proxy in front of it.
 

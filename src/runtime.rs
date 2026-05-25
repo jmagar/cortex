@@ -469,7 +469,11 @@ impl RuntimeCore {
         let notifications_cfg = self.config.notifications.clone();
         let shared_storage_state = Arc::clone(&self.storage_state);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let handle = tokio::spawn(async move {
+            let mut last_full_transitions = 0u64;
+            let mut last_udp_queue_drops = 0u64;
+            let mut last_tcp_queue_drops = 0u64;
             let mut interval = background_interval(tokio::time::Duration::from_secs(
                 storage_config.cleanup_interval_secs,
             ));
@@ -495,7 +499,26 @@ impl RuntimeCore {
                 );
                 match tokio::task::spawn_blocking(move || {
                     let _permit = permit;
-                    db::enforce_storage_budget(&pool, &storage)
+                    let outcome = db::enforce_storage_budget(&pool, &storage)?;
+                    match db::db_wal_checkpoint(&pool, "passive") {
+                        Ok((busy, log_frames, checkpointed_frames)) => {
+                            if log_frames > 0 || busy != 0 {
+                                tracing::debug!(
+                                    busy,
+                                    log_frames,
+                                    checkpointed_frames,
+                                    "Periodic WAL checkpoint completed"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Periodic WAL checkpoint skipped (non-fatal)"
+                            );
+                        }
+                    }
+                    Ok::<_, anyhow::Error>(outcome)
                 })
                 .await
                 .map_err(|e| anyhow::anyhow!("spawn_blocking error: {e}"))
@@ -561,6 +584,62 @@ impl RuntimeCore {
                                             "disk_fill: spawn_blocking failed (non-fatal)"
                                         ),
                                     }
+                                }
+                            }
+                        }
+
+                        if notifications_cfg.enabled
+                            && notifications_cfg.evaluators.ingest_queue_pressure
+                            && !notifications_cfg.apprise_urls.is_empty()
+                        {
+                            let snapshot = observability.snapshot();
+                            let full_transitions_delta = snapshot
+                                .syslog_write_channel_full_transitions
+                                .saturating_sub(last_full_transitions);
+                            let udp_drops_delta = snapshot
+                                .syslog_udp_packets_dropped_queue_full
+                                .saturating_sub(last_udp_queue_drops);
+                            let tcp_drops_delta = snapshot
+                                .syslog_tcp_lines_dropped_queue_full
+                                .saturating_sub(last_tcp_queue_drops);
+                            last_full_transitions = snapshot.syslog_write_channel_full_transitions;
+                            last_udp_queue_drops = snapshot.syslog_udp_packets_dropped_queue_full;
+                            last_tcp_queue_drops = snapshot.syslog_tcp_lines_dropped_queue_full;
+
+                            let urls_json = serde_json::to_string(&notifications_cfg.apprise_urls)
+                                .unwrap_or_else(|_| "[]".to_string());
+                            let hostname = std::env::var("HOSTNAME")
+                                .unwrap_or_else(|_| "localhost".to_string());
+                            if let Some(params) =
+                                crate::notifications::rules::evaluate_ingest_queue_pressure(
+                                    &hostname,
+                                    full_transitions_delta,
+                                    udp_drops_delta,
+                                    tcp_drops_delta,
+                                    snapshot.ingest_queue_depth,
+                                    snapshot.ingest_queue_capacity,
+                                    &urls_json,
+                                )
+                            {
+                                let pool_n = Arc::clone(&storage_pool);
+                                let result = tokio::task::spawn_blocking(move || {
+                                    let conn = pool_n.get()?;
+                                    crate::db::notifications::outbox_insert(&conn, &params)
+                                        .map_err(anyhow::Error::from)
+                                })
+                                .await;
+                                match result {
+                                    Ok(Ok(())) => {
+                                        tracing::debug!("ingest_queue_pressure: outbox row queued")
+                                    }
+                                    Ok(Err(e)) => tracing::warn!(
+                                        error = %e,
+                                        "ingest_queue_pressure: outbox_insert failed (non-fatal)"
+                                    ),
+                                    Err(e) => tracing::warn!(
+                                        error = %e,
+                                        "ingest_queue_pressure: spawn_blocking failed (non-fatal)"
+                                    ),
                                 }
                             }
                         }

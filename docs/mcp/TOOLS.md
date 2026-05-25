@@ -2,7 +2,7 @@
 
 ## Design Philosophy
 
-syslog-mcp exposes one read-only MCP tool named `syslog`. The required
+syslog-mcp exposes one MCP tool named `syslog`. The required
 `action` argument selects the operation:
 
 | Action | Purpose |
@@ -254,5 +254,6 @@ status. This metadata is for debugging and correlation, not authorization.
 
 - [../CLI.md](../CLI.md) -- direct CLI commands backed by the same service methods
 - [SCHEMA.md](SCHEMA.md) -- JSON Schema definitions for tool inputs
+- [CORRELATION.md](CORRELATION.md) -- exact behavior of correlation-style actions
 - [AUTH.md](AUTH.md) -- authentication required before tool calls
 - [ENV.md](ENV.md) -- environment variables affecting tool behavior

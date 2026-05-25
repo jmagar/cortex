@@ -9,6 +9,13 @@
 > `docs/contracts/log-row-shape.md` §3, and `docs/contracts/parser-trait.rs::SourceKind`.
 > Changing this requires updating all dependents.
 
+**Current implementation note:** The `filter`/`search` alias layer currently
+supports `source_kind=docker-stream`, `docker-event`, `agent-command`,
+`shell-history`, `transcript`, `claude`, `codex`, and `gemini`. It rejects
+`source_kind=syslog-udp`, `syslog-tcp`, and `otlp` because transport protocol
+is not indexed separately today. It does not currently support `agent`,
+`unifi-api`, or `adguard-api` as query aliases.
+
 ---
 
 ## 1. Background — the casing drift

@@ -4,25 +4,56 @@ Complete listing of all plugin components.
 
 ## MCP tools
 
-syslog-mcp exposes one read-only MCP tool named `syslog`. The required `action`
-argument selects the operation. The authoritative action list lives in
-`src/mcp/schemas.rs` as `SYSLOG_ACTIONS`.
+syslog-mcp exposes one MCP tool named `syslog`. The required `action`
+argument selects the operation. The authoritative action registry lives in
+`src/mcp/actions.rs::ACTION_SPECS`; the runtime schema enum is derived from
+that registry by `src/mcp/schemas.rs::tool_definitions()`.
 
 | Action | Description | Destructive |
 | --- | --- | --- |
 | `search` | Full-text search across syslog messages with FTS5 syntax, host/source_ip/severity/app/time filters | no |
+| `filter` | Structured filter-only log retrieval for indexed fields and source aliases | no |
 | `tail` | Get N most recent log entries, optionally filtered by host, source_ip, and/or application | no |
 | `errors` | Error/warning summary grouped by hostname and severity level with counts | no |
 | `hosts` | List all hosts with first/last seen timestamps and total log counts | no |
 | `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |
 | `stats` | Database statistics: total logs, hosts, time range, DB size, free disk, write-block status | no |
 | `status` | Lightweight runtime status: DB health, queue/backpressure state, listener/writer counters, OTLP counters | no |
-| `sessions` / `search_sessions` / `abuse` / `ai_correlate` / `usage_blocks` / `project_context` / `list_ai_tools` / `list_ai_projects` | AI transcript session, detector, and cross-corpus analytics | no |
-| `apps` / `source_ips` / `timeline` / `patterns` / `context` / `get` / `ingest_rate` / `silent_hosts` / `clock_skew` / `anomalies` / `compare` | Extended log analytics and diagnostics | no |
-| `compose_status` / `compose_doctor` | Redacted Docker Compose runtime projections | no |
+| `sessions` | AI transcript sessions grouped by project/tool/session/host | no |
+| `search_sessions` | Ranked grouped session search | no |
+| `abuse` | Abuse-term detector with same-session context | no |
+| `abuse_incidents` | Groups abuse hits into scored incident candidates | no |
+| `abuse_investigate` | Expands incidents into deterministic evidence bundles | no |
+| `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs | no |
+| `usage_blocks` | AI transcript activity grouped into deterministic 5-hour UTC blocks | no |
+| `project_context` | Summary and recent entries for one AI project path | no |
+| `list_ai_tools` | Distinct AI tools with counts | no |
+| `list_ai_projects` | Distinct AI projects with counts | no |
+| `apps` | Distinct application names with log and host counts | no |
+| `source_ips` | Distinct source identifiers with hostname breakdown | no |
+| `timeline` | Bucketed log counts over time | no |
+| `patterns` | Near-duplicate message template clusters | no |
+| `context` | Surrounding logs around a log id or timestamp | no |
+| `get` | One log entry by id, including raw frame | no |
+| `ingest_rate` | Recent ingest throughput and write-block state | no |
+| `silent_hosts` | Hosts whose last_seen is older than a threshold | no |
+| `clock_skew` | Per-host received_at minus timestamp distribution | no |
+| `anomalies` | Recent vs baseline volume/error comparison | no |
+| `compare` | Side-by-side comparison of two time ranges | no |
+| `compose_status` | Redacted Docker Compose runtime projection | no |
+| `compose_doctor` | Strict redacted Docker Compose health diagnostics | no |
+| `unaddressed_errors` | Repeating unacknowledged error signatures | no |
+| `notifications_recent` | Recent notification firings | no |
+| `similar_incidents` | FTS5 historical incident clusters with overlapping AI sessions | no |
+| `ask_history` | AI transcript history search with nearby non-AI log context | no |
+| `incident_context` | Window bundle of non-AI log aggregates/errors and active AI sessions | no |
+| `ack_error` | Acknowledge an error signature | yes |
+| `unack_error` | Revoke an error acknowledgement | yes |
+| `notifications_test` | Send a test Apprise notification | yes |
 | `help` | Returns markdown documentation for all actions | no |
 
-All MCP actions are read-only. syslog-mcp exposes no destructive operations via MCP.
+Most MCP actions are read-only. `ack_error`, `unack_error`, and
+`notifications_test` require `syslog:admin`.
 
 ## Direct CLI commands
 
@@ -35,8 +66,14 @@ methods as the MCP actions.
 | `syslog tail` | `tail` | Recent log entries |
 | `syslog errors` | `errors` | Error/warning summary |
 | `syslog hosts` | `hosts` | Known host list |
+| `syslog filter` | `filter` | Structured filter-only log retrieval |
 | `syslog correlate` | `correlate` | Cross-host event correlation |
 | `syslog ai correlate` | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs |
+| `syslog ai incidents` | `abuse_incidents` | Grouped abuse incident candidates |
+| `syslog ai investigate` | `abuse_investigate` | Abuse incident evidence bundles |
+| `syslog ai similar` | `similar_incidents` | Historical incident clusters |
+| `syslog ai ask-history` | `ask_history` | AI transcript history search |
+| `syslog ai incident-context` | `incident_context` | Full context bundle for a time window |
 | `syslog stats` | `stats` | Database and storage metrics |
 
 ## MCP resources
@@ -104,6 +141,10 @@ methods as the MCP actions.
 | `/api/hosts` | GET | yes when API enabled | Plain JSON host list |
 | `/api/correlate` | GET | yes when API enabled | Plain JSON event correlation |
 | `/api/stats` | GET | yes when API enabled | Plain JSON database stats |
+| `/api/filter` | GET | yes when API enabled | Plain JSON structured log filtering |
+| `/api/timeline` | GET | yes when API enabled | Plain JSON bucketed timeline |
+| `/api/patterns` | GET | yes when API enabled | Plain JSON message pattern clusters |
+| `/api/notifications/recent` | GET | yes when API enabled | Recent notification firings |
 
 ## Docker
 
@@ -114,7 +155,7 @@ methods as the MCP actions.
 | MCP port | `3100/tcp` |
 | Health endpoint | `GET /health` (unauthenticated) |
 | Compose file | `docker-compose.yml` |
-| Entrypoint | `entrypoint.sh` |
+| Entrypoint | `syslog` binary |
 | User | `1000:1000` |
 | Data volume | `/data` (SQLite database) |
 
