@@ -12,6 +12,7 @@ syslog-mcp exposes one MCP tool named `syslog`. The required
 | `tail` | Recent log entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
+| `host_state` | Latest bounded heartbeat state for one host |
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
 | `abuse` | Abuse hits in AI transcripts with same-session context |
@@ -87,6 +88,14 @@ Optional arguments: `from`, `to`, `group_by`.
 List all hosts that have sent syslog messages.
 
 Required argument: `action = "hosts"`
+
+## syslog host_state
+
+Return latest bounded heartbeat state for one host.
+
+Required argument: `action = "host_state"` plus either `host_id` or uniquely resolving `hostname`.
+
+Optional arguments: `since`, `limit` (default 1, max 100).
 
 ## syslog sessions
 

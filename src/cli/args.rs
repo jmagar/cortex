@@ -26,6 +26,7 @@ pub(crate) enum CliCommand {
     Notify(NotifyCommand),
     Shell(ShellCommand),
     AgentCommand(AgentCommandCommand),
+    Heartbeat(HeartbeatCommand),
     // ── Surface parity gap closure (2026-05-22) ─────────────────────────────
     SilentHosts(SilentHostsArgs),
     ClockSkew(ClockSkewArgs),
@@ -59,6 +60,11 @@ pub(crate) enum AgentCommandCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HeartbeatCommand {
+    Agent(HeartbeatAgentArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ShellIndexArgs {
     pub path: String,
     pub shell: String,
@@ -75,6 +81,20 @@ pub(crate) struct AgentCommandIngestSpoolArgs {
 pub(crate) struct AgentCommandWrapArgs {
     pub spool: String,
     pub command: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HeartbeatAgentArgs {
+    pub target: Option<String>,
+    pub token: Option<String>,
+    pub interval_secs: u64,
+    pub probe_deadline_ms: u64,
+    pub collection_deadline_ms: u64,
+    pub retry_buffer: usize,
+    pub once: bool,
+    pub emit: bool,
+    pub json: bool,
+    pub host_id_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

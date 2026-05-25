@@ -15,6 +15,7 @@ mod ai_watch;
 mod debug_wrapper;
 mod doctor;
 mod firstrun;
+mod heartbeat_agent;
 mod systemd;
 
 pub use agent_command::run_agent_command_setup;
@@ -26,6 +27,7 @@ pub use firstrun::run_setup;
 pub(crate) use firstrun::{
     default_env_for_data_dir, dockerfile_asset, installed_compose_asset, render_env,
 };
+pub use heartbeat_agent::run_heartbeat_agent_setup;
 
 // Test-only re-exports of private items accessed via `use super::*` in setup_tests.rs.
 #[cfg(test)]
@@ -73,6 +75,13 @@ pub enum AiWatchServiceAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentCommandAction {
+    Install,
+    Remove,
+    Check,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeartbeatAgentAction {
     Install,
     Remove,
     Check,
@@ -128,6 +137,16 @@ impl AgentCommandAction {
             Self::Install => "agent-command-install",
             Self::Remove => "agent-command-remove",
             Self::Check => "agent-command-check",
+        }
+    }
+}
+
+impl HeartbeatAgentAction {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "heartbeat-agent-install",
+            Self::Remove => "heartbeat-agent-remove",
+            Self::Check => "heartbeat-agent-check",
         }
     }
 }

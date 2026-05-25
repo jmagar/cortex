@@ -451,6 +451,46 @@ impl SyslogService {
         })
     }
 
+    pub async fn host_state(
+        &self,
+        req: super::models::HostStateRequest,
+    ) -> ServiceResult<super::models::HostStateResponse> {
+        let lookup = match (req.host_id, req.hostname) {
+            (Some(host_id), _) if !host_id.trim().is_empty() => {
+                db::HeartbeatHostLookup::HostId(host_id)
+            }
+            (_, Some(hostname)) if !hostname.trim().is_empty() => {
+                db::HeartbeatHostLookup::Hostname(hostname)
+            }
+            _ => {
+                return Err(ServiceError::InvalidInput(
+                    "host_state requires host_id or hostname".into(),
+                ));
+            }
+        };
+        let limit = req.limit.unwrap_or(1).clamp(1, 100) as usize;
+        let since = req.since.clone();
+        self.run_db(move |pool| {
+            db::heartbeat_host_state(pool, lookup, since.as_deref(), limit).map_err(|error| {
+                match error.to_string().as_str() {
+                    "not_found" => anyhow::anyhow!("not_found"),
+                    "ambiguous_host" => anyhow::anyhow!("ambiguous_host"),
+                    _ => error,
+                }
+            })
+        })
+        .await
+        .map_err(|error| match error {
+            ServiceError::Internal(error) if error.to_string() == "not_found" => {
+                ServiceError::NotFound("host_state host not found".into())
+            }
+            ServiceError::Internal(error) if error.to_string() == "ambiguous_host" => {
+                ServiceError::InvalidInput("ambiguous_host".into())
+            }
+            other => other,
+        })
+    }
+
     pub async fn filter_logs(&self, req: FilterLogsRequest) -> ServiceResult<SearchLogsResponse> {
         let params = filter_request_to_params(req)?;
         let logs = self

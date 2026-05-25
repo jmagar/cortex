@@ -19,7 +19,7 @@ Rust source wins.
 ## Current Actions
 
 syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument
-selects one of these 40 actions:
+selects one of these 41 actions:
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
@@ -28,6 +28,7 @@ selects one of these 40 actions:
 | `tail` | `syslog:read` | cheap | Most recent log entries |
 | `errors` | `syslog:read` | cheap | Error/warning summary |
 | `hosts` | `syslog:read` | cheap | Known source hostnames |
+| `host_state` | `syslog:read` | moderate | Latest bounded heartbeat state for one host |
 | `correlate` | `syslog:read` | moderate | Time-window event correlation |
 | `stats` | `syslog:read` | expensive | DB statistics and runtime observability |
 | `status` | `syslog:read` | cheap | Lightweight health and runtime status |
@@ -110,7 +111,8 @@ handler and service layers.
 | Argument | Used by |
 | --- | --- |
 | `query` | `search`, `search_sessions`, `correlate`, `similar_incidents`, `ask_history` |
-| `hostname` | `search`, `filter`, `tail`, `correlate`, `ai_correlate`, `apps`, `sessions`, `timeline`, `patterns`, `context`, `similar_incidents`, `ask_history`, `incident_context` |
+| `hostname` | `search`, `filter`, `tail`, `correlate`, `host_state`, `ai_correlate`, `apps`, `sessions`, `timeline`, `patterns`, `context`, `similar_incidents`, `ask_history`, `incident_context` |
+| `host_id` | Authoritative heartbeat identity for `host_state` |
 | `source_ip` | `search`, `filter`, `tail`, `correlate`, `ai_correlate` |
 | `source_kind` | `filter` only; aliases Docker, command-history, shell-history, transcript, and AI-tool rows |
 | `project` | `filter`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools` |

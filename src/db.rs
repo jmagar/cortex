@@ -2,6 +2,7 @@
 
 mod analytics;
 pub(crate) mod error_signatures;
+mod heartbeat;
 mod ingest;
 mod maintenance;
 mod models;
@@ -16,6 +17,10 @@ pub use analytics::{
     ContextRef, IngestRateBuckets, IngestRatePerHost, ListAppsParams, ListAppsResult,
     ListSourceIpsParams, ListSourceIpsResult, LogEntryWithRaw, PatternEntry, RangeSummary,
     SilentHostEntry, SourceIpEntry, SourceIpHostBreakdown, TimelineGroupBy, TimelinePoint,
+};
+pub use heartbeat::{
+    heartbeat_host_state, HeartbeatHostLookup, HeartbeatHostState, HeartbeatSampleState,
+    HeartbeatStateFlags,
 };
 pub use ingest::insert_logs_batch;
 pub(crate) use ingest::insert_logs_batch_in_tx;

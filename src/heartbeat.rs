@@ -197,6 +197,7 @@ fn insert_heartbeat(
 
 fn heartbeat_metadata_json(request: &HeartbeatRequest) -> anyhow::Result<String> {
     Ok(serde_json::to_string(&json!({
+        "schema_version": request.schema_version,
         "host": {
             "timezone": request.host.timezone,
         },
@@ -214,7 +215,7 @@ fn heartbeat_metadata_json(request: &HeartbeatRequest) -> anyhow::Result<String>
         "cpu": request.cpu,
         "memory": request.memory,
         "disks": request.disks,
-        "network": request.network,
+        "networks": request.networks,
         "processes": request.processes,
         "containers": request.containers,
     }))?)
@@ -286,7 +287,7 @@ fn insert_metric_rows(
         )?;
     }
 
-    for net in &request.network {
+    for net in &request.networks {
         tx.execute(
             "INSERT INTO heartbeat_network (
                  heartbeat_id, interface, rx_bytes_per_sec, tx_bytes_per_sec, rx_errors, tx_errors
@@ -347,6 +348,8 @@ struct HeartbeatIngestResponse {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct HeartbeatRequest {
+    #[serde(default = "default_schema_version")]
+    schema_version: i64,
     host: HeartbeatHost,
     sample: HeartbeatSample,
     agent: HeartbeatAgent,
@@ -356,14 +359,18 @@ struct HeartbeatRequest {
     memory: Option<HeartbeatMemory>,
     #[serde(default)]
     disks: Vec<HeartbeatDisk>,
-    #[serde(default)]
-    network: Vec<HeartbeatNetwork>,
+    #[serde(default, alias = "network")]
+    networks: Vec<HeartbeatNetwork>,
     #[serde(default)]
     processes: Option<HeartbeatProcesses>,
     #[serde(default)]
     containers: Option<HeartbeatContainers>,
     #[serde(default)]
     gpu: Option<serde_json::Value>,
+}
+
+fn default_schema_version() -> i64 {
+    1
 }
 
 #[derive(Debug, Deserialize, Serialize)]

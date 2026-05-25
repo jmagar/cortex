@@ -101,6 +101,14 @@ fn heartbeat_payload() -> Value {
     })
 }
 
+fn heartbeat_payload_v1() -> Value {
+    let mut payload = heartbeat_payload();
+    payload["schema_version"] = json!(1);
+    payload["networks"] = payload["network"].take();
+    payload.as_object_mut().unwrap().remove("network");
+    payload
+}
+
 async fn post_json(
     app: Router,
     uri: &str,
@@ -160,6 +168,28 @@ async fn valid_heartbeat_is_accepted_and_persisted() {
             .unwrap();
         assert_eq!(count, 1, "expected one row in {table}");
     }
+}
+
+#[tokio::test]
+async fn valid_v1_heartbeat_with_networks_is_accepted() {
+    let (app, pool, _dir) = test_app(Some("secret"));
+    let (status, value) = post_json(
+        app,
+        "/v1/heartbeats",
+        Some("secret"),
+        heartbeat_payload_v1(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(value["accepted"], 1);
+
+    let conn = pool.get().unwrap();
+    let network_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM heartbeat_network", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(network_count, 1);
 }
 
 #[tokio::test]

@@ -94,6 +94,25 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         std::process::exit(code);
     }
 
+    if let cli::CliCommand::Heartbeat(mut command) = command {
+        if flags.force_http {
+            anyhow::bail!(
+                "--http has no effect on `heartbeat agent`; use --target/--server and --token"
+            );
+        }
+        match &mut command {
+            cli::HeartbeatCommand::Agent(args) => {
+                if args.target.is_none() {
+                    args.target = flags.server;
+                }
+                if args.token.is_none() {
+                    args.token = flags.token;
+                }
+            }
+        }
+        return cli::run_heartbeat_no_db(command).await;
+    }
+
     if matches!(
         command,
         cli::CliCommand::Shell(_)
@@ -101,7 +120,7 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
     ) {
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
-                "{} has no effect on local command ingestion; remove --http / --server / --token",
+                "{} has no effect on local agent commands; remove --http / --server / --token",
                 trigger
             );
         }
@@ -194,6 +213,9 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         }
         SetupCommandKind::AgentCommand(action) => {
             syslog_mcp::setup::run_agent_command_setup(action).await?
+        }
+        SetupCommandKind::HeartbeatAgent(action) => {
+            syslog_mcp::setup::run_heartbeat_agent_setup(action).await?
         }
         SetupCommandKind::DebugWrapper(action) => {
             syslog_mcp::setup::run_debug_wrapper_setup(action).await?
@@ -385,6 +407,7 @@ enum SetupCommandKind {
     AiIndexTimer(syslog_mcp::setup::AiIndexTimerAction),
     AiWatchService(syslog_mcp::setup::AiWatchServiceAction),
     AgentCommand(syslog_mcp::setup::AgentCommandAction),
+    HeartbeatAgent(syslog_mcp::setup::HeartbeatAgentAction),
     DebugWrapper(syslog_mcp::setup::DebugWrapperAction),
     DebugCompose(syslog_mcp::setup::DebugComposeAction),
     Doctor,
@@ -463,6 +486,7 @@ impl Mode {
                         | "ai"
                         | "shell"
                         | "agent-command"
+                        | "heartbeat"
                         | "correlate"
                         | "stats"
                         | "db"
@@ -498,7 +522,7 @@ impl Mode {
                 // ignored for `serve mcp`, `setup`, etc.
                 anyhow::bail!(
                     "--http / --server / --token only apply to CLI query commands \
-                     (search, tail, errors, hosts, sessions, ai, shell, agent-command, correlate, stats, incident, db); \
+                     (search, tail, errors, hosts, sessions, ai, shell, agent-command, heartbeat, correlate, stats, incident, db); \
                      compose, service, setup, and deploy are local-only and reject HTTP flags; \
                      got: {}",
                     args.join(" ")
@@ -588,6 +612,21 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
                 "install" => syslog_mcp::setup::AgentCommandAction::Install,
                 "remove" => syslog_mcp::setup::AgentCommandAction::Remove,
                 _ => syslog_mcp::setup::AgentCommandAction::Check,
+            }),
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
+        Some("heartbeat-agent")
+    ) {
+        let _ = iter.next();
+        let (action, json) = parse_setup_subcommand_args("heartbeat-agent", iter)?;
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::HeartbeatAgent(match action {
+                "install" => syslog_mcp::setup::HeartbeatAgentAction::Install,
+                "remove" => syslog_mcp::setup::HeartbeatAgentAction::Remove,
+                _ => syslog_mcp::setup::HeartbeatAgentAction::Check,
             }),
             json,
         });
@@ -734,6 +773,7 @@ fn print_usage() {
   syslog setup ai-index-timer install|remove|check [--json]
   syslog setup ai-watch-service install|remove|check [--json]
   syslog setup agent-command install|remove|check [--json]
+  syslog setup heartbeat-agent install|remove|check [--json]
   syslog setup debug-wrapper install|remove|check [--json]
   syslog setup debug-compose install|remove|check [--json]
   syslog setup doctor [--json]
@@ -773,6 +813,7 @@ fn print_usage() {
   syslog shell index --path PATH [--shell zsh] [--json]
   syslog agent-command ingest-spool --path PATH [--json]
   syslog agent-command wrap --spool PATH -- COMMAND...
+  syslog heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]
   syslog db status [--check-coord] [--json]
   syslog db integrity [--quick] [--json]
   syslog db checkpoint [--mode passive|full|restart|truncate] [--json]
