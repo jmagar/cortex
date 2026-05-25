@@ -1,6 +1,6 @@
 {
   "name": "syslog",
-  "version": "0.32.9",
+  "version": "0.32.10",
   "description": "Syslog management via MCP",
   "author": {
     "name": "jmagar"

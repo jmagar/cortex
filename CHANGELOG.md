@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.10] - 2026-05-25
+
+### Fixed
+
+- Added maintained app and source-IP inventory stats so the `apps` and `source_ips` actions do not rescan the full logs table on large SQLite databases.
+
+
+## [0.32.10] - 2026-05-25
+
 ## [0.32.9] - 2026-05-25
 
 ### Fixed
