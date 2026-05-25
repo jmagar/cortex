@@ -2081,7 +2081,9 @@ fn apply_log_filter_aliases(
         Some("gemini") | Some("gemini-transcript") => {
             apply_source_kind_tool_alias(params, "gemini")?;
         }
-        Some("transcript") => {}
+        Some("transcript") => {
+            params.source_ip_prefix = Some("transcript://".to_string());
+        }
         Some("syslog-udp") | Some("syslog-tcp") | Some("otlp") => {
             return Err(ServiceError::InvalidInput(format!(
                 "source_kind={} is not indexed separately in v1; filter by hostname, source_ip, app_name, facility, and time range instead",
