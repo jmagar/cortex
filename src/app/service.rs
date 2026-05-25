@@ -1022,7 +1022,7 @@ impl SyslogService {
         .await
     }
 
-    pub async fn db_checkpoint(&self, mode: String) -> ServiceResult<DbCheckpointResult> {
+    async fn db_checkpoint(&self, mode: String) -> ServiceResult<DbCheckpointResult> {
         self.run_db(move |pool| {
             let (busy, log_frames, checkpointed_frames) = db::db_wal_checkpoint(pool, &mode)?;
             Ok(DbCheckpointResult {
@@ -1057,7 +1057,7 @@ impl SyslogService {
         .await
     }
 
-    pub async fn db_vacuum(
+    async fn db_vacuum(
         &self,
         full: bool,
         incremental_pages: u32,
@@ -1217,7 +1217,7 @@ impl SyslogService {
         .await
     }
 
-    pub async fn prune_ai_checkpoints(
+    async fn prune_ai_checkpoints(
         &self,
         missing_only: bool,
         dry_run: bool,
