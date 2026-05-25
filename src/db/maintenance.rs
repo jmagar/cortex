@@ -817,7 +817,7 @@ fn recovery_targets(config: &StorageConfig) -> StorageRecovery {
     }
 }
 
-pub(crate) fn exceeds_trigger(metrics: &StorageMetrics, config: &StorageConfig) -> bool {
+pub fn exceeds_trigger(metrics: &StorageMetrics, config: &StorageConfig) -> bool {
     (config.max_db_size_mb > 0
         && metrics.logical_db_size_bytes > mb_to_bytes(config.max_db_size_mb))
         || (config.min_free_disk_mb > 0

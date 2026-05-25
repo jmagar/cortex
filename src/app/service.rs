@@ -1498,8 +1498,9 @@ impl SyslogService {
                 } else {
                     None
                 };
-                let stats = db::get_stats(pool, &storage)?;
-                Ok((buckets, by_host, stats.write_blocked))
+                let metrics = db::get_storage_metrics(pool, &storage)?;
+                let write_blocked = db::exceeds_trigger(&metrics, &storage);
+                Ok((buckets, by_host, write_blocked))
             })
             .await?;
         let (buckets, by_host, write_blocked) = result;

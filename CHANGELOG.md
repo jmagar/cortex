@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.8] - 2026-05-25
+
+### Fixed
+
+- Keep `ingest_rate` responsive on large databases by avoiding the full stats
+  scan when only storage write-block state is needed.
+
 ## [0.32.7] - 2026-05-25
 
 ### Changed
