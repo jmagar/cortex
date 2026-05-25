@@ -2,6 +2,12 @@
 
 Complete listing of all plugin components.
 
+MCP, REST, and CLI are transport surfaces over the shared service layer. The
+runtime MCP action schema is derived from `src/mcp/actions.rs::ACTION_SPECS`
+through `src/mcp/schemas.rs::tool_definitions()` and exposed as
+`syslog://schema/mcp-tool`; maintained Markdown docs are drift-checked rather
+than automatically generated.
+
 ## MCP tools
 
 syslog-mcp exposes one read-only MCP tool named `syslog`. The required `action`
@@ -22,7 +28,9 @@ argument selects the operation. The authoritative action list lives in
 | `compose_status` / `compose_doctor` | Redacted Docker Compose runtime projections | no |
 | `help` | Returns markdown documentation for all actions | no |
 
-All MCP actions are read-only. syslog-mcp exposes no destructive operations via MCP.
+Most MCP actions are read-only. `ack_error`, `unack_error`, and
+`notifications_test` mutate acknowledgement/audit or notification state and use
+service-owned actor and safety policy.
 
 ## Direct CLI commands
 

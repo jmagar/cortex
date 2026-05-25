@@ -36,7 +36,7 @@ syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument s
 - `compose_doctor`
 - `help`
 
-The schema is defined in `src/mcp/schemas.rs` as a `serde_json::json!()` object returned by `tool_definitions()`.
+The runtime MCP tool schema is generated in code from `src/mcp/actions.rs::ACTION_SPECS` by `src/mcp/schemas.rs::tool_definitions()` and is exposed as the `syslog://schema/mcp-tool` resource. This Markdown file is maintained documentation with drift tests; it is not itself automatically generated.
 
 ## Schema Pattern
 

@@ -755,7 +755,10 @@ syslog-mcp`), not a project-wide `docker compose down`.
 
 ## Relationship to MCP
 
-The direct CLI and MCP tool share the same business layer:
+The direct CLI and MCP tool share the same business layer. Transport adapters
+own argument parsing and rendering; shared defaults, limits, validation, audit
+identity, and safety policy belong in `SyslogService` or service-owned request
+models.
 
 | CLI command | MCP action |
 | --- | --- |

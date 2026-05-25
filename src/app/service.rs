@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use chrono::{TimeDelta, Utc};
@@ -8,23 +8,24 @@ use tokio::sync::Semaphore;
 use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
     AbuseSearchRequest, AbuseSearchResponse, AiAssessEvidenceSummary, AiAssessRequest,
-    AiAssessResponse, AiCorrelateRequest, AiCorrelateResponse, AiCorrelationAnchor,
-    AiIncidentRequest, AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse,
-    AiSessionEntry, AnomaliesRequest, AnomaliesResponse, AskHistoryRequest, AskHistoryResponse,
-    ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse, ContextRequest,
-    ContextResponse, CorrelateEventsRequest, CorrelateEventsResponse, DbBackupResult,
-    DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumResult,
+    AiAssessResponse, AiCorrelateLimitPolicy, AiCorrelateRequest, AiCorrelateResponse,
+    AiCorrelationAnchor, AiIncidentRequest, AiIncidentResponse, AiInvestigateRequest,
+    AiInvestigateResponse, AiLimitPolicy, AiSessionEntry, AnomaliesRequest, AnomaliesResponse,
+    AskHistoryRequest, AskHistoryResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest,
+    CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
+    CorrelateEventsResponse, DbBackupResult, DbCheckpointRequest, DbCheckpointResult,
+    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult,
     FilterLogsRequest, GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse,
     IncidentContextRequest, IncidentContextResponse, IncidentEvent, IncidentRequest,
     IncidentResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
     ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
     ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, PatternsRequest, PatternsResponse,
-    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry, ServiceLogsRequest,
-    ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest,
-    SimilarIncidentsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
-    UsageBlocksRequest, UsageBlocksResponse,
+    ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, NotificationsRecentRequest,
+    PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse, RequestActor,
+    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
+    ServiceJournalEntry, ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest,
+    SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest,
+    TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
@@ -218,6 +219,28 @@ pub async fn run_service_logs(
         entries,
         dropped_lines,
     })
+}
+
+pub async fn run_compose_status() -> ServiceResult<crate::compose::ComposeStatus> {
+    static COMPOSE_DIAGNOSTICS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    let permit = COMPOSE_DIAGNOSTICS
+        .get_or_init(|| Arc::new(Semaphore::new(2)))
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|e| ServiceError::Busy(format!("compose diagnostics limiter closed: {e}")))?;
+    let service = crate::compose::ComposeService::new(
+        crate::compose::CliDockerInspect,
+        crate::compose::ProcessRunner,
+        crate::compose::ComposeDefaults::default(),
+    );
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        service.status(&crate::compose::ComposeTarget::default())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("compose status task failed: {e}"))?
+    .map_err(ServiceError::from)
 }
 
 /// Service-layer entry point bridging request structs to SQLite.
@@ -550,6 +573,22 @@ impl SyslogService {
         &self,
         req: SearchSessionsRequest,
     ) -> ServiceResult<SearchSessionsResponse> {
+        self.search_sessions_with_limit_policy(req, None).await
+    }
+
+    pub async fn search_sessions_with_limit_policy(
+        &self,
+        mut req: SearchSessionsRequest,
+        policy: Option<AiLimitPolicy>,
+    ) -> ServiceResult<SearchSessionsResponse> {
+        let limit_clamped_to = policy.and_then(|policy| {
+            req.limit
+                .filter(|limit| *limit > policy.limit_cap)
+                .map(|_| policy)
+        });
+        if let Some(policy) = limit_clamped_to {
+            req.limit = Some(policy.limit_cap);
+        }
         let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
         let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
         let params = db::SearchAiSessionsParams {
@@ -565,13 +604,34 @@ impl SyslogService {
         let result = self
             .run_db(move |pool| db::search_ai_sessions(pool, &params))
             .await?;
-        Ok(result.into())
+        let mut response: SearchSessionsResponse = result.into();
+        if let Some(policy) = limit_clamped_to.filter(|policy| policy.report_limit_clamp) {
+            response.limit_clamped_to = Some(policy.limit_cap);
+            response.truncated = true;
+        }
+        Ok(response)
     }
 
     pub async fn search_abuse(
         &self,
         req: AbuseSearchRequest,
     ) -> ServiceResult<AbuseSearchResponse> {
+        self.search_abuse_with_limit_policy(req, None).await
+    }
+
+    pub async fn search_abuse_with_limit_policy(
+        &self,
+        mut req: AbuseSearchRequest,
+        policy: Option<AiLimitPolicy>,
+    ) -> ServiceResult<AbuseSearchResponse> {
+        let limit_clamped_to = policy.and_then(|policy| {
+            req.limit
+                .filter(|limit| *limit > policy.limit_cap)
+                .map(|_| policy)
+        });
+        if let Some(policy) = limit_clamped_to {
+            req.limit = Some(policy.limit_cap);
+        }
         let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
         let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
         let params = db::AiAbuseParams {
@@ -587,7 +647,12 @@ impl SyslogService {
         let result = self
             .run_db(move |pool| db::search_ai_abuse(pool, &params))
             .await?;
-        Ok(result.into())
+        let mut response: AbuseSearchResponse = result.into();
+        if let Some(policy) = limit_clamped_to.filter(|policy| policy.report_limit_clamp) {
+            response.limit_clamped_to = Some(policy.limit_cap);
+            response.truncated = true;
+        }
+        Ok(response)
     }
 
     pub async fn list_ai_incidents(
@@ -657,10 +722,23 @@ impl SyslogService {
         &self,
         req: AiCorrelateRequest,
     ) -> ServiceResult<AiCorrelateResponse> {
+        self.correlate_ai_logs_with_limit_policy(req, AiCorrelateLimitPolicy::MCP)
+            .await
+    }
+
+    pub async fn correlate_ai_logs_with_limit_policy(
+        &self,
+        req: AiCorrelateRequest,
+        policy: AiCorrelateLimitPolicy,
+    ) -> ServiceResult<AiCorrelateResponse> {
+        let (req, events_per_anchor_clamped_to) = req.normalize_limits(policy);
         let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
         let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
         let window = req.window_minutes.unwrap_or(5).clamp(1, 120);
-        let related_limit = req.events_per_anchor.unwrap_or(25).clamp(1, 200);
+        let related_limit = req
+            .events_per_anchor
+            .unwrap_or(25)
+            .clamp(1, policy.events_per_anchor_cap);
         let anchor_limit = req.limit.unwrap_or(10).clamp(1, 50);
         let severity_min = req.severity_min.unwrap_or_else(|| "warning".into());
         let severity_levels = severity_at_or_above(&severity_min)?;
@@ -761,7 +839,7 @@ impl SyslogService {
             related_limit_per_anchor: related_limit as usize,
             total_related_events,
             anchors: correlated,
-            events_per_anchor_clamped_to: None,
+            events_per_anchor_clamped_to,
         })
     }
 
@@ -957,6 +1035,14 @@ impl SyslogService {
         .await
     }
 
+    pub async fn db_checkpoint_checked(
+        &self,
+        req: DbCheckpointRequest,
+    ) -> ServiceResult<DbCheckpointResult> {
+        let mode = req.normalized_mode()?;
+        self.db_checkpoint(mode).await
+    }
+
     /// Read the live `page_count * page_size` (logical size, in bytes) via a
     /// fresh PRAGMA pair. Used by the `POST /api/db/vacuum` pre-flight in
     /// `src/api.rs::db_vacuum` so the 2GB guard cannot be defeated by a stale
@@ -993,6 +1079,23 @@ impl SyslogService {
             })
         })
         .await
+    }
+
+    pub async fn db_vacuum_checked(
+        &self,
+        req: DbVacuumRequest,
+        full_vacuum_size_guard_bytes: u64,
+    ) -> ServiceResult<DbVacuumResult> {
+        if req.full && !req.force_enabled() {
+            let size = self.db_logical_size_bytes().await?;
+            if size > full_vacuum_size_guard_bytes {
+                let gb = size as f64 / (1024.0 * 1024.0 * 1024.0);
+                return Err(ServiceError::Busy(format!(
+                    "DB size {gb:.2} GB; full VACUUM would block ingest. Pass {{\"force\":true}} or use incremental"
+                )));
+            }
+        }
+        self.db_vacuum(req.full, req.incremental_pages).await
     }
 
     pub async fn db_backup(&self, output: Option<PathBuf>) -> ServiceResult<DbBackupResult> {
@@ -1131,6 +1234,15 @@ impl SyslogService {
             )
         })
         .await
+    }
+
+    pub async fn prune_ai_checkpoints_checked(
+        &self,
+        req: super::models::AiPruneCheckpointsRequest,
+    ) -> ServiceResult<scanner::PruneCheckpointsResult> {
+        req.validate_admin()?;
+        self.prune_ai_checkpoints(req.missing_only, req.dry_run, req.limit)
+            .await
     }
 
     pub async fn ai_doctor(&self) -> ServiceResult<scanner::AiDoctorReport> {
@@ -1536,7 +1648,7 @@ impl SyslogService {
     pub async fn ack_error(
         &self,
         req: super::models::AckErrorRequest,
-        actor: &str,
+        actor: impl Into<RequestActor>,
     ) -> ServiceResult<super::models::AckErrorResponse> {
         if let Some(ref n) = req.notes {
             if n.len() > 4096 {
@@ -1547,7 +1659,8 @@ impl SyslogService {
         }
         let hash = req.signature_hash.clone();
         let notes = req.notes.clone();
-        let actor_owned = actor.to_string();
+        let actor = actor.into();
+        let actor_owned = actor.display.clone();
         // Check it exists first
         let h = hash.clone();
         let exists = self
@@ -1604,7 +1717,7 @@ impl SyslogService {
     pub async fn unack_error(
         &self,
         req: super::models::UnackErrorRequest,
-        actor: &str,
+        actor: impl Into<RequestActor>,
     ) -> ServiceResult<super::models::UnackErrorResponse> {
         if let Some(ref r) = req.reason {
             if r.len() > 4096 {
@@ -1615,7 +1728,8 @@ impl SyslogService {
         }
         let hash = req.signature_hash.clone();
         let reason = req.reason.clone();
-        let actor_owned = actor.to_string();
+        let actor = actor.into();
+        let actor_owned = actor.display.clone();
         // Check it exists first
         let h = hash.clone();
         let exists = self
@@ -1714,28 +1828,55 @@ impl SyslogService {
         rule_id: Option<String>,
         since: Option<String>,
     ) -> ServiceResult<Vec<crate::db::notifications::FiringRow>> {
+        self.notifications_recent_checked(NotificationsRecentRequest {
+            limit: Some(limit),
+            rule_id,
+            since,
+        })
+        .await
+    }
+
+    pub async fn notifications_recent_checked(
+        &self,
+        req: NotificationsRecentRequest,
+    ) -> ServiceResult<Vec<crate::db::notifications::FiringRow>> {
+        let limit = req.effective_limit();
         self.run_db(move |pool| {
             let conn = pool.get()?;
             crate::db::notifications::firings_recent(
                 &conn,
                 limit,
-                rule_id.as_deref(),
-                since.as_deref(),
+                req.rule_id.as_deref(),
+                req.since.as_deref(),
             )
             .map_err(anyhow::Error::from)
         })
         .await
     }
 
-    /// Send a test notification via Apprise. Rate-limited to 10/min per actor.
+    /// Send a test notification via configured Apprise destinations.
     ///
-    /// # Rate limiting
-    /// Uses an in-memory counter per `actor` string. Resets after 60s of
-    /// inactivity per actor.
-    pub async fn notifications_test(
+    /// Rate-limited to 10/min per actor using an in-memory counter that resets
+    /// after 60s of inactivity per actor.
+    pub async fn notifications_test_checked(
         &self,
         body: String,
-        actor: String,
+        actor: impl Into<RequestActor>,
+        config: &crate::config::NotificationsConfig,
+    ) -> ServiceResult<String> {
+        self.notifications_test_with_destinations(
+            body,
+            actor,
+            config.apprise_url.clone(),
+            config.apprise_urls.clone(),
+        )
+        .await
+    }
+
+    async fn notifications_test_with_destinations(
+        &self,
+        body: String,
+        actor: impl Into<RequestActor>,
         apprise_url: String,
         apprise_urls: Vec<String>,
     ) -> ServiceResult<String> {
@@ -1744,6 +1885,7 @@ impl SyslogService {
         use std::time::Instant;
 
         const MAX_PER_MIN: u32 = 10;
+        let actor = actor.into().display;
 
         // In-memory rate limiter: actor -> (count, window_start)
         static RATE_LIMITER: OnceLock<Mutex<HashMap<String, (u32, Instant)>>> = OnceLock::new();

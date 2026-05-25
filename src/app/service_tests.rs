@@ -307,6 +307,44 @@ async fn correlate_ai_logs_batches_related_windows_with_per_anchor_caps() {
 }
 
 #[tokio::test]
+async fn correlate_ai_logs_rest_policy_reports_service_owned_clamp() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[
+            ai_entry("2026-01-01T00:00:00Z", "deploy failure near host-a"),
+            entry(
+                "2026-01-01T00:00:10Z",
+                "host-a",
+                "err",
+                "deploy failed on host-a",
+                "10.0.0.1:514",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let response = service
+        .correlate_ai_logs_with_limit_policy(
+            AiCorrelateRequest {
+                project: Some("/tmp/project".into()),
+                tool: Some("codex".into()),
+                ai_query: Some("deploy".into()),
+                window_minutes: Some(1),
+                limit: Some(1),
+                events_per_anchor: Some(10_000),
+                ..Default::default()
+            },
+            AiCorrelateLimitPolicy::REST,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.related_limit_per_anchor, 50);
+    assert_eq!(response.events_per_anchor_clamped_to, Some(50));
+}
+
+#[tokio::test]
 async fn source_ip_filter_uses_network_sender_identity() {
     let (service, pool, _dir) = test_service();
     insert_logs_batch(
