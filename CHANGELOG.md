@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-05-25
+
+### Added
+
+- Added heartbeat telemetry V1: SQLite heartbeat storage, `POST /v1/heartbeats`
+  ingest, the bounded `host_state` MCP action, and a Linux `syslog heartbeat
+  agent` collector with binary-owned setup.
+
 ## [0.32.6] - 2026-05-24
 
 ### Added
