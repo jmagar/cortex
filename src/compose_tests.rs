@@ -14,6 +14,44 @@ fn cwd_lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
 }
 
+static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[allow(dead_code)]
+struct EnvGuard {
+    saved: Vec<(&'static str, Option<String>)>,
+}
+
+#[allow(dead_code)]
+impl EnvGuard {
+    fn new(keys: &[&'static str]) -> Self {
+        Self {
+            saved: keys
+                .iter()
+                .map(|key| (*key, std::env::var(key).ok()))
+                .collect(),
+        }
+    }
+
+    fn set(&self, key: &str, value: &str) {
+        std::env::set_var(key, value);
+    }
+
+    fn remove(&self, key: &str) {
+        std::env::remove_var(key);
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (key, value) in self.saved.drain(..) {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct FakeInspector {
     container: Option<ContainerInfo>,
@@ -96,9 +134,7 @@ fn labelled_container() -> ContainerInfo {
         image_id: Some("sha256:abc".into()),
         labels,
         mounts: vec![MountInfo {
-            source: Some(PathBuf::from(
-                "/home/jmagar/.claude/plugins/data/syslog-jmagar-lab",
-            )),
+            source: Some(PathBuf::from("/home/jmagar/.syslog-mcp/data")),
             target: "/data".into(),
             kind: "bind".into(),
             volume_name: None,
@@ -419,6 +455,10 @@ fn docker_unavailable_code_uses_typed_error() {
 
 #[test]
 fn status_reports_systemd_check_failures_as_diagnostics() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "/home/jmagar/.syslog-mcp/data");
+
     let service = ComposeService::new(
         FakeInspector {
             container: Some(labelled_container()),
@@ -437,6 +477,11 @@ fn status_reports_systemd_check_failures_as_diagnostics() {
 
 #[test]
 fn status_errors_when_data_volume_has_unexpected_name() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_MCP_VOLUME_NAME"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "");
+    env.remove("SYSLOG_MCP_VOLUME_NAME");
+
     // Regression guard: if the container was started with a stale COMPOSE_PROJECT_NAME
     // the named volume gets an unexpected prefix (e.g. "compose_syslog-mcp-data" instead
     // of "syslog-mcp-data"). The status check must detect and surface this as an Error.
@@ -457,7 +502,7 @@ fn status_errors_when_data_volume_has_unexpected_name() {
     let drift = status
         .diagnostics
         .iter()
-        .find(|d| d.code == "data_volume_unexpected")
+        .find(|d| d.code == "data_mount_unexpected")
         .expect("drift diagnostic must be present");
     assert_eq!(drift.severity, DiagnosticSeverity::Error);
     assert!(drift.message.contains("compose_syslog-mcp-data"));
@@ -479,8 +524,75 @@ fn status_errors_when_data_volume_has_unexpected_name() {
         good_status
             .diagnostics
             .iter()
-            .all(|d| d.code != "data_volume_unexpected"),
+            .all(|d| d.code != "data_mount_unexpected"),
         "correct named volume must not produce drift error"
+    );
+}
+
+#[test]
+fn status_errors_when_bind_mount_does_not_match_configured_data_volume() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "/home/jmagar/.syslog-mcp/data");
+
+    let mut container = labelled_container();
+    container.mounts[0].kind = "bind".into();
+    container.mounts[0].source = Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data"));
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(container),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+
+    let status = service.status(&ComposeTarget::default()).unwrap();
+
+    let drift = status
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "data_mount_unexpected")
+        .expect("bind drift diagnostic must be present");
+    assert_eq!(drift.severity, DiagnosticSeverity::Error);
+    assert!(drift.message.contains("/home/jmagar/.syslog-mcp/data"));
+}
+
+#[test]
+fn status_expected_data_mount_uses_configured_env_file() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_ENV_FILE", "SYSLOG_MCP_DATA_VOLUME"]);
+    env.remove("SYSLOG_MCP_DATA_VOLUME");
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().join("data");
+    std::fs::create_dir(&data_dir).unwrap();
+    let env_file = dir.path().join("syslog.env");
+    std::fs::write(
+        &env_file,
+        format!("SYSLOG_MCP_DATA_VOLUME=\"{}\"\n", data_dir.display()),
+    )
+    .unwrap();
+    env.set("SYSLOG_ENV_FILE", env_file.to_str().unwrap());
+
+    let mut container = labelled_container();
+    container.mounts[0].source = Some(data_dir);
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(container),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+
+    let status = service.status(&ComposeTarget::default()).unwrap();
+
+    assert!(
+        status
+            .diagnostics
+            .iter()
+            .all(|d| d.code != "data_mount_unexpected"),
+        "SYSLOG_ENV_FILE should drive the same /data expectation as compose invocation"
     );
 }
 
@@ -862,6 +974,9 @@ fn live_target_allows_listener_without_process_info_when_docker_confirms_owner()
 
 #[test]
 fn up_invocation_is_detached_and_uses_project_directory_and_all_files() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_ENV_FILE"]);
+    env.remove("SYSLOG_ENV_FILE");
     let service = ComposeService::new(
         FakeInspector::default(),
         FakeRunner,
@@ -906,6 +1021,46 @@ fn up_invocation_is_detached_and_uses_project_directory_and_all_files() {
             "syslog-mcp",
         ]
     );
+}
+
+#[test]
+fn compose_invocation_uses_syslog_env_file_for_substitution() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_ENV_FILE"]);
+    let dir = tempfile::tempdir().unwrap();
+    let env_file = dir.path().join("runtime.env");
+    std::fs::write(&env_file, "SYSLOG_MCP_DATA_VOLUME=/tmp/syslog-data\n").unwrap();
+    env.set("SYSLOG_ENV_FILE", env_file.to_str().unwrap());
+    let compose_file = dir.path().join("docker-compose.yml");
+    std::fs::write(&compose_file, "services: {}\n").unwrap();
+
+    let service = ComposeService::new(
+        FakeInspector::default(),
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = ResolvedComposeTarget {
+        target: ComposeTargetSummary {
+            project_dir: Some(dir.path().to_path_buf()),
+            compose_file: Some(compose_file.clone()),
+            project_name: Some("syslog-jmagar-lab".into()),
+            service: "syslog-mcp".into(),
+            container_name: "syslog-mcp".into(),
+        },
+        source: TargetSource::Explicit,
+        confidence: TargetConfidence::Confirmed,
+        diagnostics: Vec::new(),
+        compose_files: vec![compose_file],
+        compose_working_dir: Some(dir.path().to_path_buf()),
+        compose_project: Some("syslog-jmagar-lab".into()),
+    };
+
+    let invocation = service.compose_invocation(&target, ComposeMutation::Up);
+
+    assert!(invocation
+        .args
+        .windows(2)
+        .any(|args| { args[0] == "--env-file" && args[1] == env_file.display().to_string() }));
 }
 
 #[test]

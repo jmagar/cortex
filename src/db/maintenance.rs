@@ -139,6 +139,7 @@ pub fn enforce_storage_budget_with_probe(
 ) -> Result<StorageEnforcementOutcome> {
     let recovery = recovery_targets(config);
     let mut deleted_rows = 0usize;
+    let mut deleted_log_rows = 0usize;
     let mut all_hosts: std::collections::HashSet<String> = Default::default();
 
     let mut metrics = get_storage_metrics_with_probe(pool, config, probe)?;
@@ -170,9 +171,44 @@ pub fn enforce_storage_budget_with_probe(
                 physical_db_size_bytes = metrics.physical_db_size_bytes,
                 free_disk_bytes = ?metrics.free_disk_bytes,
                 deleted_rows,
-                "Storage budget exceeded trigger — deleting oldest logs chunk"
+                "Storage budget exceeded trigger — deleting oldest telemetry chunk"
             );
-            let deleted = delete_oldest_logs_chunk(pool, config.cleanup_chunk_size)?;
+
+            let deleted_orphan_children = delete_orphan_heartbeat_children(pool)?;
+            if deleted_orphan_children > 0 {
+                deleted_rows += deleted_orphan_children;
+                tracing::info!(
+                    deleted_rows = deleted_orphan_children,
+                    total_deleted_rows = deleted_rows,
+                    "Deleted orphan heartbeat child rows for storage recovery"
+                );
+                metrics = get_storage_metrics_with_probe(pool, config, probe)?;
+                continue;
+            }
+
+            let deleted = match oldest_telemetry_source(pool)? {
+                Some(TelemetrySource::Heartbeats) => {
+                    let deleted = delete_oldest_heartbeats_chunk(pool, config.cleanup_chunk_size)?;
+                    DeletedTelemetryChunk {
+                        deleted_rows: deleted,
+                        log_hostnames: Vec::new(),
+                        source: TelemetrySource::Heartbeats,
+                    }
+                }
+                Some(TelemetrySource::Logs) => {
+                    let deleted = delete_oldest_logs_chunk(pool, config.cleanup_chunk_size)?;
+                    DeletedTelemetryChunk {
+                        deleted_rows: deleted.deleted_rows,
+                        log_hostnames: deleted.hostnames,
+                        source: TelemetrySource::Logs,
+                    }
+                }
+                None => DeletedTelemetryChunk {
+                    deleted_rows: 0,
+                    log_hostnames: Vec::new(),
+                    source: TelemetrySource::Logs,
+                },
+            };
             if deleted.deleted_rows == 0 {
                 metrics = get_storage_metrics_with_probe(pool, config, probe)?;
                 let write_blocked = exceeds_trigger(&metrics, config);
@@ -192,13 +228,17 @@ pub fn enforce_storage_budget_with_probe(
             }
 
             deleted_rows += deleted.deleted_rows;
+            if deleted.source == TelemetrySource::Logs {
+                deleted_log_rows += deleted.deleted_rows;
+            }
             tracing::info!(
                 deleted_rows = deleted.deleted_rows,
                 total_deleted_rows = deleted_rows,
-                affected_hosts = deleted.hostnames.len(),
-                "Deleted oldest log chunk for storage recovery"
+                source = ?deleted.source,
+                affected_hosts = deleted.log_hostnames.len(),
+                "Deleted oldest telemetry chunk for storage recovery"
             );
-            all_hosts.extend(deleted.hostnames);
+            all_hosts.extend(deleted.log_hostnames);
             metrics = get_storage_metrics_with_probe(pool, config, probe)?;
         }
     }
@@ -215,7 +255,9 @@ pub fn enforce_storage_budget_with_probe(
         // avoid pool exhaustion when pool_size = 1.
         // Hardcoded M=0 here — storage enforcement is rare, force unconditional
         // merge. Tunable M only matters for the regular retention path.
-        fts_incremental_merge(pool, deleted_rows, 0);
+        if deleted_log_rows > 0 {
+            fts_incremental_merge(pool, deleted_log_rows, 0);
+        }
 
         checkpoint_wal_and_incremental_vacuum(pool)?;
     }
@@ -399,6 +441,53 @@ pub fn purge_old_logs(pool: &DbPool, retention_days: u32, fts_merge_pages: u32) 
     Ok(total_deleted)
 }
 
+/// Purge heartbeat samples older than N days.
+///
+/// Heartbeat tables do not rely on global SQLite foreign-key enforcement, so
+/// child metric rows are deleted explicitly before their parent heartbeat rows.
+/// Each chunk is its own short transaction to avoid starving log ingest.
+pub fn purge_old_heartbeats(
+    pool: &DbPool,
+    retention_days: u32,
+    chunk_size: usize,
+) -> Result<usize> {
+    if retention_days == 0 {
+        return Ok(0);
+    }
+
+    let cutoff = Utc::now()
+        .checked_sub_signed(chrono::TimeDelta::days(retention_days as i64))
+        .ok_or_else(|| {
+            anyhow::anyhow!("date arithmetic overflow for retention_days={retention_days}")
+        })?
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+
+    let mut total_deleted = 0usize;
+    let orphan_children = delete_orphan_heartbeat_children(pool)?;
+    if orphan_children > 0 {
+        tracing::warn!(
+            deleted_rows = orphan_children,
+            "Purged orphan heartbeat child rows"
+        );
+    }
+    loop {
+        let deleted = delete_heartbeat_chunk_before(pool, &cutoff, chunk_size)?;
+        total_deleted += deleted;
+        if deleted == 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    tracing::info!(
+        deleted = total_deleted,
+        cutoff = %cutoff,
+        "Purged old heartbeats"
+    );
+    Ok(total_deleted)
+}
+
 /// Delete rows for a single `app_name` older than `max_days`.
 ///
 /// Same chunked-DELETE pattern as [`purge_old_logs`] (10 000 rows per
@@ -471,6 +560,36 @@ struct DeletedChunk {
     hostnames: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TelemetrySource {
+    Logs,
+    Heartbeats,
+}
+
+#[derive(Debug)]
+struct DeletedTelemetryChunk {
+    deleted_rows: usize,
+    log_hostnames: Vec<String>,
+    source: TelemetrySource,
+}
+
+fn oldest_telemetry_source(pool: &DbPool) -> Result<Option<TelemetrySource>> {
+    let conn = pool.get()?;
+    let oldest_log: Option<String> =
+        conn.query_row("SELECT MIN(received_at) FROM logs", [], |row| row.get(0))?;
+    let oldest_heartbeat: Option<String> =
+        conn.query_row("SELECT MIN(received_at) FROM host_heartbeats", [], |row| {
+            row.get(0)
+        })?;
+
+    Ok(match (oldest_log, oldest_heartbeat) {
+        (Some(log), Some(heartbeat)) if heartbeat <= log => Some(TelemetrySource::Heartbeats),
+        (Some(_), Some(_)) | (Some(_), None) => Some(TelemetrySource::Logs),
+        (None, Some(_)) => Some(TelemetrySource::Heartbeats),
+        (None, None) => None,
+    })
+}
+
 fn delete_oldest_logs_chunk(pool: &DbPool, chunk_size: usize) -> Result<DeletedChunk> {
     let conn = pool.get()?;
 
@@ -527,6 +646,110 @@ fn delete_oldest_logs_chunk(pool: &DbPool, chunk_size: usize) -> Result<DeletedC
         hostnames,
     })
 }
+
+fn delete_oldest_heartbeats_chunk(pool: &DbPool, chunk_size: usize) -> Result<usize> {
+    delete_heartbeat_chunk_where(pool, "", &[], chunk_size)
+}
+
+fn delete_heartbeat_chunk_before(pool: &DbPool, cutoff: &str, chunk_size: usize) -> Result<usize> {
+    delete_heartbeat_chunk_where(pool, "WHERE received_at < ?1", &[cutoff], chunk_size)
+}
+
+fn delete_heartbeat_chunk_where(
+    pool: &DbPool,
+    where_clause: &str,
+    params: &[&str],
+    chunk_size: usize,
+) -> Result<usize> {
+    let mut conn = pool.get()?;
+    let tx = conn.transaction()?;
+    tx.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS temp_heartbeat_delete_ids (
+             id INTEGER PRIMARY KEY
+         );
+         DELETE FROM temp_heartbeat_delete_ids;",
+    )?;
+
+    let insert_sql = format!(
+        "INSERT INTO temp_heartbeat_delete_ids (id)
+         SELECT id FROM host_heartbeats
+         {where_clause}
+         ORDER BY received_at ASC, id ASC
+         LIMIT ?{}",
+        params.len() + 1
+    );
+    let mut values: Vec<&dyn rusqlite::ToSql> = params
+        .iter()
+        .map(|value| value as &dyn rusqlite::ToSql)
+        .collect();
+    let chunk_limit = chunk_size as i64;
+    values.push(&chunk_limit);
+    tx.execute(&insert_sql, rusqlite::params_from_iter(values))?;
+
+    let selected: usize = tx.query_row(
+        "SELECT COUNT(*) FROM temp_heartbeat_delete_ids",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? as usize;
+    if selected == 0 {
+        tx.execute_batch("DELETE FROM temp_heartbeat_delete_ids;")?;
+        tx.commit()?;
+        return Ok(0);
+    }
+
+    for table in HEARTBEAT_CHILD_TABLES {
+        tx.execute(
+            &format!(
+                "DELETE FROM {table}
+                 WHERE heartbeat_id IN (SELECT id FROM temp_heartbeat_delete_ids)"
+            ),
+            [],
+        )?;
+    }
+    let deleted = tx.execute(
+        "DELETE FROM host_heartbeats
+         WHERE id IN (SELECT id FROM temp_heartbeat_delete_ids)",
+        [],
+    )?;
+    tx.execute_batch("DELETE FROM temp_heartbeat_delete_ids;")?;
+    tx.commit()?;
+
+    tracing::debug!(
+        deleted_rows = deleted,
+        child_tables = HEARTBEAT_CHILD_TABLES.len(),
+        chunk_size,
+        "Deleted heartbeat chunk"
+    );
+    Ok(deleted)
+}
+
+fn delete_orphan_heartbeat_children(pool: &DbPool) -> Result<usize> {
+    let conn = pool.get()?;
+    let mut total_deleted = 0usize;
+    for table in HEARTBEAT_CHILD_TABLES {
+        let deleted = conn.execute(
+            &format!(
+                "DELETE FROM {table}
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM host_heartbeats
+                     WHERE host_heartbeats.id = {table}.heartbeat_id
+                 )"
+            ),
+            [],
+        )?;
+        total_deleted += deleted;
+    }
+    Ok(total_deleted)
+}
+
+const HEARTBEAT_CHILD_TABLES: &[&str] = &[
+    "heartbeat_cpu",
+    "heartbeat_memory",
+    "heartbeat_disks",
+    "heartbeat_network",
+    "heartbeat_processes",
+    "heartbeat_containers",
+];
 
 fn reconcile_hosts(pool: &DbPool, hostnames: &[String]) -> Result<()> {
     if hostnames.is_empty() {

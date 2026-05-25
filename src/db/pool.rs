@@ -9,7 +9,7 @@ use crate::config::StorageConfig;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 14;
+pub const KNOWN_SCHEMA_VERSION: i64 = 15;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -599,6 +599,13 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         );
     }
 
+    // Migration 15: first-class heartbeat telemetry storage.
+    // Contract: docs/contracts/heartbeat-telemetry.md
+    if !migration_applied(&conn, 15)? {
+        apply_migration_15_heartbeat(&conn)?;
+        tracing::info!("Migration 15: created heartbeat telemetry tables and indexes");
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
@@ -675,6 +682,140 @@ fn apply_migration_13(conn: &Connection) -> rusqlite::Result<()> {
              INSERT OR IGNORE INTO schema_migrations (version) VALUES (13);",
         )
     })();
+
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT;"),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
+}
+
+fn apply_migration_15_heartbeat(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS host_heartbeats (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            host_id         TEXT NOT NULL,
+            hostname        TEXT NOT NULL,
+            source_ip       TEXT NOT NULL DEFAULT '',
+            sampled_at      TEXT NOT NULL,
+            received_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            boot_id         TEXT NOT NULL,
+            uptime_secs     INTEGER NOT NULL,
+            sequence        INTEGER NOT NULL,
+            collection_ms   INTEGER NOT NULL,
+            push_latency_ms INTEGER,
+            partial         INTEGER NOT NULL DEFAULT 0,
+            agent_version   TEXT NOT NULL,
+            os              TEXT NOT NULL,
+            kernel          TEXT,
+            architecture    TEXT NOT NULL,
+            metadata_json   TEXT,
+            UNIQUE(host_id, boot_id, sequence)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_host_heartbeats_host_sampled
+            ON host_heartbeats(host_id, sampled_at);
+        CREATE INDEX IF NOT EXISTS idx_host_heartbeats_received
+            ON host_heartbeats(received_at);
+        CREATE INDEX IF NOT EXISTS idx_host_heartbeats_hostname_sampled
+            ON host_heartbeats(hostname, sampled_at);
+
+        CREATE TABLE IF NOT EXISTS heartbeat_cpu (
+            heartbeat_id      INTEGER NOT NULL,
+            load1             REAL,
+            load5             REAL,
+            load15            REAL,
+            usage_pct         REAL,
+            user_pct          REAL,
+            system_pct        REAL,
+            iowait_pct        REAL,
+            steal_pct         REAL,
+            cpu_count         INTEGER,
+            metadata_json     TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_cpu_heartbeat_id
+            ON heartbeat_cpu(heartbeat_id);
+
+        CREATE TABLE IF NOT EXISTS heartbeat_memory (
+            heartbeat_id          INTEGER NOT NULL,
+            total_bytes           INTEGER,
+            available_bytes       INTEGER,
+            used_bytes            INTEGER,
+            swap_total_bytes      INTEGER,
+            swap_used_bytes       INTEGER,
+            metadata_json         TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_memory_heartbeat_id
+            ON heartbeat_memory(heartbeat_id);
+
+        CREATE TABLE IF NOT EXISTS heartbeat_disks (
+            heartbeat_id       INTEGER NOT NULL,
+            name               TEXT,
+            mount_point        TEXT,
+            fs_type            TEXT,
+            total_bytes        INTEGER,
+            free_bytes         INTEGER,
+            used_bytes         INTEGER,
+            inode_total        INTEGER,
+            inode_free         INTEGER,
+            read_only          INTEGER,
+            read_bytes_per_sec REAL,
+            write_bytes_per_sec REAL,
+            busy_pct           REAL,
+            metadata_json      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_disks_heartbeat_id
+            ON heartbeat_disks(heartbeat_id);
+
+        CREATE TABLE IF NOT EXISTS heartbeat_network (
+            heartbeat_id       INTEGER NOT NULL,
+            interface_name     TEXT NOT NULL,
+            rx_bytes_per_sec   REAL,
+            tx_bytes_per_sec   REAL,
+            rx_packets_per_sec REAL,
+            tx_packets_per_sec REAL,
+            rx_errors          INTEGER,
+            tx_errors          INTEGER,
+            rx_dropped         INTEGER,
+            tx_dropped         INTEGER,
+            link_up            INTEGER,
+            metadata_json      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_network_heartbeat_id
+            ON heartbeat_network(heartbeat_id);
+
+        CREATE TABLE IF NOT EXISTS heartbeat_processes (
+            heartbeat_id       INTEGER NOT NULL,
+            total              INTEGER,
+            running            INTEGER,
+            sleeping           INTEGER,
+            zombie             INTEGER,
+            top_json           TEXT,
+            metadata_json      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_processes_heartbeat_id
+            ON heartbeat_processes(heartbeat_id);
+
+        CREATE TABLE IF NOT EXISTS heartbeat_containers (
+            heartbeat_id       INTEGER NOT NULL,
+            reachable          INTEGER NOT NULL DEFAULT 0,
+            running            INTEGER,
+            exited             INTEGER,
+            restarting         INTEGER,
+            unhealthy          INTEGER,
+            details_json       TEXT,
+            metadata_json      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_containers_heartbeat_id
+            ON heartbeat_containers(heartbeat_id);
+
+        INSERT OR IGNORE INTO schema_migrations (version) VALUES (15);
+        ",
+    );
 
     match result {
         Ok(()) => conn.execute_batch("COMMIT;"),

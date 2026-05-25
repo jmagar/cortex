@@ -387,6 +387,7 @@ impl RuntimeCore {
         let purge_pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
         let fts_merge_pages = self.config.enrichment.fts_merge_pages;
+        let cleanup_chunk_size = self.config.storage.cleanup_chunk_size;
         let handle = tokio::spawn(async move {
             let mut interval = background_interval(tokio::time::Duration::from_secs(3600));
             loop {
@@ -431,19 +432,35 @@ impl RuntimeCore {
                             ),
                         }
                     }
+                    let heartbeat_deleted =
+                        match db::purge_old_heartbeats(&pool, retention_days, cleanup_chunk_size) {
+                            Ok(n) => n,
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "Heartbeat retention purge failed; continuing"
+                                );
+                                0
+                            }
+                        };
                     let global_deleted =
                         db::purge_old_logs(&pool, retention_days, fts_merge_pages)?;
-                    Ok::<(usize, usize), anyhow::Error>((tag_deleted, global_deleted))
+                    Ok::<(usize, usize, usize), anyhow::Error>((
+                        tag_deleted,
+                        heartbeat_deleted,
+                        global_deleted,
+                    ))
                 })
                 .await
                 .map_err(|e| anyhow::anyhow!("spawn_blocking error: {e}"))
                 .and_then(|r| r)
                 {
-                    Ok((tag_deleted, global_deleted)) => tracing::info!(
+                    Ok((tag_deleted, heartbeat_deleted, global_deleted)) => tracing::info!(
                         retention_days,
                         tag_deleted,
+                        heartbeat_deleted,
                         global_deleted,
-                        total_deleted = tag_deleted + global_deleted,
+                        total_deleted = tag_deleted + heartbeat_deleted + global_deleted,
                         elapsed_ms = started.elapsed().as_millis(),
                         "Retention purge tick completed"
                     ),

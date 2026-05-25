@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 
@@ -7,8 +7,8 @@ use super::format::{is_stopped_status, status_from_target, unresolved_status};
 use super::types::{
     CommandOutput, CommandRunner, ComposeCommandResult, ComposeDefaults, ComposeDiagnostic,
     ComposeDryRun, ComposeInvocation, ComposeMutation, ComposeStatus, ComposeTarget,
-    ComposeTargetSummary, DiagnosticSeverity, DockerInspect, ListenerInfo, MutationOptions,
-    ResolvedComposeTarget, TargetConfidence, TargetSource,
+    ComposeTargetSummary, DiagnosticSeverity, DockerInspect, ListenerInfo, MountInfo,
+    MutationOptions, ResolvedComposeTarget, TargetConfidence, TargetSource,
 };
 
 pub(crate) const DIAG_DOCKER_UNAVAILABLE: &str = "docker_unavailable";
@@ -69,16 +69,7 @@ fn compose_base_args(target: &ResolvedComposeTarget) -> Vec<String> {
     if let Some(project_dir) = &target.compose_working_dir {
         args.push("--project-directory".into());
         args.push(project_dir.display().to_string());
-        // Docker Compose only looks for .env in the project directory for YAML
-        // variable substitution. The syslog-mcp setup places .env one level up
-        // (e.g. ~/.syslog-mcp/.env with compose files under ~/.syslog-mcp/compose/).
-        // Pass --env-file explicitly so SYSLOG_MCP_DATA_VOLUME and similar vars
-        // are substituted correctly (bind-mount vs named-volume fallback).
-        if let Some(env_path) = project_dir
-            .parent()
-            .map(|p| p.join(".env"))
-            .filter(|p| p.is_file())
-        {
+        if let Some(env_path) = compose_env_file(project_dir) {
             args.push("--env-file".into());
             args.push(env_path.display().to_string());
         }
@@ -252,26 +243,18 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                 .inspector
                 .inspect_container(&target.target.container_name)?;
 
-            // Guard: if the running container has a /data volume with an unexpected
-            // name (e.g. from a stale COMPOSE_PROJECT_NAME), refuse Up to prevent
-            // silently creating a second orphaned database alongside the old one.
+            // Guard: if the running container has an unexpected /data mount,
+            // refuse Up to prevent silently switching SQLite files.
             if matches!(mutation, ComposeMutation::Up) {
-                let expected_volume = std::env::var("SYSLOG_MCP_VOLUME_NAME")
-                    .unwrap_or_else(|_| "syslog-mcp-data".to_string());
                 if let Some(info) = &target_container {
                     if let Some(mount) = info.mounts.iter().find(|m| m.target == "/data") {
-                        if mount.kind == "volume" {
-                            let actual = mount.volume_name.as_deref().unwrap_or("unknown");
-                            if actual != expected_volume {
-                                return Err(anyhow!(
-                                    "refusing up: container /data uses volume '{actual}' but \
-                                     expected '{expected_volume}' — stale volume from a previous \
-                                     COMPOSE_PROJECT_NAME would be orphaned.\n\
-                                     Fix: `docker stop syslog-mcp && docker rm syslog-mcp` \
-                                     then retry, or set SYSLOG_MCP_VOLUME_NAME={actual} to \
-                                     keep the existing volume."
-                                ));
-                            }
+                        if let Err(diagnostic) = data_mount_diagnostic(target, mount) {
+                            return Err(anyhow!(
+                                "refusing up: {}\nFix: recreate with the intended \
+                                 SYSLOG_MCP_DATA_VOLUME/SYSLOG_MCP_VOLUME_NAME, or update the \
+                                 env file if this mount is intentional.",
+                                diagnostic.message
+                            ));
                         }
                     }
                 }
@@ -390,8 +373,6 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             .map(|s| !is_stopped_status(s))
             .unwrap_or(false)
         {
-            let expected_volume = std::env::var("SYSLOG_MCP_VOLUME_NAME")
-                .unwrap_or_else(|_| "syslog-mcp-data".to_string());
             let data_mount = status.data_mounts.iter().find(|m| m.target == "/data");
             match data_mount {
                 None => {
@@ -401,21 +382,13 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                         message: "container has no /data mount — syslog DB is inaccessible".into(),
                     });
                 }
-                Some(mount) if mount.kind == "volume" => {
-                    let actual = mount.volume_name.as_deref().unwrap_or("unknown");
-                    if actual != expected_volume {
-                        status.diagnostics.push(ComposeDiagnostic {
-                            severity: DiagnosticSeverity::Error,
-                            code: "data_volume_unexpected".into(),
-                            message: format!(
-                                "container /data uses volume '{actual}', expected \
-                                 '{expected_volume}' — stale volume from a previous \
-                                 COMPOSE_PROJECT_NAME; run `syslog compose up` to recreate"
-                            ),
-                        });
+                Some(mount) => {
+                    if let Err(diagnostic) =
+                        data_mount_diagnostic(&status_as_target(&status), mount)
+                    {
+                        status.diagnostics.push(diagnostic);
                     }
                 }
-                Some(_) => {}
             }
         }
         if let Some(error) = systemd_error {
@@ -439,6 +412,180 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
         }
         Ok(status)
     }
+}
+
+fn status_as_target(status: &ComposeStatus) -> ResolvedComposeTarget {
+    ResolvedComposeTarget {
+        target: ComposeTargetSummary {
+            project_dir: status.compose_working_dir.clone(),
+            compose_file: status.compose_files.first().cloned(),
+            project_name: status.compose_project.clone(),
+            service: status
+                .service
+                .clone()
+                .unwrap_or_else(|| "syslog-mcp".into()),
+            container_name: status.container_name.clone(),
+        },
+        source: TargetSource::LiveContainerLabels,
+        confidence: TargetConfidence::Confirmed,
+        diagnostics: Vec::new(),
+        compose_files: status.compose_files.clone(),
+        compose_working_dir: status.compose_working_dir.clone(),
+        compose_project: status.compose_project.clone(),
+    }
+}
+
+enum ExpectedDataMount {
+    Bind(PathBuf),
+    Volume(String),
+}
+
+fn data_mount_diagnostic(
+    target: &ResolvedComposeTarget,
+    mount: &MountInfo,
+) -> Result<(), ComposeDiagnostic> {
+    match expected_data_mount(target) {
+        ExpectedDataMount::Volume(expected_volume) => {
+            if mount.kind == "volume"
+                && mount.volume_name.as_deref() == Some(expected_volume.as_str())
+            {
+                return Ok(());
+            }
+            let actual = mount_description(mount);
+            Err(ComposeDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: "data_mount_unexpected".into(),
+                message: format!(
+                    "container /data uses {actual}, expected volume '{expected_volume}'"
+                ),
+            })
+        }
+        ExpectedDataMount::Bind(expected_path) => {
+            if mount.kind == "bind"
+                && mount
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| paths_equivalent(source, &expected_path))
+            {
+                return Ok(());
+            }
+            let actual = mount_description(mount);
+            Err(ComposeDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: "data_mount_unexpected".into(),
+                message: format!(
+                    "container /data uses {actual}, expected bind '{}'",
+                    expected_path.display()
+                ),
+            })
+        }
+    }
+}
+
+fn expected_data_mount(target: &ResolvedComposeTarget) -> ExpectedDataMount {
+    let data_volume = env_or_compose_file_value(target, "SYSLOG_MCP_DATA_VOLUME");
+    if let Some(value) = data_volume.filter(|v| !v.trim().is_empty()) {
+        let path = PathBuf::from(&value);
+        if path.is_absolute() {
+            return ExpectedDataMount::Bind(normalize_path(path));
+        }
+        if value.starts_with("./") || value.starts_with("../") {
+            if let Some(project_dir) = &target.compose_working_dir {
+                return ExpectedDataMount::Bind(normalize_path(project_dir.join(path)));
+            }
+        }
+        return ExpectedDataMount::Volume(value);
+    }
+    ExpectedDataMount::Volume(
+        env_or_compose_file_value(target, "SYSLOG_MCP_VOLUME_NAME")
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "syslog-mcp-data".to_string()),
+    )
+}
+
+fn env_or_compose_file_value(target: &ResolvedComposeTarget, key: &str) -> Option<String> {
+    if let Ok(value) = std::env::var(key) {
+        return Some(value);
+    }
+    target
+        .compose_working_dir
+        .as_deref()
+        .and_then(compose_env_file)
+        .and_then(|path| read_env_value(&path, key))
+}
+
+fn read_env_value(path: &Path, key: &str) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (name, value) = line.split_once('=')?;
+        if name.trim() == key {
+            return Some(
+                value
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string(),
+            );
+        }
+    }
+    None
+}
+
+fn mount_description(mount: &MountInfo) -> String {
+    match mount.kind.as_str() {
+        "volume" => format!(
+            "volume '{}'",
+            mount.volume_name.as_deref().unwrap_or("unknown")
+        ),
+        "bind" => format!(
+            "bind '{}'",
+            mount
+                .source
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "unknown".into())
+        ),
+        other => format!("{other} mount"),
+    }
+}
+
+fn paths_equivalent(actual: &Path, expected: &Path) -> bool {
+    normalize_path(actual) == normalize_path(expected)
+}
+
+fn normalize_path(path: impl AsRef<Path>) -> PathBuf {
+    path.as_ref()
+        .canonicalize()
+        .unwrap_or_else(|_| path.as_ref().to_path_buf())
+}
+
+fn compose_env_file(project_dir: &Path) -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("SYSLOG_ENV_FILE") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    // Docker Compose only looks for .env in the project directory for YAML
+    // substitution. The installed syslog-mcp compose bundle stores compose
+    // files under ~/.syslog-mcp/compose/ and its env file one level up.
+    if let Some(path) = project_dir
+        .parent()
+        .map(|p| p.join(".env"))
+        .filter(|p| p.is_file())
+    {
+        return Some(path);
+    }
+
+    project_dir
+        .join(".env")
+        .is_file()
+        .then(|| project_dir.join(".env"))
 }
 
 impl<I: DockerInspect, R: CommandRunner> ComposeService<I, R> {
