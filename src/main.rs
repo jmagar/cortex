@@ -293,11 +293,13 @@ async fn serve_mcp() -> Result<()> {
     }
     app = app.merge(runtime.otlp_router());
     info!("OTLP receiver mounted at /v1/logs (and /v1/metrics, /v1/traces → 404)");
+    app = app.merge(runtime.heartbeat_router());
+    info!("Heartbeat receiver mounted at /v1/heartbeats");
     if runtime.config.mcp.api_token.is_none() && !runtime.config.mcp.host.starts_with("127.") {
         tracing::warn!(
             bind = %runtime.config.mcp.bind_addr(),
-            "OTLP /v1/logs is mounted WITHOUT authentication on a non-loopback bind. \
-             Anyone reachable on this address can write log records. \
+            "OTLP /v1/logs and heartbeat /v1/heartbeats are mounted WITHOUT authentication on a \
+             non-loopback bind. Anyone reachable on this address can write telemetry. \
              Set SYSLOG_MCP_TOKEN to require Bearer auth."
         );
     }

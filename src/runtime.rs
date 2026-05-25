@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::app::SyslogService;
 use crate::config::{mcp_bind_is_loopback, validate_auth_config, AuthMode, Config};
 use crate::db::{self, DbPool, StorageBudgetState};
+use crate::heartbeat::HeartbeatState;
 use crate::ingest::IngestTx;
 use crate::mcp::AuthPolicy;
 use crate::observability::RuntimeObservability;
@@ -232,6 +233,16 @@ impl RuntimeCore {
             self.auth_policy.clone(),
         );
         otlp::router(state)
+    }
+
+    /// Build the heartbeat telemetry ingest router.
+    pub fn heartbeat_router(&self) -> axum::Router {
+        let state = HeartbeatState::new(
+            Arc::clone(&self.pool),
+            self.config.mcp.api_token.clone(),
+            self.auth_policy.clone(),
+        );
+        crate::heartbeat::router(state)
     }
 
     pub fn mcp_state(&self) -> mcp::AppState {
