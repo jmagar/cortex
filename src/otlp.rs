@@ -9,12 +9,16 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::mcp::AuthPolicy;
 use axum::{
     extract::{ConnectInfo, State},
-    http::{header::RETRY_AFTER, HeaderMap, HeaderValue, StatusCode},
+    http::{
+        header::{AUTHORIZATION, RETRY_AFTER, USER_AGENT},
+        HeaderMap, HeaderValue, StatusCode,
+    },
     middleware::{from_fn, Next},
     response::{IntoResponse, Json},
     routing::post,
@@ -27,6 +31,7 @@ use opentelemetry_proto::tonic::{
 };
 use prost::Message;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::db::LogBatchEntry;
@@ -106,11 +111,30 @@ async fn logs_handler(
     body: Bytes,
 ) -> axum::response::Response {
     if !is_authorized(&state, &headers) {
-        tracing::warn!(
-            source_ip = %peer,
-            has_auth = headers.contains_key(axum::http::header::AUTHORIZATION),
-            "OTLP /v1/logs unauthorized"
-        );
+        let diagnostics = unauthorized_diagnostics(&headers);
+        if should_warn_unauthorized(&peer, &diagnostics) {
+            tracing::warn!(
+                source_ip = %peer,
+                has_auth = diagnostics.has_auth,
+                auth_scheme = %diagnostics.auth_scheme,
+                bearer_sha256_12 = %diagnostics.bearer_sha256_12,
+                user_agent = %diagnostics.user_agent,
+                token_configured = state.api_token.is_some(),
+                auth_policy = %otlp_auth_policy_label(&state.auth_policy),
+                "OTLP /v1/logs unauthorized"
+            );
+        } else {
+            tracing::debug!(
+                source_ip = %peer,
+                has_auth = diagnostics.has_auth,
+                auth_scheme = %diagnostics.auth_scheme,
+                bearer_sha256_12 = %diagnostics.bearer_sha256_12,
+                user_agent = %diagnostics.user_agent,
+                token_configured = state.api_token.is_some(),
+                auth_policy = %otlp_auth_policy_label(&state.auth_policy),
+                "OTLP /v1/logs unauthorized suppressed by rate limit"
+            );
+        }
         return unauthorized();
     }
 
@@ -466,13 +490,116 @@ fn is_authorized(state: &OtlpState, headers: &HeaderMap) -> bool {
     let Some(expected) = state.api_token.as_deref() else {
         return false;
     };
-    let Some(auth) = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-    else {
+    let Some(auth) = headers.get(AUTHORIZATION).and_then(|v| v.to_str().ok()) else {
         return false;
     };
     parse_bearer_token(auth).is_some_and(|tok| tokens_equal(&tok, expected))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct UnauthorizedDiagnostics {
+    has_auth: bool,
+    auth_scheme: String,
+    bearer_sha256_12: String,
+    user_agent: String,
+}
+
+static UNAUTHORIZED_WARNINGS: LazyLock<Mutex<HashMap<String, Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+const UNAUTHORIZED_WARNING_INTERVAL: Duration = Duration::from_secs(60);
+const UNAUTHORIZED_WARNING_MAX_KEYS: usize = 1024;
+const MAX_DIAGNOSTIC_FIELD_LEN: usize = 128;
+
+fn should_warn_unauthorized(peer: &SocketAddr, diagnostics: &UnauthorizedDiagnostics) -> bool {
+    let key = unauthorized_warning_key(peer, diagnostics);
+    let now = Instant::now();
+    let Ok(mut warnings) = UNAUTHORIZED_WARNINGS.lock() else {
+        return true;
+    };
+    record_unauthorized_warning(
+        &mut warnings,
+        key,
+        now,
+        UNAUTHORIZED_WARNING_INTERVAL,
+        UNAUTHORIZED_WARNING_MAX_KEYS,
+    )
+}
+
+fn unauthorized_warning_key(peer: &SocketAddr, diagnostics: &UnauthorizedDiagnostics) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        peer.ip(),
+        diagnostics.auth_scheme,
+        diagnostics.bearer_sha256_12,
+        diagnostics.user_agent
+    )
+}
+
+fn record_unauthorized_warning(
+    warnings: &mut HashMap<String, Instant>,
+    key: String,
+    now: Instant,
+    interval: Duration,
+    max_keys: usize,
+) -> bool {
+    match warnings.get(&key).copied() {
+        Some(last) if now.duration_since(last) < interval => false,
+        _ => {
+            if warnings.len() >= max_keys {
+                warnings.retain(|_, last| now.duration_since(*last) < interval);
+            }
+            if !warnings.contains_key(&key) && warnings.len() >= max_keys {
+                return false;
+            }
+            warnings.insert(key, now);
+            true
+        }
+    }
+}
+
+fn unauthorized_diagnostics(headers: &HeaderMap) -> UnauthorizedDiagnostics {
+    let auth = headers.get(AUTHORIZATION).and_then(|v| v.to_str().ok());
+    let bearer = auth.and_then(parse_bearer_token);
+    UnauthorizedDiagnostics {
+        has_auth: auth.is_some(),
+        auth_scheme: auth_scheme(auth),
+        bearer_sha256_12: bearer
+            .as_deref()
+            .map(sha256_12)
+            .unwrap_or_else(|| "none".to_string()),
+        user_agent: headers
+            .get(USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .filter(|value| !value.trim().is_empty())
+            .map(truncate_diagnostic_field)
+            .unwrap_or_else(|| "unknown".to_string()),
+    }
+}
+
+fn auth_scheme(auth: Option<&str>) -> String {
+    auth.and_then(|value| value.split_ascii_whitespace().next())
+        .filter(|scheme| !scheme.is_empty())
+        .unwrap_or("none")
+        .to_ascii_lowercase()
+}
+
+fn sha256_12(value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(value.as_bytes());
+    let digest = hasher.finalize();
+    format!("{digest:x}")[..12].to_string()
+}
+
+fn truncate_diagnostic_field(value: &str) -> String {
+    value.chars().take(MAX_DIAGNOSTIC_FIELD_LEN).collect()
+}
+
+fn otlp_auth_policy_label(policy: &AuthPolicy) -> &'static str {
+    match policy {
+        AuthPolicy::LoopbackDev => "loopback_dev",
+        AuthPolicy::Mounted { .. } => "mounted",
+    }
 }
 
 fn unauthorized() -> axum::response::Response {
