@@ -55,7 +55,7 @@ impl DockerHostClient {
     }
 
     pub(super) async fn list_containers(&self) -> Result<Vec<ContainerMeta>> {
-        let options = ListContainersOptionsBuilder::default().all(true).build();
+        let options = ListContainersOptionsBuilder::default().all(false).build();
         let containers = self.docker.list_containers(Some(options)).await?;
         Ok(containers
             .into_iter()

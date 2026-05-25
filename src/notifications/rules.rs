@@ -214,6 +214,46 @@ pub fn evaluate_disk_fill(
     })
 }
 
+/// Evaluate ingest queue pressure from runtime counters.
+///
+/// Fires when queue-full transitions or queue-full drops have increased since
+/// the previous evaluation cycle.
+pub fn evaluate_ingest_queue_pressure(
+    hostname: &str,
+    full_transitions_delta: u64,
+    udp_drops_delta: u64,
+    tcp_drops_delta: u64,
+    queue_depth: usize,
+    queue_capacity: usize,
+    apprise_urls_json: &str,
+) -> Option<OutboxInsertParams> {
+    if full_transitions_delta == 0 && udp_drops_delta == 0 && tcp_drops_delta == 0 {
+        return None;
+    }
+
+    let title = escape_for_notification(&format!(
+        "[WARNING] syslog ingest queue pressure on {hostname}"
+    ));
+    let body = escape_for_notification(&format!(
+        "syslog-mcp observed queue pressure on **{hostname}** since the last check:\n\n\
+         - queue-full transitions: `{full_transitions_delta}`\n\
+         - UDP drops from full queue: `{udp_drops_delta}`\n\
+         - TCP drops from full queue: `{tcp_drops_delta}`\n\
+         - current queue depth: `{queue_depth}/{queue_capacity}`"
+    ));
+
+    Some(OutboxInsertParams {
+        dedup_key: format!("ingest_queue_pressure:{hostname}"),
+        rule_id: "ingest_queue_pressure".to_string(),
+        severity: "warning".to_string(),
+        hostname: hostname.to_string(),
+        title,
+        body,
+        apprise_urls_json: apprise_urls_json.to_string(),
+        next_attempt_at: backoff_next_attempt_at(0),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,6 +506,22 @@ mod tests {
     fn disk_fill_zero_thresholds_do_not_fire() {
         // disabled thresholds: critical=0, warn=0 → no alert
         let result = evaluate_disk_fill("nas1", 0, 0, 0, "[]");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn ingest_queue_pressure_fires_on_drops() {
+        let result = evaluate_ingest_queue_pressure("dookie", 1, 2, 3, 99, 100, "[]");
+
+        let params = result.expect("queue pressure should fire");
+        assert_eq!(params.rule_id, "ingest_queue_pressure");
+        assert_eq!(params.severity, "warning");
+        assert!(params.body.contains("TCP drops"));
+    }
+
+    #[test]
+    fn ingest_queue_pressure_ok_does_not_fire() {
+        let result = evaluate_ingest_queue_pressure("dookie", 0, 0, 0, 0, 100, "[]");
         assert!(result.is_none());
     }
 }

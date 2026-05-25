@@ -12,7 +12,10 @@ syslog-mcp exposes one MCP resource:
 | --- | --- | --- |
 | `syslog://schema/mcp-tool` | JSON schema for the `syslog` MCP tool and action-based parameters | `application/json` |
 
-All log data access is through the single `syslog` MCP tool and its 8 read-only actions. Tools are preferred over log resources because queries benefit from parameterized filtering (hostname, severity, time range, FTS5 query) that URI templating cannot express efficiently.
+All log data access is through the single `syslog` MCP tool. Tools are preferred
+over log resources because queries benefit from parameterized filtering
+(hostname, severity, source identity, time range, FTS5 query, and correlation
+windows) that URI templating cannot express efficiently.
 
 ## Future considerations
 

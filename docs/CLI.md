@@ -763,25 +763,49 @@ models.
 | CLI command | MCP action |
 | --- | --- |
 | `syslog search` | `syslog` with `action="search"` |
+| `syslog filter` | `syslog` with `action="filter"` |
 | `syslog tail` | `syslog` with `action="tail"` |
 | `syslog errors` | `syslog` with `action="errors"` |
 | `syslog hosts` | `syslog` with `action="hosts"` |
 | `syslog sessions` | `syslog` with `action="sessions"` |
 | `syslog ai search` | `syslog` with `action="search_sessions"` |
 | `syslog ai abuse` | `syslog` with `action="abuse"` |
+| `syslog ai incidents` | `syslog` with `action="abuse_incidents"` |
+| `syslog ai investigate` | `syslog` with `action="abuse_investigate"` |
 | `syslog ai correlate` | `syslog` with `action="ai_correlate"` |
 | `syslog ai blocks` | `syslog` with `action="usage_blocks"` |
 | `syslog ai context` | `syslog` with `action="project_context"` |
 | `syslog ai tools` | `syslog` with `action="list_ai_tools"` |
 | `syslog ai projects` | `syslog` with `action="list_ai_projects"` |
+| `syslog ai similar` | `syslog` with `action="similar_incidents"` |
+| `syslog ai ask-history` | `syslog` with `action="ask_history"` |
+| `syslog ai incident-context` | `syslog` with `action="incident_context"` |
 | `syslog correlate` | `syslog` with `action="correlate"` |
+| `syslog apps` | `syslog` with `action="apps"` |
+| `syslog source-ips` | `syslog` with `action="source_ips"` |
+| `syslog timeline` | `syslog` with `action="timeline"` |
+| `syslog patterns` | `syslog` with `action="patterns"` |
+| `syslog context` | `syslog` with `action="context"` |
+| `syslog get` | `syslog` with `action="get"` |
+| `syslog ingest-rate` | `syslog` with `action="ingest_rate"` |
+| `syslog silent-hosts` | `syslog` with `action="silent_hosts"` |
+| `syslog clock-skew` | `syslog` with `action="clock_skew"` |
+| `syslog anomalies` | `syslog` with `action="anomalies"` |
+| `syslog compare` | `syslog` with `action="compare"` |
+| `syslog sig list` | `syslog` with `action="unaddressed_errors"` |
+| `syslog sig ack` | `syslog` with `action="ack_error"` |
+| `syslog sig unack` | `syslog` with `action="unack_error"` |
+| `syslog notify recent` | `syslog` with `action="notifications_recent"` |
+| `syslog notify test` | `syslog` with `action="notifications_test"` |
 | `syslog stats` | `syslog` with `action="stats"` |
 | `syslog compose status` | `syslog` with `action="compose_status"` (redacted read-only projection only) |
 | `syslog compose doctor` | `syslog` with `action="compose_doctor"` (redacted read-only projection only) |
 
 The MCP-only `status` and `help` actions are runtime/protocol helpers, not
 direct database queries. Compose mutations (`up`, `down`, `restart`, `pull`,
-`logs`) are CLI-only and are not exposed over MCP.
+`logs`) are CLI-only and are not exposed over MCP. Admin MCP actions such as
+`ack_error`, `unack_error`, and `notifications_test` require `syslog:admin`
+when auth is mounted.
 
 Use direct CLI mode for terminal queries and scripts on a host that can read the
 SQLite database. Use MCP HTTP or `syslog mcp` when an MCP client needs tool

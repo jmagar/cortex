@@ -3,14 +3,42 @@ name: syslog-mcp
 # Local development stack. Builds from this checkout.
 services:
   syslog-mcp:
-    extends:
-      file: docker-compose.prod.yml
-      service: syslog-mcp
-    image: syslog-mcp:dev
-    pull_policy: build
     build:
       context: .
       dockerfile: config/Dockerfile
+    container_name: syslog-mcp
+    user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"
+    env_file:
+      - path: ${SYSLOG_ENV_FILE:-.env}
+        required: false
+    ports:
+      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/udp"
+      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/tcp"
+      - "${SYSLOG_MCP_PORT:-3100}:3100/tcp"
+    volumes:
+      - ${SYSLOG_MCP_DATA_VOLUME:-syslog-mcp-data}:/data
+    networks:
+      - syslog-mcp
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "dookie:100.88.16.79"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3100/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   syslog-mcp-data:

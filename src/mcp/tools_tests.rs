@@ -239,6 +239,11 @@ async fn public_action_references_cover_schema_registry() {
     }
 
     for (path, content) in [
+        ("docs/INVENTORY.md", include_str!("../../docs/INVENTORY.md")),
+        (
+            "docs/mcp/SCHEMA.md",
+            include_str!("../../docs/mcp/SCHEMA.md"),
+        ),
         ("docs/mcp/TOOLS.md", include_str!("../../docs/mcp/TOOLS.md")),
         ("docs/mcp/TESTS.md", include_str!("../../docs/mcp/TESTS.md")),
         (

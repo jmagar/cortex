@@ -66,7 +66,7 @@ One row per distinct secret. **Sensitivity tiers:**
 | 9 | **UniFi controller API key** | `X-API-KEY` header for read-only access to `/proxy/network/api/s/<site>/{stat/event,stat/alarm}`. Issued in the UniFi OS console UI. | `SYSLOG_MCP_POLLERS_UNIFI_API_KEY` | `~/.syslog-mcp/.env` line `SYSLOG_MCP_POLLERS_UNIFI_API_KEY=…` (loaded by `load_setup_env_file` if not already in process env; symlinks rejected) | `0600` on the env file | Epic C — API pollers (`docs/superpowers/specs/2026-05-16-api-pollers-design.md` §4) | `medium` | Revoke in UniFi OS admin → System → Application UI → Admins → API keys; issue replacement; update env; restart (or send `SIGHUP` once dynamic reload lands — currently restart-only). | Never logged. UniFi poller `Debug` impls redact the key. |
 | 10 | **AdGuard Home credentials** | HTTP Basic auth for `/control/querylog`. Token-based auth is not exposed by AdGuard. | `SYSLOG_MCP_POLLERS_ADGUARD_USERNAME` + `SYSLOG_MCP_POLLERS_ADGUARD_PASSWORD` (separate vars, not the `user:pass` form the original draft contemplated — verified against `api-pollers-design.md` §5 lines 243–244) | `~/.syslog-mcp/.env` | `0600` on the env file | Epic C — API pollers (§5) | `medium` | Change in AdGuard Home admin UI; update env; restart. AdGuard does not support overlapping credentials, so rotation is a hard cutover — operator should expect one missed poll cycle. | Username may be logged at debug; password never logged. |
 | 11 | **Apprise API token** | Optional `X-Apprise-Token` header on outbound POSTs to `apprise-api`'s `/notify/{config_key}` endpoint. Only needed when the operator's apprise-api is auth-protected. | `SYSLOG_MCP_APPRISE_TOKEN` | none — env-only | n/a | Epic E — digest + notifications (`docs/superpowers/specs/2026-05-16-digest-notifications-design.md` §3) | `low` | Rotate in the apprise-api admin; update env; restart. Loss only affects outbound notification delivery — no read access to logs. | Never logged. |
-| 12 | **LLM API key for `suggest_fix` / `ask_history`** | Authenticates LLM synthesis calls. See §3 — **NEW POLICY, PINNED HERE.** | See §3 — two modes | none | n/a | Epic F — RAG over incidents (`docs/superpowers/specs/2026-05-16-rag-incidents-design.md` §7.5) | `high` (the LLM call payload contains incident card text, which is itself derived from logs) | See §3 rotation steps. | Never logged. The wrapper around `axon ask` MUST redact the API key from any error message it surfaces back to the MCP caller. |
+| 12 | **Reserved LLM/RAG API key** | Reserved for the historical `suggest_fix` / semantic `ask_history` design. The current `ask_history` implementation is SQLite FTS5 only and does not call an LLM or Axon. | n/a | none | n/a | Historical Epic F design | n/a today | No rotation needed until an LLM-backed action lands. | n/a |
 
 ### Auxiliary identity values (not secrets, listed for completeness)
 
@@ -83,7 +83,14 @@ them. They are **not** redacted and **are** safe to log.
 
 ---
 
-## 3. Pinned policy: LLM API key for `suggest_fix` / `ask_history` (NEW)
+## 3. Historical policy: LLM API key for `suggest_fix` / semantic `ask_history`
+
+The current production `ask_history` action is deterministic SQLite FTS5 over
+AI transcript rows. It returns matching sessions and nearby non-AI log context;
+it does not call an LLM, Axon, or Qdrant.
+
+The policy below is retained as historical design context for a future
+LLM-backed action. It is not active runtime behavior today.
 
 The RAG spec (§7.5) confirmed `axon ask` does its own retrieval and synthesis;
 syslog-mcp does not invoke the model directly. **However, axon itself needs

@@ -456,11 +456,13 @@ fn docker_ingest_rejects_duplicate_host_names() {
                 name: "edge-host-a".into(),
                 base_url: "http://edge-host-a:2375".into(),
                 allow_insecure_http: true,
+                excluded_containers: Vec::new(),
             },
             DockerHostConfig {
                 name: "edge-host-a".into(),
                 base_url: "http://10.0.0.10:2375".into(),
                 allow_insecure_http: true,
+                excluded_containers: Vec::new(),
             },
         ],
         ..Default::default()
@@ -506,6 +508,31 @@ fn docker_ingest_loads_hosts_file_from_env() {
 
 #[test]
 #[serial]
+fn docker_ingest_loads_excluded_containers_from_env() {
+    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "true");
+    std::env::set_var("SYSLOG_DOCKER_HOSTS", "edge-host-a");
+    std::env::set_var(
+        "SYSLOG_DOCKER_EXCLUDED_CONTAINERS",
+        "arcane-mcp, axon-qdrant",
+    );
+
+    let result = Config::load();
+
+    std::env::remove_var("SYSLOG_MCP_HOST");
+    std::env::remove_var("SYSLOG_DOCKER_INGEST_ENABLED");
+    std::env::remove_var("SYSLOG_DOCKER_HOSTS");
+    std::env::remove_var("SYSLOG_DOCKER_EXCLUDED_CONTAINERS");
+
+    let config = result.expect("Config::load should parse excluded container list");
+    assert_eq!(
+        config.docker_ingest.excluded_containers,
+        vec!["arcane-mcp".to_string(), "axon-qdrant".to_string()]
+    );
+}
+
+#[test]
+#[serial]
 fn docker_ingest_ignores_hosts_file_when_disabled() {
     std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
     std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "false");
@@ -530,6 +557,7 @@ fn docker_ingest_rejects_insecure_http_without_explicit_opt_in() {
             name: "edge-host-a".into(),
             base_url: "http://edge-host-a:2375".into(),
             allow_insecure_http: false,
+            excluded_containers: Vec::new(),
         }],
         ..Default::default()
     };

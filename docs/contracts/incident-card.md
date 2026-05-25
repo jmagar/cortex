@@ -2,14 +2,20 @@
 
 **Epic:** `syslog-mcp-h6da` (RAG over Historical Incidents and AI Sessions)
 **Spec:** [`docs/superpowers/specs/2026-05-16-rag-incidents-design.md`](../superpowers/specs/2026-05-16-rag-incidents-design.md)
-**Status:** V1 (`schema_version: 1`)
+**Status:** Historical design contract; not active runtime behavior
 **Date:** 2026-05-16
 
 ---
 
 ## 1. Purpose
 
-This contract defines the exact textual format we embed into the Qdrant collection `syslog-mcp-incidents`. **Stable wording = stable embeddings = consistent retrieval.**
+This contract defines the exact textual format originally designed for embedding
+incident cards into the Qdrant collection `syslog-mcp-incidents`.
+
+Current production `similar_incidents` is SQLite FTS5-only. It does not embed
+incident cards, query Qdrant, or call Axon. Keep this document as design context
+for a future semantic RAG implementation; use `docs/mcp/CORRELATION.md` for
+current behavior.
 
 Two consumers must agree on this shape:
 
