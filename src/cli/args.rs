@@ -4,6 +4,7 @@ use syslog_mcp::compose::{ComposeTarget, MutationOptions};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliCommand {
     Search(SearchArgs),
+    Filter(FilterArgs),
     Tail(TailArgs),
     Errors(TimeRangeArgs),
     Hosts(OutputArgs),
@@ -292,6 +293,31 @@ pub(crate) struct SearchArgs {
     pub received_from: Option<String>,
     pub received_to: Option<String>,
     pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct FilterArgs {
+    pub hostname: Option<String>,
+    pub source_ip: Option<String>,
+    pub severity: Option<String>,
+    pub app_name: Option<String>,
+    pub facility: Option<String>,
+    pub exclude_facility: Option<String>,
+    pub process_id: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub received_from: Option<String>,
+    pub received_to: Option<String>,
+    pub limit: Option<u32>,
+    pub source_kind: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub session_id: Option<String>,
+    pub container: Option<String>,
+    pub docker_host: Option<String>,
+    pub stream: Option<String>,
+    pub event_action: Option<String>,
     pub json: bool,
 }
 

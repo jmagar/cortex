@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.6] - 2026-05-24
+
+### Added
+
+- Added first-class structured log filtering across CLI, REST, and MCP.
+  Use `syslog filter`, `GET /api/filter`, or MCP `action=filter` for
+  queryless correlation by host/source/app/time, Docker source aliases,
+  AI transcript fields, agent commands, and shell history.
+
 ## [0.32.5] - 2026-05-24
 
 ### Fixed

@@ -18,7 +18,7 @@
 #   PORT                   Override server port (default: 3100)
 #
 # Action inventory reference (not every action is exercised by this live test):
-#   syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions,
+#   syslog search, syslog filter, syslog tail, syslog errors, syslog hosts, syslog sessions,
 #   syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context,
 #   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,
@@ -607,6 +607,13 @@ phase_tools() {
   search_noq="$(call_tool syslog '{"action":"search","limit":5}')" || search_noq=""
   assert_jq "syslog search (no query) — count field present" "${search_noq}" '.count != null'
   assert_jq "syslog search (no query) — logs field is array" "${search_noq}" '.logs | type' "array"
+
+  # --- syslog filter ---
+  section "  syslog filter"
+  local filter_result
+  filter_result="$(call_tool syslog '{"action":"filter","limit":5}')" || filter_result=""
+  assert_jq "syslog filter — count field present" "${filter_result}" '.count != null'
+  assert_jq "syslog filter — logs field is array" "${filter_result}" '.logs | type' "array"
 
   # --- syslog errors ---
   section "  syslog errors"

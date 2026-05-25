@@ -1,14 +1,15 @@
 use lab_auth::AuthContext;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 use crate::app::{
     AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
-    CorrelateEventsRequest, GetErrorsRequest, GetLogRequest, IncidentContextRequest,
-    IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest,
-    ListSessionsRequest, ListSourceIpsRequest, PatternsRequest, ProjectContextRequest,
-    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, SimilarIncidentsRequest,
-    TailLogsRequest, TimelineRequest, UsageBlocksRequest,
+    CorrelateEventsRequest, FilterLogsRequest, GetErrorsRequest, GetLogRequest,
+    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, PatternsRequest,
+    ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
+    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
 use super::actions;
@@ -36,6 +37,7 @@ async fn tool_syslog(
         string_arg(&args, "action").ok_or_else(|| anyhow::anyhow!("action is required"))?;
     match action.as_str() {
         "search" => tool_search_logs(state, args).await,
+        "filter" => tool_filter_logs(state, args).await,
         "tail" => tool_tail_logs(state, args).await,
         "errors" => tool_get_errors(state, args).await,
         "hosts" => tool_list_hosts(state, args).await,
@@ -98,9 +100,24 @@ async fn tool_search_logs(state: &AppState, args: Value) -> anyhow::Result<Value
             received_from: string_arg(&args, "received_from"),
             received_to: string_arg(&args, "received_to"),
             limit: u32_arg(&args, "limit")?,
+            source_kind: string_arg(&args, "source_kind"),
+            tool: string_arg(&args, "tool"),
+            project: string_arg(&args, "project"),
+            session_id: string_arg(&args, "session_id"),
+            container: string_arg(&args, "container"),
+            docker_host: string_arg(&args, "docker_host"),
+            stream: string_arg(&args, "stream"),
+            event_action: string_arg(&args, "event_action"),
         })
         .await?;
     tracing::debug!(result_count = response.count, "search_logs completed");
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_filter_logs(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: FilterLogsRequest = action_payload(args)?;
+    let response = state.service.filter_logs(req).await?;
+    tracing::debug!(result_count = response.count, "filter_logs completed");
     Ok(serde_json::to_value(response)?)
 }
 
@@ -648,6 +665,16 @@ fn extract_actor(state: &AppState, auth: Option<&AuthContext>) -> String {
     }
 }
 
+fn action_payload<T: DeserializeOwned>(args: Value) -> anyhow::Result<T> {
+    let mut object = args
+        .as_object()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("tool arguments must be a JSON object"))?;
+    object.remove("action");
+    serde_json::from_value(Value::Object(object))
+        .map_err(|err| anyhow::anyhow!("invalid filter arguments: {err}"))
+}
+
 fn u32_arg(args: &Value, name: &str) -> anyhow::Result<Option<u32>> {
     let Some(value) = args.get(name) else {
         return Ok(None);
@@ -869,6 +896,26 @@ phrase matching with quotes, prefix matching with *.
 - `to` (string, optional) — end of time range (ISO 8601)
 - `received_from` (string, optional) — restrict to entries received after this time (server-side ingestion clock, ISO 8601)
 - `received_to` (string, optional) — restrict to entries received before this time (server-side ingestion clock, ISO 8601)
+- `limit` (integer, optional) — max results (default 100, max 1000)
+
+---
+
+## syslog filter
+Filter log rows by structured fields only. This action never accepts `query`;
+use `search` for message-body FTS5 queries.
+
+**Parameters:**
+- `hostname` (string, optional) — filter by hostname (exact match)
+- `source_ip` (string, optional) — filter by exact source identifier
+- `severity` (string, optional) — one of: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`
+- `app_name` (string, optional) — filter by application/container name
+- `facility` / `exclude_facility` (string, optional) — include or exclude syslog facility
+- `process_id` (string, optional) — filter by process_id
+- `from` / `to` (string, optional) — event timestamp window
+- `received_from` / `received_to` (string, optional) — ingest timestamp window
+- `source_kind` (string, optional) — `docker-stream`, `docker-event`, `agent-command`, `shell-history`, `transcript`, `claude`, `codex`, or `gemini`
+- `tool`, `project`, `session_id` (string, optional) — AI transcript filters
+- `docker_host`, `container`, `stream`, `event_action` (string, optional) — Docker refiners
 - `limit` (integer, optional) — max results (default 100, max 1000)
 
 ---

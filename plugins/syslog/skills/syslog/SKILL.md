@@ -14,6 +14,7 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | action | purpose |
 |--------|---------|
 | `search` | Full-text search with FTS5 |
+| `filter` | Structured filter-only log retrieval |
 | `tail` | Most recent entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | List all known hosts with first/last seen |

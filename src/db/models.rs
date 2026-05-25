@@ -376,6 +376,8 @@ pub struct SearchParams {
     /// (IP:port); OTLP uses peer IP; Docker ingest uses
     /// docker://host/container/stream or docker-event://host/container/action.
     pub source_ip: Option<String>,
+    /// Filter by source identifier prefix using an indexed range predicate.
+    pub source_ip_prefix: Option<String>,
     /// Filter by severity (exact match: emerg, alert, crit, err, warning, notice, info, debug)
     pub severity: Option<String>,
     /// Filter by one of a set of severity levels (for threshold queries)
@@ -401,6 +403,7 @@ pub struct SearchParams {
     pub ai_tool: Option<String>,
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
+    pub event_action: Option<String>,
     pub exclude_ai: bool,
 }
 

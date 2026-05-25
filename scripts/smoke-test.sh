@@ -10,7 +10,7 @@
 # Requirements: mcporter, nc, curl, python3
 #
 # Action inventory reference:
-#   mcp_call search, mcp_call tail, mcp_call errors, mcp_call hosts,
+#   mcp_call search, mcp_call filter, mcp_call tail, mcp_call errors, mcp_call hosts,
 #   mcp_call sessions, mcp_call search_sessions, mcp_call abuse, mcp_call ai_correlate,
 #   mcp_call usage_blocks, mcp_call project_context, mcp_call list_ai_tools, mcp_call list_ai_projects,
 #   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
@@ -691,6 +691,21 @@ SEARCH_ZERO=$(mcp_call search "limit=0" 2>&1)
 assert_no_error "search(limit=0): no error" "$SEARCH_ZERO"
 ZERO_COUNT=$(printf '%s\n' "$SEARCH_ZERO" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "-1")
 assert_eq "search(limit=0): returns 0 results" "$ZERO_COUNT" "0"
+
+# ── filter ───────────────────────────────────────────────────────────────────
+echo ""
+echo "Action: filter"
+FILTER_HOST=$(mcp_call filter "hostname=${SEED_HOST}" "limit=50" 2>&1)
+assert_no_error "filter(hostname): no error" "$FILTER_HOST"
+FILTER_HOST_VALID=$(printf '%s\n' "$FILTER_HOST" | python3 -c "
+import sys, json
+logs = json.load(sys.stdin)['logs']
+assert logs, 'filter returned no logs for seeded host'
+wrong = [l['hostname'] for l in logs if l['hostname'] != '${SEED_HOST}']
+assert not wrong, f'filter leaked other hosts: {wrong}'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "filter(hostname): only returns logs for '$SEED_HOST'" "$FILTER_HOST_VALID" "ok"
 
 # ── errors ────────────────────────────────────────────────────────────────────
 echo ""
