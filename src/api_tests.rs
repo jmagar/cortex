@@ -260,6 +260,60 @@ async fn search_route_returns_plain_api_json() {
 }
 
 #[tokio::test]
+async fn filter_route_rejects_query_param() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+
+    let (status, _value) = get_json(app, "/api/filter?query=needle", Some("secret")).await;
+
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn filter_route_transcript_source_kind_excludes_agent_commands() {
+    let (state, pool, _dir) = test_state(Some("secret".into()));
+    let mut transcript = entry(
+        "2026-01-01T00:00:00Z",
+        "host-a",
+        "info",
+        "api transcript row",
+        "transcript://codex",
+    );
+    transcript.app_name = Some("codex-transcript".into());
+    transcript.facility = Some("transcript".into());
+    transcript.ai_tool = Some("codex".into());
+    transcript.ai_project = Some("/tmp/project".into());
+    transcript.ai_session_id = Some("sess-1".into());
+    transcript.ai_transcript_path = Some("/tmp/project/sess-1.jsonl".into());
+
+    let mut agent_command = entry(
+        "2026-01-01T00:00:01Z",
+        "host-a",
+        "info",
+        "api agent command row",
+        "agent-command://host-a/codex/sess-1",
+    );
+    agent_command.ai_tool = Some("codex".into());
+    agent_command.ai_project = Some("/tmp/project".into());
+    agent_command.ai_session_id = Some("sess-1".into());
+
+    db::insert_logs_batch(&pool, &[transcript, agent_command]).unwrap();
+
+    let app = router(state).unwrap();
+    let (status, value) = get_json(
+        app,
+        "/api/filter?source_kind=transcript&tool=codex&project=%2Ftmp%2Fproject&session_id=sess-1",
+        Some("secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK, "{value}");
+    assert_eq!(value["count"], 1);
+    assert_eq!(value["logs"][0]["message"], "api transcript row");
+    assert_eq!(value["logs"][0]["source_ip"], "transcript://codex");
+}
+
+#[tokio::test]
 async fn tail_route_returns_plain_api_json() {
     let (state, pool, _dir) = test_state(Some("secret".into()));
     db::insert_logs_batch(
