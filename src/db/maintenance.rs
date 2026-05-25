@@ -139,6 +139,7 @@ pub fn enforce_storage_budget_with_probe(
 ) -> Result<StorageEnforcementOutcome> {
     let recovery = recovery_targets(config);
     let mut deleted_rows = 0usize;
+    let mut deleted_log_rows = 0usize;
     let mut all_hosts: std::collections::HashSet<String> = Default::default();
 
     let mut metrics = get_storage_metrics_with_probe(pool, config, probe)?;
@@ -170,8 +171,21 @@ pub fn enforce_storage_budget_with_probe(
                 physical_db_size_bytes = metrics.physical_db_size_bytes,
                 free_disk_bytes = ?metrics.free_disk_bytes,
                 deleted_rows,
-                "Storage budget exceeded trigger — deleting oldest logs chunk"
+                "Storage budget exceeded trigger — deleting oldest telemetry chunk"
             );
+            let deleted_heartbeats =
+                delete_oldest_heartbeats_chunk(pool, config.cleanup_chunk_size)?;
+            if deleted_heartbeats > 0 {
+                deleted_rows += deleted_heartbeats;
+                tracing::info!(
+                    deleted_rows = deleted_heartbeats,
+                    total_deleted_rows = deleted_rows,
+                    "Deleted oldest heartbeat chunk for storage recovery"
+                );
+                metrics = get_storage_metrics_with_probe(pool, config, probe)?;
+                continue;
+            }
+
             let deleted = delete_oldest_logs_chunk(pool, config.cleanup_chunk_size)?;
             if deleted.deleted_rows == 0 {
                 metrics = get_storage_metrics_with_probe(pool, config, probe)?;
@@ -192,6 +206,7 @@ pub fn enforce_storage_budget_with_probe(
             }
 
             deleted_rows += deleted.deleted_rows;
+            deleted_log_rows += deleted.deleted_rows;
             tracing::info!(
                 deleted_rows = deleted.deleted_rows,
                 total_deleted_rows = deleted_rows,
@@ -215,7 +230,9 @@ pub fn enforce_storage_budget_with_probe(
         // avoid pool exhaustion when pool_size = 1.
         // Hardcoded M=0 here — storage enforcement is rare, force unconditional
         // merge. Tunable M only matters for the regular retention path.
-        fts_incremental_merge(pool, deleted_rows, 0);
+        if deleted_log_rows > 0 {
+            fts_incremental_merge(pool, deleted_log_rows, 0);
+        }
 
         checkpoint_wal_and_incremental_vacuum(pool)?;
     }
@@ -399,6 +416,44 @@ pub fn purge_old_logs(pool: &DbPool, retention_days: u32, fts_merge_pages: u32) 
     Ok(total_deleted)
 }
 
+/// Purge heartbeat telemetry older than N days.
+///
+/// This is intentionally independent from log retention: heartbeat samples are
+/// high-volume operational telemetry and have their own shorter retention
+/// window. Child metric rows are deleted explicitly because v1 does not depend
+/// on connection-level `PRAGMA foreign_keys`.
+pub fn purge_old_heartbeats(
+    pool: &DbPool,
+    retention_days: u32,
+    chunk_size: usize,
+) -> Result<usize> {
+    if retention_days == 0 {
+        return Ok(0);
+    }
+
+    let cutoff = Utc::now()
+        .checked_sub_signed(chrono::TimeDelta::days(retention_days as i64))
+        .ok_or_else(|| {
+            anyhow::anyhow!("date arithmetic overflow for retention_days={retention_days}")
+        })?
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+
+    let mut total_deleted = 0usize;
+    let chunk_size = chunk_size.max(1);
+    loop {
+        let chunk = delete_heartbeat_chunk_before(pool, &cutoff, chunk_size)?;
+        total_deleted += chunk;
+        if chunk == 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    tracing::info!(deleted = total_deleted, cutoff = %cutoff, "Purged old heartbeats");
+    Ok(total_deleted)
+}
+
 /// Delete rows for a single `app_name` older than `max_days`.
 ///
 /// Same chunked-DELETE pattern as [`purge_old_logs`] (10 000 rows per
@@ -463,6 +518,96 @@ pub fn purge_by_tag_window(
         "Purged tag window"
     );
     Ok(total_deleted)
+}
+
+const HEARTBEAT_CHILD_TABLES: &[&str] = &[
+    "heartbeat_cpu",
+    "heartbeat_memory",
+    "heartbeat_disks",
+    "heartbeat_network",
+    "heartbeat_processes",
+    "heartbeat_containers",
+];
+
+fn delete_oldest_heartbeats_chunk(pool: &DbPool, chunk_size: usize) -> Result<usize> {
+    let conn = pool.get()?;
+    let chunk_limit = chunk_size as i64;
+    delete_heartbeat_chunk(&conn, None, chunk_limit)
+}
+
+fn delete_heartbeat_chunk_before(pool: &DbPool, cutoff: &str, chunk_size: usize) -> Result<usize> {
+    let conn = pool.get()?;
+    let chunk_limit = chunk_size as i64;
+    delete_heartbeat_chunk(&conn, Some(cutoff), chunk_limit)
+}
+
+fn delete_heartbeat_chunk(
+    conn: &rusqlite::Connection,
+    cutoff: Option<&str>,
+    chunk_limit: i64,
+) -> Result<usize> {
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = (|| -> rusqlite::Result<usize> {
+        conn.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS heartbeat_delete_ids (
+                 id INTEGER PRIMARY KEY
+             );
+             DELETE FROM heartbeat_delete_ids;",
+        )?;
+
+        let selected = if let Some(cutoff) = cutoff {
+            conn.execute(
+                "INSERT INTO heartbeat_delete_ids(id)
+                 SELECT id FROM host_heartbeats
+                 WHERE received_at < ?1
+                 ORDER BY received_at ASC, id ASC
+                 LIMIT ?2",
+                params![cutoff, chunk_limit],
+            )?
+        } else {
+            conn.execute(
+                "INSERT INTO heartbeat_delete_ids(id)
+                 SELECT id FROM host_heartbeats
+                 ORDER BY received_at ASC, id ASC
+                 LIMIT ?1",
+                [chunk_limit],
+            )?
+        };
+
+        if selected == 0 {
+            conn.execute_batch("DELETE FROM heartbeat_delete_ids;")?;
+            return Ok(0);
+        }
+
+        for table in HEARTBEAT_CHILD_TABLES {
+            conn.execute(
+                &format!(
+                    "DELETE FROM {table}
+                     WHERE heartbeat_id IN (SELECT id FROM heartbeat_delete_ids)"
+                ),
+                [],
+            )?;
+        }
+
+        let deleted = conn.execute(
+            "DELETE FROM host_heartbeats
+             WHERE id IN (SELECT id FROM heartbeat_delete_ids)",
+            [],
+        )?;
+        conn.execute_batch("DELETE FROM heartbeat_delete_ids;")?;
+        Ok(deleted)
+    })();
+
+    match result {
+        Ok(deleted) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(deleted)
+        }
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error.into())
+        }
+    }
 }
 
 #[derive(Debug)]

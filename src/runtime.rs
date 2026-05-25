@@ -126,6 +126,7 @@ pub(crate) fn background_interval(period: tokio::time::Duration) -> tokio::time:
 /// the FTS5 index at homelab volumes (50k+ DNS queries/day).
 const ADGUARD_RETENTION_TAGS: &[&str] = &["adguard-allowed", "adguard-query", "adguard-rewrite"];
 const ADGUARD_RETENTION_DAYS: u32 = 7;
+const HEARTBEAT_RETENTION_DAYS: u32 = 14;
 
 impl RuntimeCore {
     pub async fn load() -> Result<Self> {
@@ -381,12 +382,13 @@ impl RuntimeCore {
 
     fn spawn_retention_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let retention_days = self.config.storage.retention_days;
-        if retention_days == 0 {
+        if retention_days == 0 && HEARTBEAT_RETENTION_DAYS == 0 {
             return None;
         }
         let purge_pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
         let fts_merge_pages = self.config.enrichment.fts_merge_pages;
+        let cleanup_chunk_size = self.config.storage.cleanup_chunk_size;
         let handle = tokio::spawn(async move {
             let mut interval = background_interval(tokio::time::Duration::from_secs(3600));
             loop {
@@ -431,19 +433,29 @@ impl RuntimeCore {
                             ),
                         }
                     }
+                    let heartbeat_deleted = db::purge_old_heartbeats(
+                        &pool,
+                        HEARTBEAT_RETENTION_DAYS,
+                        cleanup_chunk_size,
+                    )?;
                     let global_deleted =
                         db::purge_old_logs(&pool, retention_days, fts_merge_pages)?;
-                    Ok::<(usize, usize), anyhow::Error>((tag_deleted, global_deleted))
+                    Ok::<(usize, usize, usize), anyhow::Error>((
+                        tag_deleted,
+                        heartbeat_deleted,
+                        global_deleted,
+                    ))
                 })
                 .await
                 .map_err(|e| anyhow::anyhow!("spawn_blocking error: {e}"))
                 .and_then(|r| r)
                 {
-                    Ok((tag_deleted, global_deleted)) => tracing::info!(
+                    Ok((tag_deleted, heartbeat_deleted, global_deleted)) => tracing::info!(
                         retention_days,
                         tag_deleted,
+                        heartbeat_deleted,
                         global_deleted,
-                        total_deleted = tag_deleted + global_deleted,
+                        total_deleted = tag_deleted + heartbeat_deleted + global_deleted,
                         elapsed_ms = started.elapsed().as_millis(),
                         "Retention purge tick completed"
                     ),
@@ -451,7 +463,7 @@ impl RuntimeCore {
                         error = %e,
                         retention_days,
                         elapsed_ms = started.elapsed().as_millis(),
-                        "Failed to purge old logs"
+                        "Failed to purge telemetry retention"
                     ),
                 }
             }

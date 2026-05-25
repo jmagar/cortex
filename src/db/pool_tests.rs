@@ -61,6 +61,89 @@ fn test_init_pool_applies_busy_timeout_to_each_pooled_connection() {
 }
 
 #[test]
+fn init_db_creates_heartbeat_schema_migration_15() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("heartbeat.db");
+    let config = test_storage_config(db_path);
+
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+
+    let applied: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 15",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(applied, 1);
+
+    for table in [
+        "host_heartbeats",
+        "heartbeat_cpu",
+        "heartbeat_memory",
+        "heartbeat_disks",
+        "heartbeat_network",
+        "heartbeat_processes",
+        "heartbeat_containers",
+    ] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1, "missing heartbeat table {table}");
+    }
+
+    for index in [
+        "idx_host_heartbeats_host_sampled",
+        "idx_host_heartbeats_received",
+        "idx_host_heartbeats_hostname_sampled",
+        "idx_heartbeat_cpu_heartbeat_id",
+        "idx_heartbeat_memory_heartbeat_id",
+        "idx_heartbeat_disks_heartbeat_id",
+        "idx_heartbeat_network_heartbeat_id",
+        "idx_heartbeat_processes_heartbeat_id",
+        "idx_heartbeat_containers_heartbeat_id",
+    ] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                [index],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1, "missing heartbeat index {index}");
+    }
+}
+
+#[test]
+fn heartbeat_schema_enforces_idempotency_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("heartbeat-unique.db");
+    let config = test_storage_config(db_path);
+
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+
+    let insert = "INSERT INTO host_heartbeats (
+        host_id, hostname, source_ip, sampled_at, received_at, boot_id,
+        uptime_secs, sequence, collection_ms, partial, agent_version, os, architecture
+    ) VALUES (
+        'host-1', 'box-a', '127.0.0.1:3100', '2026-05-25T00:00:00Z',
+        '2026-05-25T00:00:01Z', 'boot-a', 60, 1, 12, 0, '0.1.0', 'linux', 'x86_64'
+    )";
+    conn.execute(insert, []).unwrap();
+    let duplicate = conn.execute(insert, []);
+    assert!(
+        duplicate.is_err(),
+        "duplicate heartbeat key must be rejected"
+    );
+}
+
+#[test]
 fn init_db_adds_ai_session_metadata_columns() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
