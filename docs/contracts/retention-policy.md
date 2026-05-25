@@ -11,6 +11,11 @@
 > RAG §11) and the prior `CLAUDE.md` "Retention" section. Changing any
 > retention number requires updating this contract and the cited code path.
 
+**Current implementation note:** The active retention code covers `logs`,
+`logs_fts`, AdGuard tag-window purges, and existing operational tables. The
+Epic F incident/Qdrant rows below remain historical design targets until the
+semantic incident pipeline lands.
+
 ---
 
 ## 1. Scope

@@ -59,3 +59,4 @@ If MCP UI annotations are adopted:
 
 - [TOOLS.md](TOOLS.md) -- tool reference with current schemas
 - [SCHEMA.md](SCHEMA.md) -- schema documentation
+- [CORRELATION.md](CORRELATION.md) -- correlation action behavior

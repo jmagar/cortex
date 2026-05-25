@@ -6,9 +6,15 @@ Elicitation is an MCP protocol capability that allows servers to request informa
 
 ## Why no elicitation
 
-syslog-mcp is a self-contained syslog receiver with no external API dependencies. There are no upstream credentials to collect at first-run. All configuration is handled via environment variables and `config.toml`.
+syslog-mcp is a self-contained syslog receiver with no interactive first-run prompts. There are no upstream credentials to collect via MCP elicitation. All configuration is handled via environment variables, `config.toml`, and plugin `userConfig`.
 
-Additionally, all MCP actions exposed by `SYSLOG_ACTIONS` are read-only. There are no destructive operations that would benefit from confirmation gates via elicitation.
+Most MCP actions are read-only and require `syslog:read` when auth is mounted. A small set of state-changing/admin actions exists:
+
+- `ack_error`
+- `unack_error`
+- `notifications_test`
+
+Those actions require `syslog:admin`; they do not use elicitation confirmation gates. The action registry and scope mapping live in `src/mcp/actions.rs::ACTION_SPECS`.
 
 ## Configuration entry points
 

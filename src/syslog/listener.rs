@@ -142,6 +142,9 @@ pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) 
 
                 match update_backpressure(&mut backpressure, ingest.capacity() == 0) {
                     Some(BackpressureTransition::Applied) => {
+                        ingest
+                            .observability()
+                            .record_write_channel_full_transition();
                         warn!(
                             src = %addr,
                             queue_depth = ingest.queue_depth(),
@@ -169,6 +172,9 @@ pub(super) async fn udp_listener(bind: &str, max_size: usize, ingest: IngestTx) 
                         // try_send is used (not .await) so the UDP recv loop is never
                         // blocked — kernel buffer absorbs bursts, explicit drop counter
                         // is tracked via observability.record_enqueue_error.
+                        ingest
+                            .observability()
+                            .record_udp_packet_dropped_queue_full(ingest.queue_depth());
                     }
                     Err(crate::ingest::TrySendErr::Closed) => {
                         error!("Write channel closed");
@@ -231,6 +237,7 @@ pub(super) async fn handle_tcp_connection(
 
                 match update_backpressure(&mut backpressure, ingest.capacity() == 0) {
                     Some(BackpressureTransition::Applied) => {
+                        observability.record_write_channel_full_transition();
                         warn!(
                             peer = %addr,
                             queue_depth = ingest.queue_depth(),
@@ -271,6 +278,7 @@ pub(super) async fn handle_tcp_connection(
                 match ingest.try_send(entry) {
                     Ok(()) => {}
                     Err(crate::ingest::TrySendErr::Full) => {
+                        observability.record_tcp_line_dropped_queue_full(ingest.queue_depth());
                         // Unlike UDP, TCP is reliable — the sender had no indication
                         // this line was dropped. Emit an explicit warn per TCP drop so
                         // the loss is observable; the batch backpressure log above marks

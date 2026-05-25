@@ -43,7 +43,7 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `anomalies` | Recent vs baseline volume/error comparison |
 | `compare` | Compare two time ranges |
 | `compose_status` | Redacted read-only Compose deployment diagnostics |
-| `compose_doctor` | Alias for Compose deployment health diagnostics |
+| `compose_doctor` | Strict Compose deployment health diagnostics |
 | `unaddressed_errors` | List unacknowledged repeating error signatures |
 | `ack_error` | Acknowledge an error signature |
 | `unack_error` | Revoke an existing acknowledgement |
@@ -68,7 +68,7 @@ For parameter-level details and response shapes, use the live action reference:
 mcp__syslog__syslog(action="help")
 ```
 
-When working from the repository instead of a live server, use `docs/mcp/TOOLS.md` and `docs/mcp/SCHEMA.md` as the canonical references. Keep this skill focused on when to use the tool, safe invocation patterns, and common workflows rather than duplicating every action schema.
+When working from the repository instead of a live server, use `docs/mcp/TOOLS.md`, `docs/mcp/SCHEMA.md`, and `docs/mcp/CORRELATION.md` as the canonical references. Keep this skill focused on when to use the tool, safe invocation patterns, and common workflows rather than duplicating every action schema.
 
 FTS5 reminders for `search` and other query-bearing actions:
 - `AND`, `OR`, `NOT` are uppercase boolean operators.

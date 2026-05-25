@@ -61,15 +61,15 @@ syslog-mcp/
    git commit -m "feat(tools): add search filter by facility"
    ```
 
-## Adding a new MCP tool
+## Adding a new MCP action
 
-1. **Define the action schema** -- add the action to `SYSLOG_ACTIONS` and update any action-specific properties in `src/mcp/schemas.rs`.
+1. **Register the action** -- add an `ActionSpec` row to `src/mcp/actions.rs::ACTION_SPECS`. The schema enum and scope checks are derived from this table.
 2. **Add adapter entry** -- add a match arm in `tool_syslog()`.
 3. **Implement handler** -- write an async function that calls `SyslogService`.
 4. **Add database query** -- implement the query function in `src/db.rs` with parameterized SQL.
 5. **Add sidecar unit tests** -- place tests in the relevant `src/<module>_tests.rs` file and keep the source module limited to the `#[cfg(test)] #[path = "..._tests.rs"] mod tests;` hook.
 6. **Update syslog help** -- add the action to the help text in `tool_syslog_help()`.
-7. **Update SKILL.md** -- add the action to the skill documentation.
+7. **Update public docs** -- refresh `docs/mcp/TOOLS.md`, `docs/mcp/SCHEMA.md`, `docs/mcp/TESTS.md`, and relevant skill docs.
 8. **Update plugin manifests** -- keep the public tool name as `syslog`.
 
 ## Debugging

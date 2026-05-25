@@ -11,7 +11,8 @@ Index for the `mcp/` documentation subdirectory. These docs cover the MCP server
 | `CONNECT.md` | Client connection methods: plugin install, Claude Code, Codex, Gemini, curl |
 | `DEPLOY.md` | Deployment: local dev, Docker, Docker Compose, port assignment |
 | `DEV.md` | Development workflow: build cycle, adding tools, debugging, code style |
-| `ELICITATION.md` | MCP elicitation: syslog-mcp does not use elicitation (read-only tools) |
+| `CORRELATION.md` | Correlation behavior: time-window, AI anchor, historical incident, and context actions |
+| `ELICITATION.md` | MCP elicitation: syslog-mcp does not use elicitation; admin writes use scope gates |
 | `ENV.md` | Environment variable reference (concise cross-ref to CONFIG.md) |
 | `LOGS.md` | Logging: RUST_LOG, tracing, structured output, error handling |
 | `MCPORTER.md` | Live smoke testing with mcporter |
@@ -22,6 +23,6 @@ Index for the `mcp/` documentation subdirectory. These docs cover the MCP server
 | `RESOURCES.md` | MCP resources: schema resource and URI conventions |
 | `SCHEMA.md` | Tool schema documentation: JSON Schema definitions in Rust |
 | `TESTS.md` | Testing: cargo test, live smoke tests, test coverage |
-| `TOOLS.md` | MCP tools reference: one `syslog` tool with action shapes from `SYSLOG_ACTIONS` |
+| `TOOLS.md` | MCP tools reference: one `syslog` tool with action shapes from `ACTION_SPECS` |
 | `TRANSPORT.md` | RMCP Streamable HTTP transport, stateless mode, port assignment |
 | `WEBMCP.md` | Web MCP: CORS configuration, browser access restrictions |

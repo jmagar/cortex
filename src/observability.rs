@@ -15,6 +15,9 @@ pub struct RuntimeObservability {
     syslog_tcp_lines_received: AtomicU64,
     syslog_tcp_bytes_received: AtomicU64,
     syslog_tcp_lines_dropped_oversize: AtomicU64,
+    syslog_write_channel_full_transitions: AtomicU64,
+    syslog_udp_packets_dropped_queue_full: AtomicU64,
+    syslog_tcp_lines_dropped_queue_full: AtomicU64,
     docker_ingest_events_received: AtomicU64,
     docker_ingest_log_entries_received: AtomicU64,
     docker_ingest_parse_errors: AtomicU64,
@@ -52,6 +55,9 @@ pub struct RuntimeObservabilitySnapshot {
     pub syslog_tcp_lines_received: u64,
     pub syslog_tcp_bytes_received: u64,
     pub syslog_tcp_lines_dropped_oversize: u64,
+    pub syslog_write_channel_full_transitions: u64,
+    pub syslog_udp_packets_dropped_queue_full: u64,
+    pub syslog_tcp_lines_dropped_queue_full: u64,
     pub docker_ingest_events_received: u64,
     pub docker_ingest_log_entries_received: u64,
     pub docker_ingest_parse_errors: u64,
@@ -131,6 +137,26 @@ impl RuntimeObservability {
     pub fn record_tcp_line_dropped_oversize(&self) {
         self.syslog_tcp_lines_dropped_oversize
             .fetch_add(1, Ordering::Relaxed);
+        self.touch_error();
+    }
+
+    pub fn record_write_channel_full_transition(&self) {
+        self.syslog_write_channel_full_transitions
+            .fetch_add(1, Ordering::Relaxed);
+        self.touch_error();
+    }
+
+    pub fn record_udp_packet_dropped_queue_full(&self, queue_depth: usize) {
+        self.syslog_udp_packets_dropped_queue_full
+            .fetch_add(1, Ordering::Relaxed);
+        self.set_queue_depth(queue_depth);
+        self.touch_error();
+    }
+
+    pub fn record_tcp_line_dropped_queue_full(&self, queue_depth: usize) {
+        self.syslog_tcp_lines_dropped_queue_full
+            .fetch_add(1, Ordering::Relaxed);
+        self.set_queue_depth(queue_depth);
         self.touch_error();
     }
 
@@ -266,6 +292,15 @@ impl RuntimeObservability {
             syslog_tcp_bytes_received: self.syslog_tcp_bytes_received.load(Ordering::Relaxed),
             syslog_tcp_lines_dropped_oversize: self
                 .syslog_tcp_lines_dropped_oversize
+                .load(Ordering::Relaxed),
+            syslog_write_channel_full_transitions: self
+                .syslog_write_channel_full_transitions
+                .load(Ordering::Relaxed),
+            syslog_udp_packets_dropped_queue_full: self
+                .syslog_udp_packets_dropped_queue_full
+                .load(Ordering::Relaxed),
+            syslog_tcp_lines_dropped_queue_full: self
+                .syslog_tcp_lines_dropped_queue_full
                 .load(Ordering::Relaxed),
             docker_ingest_events_received: self
                 .docker_ingest_events_received
@@ -422,5 +457,21 @@ mod tests {
         let snapshot = obs.snapshot();
         assert_eq!(snapshot.docker_ingest_host_streams_active, 0);
         assert_eq!(snapshot.docker_ingest_container_streams_active, 0);
+    }
+
+    #[test]
+    fn snapshot_reports_queue_pressure_counters() {
+        let obs = RuntimeObservability::default();
+        obs.record_write_channel_full_transition();
+        obs.record_udp_packet_dropped_queue_full(10);
+        obs.record_tcp_line_dropped_queue_full(20);
+
+        let snapshot = obs.snapshot();
+
+        assert_eq!(snapshot.syslog_write_channel_full_transitions, 1);
+        assert_eq!(snapshot.syslog_udp_packets_dropped_queue_full, 1);
+        assert_eq!(snapshot.syslog_tcp_lines_dropped_queue_full, 1);
+        assert_eq!(snapshot.ingest_queue_depth, 20);
+        assert!(snapshot.last_error_at.is_some());
     }
 }

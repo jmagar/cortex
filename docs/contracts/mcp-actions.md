@@ -1,5 +1,10 @@
 # MCP Actions Contract — Superpowers Epics D / E / F
 
+**Status:** Historical epic design contract. The current production MCP surface
+is `docs/contracts/mcp-actions-current.md`, with runtime source of truth in
+`src/mcp/actions.rs::ACTION_SPECS`. Several RAG/Qdrant/LLM sections below were
+design targets and are not active behavior today.
+
 This file is a contract derived from:
 
 - `docs/superpowers/specs/2026-05-16-probe-registry-design.md` (epic D — `syslog-mcp-fue9`)
