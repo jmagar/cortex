@@ -1,6 +1,7 @@
 use super::*;
 
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 #[tokio::test]
 async fn fake_collector_emits_valid_v1_payload_defaults() {
@@ -105,6 +106,94 @@ fn backoff_is_bounded() {
     assert_eq!(backoff_duration(0), Duration::from_millis(250));
     assert_eq!(backoff_duration(4), Duration::from_millis(4_000));
     assert_eq!(backoff_duration(20), Duration::from_millis(4_000));
+}
+
+#[test]
+fn linux_meminfo_parser_returns_bounded_memory_snapshot() {
+    let memory = parse_meminfo(
+        "MemTotal:        1000 kB\nMemAvailable:     400 kB\nSwapTotal:        200 kB\nSwapFree:          50 kB\n",
+    )
+    .unwrap();
+
+    assert_eq!(memory.mem_total_bytes, 1_024_000);
+    assert_eq!(memory.mem_available_bytes, 409_600);
+    assert_eq!(memory.mem_used_bytes, Some(614_400));
+    assert_eq!(memory.swap_total_bytes, 204_800);
+    assert_eq!(memory.swap_used_bytes, 153_600);
+}
+
+#[test]
+fn linux_proc_parsers_extract_cpu_network_disk_and_process_state() {
+    assert_eq!(
+        parse_loadavg("0.10 0.20 0.30 1/100 123").unwrap(),
+        (0.10, 0.20, 0.30)
+    );
+    assert_eq!(
+        parse_diskstats_device("   8       0 sda 1 0 8 0 2 0 16 0 0 0 0 0 0 0 0\n", "sda"),
+        Some((4096, 8192))
+    );
+    assert_eq!(
+        parse_proc_stat_state("123 (syslog agent) S 1 2 3"),
+        Some('S')
+    );
+
+    let network = parse_network_interface(
+        "Inter-|   Receive                                                |  Transmit\n face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n  eth0: 1000 1 2 0 0 0 0 0 2000 1 3 0 0 0 0 0\n",
+        "eth0",
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(network.rx_bytes, 1000);
+    assert_eq!(network.tx_bytes, 2000);
+    assert_eq!(network.rx_errors, 2);
+    assert_eq!(network.tx_errors, 3);
+}
+
+#[test]
+fn linux_rate_helpers_return_none_on_first_sample_and_rates_afterwards() {
+    let previous = Mutex::new(None);
+    let now = Instant::now();
+    assert_eq!(rate_pair(&previous, now, 100, 200).unwrap(), (None, None));
+    let (read, write) = rate_pair(&previous, now + Duration::from_secs(2), 300, 260).unwrap();
+    assert_eq!(read, Some(100.0));
+    assert_eq!(write, Some(30.0));
+
+    let previous_network = Mutex::new(None);
+    let current = NetworkCounters {
+        rx_bytes: 100,
+        tx_bytes: 200,
+        rx_errors: 1,
+        tx_errors: 2,
+    };
+    assert_eq!(
+        network_rates(&previous_network, now, current).unwrap(),
+        NetworkRates {
+            rx_bytes_per_sec: None,
+            tx_bytes_per_sec: None,
+            rx_errors_per_sec: None,
+            tx_errors_per_sec: None,
+        }
+    );
+    let rates = network_rates(
+        &previous_network,
+        now + Duration::from_secs(4),
+        NetworkCounters {
+            rx_bytes: 500,
+            tx_bytes: 1000,
+            rx_errors: 5,
+            tx_errors: 10,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        rates,
+        NetworkRates {
+            rx_bytes_per_sec: Some(100.0),
+            tx_bytes_per_sec: Some(200.0),
+            rx_errors_per_sec: Some(1.0),
+            tx_errors_per_sec: Some(2.0),
+        }
+    );
 }
 
 #[test]

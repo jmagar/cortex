@@ -1,7 +1,13 @@
 use std::collections::VecDeque;
+use std::ffi::CString;
+use std::fs;
 use std::future::Future;
+use std::io::{BufRead, BufReader};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -199,6 +205,36 @@ impl HeartbeatCollector {
                 Box::new(FakeProbe::processes()),
                 Box::new(FakeProbe::containers()),
             ],
+            started: Instant::now(),
+        }
+    }
+
+    pub fn linux() -> Self {
+        let mut probes: Vec<Box<dyn HeartbeatProbe>> = vec![
+            Box::new(LinuxCpuProbe),
+            Box::new(LinuxMemoryProbe),
+            Box::new(LinuxProcessProbe),
+            Box::new(LinuxContainerProbe),
+        ];
+
+        for mount in discover_mounts().into_iter().take(8) {
+            probes.push(Box::new(LinuxDiskCapacityProbe { mount }));
+        }
+        for device in discover_disk_devices().into_iter().take(8) {
+            probes.push(Box::new(LinuxDiskIoProbe {
+                device,
+                previous: Mutex::new(None),
+            }));
+        }
+        for interface in discover_network_interfaces().into_iter().take(16) {
+            probes.push(Box::new(LinuxNetworkProbe {
+                interface,
+                previous: Mutex::new(None),
+            }));
+        }
+
+        Self {
+            probes,
             started: Instant::now(),
         }
     }
@@ -435,6 +471,593 @@ impl HeartbeatProbe for FakeProbe {
     }
 }
 
+#[derive(Debug, Clone)]
+struct MountProbeTarget {
+    path: PathBuf,
+    fs_type: Option<String>,
+}
+
+struct LinuxCpuProbe;
+
+impl HeartbeatProbe for LinuxCpuProbe {
+    fn name(&self) -> &'static str {
+        "cpu"
+    }
+
+    fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
+        Box::pin(async {
+            let raw = fs::read_to_string("/proc/loadavg").context("read /proc/loadavg")?;
+            let (load1, load5, load15) = parse_loadavg(&raw)?;
+            Ok(ProbeOutput::Cpu(HeartbeatCpu {
+                load1,
+                load5,
+                load15,
+                usage_pct: None,
+                user_pct: None,
+                system_pct: None,
+                iowait_pct: None,
+                steal_pct: None,
+                core_count: std::thread::available_parallelism()
+                    .map(|count| count.get() as i64)
+                    .unwrap_or(1),
+            }))
+        })
+    }
+}
+
+struct LinuxMemoryProbe;
+
+impl HeartbeatProbe for LinuxMemoryProbe {
+    fn name(&self) -> &'static str {
+        "memory"
+    }
+
+    fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
+        Box::pin(async {
+            let raw = fs::read_to_string("/proc/meminfo").context("read /proc/meminfo")?;
+            Ok(ProbeOutput::Memory(parse_meminfo(&raw)?))
+        })
+    }
+}
+
+struct LinuxDiskCapacityProbe {
+    mount: MountProbeTarget,
+}
+
+impl HeartbeatProbe for LinuxDiskCapacityProbe {
+    fn name(&self) -> &'static str {
+        "disk_capacity"
+    }
+
+    fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
+        Box::pin(async move {
+            let (bytes_total, bytes_free) = statvfs_bytes(&self.mount.path)?;
+            Ok(ProbeOutput::Disk(HeartbeatDisk {
+                kind: "mount".to_string(),
+                name: self.mount.path.display().to_string(),
+                fs_type: self.mount.fs_type.clone(),
+                bytes_total: Some(bytes_total),
+                bytes_free: Some(bytes_free),
+                bytes_used: Some(bytes_total.saturating_sub(bytes_free)),
+                read_bytes_per_sec: None,
+                write_bytes_per_sec: None,
+            }))
+        })
+    }
+}
+
+struct LinuxDiskIoProbe {
+    device: String,
+    previous: Mutex<Option<DiskRateState>>,
+}
+
+impl HeartbeatProbe for LinuxDiskIoProbe {
+    fn name(&self) -> &'static str {
+        "disk_io"
+    }
+
+    fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
+        Box::pin(async move {
+            let now = Instant::now();
+            let raw = fs::read_to_string("/proc/diskstats").context("read /proc/diskstats")?;
+            let Some((read_bytes, write_bytes)) = parse_diskstats_device(&raw, &self.device) else {
+                bail!("device {} not found in /proc/diskstats", self.device);
+            };
+            let (read_rate, write_rate) = rate_pair(&self.previous, now, read_bytes, write_bytes)?;
+            Ok(ProbeOutput::Disk(HeartbeatDisk {
+                kind: "block_io".to_string(),
+                name: self.device.clone(),
+                fs_type: None,
+                bytes_total: None,
+                bytes_free: None,
+                bytes_used: None,
+                read_bytes_per_sec: read_rate,
+                write_bytes_per_sec: write_rate,
+            }))
+        })
+    }
+}
+
+struct LinuxNetworkProbe {
+    interface: String,
+    previous: Mutex<Option<NetworkRateState>>,
+}
+
+impl HeartbeatProbe for LinuxNetworkProbe {
+    fn name(&self) -> &'static str {
+        "network"
+    }
+
+    fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
+        Box::pin(async move {
+            let now = Instant::now();
+            let raw = fs::read_to_string("/proc/net/dev").context("read /proc/net/dev")?;
+            let Some(counters) = parse_network_interface(&raw, &self.interface)? else {
+                bail!("interface {} not found in /proc/net/dev", self.interface);
+            };
+            let rates = network_rates(&self.previous, now, counters)?;
+            Ok(ProbeOutput::Network(HeartbeatNetwork {
+                interface: self.interface.clone(),
+                rx_bytes_per_sec: rates.rx_bytes_per_sec,
+                tx_bytes_per_sec: rates.tx_bytes_per_sec,
+                rx_errors_per_sec: rates.rx_errors_per_sec,
+                tx_errors_per_sec: rates.tx_errors_per_sec,
+            }))
+        })
+    }
+}
+
+struct LinuxProcessProbe;
+
+impl HeartbeatProbe for LinuxProcessProbe {
+    fn name(&self) -> &'static str {
+        "processes"
+    }
+
+    fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
+        Box::pin(async { Ok(ProbeOutput::Processes(collect_process_counts()?)) })
+    }
+}
+
+struct LinuxContainerProbe;
+
+impl HeartbeatProbe for LinuxContainerProbe {
+    fn name(&self) -> &'static str {
+        "containers"
+    }
+
+    fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
+        Box::pin(async {
+            let output = tokio::process::Command::new("docker")
+                .args(["ps", "-a", "--format", "{{.State}}"])
+                .output()
+                .await;
+            Ok(ProbeOutput::Containers(match output {
+                Ok(output) if output.status.success() => {
+                    parse_docker_states(&String::from_utf8_lossy(&output.stdout))
+                }
+                _ => HeartbeatContainers {
+                    runtime: Some("docker".to_string()),
+                    reachable: false,
+                    running: 0,
+                    exited: 0,
+                    restarting: 0,
+                    unhealthy: 0,
+                    details: Vec::new(),
+                },
+            }))
+        })
+    }
+}
+
+fn parse_loadavg(raw: &str) -> Result<(f64, f64, f64)> {
+    let mut parts = raw.split_whitespace();
+    let load1 = parts
+        .next()
+        .ok_or_else(|| anyhow!("missing load1"))?
+        .parse::<f64>()?;
+    let load5 = parts
+        .next()
+        .ok_or_else(|| anyhow!("missing load5"))?
+        .parse::<f64>()?;
+    let load15 = parts
+        .next()
+        .ok_or_else(|| anyhow!("missing load15"))?
+        .parse::<f64>()?;
+    Ok((load1, load5, load15))
+}
+
+fn parse_meminfo(raw: &str) -> Result<HeartbeatMemory> {
+    let mut mem_total = None;
+    let mut mem_available = None;
+    let mut swap_total = 0;
+    let mut swap_free = 0;
+    for line in raw.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(key) = parts.next() else {
+            continue;
+        };
+        let Some(value) = parts.next().and_then(|value| value.parse::<i64>().ok()) else {
+            continue;
+        };
+        let bytes = value.saturating_mul(1024);
+        match key.trim_end_matches(':') {
+            "MemTotal" => mem_total = Some(bytes),
+            "MemAvailable" => mem_available = Some(bytes),
+            "SwapTotal" => swap_total = bytes,
+            "SwapFree" => swap_free = bytes,
+            _ => {}
+        }
+    }
+    let mem_total_bytes = mem_total.ok_or_else(|| anyhow!("MemTotal missing from meminfo"))?;
+    let mem_available_bytes =
+        mem_available.ok_or_else(|| anyhow!("MemAvailable missing from meminfo"))?;
+    Ok(HeartbeatMemory {
+        mem_total_bytes,
+        mem_available_bytes,
+        mem_used_bytes: Some(mem_total_bytes.saturating_sub(mem_available_bytes)),
+        swap_total_bytes: swap_total,
+        swap_used_bytes: swap_total.saturating_sub(swap_free),
+    })
+}
+
+fn discover_mounts() -> Vec<MountProbeTarget> {
+    let file = match fs::File::open("/proc/self/mounts") {
+        Ok(file) => file,
+        Err(_) => return Vec::new(),
+    };
+    let mut mounts = Vec::new();
+    for line in BufReader::new(file)
+        .lines()
+        .map_while(std::result::Result::ok)
+    {
+        let mut parts = line.split_whitespace();
+        let _source = parts.next();
+        let Some(mount_path) = parts.next() else {
+            continue;
+        };
+        let Some(fs_type) = parts.next() else {
+            continue;
+        };
+        if is_pseudo_fs(fs_type) {
+            continue;
+        }
+        let path = PathBuf::from(unescape_mount_path(mount_path));
+        if mounts
+            .iter()
+            .any(|mount: &MountProbeTarget| mount.path == path)
+        {
+            continue;
+        }
+        mounts.push(MountProbeTarget {
+            path,
+            fs_type: Some(fs_type.to_string()),
+        });
+    }
+    mounts
+}
+
+fn is_pseudo_fs(fs_type: &str) -> bool {
+    matches!(
+        fs_type,
+        "autofs"
+            | "binfmt_misc"
+            | "bpf"
+            | "cgroup"
+            | "cgroup2"
+            | "configfs"
+            | "debugfs"
+            | "devpts"
+            | "devtmpfs"
+            | "fusectl"
+            | "hugetlbfs"
+            | "mqueue"
+            | "proc"
+            | "pstore"
+            | "securityfs"
+            | "sysfs"
+            | "tmpfs"
+            | "tracefs"
+    )
+}
+
+fn unescape_mount_path(value: &str) -> String {
+    value
+        .replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
+}
+
+fn statvfs_bytes(path: &Path) -> Result<(i64, i64)> {
+    #[cfg(unix)]
+    {
+        let c_path = CString::new(path.as_os_str().as_bytes())?;
+        let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        let rc = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+        if rc != 0 {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("statvfs {}", path.display()));
+        }
+        let stat = unsafe { stat.assume_init() };
+        let block_size = stat.f_frsize as u128;
+        let total = (stat.f_blocks as u128).saturating_mul(block_size);
+        let free = (stat.f_bavail as u128).saturating_mul(block_size);
+        Ok((clamp_u128_to_i64(total), clamp_u128_to_i64(free)))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        bail!("statvfs is only available on unix")
+    }
+}
+
+fn discover_disk_devices() -> Vec<String> {
+    let raw = match fs::read_to_string("/proc/diskstats") {
+        Ok(raw) => raw,
+        Err(_) => return Vec::new(),
+    };
+    raw.lines()
+        .filter_map(|line| line.split_whitespace().nth(2))
+        .filter(|name| is_disk_device_name(name))
+        .map(ToString::to_string)
+        .take(8)
+        .collect()
+}
+
+fn is_disk_device_name(name: &str) -> bool {
+    !(name.starts_with("loop")
+        || name.starts_with("ram")
+        || name.starts_with("fd")
+        || name.chars().last().is_some_and(|ch| ch.is_ascii_digit()))
+}
+
+fn parse_diskstats_device(raw: &str, device: &str) -> Option<(i64, i64)> {
+    for line in raw.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 14 || parts[2] != device {
+            continue;
+        }
+        let sectors_read = parts.get(5)?.parse::<u128>().ok()?;
+        let sectors_written = parts.get(9)?.parse::<u128>().ok()?;
+        return Some((
+            clamp_u128_to_i64(sectors_read.saturating_mul(512)),
+            clamp_u128_to_i64(sectors_written.saturating_mul(512)),
+        ));
+    }
+    None
+}
+
+fn discover_network_interfaces() -> Vec<String> {
+    let raw = match fs::read_to_string("/proc/net/dev") {
+        Ok(raw) => raw,
+        Err(_) => return Vec::new(),
+    };
+    raw.lines()
+        .skip(2)
+        .filter_map(|line| line.split_once(':').map(|(name, _)| name.trim()))
+        .filter(|name| !name.is_empty() && *name != "lo")
+        .map(ToString::to_string)
+        .take(16)
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NetworkCounters {
+    rx_bytes: i64,
+    tx_bytes: i64,
+    rx_errors: i64,
+    tx_errors: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DiskRateState {
+    sampled_at: Instant,
+    read_bytes: i64,
+    write_bytes: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NetworkRateState {
+    sampled_at: Instant,
+    counters: NetworkCounters,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NetworkRates {
+    rx_bytes_per_sec: Option<f64>,
+    tx_bytes_per_sec: Option<f64>,
+    rx_errors_per_sec: Option<f64>,
+    tx_errors_per_sec: Option<f64>,
+}
+
+fn parse_network_interface(raw: &str, interface: &str) -> Result<Option<NetworkCounters>> {
+    for line in raw.lines().skip(2) {
+        let Some((name, values)) = line.split_once(':') else {
+            continue;
+        };
+        if name.trim() != interface {
+            continue;
+        }
+        let parts: Vec<&str> = values.split_whitespace().collect();
+        if parts.len() < 16 {
+            bail!("malformed /proc/net/dev row for {interface}");
+        }
+        return Ok(Some(NetworkCounters {
+            rx_bytes: clamp_u128_to_i64(parts[0].parse::<u128>()?),
+            tx_bytes: clamp_u128_to_i64(parts[8].parse::<u128>()?),
+            rx_errors: clamp_u128_to_i64(parts[2].parse::<u128>()?),
+            tx_errors: clamp_u128_to_i64(parts[10].parse::<u128>()?),
+        }));
+    }
+    Ok(None)
+}
+
+fn rate_pair(
+    previous: &Mutex<Option<DiskRateState>>,
+    now: Instant,
+    first: i64,
+    second: i64,
+) -> Result<(Option<f64>, Option<f64>)> {
+    let mut guard = previous
+        .lock()
+        .map_err(|_| anyhow!("heartbeat probe state lock poisoned"))?;
+    let rates = guard.map(|last| {
+        let elapsed = now.saturating_duration_since(last.sampled_at).as_secs_f64();
+        if elapsed <= 0.0 {
+            return (None, None);
+        }
+        (
+            Some(first.saturating_sub(last.read_bytes).max(0) as f64 / elapsed),
+            Some(second.saturating_sub(last.write_bytes).max(0) as f64 / elapsed),
+        )
+    });
+    *guard = Some(DiskRateState {
+        sampled_at: now,
+        read_bytes: first,
+        write_bytes: second,
+    });
+    Ok(rates.unwrap_or((None, None)))
+}
+
+fn network_rates(
+    previous: &Mutex<Option<NetworkRateState>>,
+    now: Instant,
+    current: NetworkCounters,
+) -> Result<NetworkRates> {
+    let mut guard = previous
+        .lock()
+        .map_err(|_| anyhow!("heartbeat probe state lock poisoned"))?;
+    let rates = guard.map(|last| {
+        let elapsed = now.saturating_duration_since(last.sampled_at).as_secs_f64();
+        if elapsed <= 0.0 {
+            return NetworkRates {
+                rx_bytes_per_sec: None,
+                tx_bytes_per_sec: None,
+                rx_errors_per_sec: None,
+                tx_errors_per_sec: None,
+            };
+        }
+        NetworkRates {
+            rx_bytes_per_sec: Some(
+                current
+                    .rx_bytes
+                    .saturating_sub(last.counters.rx_bytes)
+                    .max(0) as f64
+                    / elapsed,
+            ),
+            tx_bytes_per_sec: Some(
+                current
+                    .tx_bytes
+                    .saturating_sub(last.counters.tx_bytes)
+                    .max(0) as f64
+                    / elapsed,
+            ),
+            rx_errors_per_sec: Some(
+                current
+                    .rx_errors
+                    .saturating_sub(last.counters.rx_errors)
+                    .max(0) as f64
+                    / elapsed,
+            ),
+            tx_errors_per_sec: Some(
+                current
+                    .tx_errors
+                    .saturating_sub(last.counters.tx_errors)
+                    .max(0) as f64
+                    / elapsed,
+            ),
+        }
+    });
+    *guard = Some(NetworkRateState {
+        sampled_at: now,
+        counters: current,
+    });
+    Ok(rates.unwrap_or(NetworkRates {
+        rx_bytes_per_sec: None,
+        tx_bytes_per_sec: None,
+        rx_errors_per_sec: None,
+        tx_errors_per_sec: None,
+    }))
+}
+
+fn collect_process_counts() -> Result<HeartbeatProcesses> {
+    let mut total = 0i64;
+    let mut running = 0i64;
+    let mut sleeping = 0i64;
+    let mut zombies = 0i64;
+    let mut top = Vec::new();
+    for entry in fs::read_dir("/proc").context("read /proc")? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.chars().all(|ch| ch.is_ascii_digit()) {
+            continue;
+        }
+        let stat_path = entry.path().join("stat");
+        let Ok(stat) = fs::read_to_string(stat_path) else {
+            continue;
+        };
+        total += 1;
+        let state = parse_proc_stat_state(&stat);
+        match state {
+            Some('R') => running += 1,
+            Some('Z') => zombies += 1,
+            Some(_) => sleeping += 1,
+            None => {}
+        }
+        if top.len() < 8 {
+            top.push(serde_json::json!({
+                "pid": name,
+                "state": state.map(|state| state.to_string()),
+            }));
+        }
+    }
+    Ok(HeartbeatProcesses {
+        total,
+        running: Some(running),
+        sleeping: Some(sleeping),
+        zombies,
+        top,
+    })
+}
+
+fn parse_proc_stat_state(raw: &str) -> Option<char> {
+    let end = raw.rfind(')')?;
+    raw[end + 1..].split_whitespace().next()?.chars().next()
+}
+
+fn parse_docker_states(raw: &str) -> HeartbeatContainers {
+    let mut running = 0;
+    let mut exited = 0;
+    let mut restarting = 0;
+    for state in raw.lines().map(str::trim).filter(|state| !state.is_empty()) {
+        match state {
+            "running" => running += 1,
+            "exited" | "dead" | "created" | "removing" | "paused" => exited += 1,
+            "restarting" => restarting += 1,
+            _ => {}
+        }
+    }
+    HeartbeatContainers {
+        runtime: Some("docker".to_string()),
+        reachable: true,
+        running,
+        exited,
+        restarting,
+        unhealthy: 0,
+        details: Vec::new(),
+    }
+}
+
+fn clamp_u128_to_i64(value: u128) -> i64 {
+    value.min(i64::MAX as u128) as i64
+}
+
 pub struct RetryBuffer {
     limit: usize,
     queue: VecDeque<HeartbeatPayload>,
@@ -478,7 +1101,7 @@ pub fn backoff_duration(attempt: u32) -> Duration {
 
 pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
     let host_id = load_or_create_host_id(&config.host_id_path)?;
-    let collector = HeartbeatCollector::fake();
+    let collector = HeartbeatCollector::linux();
     let client = reqwest::Client::new();
     let mut retry = RetryBuffer::new(config.retry_buffer_limit);
     let mut sequence = 1i64;
