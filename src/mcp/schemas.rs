@@ -57,25 +57,30 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "hostname": {
                     "type": "string",
-                    "description": "For action=search, tail, correlate, ai_correlate, apps, sessions, timeline, patterns, context, similar_incidents, ask_history, or incident_context: exact hostname filter. Use action=hosts to enumerate."
+                    "description": "For action=search, filter, tail, correlate, ai_correlate, apps, sessions, timeline, patterns, context, similar_incidents, ask_history, or incident_context: exact hostname filter. Use action=hosts to enumerate."
                 },
                 "project": {
                     "type": "string",
-                    "description": "For action=sessions, search_sessions, abuse, ai_correlate, usage_blocks, project_context, or list_ai_tools: exact project path, e.g. /home/jmagar/workspace/syslog-mcp."
+                    "description": "For action=filter, sessions, search_sessions, abuse, ai_correlate, usage_blocks, project_context, or list_ai_tools: exact project path, e.g. /home/jmagar/workspace/syslog-mcp."
                 },
                 "tool": {
                     "type": "string",
                     "enum": ["claude", "codex", "gemini"],
-                    "description": "For action=sessions, search_sessions, abuse, ai_correlate, usage_blocks, project_context, or list_ai_projects: AI tool filter."
+                    "description": "For action=filter, sessions, search_sessions, abuse, ai_correlate, usage_blocks, project_context, or list_ai_projects: AI tool filter."
                 },
                 "source_ip": {
                     "type": "string",
-                    "description": "For action=search, tail, correlate, or ai_correlate: exact source identifier. Syslog uses IP:port; OTLP uses peer IP; Docker stream rows use docker://host/container/stream; Docker lifecycle rows use docker-event://host/container/action."
+                    "description": "For action=search, filter, tail, correlate, or ai_correlate: exact source identifier. Syslog uses IP:port; OTLP uses peer IP; Docker stream rows use docker://host/container/stream; Docker lifecycle rows use docker-event://host/container/action."
+                },
+                "source_kind": {
+                    "type": "string",
+                    "enum": ["docker-stream", "docker-event", "agent-command", "shell-history", "transcript", "claude", "codex", "gemini"],
+                    "description": "For action=filter: structured source alias. syslog-udp, syslog-tcp, and otlp are rejected in v1 because transport is not indexed separately."
                 },
                 "severity": {
                     "type": "string",
                     "enum": SEVERITY_LEVELS,
-                    "description": "For action=search: syslog severity filter."
+                    "description": "For action=search or filter: syslog severity filter."
                 },
                 "severity_min": {
                     "type": "string",
@@ -84,11 +89,11 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "app_name": {
                     "type": "string",
-                    "description": "For action=search, tail, ai_correlate, timeline, patterns, similar_incidents, ask_history, or incident_context: application name filter, e.g. sshd, dockerd, kernel."
+                    "description": "For action=search, filter, tail, ai_correlate, timeline, patterns, similar_incidents, ask_history, or incident_context: application name filter, e.g. sshd, dockerd, kernel."
                 },
                 "session_id": {
                     "type": "string",
-                    "description": "For action=ai_correlate: exact AI session id filter."
+                    "description": "For action=filter or ai_correlate: exact AI session id filter."
                 },
                 "ai_query": {
                     "type": "string",
@@ -100,35 +105,52 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "facility": {
                     "type": "string",
-                    "description": "For action=search: syslog facility filter, e.g. kern, auth, daemon, clockd."
+                    "description": "For action=search or filter: syslog facility filter, e.g. kern, auth, daemon, clockd."
                 },
                 "exclude_facility": {
                     "type": "string",
-                    "description": "For action=search: exclude one syslog facility while retaining rows with unknown facility."
+                    "description": "For action=search or filter: exclude one syslog facility while retaining rows with unknown facility."
                 },
                 "process_id": {
                     "type": "string",
-                    "description": "For action=search: exact process_id filter."
+                    "description": "For action=search or filter: exact process_id filter."
                 },
                 "received_from": {
                     "type": "string",
-                    "description": "For action=search: filter rows with received_at >= this timestamp."
+                    "description": "For action=search or filter: filter rows with received_at >= this timestamp."
                 },
                 "received_to": {
                     "type": "string",
-                    "description": "For action=search: filter rows with received_at <= this timestamp."
+                    "description": "For action=search or filter: filter rows with received_at <= this timestamp."
+                },
+                "container": {
+                    "type": "string",
+                    "description": "For action=filter: Docker container/app name refiner."
+                },
+                "docker_host": {
+                    "type": "string",
+                    "description": "For action=filter with source_kind=docker-stream or docker-event: Docker host refiner."
+                },
+                "stream": {
+                    "type": "string",
+                    "enum": ["stdout", "stderr"],
+                    "description": "For action=filter with source_kind=docker-stream: Docker log stream refiner."
+                },
+                "event_action": {
+                    "type": "string",
+                    "description": "For action=filter: Docker lifecycle/enrichment event action filter."
                 },
                 "from": {
                     "type": "string",
-                    "description": "For action=search, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or ask_history: start of time range as ISO 8601/RFC3339. Required for incident_context. Strongly recommended for timeline and patterns — omitting from/to causes a full-history scan."
+                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or ask_history: start of time range as ISO 8601/RFC3339. Required for incident_context. Strongly recommended for timeline and patterns — omitting from/to causes a full-history scan."
                 },
                 "to": {
                     "type": "string",
-                    "description": "For action=search, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or ask_history: end of time range as ISO 8601/RFC3339. Required for incident_context. Strongly recommended for timeline and patterns — omitting from/to causes a full-history scan."
+                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or ask_history: end of time range as ISO 8601/RFC3339. Required for incident_context. Strongly recommended for timeline and patterns — omitting from/to causes a full-history scan."
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search: max results, default 100, max 1000. For action=errors: max summary rows, max 100. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=patterns: alias for top_n, default 20, max 200. For action=clock_skew: max host rows, max 100. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to paginate; response includes total count of all distinct source IPs. For action=similar_incidents: max incident clusters, default 10, max 50. For action=ask_history: max sessions, default 10, max 50. For action=incident_context: max error log rows, default 50, max 200."
+                    "description": "For action=search or filter: max results, default 100, max 1000. For action=errors: max summary rows, max 100. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=patterns: alias for top_n, default 20, max 200. For action=clock_skew: max host rows, max 100. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to paginate; response includes total count of all distinct source IPs. For action=similar_incidents: max incident clusters, default 10, max 50. For action=ask_history: max sessions, default 10, max 50. For action=incident_context: max error log rows, default 50, max 200."
                 },
                 "offset": {
                     "type": "integer",

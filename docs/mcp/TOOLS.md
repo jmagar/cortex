@@ -8,6 +8,7 @@ syslog-mcp exposes one read-only MCP tool named `syslog`. The required
 | Action | Purpose |
 | --- | --- |
 | `search` | Full-text search with filters |
+| `filter` | Structured filter-only log retrieval |
 | `tail` | Recent log entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
@@ -54,6 +55,14 @@ Full-text search across all syslog messages. Uses SQLite FTS5 with porter stemmi
 Required argument: `action = "search"`
 
 Optional arguments: `query`, `hostname`, `source_ip`, `severity`, `app_name`, `facility`, `process_id`, `from`, `to`, `limit`.
+
+## syslog filter
+
+Structured filter-only log retrieval. This action rejects `query`; use `search` for FTS5 message-body search.
+
+Required argument: `action = "filter"`
+
+Optional arguments: `hostname`, `source_ip`, `source_kind`, `tool`, `project`, `session_id`, `container`, `docker_host`, `stream`, `event_action`, `severity`, `app_name`, `facility`, `exclude_facility`, `process_id`, `from`, `to`, `received_from`, `received_to`, `limit`.
 
 ## syslog tail
 

@@ -21,8 +21,8 @@
 use anyhow::{bail, Result};
 use std::future::Future;
 use syslog_mcp::app::{
-    CorrelateEventsRequest, GetErrorsRequest, IncidentRequest, ListSessionsRequest,
-    SearchLogsRequest, TailLogsRequest,
+    CorrelateEventsRequest, FilterLogsRequest, GetErrorsRequest, IncidentRequest,
+    ListSessionsRequest, SearchLogsRequest, TailLogsRequest,
 };
 
 use super::output_ai::print_incident_response;
@@ -31,7 +31,8 @@ use super::output_logs::{
     print_sessions_response, print_stats_response,
 };
 use super::{
-    CliMode, CorrelateArgs, IncidentArgs, SearchArgs, SessionsArgs, TailArgs, TimeRangeArgs,
+    CliMode, CorrelateArgs, FilterArgs, IncidentArgs, SearchArgs, SessionsArgs, TailArgs,
+    TimeRangeArgs,
 };
 
 // ─── Arg → Request conversions ──────────────────────────────────────────────
@@ -57,6 +58,41 @@ impl SearchArgs {
             received_from: self.received_from,
             received_to: self.received_to,
             limit: self.limit,
+            source_kind: None,
+            tool: None,
+            project: None,
+            session_id: None,
+            container: None,
+            docker_host: None,
+            stream: None,
+            event_action: None,
+        }
+    }
+}
+
+impl FilterArgs {
+    pub(crate) fn into_request(self) -> FilterLogsRequest {
+        FilterLogsRequest {
+            hostname: self.hostname,
+            source_ip: self.source_ip,
+            severity: self.severity,
+            app_name: self.app_name,
+            facility: self.facility,
+            exclude_facility: self.exclude_facility,
+            process_id: self.process_id,
+            from: self.from,
+            to: self.to,
+            received_from: self.received_from,
+            received_to: self.received_to,
+            limit: self.limit,
+            source_kind: self.source_kind,
+            tool: self.tool,
+            project: self.project,
+            session_id: self.session_id,
+            container: self.container,
+            docker_host: self.docker_host,
+            stream: self.stream,
+            event_action: self.event_action,
         }
     }
 }
@@ -160,6 +196,16 @@ pub(crate) async fn run_search(mode: &CliMode, args: SearchArgs) -> Result<()> {
     let response = match mode {
         CliMode::Local(service) => service.search_logs(req).await?,
         CliMode::Http(client) => http_or_cancel(client.search(&req)).await?,
+    };
+    print_search_response(&response, json)
+}
+
+pub(crate) async fn run_filter(mode: &CliMode, args: FilterArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.filter_logs(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.filter(&req)).await?,
     };
     print_search_response(&response, json)
 }

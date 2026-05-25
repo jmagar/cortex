@@ -13,10 +13,10 @@ pub(crate) use args::{
     AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
     AiSimilarArgs, AiWatchArgs, CliCommand, ComposeArgs, ComposeCommand, ComposeLogsArgs,
     ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand, DbIntegrityArgs,
-    DbStatusArgs, DbVacuumArgs, IncidentArgs, IngestRateArgs, NotifyRecentArgs, NotifyTestArgs,
-    OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand, ServiceLogsArgs,
-    SessionsArgs, SetupArgs, SetupCommand, ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs,
-    SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    DbStatusArgs, DbVacuumArgs, FilterArgs, IncidentArgs, IngestRateArgs, NotifyRecentArgs,
+    NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand,
+    ServiceLogsArgs, SessionsArgs, SetupArgs, SetupCommand, ShellCommand, ShellIndexArgs,
+    SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,

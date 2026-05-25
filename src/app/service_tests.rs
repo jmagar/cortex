@@ -357,6 +357,56 @@ async fn search_logs_rejects_invalid_severity() {
 }
 
 #[tokio::test]
+async fn filter_logs_maps_docker_stream_alias_to_source_prefix() {
+    let (service, pool, _dir) = test_service();
+    let mut stdout = entry(
+        "2026-01-01T00:00:00Z",
+        "dookie",
+        "info",
+        "docker stdout",
+        "docker://dookie/syslog-mcp/stdout",
+    );
+    stdout.app_name = Some("syslog-mcp".into());
+    let mut other = entry(
+        "2026-01-01T00:00:01Z",
+        "dookie",
+        "info",
+        "other stdout",
+        "docker://dookie/other/stdout",
+    );
+    other.app_name = Some("other".into());
+    insert_logs_batch(&pool, &[stdout, other]).unwrap();
+
+    let response = service
+        .filter_logs(FilterLogsRequest {
+            source_kind: Some("docker-stream".into()),
+            docker_host: Some("dookie".into()),
+            container: Some("syslog-mcp".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.count, 1);
+    assert_eq!(response.logs[0].message, "docker stdout");
+}
+
+#[tokio::test]
+async fn filter_logs_rejects_queryless_json_only_source_kind() {
+    let (service, _pool, _dir) = test_service();
+
+    let err = service
+        .filter_logs(FilterLogsRequest {
+            source_kind: Some("otlp".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("not indexed separately in v1"));
+}
+
+#[tokio::test]
 async fn health_check_runs_simple_database_query() {
     let (service, _pool, _dir) = test_service();
 

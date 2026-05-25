@@ -3,7 +3,7 @@
   "manifest_version": "0.4",
   "name": "syslog-mcp",
   "display_name": "Syslog MCP",
-  "version": "0.32.5",
+  "version": "0.32.6",
   "description": "Query local syslog-mcp SQLite logs through a bundled stdio MCP server.",
   "long_description": "Syslog MCP packages the existing syslog mcp stdio entrypoint as a local MCP Bundle. It is query-only: it reads the configured SQLite database and does not start syslog listeners, HTTP servers, Docker Compose, REST, or deploy flows.",
   "author": {

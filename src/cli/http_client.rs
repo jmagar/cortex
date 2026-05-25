@@ -68,15 +68,15 @@ use syslog_mcp::app::{
     ClockSkewResponse, CompareRequest, CompareResponse, CorrelateEventsRequest,
     CorrelateEventsResponse, DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest,
     DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult,
-    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, IngestRateRequest,
-    IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
-    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, PatternsRequest,
-    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
-    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
-    SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, UnackErrorRequest,
-    UnackErrorResponse, UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest,
-    UsageBlocksResponse,
+    FilterLogsRequest, GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse,
+    IngestRateRequest, IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse,
+    ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse,
+    ListSessionsRequest, ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse,
+    PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse,
+    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
+    SilentHostsRequest, SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
+    UnackErrorRequest, UnackErrorResponse, UnaddressedErrorsRequest, UnaddressedErrorsResponse,
+    UsageBlocksRequest, UsageBlocksResponse,
 };
 use syslog_mcp::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
 
@@ -405,6 +405,10 @@ impl HttpClient {
 
     pub async fn search(&self, req: &SearchLogsRequest) -> Result<SearchLogsResponse> {
         self.get_json("/api/search", Some(req)).await
+    }
+
+    pub async fn filter(&self, req: &FilterLogsRequest) -> Result<SearchLogsResponse> {
+        self.get_json("/api/filter", Some(req)).await
     }
 
     pub async fn tail(&self, req: &TailLogsRequest) -> Result<SearchLogsResponse> {

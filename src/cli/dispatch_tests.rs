@@ -27,8 +27,9 @@ use crate::cli::{
     AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
     AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
     AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs,
-    DbStatusArgs, DbVacuumArgs, IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs, SessionsArgs,
-    SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    DbStatusArgs, DbVacuumArgs, FilterArgs, IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs,
+    SessionsArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs,
+    TimelineArgs,
 };
 use anyhow::{bail, Result};
 use std::time::Duration;
@@ -89,7 +90,29 @@ fn search_args_into_request_snapshot() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "SearchLogsRequest { query: Some(\"foo\"), hostname: Some(\"h1\"), source_ip: Some(\"10.0.0.1\"), severity: Some(\"error\"), app_name: Some(\"nginx\"), facility: Some(\"auth\"), exclude_facility: Some(\"transcript\"), process_id: None, from: Some(\"2026-01-01T00:00:00Z\"), to: Some(\"2026-01-02T00:00:00Z\"), received_from: Some(\"2026-01-01T00:00:30Z\"), received_to: Some(\"2026-01-02T00:00:30Z\"), limit: Some(50) }"
+        "SearchLogsRequest { query: Some(\"foo\"), hostname: Some(\"h1\"), source_ip: Some(\"10.0.0.1\"), severity: Some(\"error\"), app_name: Some(\"nginx\"), facility: Some(\"auth\"), exclude_facility: Some(\"transcript\"), process_id: None, from: Some(\"2026-01-01T00:00:00Z\"), to: Some(\"2026-01-02T00:00:00Z\"), received_from: Some(\"2026-01-01T00:00:30Z\"), received_to: Some(\"2026-01-02T00:00:30Z\"), limit: Some(50), source_kind: None, tool: None, project: None, session_id: None, container: None, docker_host: None, stream: None, event_action: None }"
+    );
+}
+
+#[test]
+fn filter_args_into_request_snapshot() {
+    let args = FilterArgs {
+        source_kind: Some("docker-stream".into()),
+        docker_host: Some("dookie".into()),
+        container: Some("syslog-mcp".into()),
+        stream: Some("stdout".into()),
+        event_action: Some("die".into()),
+        tool: Some("claude".into()),
+        project: Some("/tmp/project".into()),
+        session_id: Some("abc123".into()),
+        limit: Some(25),
+        json: true,
+        ..Default::default()
+    };
+    let req = args.into_request();
+    assert_eq!(
+        format!("{req:?}"),
+        "FilterLogsRequest { hostname: None, source_ip: None, severity: None, app_name: None, facility: None, exclude_facility: None, process_id: None, from: None, to: None, received_from: None, received_to: None, limit: Some(25), source_kind: Some(\"docker-stream\"), tool: Some(\"claude\"), project: Some(\"/tmp/project\"), session_id: Some(\"abc123\"), container: Some(\"syslog-mcp\"), docker_host: Some(\"dookie\"), stream: Some(\"stdout\"), event_action: Some(\"die\") }"
     );
 }
 
