@@ -130,4 +130,4 @@
 - [x] Run `git diff --check`.
 - [x] Update session documentation for the completed service-boundary pass.
 - [x] Update and close completed child beads; leave explicit notes on deferred children.
-- [ ] Commit, push, and open or update the PR according to `work-it`.
+- [x] Commit, push, and open or update the PR according to `work-it`.
