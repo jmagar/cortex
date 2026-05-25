@@ -119,6 +119,78 @@ fn list_apps_returns_distinct_apps_with_counts() {
 }
 
 #[test]
+fn unfiltered_list_apps_uses_inventory_stats_without_scanning_logs() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-01-01T00:00:01Z", "h1", "info", Some("nginx"), "hello"),
+            entry("2026-01-01T00:00:02Z", "h2", "info", Some("nginx"), "again"),
+            entry(
+                "2026-01-01T00:00:03Z",
+                "h2",
+                "info",
+                Some("sshd"),
+                "auth ok",
+            ),
+        ],
+    )
+    .unwrap();
+    pool.get()
+        .unwrap()
+        .execute(
+            "UPDATE inventory_backfill_state
+             SET completed_at = '2026-01-01T00:00:00Z'
+             WHERE name = 'app_source_inventory'",
+            [],
+        )
+        .unwrap();
+
+    let conn = pool.get().unwrap();
+    let plan = conn
+        .prepare(
+            "EXPLAIN QUERY PLAN
+             WITH page AS (
+                SELECT app_name, log_count, first_seen, last_seen
+                FROM app_inventory_stats
+                ORDER BY last_seen DESC, app_name ASC
+                LIMIT 50 OFFSET 0
+             )
+             SELECT p.app_name, p.log_count, COUNT(h.hostname), p.first_seen, p.last_seen
+             FROM page p
+             LEFT JOIN app_host_inventory_stats h ON h.app_name = p.app_name
+             GROUP BY p.app_name, p.log_count, p.first_seen, p.last_seen
+             ORDER BY p.last_seen DESC, p.app_name ASC",
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+        .join("\n");
+    assert!(
+        !plan.contains("logs"),
+        "unfiltered app inventory should not scan logs; got:\n{plan}"
+    );
+    drop(conn);
+
+    let apps = list_apps(
+        &pool,
+        &ListAppsParams {
+            hostname: None,
+            from: None,
+            to: None,
+            limit: 50,
+            offset: 0,
+        },
+    )
+    .unwrap();
+    let nginx = apps.apps.iter().find(|a| a.app_name == "nginx").unwrap();
+    assert_eq!(nginx.log_count, 2);
+    assert_eq!(nginx.host_count, 2);
+}
+
+#[test]
 fn list_apps_to_filter_excludes_future_entries() {
     let (pool, _d) = test_pool();
     insert_logs_batch(
@@ -163,6 +235,78 @@ fn list_apps_to_filter_excludes_future_entries() {
     )
     .unwrap();
     assert!(!all.apps.is_empty(), "to=9999 should include all entries");
+}
+
+#[test]
+fn inventory_stats_decrement_when_logs_are_deleted() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry_with_source_ip(
+                "2026-01-01T00:00:01Z",
+                "h1",
+                "info",
+                Some("nginx"),
+                "hello",
+                "10.0.0.1:514",
+            ),
+            entry_with_source_ip(
+                "2026-01-01T00:00:02Z",
+                "h2",
+                "info",
+                Some("nginx"),
+                "again",
+                "10.0.0.1:514",
+            ),
+        ],
+    )
+    .unwrap();
+    pool.get()
+        .unwrap()
+        .execute(
+            "UPDATE inventory_backfill_state
+             SET completed_at = '2026-01-01T00:00:00Z'
+             WHERE name = 'app_source_inventory'",
+            [],
+        )
+        .unwrap();
+
+    let conn = pool.get().unwrap();
+    conn.execute("DELETE FROM logs WHERE hostname = 'h1'", [])
+        .unwrap();
+    drop(conn);
+
+    let apps = list_apps(
+        &pool,
+        &ListAppsParams {
+            hostname: None,
+            from: None,
+            to: None,
+            limit: 50,
+            offset: 0,
+        },
+    )
+    .unwrap();
+    let nginx = apps.apps.iter().find(|a| a.app_name == "nginx").unwrap();
+    assert_eq!(nginx.log_count, 1);
+    assert_eq!(nginx.host_count, 1);
+
+    let source_ips = list_source_ips(
+        &pool,
+        &ListSourceIpsParams {
+            limit: 50,
+            offset: 0,
+        },
+    )
+    .unwrap();
+    let ip = source_ips
+        .source_ips
+        .iter()
+        .find(|entry| entry.source_ip == "10.0.0.1:514")
+        .unwrap();
+    assert_eq!(ip.log_count, 1);
+    assert_eq!(ip.host_count, 1);
 }
 
 #[test]
@@ -214,6 +358,64 @@ fn list_source_ips_truncated_when_over_limit() {
         2,
         "page should contain only limit=2 IPs"
     );
+}
+
+#[test]
+fn unfiltered_list_source_ips_uses_inventory_stats_without_scanning_logs() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry_with_source_ip("2026-01-01T00:00:01Z", "h1", "info", None, "a", "10.0.0.1"),
+            entry_with_source_ip("2026-01-01T00:00:02Z", "h2", "info", None, "b", "10.0.0.1"),
+            entry_with_source_ip("2026-01-01T00:00:03Z", "h3", "info", None, "c", "10.0.0.2"),
+        ],
+    )
+    .unwrap();
+
+    let conn = pool.get().unwrap();
+    let plan = conn
+        .prepare(
+            "EXPLAIN QUERY PLAN
+             WITH page AS (
+                SELECT source_ip, log_count, first_seen, last_seen
+                FROM source_ip_inventory_stats
+                ORDER BY log_count DESC, source_ip ASC
+                LIMIT 50 OFFSET 0
+             )
+             SELECT p.source_ip, p.log_count, p.first_seen, p.last_seen,
+                    h.hostname, h.log_count, h.first_seen, h.last_seen
+             FROM page p
+             LEFT JOIN source_ip_host_inventory_stats h ON h.source_ip = p.source_ip
+             ORDER BY p.log_count DESC, p.source_ip ASC, h.log_count DESC, h.hostname ASC",
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+        .join("\n");
+    assert!(
+        !plan.contains("logs"),
+        "unfiltered source inventory should not scan logs; got:\n{plan}"
+    );
+    drop(conn);
+
+    let result = list_source_ips(
+        &pool,
+        &ListSourceIpsParams {
+            limit: 50,
+            offset: 0,
+        },
+    )
+    .unwrap();
+    let ip = result
+        .source_ips
+        .iter()
+        .find(|entry| entry.source_ip == "10.0.0.1")
+        .unwrap();
+    assert_eq!(ip.log_count, 2);
+    assert_eq!(ip.host_count, 2);
 }
 
 #[test]
