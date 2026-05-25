@@ -2073,13 +2073,13 @@ fn apply_log_filter_aliases(
             params.source_ip_prefix = Some("shell-history://".to_string());
         }
         Some("claude") | Some("claude-transcript") => {
-            params.ai_tool.get_or_insert_with(|| "claude".to_string());
+            apply_source_kind_tool_alias(params, "claude")?;
         }
         Some("codex") | Some("codex-transcript") => {
-            params.ai_tool.get_or_insert_with(|| "codex".to_string());
+            apply_source_kind_tool_alias(params, "codex")?;
         }
         Some("gemini") | Some("gemini-transcript") => {
-            params.ai_tool.get_or_insert_with(|| "gemini".to_string());
+            apply_source_kind_tool_alias(params, "gemini")?;
         }
         Some("transcript") => {}
         Some("syslog-udp") | Some("syslog-tcp") | Some("otlp") => {
@@ -2095,6 +2095,22 @@ fn apply_log_filter_aliases(
         }
     }
     Ok(())
+}
+
+fn apply_source_kind_tool_alias(
+    params: &mut SearchParams,
+    expected_tool: &str,
+) -> ServiceResult<()> {
+    match params.ai_tool.as_deref() {
+        Some(actual_tool) if actual_tool != expected_tool => Err(ServiceError::InvalidInput(
+            format!("source_kind={expected_tool} conflicts with tool={actual_tool}"),
+        )),
+        Some(_) => Ok(()),
+        None => {
+            params.ai_tool = Some(expected_tool.to_string());
+            Ok(())
+        }
+    }
 }
 
 fn docker_source_prefix(scheme: &str, req: &FilterRequestParts) -> String {

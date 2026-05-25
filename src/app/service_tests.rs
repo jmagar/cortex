@@ -407,6 +407,24 @@ async fn filter_logs_rejects_queryless_json_only_source_kind() {
 }
 
 #[tokio::test]
+async fn filter_logs_rejects_conflicting_source_kind_tool_alias() {
+    let (service, _pool, _dir) = test_service();
+
+    let err = service
+        .filter_logs(FilterLogsRequest {
+            source_kind: Some("claude".into()),
+            tool: Some("codex".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("source_kind=claude conflicts with tool=codex"));
+}
+
+#[tokio::test]
 async fn health_check_runs_simple_database_query() {
     let (service, _pool, _dir) = test_service();
 
