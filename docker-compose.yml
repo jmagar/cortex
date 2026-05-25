@@ -22,6 +22,7 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "dookie:100.88.16.79"
     ulimits:
       nofile:
         soft: 65535
