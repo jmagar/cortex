@@ -3,6 +3,106 @@ use std::path::PathBuf;
 
 use crate::db;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestActor {
+    pub surface: String,
+    pub display: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+impl RequestActor {
+    pub fn new(surface: impl Into<String>, display: impl Into<String>) -> Self {
+        Self {
+            surface: surface.into(),
+            display: display.into(),
+            subject: None,
+            email: None,
+        }
+    }
+
+    pub fn api() -> Self {
+        Self::new("api", "api")
+    }
+
+    pub fn cli() -> Self {
+        Self::new("cli", "cli")
+    }
+
+    pub fn mcp_loopback() -> Self {
+        Self::new("mcp", "mcp:loopback")
+    }
+
+    pub fn mcp_bearer() -> Self {
+        Self::new("mcp", "mcp:bearer")
+    }
+
+    pub fn mcp_oauth() -> Self {
+        Self::new("mcp", "mcp:oauth")
+    }
+
+    pub fn mcp_identity(subject: Option<String>, email: Option<String>) -> Self {
+        let display = email
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .or_else(|| subject.as_deref().filter(|value| !value.is_empty()))
+            .unwrap_or("mcp:oauth")
+            .to_string();
+        Self {
+            surface: "mcp".to_string(),
+            display,
+            subject,
+            email,
+        }
+    }
+}
+
+impl From<&str> for RequestActor {
+    fn from(value: &str) -> Self {
+        Self::new("unknown", value)
+    }
+}
+
+impl From<String> for RequestActor {
+    fn from(value: String) -> Self {
+        Self::new("unknown", value)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AiCorrelateLimitPolicy {
+    pub events_per_anchor_cap: u32,
+    pub report_events_per_anchor_clamp: bool,
+}
+
+impl AiCorrelateLimitPolicy {
+    pub const MCP: Self = Self {
+        events_per_anchor_cap: 200,
+        report_events_per_anchor_clamp: false,
+    };
+
+    pub const REST: Self = Self {
+        events_per_anchor_cap: 50,
+        report_events_per_anchor_clamp: true,
+    };
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AiLimitPolicy {
+    pub limit_cap: u32,
+    pub report_limit_clamp: bool,
+}
+
+impl AiLimitPolicy {
+    pub const REST: Self = Self {
+        limit_cap: 500,
+        report_limit_clamp: true,
+    };
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbMaintenanceStatus {
     pub db_path: PathBuf,
@@ -523,6 +623,24 @@ pub struct AiCorrelateRequest {
     pub severity_min: Option<String>,
     pub limit: Option<u32>,
     pub events_per_anchor: Option<u32>,
+}
+
+impl AiCorrelateRequest {
+    pub fn normalize_limits(mut self, policy: AiCorrelateLimitPolicy) -> (Self, Option<u32>) {
+        let clamped_to = self
+            .events_per_anchor
+            .filter(|value| *value > policy.events_per_anchor_cap)
+            .map(|_| policy.events_per_anchor_cap);
+        if let Some(cap) = clamped_to {
+            self.events_per_anchor = Some(cap);
+        }
+        let reported = if policy.report_events_per_anchor_clamp {
+            clamped_to
+        } else {
+            None
+        };
+        (self, reported)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1444,6 +1562,20 @@ pub struct UnackErrorResponse {
     pub actor: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NotificationsRecentRequest {
+    pub limit: Option<i64>,
+    pub rule_id: Option<String>,
+    pub since: Option<String>,
+}
+
+impl NotificationsRecentRequest {
+    pub fn effective_limit(&self) -> i64 {
+        self.limit.unwrap_or(50).clamp(1, 500)
+    }
+}
+
 // ── AI checkpoint inventory + prune request structs (bead 0p8r.3) ────────────
 //
 // These are typed request shapes shared between the REST handlers in
@@ -1492,6 +1624,17 @@ pub struct AiPruneCheckpointsRequest {
     pub limit: Option<u32>,
 }
 
+impl AiPruneCheckpointsRequest {
+    pub fn validate_admin(&self) -> crate::app::ServiceResult<()> {
+        if !self.dry_run && !self.missing_only {
+            return Err(crate::app::ServiceError::InvalidInput(
+                "prune_ai_checkpoints requires missing_only=true for destructive runs".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Query parameters for `GET /api/db/integrity`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1514,6 +1657,22 @@ pub struct DbCheckpointRequest {
     pub mode: String,
 }
 
+impl DbCheckpointRequest {
+    pub const ALLOWED_MODES: &'static [&'static str] = &["passive", "full", "restart", "truncate"];
+
+    pub fn normalized_mode(&self) -> crate::app::ServiceResult<String> {
+        let mode = self.mode.to_ascii_lowercase();
+        if Self::ALLOWED_MODES.contains(&mode.as_str()) {
+            Ok(mode)
+        } else {
+            Err(crate::app::ServiceError::InvalidInput(format!(
+                "mode must be one of: {}",
+                Self::ALLOWED_MODES.join(", ")
+            )))
+        }
+    }
+}
+
 /// JSON body for `POST /api/db/vacuum`.
 ///
 /// `force` is intentionally `Option<bool>` (not `bool` with serde default):
@@ -1531,6 +1690,12 @@ pub struct DbVacuumRequest {
     /// Must be `Some(true)` to bypass the 2 GB size pre-flight on full
     /// VACUUM. See struct docs.
     pub force: Option<bool>,
+}
+
+impl DbVacuumRequest {
+    pub fn force_enabled(&self) -> bool {
+        self.force == Some(true)
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -13,8 +13,9 @@ Current source of truth:
 - `src/app/models.rs` defines request and response structs for typed action payloads.
 
 `docs/mcp/SCHEMA.md` is a human-maintained reference for that generated runtime
-schema. If it disagrees with `src/mcp/actions.rs` or `src/mcp/schemas.rs`, the
-Rust source wins.
+schema with drift tests; it is not itself automatically generated. If it
+disagrees with `src/mcp/actions.rs` or `src/mcp/schemas.rs`, the Rust source
+wins.
 
 ## Current Actions
 

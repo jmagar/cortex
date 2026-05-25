@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.7] - 2026-05-25
+
+### Changed
+
+- Moved more cross-surface business policy into the service layer: typed request
+  actors, service-owned AI cap normalization, notification recent defaults, DB
+  checkpoint/vacuum/prune guardrails, and MCP `abuse_investigate` incident id
+  passthrough.
+- Clarified docs that MCP is an exposure surface over shared service logic and
+  that the runtime MCP schema is generated from `ACTION_SPECS` while Markdown
+  schema docs are maintained and drift-checked.
+
 ## [0.32.6] - 2026-05-24
 
 ### Added
