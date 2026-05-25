@@ -56,6 +56,50 @@ fn parse_errors_accepts_limit_for_bounded_agent_output() {
 }
 
 #[test]
+fn parse_filter_collects_structured_filters_and_rejects_query_terms() {
+    let args = strings(&[
+        "--source-kind=docker-stream",
+        "--docker-host",
+        "dookie",
+        "--container=syslog-mcp",
+        "--stream=stdout",
+        "--event-action",
+        "die",
+        "--tool=claude",
+        "--project=/home/jmagar/workspace/syslog-mcp",
+        "--session-id=abc123",
+        "--limit=25",
+        "--json",
+    ]);
+
+    let command = parse_filter(&args).unwrap();
+
+    match command {
+        crate::cli::CliCommand::Filter(args) => {
+            assert_eq!(args.source_kind.as_deref(), Some("docker-stream"));
+            assert_eq!(args.docker_host.as_deref(), Some("dookie"));
+            assert_eq!(args.container.as_deref(), Some("syslog-mcp"));
+            assert_eq!(args.stream.as_deref(), Some("stdout"));
+            assert_eq!(args.event_action.as_deref(), Some("die"));
+            assert_eq!(args.tool.as_deref(), Some("claude"));
+            assert_eq!(
+                args.project.as_deref(),
+                Some("/home/jmagar/workspace/syslog-mcp")
+            );
+            assert_eq!(args.session_id.as_deref(), Some("abc123"));
+            assert_eq!(args.limit, Some(25));
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    let err = parse_filter(&strings(&["error"])).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("filter does not accept positional query terms"));
+}
+
+#[test]
 fn parse_patterns_accepts_limit_alias_for_top_n() {
     let args = strings(&["--limit=7"]);
 

@@ -629,6 +629,7 @@ pub fn search_ai_related_logs(
         query: None,
         hostname: params.hostname.clone(),
         source_ip: params.source_ip.clone(),
+        source_ip_prefix: None,
         severity: None,
         severity_in: Some(params.severity_in.clone()),
         app_name: params.app_name.clone(),
@@ -643,6 +644,7 @@ pub fn search_ai_related_logs(
         ai_tool: None,
         ai_project: None,
         ai_session_id: None,
+        event_action: None,
         exclude_ai: true,
     };
     append_filters(
@@ -1584,6 +1586,16 @@ fn append_filters(
         bindings.push(rusqlite::types::Value::Text(source_ip.clone()));
         *idx += 1;
     }
+    if let Some(ref prefix) = params.source_ip_prefix {
+        sql.push_str(&format!(" AND l.source_ip >= ?{}", *idx));
+        bindings.push(rusqlite::types::Value::Text(prefix.clone()));
+        *idx += 1;
+        if let Some(upper) = prefix_upper_bound(prefix) {
+            sql.push_str(&format!(" AND l.source_ip < ?{}", *idx));
+            bindings.push(rusqlite::types::Value::Text(upper));
+            *idx += 1;
+        }
+    }
     if let Some(ref s) = params.severity {
         sql.push_str(&format!(" AND l.severity = ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(s.clone()));
@@ -1661,6 +1673,11 @@ fn append_filters(
         bindings.push(rusqlite::types::Value::Text(session_id.clone()));
         *idx += 1;
     }
+    if let Some(ref event_action) = params.event_action {
+        sql.push_str(&format!(" AND l.event_action = ?{}", *idx));
+        bindings.push(rusqlite::types::Value::Text(event_action.clone()));
+        *idx += 1;
+    }
     if params.exclude_ai {
         sql.push_str(
             " AND (l.ai_project IS NULL OR l.ai_project = '')
@@ -1678,6 +1695,18 @@ fn append_filters(
               )",
         );
     }
+}
+
+fn prefix_upper_bound(prefix: &str) -> Option<String> {
+    let mut bytes = prefix.as_bytes().to_vec();
+    for idx in (0..bytes.len()).rev() {
+        if bytes[idx] != u8::MAX {
+            bytes[idx] += 1;
+            bytes.truncate(idx + 1);
+            return String::from_utf8(bytes).ok();
+        }
+    }
+    None
 }
 
 pub(super) fn map_row(row: &rusqlite::Row) -> rusqlite::Result<LogEntry> {

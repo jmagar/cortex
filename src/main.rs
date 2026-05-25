@@ -452,6 +452,7 @@ impl Mode {
                 if matches!(
                     command.as_str(),
                     "search"
+                        | "filter"
                         | "tail"
                         | "errors"
                         | "hosts"
@@ -742,6 +743,7 @@ fn print_usage() {
   syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
   syslog mcp          Start query-only MCP stdio transport
   syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]
+  syslog filter [--hostname HOST] [--source-ip SOURCE] [--source-kind KIND] [--tool TOOL] [--project PATH] [--session-id ID] [--container NAME] [--docker-host HOST] [--stream stdout|stderr] [--event-action ACTION] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]
   syslog tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
   syslog errors [--from TIME] [--to TIME] [--limit N] [--json]
   syslog hosts [--json]

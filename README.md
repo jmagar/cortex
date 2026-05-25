@@ -24,13 +24,14 @@ The daemon listens on a single port for both UDP and TCP syslog (default `1514`)
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, or `help`.
+One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md).
 
 | Action | Purpose |
 | --- | --- |
 | `search` | Full-text search with filters |
+| `filter` | Structured filter-only log retrieval |
 | `tail` | Recent log entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
@@ -114,7 +115,7 @@ Full-text search across all syslog messages with optional filters. Uses SQLite F
 }
 ```
 
-**Examples**
+**FTS5 examples**
 
 ```
 query: "kernel panic"           # implicit AND: both terms must appear
@@ -125,6 +126,14 @@ query: '"connection refused"'  # exact phrase (bypasses stemming)
 query: "error*"                # prefix wildcard
 query: "restart*"              # matches restart, restarted, restarting
 ```
+
+### `syslog filter`
+
+Structured filter-only retrieval for correlation workflows. This action rejects `query`; use `search` for FTS5 message-body search.
+
+Common filters match `search`: `hostname`, `source_ip`, `severity`, `app_name`, `facility`, `exclude_facility`, `process_id`, `from`, `to`, `received_from`, `received_to`, and `limit`.
+
+Correlation aliases include `source_kind` (`docker-stream`, `docker-event`, `agent-command`, `shell-history`, `transcript`, `claude`, `codex`, `gemini`), plus `tool`, `project`, `session_id`, `container`, `docker_host`, `stream`, and `event_action`.
 
 ---
 

@@ -357,6 +357,108 @@ async fn search_logs_rejects_invalid_severity() {
 }
 
 #[tokio::test]
+async fn filter_logs_maps_docker_stream_alias_to_source_prefix() {
+    let (service, pool, _dir) = test_service();
+    let mut stdout = entry(
+        "2026-01-01T00:00:00Z",
+        "dookie",
+        "info",
+        "docker stdout",
+        "docker://dookie/syslog-mcp/stdout",
+    );
+    stdout.app_name = Some("syslog-mcp".into());
+    let mut other = entry(
+        "2026-01-01T00:00:01Z",
+        "dookie",
+        "info",
+        "other stdout",
+        "docker://dookie/other/stdout",
+    );
+    other.app_name = Some("other".into());
+    insert_logs_batch(&pool, &[stdout, other]).unwrap();
+
+    let response = service
+        .filter_logs(FilterLogsRequest {
+            source_kind: Some("docker-stream".into()),
+            docker_host: Some("dookie".into()),
+            container: Some("syslog-mcp".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.count, 1);
+    assert_eq!(response.logs[0].message, "docker stdout");
+}
+
+#[tokio::test]
+async fn filter_logs_rejects_queryless_json_only_source_kind() {
+    let (service, _pool, _dir) = test_service();
+
+    let err = service
+        .filter_logs(FilterLogsRequest {
+            source_kind: Some("otlp".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("not indexed separately in v1"));
+}
+
+#[tokio::test]
+async fn filter_logs_rejects_conflicting_source_kind_tool_alias() {
+    let (service, _pool, _dir) = test_service();
+
+    let err = service
+        .filter_logs(FilterLogsRequest {
+            source_kind: Some("claude".into()),
+            tool: Some("codex".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("source_kind=claude conflicts with tool=codex"));
+}
+
+#[tokio::test]
+async fn filter_logs_transcript_source_kind_excludes_agent_commands() {
+    let (service, pool, _dir) = test_service();
+
+    let transcript = ai_entry("2026-01-01T00:00:00Z", "transcript row");
+    let mut agent_command = entry(
+        "2026-01-01T00:00:01Z",
+        "localhost",
+        "info",
+        "agent command row",
+        "agent-command://localhost/codex/sess-1",
+    );
+    agent_command.ai_tool = Some("codex".into());
+    agent_command.ai_project = Some("/tmp/project".into());
+    agent_command.ai_session_id = Some("sess-1".into());
+
+    insert_logs_batch(&pool, &[transcript, agent_command]).unwrap();
+
+    let response = service
+        .filter_logs(FilterLogsRequest {
+            source_kind: Some("transcript".into()),
+            tool: Some("codex".into()),
+            project: Some("/tmp/project".into()),
+            session_id: Some("sess-1".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.count, 1);
+    assert_eq!(response.logs[0].message, "transcript row");
+    assert!(response.logs[0].source_ip.starts_with("transcript://"));
+}
+
+#[tokio::test]
 async fn health_check_runs_simple_database_query() {
     let (service, _pool, _dir) = test_service();
 

@@ -80,6 +80,12 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         cost: Cost::Cheap,
     },
     ActionSpec {
+        name: "filter",
+        scope: Scope::Read,
+        description: "Filter logs by indexed fields without a full-text query",
+        cost: Cost::Cheap,
+    },
+    ActionSpec {
         name: "tail",
         scope: Scope::Read,
         description: "Stream the most recent log entries",

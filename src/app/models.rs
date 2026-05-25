@@ -748,6 +748,39 @@ pub struct SearchLogsRequest {
     pub received_from: Option<String>,
     pub received_to: Option<String>,
     pub limit: Option<u32>,
+    pub source_kind: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub session_id: Option<String>,
+    pub container: Option<String>,
+    pub docker_host: Option<String>,
+    pub stream: Option<String>,
+    pub event_action: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FilterLogsRequest {
+    pub hostname: Option<String>,
+    pub source_ip: Option<String>,
+    pub severity: Option<String>,
+    pub app_name: Option<String>,
+    pub facility: Option<String>,
+    pub exclude_facility: Option<String>,
+    pub process_id: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub received_from: Option<String>,
+    pub received_to: Option<String>,
+    pub limit: Option<u32>,
+    pub source_kind: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub session_id: Option<String>,
+    pub container: Option<String>,
+    pub docker_host: Option<String>,
+    pub stream: Option<String>,
+    pub event_action: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

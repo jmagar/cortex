@@ -58,6 +58,7 @@ pub use models::{
     DbVacuumResult,
     ErrorSignatureEntry,
     ErrorSummaryEntry,
+    FilterLogsRequest,
     GetErrorsRequest,
     GetErrorsResponse,
     GetLogRequest,

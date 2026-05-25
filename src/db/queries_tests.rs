@@ -460,6 +460,82 @@ fn search_logs_exclude_ai_filters_structured_and_transcript_app_rows() {
 }
 
 #[test]
+fn search_logs_filters_by_source_ip_prefix_without_fts() {
+    let (pool, _dir) = test_pool();
+    let mut docker_stdout = make_entry(
+        "2026-01-01T00:00:00Z",
+        "dookie",
+        "info",
+        "container stdout line",
+    );
+    docker_stdout.source_ip = "docker://dookie/syslog-mcp/stdout".into();
+
+    let mut docker_stderr = make_entry(
+        "2026-01-01T00:00:01Z",
+        "dookie",
+        "warning",
+        "container stderr line",
+    );
+    docker_stderr.source_ip = "docker://dookie/syslog-mcp/stderr".into();
+
+    let mut other = make_entry(
+        "2026-01-01T00:00:02Z",
+        "dookie",
+        "info",
+        "different container line",
+    );
+    other.source_ip = "docker://dookie/other/stdout".into();
+
+    insert_logs_batch(&pool, &[docker_stdout, docker_stderr, other]).unwrap();
+
+    let rows = search_logs(
+        &pool,
+        &SearchParams {
+            source_ip_prefix: Some("docker://dookie/syslog-mcp/".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert!(rows
+        .iter()
+        .all(|row| row.source_ip.starts_with("docker://dookie/syslog-mcp/")));
+}
+
+#[test]
+fn search_logs_filters_by_event_action_column() {
+    let (pool, _dir) = test_pool();
+    let mut die = make_entry("2026-01-01T00:00:00Z", "dookie", "notice", "container died");
+    die.source_ip = "docker-event://dookie/syslog-mcp/die".into();
+    die.event_action = Some("die".into());
+
+    let mut start = make_entry(
+        "2026-01-01T00:00:01Z",
+        "dookie",
+        "notice",
+        "container started",
+    );
+    start.source_ip = "docker-event://dookie/syslog-mcp/start".into();
+    start.event_action = Some("start".into());
+
+    insert_logs_batch(&pool, &[die, start]).unwrap();
+
+    let rows = search_logs(
+        &pool,
+        &SearchParams {
+            source_ip_prefix: Some("docker-event://".into()),
+            event_action: Some("die".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].message, "container died");
+}
+
+#[test]
 fn search_ai_sessions_groups_results() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(

@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 
 use super::parse_common::{parse_output_args, parse_u32_flag, value_after_equals, FlagCursor};
 use super::{
-    CliCommand, CorrelateArgs, IncidentArgs, IngestRateArgs, PatternsArgs, SearchArgs,
+    CliCommand, CorrelateArgs, FilterArgs, IncidentArgs, IngestRateArgs, PatternsArgs, SearchArgs,
     SessionsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
@@ -66,6 +66,105 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
     }
     parsed.query = (!query.is_empty()).then(|| query.join(" "));
     Ok(CliCommand::Search(parsed))
+}
+
+pub(crate) fn parse_filter(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = FilterArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--source-ip" => parsed.source_ip = Some(flags.value("--source-ip")?),
+            "--severity" => parsed.severity = Some(flags.value("--severity")?),
+            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--facility" => parsed.facility = Some(flags.value("--facility")?),
+            "--exclude-facility" => {
+                parsed.exclude_facility = Some(flags.value("--exclude-facility")?)
+            }
+            "--process-id" => parsed.process_id = Some(flags.value("--process-id")?),
+            "--from" => parsed.from = Some(flags.value("--from")?),
+            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--received-from" => parsed.received_from = Some(flags.value("--received-from")?),
+            "--received-to" => parsed.received_to = Some(flags.value("--received-to")?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            "--source-kind" => parsed.source_kind = Some(flags.value("--source-kind")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--session-id" => parsed.session_id = Some(flags.value("--session-id")?),
+            "--container" => parsed.container = Some(flags.value("--container")?),
+            "--docker-host" => parsed.docker_host = Some(flags.value("--docker-host")?),
+            "--stream" => parsed.stream = Some(flags.value("--stream")?),
+            "--event-action" => parsed.event_action = Some(flags.value("--event-action")?),
+            "-h" | "--help" => bail!("use `syslog --help` for usage"),
+            _ if arg.starts_with("--hostname=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            }
+            _ if arg.starts_with("--source-ip=") => {
+                parsed.source_ip = Some(value_after_equals(arg, "--source-ip")?)
+            }
+            _ if arg.starts_with("--severity=") => {
+                parsed.severity = Some(value_after_equals(arg, "--severity")?)
+            }
+            _ if arg.starts_with("--app-name=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            }
+            _ if arg.starts_with("--facility=") => {
+                parsed.facility = Some(value_after_equals(arg, "--facility")?)
+            }
+            _ if arg.starts_with("--exclude-facility=") => {
+                parsed.exclude_facility = Some(value_after_equals(arg, "--exclude-facility")?)
+            }
+            _ if arg.starts_with("--process-id=") => {
+                parsed.process_id = Some(value_after_equals(arg, "--process-id")?)
+            }
+            _ if arg.starts_with("--from=") => {
+                parsed.from = Some(value_after_equals(arg, "--from")?)
+            }
+            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--received-from=") => {
+                parsed.received_from = Some(value_after_equals(arg, "--received-from")?)
+            }
+            _ if arg.starts_with("--received-to=") => {
+                parsed.received_to = Some(value_after_equals(arg, "--received-to")?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ if arg.starts_with("--source-kind=") => {
+                parsed.source_kind = Some(value_after_equals(arg, "--source-kind")?)
+            }
+            _ if arg.starts_with("--tool=") => {
+                parsed.tool = Some(value_after_equals(arg, "--tool")?)
+            }
+            _ if arg.starts_with("--project=") => {
+                parsed.project = Some(value_after_equals(arg, "--project")?)
+            }
+            _ if arg.starts_with("--session-id=") => {
+                parsed.session_id = Some(value_after_equals(arg, "--session-id")?)
+            }
+            _ if arg.starts_with("--container=") => {
+                parsed.container = Some(value_after_equals(arg, "--container")?)
+            }
+            _ if arg.starts_with("--docker-host=") => {
+                parsed.docker_host = Some(value_after_equals(arg, "--docker-host")?)
+            }
+            _ if arg.starts_with("--stream=") => {
+                parsed.stream = Some(value_after_equals(arg, "--stream")?)
+            }
+            _ if arg.starts_with("--event-action=") => {
+                parsed.event_action = Some(value_after_equals(arg, "--event-action")?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown filter option: {arg}"),
+            _ => {
+                bail!("filter does not accept positional query terms; use `search` for FTS queries")
+            }
+        }
+    }
+    Ok(CliCommand::Filter(parsed))
 }
 
 pub(crate) fn parse_tail(args: &[String]) -> Result<CliCommand> {

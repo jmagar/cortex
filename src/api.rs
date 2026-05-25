@@ -17,10 +17,10 @@ use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateRequest,
     AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, CorrelateEventsRequest,
-    DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, GetErrorsRequest, GetLogRequest,
-    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, PatternsRequest,
-    ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, ServiceError,
+    DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, GetErrorsRequest,
+    GetLogRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
+    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
+    PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, ServiceError,
     SilentHostsRequest, SimilarIncidentsRequest, SyslogService, TailLogsRequest, TimelineRequest,
     UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
@@ -222,6 +222,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
     let routes = Router::new()
         // --- syslog queries ---
         .route("/api/search", get(search))
+        .route("/api/filter", get(filter))
         .route("/api/tail", get(tail))
         .route("/api/errors", get(errors))
         .route("/api/hosts", get(hosts))
@@ -316,6 +317,14 @@ struct SearchQuery {
     received_from: Option<String>,
     received_to: Option<String>,
     limit: Option<u32>,
+    source_kind: Option<String>,
+    tool: Option<String>,
+    project: Option<String>,
+    session_id: Option<String>,
+    container: Option<String>,
+    docker_host: Option<String>,
+    stream: Option<String>,
+    event_action: Option<String>,
 }
 
 async fn search(
@@ -339,9 +348,24 @@ async fn search(
                 received_from: query.received_from,
                 received_to: query.received_to,
                 limit: query.limit,
+                source_kind: query.source_kind,
+                tool: query.tool,
+                project: query.project,
+                session_id: query.session_id,
+                container: query.container,
+                docker_host: query.docker_host,
+                stream: query.stream,
+                event_action: query.event_action,
             })
             .await,
     )
+}
+
+async fn filter(
+    State(state): State<ApiState>,
+    Query(query): Query<FilterLogsRequest>,
+) -> impl IntoResponse {
+    respond(state.service.filter_logs(query).await)
 }
 
 #[derive(Debug, Deserialize)]

@@ -4,8 +4,8 @@ use super::parse_admin::{parse_compose, parse_db, parse_service, parse_setup, pa
 use super::parse_ai::parse_ai;
 use super::parse_command_log::{parse_agent_command, parse_shell};
 use super::parse_logs::{
-    parse_correlate, parse_errors, parse_hosts, parse_incident, parse_ingest_rate, parse_patterns,
-    parse_search, parse_sessions, parse_source_ips, parse_tail, parse_timeline,
+    parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_ingest_rate,
+    parse_patterns, parse_search, parse_sessions, parse_source_ips, parse_tail, parse_timeline,
 };
 use super::{commands, parse_config, CliCommand};
 
@@ -15,6 +15,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         .ok_or_else(|| anyhow!("CLI command is required"))?;
     match command.as_str() {
         "search" => parse_search(rest),
+        "filter" => parse_filter(rest),
         "tail" => parse_tail(rest),
         "errors" => parse_errors(rest),
         "hosts" => parse_hosts(rest),
