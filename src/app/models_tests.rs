@@ -101,3 +101,66 @@ fn ai_inventory_conversions_preserve_counts() {
     assert_eq!(projects.total_projects, 1);
     assert!(!projects.truncated);
 }
+
+#[test]
+fn request_actor_prefers_verified_email_for_display() {
+    let actor = RequestActor::mcp_identity(Some("sub-123".into()), Some("me@example.com".into()));
+
+    assert_eq!(actor.surface, "mcp");
+    assert_eq!(actor.display, "me@example.com");
+    assert_eq!(actor.subject.as_deref(), Some("sub-123"));
+    assert_eq!(actor.email.as_deref(), Some("me@example.com"));
+}
+
+#[test]
+fn ai_correlate_rest_policy_clamps_and_reports_effective_limit() {
+    let (req, clamped_to) = AiCorrelateRequest {
+        events_per_anchor: Some(10_000),
+        ..Default::default()
+    }
+    .normalize_limits(AiCorrelateLimitPolicy::REST);
+
+    assert_eq!(req.events_per_anchor, Some(50));
+    assert_eq!(clamped_to, Some(50));
+}
+
+#[test]
+fn notifications_recent_request_owns_default_and_limit_clamp() {
+    assert_eq!(
+        NotificationsRecentRequest {
+            limit: None,
+            rule_id: None,
+            since: None,
+        }
+        .effective_limit(),
+        50
+    );
+    assert_eq!(
+        NotificationsRecentRequest {
+            limit: Some(10_000),
+            rule_id: None,
+            since: None,
+        }
+        .effective_limit(),
+        500
+    );
+}
+
+#[test]
+fn db_checkpoint_request_validates_allowed_modes() {
+    assert_eq!(
+        DbCheckpointRequest {
+            mode: "FULL".into()
+        }
+        .normalized_mode()
+        .unwrap(),
+        "full"
+    );
+
+    let err = DbCheckpointRequest {
+        mode: "evil".into(),
+    }
+    .normalized_mode()
+    .unwrap_err();
+    assert!(err.to_string().contains("mode must be one of"));
+}

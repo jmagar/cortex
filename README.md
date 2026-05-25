@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/syslog-mcp)](https://crates.io/crates/syslog-mcp) [![ghcr.io](https://img.shields.io/badge/ghcr.io-jmagar%2Fsyslog--mcp-blue?logo=docker)](https://github.com/jmagar/syslog-mcp/pkgs/container/syslog-mcp)
 
-Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog over UDP and TCP, stores it in SQLite with FTS5 full-text indexing, and exposes action-based log search, inventory, correlation, status, and analysis tools to MCP clients.
+Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog over UDP and TCP, stores it in SQLite with FTS5 full-text indexing, and exposes action-based log search, inventory, correlation, status, and analysis tools through MCP, REST, and CLI adapters backed by the shared service layer.
 
 ## Overview
 
@@ -19,6 +19,8 @@ Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog
 ```
 
 The daemon listens on a single port for both UDP and TCP syslog (default `1514`). All inbound messages are parsed, batched, and written to SQLite with full-text indexing. The MCP HTTP server runs on a separate port (default `3100`) and uses RMCP Streamable HTTP in stateless JSON-response mode. Local stdio-only MCP clients can launch `syslog mcp`, a query-only MCP process that reads the same SQLite database without starting syslog listeners or the HTTP server.
+
+MCP is an exposure surface, not the owner of log-intelligence business policy. Shared defaults, limits, validation, audit identity, correlation behavior, and safety gates should live in `SyslogService` or service-owned operation models so MCP, REST, and CLI remain consistent.
 
 ---
 

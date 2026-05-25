@@ -75,7 +75,7 @@ pub(crate) async fn run_db_checkpoint(mode: &CliMode, args: DbCheckpointArgs) ->
         mode: chk_mode.clone(),
     };
     let response = match mode {
-        CliMode::Local(service) => service.db_checkpoint(chk_mode).await?,
+        CliMode::Local(service) => service.db_checkpoint_checked(req.clone()).await?,
         CliMode::Http(client) => http_or_cancel(client.db_checkpoint(&req)).await?,
     };
     print_db_checkpoint_response(&response, json)?;
@@ -90,20 +90,9 @@ pub(crate) async fn run_db_vacuum(mode: &CliMode, args: DbVacuumArgs) -> Result<
     let req = args.into_request();
     let response = match mode {
         CliMode::Local(service) => {
-            // Mirror the API's 2GB pre-flight (bead 0p8r.4 / eng-review C3)
-            // so a local invocation can't bypass the guard just by skipping
-            // --http. Read the LIVE logical size, not a cached snapshot.
-            if req.full && req.force != Some(true) {
-                let size = service.db_logical_size_bytes().await?;
-                if size > crate::api::FULL_VACUUM_SIZE_GUARD_BYTES {
-                    let gb = size as f64 / (1024.0 * 1024.0 * 1024.0);
-                    bail!(
-                        "DB size {gb:.2} GB; full VACUUM would block ingest. \
-                         Pass --force to override, or use incremental (--pages N) instead."
-                    );
-                }
-            }
-            service.db_vacuum(req.full, req.incremental_pages).await?
+            service
+                .db_vacuum_checked(req.clone(), crate::api::FULL_VACUUM_SIZE_GUARD_BYTES)
+                .await?
         }
         CliMode::Http(client) => http_or_cancel(client.db_vacuum(&req)).await?,
     };

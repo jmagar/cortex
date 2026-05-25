@@ -27,10 +27,10 @@
 - Modify: `src/app/service.rs`
 - Add if useful: `src/app/context.rs` or `src/app/admin.rs`
 
-- [ ] Add a typed caller context, for example `RequestActor`, with surface, display name, and optional subject/email fields.
-- [ ] Add constructors for API, MCP, CLI, and internal/system actors.
-- [ ] Replace string-only service mutation entrypoints incrementally where audit provenance matters first: notification ack/unack, incident operations, and admin operations.
-- [ ] Add unit tests for actor display formatting and provenance retention.
+- [x] Add a typed caller context, for example `RequestActor`, with surface, display name, and optional subject/email fields.
+- [x] Add constructors for API, MCP, CLI, and internal/system actors.
+- [x] Replace string-only service mutation entrypoints incrementally where audit provenance matters first: notification ack/unack, incident operations, and admin operations.
+- [x] Add unit tests for actor display formatting and provenance retention.
 
 ## Task 2: Move AI Limit Policy Into Service
 
@@ -41,11 +41,11 @@
 - Modify: `src/mcp/tools.rs`
 - Modify tests beside touched modules.
 
-- [ ] Add service-owned normalization for correlation/investigation request limits and `events_per_anchor`.
-- [ ] Return effective limit/cap/truncation metadata from the service instead of patching REST responses after execution.
-- [ ] Align MCP and REST behavior, or introduce an explicit service execution profile if compatibility requires different caps.
-- [ ] Fix `abuse_investigate` so MCP passes `incident_id` through when provided.
-- [ ] Add tests for defaults, caps, truncation metadata, and `incident_id` lookup.
+- [x] Add service-owned normalization for correlation/investigation request limits and `events_per_anchor`.
+- [x] Return effective limit/cap/truncation metadata from the service instead of patching REST responses after execution.
+- [x] Align MCP and REST behavior, or introduce an explicit service execution profile if compatibility requires different caps.
+- [x] Fix `abuse_investigate` so MCP passes `incident_id` through when provided.
+- [x] Add tests for defaults, caps, truncation metadata, and `incident_id` lookup.
 
 ## Task 3: Move Compose Diagnostics Policy Into Service
 
@@ -55,11 +55,11 @@
 - Modify: `src/api.rs`
 - Modify: `src/mcp/tools.rs`
 
-- [ ] Create a service-owned compose diagnostics operation for status and doctor.
-- [ ] Centralize target override rejection/defaulting, redacted projection, readiness rules, blocking execution, and error mapping.
-- [ ] Share one process-wide limiter across REST and MCP.
-- [ ] Preserve existing `compose_status` and `compose_doctor` response shape.
-- [ ] Add service tests for default target, rejected target override, projection shape, and limiter behavior where practical.
+- [x] Create a service-owned compose diagnostics operation for status and doctor.
+- [x] Centralize target override rejection/defaulting, redacted projection, readiness rules, blocking execution, and error mapping.
+- [x] Share one process-wide limiter across REST and MCP.
+- [x] Preserve existing `compose_status` and `compose_doctor` response shape.
+- [x] Add service tests for default target, rejected target override, projection shape, and limiter behavior where practical.
 
 ## Task 4: Centralize MCP Request Validation
 
@@ -68,10 +68,10 @@
 - Modify: `src/app/models.rs`
 - Modify tests beside touched modules.
 
-- [ ] Convert high-risk MCP actions from manual `get_*` extraction to typed payload deserialization plus service-owned validation.
-- [ ] Prioritize `abuse_investigate`, AI correlation/investigation, notifications, and DB maintenance actions.
-- [ ] Keep generic JSON parsing errors in MCP, but move semantic bounds and required business fields into app request constructors.
-- [ ] Add regression tests for missing-field and invalid-limit errors.
+- [x] Convert high-risk MCP actions from manual `get_*` extraction to typed payload deserialization plus service-owned validation.
+- [x] Prioritize `abuse_investigate`, AI correlation/investigation, notifications, and DB maintenance actions.
+- [x] Keep generic JSON parsing errors in MCP, but move semantic bounds and required business fields into app request constructors.
+- [x] Add regression tests for missing-field and invalid-limit errors.
 
 ## Task 5: Move Notification Policy Into Service
 
@@ -82,11 +82,11 @@
 - Modify: `src/api.rs`
 - Modify: `src/cli/dispatch_surface.rs`
 
-- [ ] Add `NotificationsRecentRequest` with shared default and limit normalization.
-- [ ] Route MCP, REST, and CLI recent-notification queries through that request model.
-- [ ] Change notification test delivery so config/destination policy is service-owned.
-- [ ] Do not expose arbitrary destination URL/config strings as generic service primitives unless an explicit trusted-admin operation documents the trust boundary.
-- [ ] Add tests for defaults, max limits, disabled notification config, and caller identity.
+- [x] Add `NotificationsRecentRequest` with shared default and limit normalization.
+- [x] Route MCP, REST, and CLI recent-notification queries through that request model.
+- [x] Change notification test delivery so config/destination policy is service-owned.
+- [x] Do not expose arbitrary destination URL/config strings as generic service primitives unless an explicit trusted-admin operation documents the trust boundary.
+- [x] Add tests for defaults, max limits, disabled notification config, and caller identity.
 
 ## Task 6: Move DB Maintenance Safety Gates Into Service
 
@@ -96,11 +96,11 @@
 - Modify: `src/api.rs`
 - Modify tests beside touched modules.
 
-- [ ] Move checkpoint mode allowlist into service/admin request validation.
-- [ ] Move vacuum force/size thresholds and single-flight policy into service/admin operations.
-- [ ] Move AI checkpoint prune dry-run, confirmation, and audit gates into service/admin operations.
-- [ ] Leave HTTP handlers responsible only for request extraction, auth, service call, and response rendering.
-- [ ] Add service tests that prove unsafe calls are rejected without going through HTTP.
+- [x] Move checkpoint mode allowlist into service/admin request validation.
+- [x] Move vacuum force/size thresholds and single-flight policy into service/admin operations.
+- [x] Move AI checkpoint prune dry-run, confirmation, and audit gates into service/admin operations.
+- [x] Leave HTTP handlers responsible only for request extraction, auth, service call, and response rendering.
+- [x] Add service tests that prove unsafe calls are rejected without going through HTTP.
 
 ## Task 7: Refresh Docs And Contract Tests
 
@@ -111,10 +111,10 @@
 - Modify: `docs/mcp/*.md` as needed
 - Modify tests for schema/docs drift where needed.
 
-- [ ] Update docs so they describe MCP as an exposure surface, not the owner of correlation or other business policy.
-- [ ] Clarify that runtime MCP schema is generated from `src/mcp/actions.rs` and exposed as `syslog://schema/mcp-tool`; maintained docs are drift-checked, not automatically generated unless generation is actually added.
-- [ ] Add or adjust drift tests for any new generated contract.
-- [ ] Run stale phrase checks against the old ownership language.
+- [x] Update docs so they describe MCP as an exposure surface, not the owner of correlation or other business policy.
+- [x] Clarify that runtime MCP schema is generated from `src/mcp/actions.rs` and exposed as `syslog://schema/mcp-tool`; maintained docs are drift-checked, not automatically generated unless generation is actually added.
+- [x] Add or adjust drift tests for any new generated contract.
+- [x] Run stale phrase checks against the old ownership language.
 
 ## Task 8: Version, Verification, And Closeout
 
@@ -122,11 +122,12 @@
 - Modify version-bearing files required by repo policy.
 - Modify: `CHANGELOG.md`
 
-- [ ] Bump patch version for the refactor branch unless the final commit semantics require a different bump.
-- [ ] Add a CHANGELOG entry summarizing the service-boundary cleanup.
-- [ ] Run `cargo fmt`.
-- [ ] Run `cargo test`.
-- [ ] Run `cargo clippy` if time permits before push.
-- [ ] Run `git diff --check`.
-- [ ] Update and close completed child beads; leave explicit notes on deferred children.
-- [ ] Commit, push, and open or update the PR according to `work-it`.
+- [x] Bump patch version for the refactor branch unless the final commit semantics require a different bump.
+- [x] Add a CHANGELOG entry summarizing the service-boundary cleanup.
+- [x] Run `cargo fmt`.
+- [x] Run `cargo test`.
+- [x] Run `cargo clippy` if time permits before push.
+- [x] Run `git diff --check`.
+- [x] Update session documentation for the completed service-boundary pass.
+- [x] Update and close completed child beads; leave explicit notes on deferred children.
+- [x] Commit, push, and open or update the PR according to `work-it`.
