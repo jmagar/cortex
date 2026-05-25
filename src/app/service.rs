@@ -1057,11 +1057,7 @@ impl SyslogService {
         .await
     }
 
-    async fn db_vacuum(
-        &self,
-        full: bool,
-        incremental_pages: u32,
-    ) -> ServiceResult<DbVacuumResult> {
+    async fn db_vacuum(&self, full: bool, incremental_pages: u32) -> ServiceResult<DbVacuumResult> {
         let storage = self.storage.clone();
         self.run_db(move |pool| {
             let before_physical_size_bytes = db::physical_size_bytes(&storage.db_path)?;
