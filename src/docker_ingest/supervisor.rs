@@ -158,6 +158,14 @@ async fn run_host_once(
         observability,
     };
     for container in containers {
+        if !should_ingest_container(config, host, &container) {
+            tracing::info!(
+                host = %host.name,
+                container = %container.name,
+                "Docker ingest skipping excluded container"
+            );
+            continue;
+        }
         spawn_log_task_if_absent(&runtime, &mut log_tasks, container);
     }
 
@@ -212,7 +220,9 @@ async fn follow_container_events(
                     }
                 }
                 let containers = runtime.client.list_containers().await?;
-                for container in containers.into_iter().filter(|c| c.id == id) {
+                for container in containers.into_iter().filter(|c| {
+                    c.id == id && should_ingest_container(runtime.config, runtime.host, c)
+                }) {
                     spawn_log_task_if_absent(runtime, log_tasks, container);
                 }
             }
@@ -378,7 +388,7 @@ async fn follow_container_logs_once(
 ) -> Result<()> {
     let checkpoint = load_checkpoint(pool, host_name, container_id)?
         .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok());
-    let since_unix = checkpoint.map(|dt| dt.timestamp()).unwrap_or(0);
+    let since_unix = docker_log_since_unix(checkpoint.as_ref(), chrono::Utc::now().timestamp());
     let mut logs = docker.logs(
         container_id,
         Some(DockerHostClient::logs_options(since_unix)),
@@ -425,6 +435,31 @@ fn entry_is_at_or_before_checkpoint(
         })
         .is_some_and(|entry_ts| entry_ts <= *checkpoint)
 }
+
+fn should_ingest_container(
+    config: &DockerIngestConfig,
+    host: &DockerHostConfig,
+    container: &ContainerMeta,
+) -> bool {
+    !container_name_is_excluded(&config.excluded_containers, &container.name)
+        && !container_name_is_excluded(&host.excluded_containers, &container.name)
+}
+
+fn container_name_is_excluded(excluded_containers: &[String], container_name: &str) -> bool {
+    excluded_containers
+        .iter()
+        .any(|excluded| excluded.eq_ignore_ascii_case(container_name))
+}
+
+fn docker_log_since_unix(
+    checkpoint: Option<&chrono::DateTime<chrono::FixedOffset>>,
+    now_unix: i64,
+) -> i64 {
+    checkpoint
+        .map(|dt| dt.timestamp())
+        .unwrap_or_else(|| now_unix.saturating_sub(60))
+}
+
 #[cfg(test)]
 #[path = "supervisor_tests.rs"]
 mod tests;
