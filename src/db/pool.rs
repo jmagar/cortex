@@ -9,7 +9,7 @@ use crate::config::StorageConfig;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 15;
+pub const KNOWN_SCHEMA_VERSION: i64 = 16;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -99,6 +99,7 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         CREATE INDEX IF NOT EXISTS idx_logs_app_name  ON logs(app_name);
         CREATE INDEX IF NOT EXISTS idx_logs_host_time ON logs(hostname, timestamp);
         CREATE INDEX IF NOT EXISTS idx_logs_sev_time ON logs(severity, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_logs_app_name_timestamp ON logs(app_name, timestamp);
         CREATE INDEX IF NOT EXISTS idx_logs_received_at ON logs(received_at);
         CREATE INDEX IF NOT EXISTS idx_logs_hostname_received_at ON logs(hostname, received_at);
         CREATE INDEX IF NOT EXISTS idx_logs_source_ip_timestamp ON logs(source_ip, timestamp);
@@ -604,6 +605,23 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     if !migration_applied(&conn, 15)? {
         apply_migration_15_heartbeat(&conn)?;
         tracing::info!("Migration 15: created heartbeat telemetry tables and indexes");
+    }
+
+    if !migration_applied(&conn, 16)? {
+        tracing::info!(
+            "Migration 16: starting CREATE INDEX idx_logs_app_name_timestamp \
+             — may take time on large databases"
+        );
+        let started = std::time::Instant::now();
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_logs_app_name_timestamp
+                 ON logs(app_name, timestamp);
+             INSERT INTO schema_migrations (version) VALUES (16);",
+        )?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "Migration 16: app_name/timestamp search index created"
+        );
     }
 
     conn.execute_batch(

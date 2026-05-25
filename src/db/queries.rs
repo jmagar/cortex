@@ -14,6 +14,9 @@ use super::models::{
 };
 use super::pool::DbPool;
 
+const SEARCH_FTS_CANDIDATE_CAP: usize = 10_000;
+const SIMILAR_INCIDENT_FTS_CANDIDATE_CAP: usize = 5_000;
+
 /// Validate a user-supplied FTS5 query before execution.
 ///
 /// Limits:
@@ -33,6 +36,38 @@ pub fn validate_fts_query(query: &str) -> Result<()> {
         anyhow::bail!("Search query has too many terms ({term_count}); maximum is 16 terms");
     }
     Ok(())
+}
+
+fn search_logs_fts_sql(
+    query: &str,
+    params: &SearchParams,
+    limit: u32,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let mut sql = String::from(
+        "WITH fts_candidates(id, ts) AS MATERIALIZED (
+            SELECT l.id, l.timestamp
+            FROM logs_fts
+            JOIN logs l ON l.id = logs_fts.rowid
+            WHERE logs_fts MATCH ?1",
+    );
+    let mut bindings: Vec<rusqlite::types::Value> =
+        vec![rusqlite::types::Value::Text(query.to_string())];
+    let mut idx = 2;
+
+    append_filters(&mut sql, &mut bindings, &mut idx, params);
+    sql.push_str(&format!(
+        " ORDER BY logs_fts.rowid DESC
+          LIMIT {SEARCH_FTS_CANDIDATE_CAP}
+         )
+         SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
+                l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
+                l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
+         FROM fts_candidates c
+         JOIN logs l ON l.id = c.id
+         ORDER BY c.ts DESC, l.id DESC
+         LIMIT {limit}"
+    ));
+    (sql, bindings)
 }
 
 #[derive(Debug, Default)]
@@ -108,20 +143,7 @@ pub fn search_logs(pool: &DbPool, params: &SearchParams) -> Result<Vec<LogEntry>
     if let Some(ref query) = params.query {
         validate_fts_query(query)?;
 
-        let mut sql = String::from(
-            "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
-                    l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
-                    l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
-             FROM logs l
-             JOIN logs_fts ON logs_fts.rowid = l.id
-             WHERE logs_fts MATCH ?1",
-        );
-        let mut bindings: Vec<rusqlite::types::Value> =
-            vec![rusqlite::types::Value::Text(query.clone())];
-        let mut idx = 2;
-
-        append_filters(&mut sql, &mut bindings, &mut idx, params);
-        sql.push_str(&format!(" ORDER BY l.timestamp DESC LIMIT {limit}"));
+        let (sql, bindings) = search_logs_fts_sql(query, params, limit);
 
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
@@ -717,15 +739,14 @@ pub fn search_ai_abuse(pool: &DbPool, params: &AiAbuseParams) -> Result<AiAbuseR
     const CANDIDATE_CAP: usize = 10_000;
 
     let mut sql = String::from(
-        "SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
-                l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
-                l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
-         FROM logs_fts
-         JOIN logs l ON l.id = logs_fts.rowid
-         WHERE logs_fts MATCH ?1
-           AND l.ai_project IS NOT NULL AND l.ai_project != ''
-           AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
-           AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
+        "WITH candidates(id) AS MATERIALIZED (
+            SELECT l.id
+            FROM logs_fts
+            JOIN logs l ON l.id = logs_fts.rowid
+            WHERE logs_fts MATCH ?1
+              AND l.ai_project IS NOT NULL AND l.ai_project != ''
+              AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
+              AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
     );
     let mut bindings = vec![rusqlite::types::Value::Text(abuse_fts_query(&terms))];
     let mut idx = 2usize;
@@ -750,7 +771,14 @@ pub fn search_ai_abuse(pool: &DbPool, params: &AiAbuseParams) -> Result<AiAbuseR
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
     sql.push_str(&format!(
-        " ORDER BY l.timestamp DESC, l.id DESC LIMIT {}",
+        " ORDER BY logs_fts.rowid DESC LIMIT {}
+         )
+         SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
+                l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
+                l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
+         FROM candidates c
+         JOIN logs l ON l.id = c.id
+         ORDER BY l.timestamp DESC, l.id DESC",
         CANDIDATE_CAP + 1
     ));
 
@@ -1103,14 +1131,14 @@ fn ai_incident_anchor_sql(
     candidate_cap: usize,
 ) -> (String, Vec<rusqlite::types::Value>) {
     let mut sql = String::from(
-        "SELECT l.id, l.timestamp, l.hostname,
-                l.ai_tool, l.ai_project, l.ai_session_id, l.message
-         FROM logs_fts
-         JOIN logs l ON l.id = logs_fts.rowid
-         WHERE logs_fts MATCH ?1
-           AND l.ai_project IS NOT NULL AND l.ai_project != ''
-           AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
-           AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
+        "WITH candidates(id) AS MATERIALIZED (
+            SELECT l.id
+            FROM logs_fts
+            JOIN logs l ON l.id = logs_fts.rowid
+            WHERE logs_fts MATCH ?1
+              AND l.ai_project IS NOT NULL AND l.ai_project != ''
+              AND l.ai_tool IS NOT NULL AND l.ai_tool != ''
+              AND l.ai_session_id IS NOT NULL AND l.ai_session_id != ''",
     );
     let mut bindings = vec![rusqlite::types::Value::Text(abuse_fts_query(terms))];
     let mut idx = 2usize;
@@ -1136,7 +1164,12 @@ fn ai_incident_anchor_sql(
     }
     let _ = idx;
     sql.push_str(&format!(
-        " ORDER BY logs_fts.rowid ASC LIMIT {}",
+        " ORDER BY logs_fts.rowid ASC LIMIT {}
+         )
+         SELECT l.id, l.timestamp, l.hostname,
+                l.ai_tool, l.ai_project, l.ai_session_id, l.message
+         FROM candidates c
+         JOIN logs l ON l.id = c.id",
         candidate_cap + 1
     ));
     (sql, bindings)
@@ -1843,7 +1876,7 @@ pub fn similar_incidents_clusters(
     }
 
     sql.push_str(&format!(
-        " ORDER BY l.timestamp DESC LIMIT 5000
+        " ORDER BY logs_fts.rowid DESC LIMIT {SIMILAR_INCIDENT_FTS_CANDIDATE_CAP}
         ),
         bucketed AS (
             SELECT
@@ -2195,7 +2228,7 @@ pub fn incident_context_summary(
     // Total log count in window (system logs only, scoped by host/app).
     let total_logs: i64 = conn
         .query_row(
-            &format!("SELECT COUNT(*) FROM logs {agg_base_filter}"),
+            &format!("SELECT COUNT(*) FROM logs INDEXED BY idx_logs_timestamp {agg_base_filter}"),
             rusqlite::params_from_iter(agg_params.bindings.iter()),
             |r| r.get(0),
         )
@@ -2204,7 +2237,7 @@ pub fn incident_context_summary(
     // Counts by severity (system logs only, scoped by host/app).
     let mut by_sev_stmt = conn
         .prepare(&format!(
-            "SELECT severity, COUNT(*) FROM logs
+            "SELECT severity, COUNT(*) FROM logs INDEXED BY idx_logs_timestamp
              {agg_base_filter}
              GROUP BY severity
              ORDER BY COUNT(*) DESC"
@@ -2226,7 +2259,7 @@ pub fn incident_context_summary(
     // Counts by app_name (top 20, system logs only, scoped by host/app).
     let mut by_app_stmt = conn
         .prepare(&format!(
-            "SELECT app_name, COUNT(*) FROM logs
+            "SELECT app_name, COUNT(*) FROM logs INDEXED BY idx_logs_timestamp
              {agg_base_filter}
              GROUP BY app_name
              ORDER BY COUNT(*) DESC
@@ -2277,6 +2310,7 @@ pub fn incident_context_summary(
                 app_name, process_id, message, received_at, source_ip,
                 ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
          FROM logs
+         INDEXED BY idx_logs_timestamp
          WHERE timestamp BETWEEN ?1 AND ?2
            AND severity IN ({})
            AND (ai_project IS NULL OR ai_project = '')",

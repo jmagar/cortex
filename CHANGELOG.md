@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.9] - 2026-05-25
+
+### Fixed
+
+- Bounded broad FTS search candidate windows before sorting, added an
+  app/timestamp search index, and pinned incident-context window scans to the
+  timestamp index for better performance on large SQLite databases.
+
 ## [0.32.8] - 2026-05-25
 
 ### Fixed
