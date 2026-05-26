@@ -2,6 +2,8 @@ use std::io::{self, ErrorKind};
 use std::path::Path;
 use std::time::Instant;
 
+use tracing::warn;
+
 use crate::heartbeat_agent;
 
 use super::firstrun::parse_env;
@@ -210,8 +212,14 @@ fn heartbeat_agent_unit(
 
 fn read_setup_env_value(key: &str) -> Option<String> {
     let path = super::syslog_home_dir().ok()?.join(".env");
-    let raw = std::fs::read_to_string(path).ok()?;
-    parse_env(&raw).remove(key)
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => parse_env(&raw).remove(key),
+        Err(error) if error.kind() == ErrorKind::NotFound => None,
+        Err(error) => {
+            warn!(path = %path.display(), error = %error, "could not read env file for heartbeat setup");
+            None
+        }
+    }
 }
 
 fn shell_safe_value(value: &str) -> io::Result<String> {

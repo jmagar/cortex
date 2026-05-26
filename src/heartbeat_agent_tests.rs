@@ -209,6 +209,70 @@ fn generated_host_id_is_persisted_and_not_machine_id_shaped() {
     assert_ne!(first.len(), 64);
 }
 
+#[test]
+fn heartbeat_url_appends_path_to_bare_host() {
+    assert_eq!(
+        heartbeat_url("http://host:3100").unwrap(),
+        "http://host:3100/v1/heartbeats"
+    );
+}
+
+#[test]
+fn heartbeat_url_strips_trailing_slash_before_appending() {
+    assert_eq!(
+        heartbeat_url("http://host:3100/").unwrap(),
+        "http://host:3100/v1/heartbeats"
+    );
+}
+
+#[test]
+fn heartbeat_url_is_idempotent_when_path_already_present() {
+    assert_eq!(
+        heartbeat_url("http://host:3100/v1/heartbeats").unwrap(),
+        "http://host:3100/v1/heartbeats"
+    );
+}
+
+#[test]
+fn heartbeat_url_rejects_non_http_scheme() {
+    assert!(heartbeat_url("ftp://host:3100").is_err());
+}
+
+#[test]
+fn retry_buffer_zero_limit_discards_all_pushes() {
+    let mut buffer = RetryBuffer::new(0);
+    buffer.push(test_payload(1));
+    buffer.push(test_payload(2));
+    assert_eq!(buffer.len(), 0);
+    assert!(buffer.is_empty());
+}
+
+#[test]
+fn parse_meminfo_errors_on_missing_mem_total() {
+    let result = parse_meminfo("MemAvailable: 400 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("MemTotal"));
+}
+
+#[test]
+fn parse_meminfo_errors_on_missing_mem_available() {
+    let result = parse_meminfo("MemTotal: 1000 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("MemAvailable"));
+}
+
+#[test]
+fn parse_docker_states_maps_all_known_states() {
+    let containers = parse_docker_states(
+        "running\nexited\ndead\ncreated\nremoving\npaused\nrestarting\nunknown_future_state\n",
+    );
+    assert!(containers.reachable);
+    assert_eq!(containers.running, 1);
+    assert_eq!(containers.exited, 5); // exited + dead + created + removing + paused
+    assert_eq!(containers.restarting, 1);
+    // unknown_future_state should be ignored without panicking
+}
+
 fn test_payload(sequence: i64) -> HeartbeatPayload {
     HeartbeatPayload {
         schema_version: 1,

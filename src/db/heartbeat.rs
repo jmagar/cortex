@@ -3,6 +3,8 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use tracing::warn;
+
 use super::pool::DbPool;
 
 #[derive(Debug, Clone)]
@@ -160,9 +162,18 @@ fn heartbeat_flags(sample: &HeartbeatSampleState) -> HeartbeatStateFlags {
         .and_then(Value::as_i64)
         .unwrap_or(30)
         .max(1);
-    let received_at = chrono::DateTime::parse_from_rfc3339(&sample.received_at)
-        .map(|dt| dt.with_timezone(&chrono::Utc))
-        .ok();
+    let received_at = match chrono::DateTime::parse_from_rfc3339(&sample.received_at) {
+        Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
+        Err(error) => {
+            warn!(
+                heartbeat_id = sample.heartbeat_id,
+                received_at = %sample.received_at,
+                error = %error,
+                "heartbeat received_at timestamp failed to parse; heartbeat_late check skipped"
+            );
+            None
+        }
+    };
     let heartbeat_late = received_at.is_some_and(|received_at| {
         let elapsed = chrono::Utc::now().signed_duration_since(received_at);
         elapsed.num_milliseconds() > interval_secs * 2500
@@ -294,7 +305,13 @@ fn one_json(conn: &rusqlite::Connection, sql: &str, heartbeat_id: i64) -> Result
     let raw: Option<String> = conn
         .query_row(sql, [heartbeat_id], |row| row.get(0))
         .optional()?;
-    Ok(raw.and_then(|raw| serde_json::from_str(&raw).ok()))
+    Ok(raw.and_then(|raw| {
+        serde_json::from_str(&raw)
+            .map_err(|error| {
+                warn!(heartbeat_id, error = %error, "failed to parse heartbeat JSON column");
+            })
+            .ok()
+    }))
 }
 
 fn many_json(conn: &rusqlite::Connection, sql: &str, heartbeat_id: i64) -> Result<Vec<Value>> {
@@ -304,7 +321,13 @@ fn many_json(conn: &rusqlite::Connection, sql: &str, heartbeat_id: i64) -> Resul
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows
         .into_iter()
-        .filter_map(|raw| serde_json::from_str(&raw).ok())
+        .filter_map(|raw| {
+            serde_json::from_str(&raw)
+                .map_err(|error| {
+                    warn!(heartbeat_id, error = %error, "failed to parse heartbeat JSON row");
+                })
+                .ok()
+        })
         .collect())
 }
 

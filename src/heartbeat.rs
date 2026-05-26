@@ -67,7 +67,7 @@ async fn heartbeat_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> axum::response::Response {
-    if !is_authorized(&state, &headers) {
+    if !is_authorized(&state, &peer, &headers) {
         return unauthorized();
     }
 
@@ -102,9 +102,9 @@ async fn heartbeat_handler(
     }
 }
 
-fn is_authorized(state: &HeartbeatState, headers: &HeaderMap) -> bool {
+fn is_authorized(state: &HeartbeatState, peer: &SocketAddr, headers: &HeaderMap) -> bool {
     if matches!(state.auth_policy, AuthPolicy::LoopbackDev) {
-        return true;
+        return peer.ip().is_loopback();
     }
     let Some(expected) = state.api_token.as_deref() else {
         return false;
@@ -314,7 +314,10 @@ fn insert_metric_rows(
                 processes.running,
                 processes.sleeping,
                 processes.zombies,
-                serde_json::to_string(&processes.top).ok(),
+                Some(
+                    serde_json::to_string(&processes.top)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                ),
             ],
         )?;
     }
@@ -330,7 +333,10 @@ fn insert_metric_rows(
                 containers.running,
                 containers.exited + containers.restarting,
                 containers.unhealthy,
-                serde_json::to_string(&containers.details).ok(),
+                Some(
+                    serde_json::to_string(&containers.details)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                ),
             ],
         )?;
     }
@@ -349,7 +355,7 @@ struct HeartbeatIngestResponse {
 #[serde(deny_unknown_fields)]
 struct HeartbeatRequest {
     #[serde(default = "default_schema_version")]
-    schema_version: i64,
+    schema_version: u8,
     host: HeartbeatHost,
     sample: HeartbeatSample,
     agent: HeartbeatAgent,
@@ -369,7 +375,7 @@ struct HeartbeatRequest {
     gpu: Option<serde_json::Value>,
 }
 
-fn default_schema_version() -> i64 {
+fn default_schema_version() -> u8 {
     1
 }
 
@@ -462,8 +468,6 @@ struct HeartbeatDisk {
     read_bytes_per_sec: Option<f64>,
     #[serde(default)]
     write_bytes_per_sec: Option<f64>,
-    #[serde(flatten)]
-    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl HeartbeatDisk {
@@ -491,8 +495,6 @@ struct HeartbeatNetwork {
     rx_errors_per_sec: Option<f64>,
     #[serde(default)]
     tx_errors_per_sec: Option<f64>,
-    #[serde(flatten)]
-    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

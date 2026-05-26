@@ -195,6 +195,7 @@ pub struct HeartbeatCollector {
 }
 
 impl HeartbeatCollector {
+    #[cfg(test)]
     pub fn fake() -> Self {
         Self {
             probes: vec![
@@ -331,6 +332,7 @@ impl HeartbeatCollector {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 pub struct FakeProbe {
     name: &'static str,
@@ -339,6 +341,7 @@ pub struct FakeProbe {
     fail: bool,
 }
 
+#[cfg(test)]
 impl FakeProbe {
     pub fn cpu() -> Self {
         Self::new("cpu", || {
@@ -453,6 +456,7 @@ impl FakeProbe {
     }
 }
 
+#[cfg(test)]
 impl HeartbeatProbe for FakeProbe {
     fn name(&self) -> &'static str {
         self.name
@@ -628,24 +632,32 @@ impl HeartbeatProbe for LinuxContainerProbe {
 
     fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
         Box::pin(async {
-            let output = tokio::process::Command::new("docker")
+            match tokio::process::Command::new("docker")
                 .args(["ps", "-a", "--format", "{{.State}}"])
                 .output()
-                .await;
-            Ok(ProbeOutput::Containers(match output {
-                Ok(output) if output.status.success() => {
-                    parse_docker_states(&String::from_utf8_lossy(&output.stdout))
+                .await
+            {
+                Ok(output) if output.status.success() => Ok(ProbeOutput::Containers(
+                    parse_docker_states(&String::from_utf8_lossy(&output.stdout)),
+                )),
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    bail!("docker ps exited {}: {}", output.status, stderr.trim())
                 }
-                _ => HeartbeatContainers {
-                    runtime: Some("docker".to_string()),
-                    reachable: false,
-                    running: 0,
-                    exited: 0,
-                    restarting: 0,
-                    unhealthy: 0,
-                    details: Vec::new(),
-                },
-            }))
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    // Docker not installed — expected on non-Docker hosts
+                    Ok(ProbeOutput::Containers(HeartbeatContainers {
+                        runtime: None,
+                        reachable: false,
+                        running: 0,
+                        exited: 0,
+                        restarting: 0,
+                        unhealthy: 0,
+                        details: Vec::new(),
+                    }))
+                }
+                Err(error) => Err(anyhow::Error::from(error).context("spawn docker ps")),
+            }
         })
     }
 }
@@ -704,13 +716,17 @@ fn parse_meminfo(raw: &str) -> Result<HeartbeatMemory> {
 fn discover_mounts() -> Vec<MountProbeTarget> {
     let file = match fs::File::open("/proc/self/mounts") {
         Ok(file) => file,
-        Err(_) => return Vec::new(),
+        Err(error) => {
+            tracing::warn!(error = %error, "failed to open /proc/self/mounts; disk probes will be absent");
+            return Vec::new();
+        }
     };
     let mut mounts = Vec::new();
-    for line in BufReader::new(file)
-        .lines()
-        .map_while(std::result::Result::ok)
-    {
+    for line in BufReader::new(file).lines().filter_map(|result| {
+        result
+            .map_err(|error| tracing::warn!(error = %error, "error reading /proc/self/mounts line"))
+            .ok()
+    }) {
         let mut parts = line.split_whitespace();
         let _source = parts.next();
         let Some(mount_path) = parts.next() else {
@@ -795,7 +811,10 @@ fn statvfs_bytes(path: &Path) -> Result<(i64, i64)> {
 fn discover_disk_devices() -> Vec<String> {
     let raw = match fs::read_to_string("/proc/diskstats") {
         Ok(raw) => raw,
-        Err(_) => return Vec::new(),
+        Err(error) => {
+            tracing::warn!(error = %error, "failed to read /proc/diskstats; disk I/O probes will be absent");
+            return Vec::new();
+        }
     };
     raw.lines()
         .filter_map(|line| line.split_whitespace().nth(2))
@@ -806,10 +825,23 @@ fn discover_disk_devices() -> Vec<String> {
 }
 
 fn is_disk_device_name(name: &str) -> bool {
-    !(name.starts_with("loop")
-        || name.starts_with("ram")
-        || name.starts_with("fd")
-        || name.chars().last().is_some_and(|ch| ch.is_ascii_digit()))
+    if name.starts_with("loop") || name.starts_with("ram") || name.starts_with("fd") {
+        return false;
+    }
+    // NVMe whole disks end in n\d+, partitions end in n\d+p\d+
+    if let Some(rest) = name.strip_prefix("nvme") {
+        return !rest.contains('p');
+    }
+    // eMMC whole disks: mmcblk\d+, partitions: mmcblk\d+p\d+
+    if let Some(rest) = name.strip_prefix("mmcblk") {
+        return !rest.contains('p');
+    }
+    // device-mapper (dm-0, dm-1) — include whole device
+    if name.starts_with("dm-") {
+        return true;
+    }
+    // SCSI/SATA: whole disks (sda, sdb) have no trailing digit; partitions (sda1) do
+    !name.chars().last().is_some_and(|ch| ch.is_ascii_digit())
 }
 
 fn parse_diskstats_device(raw: &str, device: &str) -> Option<(i64, i64)> {
@@ -831,7 +863,10 @@ fn parse_diskstats_device(raw: &str, device: &str) -> Option<(i64, i64)> {
 fn discover_network_interfaces() -> Vec<String> {
     let raw = match fs::read_to_string("/proc/net/dev") {
         Ok(raw) => raw,
-        Err(_) => return Vec::new(),
+        Err(error) => {
+            tracing::warn!(error = %error, "failed to read /proc/net/dev; network probes will be absent");
+            return Vec::new();
+        }
     };
     raw.lines()
         .skip(2)
@@ -1084,7 +1119,14 @@ impl RetryBuffer {
             return;
         }
         while self.queue.len() >= self.limit {
-            self.queue.pop_front();
+            if let Some(evicted) = self.queue.pop_front() {
+                tracing::warn!(
+                    host_id = %evicted.host.host_id,
+                    sequence = evicted.sample.sequence,
+                    limit = self.limit,
+                    "retry buffer full; oldest heartbeat evicted and lost",
+                );
+            }
         }
         self.queue.push_back(payload);
     }
@@ -1104,7 +1146,7 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
     let collector = HeartbeatCollector::linux();
     let client = reqwest::Client::new();
     let mut retry = RetryBuffer::new(config.retry_buffer_limit);
-    let mut sequence = 1i64;
+    let mut sequence = chrono::Utc::now().timestamp_millis();
     let mut attempt = 0u32;
 
     loop {
@@ -1268,7 +1310,23 @@ fn bounded_probe_error(name: &str, error: &anyhow::Error) -> String {
 }
 
 fn hostname() -> String {
-    std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string())
+    if let Ok(hostname) = std::env::var("HOSTNAME") {
+        if !hostname.is_empty() {
+            return hostname;
+        }
+    }
+    match std::fs::read_to_string("/proc/sys/kernel/hostname") {
+        Ok(name) => {
+            let name = name.trim().to_string();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "could not determine hostname; using 'unknown'");
+        }
+    }
+    "unknown".to_string()
 }
 
 fn kernel_release() -> Option<String> {
@@ -1279,11 +1337,22 @@ fn kernel_release() -> Option<String> {
 }
 
 fn boot_id() -> String {
-    std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| format!("process-{}", std::process::id()))
+    match std::fs::read_to_string("/proc/sys/kernel/random/boot_id") {
+        Ok(value) => {
+            let trimmed = value.trim().to_string();
+            if !trimmed.is_empty() {
+                return trimmed;
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "failed to read boot_id from /proc; falling back to process ID \
+                 (heartbeat deduplication will not survive agent restart)"
+            );
+        }
+    }
+    format!("process-{}", std::process::id())
 }
 
 #[cfg(test)]

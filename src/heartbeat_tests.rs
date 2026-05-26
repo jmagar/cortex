@@ -262,3 +262,97 @@ async fn heartbeat_body_limit_is_route_local_256k() {
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(value["error"], "payload_too_large");
 }
+
+#[tokio::test]
+async fn different_boot_id_same_sequence_is_accepted_as_new_heartbeat() {
+    let (app, pool, _dir) = test_app(Some("secret"));
+
+    let mut first = heartbeat_payload();
+    first["host"]["boot_id"] = serde_json::json!("boot-A");
+    first["sample"]["sequence"] = serde_json::json!(1);
+
+    let mut second = heartbeat_payload();
+    second["host"]["boot_id"] = serde_json::json!("boot-B");
+    second["sample"]["sequence"] = serde_json::json!(1); // same sequence, different boot
+
+    let (s1, v1) = post_json(app.clone(), "/v1/heartbeats", Some("secret"), first).await;
+    let (s2, v2) = post_json(app, "/v1/heartbeats", Some("secret"), second).await;
+
+    assert_eq!(s1, StatusCode::ACCEPTED);
+    assert_eq!(s2, StatusCode::ACCEPTED);
+    assert_eq!(v1["accepted"], 1);
+    assert_eq!(v2["accepted"], 1);
+    // Both should be distinct heartbeat_ids
+    assert_ne!(v1["heartbeat_id"], v2["heartbeat_id"]);
+
+    let conn = pool.get().unwrap();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM host_heartbeats", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 2);
+}
+
+#[tokio::test]
+async fn loopback_dev_auth_accepts_loopback_peer() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = crate::config::StorageConfig::for_test(dir.path().join("test.db"));
+    let pool = Arc::new(crate::db::init_pool(&storage).unwrap());
+    let state = HeartbeatState::new(Arc::clone(&pool), None, AuthPolicy::LoopbackDev);
+    // Use loopback address (127.0.0.1)
+    let app = router(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 9000))));
+
+    // No auth header, loopback peer — should be accepted
+    let (status, value) = post_json(app, "/v1/heartbeats", None, heartbeat_payload()).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(value["accepted"], 1);
+}
+
+#[tokio::test]
+async fn loopback_dev_auth_rejects_non_loopback_peer() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = crate::config::StorageConfig::for_test(dir.path().join("test.db"));
+    let pool = Arc::new(crate::db::init_pool(&storage).unwrap());
+    let state = HeartbeatState::new(Arc::clone(&pool), None, AuthPolicy::LoopbackDev);
+    // Non-loopback address
+    let app = router(state).layer(MockConnectInfo(SocketAddr::from(([10, 0, 0, 7], 41000))));
+
+    let (status, value) = post_json(app, "/v1/heartbeats", None, heartbeat_payload()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(value["error"], "unauthorized");
+}
+
+#[tokio::test]
+async fn mounted_auth_with_no_token_rejects_all_requests() {
+    // AuthPolicy::Mounted with api_token = None — permanently-rejecting
+    let dir = tempfile::tempdir().unwrap();
+    let storage = crate::config::StorageConfig::for_test(dir.path().join("test.db"));
+    let pool = Arc::new(crate::db::init_pool(&storage).unwrap());
+    let state = HeartbeatState::new(Arc::clone(&pool), None, AuthPolicy::Mounted { auth_state: None });
+    let app = router(state).layer(MockConnectInfo(SocketAddr::from(([10, 0, 0, 7], 41000))));
+
+    // Even with a token in the header, no api_token is set so everything should reject
+    let (status, value) = post_json(app.clone(), "/v1/heartbeats", Some("anything"), heartbeat_payload()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(value["error"], "unauthorized");
+}
+
+#[tokio::test]
+async fn zero_memory_total_stores_null_used_percent() {
+    let (app, pool, _dir) = test_app(Some("secret"));
+    let mut payload = heartbeat_payload();
+    payload["memory"]["mem_total_bytes"] = serde_json::json!(0);
+    payload["memory"]["mem_available_bytes"] = serde_json::json!(0);
+
+    let (status, _) = post_json(app, "/v1/heartbeats", Some("secret"), payload).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+
+    let conn = pool.get().unwrap();
+    let used_percent: Option<f64> = conn
+        .query_row(
+            "SELECT used_percent FROM heartbeat_memory",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(used_percent.is_none(), "used_percent should be NULL when mem_total_bytes is 0");
+}
