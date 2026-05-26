@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::sync::Arc;
 
 use crate::app::os_adapter::OsAdapter;
