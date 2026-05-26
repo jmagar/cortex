@@ -41,6 +41,11 @@ impl SyslogService {
             .filter(|&pid| pid > 0);
 
         // --- Process start time (procfs, no DB) ---
+        // Direct procfs read: acceptable here because (a) /proc/<pid>/stat is a
+        // synthetic kernel file — reads are sub-microsecond, no blocking I/O,
+        // (b) the function always returns Option so ENOENT is handled, and
+        // (c) the test impact is limited to `process_start_time` being real-pid
+        // data; the rest of the report uses mock adapters.
         let process_start_time = crate::doctor::ai_watcher_process_start_time();
 
         // --- DB calls (after OS probes so a DB outage doesn't block host info) ---
