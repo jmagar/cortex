@@ -264,6 +264,17 @@ impl From<db::LogEntry> for LogEntry {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct HostStateRequest {
+    pub host_id: Option<String>,
+    pub hostname: Option<String>,
+    pub since: Option<String>,
+    pub limit: Option<u32>,
+}
+
+pub type HostStateResponse = db::HeartbeatHostState;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListSessionsRequest {
     pub project: Option<String>,
     pub tool: Option<String>,

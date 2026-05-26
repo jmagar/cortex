@@ -7,41 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.32.10] - 2026-05-25
+## [0.33.0] - 2026-05-25
 
-### Fixed
+### Added
 
-- Added maintained app and source-IP inventory stats so the `apps` and `source_ips` actions do not rescan the full logs table on large SQLite databases.
-
-
-## [0.32.10] - 2026-05-25
-
-## [0.32.9] - 2026-05-25
-
-### Fixed
-
-- Bounded broad FTS search candidate windows before sorting, added an
-  app/timestamp search index, and pinned incident-context window scans to the
-  timestamp index for better performance on large SQLite databases.
-
-## [0.32.8] - 2026-05-25
-
-### Fixed
-
-- Keep `ingest_rate` responsive on large databases by avoiding the full stats
-  scan when only storage write-block state is needed.
-
-## [0.32.7] - 2026-05-25
-
-### Changed
-
-- Moved more cross-surface business policy into the service layer: typed request
-  actors, service-owned AI cap normalization, notification recent defaults, DB
-  checkpoint/vacuum/prune guardrails, and MCP `abuse_investigate` incident id
-  passthrough.
-- Clarified docs that MCP is an exposure surface over shared service logic and
-  that the runtime MCP schema is generated from `ACTION_SPECS` while Markdown
-  schema docs are maintained and drift-checked.
+- Added heartbeat telemetry V1: SQLite heartbeat storage, `POST /v1/heartbeats`
+  ingest, the bounded `host_state` MCP action, and a Linux `syslog heartbeat
+  agent` collector with binary-owned setup.
 
 ## [0.32.6] - 2026-05-24
 

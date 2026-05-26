@@ -133,12 +133,12 @@ fn test_purge_old_heartbeats_removes_children_before_parent() {
     let new_id = insert_heartbeat(&pool, "host-new", "2099-01-01T00:00:00Z");
     let conn = pool.get().unwrap();
     conn.execute(
-        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_pct) VALUES (?1, 10.0)",
+        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_percent) VALUES (?1, 10.0)",
         [old_id],
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_pct) VALUES (?1, 20.0)",
+        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_percent) VALUES (?1, 20.0)",
         [new_id],
     )
     .unwrap();
@@ -189,7 +189,7 @@ fn test_heartbeat_cleanup_removes_all_child_tables_and_orphans() {
     let heartbeat_id = insert_heartbeat(&pool, "host-old", "2020-01-01T00:00:00Z");
     let conn = pool.get().unwrap();
     conn.execute(
-        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_pct) VALUES (?1, 10.0)",
+        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_percent) VALUES (?1, 10.0)",
         [heartbeat_id],
     )
     .unwrap();
@@ -199,12 +199,12 @@ fn test_heartbeat_cleanup_removes_all_child_tables_and_orphans() {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO heartbeat_disks (heartbeat_id, name) VALUES (?1, 'sda')",
+        "INSERT INTO heartbeat_disks (heartbeat_id, mountpoint) VALUES (?1, '/dev/sda')",
         [heartbeat_id],
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO heartbeat_network (heartbeat_id, interface_name) VALUES (?1, 'eth0')",
+        "INSERT INTO heartbeat_network (heartbeat_id, interface) VALUES (?1, 'eth0')",
         [heartbeat_id],
     )
     .unwrap();
@@ -214,12 +214,12 @@ fn test_heartbeat_cleanup_removes_all_child_tables_and_orphans() {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO heartbeat_containers (heartbeat_id, reachable) VALUES (?1, 1)",
+        "INSERT INTO heartbeat_containers (heartbeat_id, running) VALUES (?1, 1)",
         [heartbeat_id],
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_pct) VALUES (999999, 99.0)",
+        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_percent) VALUES (999999, 99.0)",
         [],
     )
     .unwrap();

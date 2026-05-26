@@ -24,6 +24,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "ai" => parse_ai(rest),
         "shell" => parse_shell(rest),
         "agent-command" => parse_agent_command(rest),
+        "heartbeat" => parse_heartbeat(rest),
         "correlate" => parse_correlate(rest),
         "stats" => parse_stats(rest),
         "compose" => parse_compose(rest),
@@ -45,6 +46,101 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "apps" => commands::apps::parse_apps(rest),
         _ => bail!("unknown CLI command: {command}"),
     }
+}
+
+fn parse_heartbeat(args: &[String]) -> Result<CliCommand> {
+    let (command, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("heartbeat subcommand is required"))?;
+    match command.as_str() {
+        "agent" => parse_heartbeat_agent(rest),
+        _ => bail!("unknown heartbeat subcommand: {command}"),
+    }
+}
+
+fn parse_heartbeat_agent(args: &[String]) -> Result<CliCommand> {
+    let mut out = super::HeartbeatAgentArgs {
+        target: None,
+        token: None,
+        interval_secs: syslog_mcp::heartbeat_agent::DEFAULT_INTERVAL_SECS,
+        probe_deadline_ms: syslog_mcp::heartbeat_agent::DEFAULT_PROBE_DEADLINE_MS,
+        collection_deadline_ms: syslog_mcp::heartbeat_agent::DEFAULT_COLLECTION_DEADLINE_MS,
+        retry_buffer: syslog_mcp::heartbeat_agent::DEFAULT_RETRY_BUFFER_LIMIT,
+        once: false,
+        emit: false,
+        json: false,
+        host_id_path: None,
+    };
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--target" => {
+                i += 1;
+                out.target = Some(required_value(args, i, "--target")?);
+            }
+            "--token" => {
+                i += 1;
+                out.token = Some(required_value(args, i, "--token")?);
+            }
+            "--interval-secs" => {
+                i += 1;
+                out.interval_secs = parse_u64_value(args, i, "--interval-secs")?;
+            }
+            "--probe-deadline-ms" => {
+                i += 1;
+                out.probe_deadline_ms = parse_u64_value(args, i, "--probe-deadline-ms")?;
+            }
+            "--collection-deadline-ms" => {
+                i += 1;
+                out.collection_deadline_ms = parse_u64_value(args, i, "--collection-deadline-ms")?;
+            }
+            "--retry-buffer" => {
+                i += 1;
+                out.retry_buffer = parse_usize_value(args, i, "--retry-buffer")?;
+            }
+            "--host-id-path" => {
+                i += 1;
+                out.host_id_path = Some(required_value(args, i, "--host-id-path")?);
+            }
+            "--once" => out.once = true,
+            "--emit" => out.emit = true,
+            "--json" => out.json = true,
+            other => bail!("unknown heartbeat agent argument: {other}"),
+        }
+        i += 1;
+    }
+    if out.interval_secs == 0 {
+        bail!("--interval-secs must be greater than zero");
+    }
+    if out.probe_deadline_ms == 0 {
+        bail!("--probe-deadline-ms must be greater than zero");
+    }
+    if out.collection_deadline_ms == 0 {
+        bail!("--collection-deadline-ms must be greater than zero");
+    }
+    Ok(CliCommand::Heartbeat(super::HeartbeatCommand::Agent(out)))
+}
+
+fn required_value(args: &[String], index: usize, flag: &str) -> Result<String> {
+    let value = args
+        .get(index)
+        .ok_or_else(|| anyhow!("{flag} requires a value"))?;
+    if value.starts_with('-') || value.trim().is_empty() {
+        bail!("{flag} requires a value");
+    }
+    Ok(value.clone())
+}
+
+fn parse_u64_value(args: &[String], index: usize, flag: &str) -> Result<u64> {
+    required_value(args, index, flag)?
+        .parse()
+        .map_err(|_| anyhow!("{flag} must be an integer"))
+}
+
+fn parse_usize_value(args: &[String], index: usize, flag: &str) -> Result<usize> {
+    required_value(args, index, flag)?
+        .parse()
+        .map_err(|_| anyhow!("{flag} must be an integer"))
 }
 
 #[cfg(test)]

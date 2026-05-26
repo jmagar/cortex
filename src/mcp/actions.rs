@@ -104,6 +104,12 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         cost: Cost::Cheap,
     },
     ActionSpec {
+        name: "host_state",
+        scope: Scope::Read,
+        description: "Fetch latest bounded heartbeat state for a host",
+        cost: Cost::Moderate,
+    },
+    ActionSpec {
         name: "correlate",
         scope: Scope::Read,
         description: "Correlate events across hosts/services",

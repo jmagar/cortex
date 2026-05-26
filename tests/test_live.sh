@@ -18,7 +18,7 @@
 #   PORT                   Override server port (default: 3100)
 #
 # Action inventory reference (not every action is exercised by this live test):
-#   syslog search, syslog filter, syslog tail, syslog errors, syslog hosts, syslog sessions,
+#   syslog search, syslog filter, syslog tail, syslog errors, syslog hosts, syslog host_state, syslog sessions,
 #   syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context,
 #   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,
