@@ -21,11 +21,10 @@ const SERVICE: &str = "syslog-ai-watch.service";
 impl SyslogService {
     /// Collect the ai watch-status report.
     ///
-    /// # Errors
-    ///
-    /// Returns `ServiceError` only if `ai_indexing_health` fails. Systemctl
-    /// and journalctl failures degrade gracefully (fields become `None` / empty
-    /// vec).
+    /// Always returns `Ok`. All failure modes degrade gracefully:
+    /// - Systemctl probes → `None` fields on failure
+    /// - `ai_indexing_health` DB failure → `health: None` with a warning
+    /// - journalctl failure → `latest_journal: []`, `journal_error: Some(msg)`
     pub async fn ai_watch_status(&self) -> ServiceResult<AiWatchStatusReport> {
         // --- Systemctl probes (OS-only, no DB dependency) ---
         let active = self.probe_systemctl(&["is-active", SERVICE]).await;
@@ -46,7 +45,15 @@ impl SyslogService {
         let process_start_time = crate::doctor::ai_watcher_process_start_time();
 
         // --- DB calls (after OS probes so a DB outage doesn't block host info) ---
-        let health = self.ai_indexing_health(process_start_time.clone()).await?;
+        // Degrade to None rather than propagating the error — the operator
+        // can still see host state (active, enabled, pid) even during a DB outage.
+        let health = match self.ai_indexing_health(process_start_time.clone()).await {
+            Ok(h) => Some(h),
+            Err(e) => {
+                warn!(error = %e, "ai_indexing_health failed; health will be absent in report");
+                None
+            }
+        };
 
         // --- journalctl via run_command (degrade to empty on failure) ---
         let journal_args: Vec<String> = [
