@@ -13,10 +13,11 @@ pub(crate) use args::{
     AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
     AiSimilarArgs, AiWatchArgs, CliCommand, ComposeArgs, ComposeCommand, ComposeLogsArgs,
     ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand, DbIntegrityArgs,
-    DbStatusArgs, DbVacuumArgs, FilterArgs, IncidentArgs, IngestRateArgs, NotifyRecentArgs,
-    NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand,
-    ServiceLogsArgs, SessionsArgs, SetupArgs, SetupCommand, ShellCommand, ShellIndexArgs,
-    SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    DbStatusArgs, DbVacuumArgs, FilterArgs, HeartbeatAgentArgs, HeartbeatCommand, IncidentArgs,
+    IngestRateArgs, NotifyRecentArgs, NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs,
+    SearchArgs, ServiceCommand, ServiceLogsArgs, SessionsArgs, SetupArgs, SetupCommand,
+    ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs,
+    TimeRangeArgs, TimelineArgs,
 };
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
@@ -35,6 +36,7 @@ mod config_cmd;
 mod config_toml;
 mod coordination;
 mod dispatch_command_log;
+mod heartbeat_agent;
 mod output_ai;
 mod output_ai_more;
 mod output_common;
@@ -51,6 +53,7 @@ mod parse_logs;
 mod setup;
 
 pub(crate) use config_cmd::run_config;
+pub(crate) use heartbeat_agent::run_heartbeat_no_db;
 pub(crate) use parse_common::{parse_i64_flag, parse_u32_flag, FlagCursor};
 pub(crate) use setup::run_setup;
 

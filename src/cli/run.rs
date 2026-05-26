@@ -99,6 +99,9 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
                 bail!("internal: agent-command wrap must be dispatched before CliMode creation")
             }
         },
+        CliCommand::Heartbeat(command) => {
+            super::heartbeat_agent::run_heartbeat_no_db(command).await
+        }
         // DB commands (bead 0p8r.9). 4 are HTTP-capable; backup stays LOCAL
         // and bails in HTTP mode with an inline message.
         CliCommand::Db(db) => match db {

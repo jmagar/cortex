@@ -116,6 +116,20 @@ fn mode_parse_accepts_agent_command_setup_namespace() {
 }
 
 #[test]
+fn mode_parse_accepts_heartbeat_agent_setup_namespace() {
+    assert!(matches!(
+        Mode::parse(vec![
+            "setup".into(),
+            "heartbeat-agent".into(),
+            "install".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
 fn mode_parse_accepts_command_ingest_namespace() {
     assert!(matches!(
         Mode::parse(vec![
@@ -123,6 +137,20 @@ fn mode_parse_accepts_command_ingest_namespace() {
             "index".into(),
             "--path".into(),
             "/tmp/history".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Cli(_)
+    ));
+    assert!(matches!(
+        Mode::parse(vec![
+            "heartbeat".into(),
+            "agent".into(),
+            "--server".into(),
+            "http://127.0.0.1:3100".into(),
+            "--token".into(),
+            "secret".into(),
+            "--emit".into(),
             "--json".into()
         ])
         .unwrap(),

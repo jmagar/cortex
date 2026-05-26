@@ -9,7 +9,7 @@ use crate::config::StorageConfig;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 17;
+pub const KNOWN_SCHEMA_VERSION: i64 = 18;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -629,6 +629,12 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 17: created app/source inventory stats");
     }
 
+    // Migration 18: add restarting column to heartbeat_containers.
+    if !migration_applied(&conn, 18)? {
+        apply_migration_18_heartbeat_restarting(&conn)?;
+        tracing::info!("Migration 18: added restarting column to heartbeat_containers");
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
@@ -1072,86 +1078,71 @@ fn apply_migration_15_heartbeat(conn: &Connection) -> rusqlite::Result<()> {
             load1             REAL,
             load5             REAL,
             load15            REAL,
-            usage_pct         REAL,
-            user_pct          REAL,
-            system_pct        REAL,
-            iowait_pct        REAL,
-            steal_pct         REAL,
-            cpu_count         INTEGER,
-            metadata_json     TEXT
+            usage_percent     REAL,
+            steal_percent     REAL,
+            io_wait_percent   REAL
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_cpu_heartbeat_id
             ON heartbeat_cpu(heartbeat_id);
 
         CREATE TABLE IF NOT EXISTS heartbeat_memory (
-            heartbeat_id          INTEGER NOT NULL,
-            total_bytes           INTEGER,
-            available_bytes       INTEGER,
-            used_bytes            INTEGER,
-            swap_total_bytes      INTEGER,
-            swap_used_bytes       INTEGER,
-            metadata_json         TEXT
+            heartbeat_id      INTEGER NOT NULL,
+            total_bytes       INTEGER,
+            available_bytes   INTEGER,
+            used_percent      REAL,
+            swap_total_bytes  INTEGER,
+            swap_used_bytes   INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_memory_heartbeat_id
             ON heartbeat_memory(heartbeat_id);
 
         CREATE TABLE IF NOT EXISTS heartbeat_disks (
-            heartbeat_id       INTEGER NOT NULL,
-            name               TEXT,
-            mount_point        TEXT,
-            fs_type            TEXT,
-            total_bytes        INTEGER,
-            free_bytes         INTEGER,
-            used_bytes         INTEGER,
-            inode_total        INTEGER,
-            inode_free         INTEGER,
-            read_only          INTEGER,
-            read_bytes_per_sec REAL,
-            write_bytes_per_sec REAL,
-            busy_pct           REAL,
-            metadata_json      TEXT
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            heartbeat_id        INTEGER NOT NULL,
+            mountpoint          TEXT,
+            filesystem          TEXT,
+            total_bytes         INTEGER,
+            available_bytes     INTEGER,
+            used_percent        REAL,
+            read_bytes_per_sec  REAL,
+            write_bytes_per_sec REAL
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_disks_heartbeat_id
             ON heartbeat_disks(heartbeat_id);
 
         CREATE TABLE IF NOT EXISTS heartbeat_network (
-            heartbeat_id       INTEGER NOT NULL,
-            interface_name     TEXT NOT NULL,
-            rx_bytes_per_sec   REAL,
-            tx_bytes_per_sec   REAL,
-            rx_packets_per_sec REAL,
-            tx_packets_per_sec REAL,
-            rx_errors          INTEGER,
-            tx_errors          INTEGER,
-            rx_dropped         INTEGER,
-            tx_dropped         INTEGER,
-            link_up            INTEGER,
-            metadata_json      TEXT
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            heartbeat_id     INTEGER NOT NULL,
+            interface        TEXT NOT NULL,
+            rx_bytes_per_sec REAL,
+            tx_bytes_per_sec REAL,
+            rx_errors        INTEGER,
+            tx_errors        INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_network_heartbeat_id
             ON heartbeat_network(heartbeat_id);
 
         CREATE TABLE IF NOT EXISTS heartbeat_processes (
-            heartbeat_id       INTEGER NOT NULL,
-            total              INTEGER,
-            running            INTEGER,
-            sleeping           INTEGER,
-            zombie             INTEGER,
-            top_json           TEXT,
-            metadata_json      TEXT
+            heartbeat_id    INTEGER NOT NULL,
+            total           INTEGER,
+            running         INTEGER,
+            sleeping        INTEGER,
+            zombie          INTEGER,
+            top_cpu_json    TEXT,
+            top_memory_json TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_processes_heartbeat_id
             ON heartbeat_processes(heartbeat_id);
 
         CREATE TABLE IF NOT EXISTS heartbeat_containers (
-            heartbeat_id       INTEGER NOT NULL,
-            reachable          INTEGER NOT NULL DEFAULT 0,
-            running            INTEGER,
-            exited             INTEGER,
-            restarting         INTEGER,
-            unhealthy          INTEGER,
-            details_json       TEXT,
-            metadata_json      TEXT
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            heartbeat_id  INTEGER NOT NULL,
+            runtime       TEXT,
+            running       INTEGER,
+            stopped       INTEGER,
+            restarting    INTEGER,
+            unhealthy     INTEGER,
+            summary_json  TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_containers_heartbeat_id
             ON heartbeat_containers(heartbeat_id);
@@ -1160,6 +1151,21 @@ fn apply_migration_15_heartbeat(conn: &Connection) -> rusqlite::Result<()> {
         ",
     );
 
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT;"),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
+}
+
+fn apply_migration_18_heartbeat_restarting(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = (|| {
+        add_column_if_missing(conn, "heartbeat_containers", "restarting", "INTEGER")?;
+        conn.execute_batch("INSERT OR IGNORE INTO schema_migrations (version) VALUES (18);")
+    })();
     match result {
         Ok(()) => conn.execute_batch("COMMIT;"),
         Err(error) => {

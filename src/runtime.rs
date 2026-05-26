@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::app::SyslogService;
 use crate::config::{mcp_bind_is_loopback, validate_auth_config, AuthMode, Config};
 use crate::db::{self, DbPool, StorageBudgetState};
+use crate::heartbeat::HeartbeatState;
 use crate::ingest::IngestTx;
 use crate::mcp::AuthPolicy;
 use crate::observability::RuntimeObservability;
@@ -128,6 +129,7 @@ pub(crate) fn background_interval(period: tokio::time::Duration) -> tokio::time:
 /// the FTS5 index at homelab volumes (50k+ DNS queries/day).
 const ADGUARD_RETENTION_TAGS: &[&str] = &["adguard-allowed", "adguard-query", "adguard-rewrite"];
 const ADGUARD_RETENTION_DAYS: u32 = 7;
+const HEARTBEAT_RETENTION_DAYS: u32 = 14;
 
 impl RuntimeCore {
     pub async fn load() -> Result<Self> {
@@ -233,6 +235,16 @@ impl RuntimeCore {
             self.auth_policy.clone(),
         );
         otlp::router(state)
+    }
+
+    /// Build the heartbeat telemetry ingest router.
+    pub fn heartbeat_router(&self) -> axum::Router {
+        let state = HeartbeatState::new(
+            Arc::clone(&self.pool),
+            self.config.mcp.api_token.clone(),
+            self.auth_policy.clone(),
+        );
+        crate::heartbeat::router(state)
     }
 
     pub fn mcp_state(&self) -> mcp::AppState {
@@ -420,7 +432,7 @@ impl RuntimeCore {
 
     fn spawn_retention_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let retention_days = self.config.storage.retention_days;
-        if retention_days == 0 {
+        if retention_days == 0 && HEARTBEAT_RETENTION_DAYS == 0 {
             return None;
         }
         let purge_pool = Arc::clone(&self.pool);
@@ -471,17 +483,20 @@ impl RuntimeCore {
                             ),
                         }
                     }
-                    let heartbeat_deleted =
-                        match db::purge_old_heartbeats(&pool, retention_days, cleanup_chunk_size) {
-                            Ok(n) => n,
-                            Err(e) => {
-                                tracing::error!(
-                                    error = %e,
-                                    "Heartbeat retention purge failed; continuing"
-                                );
-                                0
-                            }
-                        };
+                    let heartbeat_deleted = match db::purge_old_heartbeats(
+                        &pool,
+                        HEARTBEAT_RETENTION_DAYS,
+                        cleanup_chunk_size,
+                    ) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "Heartbeat retention purge failed; continuing"
+                            );
+                            0
+                        }
+                    };
                     let global_deleted =
                         db::purge_old_logs(&pool, retention_days, fts_merge_pages)?;
                     Ok::<(usize, usize, usize), anyhow::Error>((

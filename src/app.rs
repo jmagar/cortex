@@ -66,6 +66,8 @@ pub use models::{
     GetLogRequest,
     GetLogResponse,
     HostEntry,
+    HostStateRequest,
+    HostStateResponse,
     IncidentCluster,
     IncidentContextRequest,
     IncidentContextResponse,

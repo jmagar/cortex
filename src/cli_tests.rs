@@ -439,9 +439,9 @@ fn smoke_watch_target_uses_codex_root_when_claude_is_unavailable() {
     std::fs::create_dir_all(&codex_root).unwrap();
     let doctor = AiDoctorReport {
         db_path: "/tmp/syslog.db".into(),
-        db_schema_version: 14,
+        db_schema_version: 15,
         db_last_migration_at: Some("2026-01-01T00:00:00Z".into()),
-        known_schema_version: 14,
+        known_schema_version: 15,
         schema_current: true,
         claude_root: transcript_root_status("/missing", false),
         codex_root: transcript_root_status(&codex_root.to_string_lossy(), true),
@@ -474,9 +474,9 @@ fn smoke_watch_target_uses_codex_root_when_claude_is_unavailable() {
 fn strict_ai_doctor_permissions_ignore_missing_roots() {
     let doctor = AiDoctorReport {
         db_path: "/tmp/syslog.db".into(),
-        db_schema_version: 14,
+        db_schema_version: 15,
         db_last_migration_at: Some("2026-01-01T00:00:00Z".into()),
-        known_schema_version: 14,
+        known_schema_version: 15,
         schema_current: true,
         claude_root: transcript_root_status("/missing", false),
         codex_root: transcript_root_status("/tmp/codex", true),

@@ -75,6 +75,76 @@ async fn tool_get_status_returns_runtime_observability() {
 }
 
 #[tokio::test]
+async fn host_state_action_returns_bounded_heartbeat_state() {
+    let h = TestHarness::new();
+    let conn = h.pool.get().unwrap();
+    for sequence in 1..=2 {
+        conn.execute(
+            "INSERT INTO host_heartbeats (
+                 host_id, hostname, source_ip, sampled_at, received_at, boot_id,
+                 uptime_secs, sequence, collection_ms, partial, agent_version,
+                 os, architecture, metadata_json
+             ) VALUES (
+                 'host-a', 'tootie', '127.0.0.1:41000', ?1, ?1, 'boot-a',
+                 60, ?2, 5, ?3, '0.1.0-test', 'linux', 'x86_64',
+                 '{\"agent\":{\"interval_secs\":30}}'
+             )",
+            (
+                format!("2026-05-25T00:0{sequence}:00Z"),
+                sequence,
+                (sequence == 2) as i64,
+            ),
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let value = execute_tool(
+        &h.state,
+        "syslog",
+        json!({"action": "host_state", "hostname": "tootie", "limit": 1}),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(value["host_id"], "host-a");
+    assert_eq!(value["samples"].as_array().unwrap().len(), 1);
+    assert_eq!(value["flags"]["collector_partial"], true);
+}
+
+#[tokio::test]
+async fn host_state_action_reports_ambiguous_hostname() {
+    let h = TestHarness::new();
+    let conn = h.pool.get().unwrap();
+    for host_id in ["host-a", "host-b"] {
+        conn.execute(
+            "INSERT INTO host_heartbeats (
+                 host_id, hostname, source_ip, sampled_at, received_at, boot_id,
+                 uptime_secs, sequence, collection_ms, partial, agent_version,
+                 os, architecture
+             ) VALUES (
+                 ?1, 'shared', '127.0.0.1:41000', '2026-05-25T00:00:00Z',
+                 '2026-05-25T00:00:01Z', 'boot-a', 60, 1, 5, 0,
+                 '0.1.0-test', 'linux', 'x86_64'
+             )",
+            [host_id],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let error = execute_tool(
+        &h.state,
+        "syslog",
+        json!({"action": "host_state", "hostname": "shared"}),
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("ambiguous_host"));
+}
+
+#[tokio::test]
 async fn numeric_args_reject_out_of_range_values() {
     let h = TestHarness::new();
     let err = execute_tool(
@@ -133,8 +203,26 @@ async fn schema_actions_are_dispatchable() {
         }],
     )
     .unwrap();
+    {
+        let conn = h.pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO host_heartbeats (
+                 host_id, hostname, source_ip, sampled_at, received_at, boot_id,
+                 uptime_secs, sequence, collection_ms, partial, agent_version,
+                 os, architecture, metadata_json
+             ) VALUES (
+                 'schema-heartbeat', 'schema-heartbeat-host', '127.0.0.1:41000',
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 'boot-a',
+                 60, 1, 5, 0, '0.1.0-test', 'linux', 'x86_64',
+                 '{\"agent\":{\"interval_secs\":30}}'
+             )",
+            [],
+        )
+        .unwrap();
+    }
     for action in &super::actions::action_names() {
         let args = match *action {
+            "host_state" => json!({"action": action, "host_id": "schema-heartbeat"}),
             "correlate" => {
                 json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"})
             }

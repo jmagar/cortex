@@ -10,6 +10,8 @@ pub mod config;
 pub mod deploy;
 pub mod doctor;
 pub mod enrich;
+pub mod heartbeat;
+pub mod heartbeat_agent;
 pub mod logging;
 pub mod mcp;
 pub(crate) mod notifications;

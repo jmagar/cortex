@@ -54,7 +54,7 @@ the repo-local debug binary at `target/debug/syslog`, so repo-local builds do
 not require an installed shell binary.
 
 Action registry covered by live/script references: `search`, `filter`, `tail`, `errors`,
-`hosts`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`,
+`hosts`, `host_state`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`,
 `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`,
 `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`,
 `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`,
@@ -74,6 +74,7 @@ mcporter call --config config/mcporter.json syslog.syslog action=status
 mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
 mcporter call --config config/mcporter.json syslog.syslog action=search query=error limit=5
 mcporter call --config config/mcporter.json syslog.syslog action=hosts
+mcporter call --config config/mcporter.json syslog.syslog action=host_state host_id=host-id
 mcporter call --config config/mcporter.json syslog.syslog action=sessions
 mcporter call --config config/mcporter.json syslog.syslog action=abuse terms=ai-smoke-authentication limit=5
 mcporter call --config config/mcporter.json syslog.syslog action=ai_correlate project=/tmp/syslog-mcp-ai-smoke limit=2 events_per_anchor=3
@@ -125,7 +126,7 @@ curl -s -X POST http://localhost:3100/mcp \
 
 ## Testing checklist
 
-- [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog sessions, syslog correlate, syslog stats, syslog status, syslog help
+- [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog host_state, syslog sessions, syslog correlate, syslog stats, syslog status, syslog help
 - [ ] **AI session analytics return expected shape and seeded rows** -- syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects
 - [ ] **Auth: valid token** -- 200 with correct Bearer token
 - [ ] **Auth: invalid token** -- 401 Unauthorized

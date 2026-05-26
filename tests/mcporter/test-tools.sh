@@ -4,7 +4,7 @@
 #
 # Exercises broad non-destructive checks for the action-based syslog MCP tool.
 # Action inventory reference (not every action is exercised below):
-#   syslog search, syslog filter, syslog tail, syslog errors, syslog hosts, syslog sessions,
+#   syslog search, syslog filter, syslog tail, syslog errors, syslog hosts, syslog host_state, syslog sessions,
 #   syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context,
 #   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
 #   syslog source_ips, syslog timeline, syslog patterns, syslog context,

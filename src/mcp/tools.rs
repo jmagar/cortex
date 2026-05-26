@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use crate::app::{
     AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
-    CorrelateEventsRequest, FilterLogsRequest, GetErrorsRequest, GetLogRequest,
+    CorrelateEventsRequest, FilterLogsRequest, GetErrorsRequest, GetLogRequest, HostStateRequest,
     IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
     ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
     PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
@@ -42,6 +42,7 @@ async fn tool_syslog(
         "tail" => tool_tail_logs(state, args).await,
         "errors" => tool_get_errors(state, args).await,
         "hosts" => tool_list_hosts(state, args).await,
+        "host_state" => tool_host_state(state, args).await,
         "correlate" => tool_correlate_events(state, args).await,
         "stats" => tool_get_stats(state, args).await,
         "status" => tool_get_status(state, args).await,
@@ -171,6 +172,11 @@ async fn tool_list_apps(state: &AppState, args: Value) -> anyhow::Result<Value> 
         "list_apps completed"
     );
     Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_host_state(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: HostStateRequest = action_payload(args)?;
+    Ok(serde_json::to_value(state.service.host_state(req).await?)?)
 }
 
 async fn tool_list_sessions(state: &AppState, args: Value) -> anyhow::Result<Value> {
@@ -922,6 +928,17 @@ Groups by hostname and severity level (and optionally app_name), showing counts.
 List all hosts that have sent syslog messages, with first/last seen timestamps and total log counts.
 
 **Parameters:** none
+
+---
+
+## syslog host_state
+Return the latest bounded heartbeat state for one host.
+
+**Parameters:**
+- `host_id` (string, optional) — authoritative heartbeat host identity
+- `hostname` (string, optional) — self-reported hostname fallback; must resolve to exactly one host_id
+- `since` (string, optional) — minimum sampled_at timestamp (ISO 8601)
+- `limit` (integer, optional) — number of samples to return (default 1, max 100)
 
 ---
 
