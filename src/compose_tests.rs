@@ -134,10 +134,10 @@ fn labelled_container() -> ContainerInfo {
         image_id: Some("sha256:abc".into()),
         labels,
         mounts: vec![MountInfo {
-            source: Some(PathBuf::from("/home/jmagar/.syslog-mcp/data")),
+            source: None,
             target: "/data".into(),
-            kind: "bind".into(),
-            volume_name: None,
+            kind: "volume".into(),
+            volume_name: Some("syslog-mcp-data".into()),
         }],
         ports: vec![PortInfo {
             private_port: 3100,
@@ -456,8 +456,9 @@ fn docker_unavailable_code_uses_typed_error() {
 #[test]
 fn status_reports_systemd_check_failures_as_diagnostics() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "/home/jmagar/.syslog-mcp/data");
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
+    env.remove("SYSLOG_ENV_FILE");
 
     let service = ComposeService::new(
         FakeInspector {
@@ -575,6 +576,8 @@ fn status_expected_data_mount_uses_configured_env_file() {
     env.set("SYSLOG_ENV_FILE", env_file.to_str().unwrap());
 
     let mut container = labelled_container();
+    container.mounts[0].kind = "bind".into();
+    container.mounts[0].volume_name = None;
     container.mounts[0].source = Some(data_dir);
     let service = ComposeService::new(
         FakeInspector {
@@ -833,6 +836,11 @@ fn up_refuses_non_target_listener() {
 
 #[test]
 fn live_target_allows_listener_on_published_target_port() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
+    env.remove("SYSLOG_ENV_FILE");
+
     let mut owners = BTreeMap::new();
     owners.insert(3100, "abc".into());
     let service = ComposeService::new(
@@ -857,6 +865,11 @@ fn live_target_allows_listener_on_published_target_port() {
 
 #[test]
 fn live_target_refuses_foreign_docker_proxy_on_published_port() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
+    env.remove("SYSLOG_ENV_FILE");
+
     let mut owners = BTreeMap::new();
     owners.insert(3100, "foreign-container".into());
     let service = ComposeService::new(
@@ -882,6 +895,11 @@ fn live_target_refuses_foreign_docker_proxy_on_published_port() {
 
 #[test]
 fn live_target_refuses_listener_on_unpublished_target_port() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
+    env.remove("SYSLOG_ENV_FILE");
+
     let service = ComposeService::new(
         FakeInspector {
             container: Some(labelled_container()),
@@ -904,6 +922,11 @@ fn live_target_refuses_listener_on_unpublished_target_port() {
 
 #[test]
 fn live_target_refuses_foreign_listener_even_on_published_port() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
+    env.remove("SYSLOG_ENV_FILE");
+
     let service = ComposeService::new(
         FakeInspector {
             container: Some(labelled_container()),
@@ -926,6 +949,11 @@ fn live_target_refuses_foreign_listener_even_on_published_port() {
 
 #[test]
 fn live_target_refuses_published_listener_with_unknown_owner() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
+    env.remove("SYSLOG_ENV_FILE");
+
     let service = ComposeService::new(
         FakeInspector {
             container: Some(labelled_container()),
@@ -948,6 +976,11 @@ fn live_target_refuses_published_listener_with_unknown_owner() {
 
 #[test]
 fn live_target_allows_listener_without_process_info_when_docker_confirms_owner() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
+    env.remove("SYSLOG_ENV_FILE");
+
     // Non-root scenario: ss cannot report process names so the listener has no
     // "users:" field, but docker ps confirms the target container owns the port.
     let mut owners = BTreeMap::new();
