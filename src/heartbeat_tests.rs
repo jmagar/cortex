@@ -323,15 +323,9 @@ async fn loopback_dev_auth_rejects_non_loopback_peer() {
 
 #[tokio::test]
 async fn mounted_auth_with_no_token_rejects_all_requests() {
-    // AuthPolicy::Mounted with api_token = None — permanently-rejecting
-    let dir = tempfile::tempdir().unwrap();
-    let storage = crate::config::StorageConfig::for_test(dir.path().join("test.db"));
-    let pool = Arc::new(crate::db::init_pool(&storage).unwrap());
-    let state = HeartbeatState::new(Arc::clone(&pool), None, AuthPolicy::Mounted { auth_state: None });
-    let app = router(state).layer(MockConnectInfo(SocketAddr::from(([10, 0, 0, 7], 41000))));
-
-    // Even with a token in the header, no api_token is set so everything should reject
-    let (status, value) = post_json(app.clone(), "/v1/heartbeats", Some("anything"), heartbeat_payload()).await;
+    let (app, _pool, _dir) = test_app(None);
+    // Even with a token in the header, no api_token configured so everything rejects
+    let (status, value) = post_json(app, "/v1/heartbeats", Some("anything"), heartbeat_payload()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(value["error"], "unauthorized");
 }
@@ -348,11 +342,12 @@ async fn zero_memory_total_stores_null_used_percent() {
 
     let conn = pool.get().unwrap();
     let used_percent: Option<f64> = conn
-        .query_row(
-            "SELECT used_percent FROM heartbeat_memory",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT used_percent FROM heartbeat_memory", [], |row| {
+            row.get(0)
+        })
         .unwrap();
-    assert!(used_percent.is_none(), "used_percent should be NULL when mem_total_bytes is 0");
+    assert!(
+        used_percent.is_none(),
+        "used_percent should be NULL when mem_total_bytes is 0"
+    );
 }

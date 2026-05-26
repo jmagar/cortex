@@ -325,13 +325,14 @@ fn insert_metric_rows(
     if let Some(containers) = &request.containers {
         tx.execute(
             "INSERT INTO heartbeat_containers (
-                 heartbeat_id, runtime, running, stopped, unhealthy, summary_json
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                 heartbeat_id, runtime, running, stopped, restarting, unhealthy, summary_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 heartbeat_id,
                 containers.runtime.as_deref().unwrap_or("docker"),
                 containers.running,
-                containers.exited + containers.restarting,
+                containers.exited,
+                containers.restarting,
                 containers.unhealthy,
                 Some(
                     serde_json::to_string(&containers.details)

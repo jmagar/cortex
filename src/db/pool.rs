@@ -606,6 +606,12 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 15: created heartbeat telemetry tables and indexes");
     }
 
+    // Migration 16: add restarting column to heartbeat_containers.
+    if !migration_applied(&conn, 16)? {
+        apply_migration_16_heartbeat_restarting(&conn)?;
+        tracing::info!("Migration 16: added restarting column to heartbeat_containers");
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
@@ -798,6 +804,21 @@ fn apply_migration_15_heartbeat(conn: &Connection) -> rusqlite::Result<()> {
          INSERT OR IGNORE INTO schema_migrations (version) VALUES (15);",
     );
 
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT;"),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
+}
+
+fn apply_migration_16_heartbeat_restarting(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = (|| {
+        add_column_if_missing(conn, "heartbeat_containers", "restarting", "INTEGER")?;
+        conn.execute_batch("INSERT OR IGNORE INTO schema_migrations (version) VALUES (16);")
+    })();
     match result {
         Ok(()) => conn.execute_batch("COMMIT;"),
         Err(error) => {

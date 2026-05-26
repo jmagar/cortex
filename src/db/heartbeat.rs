@@ -294,7 +294,7 @@ fn sample_from_row(conn: &rusqlite::Connection, row: HeartbeatRow) -> Result<Hea
             conn,
             "SELECT json_object(
                  'runtime', runtime, 'running', running, 'stopped', stopped,
-                 'unhealthy', unhealthy, 'summary', json(summary_json)
+                 'restarting', restarting, 'unhealthy', unhealthy, 'summary', json(summary_json)
              ) FROM heartbeat_containers WHERE heartbeat_id = ?1 ORDER BY id ASC",
             row.id,
         )?,
