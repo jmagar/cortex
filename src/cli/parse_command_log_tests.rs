@@ -22,6 +22,26 @@ fn parses_shell_index() {
 }
 
 #[test]
+fn parses_shell_atuin_index() {
+    let args = vec![
+        "atuin-index".to_string(),
+        "--path".to_string(),
+        "/tmp/atuin/history.db".to_string(),
+        "--json".to_string(),
+    ];
+
+    let command = parse_shell(&args).unwrap();
+
+    match command {
+        CliCommand::Shell(ShellCommand::AtuinIndex(args)) => {
+            assert_eq!(args.path, "/tmp/atuin/history.db");
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
 fn parses_agent_command_ingest_spool() {
     let args = vec![
         "ingest-spool".to_string(),

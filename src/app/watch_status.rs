@@ -43,19 +43,28 @@ impl SyslogService {
         // --- Process start time (systemctl, no DB) ---
         // ai_watcher_process_start_time() spawns systemctl via blocking I/O.
         // Offload to the blocking thread pool so the async executor is not stalled.
-        let process_start_time =
-            tokio::task::spawn_blocking(crate::doctor::ai_watcher_process_start_time)
-                .await
-                .unwrap_or(None);
+        let process_start_time = match tokio::task::spawn_blocking(
+            crate::doctor::ai_watcher_process_start_time,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(error = %e, "ai_watcher_process_start_time task panicked or was cancelled");
+                None
+            }
+        };
 
         // --- DB calls (after OS probes so a DB outage doesn't block host info) ---
         // Degrade to None rather than propagating the error — the operator
         // can still see host state (active, enabled, pid) even during a DB outage.
-        let health = match self.ai_indexing_health(process_start_time.clone()).await {
-            Ok(h) => Some(h),
+        let (health, health_error) = match self.ai_indexing_health(process_start_time.clone()).await
+        {
+            Ok(h) => (Some(h), None),
             Err(e) => {
-                warn!(error = %e, "ai_indexing_health failed; health will be absent in report");
-                None
+                let msg = e.to_string();
+                warn!(error = %msg, "ai_indexing_health failed; health will be absent in report");
+                (None, Some(msg))
             }
         };
 
@@ -96,6 +105,7 @@ impl SyslogService {
             process_start_time,
             db_path,
             health,
+            health_error,
             latest_journal,
             journal_error,
         })

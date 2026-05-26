@@ -196,7 +196,13 @@ pub(crate) fn print_ai_watch_status_response(
                 println!("stale_indicators: {}", h.stale_indicators.join(", "));
             }
         }
-        None => println!("health: unavailable (DB unreachable)"),
+        None => {
+            if let Some(err) = response.health_error.as_deref() {
+                println!("health: unavailable ({err})");
+            } else {
+                println!("health: unavailable");
+            }
+        }
     }
     if let Some(err) = response.journal_error.as_deref() {
         println!("latest_journal: (unavailable: {err})");

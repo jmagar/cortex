@@ -321,6 +321,14 @@ impl SyslogService {
             .await
     }
 
+    pub async fn import_atuin_history(
+        &self,
+        path: PathBuf,
+    ) -> ServiceResult<CommandLogImportResult> {
+        self.run_db(move |pool| command_log::import_atuin_history(pool, &path))
+            .await
+    }
+
     pub async fn import_agent_command_spool(
         &self,
         path: PathBuf,

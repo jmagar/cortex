@@ -75,6 +75,28 @@ struct ShellHistoryImportState {
     line_no: usize,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+struct AtuinHistoryImportState {
+    path: String,
+    last_timestamp_ns: i64,
+    #[serde(default)]
+    last_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AtuinHistoryRecord {
+    id: String,
+    timestamp_ns: i64,
+    duration_ns: i64,
+    exit_status: i64,
+    command: String,
+    cwd: String,
+    session: String,
+    hostname: String,
+    author: Option<String>,
+    intent: Option<String>,
+}
+
 pub fn import_zsh_history(
     pool: &db::DbPool,
     path: &Path,
@@ -141,6 +163,74 @@ fn import_zsh_history_with_state(
         result.imported = db::insert_logs_batch(pool, &batch)?;
     }
     write_shell_history_state(state_path, path, shell, next_offset, line_no)?;
+    Ok(result)
+}
+
+pub fn import_atuin_history(pool: &db::DbPool, path: &Path) -> Result<CommandLogImportResult> {
+    let state_path = atuin_history_state_path(path)?;
+    import_atuin_history_with_state(pool, path, &state_path)
+}
+
+fn import_atuin_history_with_state(
+    pool: &db::DbPool,
+    path: &Path,
+    state_path: &Path,
+) -> Result<CommandLogImportResult> {
+    let state = read_atuin_history_state(state_path, path)?.unwrap_or_default();
+    let conn =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .with_context(|| format!("open atuin history {}", path.display()))?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, timestamp, duration, exit, command, cwd, session, hostname, author, intent
+             FROM history
+             WHERE deleted_at IS NULL
+               AND (timestamp > ?1 OR (timestamp = ?1 AND id > ?2))
+             ORDER BY timestamp ASC, id ASC",
+        )
+        .with_context(|| format!("prepare atuin history query {}", path.display()))?;
+    let records = stmt
+        .query_map((&state.last_timestamp_ns, &state.last_id), |row| {
+            Ok(AtuinHistoryRecord {
+                id: row.get(0)?,
+                timestamp_ns: row.get(1)?,
+                duration_ns: row.get(2)?,
+                exit_status: row.get(3)?,
+                command: row.get(4)?,
+                cwd: row.get(5)?,
+                session: row.get(6)?,
+                hostname: row.get(7)?,
+                author: row.get(8)?,
+                intent: row.get(9)?,
+            })
+        })
+        .with_context(|| format!("read atuin history {}", path.display()))?;
+
+    let user = username();
+    let mut result = CommandLogImportResult::default();
+    let mut batch = Vec::new();
+    let mut last_timestamp_ns = state.last_timestamp_ns;
+    let mut last_id = state.last_id;
+    for record in records {
+        let record = record.with_context(|| format!("decode atuin history {}", path.display()))?;
+        result.scanned += 1;
+        last_timestamp_ns = record.timestamp_ns;
+        last_id = record.id.clone();
+        let Some(entry) = atuin_record_to_entry(&record, path, user.as_deref()) else {
+            result.skipped += 1;
+            continue;
+        };
+        if entry_exists(pool, &entry)? {
+            result.skipped_duplicates += 1;
+        } else {
+            batch.push(entry);
+        }
+    }
+
+    if !batch.is_empty() {
+        result.imported = db::insert_logs_batch(pool, &batch)?;
+    }
+    write_atuin_history_state(state_path, path, last_timestamp_ns, &last_id)?;
     Ok(result)
 }
 
@@ -391,6 +481,78 @@ fn zsh_record_to_entry(
     entry
 }
 
+fn atuin_record_to_entry(
+    record: &AtuinHistoryRecord,
+    path: &Path,
+    user: Option<&str>,
+) -> Option<LogBatchEntry> {
+    let secs = record.timestamp_ns.div_euclid(1_000_000_000);
+    let nanos = record.timestamp_ns.rem_euclid(1_000_000_000) as u32;
+    let started_at = DateTime::<Utc>::from_timestamp(secs, nanos)?;
+    let command = scrub_command(&record.command);
+    let exit_status = if record.exit_status >= 0 {
+        Some(record.exit_status)
+    } else {
+        None
+    };
+    let severity = match exit_status {
+        Some(0) => "info",
+        Some(_) => "warning",
+        None => "err",
+    };
+    let duration_ms = if record.duration_ns >= 0 {
+        Some(record.duration_ns / 1_000_000)
+    } else {
+        None
+    };
+    let metadata_json = bounded_metadata_json(serde_json::json!({
+        "source_type": "shell_history",
+        "source_kind": SourceKind::ShellHistory.as_str(),
+        "shell": {
+            "name": "atuin",
+            "user": user,
+            "history_path": path.display().to_string(),
+            "id": record.id,
+            "cwd": record.cwd,
+            "session": record.session,
+            "exit_status": exit_status,
+            "duration_ms": duration_ms,
+            "author": record.author,
+            "intent": record.intent,
+            "timestamp_quality": "atuin_sqlite"
+        },
+        "content_scrubbed": true,
+    }));
+    let mut entry = LogBatchEntry {
+        timestamp: rfc3339(started_at),
+        hostname: record.hostname.clone(),
+        facility: Some("shell".to_string()),
+        severity: severity.to_string(),
+        app_name: Some("atuin".to_string()),
+        process_id: None,
+        message: command.clone(),
+        raw: command,
+        source_ip: format!(
+            "shell-history://{}/{}/atuin",
+            sanitize_uri_segment(&record.hostname),
+            sanitize_uri_segment(user.unwrap_or("unknown"))
+        ),
+        docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: Some(record.cwd.clone()),
+        ai_session_id: Some(record.session.clone()),
+        ai_transcript_path: None,
+        metadata_json: Some(metadata_json),
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: Some("command".to_string()),
+        parse_error: None,
+    };
+    stamp_source_kind(&mut entry, SourceKind::ShellHistory);
+    Some(entry)
+}
+
 fn agent_record_to_entry(record: &AgentCommandSpoolRecord) -> LogBatchEntry {
     let command = scrub_command(&record.command);
     let exit_status = record.exit_status;
@@ -517,6 +679,15 @@ fn shell_history_state_path(path: &Path, shell: &str) -> Result<PathBuf> {
     )))
 }
 
+fn atuin_history_state_path(path: &Path) -> Result<PathBuf> {
+    let state_dir = command_log_state_dir(path)?;
+    let identity = format!("atuin\0{}", path.display());
+    Ok(state_dir.join(format!(
+        "atuin-history-{:016x}.json",
+        stable_hash(&identity)
+    )))
+}
+
 fn command_log_state_dir(path: &Path) -> Result<PathBuf> {
     if let Some(value) = std::env::var_os("SYSLOG_COMMAND_LOG_STATE_DIR") {
         let state_dir = PathBuf::from(value);
@@ -552,7 +723,7 @@ fn read_shell_history_state(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
             return Err(error)
-                .with_context(|| format!("read shell history state {}", state_path.display()))
+                .with_context(|| format!("read shell history state {}", state_path.display()));
         }
     };
     let state: ShellHistoryImportState = serde_json::from_str(&raw)
@@ -597,6 +768,63 @@ fn write_shell_history_state(
     let mut file = options
         .open(state_path)
         .with_context(|| format!("open shell history state {}", state_path.display()))?;
+    serde_json::to_writer(&mut file, &state)?;
+    file.write_all(b"\n")?;
+    Ok(())
+}
+
+fn read_atuin_history_state(
+    state_path: &Path,
+    history_path: &Path,
+) -> Result<Option<AtuinHistoryImportState>> {
+    let raw = match fs::read_to_string(state_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("read atuin history state {}", state_path.display()));
+        }
+    };
+    let state: AtuinHistoryImportState = serde_json::from_str(&raw)
+        .with_context(|| format!("parse atuin history state {}", state_path.display()))?;
+    if state.path == history_path.display().to_string() {
+        Ok(Some(state))
+    } else {
+        Ok(None)
+    }
+}
+
+fn write_atuin_history_state(
+    state_path: &Path,
+    history_path: &Path,
+    last_timestamp_ns: i64,
+    last_id: &str,
+) -> Result<()> {
+    if let Some(parent) = state_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create atuin history state dir {}", parent.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("chmod atuin history state dir {}", parent.display()))?;
+        }
+    }
+    let state = AtuinHistoryImportState {
+        path: history_path.display().to_string(),
+        last_timestamp_ns,
+        last_id: last_id.to_string(),
+    };
+    let mut options = OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(state_path)
+        .with_context(|| format!("open atuin history state {}", state_path.display()))?;
     serde_json::to_writer(&mut file, &state)?;
     file.write_all(b"\n")?;
     Ok(())
