@@ -203,6 +203,8 @@ pub struct AiWatchStatusReport {
     /// during a DB outage.
     pub health: Option<crate::scanner::AiIndexingHealth>,
     pub latest_journal: Vec<String>,
+    /// Set when journalctl failed; distinguishes "no output" from "fetch error".
+    pub journal_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
