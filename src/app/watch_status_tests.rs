@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::app::os_adapter::OsAdapter;
-use crate::app::{ServiceError, ServiceResult};
 use crate::app::service::SyslogService;
+use crate::app::{ServiceError, ServiceResult};
 use crate::config::StorageConfig;
 use crate::db::init_pool;
 
@@ -58,7 +58,9 @@ impl OsAdapter for FailingJournalOs {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ServiceResult<String>> + Send + 'a>>
     {
         Box::pin(async move {
-            Err(ServiceError::Internal(anyhow::anyhow!("journalctl not found")))
+            Err(ServiceError::Internal(anyhow::anyhow!(
+                "journalctl not found"
+            )))
         })
     }
 

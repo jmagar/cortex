@@ -13,8 +13,8 @@
 use tracing::warn;
 
 use super::models::AiWatchStatusReport;
-use super::ServiceResult;
 use super::service::SyslogService;
+use super::ServiceResult;
 
 const SERVICE: &str = "syslog-ai-watch.service";
 
@@ -39,26 +39,25 @@ impl SyslogService {
             .probe_systemctl(&["show", "-p", "ExecStart", "--value", SERVICE])
             .await;
         let exec_main_start_timestamp = self
-            .probe_systemctl(&[
-                "show",
-                "-p",
-                "ExecMainStartTimestamp",
-                "--value",
-                SERVICE,
-            ])
+            .probe_systemctl(&["show", "-p", "ExecMainStartTimestamp", "--value", SERVICE])
             .await;
 
         // --- Process start time (procfs, no DB) ---
         let process_start_time = crate::doctor::ai_watcher_process_start_time();
 
         // --- DB calls (after OS probes so a DB outage doesn't block host info) ---
-        let health = self
-            .ai_indexing_health(process_start_time.clone())
-            .await?;
+        let health = self.ai_indexing_health(process_start_time.clone()).await?;
 
         // --- journalctl via run_command (degrade to empty on failure) ---
         let journal_args: Vec<String> = [
-            "--user", "-u", SERVICE, "-n", "10", "--no-pager", "--output", "short-iso",
+            "--user",
+            "-u",
+            SERVICE,
+            "-n",
+            "10",
+            "--no-pager",
+            "--output",
+            "short-iso",
         ]
         .iter()
         .map(|s| s.to_string())

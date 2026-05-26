@@ -64,9 +64,7 @@ pub trait OsAdapter: Send + Sync {
         program: &'a str,
         args: &'a [String],
     ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = ServiceResult<std::process::Output>> + Send + 'a,
-        >,
+        Box<dyn std::future::Future<Output = ServiceResult<std::process::Output>> + Send + 'a>,
     >;
 }
 
@@ -131,9 +129,7 @@ impl OsAdapter for SystemOsAdapter {
         program: &'a str,
         args: &'a [String],
     ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = ServiceResult<std::process::Output>> + Send + 'a,
-        >,
+        Box<dyn std::future::Future<Output = ServiceResult<std::process::Output>> + Send + 'a>,
     > {
         Box::pin(async move {
             let mut command = Command::new(program);
