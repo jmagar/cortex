@@ -114,20 +114,24 @@ impl SyslogService {
         match self.os.probe_command("systemctl", &args_owned).await {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if output.status.success() || !stdout.is_empty() {
+                if !stdout.is_empty() {
                     Some(stdout)
+                } else if output.status.success() {
+                    // Command succeeded but produced no output (e.g. property not set).
+                    None
                 } else {
+                    // Non-zero exit with empty stdout — systemctl itself errored.
                     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                     warn!(
                         args = ?args,
                         stderr = %stderr,
-                        "systemctl probe failed with empty stdout"
+                        "systemctl --user exited non-zero with empty stdout"
                     );
                     None
                 }
             }
             Err(e) => {
-                warn!(args = ?args, error = %e, "systemctl probe_command error");
+                warn!(args = ?args, error = %e, "systemctl --user spawn failed");
                 None
             }
         }
