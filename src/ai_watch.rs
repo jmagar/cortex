@@ -416,7 +416,11 @@ fn is_transient_watch_error(error: &std::io::Error) -> bool {
 async fn prune_missing_checkpoints(service: &SyslogService, json: bool) -> bool {
     const PRUNE_LIMIT: u32 = 500;
     match service
-        .prune_ai_checkpoints(true, false, Some(PRUNE_LIMIT))
+        .prune_ai_checkpoints_checked(crate::app::AiPruneCheckpointsRequest {
+            dry_run: false,
+            missing_only: true,
+            limit: Some(PRUNE_LIMIT),
+        })
         .await
     {
         Ok(result) => {

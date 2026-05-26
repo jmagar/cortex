@@ -52,6 +52,42 @@ pub fn list_apps(pool: &DbPool, params: &ListAppsParams<'_>) -> Result<ListAppsR
     let limit = params.limit.clamp(1, 5_000);
     let offset = params.offset;
 
+    if params.hostname.is_none()
+        && params.from.is_none()
+        && params.to.is_none()
+        && inventory_backfill_complete_conn(&conn).unwrap_or(false)
+    {
+        let total = conn.query_row("SELECT COUNT(*) FROM app_inventory_stats", [], |row| {
+            row.get::<_, i64>(0)
+        })? as usize;
+        let mut stmt = conn.prepare(&format!(
+            "WITH page AS (
+                SELECT app_name, log_count, first_seen, last_seen
+                FROM app_inventory_stats
+                ORDER BY last_seen DESC, app_name ASC
+                LIMIT {limit} OFFSET {offset}
+             )
+             SELECT p.app_name, p.log_count, COUNT(h.hostname), p.first_seen, p.last_seen
+             FROM page p
+             LEFT JOIN app_host_inventory_stats h ON h.app_name = p.app_name
+             GROUP BY p.app_name, p.log_count, p.first_seen, p.last_seen
+             ORDER BY p.last_seen DESC, p.app_name ASC"
+        ))?;
+        let apps = stmt
+            .query_map([], |row| {
+                Ok(AppEntry {
+                    app_name: row.get(0)?,
+                    log_count: row.get(1)?,
+                    host_count: row.get(2)?,
+                    first_seen: row.get(3)?,
+                    last_seen: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        return Ok(ListAppsResult { apps, total });
+    }
+
     // Build the shared WHERE clause and bindings once; reuse for COUNT and data queries.
     // first_seen / last_seen come from `received_at` (server clock) so they match
     // how the `hosts` table is updated and aren't skewed by a misconfigured device clock.
@@ -144,6 +180,93 @@ pub struct ListSourceIpsParams {
 pub fn list_source_ips(pool: &DbPool, params: &ListSourceIpsParams) -> Result<ListSourceIpsResult> {
     let limit = params.limit.clamp(1, 5_000);
     let offset = params.offset;
+
+    let inventory_complete = {
+        let conn = pool.get()?;
+        inventory_backfill_complete_conn(&conn).unwrap_or(false)
+    };
+
+    if inventory_complete {
+        let conn = pool.get()?;
+        let total = conn.query_row(
+            "SELECT COUNT(*) FROM source_ip_inventory_stats",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? as usize;
+
+        let mut stmt = conn.prepare(&format!(
+            "WITH page AS (
+                SELECT source_ip, log_count, first_seen, last_seen
+                FROM source_ip_inventory_stats
+                ORDER BY log_count DESC, source_ip ASC
+                LIMIT {limit} OFFSET {offset}
+             )
+             SELECT p.source_ip, p.log_count, p.first_seen, p.last_seen,
+                    h.hostname, h.log_count, h.first_seen, h.last_seen
+             FROM page p
+             LEFT JOIN source_ip_host_inventory_stats h ON h.source_ip = p.source_ip
+             ORDER BY p.log_count DESC, p.source_ip ASC, h.log_count DESC, h.hostname ASC"
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+            ))
+        })?;
+
+        let mut by_ip: BTreeMap<String, SourceIpEntry> = BTreeMap::new();
+        for row in rows {
+            let (ip, total_count, first, last, host, host_count) = row?;
+            let entry = by_ip.entry(ip.clone()).or_insert_with(|| SourceIpEntry {
+                source_ip: ip,
+                log_count: total_count,
+                host_count: 0,
+                first_seen: first,
+                last_seen: last,
+                hostnames: Vec::new(),
+            });
+            if let Some(host) = host {
+                entry.host_count += 1;
+                if entry.hostnames.len() < 10 {
+                    entry.hostnames.push(SourceIpHostBreakdown {
+                        hostname: host,
+                        log_count: host_count,
+                    });
+                }
+            }
+        }
+
+        let mut out: Vec<SourceIpEntry> = by_ip.into_values().collect();
+        out.sort_by_key(|entry| Reverse(entry.log_count));
+        return Ok(ListSourceIpsResult {
+            source_ips: out,
+            total,
+        });
+    }
+
+    list_source_ips_from_logs(pool, params)
+}
+
+fn inventory_backfill_complete_conn(conn: &rusqlite::Connection) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT completed_at IS NOT NULL
+         FROM inventory_backfill_state
+         WHERE name = 'app_source_inventory'",
+        [],
+        |row| row.get::<_, bool>(0),
+    )
+}
+
+fn list_source_ips_from_logs(
+    pool: &DbPool,
+    params: &ListSourceIpsParams,
+) -> Result<ListSourceIpsResult> {
+    let limit = params.limit.clamp(1, 5_000);
+    let offset = params.offset;
     let conn = pool.get()?;
 
     let total = conn.query_row(
@@ -152,12 +275,6 @@ pub fn list_source_ips(pool: &DbPool, params: &ListSourceIpsParams) -> Result<Li
         |row| row.get::<_, i64>(0),
     )? as usize;
 
-    // first_seen / last_seen come from `received_at` (server clock): for sender
-    // identity / spoof-detection use cases, the network arrival time is the
-    // verified value, while the message `timestamp` is whatever the sender claimed.
-    //
-    // CTE top_ips selects the page of distinct source_ips by total volume.
-    // Joining back to per-(ip,hostname) rows preserves the hostname breakdown.
     let mut stmt = conn.prepare(&format!(
         "WITH top_ips AS (
             SELECT source_ip

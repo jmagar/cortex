@@ -20,6 +20,7 @@ pub use models::{
     AiAssessRequest,
     AiAssessResponse,
     AiCheckpointsRequest,
+    AiCorrelateLimitPolicy,
     AiCorrelateRequest,
     AiCorrelateResponse,
     AiCorrelationAnchor,
@@ -27,6 +28,7 @@ pub use models::{
     AiIncidentResponse,
     AiInvestigateRequest,
     AiInvestigateResponse,
+    AiLimitPolicy,
     AiParseErrorsRequest,
     AiProjectEntry,
     AiPruneCheckpointsRequest,
@@ -87,10 +89,12 @@ pub use models::{
     ListSourceIpsRequest,
     ListSourceIpsResponse,
     LogEntry,
+    NotificationsRecentRequest,
     PatternsRequest,
     PatternsResponse,
     ProjectContextRequest,
     ProjectContextResponse,
+    RequestActor,
     SearchLogsRequest,
     SearchLogsResponse,
     SearchSessionsRequest,
@@ -116,7 +120,7 @@ pub use models::{
     UsageBlocksResponse,
 };
 pub use os_adapter::SystemOsAdapter;
-pub use service::{run_service_logs, SyslogService};
+pub use service::{run_compose_status, run_service_logs, SyslogService};
 pub use time::parse_optional_timestamp;
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use crate::config::StorageConfig;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 15;
+pub const KNOWN_SCHEMA_VERSION: i64 = 18;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -99,6 +99,7 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         CREATE INDEX IF NOT EXISTS idx_logs_app_name  ON logs(app_name);
         CREATE INDEX IF NOT EXISTS idx_logs_host_time ON logs(hostname, timestamp);
         CREATE INDEX IF NOT EXISTS idx_logs_sev_time ON logs(severity, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_logs_app_name_timestamp ON logs(app_name, timestamp);
         CREATE INDEX IF NOT EXISTS idx_logs_received_at ON logs(received_at);
         CREATE INDEX IF NOT EXISTS idx_logs_hostname_received_at ON logs(hostname, received_at);
         CREATE INDEX IF NOT EXISTS idx_logs_source_ip_timestamp ON logs(source_ip, timestamp);
@@ -599,17 +600,39 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         );
     }
 
-    // Migration 15: heartbeat telemetry storage.
+    // Migration 15: first-class heartbeat telemetry storage.
     // Contract: docs/contracts/heartbeat-telemetry.md
     if !migration_applied(&conn, 15)? {
         apply_migration_15_heartbeat(&conn)?;
         tracing::info!("Migration 15: created heartbeat telemetry tables and indexes");
     }
 
-    // Migration 16: add restarting column to heartbeat_containers.
     if !migration_applied(&conn, 16)? {
-        apply_migration_16_heartbeat_restarting(&conn)?;
-        tracing::info!("Migration 16: added restarting column to heartbeat_containers");
+        tracing::info!(
+            "Migration 16: starting CREATE INDEX idx_logs_app_name_timestamp \
+             — may take time on large databases"
+        );
+        let started = std::time::Instant::now();
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_logs_app_name_timestamp
+                 ON logs(app_name, timestamp);
+             INSERT INTO schema_migrations (version) VALUES (16);",
+        )?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "Migration 16: app_name/timestamp search index created"
+        );
+    }
+
+    if !migration_applied(&conn, 17)? {
+        apply_migration_17_inventory_stats(&conn)?;
+        tracing::info!("Migration 17: created app/source inventory stats");
+    }
+
+    // Migration 18: add restarting column to heartbeat_containers.
+    if !migration_applied(&conn, 18)? {
+        apply_migration_18_heartbeat_restarting(&conn)?;
+        tracing::info!("Migration 18: added restarting column to heartbeat_containers");
     }
 
     conn.execute_batch(
@@ -665,6 +688,326 @@ fn add_column_if_missing(
     Ok(())
 }
 
+fn apply_migration_17_inventory_stats(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "BEGIN IMMEDIATE;
+
+         CREATE TABLE IF NOT EXISTS app_inventory_stats (
+             app_name   TEXT PRIMARY KEY,
+             log_count  INTEGER NOT NULL DEFAULT 0,
+             first_seen TEXT NOT NULL,
+             last_seen  TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_app_inventory_last_seen
+             ON app_inventory_stats(last_seen DESC, app_name ASC);
+
+         CREATE TABLE IF NOT EXISTS app_host_inventory_stats (
+             app_name   TEXT NOT NULL,
+             hostname   TEXT NOT NULL,
+             log_count  INTEGER NOT NULL DEFAULT 0,
+             first_seen TEXT NOT NULL,
+             last_seen  TEXT NOT NULL,
+             PRIMARY KEY (app_name, hostname)
+         );
+         CREATE INDEX IF NOT EXISTS idx_app_host_inventory_count
+             ON app_host_inventory_stats(app_name, log_count DESC, hostname ASC);
+
+         CREATE TABLE IF NOT EXISTS source_ip_inventory_stats (
+             source_ip  TEXT PRIMARY KEY,
+             log_count  INTEGER NOT NULL DEFAULT 0,
+             first_seen TEXT NOT NULL,
+             last_seen  TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_source_ip_inventory_count
+             ON source_ip_inventory_stats(log_count DESC, source_ip ASC);
+
+         CREATE TABLE IF NOT EXISTS source_ip_host_inventory_stats (
+             source_ip  TEXT NOT NULL,
+             hostname   TEXT NOT NULL,
+             log_count  INTEGER NOT NULL DEFAULT 0,
+             first_seen TEXT NOT NULL,
+             last_seen  TEXT NOT NULL,
+             PRIMARY KEY (source_ip, hostname)
+         );
+         CREATE INDEX IF NOT EXISTS idx_source_ip_host_inventory_count
+             ON source_ip_host_inventory_stats(source_ip, log_count DESC, hostname ASC);
+
+         CREATE TABLE IF NOT EXISTS inventory_backfill_state (
+             name         TEXT PRIMARY KEY,
+             completed_at TEXT,
+             last_error   TEXT,
+             last_log_id  INTEGER NOT NULL DEFAULT 0,
+             high_watermark_id INTEGER
+         );
+         INSERT OR IGNORE INTO inventory_backfill_state(name)
+         VALUES ('app_source_inventory');
+
+         DROP TRIGGER IF EXISTS logs_inventory_app_ai;
+         DROP TRIGGER IF EXISTS logs_inventory_app_ad;
+         DROP TRIGGER IF EXISTS logs_inventory_source_ip_ai;
+         DROP TRIGGER IF EXISTS logs_inventory_source_ip_ad;
+
+         CREATE TRIGGER logs_inventory_app_ai AFTER INSERT ON logs
+         WHEN NEW.app_name IS NOT NULL AND NEW.app_name != ''
+         BEGIN
+             INSERT INTO app_inventory_stats(app_name, log_count, first_seen, last_seen)
+             VALUES (NEW.app_name, 1, NEW.received_at, NEW.received_at)
+             ON CONFLICT(app_name) DO UPDATE SET
+                 log_count = log_count + 1,
+                 first_seen = min(first_seen, excluded.first_seen),
+                 last_seen = max(last_seen, excluded.last_seen);
+
+             INSERT INTO app_host_inventory_stats(app_name, hostname, log_count, first_seen, last_seen)
+             VALUES (NEW.app_name, NEW.hostname, 1, NEW.received_at, NEW.received_at)
+             ON CONFLICT(app_name, hostname) DO UPDATE SET
+                 log_count = log_count + 1,
+                 first_seen = min(first_seen, excluded.first_seen),
+                 last_seen = max(last_seen, excluded.last_seen);
+         END;
+
+         CREATE TRIGGER logs_inventory_app_ad AFTER DELETE ON logs
+         WHEN OLD.app_name IS NOT NULL AND OLD.app_name != ''
+         BEGIN
+             UPDATE app_inventory_stats
+             SET log_count = log_count - 1
+             WHERE app_name = OLD.app_name;
+             DELETE FROM app_inventory_stats
+             WHERE app_name = OLD.app_name AND log_count <= 0;
+
+             UPDATE app_host_inventory_stats
+             SET log_count = log_count - 1
+             WHERE app_name = OLD.app_name AND hostname = OLD.hostname;
+             DELETE FROM app_host_inventory_stats
+             WHERE app_name = OLD.app_name AND hostname = OLD.hostname AND log_count <= 0;
+         END;
+
+         CREATE TRIGGER logs_inventory_source_ip_ai AFTER INSERT ON logs
+         WHEN NEW.source_ip != ''
+         BEGIN
+             INSERT INTO source_ip_inventory_stats(source_ip, log_count, first_seen, last_seen)
+             VALUES (NEW.source_ip, 1, NEW.received_at, NEW.received_at)
+             ON CONFLICT(source_ip) DO UPDATE SET
+                 log_count = log_count + 1,
+                 first_seen = min(first_seen, excluded.first_seen),
+                 last_seen = max(last_seen, excluded.last_seen);
+
+             INSERT INTO source_ip_host_inventory_stats(source_ip, hostname, log_count, first_seen, last_seen)
+             VALUES (NEW.source_ip, NEW.hostname, 1, NEW.received_at, NEW.received_at)
+             ON CONFLICT(source_ip, hostname) DO UPDATE SET
+                 log_count = log_count + 1,
+                 first_seen = min(first_seen, excluded.first_seen),
+                 last_seen = max(last_seen, excluded.last_seen);
+         END;
+
+         CREATE TRIGGER logs_inventory_source_ip_ad AFTER DELETE ON logs
+         WHEN OLD.source_ip != ''
+         BEGIN
+             UPDATE source_ip_inventory_stats
+             SET log_count = log_count - 1
+             WHERE source_ip = OLD.source_ip;
+             DELETE FROM source_ip_inventory_stats
+             WHERE source_ip = OLD.source_ip AND log_count <= 0;
+
+             UPDATE source_ip_host_inventory_stats
+             SET log_count = log_count - 1
+             WHERE source_ip = OLD.source_ip AND hostname = OLD.hostname;
+             DELETE FROM source_ip_host_inventory_stats
+             WHERE source_ip = OLD.source_ip AND hostname = OLD.hostname AND log_count <= 0;
+         END;
+
+         INSERT OR IGNORE INTO schema_migrations (version) VALUES (17);
+         COMMIT;",
+    )?;
+    tracing::info!("Migration 17: created app/source inventory stats tables and triggers");
+    Ok(())
+}
+
+pub fn inventory_backfill_complete(pool: &DbPool) -> Result<bool> {
+    let conn = pool.get()?;
+    let complete = conn.query_row(
+        "SELECT completed_at IS NOT NULL
+         FROM inventory_backfill_state
+         WHERE name = 'app_source_inventory'",
+        [],
+        |row| row.get::<_, bool>(0),
+    )?;
+    Ok(complete)
+}
+
+fn ensure_inventory_backfill_state_columns(conn: &Connection) -> rusqlite::Result<()> {
+    add_column_if_missing(
+        conn,
+        "inventory_backfill_state",
+        "last_log_id",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        conn,
+        "inventory_backfill_state",
+        "high_watermark_id",
+        "INTEGER",
+    )?;
+    Ok(())
+}
+
+pub fn backfill_inventory_stats(pool: &DbPool) -> Result<()> {
+    const CHUNK_SIZE: i64 = 25_000;
+    const BETWEEN_CHUNKS: std::time::Duration = std::time::Duration::from_millis(25);
+
+    if inventory_backfill_complete(pool)? {
+        return Ok(());
+    }
+    let conn = pool.get()?;
+    ensure_inventory_backfill_state_columns(&conn)?;
+    tracing::info!(
+        "Inventory stats backfill starting — queries may fall back to logs until this completes"
+    );
+    let started = std::time::Instant::now();
+
+    loop {
+        let (last_log_id, high_watermark_id): (i64, Option<i64>) = conn.query_row(
+            "SELECT last_log_id, high_watermark_id
+             FROM inventory_backfill_state
+             WHERE name = 'app_source_inventory'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let high_watermark_id = match high_watermark_id {
+            Some(id) => id,
+            None => {
+                let high: i64 =
+                    conn.query_row("SELECT COALESCE(MAX(id), 0) FROM logs", [], |row| {
+                        row.get(0)
+                    })?;
+                conn.execute_batch(
+                    "BEGIN IMMEDIATE;
+                     DELETE FROM app_inventory_stats;
+                     DELETE FROM app_host_inventory_stats;
+                     DELETE FROM source_ip_inventory_stats;
+                     DELETE FROM source_ip_host_inventory_stats;",
+                )?;
+                conn.execute(
+                    "UPDATE inventory_backfill_state
+                     SET last_log_id = 0,
+                         high_watermark_id = ?1,
+                         completed_at = NULL,
+                         last_error = NULL
+                     WHERE name = 'app_source_inventory'",
+                    [high],
+                )?;
+                conn.execute_batch("COMMIT;")?;
+                high
+            }
+        };
+
+        if last_log_id >= high_watermark_id {
+            conn.execute(
+                "UPDATE inventory_backfill_state
+                 SET completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                     last_error = NULL
+                 WHERE name = 'app_source_inventory'",
+                [],
+            )?;
+            tracing::info!(
+                elapsed_ms = started.elapsed().as_millis(),
+                high_watermark_id,
+                "Inventory stats backfill completed"
+            );
+            return Ok(());
+        }
+
+        let next_log_id = (last_log_id + CHUNK_SIZE).min(high_watermark_id);
+        conn.execute_batch("BEGIN IMMEDIATE;")?;
+        let result = (|| -> rusqlite::Result<()> {
+            conn.execute(
+                "INSERT INTO app_inventory_stats(app_name, log_count, first_seen, last_seen)
+                 SELECT app_name, COUNT(*), MIN(received_at), MAX(received_at)
+                 FROM logs
+                 WHERE id > ?1
+                   AND id <= ?2
+                   AND app_name IS NOT NULL
+                   AND app_name != ''
+                 GROUP BY app_name
+                 ON CONFLICT(app_name) DO UPDATE SET
+                     log_count = log_count + excluded.log_count,
+                     first_seen = min(first_seen, excluded.first_seen),
+                     last_seen = max(last_seen, excluded.last_seen)",
+                (last_log_id, next_log_id),
+            )?;
+            conn.execute(
+                "INSERT INTO app_host_inventory_stats(app_name, hostname, log_count, first_seen, last_seen)
+                 SELECT app_name, hostname, COUNT(*), MIN(received_at), MAX(received_at)
+                 FROM logs
+                 WHERE id > ?1
+                   AND id <= ?2
+                   AND app_name IS NOT NULL
+                   AND app_name != ''
+                 GROUP BY app_name, hostname
+                 ON CONFLICT(app_name, hostname) DO UPDATE SET
+                     log_count = log_count + excluded.log_count,
+                     first_seen = min(first_seen, excluded.first_seen),
+                     last_seen = max(last_seen, excluded.last_seen)",
+                (last_log_id, next_log_id),
+            )?;
+            conn.execute(
+                "INSERT INTO source_ip_inventory_stats(source_ip, log_count, first_seen, last_seen)
+                 SELECT source_ip, COUNT(*), MIN(received_at), MAX(received_at)
+                 FROM logs
+                 WHERE id > ?1
+                   AND id <= ?2
+                   AND source_ip != ''
+                 GROUP BY source_ip
+                 ON CONFLICT(source_ip) DO UPDATE SET
+                     log_count = log_count + excluded.log_count,
+                     first_seen = min(first_seen, excluded.first_seen),
+                     last_seen = max(last_seen, excluded.last_seen)",
+                (last_log_id, next_log_id),
+            )?;
+            conn.execute(
+                "INSERT INTO source_ip_host_inventory_stats(source_ip, hostname, log_count, first_seen, last_seen)
+                 SELECT source_ip, hostname, COUNT(*), MIN(received_at), MAX(received_at)
+                 FROM logs
+                 WHERE id > ?1
+                   AND id <= ?2
+                   AND source_ip != ''
+                 GROUP BY source_ip, hostname
+                 ON CONFLICT(source_ip, hostname) DO UPDATE SET
+                     log_count = log_count + excluded.log_count,
+                     first_seen = min(first_seen, excluded.first_seen),
+                     last_seen = max(last_seen, excluded.last_seen)",
+                (last_log_id, next_log_id),
+            )?;
+            conn.execute(
+                "UPDATE inventory_backfill_state
+                 SET last_log_id = ?1,
+                     last_error = NULL
+                 WHERE name = 'app_source_inventory'",
+                [next_log_id],
+            )?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => conn.execute_batch("COMMIT;")?,
+            Err(error) => {
+                let _ = conn.execute_batch("ROLLBACK;");
+                let _ = conn.execute(
+                    "UPDATE inventory_backfill_state
+                     SET last_error = ?1
+                     WHERE name = 'app_source_inventory'",
+                    [error.to_string()],
+                );
+                return Err(error.into());
+            }
+        }
+        tracing::debug!(
+            last_log_id = next_log_id,
+            high_watermark_id,
+            "Inventory stats backfill chunk completed"
+        );
+        std::thread::sleep(BETWEEN_CHUNKS);
+    }
+}
+
 fn apply_migration_13(conn: &Connection) -> rusqlite::Result<()> {
     // Explicit transaction keeps index/version updates atomic, while each ALTER is
     // guarded so manually repaired or partially migrated DBs can converge instead
@@ -701,107 +1044,126 @@ fn apply_migration_13(conn: &Connection) -> rusqlite::Result<()> {
 fn apply_migration_15_heartbeat(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE;")?;
     let result = conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS host_heartbeats (
-             id             INTEGER PRIMARY KEY AUTOINCREMENT,
-             host_id        TEXT NOT NULL,
-             hostname       TEXT NOT NULL,
-             source_ip      TEXT NOT NULL DEFAULT '',
-             sampled_at     TEXT NOT NULL,
-             received_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-             boot_id        TEXT NOT NULL,
-             uptime_secs    INTEGER NOT NULL,
-             sequence       INTEGER NOT NULL,
-             collection_ms  INTEGER NOT NULL,
-             push_latency_ms INTEGER,
-             partial        INTEGER NOT NULL DEFAULT 0,
-             agent_version  TEXT NOT NULL,
-             os             TEXT NOT NULL,
-             kernel         TEXT,
-             architecture   TEXT NOT NULL,
-             metadata_json  TEXT,
-             UNIQUE(host_id, boot_id, sequence)
-         );
-         CREATE INDEX IF NOT EXISTS idx_host_heartbeats_host_sampled
-             ON host_heartbeats(host_id, sampled_at DESC);
-         CREATE INDEX IF NOT EXISTS idx_host_heartbeats_received
-             ON host_heartbeats(received_at DESC);
-         CREATE INDEX IF NOT EXISTS idx_host_heartbeats_hostname_sampled
-             ON host_heartbeats(hostname, sampled_at DESC);
+        "
+        CREATE TABLE IF NOT EXISTS host_heartbeats (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            host_id         TEXT NOT NULL,
+            hostname        TEXT NOT NULL,
+            source_ip       TEXT NOT NULL DEFAULT '',
+            sampled_at      TEXT NOT NULL,
+            received_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            boot_id         TEXT NOT NULL,
+            uptime_secs     INTEGER NOT NULL,
+            sequence        INTEGER NOT NULL,
+            collection_ms   INTEGER NOT NULL,
+            push_latency_ms INTEGER,
+            partial         INTEGER NOT NULL DEFAULT 0,
+            agent_version   TEXT NOT NULL,
+            os              TEXT NOT NULL,
+            kernel          TEXT,
+            architecture    TEXT NOT NULL,
+            metadata_json   TEXT,
+            UNIQUE(host_id, boot_id, sequence)
+        );
 
-         CREATE TABLE IF NOT EXISTS heartbeat_cpu (
-             heartbeat_id       INTEGER PRIMARY KEY,
-             load1              REAL,
-             load5              REAL,
-             load15             REAL,
-             usage_percent      REAL,
-             steal_percent      REAL,
-             io_wait_percent    REAL
-         );
-         CREATE INDEX IF NOT EXISTS idx_heartbeat_cpu_heartbeat_id
-             ON heartbeat_cpu(heartbeat_id);
+        CREATE INDEX IF NOT EXISTS idx_host_heartbeats_host_sampled
+            ON host_heartbeats(host_id, sampled_at);
+        CREATE INDEX IF NOT EXISTS idx_host_heartbeats_received
+            ON host_heartbeats(received_at);
+        CREATE INDEX IF NOT EXISTS idx_host_heartbeats_hostname_sampled
+            ON host_heartbeats(hostname, sampled_at);
 
-         CREATE TABLE IF NOT EXISTS heartbeat_memory (
-             heartbeat_id        INTEGER PRIMARY KEY,
-             total_bytes         INTEGER,
-             available_bytes     INTEGER,
-             used_percent        REAL,
-             swap_total_bytes    INTEGER,
-             swap_used_bytes     INTEGER
-         );
-         CREATE INDEX IF NOT EXISTS idx_heartbeat_memory_heartbeat_id
-             ON heartbeat_memory(heartbeat_id);
+        CREATE TABLE IF NOT EXISTS heartbeat_cpu (
+            heartbeat_id      INTEGER NOT NULL,
+            load1             REAL,
+            load5             REAL,
+            load15            REAL,
+            usage_pct         REAL,
+            user_pct          REAL,
+            system_pct        REAL,
+            iowait_pct        REAL,
+            steal_pct         REAL,
+            cpu_count         INTEGER,
+            metadata_json     TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_cpu_heartbeat_id
+            ON heartbeat_cpu(heartbeat_id);
 
-         CREATE TABLE IF NOT EXISTS heartbeat_disks (
-             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-             heartbeat_id        INTEGER NOT NULL,
-             mountpoint          TEXT NOT NULL,
-             filesystem          TEXT,
-             total_bytes         INTEGER,
-             available_bytes     INTEGER,
-             used_percent        REAL,
-             read_bytes_per_sec  REAL,
-             write_bytes_per_sec REAL
-         );
-         CREATE INDEX IF NOT EXISTS idx_heartbeat_disks_heartbeat_id
-             ON heartbeat_disks(heartbeat_id);
+        CREATE TABLE IF NOT EXISTS heartbeat_memory (
+            heartbeat_id          INTEGER NOT NULL,
+            total_bytes           INTEGER,
+            available_bytes       INTEGER,
+            used_bytes            INTEGER,
+            swap_total_bytes      INTEGER,
+            swap_used_bytes       INTEGER,
+            metadata_json         TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_memory_heartbeat_id
+            ON heartbeat_memory(heartbeat_id);
 
-         CREATE TABLE IF NOT EXISTS heartbeat_network (
-             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-             heartbeat_id        INTEGER NOT NULL,
-             interface           TEXT NOT NULL,
-             rx_bytes_per_sec    REAL,
-             tx_bytes_per_sec    REAL,
-             rx_errors           INTEGER,
-             tx_errors           INTEGER
-         );
-         CREATE INDEX IF NOT EXISTS idx_heartbeat_network_heartbeat_id
-             ON heartbeat_network(heartbeat_id);
+        CREATE TABLE IF NOT EXISTS heartbeat_disks (
+            heartbeat_id       INTEGER NOT NULL,
+            name               TEXT,
+            mount_point        TEXT,
+            fs_type            TEXT,
+            total_bytes        INTEGER,
+            free_bytes         INTEGER,
+            used_bytes         INTEGER,
+            inode_total        INTEGER,
+            inode_free         INTEGER,
+            read_only          INTEGER,
+            read_bytes_per_sec REAL,
+            write_bytes_per_sec REAL,
+            busy_pct           REAL,
+            metadata_json      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_disks_heartbeat_id
+            ON heartbeat_disks(heartbeat_id);
 
-         CREATE TABLE IF NOT EXISTS heartbeat_processes (
-             heartbeat_id        INTEGER PRIMARY KEY,
-             total               INTEGER,
-             running             INTEGER,
-             sleeping            INTEGER,
-             zombie              INTEGER,
-             top_cpu_json        TEXT,
-             top_memory_json     TEXT
-         );
-         CREATE INDEX IF NOT EXISTS idx_heartbeat_processes_heartbeat_id
-             ON heartbeat_processes(heartbeat_id);
+        CREATE TABLE IF NOT EXISTS heartbeat_network (
+            heartbeat_id       INTEGER NOT NULL,
+            interface_name     TEXT NOT NULL,
+            rx_bytes_per_sec   REAL,
+            tx_bytes_per_sec   REAL,
+            rx_packets_per_sec REAL,
+            tx_packets_per_sec REAL,
+            rx_errors          INTEGER,
+            tx_errors          INTEGER,
+            rx_dropped         INTEGER,
+            tx_dropped         INTEGER,
+            link_up            INTEGER,
+            metadata_json      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_network_heartbeat_id
+            ON heartbeat_network(heartbeat_id);
 
-         CREATE TABLE IF NOT EXISTS heartbeat_containers (
-             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-             heartbeat_id        INTEGER NOT NULL,
-             runtime             TEXT NOT NULL,
-             running             INTEGER,
-             stopped             INTEGER,
-             unhealthy           INTEGER,
-             summary_json        TEXT
-         );
-         CREATE INDEX IF NOT EXISTS idx_heartbeat_containers_heartbeat_id
-             ON heartbeat_containers(heartbeat_id);
+        CREATE TABLE IF NOT EXISTS heartbeat_processes (
+            heartbeat_id       INTEGER NOT NULL,
+            total              INTEGER,
+            running            INTEGER,
+            sleeping           INTEGER,
+            zombie             INTEGER,
+            top_json           TEXT,
+            metadata_json      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_processes_heartbeat_id
+            ON heartbeat_processes(heartbeat_id);
 
-         INSERT OR IGNORE INTO schema_migrations (version) VALUES (15);",
+        CREATE TABLE IF NOT EXISTS heartbeat_containers (
+            heartbeat_id       INTEGER NOT NULL,
+            reachable          INTEGER NOT NULL DEFAULT 0,
+            running            INTEGER,
+            exited             INTEGER,
+            restarting         INTEGER,
+            unhealthy          INTEGER,
+            details_json       TEXT,
+            metadata_json      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_containers_heartbeat_id
+            ON heartbeat_containers(heartbeat_id);
+
+        INSERT OR IGNORE INTO schema_migrations (version) VALUES (15);
+        ",
     );
 
     match result {
@@ -813,11 +1175,11 @@ fn apply_migration_15_heartbeat(conn: &Connection) -> rusqlite::Result<()> {
     }
 }
 
-fn apply_migration_16_heartbeat_restarting(conn: &Connection) -> rusqlite::Result<()> {
+fn apply_migration_18_heartbeat_restarting(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE;")?;
     let result = (|| {
         add_column_if_missing(conn, "heartbeat_containers", "restarting", "INTEGER")?;
-        conn.execute_batch("INSERT OR IGNORE INTO schema_migrations (version) VALUES (16);")
+        conn.execute_batch("INSERT OR IGNORE INTO schema_migrations (version) VALUES (18);")
     })();
     match result {
         Ok(()) => conn.execute_batch("COMMIT;"),

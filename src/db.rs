@@ -26,8 +26,8 @@ pub use ingest::insert_logs_batch;
 pub(crate) use ingest::insert_logs_batch_in_tx;
 pub use maintenance::{
     db_full_vacuum, db_incremental_vacuum, db_integrity_check, db_wal_checkpoint,
-    enforce_storage_budget, get_storage_metrics, physical_size_bytes, purge_by_tag_window,
-    purge_old_heartbeats, purge_old_logs, DiskSpaceProbe,
+    enforce_storage_budget, exceeds_trigger, get_storage_metrics, physical_size_bytes,
+    purge_by_tag_window, purge_old_heartbeats, purge_old_logs, DiskSpaceProbe,
 };
 pub(crate) use maintenance::{db_pragma_i64, db_pragma_string, PragmaName};
 pub use models::{
@@ -44,8 +44,8 @@ pub use models::{
 };
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
 pub use pool::{
-    init_pool, read_schema_version_info, read_schema_version_info_conn, DbPool, SchemaVersionInfo,
-    KNOWN_SCHEMA_VERSION,
+    backfill_inventory_stats, init_pool, inventory_backfill_complete, read_schema_version_info,
+    read_schema_version_info_conn, DbPool, SchemaVersionInfo, KNOWN_SCHEMA_VERSION,
 };
 pub use queries::{
     ask_history_sessions, get_error_summary, get_stats, incident_context_summary,

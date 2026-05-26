@@ -1273,12 +1273,12 @@ fn ai_prune_checkpoints_audit_log_precedes_service_call_in_source() {
         .find("tracing::warn!(")
         .expect("handler must contain tracing::warn!( audit invocation");
     let service_call_pos = handler
-        .find(".prune_ai_checkpoints(")
-        .expect("handler must call .prune_ai_checkpoints( on the service");
+        .find(".prune_ai_checkpoints_checked(")
+        .expect("handler must call .prune_ai_checkpoints_checked( on the service");
     assert!(
         warn_pos < service_call_pos,
         "audit tracing::warn! must appear in source BEFORE the \
-         .prune_ai_checkpoints service call (eng-review #A13). \
+         .prune_ai_checkpoints_checked service call (eng-review #A13). \
          warn_pos={warn_pos}, service_call_pos={service_call_pos}"
     );
 
@@ -1847,12 +1847,12 @@ fn db_admin_audit_logs_precede_service_calls_in_source() {
     for (handler_name, service_call, required_fields) in [
         (
             "async fn db_vacuum(",
-            ".db_vacuum(",
+            ".db_vacuum_checked(",
             &["caller_ip", "action", "full", "force"][..],
         ),
         (
             "async fn db_checkpoint(",
-            ".db_checkpoint(",
+            ".db_checkpoint_checked(",
             &["caller_ip", "action", "mode"][..],
         ),
     ] {
@@ -1892,9 +1892,10 @@ fn db_admin_audit_logs_precede_service_calls_in_source() {
         }
     }
 
-    // Bead 0p8r.22: db_checkpoint's audit warn! must also precede the mode
-    // allowlist check so a rejected `mode=evil` 400 still leaves an audit
-    // row; otherwise an attacker can probe modes indefinitely without trace.
+    // Bead 0p8r.22 + syslog-mcp-yab3.5: db_checkpoint's audit warn! must also
+    // precede the checked service operation, because the mode allowlist now
+    // lives in the service request model. A rejected `mode=evil` 400 still
+    // leaves an audit row.
     let handler_start = api_src
         .find("async fn db_checkpoint(")
         .expect("db_checkpoint handler must exist");
@@ -1907,11 +1908,11 @@ fn db_admin_audit_logs_precede_service_calls_in_source() {
     let handler = &handler_tail[..handler_end];
     let warn_pos = handler.find("tracing::warn!(").expect("warn must exist");
     let mode_check_pos = handler
-        .find("CHECKPOINT_ALLOWED_MODES.contains")
-        .expect("mode allowlist check must exist");
+        .find(".db_checkpoint_checked(")
+        .expect("checked service mode validation call must exist");
     assert!(
         warn_pos < mode_check_pos,
-        "db_checkpoint audit warn! must precede the mode allowlist check (bead 0p8r.22). \
+        "db_checkpoint audit warn! must precede the checked service validation call (bead 0p8r.22). \
          warn_pos={warn_pos}, mode_check_pos={mode_check_pos}"
     );
 }

@@ -2,6 +2,12 @@
 
 Complete listing of all plugin components.
 
+MCP, REST, and CLI are transport surfaces over the shared service layer. The
+runtime MCP action schema is derived from `src/mcp/actions.rs::ACTION_SPECS`
+through `src/mcp/schemas.rs::tool_definitions()` and exposed as
+`syslog://schema/mcp-tool`; maintained Markdown docs are drift-checked rather
+than automatically generated.
+
 ## MCP tools
 
 syslog-mcp exposes one MCP tool named `syslog`. The required `action`
@@ -54,7 +60,8 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `help` | Returns markdown documentation for all actions | no |
 
 Most MCP actions are read-only. `ack_error`, `unack_error`, and
-`notifications_test` require `syslog:admin`.
+`notifications_test` require `syslog:admin`; they mutate acknowledgement/audit
+or notification state through service-owned actor and safety policy.
 
 ## Direct CLI commands
 

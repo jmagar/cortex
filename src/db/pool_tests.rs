@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::StorageConfig;
+use crate::db::{insert_logs_batch, LogBatchEntry};
 
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {
     StorageConfig::for_test(db_path)
@@ -207,6 +208,125 @@ fn init_db_creates_partial_ai_metadata_indexes() {
         assert!(sql.contains("WHERE"));
         assert!(sql.contains("IS NOT NULL"));
     }
+}
+
+#[test]
+fn init_db_creates_inventory_stats_tables_and_triggers() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = crate::config::StorageConfig {
+        db_path,
+        ..Default::default()
+    };
+
+    let _pool = init_pool(&config).unwrap();
+    let conn = rusqlite::Connection::open(&config.db_path).unwrap();
+    for table in [
+        "app_inventory_stats",
+        "app_host_inventory_stats",
+        "source_ip_inventory_stats",
+        "source_ip_host_inventory_stats",
+    ] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1, "missing table {table}");
+    }
+    for trigger in [
+        "logs_inventory_app_ai",
+        "logs_inventory_app_ad",
+        "logs_inventory_source_ip_ai",
+        "logs_inventory_source_ip_ad",
+    ] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
+                [trigger],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1, "missing trigger {trigger}");
+    }
+}
+
+#[test]
+fn inventory_backfill_processes_existing_logs_in_chunks() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = crate::config::StorageConfig {
+        db_path: dir.path().join("test.db"),
+        ..Default::default()
+    };
+    let pool = init_pool(&config).unwrap();
+    let mut entries = Vec::new();
+    for i in 0..3 {
+        entries.push(LogBatchEntry {
+            timestamp: format!("2026-01-01T00:00:0{i}Z"),
+            hostname: format!("host-{i}"),
+            facility: None,
+            severity: "info".to_string(),
+            app_name: Some("nginx".to_string()),
+            process_id: None,
+            message: "hello".to_string(),
+            raw: "hello".to_string(),
+            source_ip: "10.0.0.1:514".to_string(),
+            docker_checkpoint: None,
+            ai_tool: None,
+            ai_project: None,
+            ai_session_id: None,
+            ai_transcript_path: None,
+            metadata_json: None,
+            http_status: None,
+            auth_outcome: None,
+            dns_blocked: None,
+            event_action: None,
+            parse_error: None,
+        });
+    }
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let conn = pool.get().unwrap();
+    conn.execute("DELETE FROM app_inventory_stats", []).unwrap();
+    conn.execute("DELETE FROM app_host_inventory_stats", [])
+        .unwrap();
+    conn.execute("DELETE FROM source_ip_inventory_stats", [])
+        .unwrap();
+    conn.execute("DELETE FROM source_ip_host_inventory_stats", [])
+        .unwrap();
+    drop(conn);
+
+    backfill_inventory_stats(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    let complete: bool = conn
+        .query_row(
+            "SELECT completed_at IS NOT NULL
+             FROM inventory_backfill_state
+             WHERE name = 'app_source_inventory'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(complete);
+    let app_count: i64 = conn
+        .query_row(
+            "SELECT log_count FROM app_inventory_stats WHERE app_name = 'nginx'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(app_count, 3);
+    let source_count: i64 = conn
+        .query_row(
+            "SELECT log_count FROM source_ip_inventory_stats WHERE source_ip = '10.0.0.1:514'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(source_count, 3);
 }
 
 #[test]

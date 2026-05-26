@@ -14,15 +14,16 @@ use tokio::sync::Semaphore;
 use tower_http::cors::CorsLayer;
 
 use crate::app::{
-    AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateRequest,
-    AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
-    AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, CorrelateEventsRequest,
-    DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, GetErrorsRequest,
-    GetLogRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
-    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
-    PatternsRequest, ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, ServiceError,
-    SilentHostsRequest, SimilarIncidentsRequest, SyslogService, TailLogsRequest, TimelineRequest,
-    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
+    AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateLimitPolicy,
+    AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest, AiLimitPolicy,
+    AiParseErrorsRequest, AiPruneCheckpointsRequest, AnomaliesRequest, AskHistoryRequest,
+    ClockSkewRequest, CompareRequest, CorrelateEventsRequest, DbCheckpointRequest,
+    DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, GetErrorsRequest, GetLogRequest,
+    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
+    PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
+    ServiceError, SilentHostsRequest, SimilarIncidentsRequest, SyslogService, TailLogsRequest,
+    TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::db::DbPool;
@@ -35,18 +36,6 @@ const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// absent we emit `None` so the `/api/version` JSON response omits the field
 /// rather than rendering `null`.
 const GIT_SHA: Option<&str> = option_env!("GIT_SHA");
-
-/// Server-side hard cap for `events_per_anchor` on `/api/ai/correlate`. When
-/// the caller-supplied value exceeds this, the response carries
-/// `events_per_anchor_clamped_to: 50`. The service layer applies its own
-/// (larger) clamp; this one defends the REST surface against accidental
-/// `events_per_anchor=10000` requests blowing up the JSON payload.
-const REST_CORRELATE_EVENTS_PER_ANCHOR_CAP: u32 = 50;
-
-/// Server-side hard cap for `limit` on `/api/ai/search` + `/api/ai/abuse`.
-/// When the caller-supplied value exceeds this, the response carries
-/// `limit_clamped_to: 500` and `truncated: true`.
-const REST_AI_LIMIT_CAP: u32 = 500;
 
 /// Size threshold for the `POST /api/db/vacuum` full-vacuum pre-flight.
 /// When the cached physical size exceeds this AND the request does NOT carry
@@ -620,7 +609,7 @@ async fn ack_error(
                     signature_hash: body.signature_hash,
                     notes: body.notes,
                 },
-                "api",
+                RequestActor::api(),
             )
             .await,
     )
@@ -644,33 +633,17 @@ async fn unack_error(
                     signature_hash: body.signature_hash,
                     reason: body.reason,
                 },
-                "api",
+                RequestActor::api(),
             )
             .await,
     )
-}
-
-#[derive(Debug, Deserialize)]
-struct NotificationsRecentQuery {
-    limit: Option<i64>,
-    rule_id: Option<String>,
-    since: Option<String>,
 }
 
 async fn notifications_recent(
     State(state): State<ApiState>,
-    Query(query): Query<NotificationsRecentQuery>,
+    Query(req): Query<NotificationsRecentRequest>,
 ) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .notifications_recent(
-                query.limit.unwrap_or(50).clamp(1, 500),
-                query.rule_id,
-                query.since,
-            )
-            .await,
-    )
+    respond(state.service.notifications_recent_checked(req).await)
 }
 
 async fn notifications_test() -> impl IntoResponse {
@@ -965,49 +938,18 @@ async fn ai_investigate(
     )
 }
 
-/// Run `crate::compose::ComposeService::status()` on a blocking task, gated
-/// by a process-wide semaphore so multiple concurrent REST callers cannot
-/// spawn unbounded `docker inspect` subprocesses. Mirrors the helper in
-/// `src/mcp/tools.rs:412-433` (`compose_status`).
-async fn compose_status_inner() -> anyhow::Result<crate::compose::ComposeStatus> {
-    static COMPOSE_REST_DIAGNOSTICS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
-        std::sync::OnceLock::new();
-    let permit = COMPOSE_REST_DIAGNOSTICS
-        .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)))
-        .clone()
-        .acquire_owned()
-        .await
-        .map_err(|e| anyhow::anyhow!("compose diagnostics limiter closed: {e}"))?;
-    let service = crate::compose::ComposeService::new(
-        crate::compose::CliDockerInspect,
-        crate::compose::ProcessRunner,
-        crate::compose::ComposeDefaults::default(),
-    );
-    let status = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        service.status(&crate::compose::ComposeTarget::default())
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("compose status task failed: {e}"))??;
-    Ok(status)
-}
-
 async fn compose_status() -> impl IntoResponse {
-    match compose_status_inner().await {
+    match crate::app::run_compose_status().await {
         Ok(status) => respond::<_>(Ok(crate::compose::mcp_projection(&status))),
-        Err(e) => respond::<crate::compose::ComposeMcpStatus>(Err(ServiceError::Internal(
-            anyhow::anyhow!("compose status: {e}"),
-        ))),
+        Err(e) => respond::<crate::compose::ComposeMcpStatus>(Err(e)),
     }
 }
 
 async fn compose_doctor() -> impl IntoResponse {
-    let status = match compose_status_inner().await {
+    let status = match crate::app::run_compose_status().await {
         Ok(s) => s,
         Err(e) => {
-            return respond::<crate::compose::ComposeMcpStatus>(Err(ServiceError::Internal(
-                anyhow::anyhow!("compose doctor status: {e}"),
-            )));
+            return respond::<crate::compose::ComposeMcpStatus>(Err(e));
         }
     };
     if let Err(e) = crate::compose::ensure_doctor_ready(&status) {
@@ -1037,29 +979,18 @@ async fn sessions(
     respond(state.service.list_sessions(req).await)
 }
 
-/// Returns `Some(cap)` if `value` exceeds `cap`, otherwise `None`. Used by
-/// the three AI handlers below to detect-and-report a server-side clamp on
-/// caller-supplied limits in a single line (bead 0p8r.30).
-fn clamp_to(value: Option<u32>, cap: u32) -> Option<u32> {
-    value.filter(|&supplied| supplied > cap).map(|_| cap)
-}
-
 async fn ai_search(
     State(state): State<ApiState>,
-    Query(mut req): Query<SearchSessionsRequest>,
+    Query(req): Query<SearchSessionsRequest>,
 ) -> impl IntoResponse {
-    let clamped = clamp_to(req.limit, REST_AI_LIMIT_CAP);
-    if let Some(cap) = clamped {
-        req.limit = Some(cap);
-    }
-    let mut response = match state.service.search_sessions(req).await {
+    let response = match state
+        .service
+        .search_sessions_with_limit_policy(req, Some(AiLimitPolicy::REST))
+        .await
+    {
         Ok(v) => v,
         Err(err) => return respond::<()>(Err(err)),
     };
-    if let Some(cap) = clamped {
-        response.limit_clamped_to = Some(cap);
-        response.truncated = true;
-    }
     Json(response).into_response()
 }
 
@@ -1070,41 +1001,31 @@ async fn ai_search(
 /// (bead 0p8r.15: closes the wire-shape duplication seam).
 async fn ai_abuse(
     State(state): State<ApiState>,
-    serde_qs::axum::QsQuery(mut req): serde_qs::axum::QsQuery<AbuseSearchRequest>,
+    serde_qs::axum::QsQuery(req): serde_qs::axum::QsQuery<AbuseSearchRequest>,
 ) -> impl IntoResponse {
-    let clamped = clamp_to(req.limit, REST_AI_LIMIT_CAP);
-    if let Some(cap) = clamped {
-        req.limit = Some(cap);
-    }
-    let mut response = match state.service.search_abuse(req).await {
+    let response = match state
+        .service
+        .search_abuse_with_limit_policy(req, Some(AiLimitPolicy::REST))
+        .await
+    {
         Ok(v) => v,
         Err(err) => return respond::<()>(Err(err)),
     };
-    if let Some(cap) = clamped {
-        response.limit_clamped_to = Some(cap);
-        response.truncated = true;
-    }
     Json(response).into_response()
 }
 
 async fn ai_correlate(
     State(state): State<ApiState>,
-    Query(mut req): Query<AiCorrelateRequest>,
+    Query(req): Query<AiCorrelateRequest>,
 ) -> impl IntoResponse {
-    // Clamp `events_per_anchor` to REST_CORRELATE_EVENTS_PER_ANCHOR_CAP.
-    // Mark the response when the caller asked for more so clients know
-    // their value was reduced.
-    let clamped = clamp_to(req.events_per_anchor, REST_CORRELATE_EVENTS_PER_ANCHOR_CAP);
-    if let Some(cap) = clamped {
-        req.events_per_anchor = Some(cap);
-    }
-    let mut response = match state.service.correlate_ai_logs(req).await {
+    let response = match state
+        .service
+        .correlate_ai_logs_with_limit_policy(req, AiCorrelateLimitPolicy::REST)
+        .await
+    {
         Ok(v) => v,
         Err(err) => return respond::<()>(Err(err)),
     };
-    if let Some(cap) = clamped {
-        response.events_per_anchor_clamped_to = Some(cap);
-    }
     Json(response).into_response()
 }
 
@@ -1266,12 +1187,7 @@ async fn ai_prune_checkpoints(
         }
     };
 
-    respond(
-        state
-            .service
-            .prune_ai_checkpoints(req.missing_only, req.dry_run, req.limit)
-            .await,
-    )
+    respond(state.service.prune_ai_checkpoints_checked(req).await)
 }
 
 fn respond<T: serde::Serialize>(result: crate::app::ServiceResult<T>) -> axum::response::Response {
@@ -1394,11 +1310,6 @@ async fn db_integrity(
     respond(state.service.db_integrity(req.quick).await)
 }
 
-/// Allowed values for `DbCheckpointRequest::mode` (validated at handler entry
-/// per bead 0p8r.4 #A17). SQLite would also reject unknown modes, but explicit
-/// validation gives a clearer 400 with the allowed list.
-const CHECKPOINT_ALLOWED_MODES: &[&str] = &["passive", "full", "restart", "truncate"];
-
 /// `POST /api/db/checkpoint` — admin: `PRAGMA wal_checkpoint(<mode>)`.
 ///
 /// Uses MAINTENANCE_PERMIT (dual-permit pattern — see `MAINTENANCE_PERMIT`
@@ -1431,21 +1342,6 @@ async fn db_checkpoint(
         "admin: db_checkpoint invoked"
     );
 
-    // Validate mode (bead 0p8r.4 #A17). SQLite would also reject unknown
-    // modes, but an explicit allowlist gives a clearer 400.
-    if !CHECKPOINT_ALLOWED_MODES.contains(&mode_lower.as_str()) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": format!(
-                    "mode must be one of: {}",
-                    CHECKPOINT_ALLOWED_MODES.join(", ")
-                )
-            })),
-        )
-            .into_response();
-    }
-
     // Single-flight gate — separate from the read-worker pool (eng-review C2).
     // See `maintenance_permit` field docs on ApiState.
     let _permit = match Arc::clone(&state.maintenance_permit).try_acquire_owned() {
@@ -1459,7 +1355,7 @@ async fn db_checkpoint(
         }
     };
 
-    respond(state.service.db_checkpoint(mode_lower).await)
+    respond(state.service.db_checkpoint_checked(req).await)
 }
 
 /// `POST /api/db/vacuum` — admin: full or incremental VACUUM.
@@ -1515,36 +1411,16 @@ async fn db_vacuum(
         }
     };
 
-    // Size pre-flight (bead 0p8r.4 / eng-review C3, bead 0p8r.17). Only
-    // applies to full VACUUM, and only when force is NOT explicitly true.
-    // The size is read FRESH from `page_count * page_size` on every call so
-    // a long-running container (months of ingest growth) cannot defeat the
-    // guard with a stale startup snapshot.
-    if req.full && req.force != Some(true) {
-        let size = match state.service.db_logical_size_bytes().await {
-            Ok(bytes) => bytes,
-            Err(err) => return respond::<()>(Err(err)),
-        };
-        if size > state.full_vacuum_size_guard_bytes {
-            let gb = size as f64 / (1024.0 * 1024.0 * 1024.0);
-            return (
-                StatusCode::CONFLICT,
-                Json(json!({
-                    "error": format!(
-                        "DB size {gb:.2} GB; full VACUUM would block ingest. Pass {{\"force\":true}} or use incremental"
-                    )
-                })),
-            )
-                .into_response();
+    match state
+        .service
+        .db_vacuum_checked(req, state.full_vacuum_size_guard_bytes)
+        .await
+    {
+        Err(ServiceError::Busy(msg)) if msg.contains("full VACUUM would block ingest") => {
+            (StatusCode::CONFLICT, Json(json!({ "error": msg }))).into_response()
         }
+        other => respond(other),
     }
-
-    respond(
-        state
-            .service
-            .db_vacuum(req.full, req.incremental_pages)
-            .await,
-    )
 }
 
 #[cfg(test)]

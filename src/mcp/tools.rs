@@ -7,9 +7,10 @@ use crate::app::{
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
     CorrelateEventsRequest, FilterLogsRequest, GetErrorsRequest, GetLogRequest, HostStateRequest,
     IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, PatternsRequest,
-    ProjectContextRequest, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
-    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UsageBlocksRequest,
+    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
+    PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
+    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
+    UsageBlocksRequest,
 };
 
 use super::actions;
@@ -292,7 +293,7 @@ async fn tool_abuse_investigate(state: &AppState, args: Value) -> anyhow::Result
     let response = state
         .service
         .investigate_ai_incidents(AiInvestigateRequest {
-            incident_id: None,
+            incident_id: string_arg(&args, "incident_id"),
             project: string_arg(&args, "project"),
             tool: string_arg(&args, "tool"),
             from: string_arg(&args, "from"),
@@ -419,7 +420,7 @@ fn reject_compose_target_overrides(args: &Value) -> anyhow::Result<()> {
 
 async fn tool_compose_status(args: Value) -> anyhow::Result<Value> {
     reject_compose_target_overrides(&args)?;
-    let status = compose_status().await?;
+    let status = crate::app::run_compose_status().await?;
     Ok(serde_json::to_value(crate::compose::mcp_projection(
         &status,
     ))?)
@@ -427,34 +428,11 @@ async fn tool_compose_status(args: Value) -> anyhow::Result<Value> {
 
 async fn tool_compose_doctor(args: Value) -> anyhow::Result<Value> {
     reject_compose_target_overrides(&args)?;
-    let status = compose_status().await?;
+    let status = crate::app::run_compose_status().await?;
     crate::compose::ensure_doctor_ready(&status)?;
     Ok(serde_json::to_value(crate::compose::mcp_projection(
         &status,
     ))?)
-}
-
-async fn compose_status() -> anyhow::Result<crate::compose::ComposeStatus> {
-    static COMPOSE_DIAGNOSTICS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
-        std::sync::OnceLock::new();
-    let permit = COMPOSE_DIAGNOSTICS
-        .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)))
-        .clone()
-        .acquire_owned()
-        .await
-        .map_err(|e| anyhow::anyhow!("compose diagnostics limiter closed: {e}"))?;
-    let service = crate::compose::ComposeService::new(
-        crate::compose::CliDockerInspect,
-        crate::compose::ProcessRunner,
-        crate::compose::ComposeDefaults::default(),
-    );
-    let status = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        service.status(&crate::compose::ComposeTarget::default())
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("compose status task failed: {e}"))??;
-    Ok(status)
 }
 
 async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {
@@ -654,22 +632,23 @@ fn string_arg(args: &Value, name: &str) -> Option<String> {
 /// Mounted MCP requests carry caller identity in `AuthContext`. Prefer the
 /// verified email when available, then the subject. Loopback mode has no
 /// per-request credential, so it falls back to the local trust-boundary actor.
-fn extract_actor(state: &AppState, auth: Option<&AuthContext>) -> String {
+fn extract_actor(state: &AppState, auth: Option<&AuthContext>) -> RequestActor {
     if let Some(auth) = auth {
-        if let Some(email) = auth.email.as_deref().filter(|email| !email.is_empty()) {
-            return email.to_string();
-        }
-        if !auth.sub.is_empty() {
-            return auth.sub.clone();
-        }
+        return RequestActor::mcp_identity(
+            (!auth.sub.is_empty()).then(|| auth.sub.clone()),
+            auth.email
+                .as_deref()
+                .filter(|email| !email.is_empty())
+                .map(str::to_string),
+        );
     }
 
     match &state.auth_policy {
-        super::AuthPolicy::LoopbackDev => "mcp:loopback".to_string(),
+        super::AuthPolicy::LoopbackDev => RequestActor::mcp_loopback(),
         super::AuthPolicy::Mounted {
             auth_state: Some(_),
-        } => "mcp:oauth".to_string(),
-        super::AuthPolicy::Mounted { auth_state: None } => "mcp:bearer".to_string(),
+        } => RequestActor::mcp_oauth(),
+        super::AuthPolicy::Mounted { auth_state: None } => RequestActor::mcp_bearer(),
     }
 }
 
@@ -740,7 +719,7 @@ async fn tool_ack_error(
         notes: string_arg(&args, "notes"),
     };
     let actor = extract_actor(state, auth);
-    let resp = state.service.ack_error(req, &actor).await?;
+    let resp = state.service.ack_error(req, actor).await?;
     Ok(serde_json::to_value(resp)?)
 }
 
@@ -757,21 +736,18 @@ async fn tool_unack_error(
         reason: string_arg(&args, "reason"),
     };
     let actor = extract_actor(state, auth);
-    let resp = state.service.unack_error(req, &actor).await?;
+    let resp = state.service.unack_error(req, actor).await?;
     Ok(serde_json::to_value(resp)?)
 }
 
 async fn tool_notifications_recent(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let limit = args
-        .get("limit")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(50)
-        .clamp(1, 500);
-    let rule_id = string_arg(&args, "rule_id");
-    let since = string_arg(&args, "since");
     let firings = state
         .service
-        .notifications_recent(limit, rule_id, since)
+        .notifications_recent_checked(NotificationsRecentRequest {
+            limit: args.get("limit").and_then(|v| v.as_i64()),
+            rule_id: string_arg(&args, "rule_id"),
+            since: string_arg(&args, "since"),
+        })
         .await?;
     Ok(serde_json::to_value(firings)?)
 }
@@ -785,14 +761,9 @@ async fn tool_notifications_test(
         .unwrap_or_else(|| "Test notification from syslog-mcp".to_string());
     // Actor is derived from request auth context, not caller-supplied args.
     let actor = extract_actor(state, auth);
-    // Apprise URLs come exclusively from server config to prevent SSRF.
-    // Caller-supplied apprise_url / apprise_urls are intentionally ignored.
-    let apprise_url = state.notifications_config.apprise_url.clone();
-    let apprise_urls = state.notifications_config.apprise_urls.clone();
-
     let result = state
         .service
-        .notifications_test(body, actor, apprise_url, apprise_urls)
+        .notifications_test_checked(body, actor, &state.notifications_config)
         .await?;
     Ok(serde_json::json!({ "result": result }))
 }

@@ -50,6 +50,7 @@ pub struct MaintenanceHandles {
     notification_dispatcher: Option<JoinHandle<()>>,
     notification_evaluator: Option<JoinHandle<()>>,
     notification_digest: Option<JoinHandle<()>>,
+    inventory_backfill: Option<JoinHandle<()>>,
 }
 
 impl MaintenanceHandles {
@@ -95,6 +96,7 @@ impl MaintenanceHandles {
             self.notification_dispatcher,
             self.notification_evaluator,
             self.notification_digest,
+            self.inventory_backfill,
         ]
         .into_iter()
         .flatten()
@@ -292,6 +294,7 @@ impl RuntimeCore {
         let notification_dispatcher = self.spawn_notification_dispatcher(token.clone());
         let notification_evaluator = self.spawn_notification_evaluator(token.clone());
         let notification_digest = self.spawn_notification_digest(token.clone());
+        let inventory_backfill = self.spawn_inventory_backfill_task(token.clone());
         MaintenanceHandles {
             token,
             purge,
@@ -301,7 +304,43 @@ impl RuntimeCore {
             notification_dispatcher,
             notification_evaluator,
             notification_digest,
+            inventory_backfill,
         }
+    }
+
+    fn spawn_inventory_backfill_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
+        match db::inventory_backfill_complete(&self.pool) {
+            Ok(true) => return None,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(%error, "inventory_backfill: state probe failed");
+                return None;
+            }
+        }
+        let pool = Arc::clone(&self.pool);
+        let limiter = Arc::clone(&self.maintenance_permit);
+        Some(tokio::spawn(async move {
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => {
+                    tracing::debug!("inventory_backfill: cancelled before start");
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(5)) => {}
+            }
+            if token.is_cancelled() {
+                return;
+            }
+            let Ok(_permit) = limiter.acquire_owned().await else {
+                return;
+            };
+            let result = tokio::task::spawn_blocking(move || db::backfill_inventory_stats(&pool))
+                .await
+                .map_err(|e| anyhow::anyhow!("spawn_blocking error: {e}"))
+                .and_then(|inner| inner);
+            if let Err(error) = result {
+                tracing::error!(%error, "inventory_backfill: failed");
+            }
+        }))
     }
 
     fn spawn_notification_dispatcher(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
@@ -444,11 +483,17 @@ impl RuntimeCore {
                             ),
                         }
                     }
-                    let heartbeat_deleted = db::purge_old_heartbeats(
-                        &pool,
-                        HEARTBEAT_RETENTION_DAYS,
-                        cleanup_chunk_size,
-                    )?;
+                    let heartbeat_deleted =
+                        match db::purge_old_heartbeats(&pool, HEARTBEAT_RETENTION_DAYS, cleanup_chunk_size) {
+                            Ok(n) => n,
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "Heartbeat retention purge failed; continuing"
+                                );
+                                0
+                            }
+                        };
                     let global_deleted =
                         db::purge_old_logs(&pool, retention_days, fts_merge_pages)?;
                     Ok::<(usize, usize, usize), anyhow::Error>((
@@ -474,7 +519,7 @@ impl RuntimeCore {
                         error = %e,
                         retention_days,
                         elapsed_ms = started.elapsed().as_millis(),
-                        "Failed to purge telemetry retention"
+                        "Failed to purge old logs"
                     ),
                 }
             }

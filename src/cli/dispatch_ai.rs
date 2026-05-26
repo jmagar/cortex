@@ -298,11 +298,7 @@ pub(crate) async fn run_ai_prune_checkpoints(
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => {
-            service
-                .prune_ai_checkpoints(req.missing_only, req.dry_run, req.limit)
-                .await?
-        }
+        CliMode::Local(service) => service.prune_ai_checkpoints_checked(req.clone()).await?,
         CliMode::Http(client) => http_or_cancel(client.prune_ai_checkpoints(&req)).await?,
     };
     print_prune_checkpoints_response(&response, json)

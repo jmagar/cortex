@@ -15,6 +15,18 @@ fn test_pool() -> (DbPool, tempfile::TempDir) {
     (pool, dir) // keep dir alive for test duration
 }
 
+fn query_plan(pool: &DbPool, sql: &str, bindings: &[rusqlite::types::Value]) -> String {
+    let conn = pool.get().unwrap();
+    let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+    stmt.query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+        row.get::<_, String>(3)
+    })
+    .unwrap()
+    .collect::<rusqlite::Result<Vec<_>>>()
+    .unwrap()
+    .join("\n")
+}
+
 fn make_entry(ts: &str, host: &str, severity: &str, msg: &str) -> LogBatchEntry {
     LogBatchEntry {
         timestamp: ts.to_string(),
@@ -38,6 +50,61 @@ fn make_entry(ts: &str, host: &str, severity: &str, msg: &str) -> LogBatchEntry 
         event_action: None,
         parse_error: None,
     }
+}
+
+#[test]
+fn search_logs_fts_plan_uses_bounded_candidate_window() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[make_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            "err",
+            "bounded search candidate",
+        )],
+    )
+    .unwrap();
+
+    let params = SearchParams {
+        query: Some("bounded".to_string()),
+        ..Default::default()
+    };
+    let (sql, bindings) = search_logs_fts_sql(params.query.as_deref().unwrap(), &params, 100);
+    assert!(sql.contains("fts_candidates"));
+    assert!(sql.contains(&format!("LIMIT {SEARCH_FTS_CANDIDATE_CAP}")));
+
+    let plan = query_plan(&pool, &sql, &bindings);
+    assert!(
+        plan.contains("MATERIALIZE fts_candidates"),
+        "FTS search should cap candidates before final sort; got:\n{plan}"
+    );
+    assert!(
+        plan.contains("SCAN logs_fts VIRTUAL TABLE"),
+        "FTS search should remain FTS-driven; got:\n{plan}"
+    );
+}
+
+#[test]
+fn app_filtered_search_order_uses_app_timestamp_index() {
+    let (pool, _dir) = test_pool();
+    let plan = query_plan(
+        &pool,
+        "SELECT l.id
+         FROM logs l
+         WHERE l.app_name = ?1
+         ORDER BY l.timestamp DESC
+         LIMIT 100",
+        &[rusqlite::types::Value::Text("nginx".into())],
+    );
+    assert!(
+        plan.contains("idx_logs_app_name_timestamp"),
+        "app filtered timestamp-ordered search should use app/timestamp index; got:\n{plan}"
+    );
+    assert!(
+        !plan.contains("USE TEMP B-TREE"),
+        "app filtered timestamp-ordered search should not temp-sort; got:\n{plan}"
+    );
 }
 
 #[test]
@@ -1449,6 +1516,26 @@ fn incident_context_summary_empty_window_returns_zero() {
     assert_eq!(result.total_logs, 0);
     assert!(result.error_logs.is_empty());
     assert!(result.ai_sessions.is_empty());
+}
+
+#[test]
+fn incident_context_window_queries_force_timestamp_index() {
+    let (pool, _dir) = test_pool();
+    let plan = query_plan(
+        &pool,
+        "SELECT COUNT(*)
+         FROM logs INDEXED BY idx_logs_timestamp
+         WHERE (ai_project IS NULL OR ai_project = '')
+           AND timestamp BETWEEN ?1 AND ?2",
+        &[
+            rusqlite::types::Value::Text("2024-02-01T07:00:00Z".into()),
+            rusqlite::types::Value::Text("2024-02-01T09:00:00Z".into()),
+        ],
+    );
+    assert!(
+        plan.contains("idx_logs_timestamp"),
+        "incident context window scan should be timestamp-index driven; got:\n{plan}"
+    );
 }
 
 #[test]

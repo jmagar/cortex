@@ -78,7 +78,13 @@ pub(crate) async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWat
     let mut missing_checkpoint_count = i64::MAX;
     let mut pruned_missing_checkpoint = false;
     for _ in 0..30 {
-        let result = service.prune_ai_checkpoints(true, false, Some(500)).await?;
+        let result = service
+            .prune_ai_checkpoints_checked(syslog_mcp::app::AiPruneCheckpointsRequest {
+                dry_run: false,
+                missing_only: true,
+                limit: Some(500),
+            })
+            .await?;
         if result
             .paths
             .iter()

@@ -52,63 +52,19 @@ fn update_received_at(pool: &DbPool, message: &str, received_at: &str) {
     .unwrap();
 }
 
-fn insert_heartbeat(pool: &DbPool, host_id: &str, sequence: i64, received_at: &str) -> i64 {
+fn insert_heartbeat(pool: &DbPool, hostname: &str, received_at: &str) -> i64 {
     let conn = pool.get().unwrap();
     conn.execute(
         "INSERT INTO host_heartbeats (
-             host_id, hostname, source_ip, sampled_at, received_at, boot_id,
-             uptime_secs, sequence, collection_ms, partial, agent_version,
-             os, architecture, metadata_json
-         ) VALUES (
-             ?1, ?2, '127.0.0.1:3100', ?4, ?4, 'boot-a',
-             60, ?3, 5, 0, '0.1.0-test', 'linux', 'x86_64', ?5
-         )",
-        params![
-            host_id,
-            format!("{host_id}.local"),
-            sequence,
-            received_at,
-            "{}",
-        ],
+            host_id, hostname, source_ip, sampled_at, received_at, boot_id, uptime_secs,
+            sequence, collection_ms, agent_version, os, architecture
+        ) VALUES (
+            ?1, ?2, '127.0.0.1', ?3, ?3, ?4, 1, 1, 1, 'test', 'linux', 'x86_64'
+        )",
+        params![hostname, hostname, received_at, format!("boot-{hostname}")],
     )
     .unwrap();
     conn.last_insert_rowid()
-}
-
-fn insert_large_heartbeat(
-    pool: &DbPool,
-    host_id: &str,
-    sequence: i64,
-    received_at: &str,
-    bytes: usize,
-) -> i64 {
-    let conn = pool.get().unwrap();
-    let metadata = format!("{{\"padding\":\"{}\"}}", "x".repeat(bytes));
-    conn.execute(
-        "INSERT INTO host_heartbeats (
-             host_id, hostname, source_ip, sampled_at, received_at, boot_id,
-             uptime_secs, sequence, collection_ms, partial, agent_version,
-             os, architecture, metadata_json
-         ) VALUES (
-             ?1, ?2, '127.0.0.1:3100', ?4, ?4, 'boot-a',
-             60, ?3, 5, 0, '0.1.0-test', 'linux', 'x86_64', ?5
-         )",
-        params![
-            host_id,
-            format!("{host_id}.local"),
-            sequence,
-            received_at,
-            metadata
-        ],
-    )
-    .unwrap();
-    conn.last_insert_rowid()
-}
-
-fn heartbeat_count(pool: &DbPool) -> i64 {
-    let conn = pool.get().unwrap();
-    conn.query_row("SELECT COUNT(*) FROM host_heartbeats", [], |row| row.get(0))
-        .unwrap()
 }
 
 #[test]
@@ -171,99 +127,152 @@ fn test_purge_zero_retention_noop() {
 }
 
 #[test]
-fn test_purge_old_heartbeats_removes_children() {
+fn test_purge_old_heartbeats_removes_children_before_parent() {
     let (pool, _dir) = test_pool();
-    let old_id = insert_heartbeat(&pool, "old-host", 1, "2020-01-01T00:00:00Z");
-    let fresh_id = insert_heartbeat(&pool, "fresh-host", 1, "2099-01-01T00:00:00Z");
+    let old_id = insert_heartbeat(&pool, "host-old", "2020-01-01T00:00:00Z");
+    let new_id = insert_heartbeat(&pool, "host-new", "2099-01-01T00:00:00Z");
     let conn = pool.get().unwrap();
     conn.execute(
-        "INSERT INTO heartbeat_cpu (heartbeat_id, load1) VALUES (?1, 1.0)",
+        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_pct) VALUES (?1, 10.0)",
         [old_id],
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO heartbeat_cpu (heartbeat_id, load1) VALUES (?1, 2.0)",
-        [fresh_id],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO heartbeat_disks (heartbeat_id, mountpoint, filesystem, total_bytes)
-         VALUES (?1, '/', 'ext4', 1024)",
-        [old_id],
+        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_pct) VALUES (?1, 20.0)",
+        [new_id],
     )
     .unwrap();
     drop(conn);
 
-    let deleted = purge_old_heartbeats(&pool, 14, 10).unwrap();
+    let deleted = purge_old_heartbeats(&pool, 90, 100).unwrap();
     assert_eq!(deleted, 1);
-    assert_eq!(heartbeat_count(&pool), 1);
 
     let conn = pool.get().unwrap();
-    let old_children: i64 = conn
+    let old_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM host_heartbeats WHERE hostname = 'host-old'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let old_child_rows: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM heartbeat_cpu WHERE heartbeat_id = ?1",
             [old_id],
             |row| row.get(0),
         )
         .unwrap();
-    let fresh_children: i64 = conn
+    let new_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM host_heartbeats WHERE hostname = 'host-new'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let new_child_rows: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM heartbeat_cpu WHERE heartbeat_id = ?1",
-            [fresh_id],
+            [new_id],
             |row| row.get(0),
         )
         .unwrap();
-    let old_disk_children: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM heartbeat_disks WHERE heartbeat_id = ?1",
-            [old_id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(old_children, 0);
-    assert_eq!(old_disk_children, 0);
-    assert_eq!(fresh_children, 1);
+
+    assert_eq!(old_rows, 0);
+    assert_eq!(old_child_rows, 0);
+    assert_eq!(new_rows, 1);
+    assert_eq!(new_child_rows, 1);
 }
 
 #[test]
-fn test_enforce_storage_budget_reclaims_heartbeat_rows() {
-    let (pool, dir) = test_pool();
-    let old_id = insert_large_heartbeat(&pool, "old-heartbeat", 1, "2026-01-01T00:00:00Z", 900_000);
-    let _fresh_id =
-        insert_large_heartbeat(&pool, "fresh-heartbeat", 1, "2026-01-02T00:00:00Z", 10_000);
+fn test_heartbeat_cleanup_removes_all_child_tables_and_orphans() {
+    let (pool, _dir) = test_pool();
+    let heartbeat_id = insert_heartbeat(&pool, "host-old", "2020-01-01T00:00:00Z");
     let conn = pool.get().unwrap();
     conn.execute(
-        "INSERT INTO heartbeat_cpu (heartbeat_id, load1) VALUES (?1, 1.0)",
-        [old_id],
+        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_pct) VALUES (?1, 10.0)",
+        [heartbeat_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_memory (heartbeat_id, total_bytes) VALUES (?1, 1024)",
+        [heartbeat_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_disks (heartbeat_id, name) VALUES (?1, 'sda')",
+        [heartbeat_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_network (heartbeat_id, interface_name) VALUES (?1, 'eth0')",
+        [heartbeat_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_processes (heartbeat_id, total) VALUES (?1, 10)",
+        [heartbeat_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_containers (heartbeat_id, reachable) VALUES (?1, 1)",
+        [heartbeat_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_pct) VALUES (999999, 99.0)",
+        [],
     )
     .unwrap();
     drop(conn);
 
+    let deleted = purge_old_heartbeats(&pool, 90, 100).unwrap();
+    assert_eq!(deleted, 1);
+
+    let conn = pool.get().unwrap();
+    for table in HEARTBEAT_CHILD_TABLES {
+        let remaining: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(remaining, 0, "{table} should be empty after cleanup");
+    }
+}
+
+#[test]
+fn test_enforce_storage_budget_keeps_recent_heartbeats_when_logs_are_older() {
+    let (pool, dir) = test_pool();
+    let large_old = "old-log-".repeat(350_000);
+    let entries = vec![make_entry(
+        "2026-01-01T00:00:01Z",
+        "deleted-host",
+        "info",
+        &large_old,
+    )];
+    insert_logs_batch(&pool, &entries).unwrap();
+    update_received_at(&pool, &large_old, "2020-01-01T00:00:00Z");
+    let heartbeat_id = insert_heartbeat(&pool, "recent-heartbeat", "2099-01-01T00:00:00Z");
+
     let mut config = test_storage_config(dir.path().join("test.db"));
-    config.max_db_size_mb = 1;
-    config.recovery_db_size_mb = 0;
-    config.cleanup_chunk_size = 1;
+    config.max_db_size_mb = 3;
+    config.recovery_db_size_mb = 2;
 
     let outcome = enforce_storage_budget(&pool, &config).unwrap();
     assert!(outcome.deleted_rows > 0);
 
     let conn = pool.get().unwrap();
-    let old_remaining: i64 = conn
+    let heartbeats: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM host_heartbeats WHERE id = ?1",
-            [old_id],
+            [heartbeat_id],
             |row| row.get(0),
         )
         .unwrap();
-    let old_children: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM heartbeat_cpu WHERE heartbeat_id = ?1",
-            [old_id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(old_remaining, 0);
-    assert_eq!(old_children, 0);
+    assert_eq!(heartbeats, 1);
+    drop(conn);
+
+    let logs = tail_logs(&pool, None, None, None, None, 10).unwrap();
+    assert!(logs.is_empty());
 }
 
 #[test]
