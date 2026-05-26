@@ -483,17 +483,20 @@ impl RuntimeCore {
                             ),
                         }
                     }
-                    let heartbeat_deleted =
-                        match db::purge_old_heartbeats(&pool, HEARTBEAT_RETENTION_DAYS, cleanup_chunk_size) {
-                            Ok(n) => n,
-                            Err(e) => {
-                                tracing::error!(
-                                    error = %e,
-                                    "Heartbeat retention purge failed; continuing"
-                                );
-                                0
-                            }
-                        };
+                    let heartbeat_deleted = match db::purge_old_heartbeats(
+                        &pool,
+                        HEARTBEAT_RETENTION_DAYS,
+                        cleanup_chunk_size,
+                    ) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "Heartbeat retention purge failed; continuing"
+                            );
+                            0
+                        }
+                    };
                     let global_deleted =
                         db::purge_old_logs(&pool, retention_days, fts_merge_pages)?;
                     Ok::<(usize, usize, usize), anyhow::Error>((
