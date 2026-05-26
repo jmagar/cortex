@@ -1,0 +1,126 @@
+//! ai watch-status host probing — service-layer implementation.
+//!
+//! All systemctl probes route through `self.os.probe_command()` and are
+//! mockable in tests via `SyslogService::with_os_adapter()`. The D-Bus env
+//! setup lives in `SystemOsAdapter::probe_command` so this module stays clean.
+//!
+//! journalctl uses `self.os.run_command()` (success required); failures
+//! degrade to an empty vec — `.unwrap_or_default()` semantics preserved.
+//!
+//! Execution order: systemctl probes first (OS-only), then DB calls.
+//! This ensures the operator receives host state even during DB outages.
+
+use tracing::warn;
+
+use super::models::AiWatchStatusReport;
+use super::ServiceResult;
+use super::service::SyslogService;
+
+const SERVICE: &str = "syslog-ai-watch.service";
+
+impl SyslogService {
+    /// Collect the ai watch-status report.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServiceError` only if `ai_indexing_health` fails. Systemctl
+    /// and journalctl failures degrade gracefully (fields become `None` / empty
+    /// vec).
+    pub async fn ai_watch_status(&self) -> ServiceResult<AiWatchStatusReport> {
+        // --- Systemctl probes (OS-only, no DB dependency) ---
+        let active = self.probe_systemctl(&["is-active", SERVICE]).await;
+        let enabled = self.probe_systemctl(&["is-enabled", SERVICE]).await;
+        let main_pid = self
+            .probe_systemctl(&["show", "-p", "MainPID", "--value", SERVICE])
+            .await
+            .and_then(|v| v.parse::<u32>().ok())
+            .filter(|&pid| pid > 0);
+        let exec_start = self
+            .probe_systemctl(&["show", "-p", "ExecStart", "--value", SERVICE])
+            .await;
+        let exec_main_start_timestamp = self
+            .probe_systemctl(&[
+                "show",
+                "-p",
+                "ExecMainStartTimestamp",
+                "--value",
+                SERVICE,
+            ])
+            .await;
+
+        // --- Process start time (procfs, no DB) ---
+        let process_start_time = crate::doctor::ai_watcher_process_start_time();
+
+        // --- DB calls (after OS probes so a DB outage doesn't block host info) ---
+        let health = self
+            .ai_indexing_health(process_start_time.clone())
+            .await?;
+
+        // --- journalctl via run_command (degrade to empty on failure) ---
+        let journal_args: Vec<String> = [
+            "--user", "-u", SERVICE, "-n", "10", "--no-pager", "--output", "short-iso",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let latest_journal = match self.os.run_command("journalctl", &journal_args).await {
+            Ok(raw) => raw.lines().map(str::to_string).collect(),
+            Err(e) => {
+                warn!(service = SERVICE, error = %e, "journalctl probe failed; latest_journal will be empty");
+                Vec::new()
+            }
+        };
+
+        let db_path = self.storage.db_path.display().to_string();
+
+        Ok(AiWatchStatusReport {
+            service: SERVICE.to_string(),
+            active,
+            enabled,
+            main_pid,
+            exec_start,
+            exec_main_start_timestamp,
+            process_start_time,
+            db_path,
+            health,
+            latest_journal,
+        })
+    }
+
+    /// Call `systemctl --user <args>` via `probe_command` and return trimmed
+    /// stdout, or `None` when the command fails and stdout is empty.
+    /// Non-zero exit with non-empty stdout (e.g., "inactive") is treated as
+    /// success — that is the systemctl is-active contract.
+    async fn probe_systemctl(&self, args: &[&str]) -> Option<String> {
+        let args_owned: Vec<String> = std::iter::once("--user")
+            .chain(args.iter().copied())
+            .map(str::to_string)
+            .collect();
+
+        match self.os.probe_command("systemctl", &args_owned).await {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if output.status.success() || !stdout.is_empty() {
+                    Some(stdout)
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    warn!(
+                        args = ?args,
+                        stderr = %stderr,
+                        "systemctl probe failed with empty stdout"
+                    );
+                    None
+                }
+            }
+            Err(e) => {
+                warn!(args = ?args, error = %e, "systemctl probe_command error");
+                None
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "watch_status_tests.rs"]
+mod tests;

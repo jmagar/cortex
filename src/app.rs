@@ -5,6 +5,7 @@ mod models;
 mod os_adapter;
 mod service;
 pub(crate) mod time;
+mod watch_status;
 
 pub use correlate::severity_at_or_above;
 pub use error::{ServiceError, ServiceResult};
