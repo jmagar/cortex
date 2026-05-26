@@ -172,6 +172,10 @@ pub(crate) fn print_ai_watch_status_response(
         response.exec_start.as_deref().unwrap_or("-")
     );
     println!(
+        "exec_main_start_timestamp: {}",
+        response.exec_main_start_timestamp.as_deref().unwrap_or("-")
+    );
+    println!(
         "process_start_time: {}",
         response.process_start_time.as_deref().unwrap_or("-")
     );
