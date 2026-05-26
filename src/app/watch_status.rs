@@ -27,19 +27,18 @@ impl SyslogService {
     /// - journalctl failure → `latest_journal: []`, `journal_error: Some(msg)`
     pub async fn ai_watch_status(&self) -> ServiceResult<AiWatchStatusReport> {
         // --- Systemctl probes (OS-only, no DB dependency) ---
-        let active = self.probe_systemctl(&["is-active", SERVICE]).await;
-        let enabled = self.probe_systemctl(&["is-enabled", SERVICE]).await;
-        let main_pid = self
-            .probe_systemctl(&["show", "-p", "MainPID", "--value", SERVICE])
-            .await
+        // All 5 are independent — run in parallel so worst-case latency is one
+        // timeout period (30s) instead of 5× (150s).
+        let (active, enabled, main_pid_raw, exec_start, exec_main_start_timestamp) = tokio::join!(
+            self.probe_systemctl(&["is-active", SERVICE]),
+            self.probe_systemctl(&["is-enabled", SERVICE]),
+            self.probe_systemctl(&["show", "-p", "MainPID", "--value", SERVICE]),
+            self.probe_systemctl(&["show", "-p", "ExecStart", "--value", SERVICE]),
+            self.probe_systemctl(&["show", "-p", "ExecMainStartTimestamp", "--value", SERVICE]),
+        );
+        let main_pid = main_pid_raw
             .and_then(|v| v.parse::<u32>().ok())
             .filter(|&pid| pid > 0);
-        let exec_start = self
-            .probe_systemctl(&["show", "-p", "ExecStart", "--value", SERVICE])
-            .await;
-        let exec_main_start_timestamp = self
-            .probe_systemctl(&["show", "-p", "ExecMainStartTimestamp", "--value", SERVICE])
-            .await;
 
         // --- Process start time (procfs, no DB) ---
         let process_start_time = crate::doctor::ai_watcher_process_start_time();
