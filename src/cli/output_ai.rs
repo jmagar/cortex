@@ -5,8 +5,8 @@ use syslog_mcp::scanner::{
 };
 
 use super::ai_watch::AiSmokeWatchReport;
-use syslog_mcp::app::AiWatchStatusReport;
 use super::output_common::{local_ts, print_json, truncate};
+use syslog_mcp::app::AiWatchStatusReport;
 pub(crate) fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Result<()> {
     if json {
         return print_json(response);
