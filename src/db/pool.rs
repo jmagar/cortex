@@ -1078,86 +1078,71 @@ fn apply_migration_15_heartbeat(conn: &Connection) -> rusqlite::Result<()> {
             load1             REAL,
             load5             REAL,
             load15            REAL,
-            usage_pct         REAL,
-            user_pct          REAL,
-            system_pct        REAL,
-            iowait_pct        REAL,
-            steal_pct         REAL,
-            cpu_count         INTEGER,
-            metadata_json     TEXT
+            usage_percent     REAL,
+            steal_percent     REAL,
+            io_wait_percent   REAL
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_cpu_heartbeat_id
             ON heartbeat_cpu(heartbeat_id);
 
         CREATE TABLE IF NOT EXISTS heartbeat_memory (
-            heartbeat_id          INTEGER NOT NULL,
-            total_bytes           INTEGER,
-            available_bytes       INTEGER,
-            used_bytes            INTEGER,
-            swap_total_bytes      INTEGER,
-            swap_used_bytes       INTEGER,
-            metadata_json         TEXT
+            heartbeat_id      INTEGER NOT NULL,
+            total_bytes       INTEGER,
+            available_bytes   INTEGER,
+            used_percent      REAL,
+            swap_total_bytes  INTEGER,
+            swap_used_bytes   INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_memory_heartbeat_id
             ON heartbeat_memory(heartbeat_id);
 
         CREATE TABLE IF NOT EXISTS heartbeat_disks (
-            heartbeat_id       INTEGER NOT NULL,
-            name               TEXT,
-            mount_point        TEXT,
-            fs_type            TEXT,
-            total_bytes        INTEGER,
-            free_bytes         INTEGER,
-            used_bytes         INTEGER,
-            inode_total        INTEGER,
-            inode_free         INTEGER,
-            read_only          INTEGER,
-            read_bytes_per_sec REAL,
-            write_bytes_per_sec REAL,
-            busy_pct           REAL,
-            metadata_json      TEXT
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            heartbeat_id        INTEGER NOT NULL,
+            mountpoint          TEXT,
+            filesystem          TEXT,
+            total_bytes         INTEGER,
+            available_bytes     INTEGER,
+            used_percent        REAL,
+            read_bytes_per_sec  REAL,
+            write_bytes_per_sec REAL
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_disks_heartbeat_id
             ON heartbeat_disks(heartbeat_id);
 
         CREATE TABLE IF NOT EXISTS heartbeat_network (
-            heartbeat_id       INTEGER NOT NULL,
-            interface_name     TEXT NOT NULL,
-            rx_bytes_per_sec   REAL,
-            tx_bytes_per_sec   REAL,
-            rx_packets_per_sec REAL,
-            tx_packets_per_sec REAL,
-            rx_errors          INTEGER,
-            tx_errors          INTEGER,
-            rx_dropped         INTEGER,
-            tx_dropped         INTEGER,
-            link_up            INTEGER,
-            metadata_json      TEXT
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            heartbeat_id     INTEGER NOT NULL,
+            interface        TEXT NOT NULL,
+            rx_bytes_per_sec REAL,
+            tx_bytes_per_sec REAL,
+            rx_errors        INTEGER,
+            tx_errors        INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_network_heartbeat_id
             ON heartbeat_network(heartbeat_id);
 
         CREATE TABLE IF NOT EXISTS heartbeat_processes (
-            heartbeat_id       INTEGER NOT NULL,
-            total              INTEGER,
-            running            INTEGER,
-            sleeping           INTEGER,
-            zombie             INTEGER,
-            top_json           TEXT,
-            metadata_json      TEXT
+            heartbeat_id    INTEGER NOT NULL,
+            total           INTEGER,
+            running         INTEGER,
+            sleeping        INTEGER,
+            zombie          INTEGER,
+            top_cpu_json    TEXT,
+            top_memory_json TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_processes_heartbeat_id
             ON heartbeat_processes(heartbeat_id);
 
         CREATE TABLE IF NOT EXISTS heartbeat_containers (
-            heartbeat_id       INTEGER NOT NULL,
-            reachable          INTEGER NOT NULL DEFAULT 0,
-            running            INTEGER,
-            exited             INTEGER,
-            restarting         INTEGER,
-            unhealthy          INTEGER,
-            details_json       TEXT,
-            metadata_json      TEXT
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            heartbeat_id  INTEGER NOT NULL,
+            runtime       TEXT,
+            running       INTEGER,
+            stopped       INTEGER,
+            restarting    INTEGER,
+            unhealthy     INTEGER,
+            summary_json  TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_heartbeat_containers_heartbeat_id
             ON heartbeat_containers(heartbeat_id);
