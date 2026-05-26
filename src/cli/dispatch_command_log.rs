@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use anyhow::{bail, Result};
 use syslog_mcp::command_log::{self, CommandLogImportResult};
 
-use super::{AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, CliMode, ShellIndexArgs};
+use super::{
+    AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, CliMode, ShellAtuinIndexArgs, ShellIndexArgs,
+};
 
 pub(crate) async fn run_shell_index(mode: &CliMode, args: ShellIndexArgs) -> Result<()> {
     let CliMode::Local(service) = mode else {
@@ -13,6 +15,16 @@ pub(crate) async fn run_shell_index(mode: &CliMode, args: ShellIndexArgs) -> Res
         .import_shell_history(PathBuf::from(args.path), args.shell)
         .await?;
     print_import_result("shell index", &result, args.json)
+}
+
+pub(crate) async fn run_shell_atuin_index(mode: &CliMode, args: ShellAtuinIndexArgs) -> Result<()> {
+    let CliMode::Local(service) = mode else {
+        bail!("shell atuin-index is local-only; run without --http/--server/--token");
+    };
+    let result = service
+        .import_atuin_history(PathBuf::from(args.path))
+        .await?;
+    print_import_result("shell atuin-index", &result, args.json)
 }
 
 pub(crate) async fn run_agent_command_ingest_spool(

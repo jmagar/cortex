@@ -16,8 +16,8 @@ pub(crate) use args::{
     DbStatusArgs, DbVacuumArgs, FilterArgs, HeartbeatAgentArgs, HeartbeatCommand, IncidentArgs,
     IngestRateArgs, NotifyRecentArgs, NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs,
     SearchArgs, ServiceCommand, ServiceLogsArgs, SessionsArgs, SetupArgs, SetupCommand,
-    ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs,
-    TimeRangeArgs, TimelineArgs,
+    ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs, SigUnackArgs,
+    SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,

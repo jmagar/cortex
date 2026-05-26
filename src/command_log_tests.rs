@@ -208,6 +208,124 @@ fn imports_zsh_history_from_saved_offset() {
 }
 
 #[test]
+fn imports_atuin_history_as_shell_history_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("syslog.db");
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let atuin = dir.path().join("history.db");
+    let conn = rusqlite::Connection::open(&atuin).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE history (
+            id TEXT PRIMARY KEY,
+            timestamp INTEGER NOT NULL,
+            duration INTEGER NOT NULL,
+            exit INTEGER NOT NULL,
+            command TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            session TEXT NOT NULL,
+            hostname TEXT NOT NULL,
+            deleted_at INTEGER,
+            author TEXT,
+            intent TEXT
+        );",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO history (id, timestamp, duration, exit, command, cwd, session, hostname)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![
+            "hist-1",
+            1_716_500_000_123_000_000_i64,
+            3_000_000_000_i64,
+            2_i64,
+            "export API_KEY=abc123",
+            "/tmp/project",
+            "session-1",
+            "dookie"
+        ],
+    )
+    .unwrap();
+
+    let result = import_atuin_history_with_state(
+        &pool,
+        &atuin,
+        dir.path().join("atuin-state.json").as_path(),
+    )
+    .unwrap();
+
+    assert_eq!(result.scanned, 1);
+    assert_eq!(result.imported, 1);
+    let rows = search_logs(
+        &pool,
+        &SearchParams {
+            query: Some("export".into()),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].hostname, "dookie");
+    assert_eq!(rows[0].facility.as_deref(), Some("shell"));
+    assert_eq!(rows[0].app_name.as_deref(), Some("atuin"));
+    assert_eq!(rows[0].severity, "warning");
+    assert!(rows[0].message.contains("[REDACTED]"));
+    let metadata = rows[0].metadata_json.as_deref().unwrap();
+    assert!(metadata.contains("\"source_kind\":\"shell-history\""));
+    assert!(metadata.contains("\"session\":\"session-1\""));
+    assert!(metadata.contains("\"cwd\":\"/tmp/project\""));
+}
+
+#[test]
+fn imports_atuin_history_from_saved_timestamp_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("syslog.db");
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let atuin = dir.path().join("history.db");
+    let state = dir.path().join("atuin-state.json");
+    let conn = rusqlite::Connection::open(&atuin).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE history (
+            id TEXT PRIMARY KEY,
+            timestamp INTEGER NOT NULL,
+            duration INTEGER NOT NULL,
+            exit INTEGER NOT NULL,
+            command TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            session TEXT NOT NULL,
+            hostname TEXT NOT NULL,
+            deleted_at INTEGER,
+            author TEXT,
+            intent TEXT
+        );",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO history (id, timestamp, duration, exit, command, cwd, session, hostname)
+         VALUES ('hist-1', 1716500000000000000, 1000, 0, 'cargo test', '/tmp/project', 's1', 'dookie')",
+        [],
+    )
+    .unwrap();
+
+    let first = import_atuin_history_with_state(&pool, &atuin, &state).unwrap();
+    conn.execute(
+        "INSERT INTO history (id, timestamp, duration, exit, command, cwd, session, hostname)
+         VALUES ('hist-2', 1716500001000000000, 1000, 0, 'cargo fmt', '/tmp/project', 's1', 'dookie')",
+        [],
+    )
+    .unwrap();
+    let second = import_atuin_history_with_state(&pool, &atuin, &state).unwrap();
+    let third = import_atuin_history_with_state(&pool, &atuin, &state).unwrap();
+
+    assert_eq!(first.scanned, 1);
+    assert_eq!(first.imported, 1);
+    assert_eq!(second.scanned, 1);
+    assert_eq!(second.imported, 1);
+    assert_eq!(third.scanned, 0);
+    assert_eq!(third.imported, 0);
+}
+
+#[test]
 fn imports_agent_spool_as_agent_command_rows() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("syslog.db");

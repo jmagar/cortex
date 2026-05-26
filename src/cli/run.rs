@@ -90,6 +90,9 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             ShellCommand::Index(args) => {
                 super::dispatch_command_log::run_shell_index(&mode, args).await
             }
+            ShellCommand::AtuinIndex(args) => {
+                super::dispatch_command_log::run_shell_atuin_index(&mode, args).await
+            }
         },
         CliCommand::AgentCommand(command) => match command {
             AgentCommandCommand::IngestSpool(args) => {
@@ -139,7 +142,9 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             )
         }
         CliCommand::Config(_) => {
-            bail!("internal: config commands must be dispatched by main::run_cli before reaching cli::run()")
+            bail!(
+                "internal: config commands must be dispatched by main::run_cli before reaching cli::run()"
+            )
         }
     }
 }

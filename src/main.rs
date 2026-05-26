@@ -811,6 +811,7 @@ fn print_usage() {
   syslog ai watch-status [--json]
   syslog ai smoke-watch [--json]
   syslog shell index --path PATH [--shell zsh] [--json]
+  syslog shell atuin-index --path PATH [--json]
   syslog agent-command ingest-spool --path PATH [--json]
   syslog agent-command wrap --spool PATH -- COMMAND...
   syslog heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]
