@@ -40,13 +40,13 @@ impl SyslogService {
             .and_then(|v| v.parse::<u32>().ok())
             .filter(|&pid| pid > 0);
 
-        // --- Process start time (procfs, no DB) ---
-        // Direct procfs read: acceptable here because (a) /proc/<pid>/stat is a
-        // synthetic kernel file — reads are sub-microsecond, no blocking I/O,
-        // (b) the function always returns Option so ENOENT is handled, and
-        // (c) the test impact is limited to `process_start_time` being real-pid
-        // data; the rest of the report uses mock adapters.
-        let process_start_time = crate::doctor::ai_watcher_process_start_time();
+        // --- Process start time (systemctl, no DB) ---
+        // ai_watcher_process_start_time() spawns systemctl via blocking I/O.
+        // Offload to the blocking thread pool so the async executor is not stalled.
+        let process_start_time =
+            tokio::task::spawn_blocking(crate::doctor::ai_watcher_process_start_time)
+                .await
+                .unwrap_or(None);
 
         // --- DB calls (after OS probes so a DB outage doesn't block host info) ---
         // Degrade to None rather than propagating the error — the operator
@@ -123,7 +123,7 @@ impl SyslogService {
                     // Non-zero exit with empty stdout — systemctl itself errored.
                     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                     warn!(
-                        args = ?args,
+                        args = ?args_owned,
                         stderr = %stderr,
                         "systemctl --user exited non-zero with empty stdout"
                     );
@@ -131,7 +131,7 @@ impl SyslogService {
                 }
             }
             Err(e) => {
-                warn!(args = ?args, error = %e, "systemctl --user spawn failed");
+                warn!(args = ?args_owned, error = %e, "systemctl --user spawn failed");
                 None
             }
         }

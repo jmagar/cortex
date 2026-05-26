@@ -1,0 +1,8 @@
+pre-commit:
+  commands:
+    lint:
+      run: cargo clippy -- -D warnings
+    format:
+      run: cargo fmt --check
+    skills:
+      skip: true
