@@ -1,21 +1,8 @@
 use anyhow::{bail, Result};
 use serde::Serialize;
 use std::path::PathBuf;
-use syslog_mcp::app::SyslogService;
-use syslog_mcp::scanner::{AiDoctorReport, AiIndexingHealth};
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct AiWatchStatusReport {
-    pub(crate) service: String,
-    pub(crate) active: Option<String>,
-    pub(crate) enabled: Option<String>,
-    pub(crate) main_pid: Option<u32>,
-    pub(crate) exec_start: Option<String>,
-    pub(crate) exec_main_start_timestamp: Option<String>,
-    pub(crate) process_start_time: Option<String>,
-    pub(crate) db_path: String,
-    pub(crate) health: AiIndexingHealth,
-    pub(crate) latest_journal: Vec<String>,
-}
+use syslog_mcp::app::{AiWatchStatusReport, SyslogService};
+use syslog_mcp::scanner::AiDoctorReport;
 
 #[derive(Debug, Clone, Serialize)]
 

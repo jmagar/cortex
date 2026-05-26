@@ -188,6 +188,20 @@ pub struct ServiceJournalEntry {
     pub cursor: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AiWatchStatusReport {
+    pub service: String,
+    pub active: Option<String>,
+    pub enabled: Option<String>,
+    pub main_pid: Option<u32>,
+    pub exec_start: Option<String>,
+    pub exec_main_start_timestamp: Option<String>,
+    pub process_start_time: Option<String>,
+    pub db_path: String,
+    pub health: crate::scanner::AiIndexingHealth,
+    pub latest_journal: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IncidentRequest {
