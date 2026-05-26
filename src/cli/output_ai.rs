@@ -176,31 +176,23 @@ pub(crate) fn print_ai_watch_status_response(
         response.process_start_time.as_deref().unwrap_or("-")
     );
     println!("db_path: {}", response.db_path);
-    println!(
-        "db_schema_version: {}/{}",
-        response.health.db_schema_version, response.health.known_schema_version
-    );
-    println!(
-        "schema_drift_detected: {}",
-        response.health.schema_drift_detected
-    );
-    println!(
-        "last_successful_ingest_at: {}",
-        response
-            .health
-            .last_successful_ingest_at
-            .as_deref()
-            .unwrap_or("-")
-    );
-    println!(
-        "recent_failure_count: {}",
-        response.health.recent_failure_count
-    );
-    if !response.health.stale_indicators.is_empty() {
-        println!(
-            "stale_indicators: {}",
-            response.health.stale_indicators.join(", ")
-        );
+    match response.health.as_ref() {
+        Some(h) => {
+            println!(
+                "db_schema_version: {}/{}",
+                h.db_schema_version, h.known_schema_version
+            );
+            println!("schema_drift_detected: {}", h.schema_drift_detected);
+            println!(
+                "last_successful_ingest_at: {}",
+                h.last_successful_ingest_at.as_deref().unwrap_or("-")
+            );
+            println!("recent_failure_count: {}", h.recent_failure_count);
+            if !h.stale_indicators.is_empty() {
+                println!("stale_indicators: {}", h.stale_indicators.join(", "));
+            }
+        }
+        None => println!("health: unavailable (DB unreachable)"),
     }
     if !response.latest_journal.is_empty() {
         println!("latest_journal:");

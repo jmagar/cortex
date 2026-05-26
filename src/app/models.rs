@@ -198,7 +198,10 @@ pub struct AiWatchStatusReport {
     pub exec_main_start_timestamp: Option<String>,
     pub process_start_time: Option<String>,
     pub db_path: String,
-    pub health: crate::scanner::AiIndexingHealth,
+    /// `None` when the DB was unavailable during collection; OS probe fields
+    /// are still populated so the operator can diagnose the service state even
+    /// during a DB outage.
+    pub health: Option<crate::scanner::AiIndexingHealth>,
     pub latest_journal: Vec<String>,
 }
 
