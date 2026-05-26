@@ -87,11 +87,12 @@ impl OsAdapter for SystemOsAdapter {
             let mut command = Command::new(program);
             command.args(args).kill_on_drop(true);
 
-            // journalctl requires a D-Bus session to enumerate user services.
-            // When the environment does not provide `DBUS_SESSION_BUS_ADDRESS`,
-            // infer it from the XDG runtime directory so it works under
-            // systemd --user.
-            if program == "journalctl" && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+            // Both `journalctl --user` and `systemctl --user` require a D-Bus
+            // session. When DBUS_SESSION_BUS_ADDRESS is absent, infer it from
+            // the XDG runtime directory so --user commands work under systemd
+            // without a desktop session. Policy: inject only when not already
+            // set — never override a valid caller-supplied value.
+            if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
                 if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
                     command
                         .env("XDG_RUNTIME_DIR", runtime_dir)
@@ -135,6 +136,7 @@ impl OsAdapter for SystemOsAdapter {
             let mut command = Command::new(program);
             command.args(args).kill_on_drop(true);
 
+            // Same policy as run_command: inject D-Bus env only when absent.
             if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
                 if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
                     command
