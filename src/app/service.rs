@@ -268,11 +268,11 @@ pub async fn run_compose_status() -> ServiceResult<crate::compose::ComposeStatus
 #[derive(Clone)]
 pub struct SyslogService {
     pool: Arc<DbPool>,
-    storage: StorageConfig,
+    pub(super) storage: StorageConfig,
     db_permits: Arc<Semaphore>,
     acquire_timeout: Duration,
     /// OS-level adapter for journalctl / systemd shell-outs.
-    os: Arc<dyn OsAdapter + Send + Sync>,
+    pub(super) os: Arc<dyn OsAdapter + Send + Sync>,
 }
 
 impl SyslogService {
