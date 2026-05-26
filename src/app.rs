@@ -34,6 +34,7 @@ pub use models::{
     AiPruneCheckpointsRequest,
     AiSessionEntry,
     AiToolEntry,
+    AiWatchStatusReport,
     AnomaliesRequest,
     AnomaliesResponse,
     AppLogCount,
