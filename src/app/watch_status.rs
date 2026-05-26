@@ -70,13 +70,15 @@ impl SyslogService {
         .map(|s| s.to_string())
         .collect();
 
-        let latest_journal = match self.os.run_command("journalctl", &journal_args).await {
-            Ok(raw) => raw.lines().map(str::to_string).collect(),
-            Err(e) => {
-                warn!(service = SERVICE, error = %e, "journalctl probe failed; latest_journal will be empty");
-                Vec::new()
-            }
-        };
+        let (latest_journal, journal_error) =
+            match self.os.run_command("journalctl", &journal_args).await {
+                Ok(raw) => (raw.lines().map(str::to_string).collect(), None),
+                Err(e) => {
+                    let msg = e.to_string();
+                    warn!(service = SERVICE, error = %msg, "journalctl probe failed");
+                    (Vec::new(), Some(msg))
+                }
+            };
 
         let db_path = self.storage.db_path.display().to_string();
 
@@ -91,6 +93,7 @@ impl SyslogService {
             db_path,
             health,
             latest_journal,
+            journal_error,
         })
     }
 

@@ -194,7 +194,9 @@ pub(crate) fn print_ai_watch_status_response(
         }
         None => println!("health: unavailable (DB unreachable)"),
     }
-    if !response.latest_journal.is_empty() {
+    if let Some(err) = response.journal_error.as_deref() {
+        println!("latest_journal: (unavailable: {err})");
+    } else if !response.latest_journal.is_empty() {
         println!("latest_journal:");
         for line in &response.latest_journal {
             println!("  {line}");
