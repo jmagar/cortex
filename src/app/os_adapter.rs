@@ -50,6 +50,24 @@ pub trait OsAdapter: Send + Sync {
         program: &'a str,
         args: &'a [String],
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ServiceResult<String>> + Send + 'a>>;
+
+    /// Run `program` with `args` and return the raw [`std::process::Output`].
+    ///
+    /// Unlike [`run_command`], a non-zero exit code is **not** an error —
+    /// the caller inspects `output.status` and `output.stdout` directly.
+    /// Use this for commands like `systemctl is-active` that write meaningful
+    /// output to stdout even when they exit non-zero.
+    ///
+    /// Implementations must apply a reasonable execution timeout.
+    fn probe_command<'a>(
+        &'a self,
+        program: &'a str,
+        args: &'a [String],
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = ServiceResult<std::process::Output>> + Send + 'a,
+        >,
+    >;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,19 +125,56 @@ impl OsAdapter for SystemOsAdapter {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         })
     }
+
+    fn probe_command<'a>(
+        &'a self,
+        program: &'a str,
+        args: &'a [String],
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = ServiceResult<std::process::Output>> + Send + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let mut command = Command::new(program);
+            command.args(args).kill_on_drop(true);
+
+            if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+                if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
+                    command
+                        .env("XDG_RUNTIME_DIR", runtime_dir)
+                        .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
+                }
+            }
+
+            tokio::time::timeout(COMMAND_TIMEOUT, command.output())
+                .await
+                .map_err(|_| {
+                    ServiceError::Internal(anyhow::anyhow!(
+                        "{} {} timed out after {}s",
+                        program,
+                        args.join(" "),
+                        COMMAND_TIMEOUT.as_secs()
+                    ))
+                })?
+                .map_err(anyhow::Error::from)
+                .map_err(ServiceError::Internal)
+        })
+    }
 }
 
 /// Infer the D-Bus user session socket path from the XDG runtime directory
 /// when `DBUS_SESSION_BUS_ADDRESS` is not set in the environment. Required
-/// for `journalctl --user` under systemd without a desktop session.
-fn inferred_user_bus_env() -> Option<(PathBuf, String)> {
+/// for `journalctl --user` and `systemctl --user` under systemd without a
+/// desktop session.
+pub(crate) fn inferred_user_bus_env() -> Option<(PathBuf, String)> {
     let runtime_dir = PathBuf::from(format!("/run/user/{}", current_uid()));
     let bus = runtime_dir.join("bus");
     bus.exists()
         .then(|| (runtime_dir, format!("unix:path={}", bus.display())))
 }
 
-fn current_uid() -> u32 {
+pub(crate) fn current_uid() -> u32 {
     #[cfg(unix)]
     {
         unsafe { libc::geteuid() }
