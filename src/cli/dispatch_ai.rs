@@ -9,7 +9,7 @@ use syslog_mcp::app::{
     ProjectContextRequest, SearchSessionsRequest, SimilarIncidentsRequest, UsageBlocksRequest,
 };
 
-use super::ai_watch::{ai_smoke_watch, ai_watch_status};
+use super::ai_watch::ai_smoke_watch;
 use super::output_ai::{
     ensure_ai_doctor_success, ensure_index_success, print_ai_doctor_response,
     print_ai_parse_errors_response, print_ai_smoke_watch_response, print_ai_watch_status_response,
@@ -364,7 +364,7 @@ pub(crate) async fn run_ai_watch_status(mode: &CliMode, args: OutputArgs) -> Res
     let CliMode::Local(service) = mode else {
         unreachable!("http mode returned above");
     };
-    let response = ai_watch_status(service).await?;
+    let response = service.ai_watch_status().await?;
     print_ai_watch_status_response(&response, args.json)
 }
 
