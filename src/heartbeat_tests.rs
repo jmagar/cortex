@@ -325,7 +325,8 @@ async fn loopback_dev_auth_rejects_non_loopback_peer() {
 async fn mounted_auth_with_no_token_rejects_all_requests() {
     let (app, _pool, _dir) = test_app(None);
     // Even with a token in the header, no api_token configured so everything rejects
-    let (status, value) = post_json(app, "/v1/heartbeats", Some("anything"), heartbeat_payload()).await;
+    let (status, value) =
+        post_json(app, "/v1/heartbeats", Some("anything"), heartbeat_payload()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(value["error"], "unauthorized");
 }
