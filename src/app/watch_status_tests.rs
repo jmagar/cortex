@@ -176,11 +176,8 @@ async fn ai_watch_status_parses_main_pid() {
 }
 
 #[tokio::test]
-async fn ai_watch_status_health_is_none_when_db_fails() {
-    // With a fresh empty DB, ai_indexing_health succeeds (returns default health).
-    // This test verifies the report is still Ok even when health would be None —
-    // we can't easily force ai_indexing_health to fail in a unit test, but we
-    // verify the field is present (Some or None) without panicking.
+async fn ai_watch_status_health_is_some_with_valid_db() {
+    // Fresh DB → ai_indexing_health succeeds → health is Some.
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("test4.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
@@ -191,9 +188,44 @@ async fn ai_watch_status_health_is_none_when_db_fails() {
     });
     let service = SyslogService::with_os_adapter(pool, storage, os);
 
-    // Must return Ok (never propagate DB errors as hard failures).
     let result = service.ai_watch_status().await;
     assert!(result.is_ok(), "ai_watch_status must never return Err");
-    // OS probe fields are populated regardless.
-    assert_eq!(result.unwrap().active.as_deref(), Some("active"));
+    let report = result.unwrap();
+    assert!(
+        report.health.is_some(),
+        "health should be Some with a valid DB"
+    );
+    assert_eq!(report.active.as_deref(), Some("active"));
+}
+
+#[tokio::test]
+async fn ai_watch_status_health_is_none_when_db_schema_broken() {
+    // Drop a table that ai_indexing_health queries so it returns Err.
+    // ai_watch_status must still return Ok with health=None.
+    let dir = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(dir.path().join("test5.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    {
+        let conn = pool.get().unwrap();
+        conn.execute_batch("DROP TABLE transcript_sources").unwrap();
+    }
+    let os = Arc::new(MockProbeOs {
+        journal_output: String::new(),
+        probe_stdout: b"active\n".to_vec(),
+        probe_success: true,
+    });
+    let service = SyslogService::with_os_adapter(pool, storage, os);
+
+    let result = service.ai_watch_status().await;
+    assert!(result.is_ok(), "ai_watch_status must never return Err");
+    let report = result.unwrap();
+    assert!(
+        report.health.is_none(),
+        "health should be None when DB query fails"
+    );
+    assert_eq!(
+        report.active.as_deref(),
+        Some("active"),
+        "OS probe fields still populated"
+    );
 }

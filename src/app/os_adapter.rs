@@ -86,19 +86,7 @@ impl OsAdapter for SystemOsAdapter {
         Box::pin(async move {
             let mut command = Command::new(program);
             command.args(args).kill_on_drop(true);
-
-            // Both `journalctl --user` and `systemctl --user` require a D-Bus
-            // session. When DBUS_SESSION_BUS_ADDRESS is absent, infer it from
-            // the XDG runtime directory so --user commands work under systemd
-            // without a desktop session. Policy: inject only when not already
-            // set — never override a valid caller-supplied value.
-            if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
-                if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
-                    command
-                        .env("XDG_RUNTIME_DIR", runtime_dir)
-                        .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
-                }
-            }
+            apply_dbus_env(&mut command);
 
             let output = tokio::time::timeout(COMMAND_TIMEOUT, command.output())
                 .await
@@ -135,15 +123,7 @@ impl OsAdapter for SystemOsAdapter {
         Box::pin(async move {
             let mut command = Command::new(program);
             command.args(args).kill_on_drop(true);
-
-            // Same policy as run_command: inject D-Bus env only when absent.
-            if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
-                if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
-                    command
-                        .env("XDG_RUNTIME_DIR", runtime_dir)
-                        .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
-                }
-            }
+            apply_dbus_env(&mut command);
 
             tokio::time::timeout(COMMAND_TIMEOUT, command.output())
                 .await
@@ -158,6 +138,20 @@ impl OsAdapter for SystemOsAdapter {
                 .map_err(anyhow::Error::from)
                 .map_err(ServiceError::Internal)
         })
+    }
+}
+
+/// Inject D-Bus session env vars into `command` when they are not already set.
+///
+/// Both `journalctl --user` and `systemctl --user` require a D-Bus session.
+/// Policy: inject only when absent — never override a caller-supplied value.
+fn apply_dbus_env(command: &mut Command) {
+    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
+            command
+                .env("XDG_RUNTIME_DIR", runtime_dir)
+                .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
+        }
     }
 }
 

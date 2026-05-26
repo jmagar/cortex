@@ -201,9 +201,12 @@ pub struct AiWatchStatusReport {
     /// `None` when the DB was unavailable during collection; OS probe fields
     /// are still populated so the operator can diagnose the service state even
     /// during a DB outage.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub health: Option<crate::scanner::AiIndexingHealth>,
     pub latest_journal: Vec<String>,
     /// Set when journalctl failed; distinguishes "no output" from "fetch error".
+    /// Mutually exclusive with `latest_journal` — exactly one carries data.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub journal_error: Option<String>,
 }
 
