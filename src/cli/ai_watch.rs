@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use serde::Serialize;
 use std::path::PathBuf;
-use syslog_mcp::app::{AiWatchStatusReport, SyslogService};
+use syslog_mcp::app::SyslogService;
 use syslog_mcp::scanner::AiDoctorReport;
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,51 +158,6 @@ pub(crate) fn smoke_watch_target(
     bail!("no writable AI transcript root is available for smoke-watch");
 }
 
-pub(crate) async fn ai_watch_status(service: &SyslogService) -> Result<AiWatchStatusReport> {
-    const SERVICE: &str = "syslog-ai-watch.service";
-    let active = systemctl_user_output(&["is-active", SERVICE]).ok();
-    let enabled = systemctl_user_output(&["is-enabled", SERVICE]).ok();
-    let main_pid = systemctl_user_output(&["show", "-p", "MainPID", "--value", SERVICE])
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .filter(|pid| *pid > 0);
-    let exec_start = systemctl_user_output(&["show", "-p", "ExecStart", "--value", SERVICE]).ok();
-    let exec_main_start_timestamp =
-        systemctl_user_output(&["show", "-p", "ExecMainStartTimestamp", "--value", SERVICE]).ok();
-    let process_start_time = syslog_mcp::doctor::ai_watcher_process_start_time();
-    let doctor = service.ai_doctor().await?;
-    let health = service
-        .ai_indexing_health(process_start_time.clone())
-        .await?;
-    let latest_journal = command_output(
-        "journalctl",
-        &[
-            "--user",
-            "-u",
-            SERVICE,
-            "-n",
-            "10",
-            "--no-pager",
-            "--output",
-            "short-iso",
-        ],
-    )
-    .map(|raw| raw.lines().map(str::to_string).collect())
-    .unwrap_or_default();
-    Ok(AiWatchStatusReport {
-        service: SERVICE.to_string(),
-        active,
-        enabled,
-        main_pid,
-        exec_start,
-        exec_main_start_timestamp,
-        process_start_time,
-        db_path: doctor.db_path,
-        health,
-        latest_journal,
-    })
-}
-
 pub(crate) fn systemctl_user_output(args: &[&str]) -> Result<String> {
     let mut command = std::process::Command::new("systemctl");
     command.arg("--user").args(args);
@@ -259,28 +214,6 @@ fn current_uid() -> u32 {
     {
         0
     }
-}
-
-fn command_output(program: &str, args: &[&str]) -> Result<String> {
-    let mut command = std::process::Command::new(program);
-    command.args(args);
-    if program == "journalctl" && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
-        if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
-            command
-                .env("XDG_RUNTIME_DIR", runtime_dir)
-                .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
-        }
-    }
-    let output = command.output()?;
-    if !output.status.success() {
-        bail!(
-            "{} {} failed: {}",
-            program,
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 #[cfg(test)]
