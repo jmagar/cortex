@@ -27,6 +27,7 @@ impl SyslogService {
     /// - Systemctl probes → `None` fields on failure
     /// - `ai_indexing_health` DB failure → `health: None` with a warning
     /// - journalctl failure → `latest_journal: []`, `journal_error: Some(msg)`
+    /// - `spawn_blocking` JoinError → `process_start_time: None` with a warning
     pub async fn ai_watch_status(&self) -> ServiceResult<AiWatchStatusReport> {
         // --- Systemctl probes (OS-only, no DB dependency) ---
         // All 5 are independent — run in parallel so worst-case latency is one
