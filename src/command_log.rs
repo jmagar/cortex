@@ -233,7 +233,7 @@ pub fn run_agent_command_wrapper(spool_path: &Path, command_args: &[String]) -> 
         content_scrubbed: true,
     };
     if let Err(error) = append_spool_record(spool_path, &record) {
-        eprintln!("syslog agent-command: failed to append command record: {error:#}");
+        eprintln!("syslog agent-command: failed to append to {}: {error:#}", spool_path.display());
     }
     Ok(status.code().unwrap_or(1))
 }
