@@ -233,7 +233,10 @@ pub fn run_agent_command_wrapper(spool_path: &Path, command_args: &[String]) -> 
         content_scrubbed: true,
     };
     if let Err(error) = append_spool_record(spool_path, &record) {
-        eprintln!("syslog agent-command: failed to append to {}: {error:#}", spool_path.display());
+        eprintln!(
+            "syslog agent-command: failed to append to {}: {error:#}",
+            spool_path.display()
+        );
     }
     Ok(status.code().unwrap_or(1))
 }
@@ -304,7 +307,7 @@ fn command_status(command_args: &[String], fallback_shell_command: &str) -> Resu
     }
     let (program, args) = command_args
         .split_first()
-        .expect("wrapper validates command args are not empty");
+        .ok_or_else(|| anyhow::anyhow!("internal error: command_status called with empty args"))?;
     Command::new(program)
         .args(args)
         .env("SYSLOG_AGENT_COMMAND_WRAPPER", "1")
