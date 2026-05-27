@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 
 use super::{
     AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, CliCommand,
-    ShellCommand, ShellIndexArgs,
+    ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs,
 };
 
 pub(crate) fn parse_shell(args: &[String]) -> Result<CliCommand> {
@@ -11,6 +11,7 @@ pub(crate) fn parse_shell(args: &[String]) -> Result<CliCommand> {
         .ok_or_else(|| anyhow::anyhow!("shell subcommand is required"))?;
     match command.as_str() {
         "index" => parse_shell_index(rest),
+        "atuin-index" => parse_shell_atuin_index(rest),
         _ => bail!("unknown shell subcommand: {command}"),
     }
 }
@@ -55,6 +56,27 @@ fn parse_shell_index(args: &[String]) -> Result<CliCommand> {
         shell,
         json,
     })))
+}
+
+fn parse_shell_atuin_index(args: &[String]) -> Result<CliCommand> {
+    let mut path = None;
+    let mut json = false;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--path" => {
+                i += 1;
+                path = Some(required_value(args, i, "--path")?);
+            }
+            "--json" => json = true,
+            other => bail!("unknown shell atuin-index argument: {other}"),
+        }
+        i += 1;
+    }
+    let path = path.ok_or_else(|| anyhow::anyhow!("shell atuin-index requires --path PATH"))?;
+    Ok(CliCommand::Shell(ShellCommand::AtuinIndex(
+        ShellAtuinIndexArgs { path, json },
+    )))
 }
 
 fn parse_agent_command_ingest_spool(args: &[String]) -> Result<CliCommand> {

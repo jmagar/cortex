@@ -86,18 +86,7 @@ impl OsAdapter for SystemOsAdapter {
         Box::pin(async move {
             let mut command = Command::new(program);
             command.args(args).kill_on_drop(true);
-
-            // journalctl requires a D-Bus session to enumerate user services.
-            // When the environment does not provide `DBUS_SESSION_BUS_ADDRESS`,
-            // infer it from the XDG runtime directory so it works under
-            // systemd --user.
-            if program == "journalctl" && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
-                if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
-                    command
-                        .env("XDG_RUNTIME_DIR", runtime_dir)
-                        .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
-                }
-            }
+            apply_dbus_env(&mut command);
 
             let output = tokio::time::timeout(COMMAND_TIMEOUT, command.output())
                 .await
@@ -134,14 +123,7 @@ impl OsAdapter for SystemOsAdapter {
         Box::pin(async move {
             let mut command = Command::new(program);
             command.args(args).kill_on_drop(true);
-
-            if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
-                if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
-                    command
-                        .env("XDG_RUNTIME_DIR", runtime_dir)
-                        .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
-                }
-            }
+            apply_dbus_env(&mut command);
 
             tokio::time::timeout(COMMAND_TIMEOUT, command.output())
                 .await
@@ -156,6 +138,22 @@ impl OsAdapter for SystemOsAdapter {
                 .map_err(anyhow::Error::from)
                 .map_err(ServiceError::Internal)
         })
+    }
+}
+
+/// Inject D-Bus session env vars into `command` so that `journalctl --user`
+/// and `systemctl --user` can reach the D-Bus session.
+///
+/// Policy: inject only when `DBUS_SESSION_BUS_ADDRESS` is absent from the
+/// process environment. `XDG_RUNTIME_DIR` is always set when the bus address
+/// is inferred — it is not independently guarded.
+fn apply_dbus_env(command: &mut Command) {
+    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
+            command
+                .env("XDG_RUNTIME_DIR", runtime_dir)
+                .env("DBUS_SESSION_BUS_ADDRESS", bus_address);
+        }
     }
 }
 

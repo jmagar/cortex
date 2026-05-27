@@ -51,6 +51,7 @@ pub(crate) enum NotifyCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ShellCommand {
     Index(ShellIndexArgs),
+    AtuinIndex(ShellAtuinIndexArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +69,12 @@ pub(crate) enum HeartbeatCommand {
 pub(crate) struct ShellIndexArgs {
     pub path: String,
     pub shell: String,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ShellAtuinIndexArgs {
+    pub path: String,
     pub json: bool,
 }
 
