@@ -197,6 +197,10 @@ async fn ai_watch_status_health_is_some_with_valid_db() {
         report.health.is_some(),
         "health should be Some with a valid DB"
     );
+    assert!(
+        report.health_error.is_none(),
+        "health_error must be None when health is Some"
+    );
     assert_eq!(report.active.as_deref(), Some("active"));
 }
 
@@ -224,6 +228,10 @@ async fn ai_watch_status_health_is_none_when_db_schema_broken() {
     assert!(
         report.health.is_none(),
         "health should be None when DB query fails"
+    );
+    assert!(
+        report.health_error.is_some(),
+        "health_error must carry the DB failure message when health is None"
     );
     assert_eq!(
         report.active.as_deref(),
