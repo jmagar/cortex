@@ -704,9 +704,17 @@ fn schema_version_one() -> u32 {
 }
 
 fn normalize_or_now(value: &str) -> String {
-    DateTime::parse_from_rfc3339(value)
-        .map(|dt| rfc3339(dt.with_timezone(&Utc)))
-        .unwrap_or_else(|_| rfc3339(Utc::now()))
+    match DateTime::parse_from_rfc3339(value) {
+        Ok(dt) => rfc3339(dt.with_timezone(&Utc)),
+        Err(e) => {
+            tracing::warn!(
+                raw_timestamp = value,
+                error = %e,
+                "agent command spool record has unparseable started_at; substituting import time"
+            );
+            rfc3339(Utc::now())
+        }
+    }
 }
 
 fn rfc3339(value: DateTime<Utc>) -> String {
