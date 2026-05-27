@@ -82,7 +82,7 @@ impl OsAdapter for MockPidOs {
         Box<dyn std::future::Future<Output = ServiceResult<std::process::Output>> + Send + 'a>,
     > {
         let stdout = format!("{}\n", self.pid).into_bytes();
-        Box::pin(async move { Ok(make_output(&stdout, 0)) })
+        Box::pin(async move { Ok(make_output(&stdout, exit_success())) })
     }
 }
 
