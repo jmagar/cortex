@@ -533,8 +533,9 @@ fn status_errors_when_data_volume_has_unexpected_name() {
 #[test]
 fn status_errors_when_bind_mount_does_not_match_configured_data_volume() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME"]);
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
     env.set("SYSLOG_MCP_DATA_VOLUME", "/home/jmagar/.syslog-mcp/data");
+    env.remove("SYSLOG_ENV_FILE");
 
     let mut container = labelled_container();
     container.mounts[0].kind = "bind".into();
@@ -601,6 +602,10 @@ fn status_expected_data_mount_uses_configured_env_file() {
 
 #[test]
 fn status_errors_when_data_volume_is_missing() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
+    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
+    env.remove("SYSLOG_ENV_FILE");
     let mut container = labelled_container();
     container.mounts.clear(); // no /data mount at all
     let service = ComposeService::new(

@@ -2,10 +2,12 @@
 //!
 //! All systemctl probes route through `self.os.probe_command()` and are
 //! mockable in tests via `SyslogService::with_os_adapter()`. The D-Bus env
-//! setup lives in `SystemOsAdapter::probe_command` so this module stays clean.
+//! setup lives in `apply_dbus_env()` in `os_adapter.rs`, called from both
+//! `run_command` and `probe_command`.
 //!
-//! journalctl uses `self.os.run_command()` (success required); failures
-//! degrade to an empty vec — `.unwrap_or_default()` semantics preserved.
+//! journalctl failures surface as `journal_error: Some(msg)` with
+//! `latest_journal` empty, so callers can distinguish a fetch error from a
+//! genuinely empty journal.
 //!
 //! Execution order: systemctl probes first (OS-only), then DB calls.
 //! This ensures the operator receives host state even during DB outages.
