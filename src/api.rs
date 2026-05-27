@@ -266,7 +266,9 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
     // token — the single-token model documented for /api/* and /mcp depends
     // on this invariant (eng-review C1).
     let forced_policy = match &state.auth_policy {
-        AuthPolicy::LoopbackDev => AuthPolicy::Mounted { auth_state: None },
+        AuthPolicy::LoopbackDev | AuthPolicy::TrustedGatewayUnscoped => {
+            AuthPolicy::Mounted { auth_state: None }
+        }
         AuthPolicy::Mounted { auth_state } => AuthPolicy::Mounted {
             auth_state: auth_state.clone(),
         },

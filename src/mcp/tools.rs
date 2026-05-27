@@ -645,6 +645,7 @@ fn extract_actor(state: &AppState, auth: Option<&AuthContext>) -> RequestActor {
 
     match &state.auth_policy {
         super::AuthPolicy::LoopbackDev => RequestActor::mcp_loopback(),
+        super::AuthPolicy::TrustedGatewayUnscoped => "mcp:trusted-gateway".to_string().into(),
         super::AuthPolicy::Mounted {
             auth_state: Some(_),
         } => RequestActor::mcp_oauth(),

@@ -244,10 +244,14 @@ pub struct McpConfig {
     /// Server name exposed via MCP
     #[serde(default = "default_server_name")]
     pub server_name: String,
-    /// Explicitly disable MCP auth even on non-loopback binds. Intended for
-    /// deployments protected by an upstream gateway or reverse proxy.
+    /// Explicitly disable MCP auth. Without `trusted_gateway_no_auth`, this is
+    /// only legal on loopback binds.
     #[serde(default)]
     pub no_auth: bool,
+    /// Permit `no_auth` on non-loopback binds only when an upstream gateway
+    /// enforces authentication before requests reach syslog-mcp.
+    #[serde(default)]
+    pub trusted_gateway_no_auth: bool,
     /// Optional bearer token for authenticating MCP requests.
     #[serde(default)]
     pub api_token: Option<String>,
@@ -544,6 +548,7 @@ impl Default for McpConfig {
             port: default_mcp_port(),
             server_name: default_server_name(),
             no_auth: false,
+            trusted_gateway_no_auth: false,
             api_token: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
@@ -653,6 +658,10 @@ impl Config {
         env_override_parse("SYSLOG_MCP_PORT", &mut config.mcp.port)?;
         env_override_bool("NO_AUTH", &mut config.mcp.no_auth)?;
         env_override_bool("SYSLOG_MCP_NO_AUTH", &mut config.mcp.no_auth)?;
+        env_override_bool(
+            "SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH",
+            &mut config.mcp.trusted_gateway_no_auth,
+        )?;
         env_override_bool(
             "SYSLOG_MCP_STATIC_TOKEN_ADMIN",
             &mut config.mcp.static_token_is_admin,
@@ -1059,12 +1068,22 @@ pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow:
     // during server startup before any request is served, so operators
     // see the same error early.
 
+    // ---- OAuth prerequisites ----------------------------------------------
+    let auth = &config.mcp.auth;
     if config.mcp.no_auth {
+        let bind_is_loopback = mcp_bind_is_loopback(config);
+        if check_bind && !bind_is_loopback && !config.mcp.trusted_gateway_no_auth {
+            return Err(anyhow::anyhow!(
+                "MCP host `{}` is not a loopback address and SYSLOG_MCP_NO_AUTH=true was set \
+                 without SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true. Bind to 127.0.0.1 / ::1, \
+                 configure SYSLOG_MCP_TOKEN or OAuth, or set the trusted-gateway flag only \
+                 when an upstream gateway enforces authentication before syslog-mcp.",
+                config.mcp.host
+            ));
+        }
         return Ok(());
     }
 
-    // ---- OAuth prerequisites ----------------------------------------------
-    let auth = &config.mcp.auth;
     if auth.mode == AuthMode::OAuth {
         if option_is_blank(&auth.public_url) {
             return Err(anyhow::anyhow!(
@@ -1124,7 +1143,7 @@ pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow:
                  configured without SYSLOG_MCP_TOKEN. OTLP /v1/logs only supports the static \
                  Bearer token gate today, so this would expose unauthenticated OTLP writes. \
                  Set SYSLOG_MCP_TOKEN, bind to 127.0.0.1 / ::1, or enable an upstream auth \
-                 gateway with SYSLOG_MCP_NO_AUTH=true.",
+                 gateway with SYSLOG_MCP_NO_AUTH=true and SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true.",
                 config.mcp.host
             ));
         }

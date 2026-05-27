@@ -480,8 +480,11 @@ fn any_value_to_string(v: &AnyValue) -> Option<String> {
 }
 
 fn is_authorized(state: &OtlpState, headers: &HeaderMap) -> bool {
-    // LoopbackDev: loopback bind is the trust boundary, no token required.
-    if matches!(state.auth_policy, AuthPolicy::LoopbackDev) {
+    // No-auth policies: loopback bind or upstream gateway is the trust boundary.
+    if matches!(
+        state.auth_policy,
+        AuthPolicy::LoopbackDev | AuthPolicy::TrustedGatewayUnscoped
+    ) {
         return true;
     }
     // Mounted auth: require the static bearer token. If none is configured
@@ -598,6 +601,7 @@ fn truncate_diagnostic_field(value: &str) -> String {
 fn otlp_auth_policy_label(policy: &AuthPolicy) -> &'static str {
     match policy {
         AuthPolicy::LoopbackDev => "loopback_dev",
+        AuthPolicy::TrustedGatewayUnscoped => "trusted_gateway",
         AuthPolicy::Mounted { .. } => "mounted",
     }
 }

@@ -86,7 +86,8 @@ When installed as a Claude Code plugin, the token is managed via `userConfig` in
 
 Fields marked `"sensitive": true` are stored encrypted by Claude Code.
 When `"no_auth": true`, token enforcement is disabled and `api_token` is not
-required; otherwise provide `api_token`.
+required on loopback binds. Non-loopback binds also require
+`SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true`.
 
 ## Security practices
 

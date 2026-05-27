@@ -620,7 +620,9 @@ syslog-mcp supports two auth modes, selectable via `SYSLOG_MCP_AUTH_MODE`.
 
 **Bearer-only (default)** — set `SYSLOG_MCP_TOKEN` and all `/mcp` requests must present that token as `Authorization: Bearer <token>`. No OAuth routes are mounted.
 
-**Gateway-protected no-auth** — set `NO_AUTH=true` only when an upstream gateway or reverse proxy enforces auth before traffic reaches syslog-mcp. This intentionally disables service-local MCP auth even on non-loopback binds.
+**Loopback no-auth** — set `NO_AUTH=true` only for local development on loopback binds.
+
+**Gateway-protected no-auth** — on non-loopback binds, set both `NO_AUTH=true` and `SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true` only when an upstream gateway or reverse proxy enforces auth before traffic reaches syslog-mcp. This intentionally disables service-local MCP auth.
 
 **OAuth (Google)** — set `SYSLOG_MCP_AUTH_MODE=oauth`, the OAuth provider env vars, and an allowlisted admin email. The server issues RS256 JWTs after users authenticate via Google. Bearer tokens and OAuth JWTs can coexist (OAuth mode disables the static token by default; set `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in `config.toml` for break-glass access).
 

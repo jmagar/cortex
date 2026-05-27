@@ -193,7 +193,7 @@ For Docker ingest integration testing, keep the default smoke test focused on UD
 ### "401 Unauthorized" on tool calls
 
 - Verify `SYSLOG_MCP_TOKEN` in `.env` matches the token configured in your MCP client
-- If behind a reverse proxy (SWAG), either bind `SYSLOG_MCP_HOST` to loopback, keep `SYSLOG_MCP_TOKEN` set, or explicitly set `SYSLOG_MCP_NO_AUTH=true` only when the proxy enforces upstream auth before traffic reaches syslog-mcp.
+- If behind a reverse proxy (SWAG), either bind `SYSLOG_MCP_HOST` to loopback, keep `SYSLOG_MCP_TOKEN` set, or explicitly set both `SYSLOG_MCP_NO_AUTH=true` and `SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true` only when the proxy enforces upstream auth before traffic reaches syslog-mcp.
 
 ### No syslog messages arriving
 

@@ -287,8 +287,84 @@ pub struct HostStateRequest {
 
 pub type HostStateResponse = db::HeartbeatHostState;
 
+// ── fleet_state ───────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct FleetStateRequest {
+    /// When `false`, hosts with `status == "ok"` are excluded.
+    /// Defaults to `true`.
+    pub include_ok: Option<bool>,
+    /// Sort order: `"pressure"` (default), `"freshness"`, `"hostname"`.
+    pub sort: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetStateHostRow {
+    pub host_id: String,
+    pub hostname: String,
+    pub last_heartbeat_at: String,
+    pub status: String,
+    pub pressure: Vec<String>,
+    pub partial: bool,
+    pub clock_skew: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FleetStateSummary {
+    pub total: usize,
+    pub ok: usize,
+    pub late: usize,
+    pub partial: usize,
+    pub pressure: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetStateResponse {
+    pub hosts: Vec<FleetStateHostRow>,
+    pub summary: FleetStateSummary,
+}
+
+// ── correlate_state ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CorrelateStateRequest {
+    /// Required ISO-8601 reference timestamp.
+    pub reference_time: String,
+    /// Window in minutes before and after `reference_time`. Defaults to 10,
+    /// capped at 120.
+    pub window_minutes: Option<u32>,
+    /// Optional host filter (`host_id` or unique hostname).
+    pub host: Option<String>,
+    /// Minimum severity for log rows. Defaults to `"info"`.
+    pub severity_min: Option<String>,
+    /// Maximum log rows to return per host. Defaults to 100.
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrelateStateWindow {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrelateStateHostEntry {
+    pub host_id: String,
+    pub hostname: String,
+    pub heartbeat_summary: db::HeartbeatWindowSummary,
+    pub logs: Vec<crate::app::models::LogEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrelateStateResponse {
+    pub window: CorrelateStateWindow,
+    pub hosts: Vec<CorrelateStateHostEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSessionsRequest {
     pub project: Option<String>,
     pub tool: Option<String>,

@@ -69,7 +69,8 @@ For every row in §4:
 | `host` | `SYSLOG_MCP_HOST` | string | `"0.0.0.0"` | public | restart-only | no `:` | `mcp_host` | |
 | `port` | `SYSLOG_MCP_PORT` | u16 | `3100` | public | restart-only | parse u16 | `mcp_port` | |
 | `server_name` | — | string | `"syslog-mcp"` | public | restart-only | — | — | Reported in MCP capabilities |
-| `no_auth` | `NO_AUTH` or `SYSLOG_MCP_NO_AUTH` | bool | `false` | public | restart-only | see §6 | `no_auth` | Skips loopback gate; only safe behind upstream auth |
+| `no_auth` | `NO_AUTH` or `SYSLOG_MCP_NO_AUTH` | bool | `false` | public | restart-only | see §6 | `no_auth` | Disables service-local MCP auth; non-loopback binds also require `trusted_gateway_no_auth` |
+| `trusted_gateway_no_auth` | `SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH` | bool | `false` | public | restart-only | see §6 | — | Allows `no_auth` on non-loopback binds only when an upstream gateway enforces auth |
 | `api_token` | `SYSLOG_MCP_TOKEN` (preferred), `SYSLOG_MCP_API_TOKEN` (deprecated) | string | `None` | **secret** | restart-only | non-empty if set | `api_token` | Static Bearer token; deprecated env var logs a warning |
 | `allowed_hosts` | `SYSLOG_MCP_ALLOWED_HOSTS` | csv list | `[]` | public | restart-only | — | — | Extra Host headers RMCP accepts |
 | `allowed_origins` | `SYSLOG_MCP_ALLOWED_ORIGINS` | csv list | `[]` | public | restart-only | — | — | Extra browser Origins |
@@ -204,11 +205,11 @@ These are checked in `src/config.rs::validate_*` and `src/runtime.rs::reject_uns
 
 1. **Non-loopback bind requires auth.** When `serve mcp` is the active mode (i.e. an HTTP port is bound), the server refuses to start if:
    - `mcp.host` does not resolve to a loopback `IpAddr`, AND
-   - `mcp.no_auth == false`, AND
+   - `mcp.no_auth == false` or `mcp.trusted_gateway_no_auth == false`, AND
    - Neither a static token (`mcp.api_token`) nor `auth.mode == OAuth` is configured.
    - **OAuth-only on a non-loopback bind also requires `mcp.api_token`** because OTLP `/v1/logs` honors only the static bearer gate in V1. This is enforced once in `validate_auth_config` and again as defense-in-depth in `runtime.rs::reject_unsafe_otlp_oauth_only_exposure`.
 2. **Storage budget shape.** When `storage.max_db_size_mb > 0`: `storage.recovery_db_size_mb > 0` AND `storage.recovery_db_size_mb < storage.max_db_size_mb`. When `storage.max_db_size_mb == 0`: `storage.recovery_db_size_mb` MUST also be `0`. Symmetric rule for `min_free_disk_mb` / `recovery_free_disk_mb` (recovery must be **greater than** min).
-3. **OAuth admin email required.** With `auth.mode == oauth`, `admin_email` must be non-empty because it is the only config-backed email gate syslog-mcp passes into lab-auth today. Non-empty `allowed_emails` is rejected in OAuth mode until syslog-mcp can pass or enforce that config list. `mcp.no_auth=true` short-circuits auth validation because auth config is ignored under `LoopbackDev`.
+3. **OAuth admin email required.** With `auth.mode == oauth`, `admin_email` must be non-empty because it is the only config-backed email gate syslog-mcp passes into lab-auth today. Non-empty `allowed_emails` is rejected in OAuth mode until syslog-mcp can pass or enforce that config list. `mcp.no_auth=true` short-circuits auth validation because auth config is ignored under `LoopbackDev` or `TrustedGatewayUnscoped`.
 4. **OAuth prerequisite triple.** `public_url`, `google_client_id`, `google_client_secret` are all required when `auth.mode == oauth`.
 5. **OTLP non-loopback gate.** Already captured by (1) — restated because it is the most-common operator misconfig: setting `mcp.host = 0.0.0.0` with neither token nor OAuth+token combo is rejected.
 6. **`SYSLOG_MCP_DB_PATH` parent must exist** when explicitly set via env. Catches the Docker misconfig where the variable is pointed at an unmounted host path.

@@ -759,7 +759,17 @@ impl RuntimeCore {
 /// Defense-in-depth duplicate of `validate_auth_config` for callers that use
 /// `RuntimeCore::for_server(config)` without going through `Config::load()`.
 fn reject_unsafe_otlp_oauth_only_exposure(config: &Config, is_stdio: bool) -> Result<()> {
-    if is_stdio || config.mcp.no_auth || config.mcp.auth.mode != AuthMode::OAuth {
+    if is_stdio || config.mcp.auth.mode != AuthMode::OAuth {
+        return Ok(());
+    }
+
+    if config.mcp.no_auth {
+        if !mcp_bind_is_loopback(config) && !config.mcp.trusted_gateway_no_auth {
+            anyhow::bail!(
+                "refusing non-loopback SYSLOG_MCP_NO_AUTH=true without \
+                 SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true"
+            );
+        }
         return Ok(());
     }
 
@@ -767,8 +777,9 @@ fn reject_unsafe_otlp_oauth_only_exposure(config: &Config, is_stdio: bool) -> Re
         anyhow::bail!(
             "refusing to mount OTLP /v1/logs on non-loopback OAuth-only deployment: \
              OTLP only supports SYSLOG_MCP_TOKEN Bearer auth today; set SYSLOG_MCP_TOKEN, \
-             bind to loopback, or set SYSLOG_MCP_NO_AUTH=true when an upstream gateway \
-             protects all mounted routes"
+             bind to loopback, or set SYSLOG_MCP_NO_AUTH=true plus \
+             SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true when an upstream gateway protects all \
+             mounted routes"
         );
     }
 
@@ -794,7 +805,8 @@ fn mcp_static_token_active(config: &Config) -> bool {
 /// | `Bearer`    | set         | any          | `Mounted { auth_state: None }` (bearer-only)   |
 /// | `Bearer`    | unset       | loopback     | `LoopbackDev` (dev mode; no auth enforced)     |
 /// | `Bearer`    | unset       | non-loopback | rejected by `validate_auth_config` at startup  |
-/// | any          | any         | any          | `LoopbackDev` when `mcp.no_auth` is true       |
+/// | any          | any         | loopback     | `LoopbackDev` when `mcp.no_auth` is true       |
+/// | any          | any         | non-loopback | `TrustedGatewayUnscoped` when both no-auth flags are true |
 ///
 /// Bearer-only (`static_token` set, no OAuth) produces `Mounted { auth_state: None }` so
 /// that scope checks in tool dispatch (S5) know middleware is enforcing auth.
@@ -802,11 +814,24 @@ fn mcp_static_token_active(config: &Config) -> bool {
 /// mode == OAuth and initialises Google OIDC + SQLite session storage.
 async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy> {
     if config.mcp.no_auth {
-        tracing::warn!(
-            mcp_bind = %config.mcp.bind_addr(),
-            "syslog-mcp auth policy: LoopbackDev (NO_AUTH=true — upstream gateway must enforce access)"
+        if mcp_bind_is_loopback(config) {
+            tracing::warn!(
+                mcp_bind = %config.mcp.bind_addr(),
+                "syslog-mcp auth policy: LoopbackDev (NO_AUTH=true on loopback)"
+            );
+            return Ok(AuthPolicy::LoopbackDev);
+        }
+        if config.mcp.trusted_gateway_no_auth {
+            tracing::warn!(
+                mcp_bind = %config.mcp.bind_addr(),
+                "syslog-mcp auth policy: TrustedGatewayUnscoped (NO_AUTH=true; upstream gateway must enforce access)"
+            );
+            return Ok(AuthPolicy::TrustedGatewayUnscoped);
+        }
+        anyhow::bail!(
+            "refusing non-loopback SYSLOG_MCP_NO_AUTH=true without \
+             SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true"
         );
-        return Ok(AuthPolicy::LoopbackDev);
     }
 
     if is_stdio {

@@ -24,10 +24,25 @@ pub struct HeartbeatHostState {
     pub samples: Vec<HeartbeatSampleState>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Server-computed derived signals for a heartbeat sample.
+/// These are the canonical source of truth for fleet views and correlation;
+/// agent-supplied local flags are informational only.
+///
+/// All flag computation is centralised in `app::heartbeat_flags::derive_flags`
+/// so that MCP, REST, and CLI adapters share identical thresholds and logic.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HeartbeatStateFlags {
+    // ── Availability ─────────────────────────────────────────────────────────
     pub collector_partial: bool,
     pub heartbeat_late: bool,
+    pub clock_skew: bool,
+    // ── Resource pressure ────────────────────────────────────────────────────
+    pub cpu_pressure: bool,
+    pub memory_pressure: bool,
+    pub swap_pressure: bool,
+    pub disk_capacity_pressure: bool,
+    pub network_error_pressure: bool,
+    pub container_unhealthy: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +70,233 @@ pub struct HeartbeatSampleState {
     pub processes: Option<Value>,
     pub containers: Vec<Value>,
 }
+
+// ── Fleet-state types ─────────────────────────────────────────────────────
+
+/// One row from `host_heartbeats_latest` — the fleet-state cache table.
+/// Holds only the fields needed to compute derived flags without joining
+/// the main `host_heartbeats` table.
+#[derive(Debug, Clone)]
+pub struct HeartbeatLatestEntry {
+    pub host_id: String,
+    pub heartbeat_id: i64,
+    pub hostname: String,
+    pub sampled_at: String,
+    pub received_at: String,
+    pub partial: bool,
+    pub metadata_json: Option<String>,
+}
+
+/// Aggregated metric values for a single heartbeat_id.
+/// Used by `app::heartbeat_flags::derive_flags` to compute pressure signals.
+#[derive(Debug, Clone, Default)]
+pub struct HeartbeatMetricSnapshot {
+    pub cpu_usage_percent: Option<f64>,
+    pub mem_used_percent: Option<f64>,
+    pub swap_total_bytes: Option<i64>,
+    pub swap_used_bytes: Option<i64>,
+    pub max_disk_used_percent: Option<f64>,
+    pub total_network_errors: Option<i64>,
+    pub container_unhealthy_count: Option<i64>,
+}
+
+/// Return all entries from `host_heartbeats_latest`, ordered by hostname.
+///
+/// This is an O(hosts) full scan of a small cache table — it deliberately
+/// avoids scanning `host_heartbeats` (which may contain millions of rows).
+/// EXPLAIN QUERY PLAN should show `SCAN host_heartbeats_latest`, never
+/// `SCAN host_heartbeats`.
+pub fn heartbeat_latest_all(pool: &DbPool) -> Result<Vec<HeartbeatLatestEntry>> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT host_id, heartbeat_id, hostname, sampled_at, received_at,
+                partial, metadata_json
+         FROM host_heartbeats_latest
+         ORDER BY hostname ASC",
+    )?;
+    let entries = stmt
+        .query_map([], |row| {
+            Ok(HeartbeatLatestEntry {
+                host_id: row.get(0)?,
+                heartbeat_id: row.get(1)?,
+                hostname: row.get(2)?,
+                sampled_at: row.get(3)?,
+                received_at: row.get(4)?,
+                partial: row.get::<_, i64>(5)? != 0,
+                metadata_json: row.get(6)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(entries)
+}
+
+/// Fetch aggregated metric values for one heartbeat by `heartbeat_id`.
+///
+/// All five queries target indexed `heartbeat_id` columns. Each returns at
+/// most one row (or one aggregate). Used by `app::heartbeat_flags::derive_flags`
+/// to compute pressure signals for fleet and correlation views.
+pub fn heartbeat_metric_snapshot(
+    pool: &DbPool,
+    heartbeat_id: i64,
+) -> Result<HeartbeatMetricSnapshot> {
+    let conn = pool.get()?;
+
+    let cpu: Option<(Option<f64>, Option<f64>)> = conn
+        .query_row(
+            "SELECT usage_percent, load1
+             FROM heartbeat_cpu WHERE heartbeat_id = ?1",
+            [heartbeat_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+
+    let mem: Option<(Option<f64>, Option<i64>, Option<i64>)> = conn
+        .query_row(
+            "SELECT used_percent, swap_total_bytes, swap_used_bytes
+             FROM heartbeat_memory WHERE heartbeat_id = ?1",
+            [heartbeat_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+
+    let max_disk: Option<f64> = conn
+        .query_row(
+            "SELECT MAX(used_percent) FROM heartbeat_disks WHERE heartbeat_id = ?1",
+            [heartbeat_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+
+    let net_errors: Option<i64> = conn
+        .query_row(
+            "SELECT SUM(COALESCE(rx_errors, 0) + COALESCE(tx_errors, 0))
+             FROM heartbeat_network WHERE heartbeat_id = ?1",
+            [heartbeat_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+
+    let container_unhealthy: Option<i64> = conn
+        .query_row(
+            "SELECT MAX(COALESCE(unhealthy, 0))
+             FROM heartbeat_containers WHERE heartbeat_id = ?1",
+            [heartbeat_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+
+    Ok(HeartbeatMetricSnapshot {
+        cpu_usage_percent: cpu.as_ref().and_then(|(u, _)| *u),
+        mem_used_percent: mem.as_ref().and_then(|(u, _, _)| *u),
+        swap_total_bytes: mem.as_ref().and_then(|(_, t, _)| *t),
+        swap_used_bytes: mem.and_then(|(_, _, u)| u),
+        max_disk_used_percent: max_disk,
+        total_network_errors: net_errors,
+        container_unhealthy_count: container_unhealthy,
+    })
+}
+
+/// Return all heartbeat rows for `host_id` within `[from, to]` (inclusive),
+/// with lightweight summaries for `correlate_state`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatWindowSummary {
+    pub host_id: String,
+    pub hostname: String,
+    pub samples: usize,
+    pub partial_samples: usize,
+    pub max_cpu_usage_percent: Option<f64>,
+    pub min_mem_available_bytes: Option<i64>,
+    pub pressure_flags: Vec<String>,
+}
+
+/// Build per-host heartbeat summaries for a time window.
+///
+/// When `host_id` is `Some`, only that host is included (single-host
+/// correlate_state). When `None`, all hosts with heartbeats in the window are
+/// included. The query uses the `idx_host_heartbeats_received` index on
+/// `received_at` as the primary range predicate to avoid broad table scans.
+pub fn heartbeat_window_summaries(
+    pool: &DbPool,
+    from: &str,
+    to: &str,
+    host_id: Option<&str>,
+) -> Result<Vec<HeartbeatWindowSummary>> {
+    let conn = pool.get()?;
+
+    type WindowRow = (String, String, i64, i64, Option<f64>, Option<i64>);
+    let row_from = |row: &rusqlite::Row<'_>| -> rusqlite::Result<WindowRow> {
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get(5)?,
+        ))
+    };
+
+    let rows: Vec<WindowRow> = if let Some(hid) = host_id {
+        let mut stmt = conn.prepare(
+            "SELECT h.host_id, h.hostname,
+                    COUNT(*) AS samples,
+                    SUM(h.partial) AS partial_samples,
+                    (SELECT c.usage_percent FROM heartbeat_cpu c
+                     WHERE c.heartbeat_id = MAX(h.id)) AS max_cpu,
+                    (SELECT m.available_bytes FROM heartbeat_memory m
+                     WHERE m.heartbeat_id = MAX(h.id)) AS min_mem
+             FROM host_heartbeats h
+             WHERE h.host_id = ?1
+               AND h.received_at >= ?2
+               AND h.received_at <= ?3
+             GROUP BY h.host_id, h.hostname",
+        )?;
+        let rows = stmt
+            .query_map(params![hid, from, to], row_from)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT h.host_id, h.hostname,
+                    COUNT(*) AS samples,
+                    SUM(h.partial) AS partial_samples,
+                    (SELECT c.usage_percent FROM heartbeat_cpu c
+                     WHERE c.heartbeat_id = MAX(h.id)) AS max_cpu,
+                    (SELECT m.available_bytes FROM heartbeat_memory m
+                     WHERE m.heartbeat_id = MAX(h.id)) AS min_mem
+             FROM host_heartbeats h
+             WHERE h.received_at >= ?1
+               AND h.received_at <= ?2
+             GROUP BY h.host_id, h.hostname
+             ORDER BY h.hostname ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![from, to], row_from)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(host_id, hostname, samples, partial_samples, max_cpu, min_mem)| {
+                HeartbeatWindowSummary {
+                    host_id,
+                    hostname,
+                    samples: samples as usize,
+                    partial_samples: partial_samples as usize,
+                    max_cpu_usage_percent: max_cpu,
+                    min_mem_available_bytes: min_mem,
+                    pressure_flags: Vec::new(), // filled by service layer
+                }
+            },
+        )
+        .collect())
+}
+
+// ── Private row types ─────────────────────────────────────────────────────
 
 #[derive(Debug)]
 struct HeartbeatRow {
@@ -135,13 +377,7 @@ pub fn heartbeat_host_state(
     let latest = samples.first().cloned();
     let host_id = samples[0].host_id.clone();
     let hostname = samples[0].hostname.clone();
-    let flags = latest
-        .as_ref()
-        .map(heartbeat_flags)
-        .unwrap_or(HeartbeatStateFlags {
-            collector_partial: false,
-            heartbeat_late: false,
-        });
+    let flags = latest.as_ref().map(heartbeat_flags).unwrap_or_default();
 
     Ok(HeartbeatHostState {
         host_id,
@@ -154,34 +390,15 @@ pub fn heartbeat_host_state(
     })
 }
 
-fn heartbeat_flags(sample: &HeartbeatSampleState) -> HeartbeatStateFlags {
-    let interval_secs = sample
-        .metadata
-        .as_ref()
-        .and_then(|metadata| metadata.pointer("/agent/interval_secs"))
-        .and_then(Value::as_i64)
-        .unwrap_or(30)
-        .max(1);
-    let received_at = match chrono::DateTime::parse_from_rfc3339(&sample.received_at) {
-        Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
-        Err(error) => {
-            warn!(
-                heartbeat_id = sample.heartbeat_id,
-                received_at = %sample.received_at,
-                error = %error,
-                "heartbeat received_at timestamp failed to parse; heartbeat_late check skipped"
-            );
-            None
-        }
-    };
-    let heartbeat_late = received_at.is_some_and(|received_at| {
-        let elapsed = chrono::Utc::now().signed_duration_since(received_at);
-        elapsed.num_milliseconds() > interval_secs * 2500
-    });
-    HeartbeatStateFlags {
-        collector_partial: sample.partial,
-        heartbeat_late,
-    }
+/// Derive `HeartbeatStateFlags` from a fully-loaded sample state.
+///
+/// For the single-host path (`host_state`) where metric data is already
+/// embedded in `HeartbeatSampleState` as JSON Values, this function computes
+/// all derived signals without additional DB queries. For the fleet path
+/// (`fleet_state`), use `app::heartbeat_flags::derive_flags` instead.
+pub(crate) fn heartbeat_flags(sample: &HeartbeatSampleState) -> HeartbeatStateFlags {
+    use crate::app::heartbeat_flags;
+    heartbeat_flags::from_sample(sample)
 }
 
 fn resolve_unique_hostname(conn: &rusqlite::Connection, hostname: &str) -> Result<String> {

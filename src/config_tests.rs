@@ -839,11 +839,25 @@ fn loopback_bind_with_no_auth_is_permitted() {
 }
 
 #[test]
-fn explicit_no_auth_allows_non_loopback_bind_without_token() {
+fn explicit_no_auth_rejects_non_loopback_bind_without_trusted_gateway() {
     let mut cfg = Config::default();
     cfg.mcp.host = "0.0.0.0".into();
     cfg.mcp.api_token = None;
     cfg.mcp.no_auth = true;
+    let err = validate_auth_config(&cfg, true)
+        .expect_err("non-loopback no_auth must require trusted gateway flag");
+    assert!(err
+        .to_string()
+        .contains("SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH"));
+}
+
+#[test]
+fn explicit_trusted_gateway_no_auth_allows_non_loopback_bind_without_token() {
+    let mut cfg = Config::default();
+    cfg.mcp.host = "0.0.0.0".into();
+    cfg.mcp.api_token = None;
+    cfg.mcp.no_auth = true;
+    cfg.mcp.trusted_gateway_no_auth = true;
     validate_auth_config(&cfg, true).expect("gateway-protected no-auth mode");
 }
 
@@ -853,6 +867,7 @@ fn explicit_no_auth_ignores_stale_oauth_fields() {
     cfg.mcp.host = "0.0.0.0".into();
     cfg.mcp.api_token = None;
     cfg.mcp.no_auth = true;
+    cfg.mcp.trusted_gateway_no_auth = true;
     cfg.mcp.auth.mode = AuthMode::OAuth;
     cfg.mcp.auth.allowed_emails = vec!["stale@example.com".into()];
 

@@ -186,6 +186,40 @@ fn insert_heartbeat(
     };
 
     insert_metric_rows(&tx, heartbeat_id, &request)?;
+
+    // Keep the fleet-state cache in sync. Only runs for accepted (non-duplicate)
+    // heartbeats. The WHERE guard on sampled_at ensures out-of-order retries
+    // never overwrite a newer entry with an older one.
+    tx.execute(
+        "INSERT INTO host_heartbeats_latest
+             (host_id, heartbeat_id, hostname, sampled_at, received_at,
+              partial, agent_version, os, architecture, metadata_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(host_id) DO UPDATE SET
+             heartbeat_id  = excluded.heartbeat_id,
+             hostname      = excluded.hostname,
+             sampled_at    = excluded.sampled_at,
+             received_at   = excluded.received_at,
+             partial       = excluded.partial,
+             agent_version = excluded.agent_version,
+             os            = excluded.os,
+             architecture  = excluded.architecture,
+             metadata_json = excluded.metadata_json
+         WHERE excluded.sampled_at >= host_heartbeats_latest.sampled_at",
+        params![
+            request.host.host_id,
+            heartbeat_id,
+            request.host.hostname,
+            request.sample.sampled_at,
+            received_at,
+            request.sample.partial as i64,
+            request.agent.version,
+            request.host.os,
+            request.host.architecture,
+            metadata_json,
+        ],
+    )?;
+
     tx.commit()?;
 
     Ok(HeartbeatIngestResponse {

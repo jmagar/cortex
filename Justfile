@@ -47,10 +47,44 @@ setup:
 gen-token:
     openssl rand -hex 32
 
-
-validate-skills:
+# Validate plugin manifests, MCP config, hooks, and skill frontmatter
+validate-plugin:
     #!/usr/bin/env bash
     set -euo pipefail
+    python3 - <<'PY'
+    import json
+    from pathlib import Path
+
+    plugin = json.loads(Path(".claude-plugin/plugin.json").read_text())
+    if "version" in plugin:
+        raise SystemExit("FORBIDDEN: .claude-plugin/plugin.json version")
+    for key in ["mcpServers", "hooks", "skills"]:
+        value = plugin.get(key)
+        if not value:
+            raise SystemExit(f"MISSING: .claude-plugin/plugin.json {key}")
+        path = Path(value)
+        if not path.exists():
+            raise SystemExit(f"MISSING: {path}")
+
+    mcp_path = Path(plugin["mcpServers"])
+    mcp = json.loads(mcp_path.read_text())
+    if "syslog" not in mcp.get("mcpServers", {}):
+        raise SystemExit(f"MISSING: syslog server in {mcp_path}")
+
+    hooks_path = Path(plugin["hooks"])
+    hooks = json.loads(hooks_path.read_text()).get("hooks", {})
+    for event in ["SessionStart", "ConfigChange"]:
+        entries = hooks.get(event)
+        if not entries:
+            raise SystemExit(f"MISSING: {event} hook in {hooks_path}")
+        for entry in entries:
+            for hook in entry.get("hooks", []):
+                command = hook.get("command", "")
+                if command.startswith("${CLAUDE_PLUGIN_ROOT}/"):
+                    command_path = Path(command.removeprefix("${CLAUDE_PLUGIN_ROOT}/"))
+                    if not command_path.exists():
+                        raise SystemExit(f"MISSING: hook command {command_path}")
+    PY
     found=0
     for dir in plugins/syslog/skills/*; do
       [[ -d "$dir" ]] || continue
@@ -62,15 +96,22 @@ validate-skills:
     [[ "$found" -eq 1 ]] || { echo "MISSING: plugins/syslog/skills/*"; exit 1; }
     echo "OK"
 
+validate-skills: validate-plugin
+
 # Generate a standalone CLI for this server (requires running server; HTTP-only transport)
 generate-cli:
     #!/usr/bin/env bash
     set -euo pipefail
+    TOKEN="${SYSLOG_MCP_TOKEN:-}"
+    if [[ -z "${TOKEN}" ]]; then
+      echo "Set SYSLOG_MCP_TOKEN before running generate-cli"
+      exit 1
+    fi
     echo "⚠  Server must be running on port 3100 (run 'just dev' first)"
     echo "⚠  Generated CLI embeds your OAuth token — do not commit or share"
     mkdir -p dist dist/.cache
     current_hash=$(timeout 10 curl -sf \
-      -H "Authorization: Bearer $MCP_TOKEN" \
+      -H "Authorization: Bearer ${TOKEN}" \
       -H "Accept: application/json, text/event-stream" \
       http://localhost:3100/mcp/tools/list 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "nohash")
     cache_file="dist/.cache/syslog-mcp-cli.schema_hash"
@@ -80,7 +121,7 @@ generate-cli:
     fi
     timeout 30 mcporter generate-cli \
       --command http://localhost:3100/mcp \
-      --header "Authorization: Bearer $MCP_TOKEN" \
+      --header "Authorization: Bearer ${TOKEN}" \
       --name syslog-mcp-cli \
       --output dist/syslog-mcp-cli
     printf '%s' "$current_hash" > "$cache_file"
@@ -102,6 +143,9 @@ build-plugin: release
 
 build-mcpb:
     bash scripts/build-mcpb.sh
+
+runtime-current:
+    bash scripts/check-runtime-current.sh
 
 # Publish: bump version, tag, push (triggers crates.io + Docker publish)
 publish bump="patch":

@@ -49,7 +49,8 @@ epic, post eng-review):
 | `Bearer`               | set             | any           | `Mounted { auth_state: None }`                   | Static Bearer token only (`Authorization: Bearer <token>` or `X-Mcp-Token: <token>`, compared constant-time via lab-auth's `tokens_equal`).                            |
 | `Bearer`               | unset           | loopback      | `LoopbackDev`                                    | Unauthenticated — the loopback bind *is* the trust boundary. Scope checks are bypassed.                                                                               |
 | `Bearer`               | unset           | non-loopback  | **rejected at startup** (see §9)                 | n/a — process exits.                                                                                                                                                  |
-| any                    | any             | any           | `LoopbackDev` (overrides above) when `mcp.no_auth = true` | Unauthenticated. The operator is asserting that an upstream gateway enforces access.                                                                                  |
+| any                    | any             | loopback      | `LoopbackDev` when `mcp.no_auth = true`           | Unauthenticated — local development only.                                                                                                                            |
+| any                    | any             | non-loopback  | `TrustedGatewayUnscoped` when `mcp.no_auth = true` and `mcp.trusted_gateway_no_auth = true` | Unauthenticated by syslog-mcp. The operator is asserting that an upstream gateway enforces access.                                                                    |
 
 Notes:
 
@@ -123,7 +124,7 @@ Footnotes:
   (with `SYSLOG_MCP_API_TOKEN` accepted as a deprecated alias). When unset
   the route is unauthenticated, but the non-loopback safety gate (§9)
   prevents that state from coexisting with a non-loopback bind without
-  the operator explicitly setting `SYSLOG_MCP_NO_AUTH=true`.
+  the operator explicitly setting both no-auth gateway flags.
 - **§** OAuth token/register payloads are small JSON envelopes; the 64 KiB
   MCP body cap applies (`/token` and `/register` are merged into the MCP
   router before the `RequestBodyLimitLayer`).
@@ -214,12 +215,13 @@ Three blocked combinations:
 2. `auth.mode = Bearer` **and** `api_token` unset **and** bind is non-loopback
    — rejected because no auth is configured and the bind is publicly
    reachable.
-3. Either of the above can be overridden by `SYSLOG_MCP_NO_AUTH=true`. The
-   operator is asserting that an upstream gateway (typically SWAG with
-   Authelia) enforces access for all mounted routes.
+3. Either of the above can be overridden by `SYSLOG_MCP_NO_AUTH=true` plus
+   `SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true`. The operator is asserting that
+   an upstream gateway (typically SWAG with Authelia) enforces access for all
+   mounted routes.
 
 Additionally, when `/v1/logs` is mounted **without** a token on a non-loopback
-bind (which is only reachable via the `SYSLOG_MCP_NO_AUTH=true` path), `main.rs`
+bind (which is only reachable via the trusted-gateway no-auth path), `main.rs`
 logs a `WARN` with the exact bind address and a pointer to set
 `SYSLOG_MCP_TOKEN`. The server still starts.
 
@@ -270,7 +272,7 @@ quick read:
   must learn auth is required before they learn the verb is wrong.
 - `/v1/logs` accepts payloads even when `api_token` is unset, but the
   non-loopback safety gate (§9) makes that combination impossible on a
-  public bind without `SYSLOG_MCP_NO_AUTH=true`. The combination
+  public bind without both no-auth gateway flags. The combination
   "unauthenticated `/v1/logs` on `0.0.0.0`" is therefore an explicit operator
   choice, not an oversight.
 - `/api/*` uses a **separate** bearer token from `/mcp`. The `/api/*` gate
