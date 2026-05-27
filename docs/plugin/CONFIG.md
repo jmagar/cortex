@@ -53,7 +53,7 @@ Client-mode installs only connect to an existing server and skip local setup.
 | `is_server` | boolean | no | Whether this machine should run the local ingest/MCP server |
 | `server_url` | string | no | Base server URL (the plugin appends `/mcp`) |
 | `api_token` | string | yes | Bearer token for MCP authentication |
-| `no_auth` | boolean | no | Disable service-local auth when a trusted upstream proxy enforces auth |
+| `no_auth` | boolean | no | Disable service-local auth; non-loopback server binds require `SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true` |
 | `auth_mode` | string | no | `bearer` or `oauth` |
 | `data_dir` | directory | no | Optional database directory override; empty uses `~/.syslog-mcp/data` |
 | `fleet_hosts` | string | no | Fleet hosts for Docker ingest and rsyslog drop-in deployment |

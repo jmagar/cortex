@@ -31,6 +31,38 @@ fn insert_heartbeat(
     conn.last_insert_rowid()
 }
 
+/// Populate `host_heartbeats_latest` as the ingest path would.
+fn seed_latest(
+    pool: &DbPool,
+    host_id: &str,
+    heartbeat_id: i64,
+    hostname: &str,
+    sampled_at: &str,
+    partial: bool,
+) {
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO host_heartbeats_latest
+             (host_id, heartbeat_id, hostname, sampled_at, received_at,
+              partial, agent_version, os, architecture, metadata_json)
+         VALUES (?1, ?2, ?3, ?4, ?4, ?5, '0.1.0', 'linux', 'x86_64',
+                 '{\"agent\":{\"interval_secs\":30}}')
+         ON CONFLICT(host_id) DO UPDATE SET
+             heartbeat_id  = excluded.heartbeat_id,
+             hostname      = excluded.hostname,
+             sampled_at    = excluded.sampled_at,
+             received_at   = excluded.received_at,
+             partial       = excluded.partial,
+             agent_version = excluded.agent_version,
+             os            = excluded.os,
+             architecture  = excluded.architecture,
+             metadata_json = excluded.metadata_json
+         WHERE excluded.sampled_at >= host_heartbeats_latest.sampled_at",
+        params![host_id, heartbeat_id, hostname, sampled_at, partial as i64],
+    )
+    .unwrap();
+}
+
 #[test]
 fn host_state_returns_latest_by_host_id() {
     let (pool, _dir) = test_pool();
@@ -120,4 +152,153 @@ fn host_state_caps_limit_and_filters_since() {
     )
     .unwrap();
     assert_eq!(since.samples.len(), 6);
+}
+
+// ── Fleet-state cache tests ───────────────────────────────────────────────
+
+/// `heartbeat_latest_all` must use SCAN on the small cache table, not the
+/// main `host_heartbeats` table. Verified via EXPLAIN QUERY PLAN.
+#[test]
+fn fleet_state_explain_does_not_scan_main_table() {
+    let (pool, _dir) = test_pool();
+    // Seed the cache with two hosts; main table is intentionally empty for
+    // this test (the cache is populated by the ingest path, or migration 19).
+    seed_latest(&pool, "host-a", 1, "tootie", "2026-05-25T00:01:00Z", false);
+    seed_latest(&pool, "host-b", 2, "dookie", "2026-05-25T00:01:00Z", false);
+
+    let conn = pool.get().unwrap();
+    let plan: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT host_id, heartbeat_id, hostname, sampled_at, received_at,
+                        partial, metadata_json
+                 FROM host_heartbeats_latest
+                 ORDER BY hostname ASC",
+            )
+            .unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    };
+
+    let plan_text = plan.join("\n").to_lowercase();
+    // Must see the cache table in the plan, not the main table.
+    assert!(
+        plan_text.contains("host_heartbeats_latest"),
+        "EXPLAIN must reference host_heartbeats_latest; got: {plan_text}"
+    );
+    assert!(
+        !plan_text.contains("scan host_heartbeats\n")
+            && !plan_text.contains("scan host_heartbeats "),
+        "EXPLAIN must NOT scan host_heartbeats; got: {plan_text}"
+    );
+}
+
+#[test]
+fn heartbeat_latest_all_returns_one_row_per_host_ordered_by_hostname() {
+    let (pool, _dir) = test_pool();
+    seed_latest(&pool, "host-b", 2, "zebra", "2026-05-25T00:01:00Z", false);
+    seed_latest(&pool, "host-a", 1, "alpha", "2026-05-25T00:00:00Z", true);
+    seed_latest(&pool, "host-c", 3, "midway", "2026-05-25T00:02:00Z", false);
+
+    let entries = heartbeat_latest_all(&pool).unwrap();
+    assert_eq!(entries.len(), 3);
+    // Verify hostname ordering.
+    assert_eq!(entries[0].hostname, "alpha");
+    assert_eq!(entries[1].hostname, "midway");
+    assert_eq!(entries[2].hostname, "zebra");
+    // Partial flag is preserved.
+    assert!(entries[0].partial);
+    assert!(!entries[1].partial);
+}
+
+#[test]
+fn cache_upsert_only_advances_on_newer_sampled_at() {
+    let (pool, _dir) = test_pool();
+    seed_latest(&pool, "host-a", 1, "tootie", "2026-05-25T00:01:00Z", false);
+    // "Older" heartbeat: sampled_at is earlier, should NOT overwrite.
+    seed_latest(&pool, "host-a", 99, "tootie", "2026-05-24T00:00:00Z", true);
+
+    let entries = heartbeat_latest_all(&pool).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].heartbeat_id, 1,
+        "older heartbeat must not overwrite newer cache entry"
+    );
+    assert!(
+        !entries[0].partial,
+        "partial flag must not be overwritten by older entry"
+    );
+}
+
+#[test]
+fn heartbeat_metric_snapshot_returns_aggregates() {
+    let (pool, _dir) = test_pool();
+    let hb_id = insert_heartbeat(&pool, "host-a", "tootie", 1, "2026-05-25T00:00:00Z", false);
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_cpu (heartbeat_id, load1, load5, load15, usage_percent)
+         VALUES (?1, 1.0, 1.5, 2.0, 91.5)",
+        [hb_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_memory
+             (heartbeat_id, total_bytes, available_bytes, used_percent,
+              swap_total_bytes, swap_used_bytes)
+         VALUES (?1, 8000000000, 500000000, 87.5, 2000000000, 1900000000)",
+        [hb_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_disks
+             (heartbeat_id, mountpoint, filesystem, total_bytes, available_bytes, used_percent)
+         VALUES (?1, '/', 'ext4', 1000000000, 50000000, 95.0)",
+        [hb_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_network
+             (heartbeat_id, interface, rx_bytes_per_sec, tx_bytes_per_sec, rx_errors, tx_errors)
+         VALUES (?1, 'eth0', 1000, 500, 3, 1)",
+        [hb_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_containers
+             (heartbeat_id, runtime, running, stopped, restarting, unhealthy)
+         VALUES (?1, 'docker', 5, 1, 0, 2)",
+        [hb_id],
+    )
+    .unwrap();
+    drop(conn);
+
+    let snap = heartbeat_metric_snapshot(&pool, hb_id).unwrap();
+    assert!(
+        snap.cpu_usage_percent
+            .is_some_and(|p| (p - 91.5).abs() < 0.01),
+        "cpu_usage_percent"
+    );
+    assert!(
+        snap.mem_used_percent
+            .is_some_and(|p| (p - 87.5).abs() < 0.01),
+        "mem_used_percent"
+    );
+    assert!(
+        snap.swap_total_bytes == Some(2_000_000_000),
+        "swap_total_bytes"
+    );
+    assert!(
+        snap.max_disk_used_percent
+            .is_some_and(|p| (p - 95.0).abs() < 0.01),
+        "max_disk_used_percent"
+    );
+    assert_eq!(snap.total_network_errors, Some(4), "total_network_errors");
+    assert_eq!(
+        snap.container_unhealthy_count,
+        Some(2),
+        "container_unhealthy_count"
+    );
 }

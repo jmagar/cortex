@@ -16,7 +16,6 @@ VERSION_FILES=(
     "${REPO_ROOT}/server.json"
     "${REPO_ROOT}/package.json"
     "${REPO_ROOT}/pyproject.toml"
-    "${REPO_ROOT}/.claude-plugin/plugin.json"
     "${REPO_ROOT}/.codex-plugin/plugin.json"
     "${REPO_ROOT}/gemini-extension.json"
     "${REPO_ROOT}/mcpb/manifest.json"

@@ -37,6 +37,7 @@ fn loopback_mcp() -> McpConfig {
         port: 3100,
         server_name: "syslog-mcp".into(),
         no_auth: false,
+        trusted_gateway_no_auth: false,
         api_token: None,
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
@@ -46,23 +47,38 @@ fn loopback_mcp() -> McpConfig {
 }
 
 #[tokio::test]
-async fn build_auth_policy_returns_loopback_dev_when_explicit_no_auth_non_loopback() {
+async fn build_auth_policy_rejects_no_auth_non_loopback_without_trusted_gateway() {
     let tmp = tempfile::tempdir().unwrap();
     let mut mcp = loopback_mcp();
     mcp.host = "0.0.0.0".into();
     mcp.no_auth = true;
     let config = test_config(tmp.path(), mcp);
+    let err = build_auth_policy(&config, false)
+        .await
+        .expect_err("non-loopback no_auth must require trusted gateway flag");
+    assert!(err
+        .to_string()
+        .contains("SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH"));
+}
+
+#[tokio::test]
+async fn build_auth_policy_returns_trusted_gateway_when_explicitly_asserted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut mcp = loopback_mcp();
+    mcp.host = "0.0.0.0".into();
+    mcp.no_auth = true;
+    mcp.trusted_gateway_no_auth = true;
+    let config = test_config(tmp.path(), mcp);
     let policy = build_auth_policy(&config, false)
         .await
         .expect("build policy");
-    assert!(matches!(policy, AuthPolicy::LoopbackDev));
+    assert!(matches!(policy, AuthPolicy::TrustedGatewayUnscoped));
 }
 
 #[tokio::test]
 async fn runtime_no_auth_ignores_stale_oauth_fields() {
     let tmp = tempfile::tempdir().unwrap();
     let mut mcp = loopback_mcp();
-    mcp.host = "0.0.0.0".into();
     mcp.no_auth = true;
     mcp.auth.mode = AuthMode::OAuth;
     mcp.auth.allowed_emails = vec!["stale@example.com".into()];

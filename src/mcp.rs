@@ -40,6 +40,9 @@ pub enum AuthPolicy {
     /// Scope checks are bypassed in this variant — the bind itself is the
     /// trust boundary.
     LoopbackDev,
+    /// No authentication is wired because an upstream gateway is expected to
+    /// enforce access before traffic reaches syslog-mcp.
+    TrustedGatewayUnscoped,
     /// Authentication middleware is mounted. Scope checks MUST run.
     /// `auth_state` is:
     /// - `Some` when OAuth mode is active (Google flow + JWKS issuance
@@ -60,6 +63,7 @@ impl std::fmt::Debug for AuthPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AuthPolicy::LoopbackDev => f.write_str("AuthPolicy::LoopbackDev"),
+            AuthPolicy::TrustedGatewayUnscoped => f.write_str("AuthPolicy::TrustedGatewayUnscoped"),
             AuthPolicy::Mounted {
                 auth_state: Some(_),
             } => f.write_str("AuthPolicy::Mounted { auth_state: Some(<lab_auth::AuthState>) }"),
@@ -89,8 +93,8 @@ pub struct AppState {
 }
 
 /// Build an [`AuthLayer`] from an [`AuthPolicy`], or return `None` for
-/// [`AuthPolicy::LoopbackDev`] (no layer needed — loopback bind is the trust
-/// boundary).
+/// no-auth policies (no layer needed — loopback or trusted gateway is the
+/// trust boundary).
 ///
 /// Centralises the `AuthLayer` construction shared by `api.rs` and
 /// `mcp/routes.rs`.
@@ -122,7 +126,7 @@ pub fn build_auth_layer(
     static_token_is_admin: bool,
 ) -> Option<AuthLayer> {
     match policy {
-        AuthPolicy::LoopbackDev => None,
+        AuthPolicy::LoopbackDev | AuthPolicy::TrustedGatewayUnscoped => None,
         AuthPolicy::Mounted { auth_state } => {
             // Default: static bearer tokens receive read-only scope.
             // Opt-in: set SYSLOG_MCP_STATIC_TOKEN_ADMIN=true to also grant admin.

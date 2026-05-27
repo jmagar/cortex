@@ -18,6 +18,7 @@ fn test_state_with_token(token: Option<String>) -> (AppState, Arc<db::DbPool>, t
                 port: 3100,
                 server_name: "syslog-mcp".into(),
                 no_auth: false,
+                trusted_gateway_no_auth: false,
                 api_token: token,
                 allowed_hosts: Vec::new(),
                 allowed_origins: Vec::new(),

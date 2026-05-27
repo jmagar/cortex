@@ -9,7 +9,7 @@ use crate::config::StorageConfig;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 18;
+pub const KNOWN_SCHEMA_VERSION: i64 = 19;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -635,6 +635,12 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 18: added restarting column to heartbeat_containers");
     }
 
+    // Migration 19: add host_heartbeats_latest fleet cache table.
+    if !migration_applied(&conn, 19)? {
+        apply_migration_19_heartbeat_latest(&conn)?;
+        tracing::info!("Migration 19: created host_heartbeats_latest fleet cache table");
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
@@ -1165,6 +1171,53 @@ fn apply_migration_18_heartbeat_restarting(conn: &Connection) -> rusqlite::Resul
     let result = (|| {
         add_column_if_missing(conn, "heartbeat_containers", "restarting", "INTEGER")?;
         conn.execute_batch("INSERT OR IGNORE INTO schema_migrations (version) VALUES (18);")
+    })();
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT;"),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
+}
+
+/// Migration 19: `host_heartbeats_latest` — one row per host_id, updated on
+/// every new accepted heartbeat. This is the foundation for `fleet_state`
+/// queries: instead of scanning `host_heartbeats` for the latest row per host
+/// (O(heartbeats)), fleet queries scan this small table (O(hosts)).
+///
+/// Backfill on first apply: for each distinct `host_id`, find the row with the
+/// highest `id` (proxy for latest, since `id` is AUTOINCREMENT) and seed the
+/// cache. The GROUP BY scan happens once at migration time, not per query.
+fn apply_migration_19_heartbeat_latest(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = (|| {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS host_heartbeats_latest (
+                 host_id       TEXT PRIMARY KEY,
+                 heartbeat_id  INTEGER NOT NULL,
+                 hostname      TEXT NOT NULL,
+                 sampled_at    TEXT NOT NULL,
+                 received_at   TEXT NOT NULL,
+                 partial       INTEGER NOT NULL DEFAULT 0,
+                 agent_version TEXT NOT NULL DEFAULT '',
+                 os            TEXT NOT NULL DEFAULT '',
+                 architecture  TEXT NOT NULL DEFAULT '',
+                 metadata_json TEXT
+             );
+             INSERT OR IGNORE INTO host_heartbeats_latest
+                 (host_id, heartbeat_id, hostname, sampled_at, received_at,
+                  partial, agent_version, os, architecture, metadata_json)
+             SELECT h.host_id, h.id, h.hostname, h.sampled_at, h.received_at,
+                    h.partial, h.agent_version, h.os, h.architecture, h.metadata_json
+             FROM host_heartbeats h
+             INNER JOIN (
+                 SELECT host_id, MAX(id) AS max_id
+                 FROM host_heartbeats
+                 GROUP BY host_id
+             ) latest ON h.id = latest.max_id;",
+        )?;
+        conn.execute_batch("INSERT OR IGNORE INTO schema_migrations (version) VALUES (19);")
     })();
     match result {
         Ok(()) => conn.execute_batch("COMMIT;"),

@@ -19,8 +19,9 @@ pub use analytics::{
     SilentHostEntry, SourceIpEntry, SourceIpHostBreakdown, TimelineGroupBy, TimelinePoint,
 };
 pub use heartbeat::{
-    heartbeat_host_state, HeartbeatHostLookup, HeartbeatHostState, HeartbeatSampleState,
-    HeartbeatStateFlags,
+    heartbeat_host_state, heartbeat_latest_all, heartbeat_metric_snapshot,
+    heartbeat_window_summaries, HeartbeatHostLookup, HeartbeatHostState, HeartbeatLatestEntry,
+    HeartbeatMetricSnapshot, HeartbeatSampleState, HeartbeatStateFlags, HeartbeatWindowSummary,
 };
 pub use ingest::insert_logs_batch;
 pub(crate) use ingest::insert_logs_batch_in_tx;

@@ -1,6 +1,7 @@
 mod correlate;
 mod error;
 pub(crate) mod error_detection;
+pub(crate) mod heartbeat_flags;
 mod models;
 mod os_adapter;
 mod service;

@@ -60,6 +60,39 @@ impl OsAdapter for MockProbeOs {
     }
 }
 
+struct MockPidOs {
+    pid: u32,
+}
+
+impl OsAdapter for MockPidOs {
+    fn run_command<'a>(
+        &'a self,
+        _program: &'a str,
+        _args: &'a [String],
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ServiceResult<String>> + Send + 'a>>
+    {
+        Box::pin(async move { Ok(String::new()) })
+    }
+
+    fn probe_command<'a>(
+        &'a self,
+        _program: &'a str,
+        _args: &'a [String],
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = ServiceResult<std::process::Output>> + Send + 'a>,
+    > {
+        let stdout = format!("{}\n", self.pid).into_bytes();
+        Box::pin(async move { Ok(make_output(&stdout, 0)) })
+    }
+}
+
+fn make_service(os: MockPidOs) -> SyslogService {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(dir.path().join("pid_test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    SyslogService::with_os_adapter(pool, storage, Arc::new(os))
+}
+
 struct FailingJournalOs;
 
 impl OsAdapter for FailingJournalOs {
@@ -85,36 +118,6 @@ impl OsAdapter for FailingJournalOs {
     > {
         // Non-zero exit with non-empty stdout — "inactive" is a valid probe result.
         let out = make_output(b"inactive\n", exit_code(3));
-        Box::pin(async move { Ok(out) })
-    }
-}
-
-struct MockPidOs;
-
-impl OsAdapter for MockPidOs {
-    fn run_command<'a>(
-        &'a self,
-        _program: &'a str,
-        _args: &'a [String],
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ServiceResult<String>> + Send + 'a>>
-    {
-        Box::pin(async move { Ok(String::new()) })
-    }
-
-    fn probe_command<'a>(
-        &'a self,
-        _program: &'a str,
-        args: &'a [String],
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = ServiceResult<std::process::Output>> + Send + 'a>,
-    > {
-        // Return PID 1234 for the MainPID probe, "active" for everything else.
-        let stdout: Vec<u8> = if args.iter().any(|a| a == "MainPID") {
-            b"1234\n".to_vec()
-        } else {
-            b"active\n".to_vec()
-        };
-        let out = make_output(&stdout, exit_success());
         Box::pin(async move { Ok(out) })
     }
 }
@@ -165,16 +168,10 @@ async fn ai_watch_status_degrades_gracefully_when_journalctl_fails() {
 
 #[tokio::test]
 async fn ai_watch_status_parses_main_pid() {
-    let dir = tempfile::tempdir().unwrap();
-    let storage = StorageConfig::for_test(dir.path().join("test3.db"));
-    let pool = Arc::new(init_pool(&storage).unwrap());
-    let os = Arc::new(MockPidOs);
-    let service = SyslogService::with_os_adapter(pool, storage, os);
-
+    let service = make_service(MockPidOs { pid: 1234 });
     let report = service.ai_watch_status().await.unwrap();
 
     assert_eq!(report.main_pid, Some(1234));
-    assert_eq!(report.active.as_deref(), Some("active"));
 }
 
 #[tokio::test]
@@ -238,4 +235,11 @@ async fn ai_watch_status_health_is_none_when_db_schema_broken() {
         Some("active"),
         "OS probe fields still populated"
     );
+}
+
+#[tokio::test]
+async fn ai_watch_status_main_pid_zero_becomes_none() {
+    let service = make_service(MockPidOs { pid: 0 });
+    let report = service.ai_watch_status().await.unwrap();
+    assert_eq!(report.main_pid, None, "PID 0 must be filtered to None");
 }

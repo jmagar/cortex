@@ -444,20 +444,20 @@ fn safe_result_count(value: &Value) -> Option<usize> {
 
 /// Extract and enforce the authentication context from the rmcp request.
 ///
-/// - `AuthPolicy::LoopbackDev`: always returns `Ok(None)` — the loopback bind
-///   is the trust boundary; no per-request credential needed.
+/// - no-auth policies: always return `Ok(None)` — the listener bind or trusted
+///   gateway is the trust boundary; no per-request credential needed.
 /// - `AuthPolicy::Mounted(_)`: the middleware MUST have inserted an
 ///   [`AuthContext`] into the request extensions. If it is absent, this
 ///   returns a forbidden error immediately (fail-closed).
 ///
 /// Returns `Ok(Some(&AuthContext))` for Mounted+present, `Ok(None)` for
-/// LoopbackDev. Callers can skip the scope check when the result is `None`.
+/// no-auth policies. Callers can skip the scope check when the result is `None`.
 fn require_auth_context<'a>(
     state: &AppState,
     ctx: &'a RequestContext<RoleServer>,
 ) -> Result<Option<&'a AuthContext>, ErrorData> {
     match &state.auth_policy {
-        AuthPolicy::LoopbackDev => Ok(None),
+        AuthPolicy::LoopbackDev | AuthPolicy::TrustedGatewayUnscoped => Ok(None),
         AuthPolicy::Mounted { .. } => {
             let parts = ctx
                 .extensions
