@@ -217,7 +217,12 @@ fn import_atuin_history_with_state(
         last_timestamp_ns = record.timestamp_ns;
         last_id = record.id.clone();
         let Some(entry) = atuin_record_to_entry(&record, path, user.as_deref()) else {
-            result.skipped += 1;
+            tracing::warn!(
+                record_id = %record.id,
+                timestamp_ns = record.timestamp_ns,
+                "atuin record has out-of-range timestamp; skipping"
+            );
+            result.errors += 1;
             continue;
         };
         if entry_exists(pool, &entry)? {
