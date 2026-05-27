@@ -256,7 +256,13 @@ pub fn import_agent_command_spool(
         result.scanned += 1;
         let line = match line {
             Ok(line) => line,
-            Err(_) => {
+            Err(e) => {
+                tracing::warn!(
+                    line = result.scanned,
+                    error_kind = "io",
+                    error = %e,
+                    "failed to read line from agent command spool"
+                );
                 result.errors += 1;
                 continue;
             }
@@ -274,7 +280,16 @@ pub fn import_agent_command_spool(
                     batch.push(entry);
                 }
             }
-            Err(_) => result.errors += 1,
+            Err(e) => {
+                tracing::warn!(
+                    line = result.scanned,
+                    error_kind = "json",
+                    error = %e,
+                    line_preview = %&line[..line.len().min(80)],
+                    "failed to parse agent command spool record"
+                );
+                result.errors += 1;
+            }
         }
     }
 

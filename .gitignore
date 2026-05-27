@@ -2,7 +2,7 @@
 .env
 .env.*
 !.env.example
-
+.broadcastr
 # ── Runtime artifacts ────────────────────────────────────────────────────────
 *.log
 *.pid
