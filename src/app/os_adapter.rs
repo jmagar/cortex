@@ -141,10 +141,12 @@ impl OsAdapter for SystemOsAdapter {
     }
 }
 
-/// Inject D-Bus session env vars into `command` when they are not already set.
+/// Inject D-Bus session env vars into `command` so that `journalctl --user`
+/// and `systemctl --user` can reach the D-Bus session.
 ///
-/// Both `journalctl --user` and `systemctl --user` require a D-Bus session.
-/// Policy: inject only when absent — never override a caller-supplied value.
+/// Policy: inject only when `DBUS_SESSION_BUS_ADDRESS` is absent from the
+/// process environment. `XDG_RUNTIME_DIR` is always set when the bus address
+/// is inferred — it is not independently guarded.
 fn apply_dbus_env(command: &mut Command) {
     if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
         if let Some((runtime_dir, bus_address)) = inferred_user_bus_env() {
