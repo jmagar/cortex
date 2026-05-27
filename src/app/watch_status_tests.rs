@@ -48,6 +48,39 @@ impl OsAdapter for MockProbeOs {
     }
 }
 
+struct MockPidOs {
+    pid: u32,
+}
+
+impl OsAdapter for MockPidOs {
+    fn run_command<'a>(
+        &'a self,
+        _program: &'a str,
+        _args: &'a [String],
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ServiceResult<String>> + Send + 'a>>
+    {
+        Box::pin(async move { Ok(String::new()) })
+    }
+
+    fn probe_command<'a>(
+        &'a self,
+        _program: &'a str,
+        _args: &'a [String],
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = ServiceResult<std::process::Output>> + Send + 'a>,
+    > {
+        let stdout = format!("{}\n", self.pid).into_bytes();
+        Box::pin(async move { Ok(make_output(&stdout, 0)) })
+    }
+}
+
+fn make_service(os: MockPidOs) -> SyslogService {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(dir.path().join("pid_test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    SyslogService::with_os_adapter(pool, storage, Arc::new(os))
+}
+
 struct FailingJournalOs;
 
 impl OsAdapter for FailingJournalOs {
@@ -112,4 +145,11 @@ async fn ai_watch_status_degrades_gracefully_when_journalctl_fails() {
     assert_eq!(report.service, "syslog-ai-watch.service");
     // systemctl probe returned "inactive" from the mock (non-zero exit but non-empty stdout)
     assert_eq!(report.active.as_deref(), Some("inactive"));
+}
+
+#[tokio::test]
+async fn ai_watch_status_main_pid_zero_becomes_none() {
+    let service = make_service(MockPidOs { pid: 0 });
+    let report = service.ai_watch_status().await.unwrap();
+    assert_eq!(report.main_pid, None, "PID 0 must be filtered to None");
 }
