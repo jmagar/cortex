@@ -5,7 +5,7 @@ use serial_test::serial;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use wiremock::matchers::{header, method, path};
+use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // ─── Discovery: base URL precedence ─────────────────────────────────────────
@@ -525,6 +525,7 @@ async fn similar_incidents_round_trips_typed_response() {
     Mock::given(method("GET"))
         .and(path("/api/similar-incidents"))
         .and(header("authorization", "Bearer test-value"))
+        .and(query_param("query", "disk full"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "query": "disk full",
             "total_clusters": 0,
@@ -562,6 +563,7 @@ async fn ask_history_round_trips_typed_response() {
     Mock::given(method("GET"))
         .and(path("/api/ai/ask-history"))
         .and(header("authorization", "Bearer test-value"))
+        .and(query_param("query", "why did deploy fail"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "query": "why did deploy fail",
             "total_candidates": 0,
@@ -594,6 +596,8 @@ async fn incident_context_round_trips_typed_response() {
     Mock::given(method("GET"))
         .and(path("/api/incident-context"))
         .and(header("authorization", "Bearer test-value"))
+        .and(query_param("from", "2026-05-01T00:00:00Z"))
+        .and(query_param("to", "2026-05-01T01:00:00Z"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "window_from": "2026-05-01T00:00:00Z",
             "window_to":   "2026-05-01T01:00:00Z",
