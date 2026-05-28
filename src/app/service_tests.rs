@@ -581,6 +581,10 @@ async fn run_db_emits_warn_on_slow_op() {
 
     assert!(logs_contain("slow db op"));
     assert!(logs_contain("op=\"slow_test\""));
+    // The slow-path warn must still carry structured timing so operators can
+    // see how long the op actually took — not just that it was slow.
+    assert!(logs_contain("permit_ms"));
+    assert!(logs_contain("exec_ms"));
 }
 
 #[tokio::test]
@@ -588,7 +592,13 @@ async fn run_db_emits_warn_on_slow_op() {
 async fn run_db_emits_warn_on_semaphore_closed() {
     let (service, _pool, _dir) = test_service();
     service.db_permits.close();
-    let result = service.run_db("closed_test", |_| Ok(())).await;
-    assert!(result.is_err());
+
+    let err = service.run_db("closed_test", |_| Ok(())).await.unwrap_err();
+
+    assert!(
+        matches!(err, ServiceError::Busy(_)),
+        "expected Busy, got {err:?}"
+    );
     assert!(logs_contain("db semaphore closed"));
+    assert!(logs_contain("op=\"closed_test\""));
 }
