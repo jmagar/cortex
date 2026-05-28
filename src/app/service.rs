@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{TimeDelta, Utc};
 use tokio::sync::Semaphore;
@@ -319,24 +319,30 @@ impl SyslogService {
         path: PathBuf,
         shell: String,
     ) -> ServiceResult<CommandLogImportResult> {
-        self.run_db(move |pool| command_log::import_zsh_history(pool, &path, &shell))
-            .await
+        self.run_db("import_shell_history", move |pool| {
+            command_log::import_zsh_history(pool, &path, &shell)
+        })
+        .await
     }
 
     pub async fn import_atuin_history(
         &self,
         path: PathBuf,
     ) -> ServiceResult<CommandLogImportResult> {
-        self.run_db(move |pool| command_log::import_atuin_history(pool, &path))
-            .await
+        self.run_db("import_atuin_history", move |pool| {
+            command_log::import_atuin_history(pool, &path)
+        })
+        .await
     }
 
     pub async fn import_agent_command_spool(
         &self,
         path: PathBuf,
     ) -> ServiceResult<CommandLogImportResult> {
-        self.run_db(move |pool| command_log::import_agent_command_spool(pool, &path))
-            .await
+        self.run_db("import_agent_command_spool", move |pool| {
+            command_log::import_agent_command_spool(pool, &path)
+        })
+        .await
     }
 
     pub async fn incident(&self, req: IncidentRequest) -> ServiceResult<IncidentResponse> {
@@ -378,7 +384,7 @@ impl SyslogService {
             exclude_ai: false,
         };
         let mut rows = self
-            .run_db(move |pool| db::search_logs(pool, &params))
+            .run_db("incident", move |pool| db::search_logs(pool, &params))
             .await?;
         let mut truncated = rows.len() > limit as usize;
         rows.truncate(limit as usize);
@@ -439,11 +445,12 @@ impl SyslogService {
         })
     }
 
-    async fn run_db<F, T>(&self, f: F) -> ServiceResult<T>
+    async fn run_db<F, T>(&self, op: &'static str, f: F) -> ServiceResult<T>
     where
         F: FnOnce(&DbPool) -> anyhow::Result<T> + Send + 'static,
         T: Send + 'static,
     {
+        let wait_start = Instant::now();
         let permit = tokio::time::timeout(
             self.acquire_timeout,
             Arc::clone(&self.db_permits).acquire_owned(),
@@ -451,18 +458,28 @@ impl SyslogService {
         .await
         .map_err(|_| ServiceError::Busy("database worker limit reached".into()))?
         .map_err(|_| ServiceError::Busy("database worker limit closed".into()))?;
+        let permit_ms = wait_start.elapsed().as_millis();
+
+        let exec_start = Instant::now();
         let pool = Arc::clone(&self.pool);
-        tokio::task::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             f(&pool)
         })
         .await
         .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Task join error: {e}")))?
-        .map_err(ServiceError::Internal)
+        .map_err(ServiceError::Internal);
+
+        let exec_ms = exec_start.elapsed().as_millis();
+        match &result {
+            Ok(_) => tracing::debug!(op, permit_ms, exec_ms, "db op ok"),
+            Err(e) => tracing::debug!(op, permit_ms, exec_ms, error = %e, "db op err"),
+        }
+        result
     }
 
     pub async fn health_check(&self) -> ServiceResult<()> {
-        self.run_db(|pool| {
+        self.run_db("health_check", |pool| {
             let conn = pool.get()?;
             conn.query_row("SELECT 1", [], |_| Ok(()))?;
             Ok(())
@@ -475,7 +492,7 @@ impl SyslogService {
         let params = search_request_to_params(req)?;
         let params = SearchParams { query, ..params };
         let logs = self
-            .run_db(move |pool| db::search_logs(pool, &params))
+            .run_db("search_logs", move |pool| db::search_logs(pool, &params))
             .await?;
         let logs: Vec<LogEntry> = logs.into_iter().map(Into::into).collect();
         Ok(SearchLogsResponse {
@@ -503,7 +520,7 @@ impl SyslogService {
         };
         let limit = req.limit.unwrap_or(1).clamp(1, 100) as usize;
         let since = parse_optional_timestamp(req.since.as_deref(), "since")?;
-        self.run_db(move |pool| {
+        self.run_db("host_state", move |pool| {
             db::heartbeat_host_state(pool, lookup, since.as_deref(), limit).map_err(|error| {
                 match error.to_string().as_str() {
                     "not_found" => anyhow::anyhow!("not_found"),
@@ -528,13 +545,17 @@ impl SyslogService {
         let include_ok = req.include_ok.unwrap_or(true);
         let sort = req.sort.clone().unwrap_or_else(|| "pressure".into());
 
-        let entries = self.run_db(db::heartbeat_latest_all).await?;
+        let entries = self
+            .run_db("fleet_state.latest", db::heartbeat_latest_all)
+            .await?;
 
         let mut rows: Vec<FleetStateHostRow> = Vec::with_capacity(entries.len());
         for entry in &entries {
             let hb_id = entry.heartbeat_id;
             let metrics = self
-                .run_db(move |pool| db::heartbeat_metric_snapshot(pool, hb_id))
+                .run_db("fleet_state.metrics", move |pool| {
+                    db::heartbeat_metric_snapshot(pool, hb_id)
+                })
                 .await?;
             let flags = super::heartbeat_flags::from_latest_and_metrics(entry, &metrics);
             let pressure = super::heartbeat_flags::pressure_names(&flags);
@@ -620,7 +641,7 @@ impl SyslogService {
         let host_id: Option<String> = if let Some(host) = req.host.as_deref() {
             let h = host.to_owned();
             let resolved = self
-                .run_db(move |pool| {
+                .run_db("correlate_state.resolve_host", move |pool| {
                     let conn = pool.get()?;
                     // Try host_id first
                     let exists: bool = conn
@@ -667,7 +688,9 @@ impl SyslogService {
         let to2 = to.clone();
         let hid = host_id.clone();
         let heartbeat_summaries = self
-            .run_db(move |pool| db::heartbeat_window_summaries(pool, &from2, &to2, hid.as_deref()))
+            .run_db("correlate_state.heartbeats", move |pool| {
+                db::heartbeat_window_summaries(pool, &from2, &to2, hid.as_deref())
+            })
             .await?;
 
         // Fetch logs for each host in the window
@@ -681,7 +704,7 @@ impl SyslogService {
             let sev_levels = super::correlate::severity_at_or_above(&severity_min)?;
             let fetch_limit = limit + 1;
             let logs = self
-                .run_db(move |pool| {
+                .run_db("correlate_state.logs", move |pool| {
                     db::search_logs(
                         pool,
                         &db::SearchParams {
@@ -727,7 +750,7 @@ impl SyslogService {
     pub async fn filter_logs(&self, req: FilterLogsRequest) -> ServiceResult<SearchLogsResponse> {
         let params = filter_request_to_params(req)?;
         let logs = self
-            .run_db(move |pool| db::search_logs(pool, &params))
+            .run_db("filter_logs", move |pool| db::search_logs(pool, &params))
             .await?;
         let logs: Vec<LogEntry> = logs.into_iter().map(Into::into).collect();
         Ok(SearchLogsResponse {
@@ -742,7 +765,7 @@ impl SyslogService {
             None => None,
         };
         let logs = self
-            .run_db(move |pool| {
+            .run_db("tail_logs", move |pool| {
                 db::tail_logs(
                     pool,
                     req.hostname.as_deref(),
@@ -773,7 +796,7 @@ impl SyslogService {
             }
         };
         let rows = self
-            .run_db(move |pool| {
+            .run_db("get_errors", move |pool| {
                 db::get_error_summary(
                     pool,
                     from.as_deref(),
@@ -789,7 +812,7 @@ impl SyslogService {
     }
 
     pub async fn list_hosts(&self) -> ServiceResult<ListHostsResponse> {
-        let rows = self.run_db(db::list_hosts).await?;
+        let rows = self.run_db("list_hosts", db::list_hosts).await?;
         Ok(ListHostsResponse {
             hosts: rows.into_iter().map(Into::into).collect(),
         })
@@ -810,7 +833,9 @@ impl SyslogService {
             limit: req.limit,
         };
         let rows = self
-            .run_db(move |pool| db::list_ai_sessions(pool, &params))
+            .run_db("list_sessions", move |pool| {
+                db::list_ai_sessions(pool, &params)
+            })
             .await?;
         let sessions: Vec<AiSessionEntry> = rows.into_iter().map(Into::into).collect();
         Ok(ListSessionsResponse {
@@ -852,7 +877,9 @@ impl SyslogService {
             limit: req.limit,
         };
         let result = self
-            .run_db(move |pool| db::search_ai_sessions(pool, &params))
+            .run_db("search_sessions", move |pool| {
+                db::search_ai_sessions(pool, &params)
+            })
             .await?;
         let mut response: SearchSessionsResponse = result.into();
         if let Some(policy) = limit_clamped_to.filter(|policy| policy.report_limit_clamp) {
@@ -895,7 +922,9 @@ impl SyslogService {
             terms: req.terms,
         };
         let result = self
-            .run_db(move |pool| db::search_ai_abuse(pool, &params))
+            .run_db("search_abuse", move |pool| {
+                db::search_ai_abuse(pool, &params)
+            })
             .await?;
         let mut response: AbuseSearchResponse = result.into();
         if let Some(policy) = limit_clamped_to.filter(|policy| policy.report_limit_clamp) {
@@ -912,7 +941,7 @@ impl SyslogService {
         let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
         let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
         let result = self
-            .run_db(move |pool| {
+            .run_db("list_ai_incidents", move |pool| {
                 db::search_ai_incidents(
                     pool,
                     &db::AiIncidentParams {
@@ -944,7 +973,7 @@ impl SyslogService {
         let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
         let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
         let result = self
-            .run_db(move |pool| {
+            .run_db("investigate_ai_incidents", move |pool| {
                 db::investigate_ai_incidents(
                     pool,
                     &db::AiInvestigateParams {
@@ -1017,41 +1046,45 @@ impl SyslogService {
             Vec<db::AiRelatedLogsForAnchor>,
         );
         let (anchors_truncated, anchor_entries, related_by_anchor) = self
-            .run_db(move |pool| -> anyhow::Result<CorrelateDbResult> {
-                let mut anchors = db::search_ai_anchors(pool, &anchor_params)?;
-                let anchors_truncated = anchors.len() > anchor_limit as usize;
-                anchors.truncate(anchor_limit as usize);
+            .run_db(
+                "correlate_ai_logs",
+                move |pool| -> anyhow::Result<CorrelateDbResult> {
+                    let mut anchors = db::search_ai_anchors(pool, &anchor_params)?;
+                    let anchors_truncated = anchors.len() > anchor_limit as usize;
+                    anchors.truncate(anchor_limit as usize);
 
-                let delta = TimeDelta::try_minutes(i64::from(window))
-                    .ok_or_else(|| anyhow::anyhow!("window_minutes overflow"))?;
+                    let delta = TimeDelta::try_minutes(i64::from(window))
+                        .ok_or_else(|| anyhow::anyhow!("window_minutes overflow"))?;
 
-                let mut anchor_entries = Vec::with_capacity(anchors.len());
-                let mut windows = Vec::with_capacity(anchors.len());
-                for (anchor_index, anchor) in anchors.into_iter().enumerate() {
-                    let ref_dt = parse_required_timestamp(&anchor.timestamp, "anchor.timestamp")
-                        .map_err(anyhow::Error::from)?;
-                    let window_from = rfc3339_z(ref_dt - delta);
-                    let window_to = rfc3339_z(ref_dt + delta);
-                    windows.push(db::AiRelatedWindow {
-                        anchor_index,
-                        window_from: window_from.clone(),
-                        window_to: window_to.clone(),
-                    });
-                    anchor_entries.push((anchor, window_from, window_to));
-                }
+                    let mut anchor_entries = Vec::with_capacity(anchors.len());
+                    let mut windows = Vec::with_capacity(anchors.len());
+                    for (anchor_index, anchor) in anchors.into_iter().enumerate() {
+                        let ref_dt =
+                            parse_required_timestamp(&anchor.timestamp, "anchor.timestamp")
+                                .map_err(anyhow::Error::from)?;
+                        let window_from = rfc3339_z(ref_dt - delta);
+                        let window_to = rfc3339_z(ref_dt + delta);
+                        windows.push(db::AiRelatedWindow {
+                            anchor_index,
+                            window_from: window_from.clone(),
+                            window_to: window_to.clone(),
+                        });
+                        anchor_entries.push((anchor, window_from, window_to));
+                    }
 
-                let related_params = db::AiRelatedLogsParams {
-                    windows,
-                    query: log_query,
-                    hostname,
-                    source_ip,
-                    severity_in: severity_levels,
-                    app_name,
-                    limit_per_anchor: related_limit,
-                };
-                let related_by_anchor = db::search_ai_related_logs(pool, &related_params)?;
-                Ok((anchors_truncated, anchor_entries, related_by_anchor))
-            })
+                    let related_params = db::AiRelatedLogsParams {
+                        windows,
+                        query: log_query,
+                        hostname,
+                        source_ip,
+                        severity_in: severity_levels,
+                        app_name,
+                        limit_per_anchor: related_limit,
+                    };
+                    let related_by_anchor = db::search_ai_related_logs(pool, &related_params)?;
+                    Ok((anchors_truncated, anchor_entries, related_by_anchor))
+                },
+            )
             .await?;
 
         let mut by_anchor: std::collections::HashMap<usize, db::AiRelatedLogsForAnchor> =
@@ -1106,7 +1139,9 @@ impl SyslogService {
             to,
         };
         let result = self
-            .run_db(move |pool| db::get_ai_usage_blocks(pool, &params))
+            .run_db("usage_blocks", move |pool| {
+                db::get_ai_usage_blocks(pool, &params)
+            })
             .await?;
         Ok(result.into())
     }
@@ -1121,7 +1156,9 @@ impl SyslogService {
             limit: req.limit,
         };
         let result = self
-            .run_db(move |pool| db::get_ai_project_context(pool, &params))
+            .run_db("project_context", move |pool| {
+                db::get_ai_project_context(pool, &params)
+            })
             .await?;
         Ok(result.into())
     }
@@ -1138,7 +1175,9 @@ impl SyslogService {
             to,
         };
         let result = self
-            .run_db(move |pool| db::list_ai_tools(pool, &params))
+            .run_db("list_ai_tools", move |pool| {
+                db::list_ai_tools(pool, &params)
+            })
             .await?;
         Ok(result.into())
     }
@@ -1155,7 +1194,9 @@ impl SyslogService {
             to,
         };
         let result = self
-            .run_db(move |pool| db::list_ai_projects(pool, &params))
+            .run_db("list_ai_projects", move |pool| {
+                db::list_ai_projects(pool, &params)
+            })
             .await?;
         Ok(result.into())
     }
@@ -1196,7 +1237,9 @@ impl SyslogService {
             exclude_ai: false,
         };
         let mut rows = self
-            .run_db(move |pool| db::search_logs(pool, &params))
+            .run_db("correlate_events", move |pool| {
+                db::search_logs(pool, &params)
+            })
             .await?;
         let truncated = rows.len() > limit as usize;
         rows.truncate(limit as usize);
@@ -1220,7 +1263,7 @@ impl SyslogService {
     pub async fn get_stats(&self) -> ServiceResult<DbStats> {
         let storage = self.storage.clone();
         let stats = self
-            .run_db(move |pool| db::get_stats(pool, &storage))
+            .run_db("get_stats", move |pool| db::get_stats(pool, &storage))
             .await?
             .into();
         Ok(stats)
@@ -1228,7 +1271,7 @@ impl SyslogService {
 
     pub async fn db_status(&self) -> ServiceResult<DbMaintenanceStatus> {
         let storage = self.storage.clone();
-        self.run_db(move |pool| {
+        self.run_db("db_status", move |pool| {
             let page_count = db::db_pragma_i64(pool, db::PragmaName("page_count"))?;
             let freelist_count = db::db_pragma_i64(pool, db::PragmaName("freelist_count"))?;
             let page_size = db::db_pragma_i64(pool, db::PragmaName("page_size"))?;
@@ -1262,7 +1305,7 @@ impl SyslogService {
     }
 
     pub async fn db_integrity(&self, quick: bool) -> ServiceResult<DbIntegrityResult> {
-        self.run_db(move |pool| {
+        self.run_db("db_integrity", move |pool| {
             let messages = db::db_integrity_check(pool, quick)?;
             Ok(DbIntegrityResult {
                 ok: messages.len() == 1 && messages.first().is_some_and(|value| value == "ok"),
@@ -1273,7 +1316,7 @@ impl SyslogService {
     }
 
     async fn db_checkpoint(&self, mode: String) -> ServiceResult<DbCheckpointResult> {
-        self.run_db(move |pool| {
+        self.run_db("db_checkpoint", move |pool| {
             let (busy, log_frames, checkpointed_frames) = db::db_wal_checkpoint(pool, &mode)?;
             Ok(DbCheckpointResult {
                 mode,
@@ -1299,7 +1342,7 @@ impl SyslogService {
     /// startup snapshot (bead 0p8r.17). Cheap enough to call per-request:
     /// two `PRAGMA` reads on a held connection inside `spawn_blocking`.
     pub async fn db_logical_size_bytes(&self) -> ServiceResult<u64> {
-        self.run_db(move |pool| {
+        self.run_db("db_logical_size_bytes", move |pool| {
             let page_count = db::db_pragma_i64(pool, db::PragmaName("page_count"))?;
             let page_size = db::db_pragma_i64(pool, db::PragmaName("page_size"))?;
             Ok((page_count.max(0) as u64).saturating_mul(page_size.max(0) as u64))
@@ -1309,7 +1352,7 @@ impl SyslogService {
 
     async fn db_vacuum(&self, full: bool, incremental_pages: u32) -> ServiceResult<DbVacuumResult> {
         let storage = self.storage.clone();
-        self.run_db(move |pool| {
+        self.run_db("db_vacuum", move |pool| {
             let before_physical_size_bytes = db::physical_size_bytes(&storage.db_path)?;
             if full {
                 db::db_full_vacuum(pool)?;
@@ -1346,7 +1389,7 @@ impl SyslogService {
 
     pub async fn db_backup(&self, output: Option<PathBuf>) -> ServiceResult<DbBackupResult> {
         let db_path = self.storage.db_path.clone();
-        self.run_db(move |_pool| {
+        self.run_db("db_backup", move |_pool| {
             let backup_path = backup_path_for(&db_path, output)?;
             if let Some(parent) = backup_path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -1400,7 +1443,7 @@ impl SyslogService {
                 })
             })
             .transpose()?;
-        self.run_db(move |pool| {
+        self.run_db("index_ai_roots", move |pool| {
             scanner::index_roots_with_options(
                 pool,
                 scanner::IndexOptions {
@@ -1421,7 +1464,7 @@ impl SyslogService {
         force: bool,
     ) -> ServiceResult<scanner::IndexResult> {
         let storage = self.storage.clone();
-        self.run_db(move |pool| {
+        self.run_db("add_ai_file", move |pool| {
             scanner::index_file_with_options(
                 pool,
                 std::path::Path::new(&file),
@@ -1440,7 +1483,7 @@ impl SyslogService {
         missing_only: bool,
         limit: Option<u32>,
     ) -> ServiceResult<Vec<scanner::CheckpointEntry>> {
-        self.run_db(move |pool| {
+        self.run_db("list_ai_checkpoints", move |pool| {
             scanner::list_checkpoints(
                 pool,
                 &scanner::CheckpointListOptions {
@@ -1457,7 +1500,7 @@ impl SyslogService {
         &self,
         limit: Option<u32>,
     ) -> ServiceResult<Vec<scanner::ParseErrorEntry>> {
-        self.run_db(move |pool| {
+        self.run_db("list_ai_parse_errors", move |pool| {
             scanner::list_parse_errors(pool, &scanner::ParseErrorListOptions { limit })
         })
         .await
@@ -1469,7 +1512,7 @@ impl SyslogService {
         dry_run: bool,
         limit: Option<u32>,
     ) -> ServiceResult<scanner::PruneCheckpointsResult> {
-        self.run_db(move |pool| {
+        self.run_db("prune_ai_checkpoints", move |pool| {
             scanner::prune_checkpoints(
                 pool,
                 &scanner::PruneCheckpointsOptions {
@@ -1493,7 +1536,7 @@ impl SyslogService {
 
     pub async fn ai_doctor(&self) -> ServiceResult<scanner::AiDoctorReport> {
         let db_path = self.storage.db_path.clone();
-        self.run_db(move |pool| scanner::ai_doctor(pool, &db_path))
+        self.run_db("ai_doctor", move |pool| scanner::ai_doctor(pool, &db_path))
             .await
     }
 
@@ -1501,15 +1544,17 @@ impl SyslogService {
         &self,
         process_start_time: Option<String>,
     ) -> ServiceResult<scanner::AiIndexingHealth> {
-        self.run_db(move |pool| scanner::ai_indexing_health(pool, process_start_time.as_deref()))
-            .await
+        self.run_db("ai_indexing_health", move |pool| {
+            scanner::ai_indexing_health(pool, process_start_time.as_deref())
+        })
+        .await
     }
 
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {
         let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
         let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
         let result = self
-            .run_db(move |pool| {
+            .run_db("list_apps", move |pool| {
                 db::list_apps(
                     pool,
                     &db::ListAppsParams {
@@ -1533,7 +1578,7 @@ impl SyslogService {
         req: ListSourceIpsRequest,
     ) -> ServiceResult<ListSourceIpsResponse> {
         let result = self
-            .run_db(move |pool| {
+            .run_db("list_source_ips", move |pool| {
                 db::list_source_ips(
                     pool,
                     &db::ListSourceIpsParams {
@@ -1572,7 +1617,7 @@ impl SyslogService {
         };
         let group_by_label = req.group_by.clone();
         let points = self
-            .run_db(move |pool| {
+            .run_db("timeline", move |pool| {
                 db::timeline(
                     pool,
                     bucket,
@@ -1602,7 +1647,7 @@ impl SyslogService {
         let scan_limit = req.scan_limit.unwrap_or(10_000);
         let top_n = req.top_n.unwrap_or(20).min(200);
         let (patterns, scanned, truncated) = self
-            .run_db(move |pool| {
+            .run_db("patterns", move |pool| {
                 db::patterns(
                     pool,
                     from.as_deref(),
@@ -1641,7 +1686,7 @@ impl SyslogService {
         };
 
         let resolved = self
-            .run_db(move |pool| -> anyhow::Result<_> {
+            .run_db("context", move |pool| -> anyhow::Result<_> {
                 let (reference, hostname, timestamp, id): (LogEntry, String, String, Option<i64>) =
                     if let Some(id) = req.log_id {
                         let row = db::fetch_log_by_id(pool, id)?
@@ -1730,7 +1775,7 @@ impl SyslogService {
     pub async fn get_log(&self, req: GetLogRequest) -> ServiceResult<GetLogResponse> {
         let id = req.id;
         let row = self
-            .run_db(move |pool| db::fetch_log_by_id(pool, id))
+            .run_db("get_log", move |pool| db::fetch_log_by_id(pool, id))
             .await?
             .ok_or_else(|| ServiceError::InvalidInput(format!("No log found for id {id}")))?;
         Ok(GetLogResponse { log: row.into() })
@@ -1750,7 +1795,7 @@ impl SyslogService {
         let cut_5m_q = cut_5m.clone();
         let cut_15m_q = cut_15m.clone();
         let result = self
-            .run_db(move |pool| -> anyhow::Result<_> {
+            .run_db("ingest_rate", move |pool| -> anyhow::Result<_> {
                 let buckets = db::ingest_rate(pool, &now_clone, &cut_1m_q, &cut_5m_q, &cut_15m_q)?;
                 let by_host = if want_by_host {
                     Some(db::ingest_rate_by_host(
@@ -1785,7 +1830,9 @@ impl SyslogService {
         let now_unix = now_dt.timestamp();
         let cutoff_q = cutoff.clone();
         let hosts = self
-            .run_db(move |pool| db::silent_hosts(pool, &cutoff_q, now_unix))
+            .run_db("silent_hosts", move |pool| {
+                db::silent_hosts(pool, &cutoff_q, now_unix)
+            })
             .await?;
         Ok(SilentHostsResponse {
             silent_minutes,
@@ -1805,7 +1852,7 @@ impl SyslogService {
         let q = since_str.clone();
         let limit = req.limit.map(|limit| limit.clamp(1, 100));
         let hosts = self
-            .run_db(move |pool| db::clock_skew(pool, &q, limit))
+            .run_db("clock_skew", move |pool| db::clock_skew(pool, &q, limit))
             .await?;
         Ok(ClockSkewResponse {
             since: since_str,
@@ -1829,7 +1876,7 @@ impl SyslogService {
         let bf = baseline_from.clone();
         let bt = baseline_to.clone();
         let hosts = self
-            .run_db(move |pool| {
+            .run_db("anomalies", move |pool| {
                 db::anomalies(pool, &rf, &rt, &bf, &bt, recent_minutes, baseline_minutes)
             })
             .await?;
@@ -1855,7 +1902,7 @@ impl SyslogService {
         let b_from_q = b_from.clone();
         let b_to_q = b_to.clone();
         let result = self
-            .run_db(move |pool| -> anyhow::Result<_> {
+            .run_db("compare", move |pool| -> anyhow::Result<_> {
                 let a = db::summarize_range(pool, &a_from_q, &a_to_q)?;
                 let b = db::summarize_range(pool, &b_from_q, &b_to_q)?;
                 Ok((a, b))
@@ -1880,7 +1927,7 @@ impl SyslogService {
     ) -> ServiceResult<super::models::UnaddressedErrorsResponse> {
         let limit = req.limit.unwrap_or(50) as i64;
         let include_acked = req.include_acknowledged.unwrap_or(false);
-        self.run_db(move |pool| {
+        self.run_db("unaddressed_errors", move |pool| {
             let rows = crate::db::error_signatures::read_unaddressed(pool, limit, include_acked)?;
             let signatures = rows
                 .into_iter()
@@ -1922,7 +1969,7 @@ impl SyslogService {
         // Check it exists first
         let h = hash.clone();
         let exists = self
-            .run_db(move |pool| {
+            .run_db("ack_error.exists", move |pool| {
                 Ok(crate::db::error_signatures::read_signature_by_hash(
                     pool,
                     &h,
@@ -1943,7 +1990,7 @@ impl SyslogService {
         let now_clone = now.clone();
         let actor_clone = actor_owned.clone();
         let hash_clone = hash.clone();
-        self.run_db(move |pool| {
+        self.run_db("ack_error.commit", move |pool| {
             let mut conn = pool.get()?;
             let tx = conn.transaction()?;
             crate::db::error_signatures::record_ack_event(
@@ -1991,7 +2038,7 @@ impl SyslogService {
         // Check it exists first
         let h = hash.clone();
         let exists = self
-            .run_db(move |pool| {
+            .run_db("unack_error.exists", move |pool| {
                 Ok(crate::db::error_signatures::read_signature_by_hash(
                     pool,
                     &h,
@@ -2011,7 +2058,7 @@ impl SyslogService {
             .to_string();
         let actor_clone = actor_owned.clone();
         let hash_clone = hash.clone();
-        self.run_db(move |pool| {
+        self.run_db("unack_error.commit", move |pool| {
             let mut conn = pool.get()?;
             let tx = conn.transaction()?;
             crate::db::error_signatures::record_ack_event(
@@ -2099,7 +2146,7 @@ impl SyslogService {
         req: NotificationsRecentRequest,
     ) -> ServiceResult<Vec<crate::db::notifications::FiringRow>> {
         let limit = req.effective_limit();
-        self.run_db(move |pool| {
+        self.run_db("notifications_recent", move |pool| {
             let conn = pool.get()?;
             crate::db::notifications::firings_recent(
                 &conn,
@@ -2202,7 +2249,7 @@ impl SyslogService {
         let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
         let severity_min = validate_optional_severity(req.severity_min)?;
         let result = self
-            .run_db(move |pool| {
+            .run_db("similar_incidents", move |pool| {
                 db::similar_incidents_clusters(
                     pool,
                     &db::SimilarIncidentsParams {
@@ -2225,7 +2272,7 @@ impl SyslogService {
         let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
         let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
         let result = self
-            .run_db(move |pool| {
+            .run_db("ask_history", move |pool| {
                 db::ask_history_sessions(
                     pool,
                     &db::AskHistoryParams {
@@ -2250,7 +2297,7 @@ impl SyslogService {
         let from = rfc3339_z(parse_required_timestamp(&req.from, "from")?);
         let to = rfc3339_z(parse_required_timestamp(&req.to, "to")?);
         let result = self
-            .run_db(move |pool| {
+            .run_db("incident_context", move |pool| {
                 db::incident_context_summary(
                     pool,
                     &db::IncidentContextParams {
