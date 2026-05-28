@@ -2277,28 +2277,22 @@ async fn host_state_returns_404_for_unknown_host() {
 }
 
 // ─── /api/context ───────────────────────────────────────────────────────────
-// NOTE: `SyslogService::context` surfaces "missing pivot" and "unknown log_id"
-// via `anyhow!` → `ServiceError::Internal` → 500. The plan flagged this as a
-// service-layer gap to be addressed in a follow-up; these tests pin current
-// behaviour rather than papering over the gap in the handler.
 
 #[tokio::test]
-async fn context_returns_500_without_pivot() {
-    // TODO(follow-up): service should map "no pivot" to ServiceError::InvalidInput → 400.
+async fn context_returns_400_without_pivot() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
     let (status, value) = get_json(app, "/api/context", Some("secret")).await;
-    assert_eq!(status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
     assert!(value.get("error").is_some(), "missing error: {value}");
 }
 
 #[tokio::test]
-async fn context_returns_500_for_unknown_log_id() {
-    // TODO(follow-up): service should map "log id not found" to ServiceError::NotFound → 404.
+async fn context_returns_404_for_unknown_log_id() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
     let (status, _value) = get_json(app, "/api/context?log_id=999999", Some("secret")).await;
-    assert_eq!(status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
 }
 
 // ─── /api/fleet-state ───────────────────────────────────────────────────────
