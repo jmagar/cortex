@@ -7,9 +7,13 @@
 //! been reached and hasn't fired today. No cron crate needed.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::Result;
 use tokio::sync::Semaphore;
+
+// Digest runs two aggregate queries over a 24h window — allow 5s before warning.
+const SLOW_DB_MS: u128 = 5_000;
 
 use crate::config::NotificationsConfig;
 use crate::db::notifications::{backoff_next_attempt_at, outbox_insert, OutboxInsertParams};
@@ -140,7 +144,8 @@ pub(crate) async fn run_digest(
     let apprise_urls_json =
         serde_json::to_string(&cfg.apprise_urls).unwrap_or_else(|_| "[]".to_string());
 
-    tokio::task::spawn_blocking(move || -> Result<()> {
+    let exec_start = Instant::now();
+    let join_result = tokio::task::spawn_blocking(move || -> Result<()> {
         let conn = pool.get()?;
         let entries = fetch_host_stats(&conn, 24).map_err(anyhow::Error::from)?;
         let body = build_digest_body(&entries, 24);
@@ -165,7 +170,21 @@ pub(crate) async fn run_digest(
         tracing::info!(date = %today, "digest: daily digest queued");
         Ok(())
     })
-    .await??;
+    .await;
+    let exec_ms = exec_start.elapsed().as_millis();
+    let result = join_result.map_err(|e| anyhow::anyhow!("db task join error: {e}"))?;
+    if exec_ms > SLOW_DB_MS {
+        match &result {
+            Ok(_) => tracing::warn!(op = "notif.digest_write", exec_ms, "db op ok"),
+            Err(e) => tracing::warn!(op = "notif.digest_write", exec_ms, error = %e, "db op err"),
+        }
+    } else {
+        match &result {
+            Ok(_) => tracing::debug!(op = "notif.digest_write", exec_ms, "db op ok"),
+            Err(e) => tracing::debug!(op = "notif.digest_write", exec_ms, error = %e, "db op err"),
+        }
+    }
+    result?;
 
     Ok(())
 }

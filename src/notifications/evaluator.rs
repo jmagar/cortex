@@ -7,9 +7,15 @@
 //! MUST NOT be imported from src/syslog/, src/ingest.rs, or src/syslog/writer.rs.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::Result;
 use tokio::sync::Semaphore;
+
+// Phase 1 scans up to 50,000 rows in one blocking call — allow 10s before warning.
+const SLOW_EVAL_SCAN_MS: u128 = 10_000;
+// Phase 2 inserts are bounded by matched rules (typically single-digit rows).
+const SLOW_DB_MS: u128 = 500;
 
 use crate::config::NotificationsConfig;
 use crate::db::DbPool;
@@ -39,7 +45,8 @@ pub(crate) async fn run_evaluation_cycle(
     const BATCH_SIZE: u64 = 1_000;
     const MAX_ROWS: u64 = 50_000;
     let pool_r = Arc::clone(&pool);
-    let all_params = tokio::task::spawn_blocking(
+    let exec_start = Instant::now();
+    let phase1_result = tokio::task::spawn_blocking(
         move || -> Result<Vec<crate::db::notifications::OutboxInsertParams>> {
             let conn = pool_r.get()?;
 
@@ -71,7 +78,25 @@ pub(crate) async fn run_evaluation_cycle(
             Ok(out)
         },
     )
-    .await??;
+    .await;
+    let exec_ms = exec_start.elapsed().as_millis();
+    let phase1_inner = phase1_result.map_err(|e| anyhow::anyhow!("db task join error: {e}"))?;
+    if exec_ms > SLOW_EVAL_SCAN_MS {
+        match &phase1_inner {
+            Ok(_) => tracing::warn!(op = "notif.eval_phase1_scan", exec_ms, "db op ok"),
+            Err(e) => {
+                tracing::warn!(op = "notif.eval_phase1_scan", exec_ms, error = %e, "db op err")
+            }
+        }
+    } else {
+        match &phase1_inner {
+            Ok(_) => tracing::debug!(op = "notif.eval_phase1_scan", exec_ms, "db op ok"),
+            Err(e) => {
+                tracing::debug!(op = "notif.eval_phase1_scan", exec_ms, error = %e, "db op err")
+            }
+        }
+    }
+    let all_params = phase1_inner?;
 
     if all_params.is_empty() {
         return Ok(0);
@@ -84,7 +109,8 @@ pub(crate) async fn run_evaluation_cycle(
     };
 
     let pool_w = Arc::clone(&pool);
-    let count = tokio::task::spawn_blocking(move || -> Result<u64> {
+    let exec_start = Instant::now();
+    let phase2_result = tokio::task::spawn_blocking(move || -> Result<u64> {
         let _permit = _permit; // keep permit alive for the duration of the write block
         let conn = pool_w.get()?;
         let mut total = 0u64;
@@ -106,7 +132,25 @@ pub(crate) async fn run_evaluation_cycle(
         }
         Ok(total)
     })
-    .await??;
+    .await;
+    let exec_ms = exec_start.elapsed().as_millis();
+    let phase2_inner = phase2_result.map_err(|e| anyhow::anyhow!("db task join error: {e}"))?;
+    if exec_ms > SLOW_DB_MS {
+        match &phase2_inner {
+            Ok(_) => tracing::warn!(op = "notif.eval_phase2_insert", exec_ms, "db op ok"),
+            Err(e) => {
+                tracing::warn!(op = "notif.eval_phase2_insert", exec_ms, error = %e, "db op err")
+            }
+        }
+    } else {
+        match &phase2_inner {
+            Ok(_) => tracing::debug!(op = "notif.eval_phase2_insert", exec_ms, "db op ok"),
+            Err(e) => {
+                tracing::debug!(op = "notif.eval_phase2_insert", exec_ms, error = %e, "db op err")
+            }
+        }
+    }
+    let count = phase2_inner?;
 
     Ok(count)
 }

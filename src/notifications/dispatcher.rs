@@ -16,6 +16,7 @@
 //! Security: NEVER log Apprise URLs.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::Result;
 use tokio::sync::Semaphore;
@@ -30,23 +31,39 @@ use crate::db::DbPool;
 use crate::notifications::apprise::{AppriseClient, AppriseError, NotifyType};
 
 const CLAIM_LIMIT: i64 = 50;
+const SLOW_DB_MS: u128 = 500;
 
 /// Run a blocking read-only DB operation on a pooled connection.
 ///
 /// Centralizes the `Arc::clone` + `spawn_blocking` + `pool.get()` boilerplate
 /// for operations that do not need a transaction (single reads or single
 /// auto-committed writes).
-async fn db_read<F, T>(pool: &Arc<DbPool>, f: F) -> Result<T>
+async fn db_read<F, T>(pool: &Arc<DbPool>, op: &'static str, f: F) -> Result<T>
 where
     F: FnOnce(&rusqlite::Connection) -> Result<T> + Send + 'static,
     T: Send + 'static,
 {
     let pool = Arc::clone(pool);
-    tokio::task::spawn_blocking(move || -> Result<T> {
+    let exec_start = Instant::now();
+    let join_result = tokio::task::spawn_blocking(move || -> Result<T> {
         let conn = pool.get()?;
         f(&conn)
     })
-    .await?
+    .await;
+    let exec_ms = exec_start.elapsed().as_millis();
+    let result = join_result.map_err(|e| anyhow::anyhow!("db task join error: {e}"))?;
+    if exec_ms > SLOW_DB_MS {
+        match &result {
+            Ok(_) => tracing::warn!(op, exec_ms, "db op ok"),
+            Err(e) => tracing::warn!(op, exec_ms, error = %e, "db op err"),
+        }
+    } else {
+        match &result {
+            Ok(_) => tracing::debug!(op, exec_ms, "db op ok"),
+            Err(e) => tracing::debug!(op, exec_ms, error = %e, "db op err"),
+        }
+    }
+    result
 }
 
 /// Run a blocking DB operation inside an explicit transaction.
@@ -54,19 +71,34 @@ where
 /// Centralizes the `Arc::clone` + `spawn_blocking` + `pool.get()` +
 /// `conn.transaction()` + `tx.commit()` boilerplate for multi-statement
 /// writes that must be atomic.
-async fn db_tx<F>(pool: &Arc<DbPool>, f: F) -> Result<()>
+async fn db_tx<F>(pool: &Arc<DbPool>, op: &'static str, f: F) -> Result<()>
 where
     F: FnOnce(&rusqlite::Transaction<'_>) -> Result<()> + Send + 'static,
 {
     let pool = Arc::clone(pool);
-    tokio::task::spawn_blocking(move || -> Result<()> {
+    let exec_start = Instant::now();
+    let join_result = tokio::task::spawn_blocking(move || -> Result<()> {
         let mut conn = pool.get()?;
         let tx = conn.transaction()?;
         f(&tx)?;
         tx.commit()?;
         Ok(())
     })
-    .await?
+    .await;
+    let exec_ms = exec_start.elapsed().as_millis();
+    let result = join_result.map_err(|e| anyhow::anyhow!("db task join error: {e}"))?;
+    if exec_ms > SLOW_DB_MS {
+        match &result {
+            Ok(_) => tracing::warn!(op, exec_ms, "db op ok"),
+            Err(e) => tracing::warn!(op, exec_ms, error = %e, "db op err"),
+        }
+    } else {
+        match &result {
+            Ok(_) => tracing::debug!(op, exec_ms, "db op ok"),
+            Err(e) => tracing::debug!(op, exec_ms, error = %e, "db op err"),
+        }
+    }
+    result
 }
 
 /// Run one dispatcher cycle.
@@ -77,7 +109,7 @@ pub(crate) async fn run_dispatch_cycle(
     cfg: &NotificationsConfig,
 ) -> Result<u64> {
     // Claim pending rows (read-only, no permit needed)
-    let rows = db_read(&pool, |conn| {
+    let rows = db_read(&pool, "notif.claim_pending", |conn| {
         outbox_claim_pending(conn, CLAIM_LIMIT).map_err(anyhow::Error::from)
     })
     .await?;
@@ -100,7 +132,7 @@ pub(crate) async fn run_dispatch_cycle(
             let hostname = row.hostname.clone();
             let dedup_key = row.dedup_key.clone();
             let dedup_secs = cfg.dedup_window_secs;
-            db_read(&pool, move |conn| {
+            db_read(&pool, "notif.dedup_check", move |conn| {
                 firings_recent_dedup_check(conn, &rule_id, &hostname, &dedup_key, dedup_secs)
                     .map_err(anyhow::Error::from)
             })
@@ -109,7 +141,7 @@ pub(crate) async fn run_dispatch_cycle(
 
         if is_dedup {
             let row_id = row.id;
-            db_read(&pool, move |conn| {
+            db_read(&pool, "notif.mark_dropped", move |conn| {
                 outbox_mark_dropped(conn, row_id, "dedup_suppressed")?;
                 Ok(())
             })
@@ -129,7 +161,7 @@ pub(crate) async fn run_dispatch_cycle(
             if let Some(hash) = row.dedup_key.strip_prefix("error_sig:") {
                 let hash_owned = hash.to_string();
                 let normalizer_version = crate::app::error_detection::NORMALIZER_VERSION;
-                let is_acked = db_read(&pool, move |conn| {
+                let is_acked = db_read(&pool, "notif.sig_acked_check", move |conn| {
                     is_signature_acked(conn, &hash_owned, normalizer_version)
                         .map_err(anyhow::Error::from)
                 })
@@ -137,7 +169,7 @@ pub(crate) async fn run_dispatch_cycle(
 
                 if is_acked {
                     let row_id = row.id;
-                    db_read(&pool, move |conn| {
+                    db_read(&pool, "notif.mark_dropped", move |conn| {
                         outbox_mark_dropped(conn, row_id, "error_signature_acked")?;
                         Ok(())
                     })
@@ -180,7 +212,7 @@ pub(crate) async fn run_dispatch_cycle(
                 break;
             };
             let row_id = row.id;
-            db_read(&pool, move |conn| {
+            db_read(&pool, "notif.mark_dropped", move |conn| {
                 outbox_mark_dropped(conn, row_id, "no_apprise_urls")?;
                 Ok(())
             })
@@ -221,7 +253,7 @@ pub(crate) async fn run_dispatch_cycle(
                     hostname.clone(),
                     dedup_key.clone(),
                 );
-                db_tx(&pool, move |tx| {
+                db_tx(&pool, "notif.mark_sent", move |tx| {
                     outbox_mark_sent(tx, row_id, Some(sc))?;
                     firings_insert(
                         tx,
@@ -256,7 +288,7 @@ pub(crate) async fn run_dispatch_cycle(
                     hostname.clone(),
                     dedup_key.clone(),
                 );
-                db_tx(&pool, move |tx| {
+                db_tx(&pool, "notif.mark_dead", move |tx| {
                     outbox_mark_dead(tx, row_id, Some(code as i64), &error_msg)?;
                     firings_insert(
                         tx,
@@ -298,7 +330,7 @@ pub(crate) async fn run_dispatch_cycle(
                         hostname.clone(),
                         dedup_key.clone(),
                     );
-                    db_tx(&pool, move |tx| {
+                    db_tx(&pool, "notif.mark_dead", move |tx| {
                         outbox_mark_dead(tx, row_id, None, &dead_msg)?;
                         firings_insert(
                             tx,
@@ -329,7 +361,7 @@ pub(crate) async fn run_dispatch_cycle(
                     let next_at = backoff_next_attempt_at(attempt_count);
                     let next_at_log = next_at.clone();
                     let err_clone = error_msg.clone();
-                    db_read(&pool, move |conn| {
+                    db_read(&pool, "notif.schedule_retry", move |conn| {
                         outbox_schedule_retry(conn, row_id, &next_at, &err_clone, None)?;
                         Ok(())
                     })

@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::{
     extract::{ConnectInfo, State},
@@ -84,10 +85,25 @@ async fn heartbeat_handler(
 
     let pool = Arc::clone(&state.pool);
     let source_ip = peer.to_string();
-    let result = tokio::task::spawn_blocking(move || insert_heartbeat(&pool, request, &source_ip))
-        .await
+    let exec_start = Instant::now();
+    let join_result =
+        tokio::task::spawn_blocking(move || insert_heartbeat(&pool, request, &source_ip)).await;
+    let exec_ms = exec_start.elapsed().as_millis();
+    let result = join_result
         .map_err(|error| anyhow::anyhow!("heartbeat insert task failed: {error}"))
         .and_then(|result| result);
+    // Two-tier: heartbeat INSERTs target <5ms; warn only above 500ms to avoid noise.
+    if exec_ms > 500 {
+        match &result {
+            Ok(_) => tracing::warn!(op = "heartbeat.insert", exec_ms, "db op ok"),
+            Err(e) => tracing::warn!(op = "heartbeat.insert", exec_ms, error = %e, "db op err"),
+        }
+    } else {
+        match &result {
+            Ok(_) => tracing::debug!(op = "heartbeat.insert", exec_ms, "db op ok"),
+            Err(e) => tracing::debug!(op = "heartbeat.insert", exec_ms, error = %e, "db op err"),
+        }
+    }
 
     match result {
         Ok(response) => (StatusCode::ACCEPTED, Json(response)).into_response(),
