@@ -502,7 +502,7 @@ impl SyslogService {
             }
         };
         let limit = req.limit.unwrap_or(1).clamp(1, 100) as usize;
-        let since = req.since.clone();
+        let since = parse_optional_timestamp(req.since.as_deref(), "since")?;
         self.run_db(move |pool| {
             db::heartbeat_host_state(pool, lookup, since.as_deref(), limit).map_err(|error| {
                 match error.to_string().as_str() {

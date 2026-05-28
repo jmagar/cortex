@@ -2254,6 +2254,20 @@ async fn host_state_returns_400_without_host_id_or_hostname() {
 }
 
 #[tokio::test]
+async fn host_state_returns_400_for_invalid_since_timestamp() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(
+        app,
+        "/api/host-state?hostname=foo&since=not-a-timestamp",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert!(value.get("error").is_some(), "missing error: {value}");
+}
+
+#[tokio::test]
 async fn host_state_returns_404_for_unknown_host() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
