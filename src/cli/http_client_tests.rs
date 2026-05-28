@@ -512,6 +512,117 @@ async fn ai_abuse_request_round_trips_through_serde_qs() {
     assert_eq!(decoded.terms, req.terms);
 }
 
+// ─── Round-trip coverage for RAG v1 wrappers (similar_incidents, ask_history,
+//     incident_context) — bead 0p8r.6. Verifies HttpClient → /api/<path> wires
+//     the bearer header, hits the documented URL, and deserialises a typed
+//     response. ────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn similar_incidents_round_trips_typed_response() {
+    use syslog_mcp::app::SimilarIncidentsRequest;
+
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/similar-incidents"))
+        .and(header("authorization", "Bearer test-value"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "query": "disk full",
+            "total_clusters": 0,
+            "truncated": false,
+            "clusters": [],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let req = SimilarIncidentsRequest {
+        query: "disk full".into(),
+        hostname: None,
+        app_name: None,
+        severity_min: None,
+        from: None,
+        to: None,
+        window_minutes: None,
+        limit: None,
+    };
+    let resp = client
+        .similar_incidents(&req)
+        .await
+        .expect("similar_incidents wrapper should succeed");
+    assert_eq!(resp.query, "disk full");
+    assert_eq!(resp.total_clusters, 0);
+    assert!(resp.clusters.is_empty());
+}
+
+#[tokio::test]
+async fn ask_history_round_trips_typed_response() {
+    use syslog_mcp::app::AskHistoryRequest;
+
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/ai/ask-history"))
+        .and(header("authorization", "Bearer test-value"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "query": "why did deploy fail",
+            "total_candidates": 0,
+            "truncated": false,
+            "sessions": [],
+            "context_logs": [],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let req = AskHistoryRequest {
+        query: "why did deploy fail".into(),
+        ..Default::default()
+    };
+    let resp = client
+        .ask_history(&req)
+        .await
+        .expect("ask_history wrapper should succeed");
+    assert_eq!(resp.query, "why did deploy fail");
+    assert_eq!(resp.total_candidates, 0);
+    assert!(resp.sessions.is_empty());
+}
+
+#[tokio::test]
+async fn incident_context_round_trips_typed_response() {
+    use syslog_mcp::app::IncidentContextRequest;
+
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/incident-context"))
+        .and(header("authorization", "Bearer test-value"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "window_from": "2026-05-01T00:00:00Z",
+            "window_to":   "2026-05-01T01:00:00Z",
+            "total_logs":  0,
+            "by_severity": [],
+            "by_app":      [],
+            "error_logs":  [],
+            "error_logs_truncated": false,
+            "ai_sessions": [],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let req = IncidentContextRequest {
+        from: "2026-05-01T00:00:00Z".into(),
+        to: "2026-05-01T01:00:00Z".into(),
+        ..Default::default()
+    };
+    let resp = client
+        .incident_context(&req)
+        .await
+        .expect("incident_context wrapper should succeed");
+    assert_eq!(resp.window_from, "2026-05-01T00:00:00Z");
+    assert_eq!(resp.window_to, "2026-05-01T01:00:00Z");
+    assert_eq!(resp.total_logs, 0);
+    assert!(resp.error_logs.is_empty());
+}
+
 // ─── Env var guard ──────────────────────────────────────────────────────────
 //
 // `std::env::set_var` is data-racy across threads. We serialise via the
