@@ -110,6 +110,12 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         cost: Cost::Moderate,
     },
     ActionSpec {
+        name: "fleet_state",
+        scope: Scope::Read,
+        description: "Fleet-wide heartbeat snapshot with pressure flags",
+        cost: Cost::Moderate,
+    },
+    ActionSpec {
         name: "correlate",
         scope: Scope::Read,
         description: "Correlate events across hosts/services",

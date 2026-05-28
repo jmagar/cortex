@@ -64,6 +64,8 @@ pub use models::{
     ErrorSignatureEntry,
     ErrorSummaryEntry,
     FilterLogsRequest,
+    FleetStateRequest,
+    FleetStateResponse,
     GetErrorsRequest,
     GetErrorsResponse,
     GetLogRequest,
