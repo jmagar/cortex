@@ -2286,3 +2286,28 @@ async fn context_returns_500_for_unknown_log_id_pending_service_mapping() {
     let (status, _value) = get_json(app, "/api/context?log_id=999999", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
 }
+
+// ─── /api/fleet-state ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn fleet_state_returns_200_with_token_on_empty_db() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/fleet-state", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("hosts").is_some(), "missing hosts: {value}");
+    assert!(value.get("summary").is_some(), "missing summary: {value}");
+}
+
+#[tokio::test]
+async fn fleet_state_accepts_include_ok_and_sort_params() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(
+        app,
+        "/api/fleet-state?include_ok=false&sort=freshness",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+}

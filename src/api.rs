@@ -18,11 +18,11 @@ use crate::app::{
     AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest, AiLimitPolicy,
     AiParseErrorsRequest, AiPruneCheckpointsRequest, AnomaliesRequest, AskHistoryRequest,
     ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest, DbCheckpointRequest,
-    DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, GetErrorsRequest, GetLogRequest,
-    HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
-    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
-    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
-    SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
+    DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest,
+    GetLogRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
+    ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
+    RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
     SimilarIncidentsRequest, SyslogService, TailLogsRequest, TimelineRequest, UnackErrorRequest,
     UnaddressedErrorsRequest, UsageBlocksRequest,
 };
@@ -227,6 +227,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/get", get(get_log))
         .route("/api/host-state", get(host_state))
         .route("/api/context", get(context))
+        .route("/api/fleet-state", get(fleet_state))
         .route("/api/errors/unaddressed", get(unaddressed_errors))
         .route("/api/errors/ack", post(ack_error))
         .route("/api/errors/unack", post(unack_error))
@@ -624,6 +625,28 @@ async fn context(
                 timestamp: query.timestamp,
                 before: query.before,
                 after: query.after,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FleetStateQuery {
+    include_ok: Option<bool>,
+    sort: Option<String>,
+}
+
+async fn fleet_state(
+    State(state): State<ApiState>,
+    Query(query): Query<FleetStateQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .fleet_state(FleetStateRequest {
+                include_ok: query.include_ok,
+                sort: query.sort,
             })
             .await,
     )
