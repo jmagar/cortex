@@ -390,7 +390,7 @@ pub(crate) async fn run_ai_similar_incidents(mode: &CliMode, args: AiSimilarArgs
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Http(client) => client.similar_incidents(&req).await?,
+        CliMode::Http(client) => http_or_cancel(client.similar_incidents(&req)).await?,
         CliMode::Local(service) => service.similar_incidents(req).await?,
     };
     print_similar_incidents_response(&response, json)
@@ -400,7 +400,7 @@ pub(crate) async fn run_ai_ask_history(mode: &CliMode, args: AiAskHistoryArgs) -
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Http(client) => client.ask_history(&req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ask_history(&req)).await?,
         CliMode::Local(service) => service.ask_history(req).await?,
     };
     print_ask_history_response(&response, json)
@@ -413,7 +413,7 @@ pub(crate) async fn run_ai_incident_context(
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Http(client) => client.incident_context(&req).await?,
+        CliMode::Http(client) => http_or_cancel(client.incident_context(&req)).await?,
         CliMode::Local(service) => service.incident_context(req).await?,
     };
     print_incident_context_response(&response, json)
