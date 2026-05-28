@@ -564,3 +564,31 @@ async fn run_db_emits_timing_trace_on_success() {
     assert!(logs_contain("permit_ms"));
     assert!(logs_contain("exec_ms"));
 }
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn run_db_emits_warn_on_slow_op() {
+    use std::time::Duration;
+    let (service, _pool, _dir) = test_service();
+
+    service
+        .run_db("slow_test", |_pool| {
+            std::thread::sleep(Duration::from_millis(SLOW_DB_MS as u64 + 50));
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    assert!(logs_contain("slow db op"));
+    assert!(logs_contain("op=\"slow_test\""));
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn run_db_emits_warn_on_semaphore_closed() {
+    let (service, _pool, _dir) = test_service();
+    service.db_permits.close();
+    let result = service.run_db("closed_test", |_| Ok(())).await;
+    assert!(result.is_err());
+    assert!(logs_contain("db semaphore closed"));
+}

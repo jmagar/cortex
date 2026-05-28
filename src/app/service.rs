@@ -39,6 +39,7 @@ use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy}
 use crate::scanner;
 
 const DB_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const SLOW_DB_MS: u128 = 500;
 const SYSLOG_OWNED_USER_SERVICES: &[&str] = &[
     "syslog-ai-watch.service",
     "syslog-ai-index.service",
@@ -384,7 +385,9 @@ impl SyslogService {
             exclude_ai: false,
         };
         let mut rows = self
-            .run_db("incident", move |pool| db::search_logs(pool, &params))
+            .run_db("incident.search", move |pool| {
+                db::search_logs(pool, &params)
+            })
             .await?;
         let mut truncated = rows.len() > limit as usize;
         rows.truncate(limit as usize);
@@ -451,29 +454,54 @@ impl SyslogService {
         T: Send + 'static,
     {
         let wait_start = Instant::now();
-        let permit = tokio::time::timeout(
+        let permit_result = tokio::time::timeout(
             self.acquire_timeout,
             Arc::clone(&self.db_permits).acquire_owned(),
         )
-        .await
-        .map_err(|_| ServiceError::Busy("database worker limit reached".into()))?
-        .map_err(|_| ServiceError::Busy("database worker limit closed".into()))?;
+        .await;
         let permit_ms = wait_start.elapsed().as_millis();
+
+        let permit = match permit_result {
+            Err(_) => {
+                tracing::warn!(op, permit_ms, "db acquire timeout");
+                return Err(ServiceError::Busy("database worker limit reached".into()));
+            }
+            Ok(Err(_)) => {
+                tracing::warn!(op, permit_ms, "db semaphore closed");
+                return Err(ServiceError::Busy("database worker limit closed".into()));
+            }
+            Ok(Ok(p)) => p,
+        };
 
         let exec_start = Instant::now();
         let pool = Arc::clone(&self.pool);
-        let result = tokio::task::spawn_blocking(move || {
+        let join_result = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             f(&pool)
         })
-        .await
-        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Task join error: {e}")))?
-        .map_err(ServiceError::Internal);
-
+        .await;
         let exec_ms = exec_start.elapsed().as_millis();
-        match &result {
-            Ok(_) => tracing::debug!(op, permit_ms, exec_ms, "db op ok"),
-            Err(e) => tracing::debug!(op, permit_ms, exec_ms, error = %e, "db op err"),
+
+        let result = match join_result {
+            Err(e) => {
+                tracing::warn!(op, permit_ms, exec_ms, error = %e, "db task panic");
+                return Err(ServiceError::Internal(anyhow::anyhow!(
+                    "Task join error: {e}"
+                )));
+            }
+            Ok(r) => r.map_err(ServiceError::Internal),
+        };
+
+        if exec_ms > SLOW_DB_MS {
+            match &result {
+                Ok(_) => tracing::warn!(op, permit_ms, exec_ms, "slow db op"),
+                Err(e) => tracing::warn!(op, permit_ms, exec_ms, error = %e, "slow db op err"),
+            }
+        } else {
+            match &result {
+                Ok(_) => tracing::debug!(op, permit_ms, exec_ms, "db op ok"),
+                Err(e) => tracing::debug!(op, permit_ms, exec_ms, error = %e, "db op err"),
+            }
         }
         result
     }
