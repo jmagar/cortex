@@ -653,6 +653,7 @@ async fn fleet_state(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct UnaddressedErrorsQuery {
     limit: Option<u32>,
     include_acknowledged: Option<bool>,
