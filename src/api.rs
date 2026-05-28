@@ -17,7 +17,7 @@ use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateLimitPolicy,
     AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest, AiLimitPolicy,
     AiParseErrorsRequest, AiPruneCheckpointsRequest, AnomaliesRequest, AskHistoryRequest,
-    ClockSkewRequest, CompareRequest, CorrelateEventsRequest, DbCheckpointRequest,
+    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest, DbCheckpointRequest,
     DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, GetErrorsRequest, GetLogRequest,
     HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
     ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
@@ -226,6 +226,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/ingest-rate", get(ingest_rate))
         .route("/api/get", get(get_log))
         .route("/api/host-state", get(host_state))
+        .route("/api/context", get(context))
         .route("/api/errors/unaddressed", get(unaddressed_errors))
         .route("/api/errors/ack", post(ack_error))
         .route("/api/errors/unack", post(unack_error))
@@ -595,6 +596,34 @@ async fn host_state(
                 hostname: query.hostname,
                 since: query.since,
                 limit: query.limit,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContextQuery {
+    log_id: Option<i64>,
+    hostname: Option<String>,
+    timestamp: Option<String>,
+    before: Option<u32>,
+    after: Option<u32>,
+}
+
+async fn context(
+    State(state): State<ApiState>,
+    Query(query): Query<ContextQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .context(ContextRequest {
+                log_id: query.log_id,
+                hostname: query.hostname,
+                timestamp: query.timestamp,
+                before: query.before,
+                after: query.after,
             })
             .await,
     )
