@@ -2238,3 +2238,26 @@ async fn compose_doctor_unready_returns_structured_projection() {
     assert_eq!(value["runtime_state"], "docker_unavailable");
     assert_eq!(value["diagnostics"][0]["code"], "docker_unavailable");
 }
+
+// ─── /api/host-state ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn host_state_returns_400_without_host_id_or_hostname() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/host-state", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert!(
+        value.get("error").is_some(),
+        "missing error message: {value}"
+    );
+}
+
+#[tokio::test]
+async fn host_state_returns_404_for_unknown_host() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) =
+        get_json(app, "/api/host-state?hostname=nonexistent", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+}

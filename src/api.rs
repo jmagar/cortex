@@ -19,11 +19,12 @@ use crate::app::{
     AiParseErrorsRequest, AiPruneCheckpointsRequest, AnomaliesRequest, AskHistoryRequest,
     ClockSkewRequest, CompareRequest, CorrelateEventsRequest, DbCheckpointRequest,
     DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, GetErrorsRequest, GetLogRequest,
-    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
-    PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
-    ServiceError, SilentHostsRequest, SimilarIncidentsRequest, SyslogService, TailLogsRequest,
-    TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
+    HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
+    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
+    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
+    SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
+    SimilarIncidentsRequest, SyslogService, TailLogsRequest, TimelineRequest, UnackErrorRequest,
+    UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::db::DbPool;
@@ -224,6 +225,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/patterns", get(patterns))
         .route("/api/ingest-rate", get(ingest_rate))
         .route("/api/get", get(get_log))
+        .route("/api/host-state", get(host_state))
         .route("/api/errors/unaddressed", get(unaddressed_errors))
         .route("/api/errors/ack", post(ack_error))
         .route("/api/errors/unack", post(unack_error))
@@ -570,6 +572,32 @@ async fn get_log(
     Query(query): Query<GetLogQuery>,
 ) -> impl IntoResponse {
     respond(state.service.get_log(GetLogRequest { id: query.id }).await)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostStateQuery {
+    host_id: Option<String>,
+    hostname: Option<String>,
+    since: Option<String>,
+    limit: Option<u32>,
+}
+
+async fn host_state(
+    State(state): State<ApiState>,
+    Query(query): Query<HostStateQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .host_state(HostStateRequest {
+                host_id: query.host_id,
+                hostname: query.hostname,
+                since: query.since,
+                limit: query.limit,
+            })
+            .await,
+    )
 }
 
 #[derive(Debug, Deserialize)]
