@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-05-27
+
+### Added
+
+- Three new HTTP routes that close MCP/HTTP parity gaps:
+  - `GET /api/host-state` — bounded per-host heartbeat snapshot. 400 for
+    missing `host_id`/`hostname` or invalid `since` timestamp; 404 for
+    unknown host.
+  - `GET /api/context` — pivot-window log context around a `log_id` or
+    `hostname`+`timestamp`. 400 for missing pivot; 404 for unknown log.
+  - `GET /api/fleet-state` — fleet-wide heartbeat snapshot with pressure
+    flags and summary counts (`include_ok`, `sort` query params).
+- Registered `fleet_state` as a first-class MCP action so all three
+  surfaces (CLI, REST, MCP) see the same catalog. Tool dispatch, schema,
+  help text, and the registry-coverage fence files were updated.
+- `HttpClient` wrappers for `similar_incidents`, `ask_history`, and
+  `incident_context` — three CLI actions that previously had REST routes
+  but no client wrappers, so `--http` mode was blocked. The CLI now
+  reaches the REST surface end-to-end with Ctrl-C cancellation.
+
+### Changed
+
+- `SyslogService::host_state` now validates the `since` query parameter
+  via `parse_optional_timestamp` before passing it to SQL. Previously
+  garbage strings silently produced wrong results against
+  `sampled_at >= ?2`.
+- `SyslogService::context` now returns `ServiceError::InvalidInput` for
+  missing pivot and `ServiceError::NotFound` for unknown `log_id`. The
+  REST surface returns 400/404 instead of 500 for these client-side
+  conditions.
+- `fleet_state` MCP action cost classification: `Moderate` → `Expensive`.
+  The implementation issues N+1 DB calls across the fleet; the new
+  cost is honest about the resource profile.
+- `UnaddressedErrorsQuery` gains `#[serde(deny_unknown_fields)]` for
+  consistency with the rest of the query-string structs.
+
 ## [0.33.0] - 2026-05-25
 
 ### Added

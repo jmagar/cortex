@@ -23,6 +23,7 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `errors` | Error/warning summary grouped by hostname and severity level with counts | no |
 | `hosts` | List all hosts with first/last seen timestamps and total log counts | no |
 | `host_state` | Latest bounded heartbeat state for one host | no |
+| `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags and summary counts | no |
 | `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |
 | `stats` | Database statistics: total logs, hosts, time range, DB size, free disk, write-block status | no |
 | `status` | Lightweight runtime status: DB health, queue/backpressure state, listener/writer counters, OTLP counters | no |

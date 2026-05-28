@@ -389,22 +389,20 @@ pub(crate) async fn run_ai_watch(mode: &CliMode, args: AiWatchArgs) -> Result<()
 pub(crate) async fn run_ai_similar_incidents(mode: &CliMode, args: AiSimilarArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
-    let service = match mode {
-        CliMode::Http(_) => bail!("similar_incidents currently runs locally only; omit --http."),
-        CliMode::Local(service) => service,
+    let response = match mode {
+        CliMode::Http(client) => http_or_cancel(client.similar_incidents(&req)).await?,
+        CliMode::Local(service) => service.similar_incidents(req).await?,
     };
-    let response = service.similar_incidents(req).await?;
     print_similar_incidents_response(&response, json)
 }
 
 pub(crate) async fn run_ai_ask_history(mode: &CliMode, args: AiAskHistoryArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
-    let service = match mode {
-        CliMode::Http(_) => bail!("ask_history currently runs locally only; omit --http."),
-        CliMode::Local(service) => service,
+    let response = match mode {
+        CliMode::Http(client) => http_or_cancel(client.ask_history(&req)).await?,
+        CliMode::Local(service) => service.ask_history(req).await?,
     };
-    let response = service.ask_history(req).await?;
     print_ask_history_response(&response, json)
 }
 
@@ -414,11 +412,10 @@ pub(crate) async fn run_ai_incident_context(
 ) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
-    let service = match mode {
-        CliMode::Http(_) => bail!("incident_context currently runs locally only; omit --http."),
-        CliMode::Local(service) => service,
+    let response = match mode {
+        CliMode::Http(client) => http_or_cancel(client.incident_context(&req)).await?,
+        CliMode::Local(service) => service.incident_context(req).await?,
     };
-    let response = service.incident_context(req).await?;
     print_incident_context_response(&response, json)
 }
 

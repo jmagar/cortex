@@ -114,6 +114,22 @@ async fn host_state_action_returns_bounded_heartbeat_state() {
 }
 
 #[tokio::test]
+async fn fleet_state_action_returns_fleet_snapshot() {
+    let h = TestHarness::new();
+    let value = execute_tool(&h.state, "syslog", json!({"action": "fleet_state"}), None)
+        .await
+        .unwrap();
+    assert!(
+        value.get("hosts").is_some(),
+        "fleet_state response missing hosts: {value}"
+    );
+    assert!(
+        value.get("summary").is_some(),
+        "fleet_state response missing summary: {value}"
+    );
+}
+
+#[tokio::test]
 async fn host_state_action_reports_ambiguous_hostname() {
     let h = TestHarness::new();
     let conn = h.pool.get().unwrap();

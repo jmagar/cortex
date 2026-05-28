@@ -502,7 +502,7 @@ impl SyslogService {
             }
         };
         let limit = req.limit.unwrap_or(1).clamp(1, 100) as usize;
-        let since = req.since.clone();
+        let since = parse_optional_timestamp(req.since.as_deref(), "since")?;
         self.run_db(move |pool| {
             db::heartbeat_host_state(pool, lookup, since.as_deref(), limit).map_err(|error| {
                 match error.to_string().as_str() {
@@ -1645,7 +1645,7 @@ impl SyslogService {
                 let (reference, hostname, timestamp, id): (LogEntry, String, String, Option<i64>) =
                     if let Some(id) = req.log_id {
                         let row = db::fetch_log_by_id(pool, id)?
-                            .ok_or_else(|| anyhow::anyhow!("No log found for id {id}"))?;
+                            .ok_or_else(|| anyhow::anyhow!("context_log_not_found:{id}"))?;
                         let entry = LogEntry {
                             id: row.id,
                             timestamp: row.timestamp.clone(),
@@ -1665,16 +1665,12 @@ impl SyslogService {
                         };
                         (entry, row.hostname, row.timestamp, Some(row.id))
                     } else {
-                        let hostname = req.hostname.clone().ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "Either `log_id` or both `hostname` + `timestamp` are required"
-                            )
-                        })?;
-                        let timestamp = synthetic_timestamp.ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "Either `log_id` or both `hostname` + `timestamp` are required"
-                            )
-                        })?;
+                        let hostname = req
+                            .hostname
+                            .clone()
+                            .ok_or_else(|| anyhow::anyhow!("context_missing_pivot"))?;
+                        let timestamp = synthetic_timestamp
+                            .ok_or_else(|| anyhow::anyhow!("context_missing_pivot"))?;
                         let synthetic = LogEntry {
                             id: 0,
                             timestamp: timestamp.clone(),
@@ -1707,7 +1703,22 @@ impl SyslogService {
                 )?;
                 Ok((reference, before_rows, after_rows))
             })
-            .await?;
+            .await
+            .map_err(|error| match error {
+                ServiceError::Internal(inner) => {
+                    let msg = inner.to_string();
+                    if msg == "context_missing_pivot" {
+                        ServiceError::InvalidInput(
+                            "Either `log_id` or both `hostname` + `timestamp` are required".into(),
+                        )
+                    } else if let Some(id) = msg.strip_prefix("context_log_not_found:") {
+                        ServiceError::NotFound(format!("No log found for id {id}"))
+                    } else {
+                        ServiceError::Internal(inner)
+                    }
+                }
+                other => other,
+            })?;
         let (reference, before_rows, after_rows) = resolved;
         Ok(ContextResponse {
             reference,

@@ -2238,3 +2238,136 @@ async fn compose_doctor_unready_returns_structured_projection() {
     assert_eq!(value["runtime_state"], "docker_unavailable");
     assert_eq!(value["diagnostics"][0]["code"], "docker_unavailable");
 }
+
+// ─── /api/host-state ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn host_state_returns_400_without_host_id_or_hostname() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/host-state", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert!(
+        value.get("error").is_some(),
+        "missing error message: {value}"
+    );
+}
+
+#[tokio::test]
+async fn host_state_returns_400_for_invalid_since_timestamp() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(
+        app,
+        "/api/host-state?hostname=foo&since=not-a-timestamp",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert!(value.get("error").is_some(), "missing error: {value}");
+}
+
+#[tokio::test]
+async fn host_state_returns_404_for_unknown_host() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) =
+        get_json(app, "/api/host-state?hostname=nonexistent", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+}
+
+// ─── /api/context ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn context_returns_400_without_pivot() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/context", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert!(value.get("error").is_some(), "missing error: {value}");
+}
+
+#[tokio::test]
+async fn context_returns_404_for_unknown_log_id() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(app, "/api/context?log_id=999999", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+}
+
+// ─── /api/fleet-state ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn fleet_state_returns_200_with_token_on_empty_db() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(app, "/api/fleet-state", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("hosts").is_some(), "missing hosts: {value}");
+    assert!(value.get("summary").is_some(), "missing summary: {value}");
+}
+
+#[tokio::test]
+async fn fleet_state_accepts_include_ok_and_sort_params() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, _value) = get_json(
+        app,
+        "/api/fleet-state?include_ok=false&sort=freshness",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+}
+
+// ── bearer enforcement on new RAG-adjacent / heartbeat routes ───────────────
+
+#[tokio::test]
+async fn host_state_route_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/host-state?hostname=foo", None).await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn context_route_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/context?log_id=1", None).await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn fleet_state_route_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/fleet-state", None).await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+// ── deny_unknown_fields enforcement on new routes ───────────────────────────
+
+#[tokio::test]
+async fn unknown_query_param_returns_400_on_host_state() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/host-state?hostname=foo&bogus=1", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unknown_query_param_returns_400_on_context() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/context?bogus=1", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unknown_query_param_returns_400_on_fleet_state() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/fleet-state?bogus=1", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}

@@ -17,13 +17,14 @@ use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateLimitPolicy,
     AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest, AiLimitPolicy,
     AiParseErrorsRequest, AiPruneCheckpointsRequest, AnomaliesRequest, AskHistoryRequest,
-    ClockSkewRequest, CompareRequest, CorrelateEventsRequest, DbCheckpointRequest,
-    DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, GetErrorsRequest, GetLogRequest,
-    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
-    PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
-    ServiceError, SilentHostsRequest, SimilarIncidentsRequest, SyslogService, TailLogsRequest,
-    TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
+    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest, DbCheckpointRequest,
+    DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest,
+    GetLogRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
+    ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
+    RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
+    SimilarIncidentsRequest, SyslogService, TailLogsRequest, TimelineRequest, UnackErrorRequest,
+    UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::db::DbPool;
@@ -224,6 +225,9 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/patterns", get(patterns))
         .route("/api/ingest-rate", get(ingest_rate))
         .route("/api/get", get(get_log))
+        .route("/api/host-state", get(host_state))
+        .route("/api/context", get(context))
+        .route("/api/fleet-state", get(fleet_state))
         .route("/api/errors/unaddressed", get(unaddressed_errors))
         .route("/api/errors/ack", post(ack_error))
         .route("/api/errors/unack", post(unack_error))
@@ -572,7 +576,29 @@ async fn get_log(
     respond(state.service.get_log(GetLogRequest { id: query.id }).await)
 }
 
+async fn host_state(
+    State(state): State<ApiState>,
+    Query(req): Query<HostStateRequest>,
+) -> impl IntoResponse {
+    respond(state.service.host_state(req).await)
+}
+
+async fn context(
+    State(state): State<ApiState>,
+    Query(req): Query<ContextRequest>,
+) -> impl IntoResponse {
+    respond(state.service.context(req).await)
+}
+
+async fn fleet_state(
+    State(state): State<ApiState>,
+    Query(req): Query<FleetStateRequest>,
+) -> impl IntoResponse {
+    respond(state.service.fleet_state(req).await)
+}
+
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct UnaddressedErrorsQuery {
     limit: Option<u32>,
     include_acknowledged: Option<bool>,

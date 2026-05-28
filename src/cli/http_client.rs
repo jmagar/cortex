@@ -64,19 +64,20 @@ use syslog_mcp::app::{
     AbuseSearchRequest, AbuseSearchResponse, AckErrorRequest, AckErrorResponse,
     AiCheckpointsRequest, AiCorrelateRequest, AiCorrelateResponse, AiIncidentRequest,
     AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiParseErrorsRequest,
-    AiPruneCheckpointsRequest, AnomaliesRequest, AnomaliesResponse, ClockSkewRequest,
-    ClockSkewResponse, CompareRequest, CompareResponse, CorrelateEventsRequest,
-    CorrelateEventsResponse, DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest,
-    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult,
-    FilterLogsRequest, GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse,
-    IngestRateRequest, IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse,
-    ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse,
-    ListSessionsRequest, ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse,
-    PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse,
-    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
-    SilentHostsRequest, SilentHostsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
-    UnackErrorRequest, UnackErrorResponse, UnaddressedErrorsRequest, UnaddressedErrorsResponse,
-    UsageBlocksRequest, UsageBlocksResponse,
+    AiPruneCheckpointsRequest, AnomaliesRequest, AnomaliesResponse, AskHistoryRequest,
+    AskHistoryResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse,
+    CorrelateEventsRequest, CorrelateEventsResponse, DbCheckpointRequest, DbCheckpointResult,
+    DbIntegrityRequest, DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest,
+    DbVacuumResult, FilterLogsRequest, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
+    GetLogResponse, IncidentContextRequest, IncidentContextResponse, IngestRateRequest,
+    IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
+    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, PatternsRequest,
+    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
+    SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest,
+    TimelineRequest, TimelineResponse, UnackErrorRequest, UnackErrorResponse,
+    UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use syslog_mcp::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
 
@@ -622,6 +623,24 @@ impl HttpClient {
 
     pub async fn list_apps(&self, req: &ListAppsRequest) -> Result<ListAppsResponse> {
         self.get_json("/api/apps", Some(req)).await
+    }
+
+    pub async fn similar_incidents(
+        &self,
+        req: &SimilarIncidentsRequest,
+    ) -> Result<SimilarIncidentsResponse> {
+        self.get_json("/api/similar-incidents", Some(req)).await
+    }
+
+    pub async fn ask_history(&self, req: &AskHistoryRequest) -> Result<AskHistoryResponse> {
+        self.get_json("/api/ai/ask-history", Some(req)).await
+    }
+
+    pub async fn incident_context(
+        &self,
+        req: &IncidentContextRequest,
+    ) -> Result<IncidentContextResponse> {
+        self.get_json("/api/incident-context", Some(req)).await
     }
 }
 

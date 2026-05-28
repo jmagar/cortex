@@ -5,12 +5,12 @@ use serde_json::{json, Value};
 use crate::app::{
     AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
-    CorrelateEventsRequest, FilterLogsRequest, GetErrorsRequest, GetLogRequest, HostStateRequest,
-    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
-    PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
-    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
-    UsageBlocksRequest,
+    CorrelateEventsRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest,
+    HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
+    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
+    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
+    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, SimilarIncidentsRequest,
+    TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
 use super::actions;
@@ -43,6 +43,7 @@ async fn tool_syslog(
         "errors" => tool_get_errors(state, args).await,
         "hosts" => tool_list_hosts(state, args).await,
         "host_state" => tool_host_state(state, args).await,
+        "fleet_state" => tool_fleet_state(state, args).await,
         "correlate" => tool_correlate_events(state, args).await,
         "stats" => tool_get_stats(state, args).await,
         "status" => tool_get_status(state, args).await,
@@ -177,6 +178,11 @@ async fn tool_list_apps(state: &AppState, args: Value) -> anyhow::Result<Value> 
 async fn tool_host_state(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let req: HostStateRequest = action_payload(args)?;
     Ok(serde_json::to_value(state.service.host_state(req).await?)?)
+}
+
+async fn tool_fleet_state(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: FleetStateRequest = action_payload(args)?;
+    Ok(serde_json::to_value(state.service.fleet_state(req).await?)?)
 }
 
 async fn tool_list_sessions(state: &AppState, args: Value) -> anyhow::Result<Value> {
@@ -940,6 +946,15 @@ Return the latest bounded heartbeat state for one host.
 - `hostname` (string, optional) — self-reported hostname fallback; must resolve to exactly one host_id
 - `since` (string, optional) — minimum sampled_at timestamp (ISO 8601)
 - `limit` (integer, optional) — number of samples to return (default 1, max 100)
+
+---
+
+## syslog fleet_state
+Return a fleet-wide heartbeat snapshot with pressure flags and summary counts.
+
+**Parameters:**
+- `include_ok` (boolean, optional) — when `false`, exclude hosts with `status == "ok"` (default `true`)
+- `sort` (string, optional) — sort order: `pressure` (default), `freshness`, or `hostname`
 
 ---
 

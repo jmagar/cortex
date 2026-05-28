@@ -1332,6 +1332,7 @@ impl From<db::PatternEntry> for PatternEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContextRequest {
     pub log_id: Option<i64>,
     pub hostname: Option<String>,

@@ -20,7 +20,7 @@ wins.
 ## Current Actions
 
 syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument
-selects one of these 41 actions:
+selects one of these 42 actions:
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
@@ -30,6 +30,7 @@ selects one of these 41 actions:
 | `errors` | `syslog:read` | cheap | Error/warning summary |
 | `hosts` | `syslog:read` | cheap | Known source hostnames |
 | `host_state` | `syslog:read` | moderate | Latest bounded heartbeat state for one host |
+| `fleet_state` | `syslog:read` | expensive | Fleet-wide heartbeat snapshot with pressure flags |
 | `correlate` | `syslog:read` | moderate | Time-window event correlation |
 | `stats` | `syslog:read` | expensive | DB statistics and runtime observability |
 | `status` | `syslog:read` | cheap | Lightweight health and runtime status |
