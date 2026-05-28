@@ -949,6 +949,15 @@ Return the latest bounded heartbeat state for one host.
 
 ---
 
+## syslog fleet_state
+Return a fleet-wide heartbeat snapshot with pressure flags and summary counts.
+
+**Parameters:**
+- `include_ok` (boolean, optional) — when `false`, exclude hosts with `status == "ok"` (default `true`)
+- `sort` (string, optional) — sort order: `pressure` (default), `freshness`, or `hostname`
+
+---
+
 ## syslog apps
 List distinct application names with log counts, host counts, and first/last seen timestamps.
 Mirror of `syslog hosts` for the `app_name` dimension.

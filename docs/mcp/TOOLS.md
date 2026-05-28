@@ -13,6 +13,7 @@ syslog-mcp exposes one MCP tool named `syslog`. The required
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
 | `host_state` | Latest bounded heartbeat state for one host |
+| `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags and summary counts |
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
 | `abuse` | Abuse hits in AI transcripts with same-session context |
