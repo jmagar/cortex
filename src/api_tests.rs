@@ -2325,3 +2325,55 @@ async fn fleet_state_accepts_include_ok_and_sort_params() {
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
 }
+
+// ── bearer enforcement on new RAG-adjacent / heartbeat routes ───────────────
+
+#[tokio::test]
+async fn host_state_route_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/host-state?hostname=foo", None).await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn context_route_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/context?log_id=1", None).await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn fleet_state_route_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/fleet-state", None).await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+// ── deny_unknown_fields enforcement on new routes ───────────────────────────
+
+#[tokio::test]
+async fn unknown_query_param_returns_400_on_host_state() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/host-state?hostname=foo&bogus=1", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unknown_query_param_returns_400_on_context() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/context?bogus=1", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unknown_query_param_returns_400_on_fleet_state() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(app, "/api/fleet-state?bogus=1", Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
