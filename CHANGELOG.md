@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.1] - 2026-05-28
+
+### Changed
+
+- `run_db` now emits structured `tracing` events on every code path, including
+  acquire-timeout, semaphore-closed, and task-panic early returns that
+  previously returned silently. All ~60 callsites carry an `op` label for
+  correlation in log queries.
+- Ops exceeding 500 ms escalate from `debug` to `warn` level so slow queries
+  are visible at production `RUST_LOG=info` without configuration changes.
+- Fixed silent-failure in `correlate_state.resolve_host`: a `COUNT(*)` query
+  error was previously swallowed via `.unwrap_or(false)`, converting any DB
+  failure into a misleading `NotFound` response.
+- `JoinError` from `spawn_blocking` now distinguishes task-cancelled (graceful
+  shutdown) from task-panic in the log message.
+
 ## [0.35.0] - 2026-05-27
 
 ### Added
