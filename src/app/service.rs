@@ -39,7 +39,7 @@ use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy}
 use crate::scanner;
 
 const DB_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
-pub(super) const SLOW_DB_MS: u128 = 500;
+const SLOW_DB_MS: u128 = 500;
 const SYSLOG_OWNED_USER_SERVICES: &[&str] = &[
     "syslog-ai-watch.service",
     "syslog-ai-index.service",
@@ -498,8 +498,8 @@ impl SyslogService {
 
         if exec_ms > SLOW_DB_MS {
             match &result {
-                Ok(_) => tracing::warn!(op, permit_ms, exec_ms, "slow db op"),
-                Err(e) => tracing::warn!(op, permit_ms, exec_ms, error = %e, "slow db op err"),
+                Ok(_) => tracing::warn!(op, permit_ms, exec_ms, "db op ok"),
+                Err(e) => tracing::warn!(op, permit_ms, exec_ms, error = %e, "db op err"),
             }
         } else {
             match &result {

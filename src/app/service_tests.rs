@@ -579,10 +579,11 @@ async fn run_db_emits_warn_on_slow_op() {
         .await
         .unwrap();
 
-    assert!(logs_contain("slow db op"));
+    // Slow ops escalate to WARN level; message stays "db op ok" so aggregators
+    // can filter a single message across all speeds, using exec_ms for the threshold.
+    assert!(logs_contain("WARN"));
+    assert!(logs_contain("db op ok"));
     assert!(logs_contain("op=\"slow_test\""));
-    // The slow-path warn must still carry structured timing so operators can
-    // see how long the op actually took — not just that it was slow.
     assert!(logs_contain("permit_ms"));
     assert!(logs_contain("exec_ms"));
 }
@@ -616,7 +617,8 @@ async fn run_db_emits_warn_on_slow_op_with_error() {
         })
         .await;
 
-    assert!(logs_contain("slow db op err"));
+    assert!(logs_contain("WARN"));
+    assert!(logs_contain("db op err"));
     assert!(logs_contain("op=\"slow_err_test\""));
     assert!(logs_contain("error="));
 }
