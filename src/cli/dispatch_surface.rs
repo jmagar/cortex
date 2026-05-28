@@ -1,5 +1,7 @@
+use super::color::{cyan, muted, primary, warn};
 use super::dispatch::http_or_cancel;
 use super::output_common::print_json;
+use super::sparkline::sparkline;
 
 use anyhow::{bail, Result};
 use syslog_mcp::app::{
@@ -100,13 +102,16 @@ pub(crate) async fn run_source_ips(mode: &CliMode, args: SourceIpsArgs) -> Resul
     }
     println!(
         "{} source IP(s) (total {}):",
-        response.source_ips.len(),
-        response.total
+        cyan(&response.source_ips.len().to_string()),
+        cyan(&response.total.to_string())
     );
     for ip in &response.source_ips {
         println!(
             "  {:<20} logs={} hosts={} last_seen={}",
-            ip.source_ip, ip.log_count, ip.host_count, ip.last_seen
+            primary(&ip.source_ip),
+            cyan(&ip.log_count.to_string()),
+            cyan(&ip.host_count.to_string()),
+            muted(&ip.last_seen)
         );
     }
     Ok(())
@@ -122,22 +127,35 @@ pub(crate) async fn run_timeline(mode: &CliMode, args: TimelineArgs) -> Result<(
     if json {
         return print_json(&response);
     }
+    let spark = sparkline(
+        &response
+            .points
+            .iter()
+            .map(|p| p.count as u64)
+            .collect::<Vec<_>>(),
+    );
     println!(
-        "bucket={}{}",
-        response.bucket,
+        "bucket={}{} {}",
+        cyan(&response.bucket),
         response
             .group_by
             .as_deref()
-            .map(|g| format!(" group_by={g}"))
-            .unwrap_or_default()
+            .map(|g| format!(" group_by={}", muted(g)))
+            .unwrap_or_default(),
+        spark
     );
     for pt in &response.points {
         let group = pt
             .group
             .as_deref()
-            .map(|g| format!(" [{g}]"))
+            .map(|g| format!(" [{}]", muted(g)))
             .unwrap_or_default();
-        println!("  {}  {:>8}{}", pt.bucket, pt.count, group);
+        println!(
+            "  {}  {:>8}{}",
+            muted(&pt.bucket),
+            cyan(&pt.count.to_string()),
+            group
+        );
     }
     Ok(())
 }
@@ -154,8 +172,8 @@ pub(crate) async fn run_patterns(mode: &CliMode, args: PatternsArgs) -> Result<(
     }
     println!(
         "{} pattern(s) (scanned {} logs{})",
-        response.patterns.len(),
-        response.scanned,
+        cyan(&response.patterns.len().to_string()),
+        cyan(&response.scanned.to_string()),
         if response.truncated {
             ", truncated"
         } else {
@@ -163,7 +181,7 @@ pub(crate) async fn run_patterns(mode: &CliMode, args: PatternsArgs) -> Result<(
         }
     );
     for p in &response.patterns {
-        println!("  {:>6}  {}", p.count, p.template);
+        println!("  {:>6}  {}", cyan(&p.count.to_string()), p.template);
     }
     Ok(())
 }
@@ -180,15 +198,24 @@ pub(crate) async fn run_ingest_rate(mode: &CliMode, args: IngestRateArgs) -> Res
     }
     let b = &response.buckets;
     println!(
-        "ingest rate (per_sec): 1m={:.2} 5m={:.2} 15m={:.2}  (counts 1m={} 5m={} 15m={}; write_blocked={})",
-        b.per_sec_1m, b.per_sec_5m, b.per_sec_15m, b.last_1m, b.last_5m, b.last_15m,
-        response.write_blocked
+        "{} ingest rate (per_sec): 1m={} 5m={} 15m={}  (counts 1m={} 5m={} 15m={}; write_blocked={})",
+        if response.write_blocked { warn("BLOCKED") } else { muted("ok") },
+        cyan(&format!("{:.2}", b.per_sec_1m)),
+        cyan(&format!("{:.2}", b.per_sec_5m)),
+        cyan(&format!("{:.2}", b.per_sec_15m)),
+        cyan(&b.last_1m.to_string()),
+        cyan(&b.last_5m.to_string()),
+        cyan(&b.last_15m.to_string()),
+        primary(&response.write_blocked.to_string()),
     );
     if let Some(hosts) = &response.by_host {
         for h in hosts {
             println!(
                 "  {:<20} 1m={} 5m={} 15m={}",
-                h.hostname, h.last_1m, h.last_5m, h.last_15m
+                primary(&h.hostname),
+                cyan(&h.last_1m.to_string()),
+                cyan(&h.last_5m.to_string()),
+                cyan(&h.last_15m.to_string())
             );
         }
     }
@@ -209,12 +236,15 @@ pub(crate) async fn run_sig_list(mode: &CliMode, args: SigListArgs) -> Result<()
         println!("No unaddressed error signatures.");
         return Ok(());
     }
-    println!("{} signature(s):", response.signatures.len());
+    println!(
+        "{} signature(s):",
+        cyan(&response.signatures.len().to_string())
+    );
     for sig in &response.signatures {
         let acked = if sig.acknowledged_at.is_some() {
-            " [acked]"
+            format!(" {}", muted("[acked]"))
         } else {
-            ""
+            String::new()
         };
         let hash_short = sig
             .signature_hash
@@ -222,12 +252,15 @@ pub(crate) async fn run_sig_list(mode: &CliMode, args: SigListArgs) -> Result<()
             .unwrap_or(sig.signature_hash.as_str());
         println!(
             "  {:>6}x  {}  {}{}",
-            sig.total_count, hash_short, sig.template, acked
+            cyan(&sig.total_count.to_string()),
+            muted(hash_short),
+            sig.template,
+            acked
         );
         println!(
             "         app={} host={}",
-            sig.sample_app_name.as_deref().unwrap_or("-"),
-            sig.sample_hostname
+            primary(sig.sample_app_name.as_deref().unwrap_or("-")),
+            cyan(&sig.sample_hostname)
         );
     }
     Ok(())

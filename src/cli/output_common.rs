@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Serialize;
 use syslog_mcp::app::LogEntry;
 
-use super::color::Palette;
+use super::color::{cyan, muted, primary, severity, violet};
 
 pub(crate) fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
@@ -21,23 +21,22 @@ pub(crate) fn local_ts(utc: &str) -> String {
 }
 
 pub(crate) fn print_log(log: &LogEntry) {
-    let p = Palette::new();
     if is_transcript_log(log) {
-        print_ai_log_with(log, &p);
+        print_ai_log(log);
         return;
     }
     let app = log.app_name.as_deref().unwrap_or("-");
     println!(
         "{} {:<7} {:<20} {:<16} {}",
-        p.muted(&local_ts(&log.timestamp)),
-        p.severity(&log.severity),
-        p.cyan(&log.hostname),
-        p.primary(app),
+        muted(&local_ts(&log.timestamp)),
+        severity(&log.severity),
+        cyan(&log.hostname),
+        primary(app),
         log.message
     );
 }
 
-fn print_ai_log_with(log: &LogEntry, p: &Palette) {
+fn print_ai_log(log: &LogEntry) {
     let tool = log
         .ai_tool
         .as_deref()
@@ -51,11 +50,11 @@ fn print_ai_log_with(log: &LogEntry, p: &Palette) {
     let session = log.ai_session_id.as_deref().unwrap_or("(unknown session)");
     println!(
         "{} {:<7} {:<8} {:<36} session={}",
-        p.muted(&local_ts(&log.timestamp)),
-        p.severity(&log.severity),
-        p.violet(&truncate(tool, 8)),
-        p.primary(&truncate(project, 35)),
-        p.muted(&truncate(session, 24))
+        muted(&local_ts(&log.timestamp)),
+        severity(&log.severity),
+        violet(&truncate(tool, 8)),
+        primary(&truncate(project, 35)),
+        muted(&truncate(session, 24))
     );
     println!("    {}", indent_multiline(&log.message));
 }

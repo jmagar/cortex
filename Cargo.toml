@@ -72,6 +72,10 @@ thiserror = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# CLI output
+comfy-table = "7"
+supports-hyperlinks = "3"
+
 # Utils
 anyhow = "1"
 libc = "0.2"
