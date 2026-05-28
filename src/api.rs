@@ -576,30 +576,11 @@ async fn get_log(
     respond(state.service.get_log(GetLogRequest { id: query.id }).await)
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HostStateQuery {
-    host_id: Option<String>,
-    hostname: Option<String>,
-    since: Option<String>,
-    limit: Option<u32>,
-}
-
 async fn host_state(
     State(state): State<ApiState>,
-    Query(query): Query<HostStateQuery>,
+    Query(req): Query<HostStateRequest>,
 ) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .host_state(HostStateRequest {
-                host_id: query.host_id,
-                hostname: query.hostname,
-                since: query.since,
-                limit: query.limit,
-            })
-            .await,
-    )
+    respond(state.service.host_state(req).await)
 }
 
 #[derive(Debug, Deserialize)]
@@ -630,26 +611,11 @@ async fn context(
     )
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FleetStateQuery {
-    include_ok: Option<bool>,
-    sort: Option<String>,
-}
-
 async fn fleet_state(
     State(state): State<ApiState>,
-    Query(query): Query<FleetStateQuery>,
+    Query(req): Query<FleetStateRequest>,
 ) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .fleet_state(FleetStateRequest {
-                include_ok: query.include_ok,
-                sort: query.sort,
-            })
-            .await,
-    )
+    respond(state.service.fleet_state(req).await)
 }
 
 #[derive(Debug, Deserialize)]
