@@ -32,6 +32,7 @@ pub(crate) use run::ENV_USE_HTTP;
 pub(crate) use run::{run, CliMode, GlobalFlags};
 
 mod ai_watch;
+mod color;
 mod config_cmd;
 mod config_toml;
 mod coordination;
