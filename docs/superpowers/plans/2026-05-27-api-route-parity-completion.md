@@ -165,6 +165,14 @@ method. 400/404 mapping is inherited from the shared respond() helper."
 
 ## Task 2: `GET /api/context`
 
+> **Deviation note (resolved in commit `cad1349`):** during initial implementation
+> the service surfaced "missing pivot" / "unknown log_id" as `Internal` errors,
+> which mapped to HTTP 500. The wave-3 fix reshaped `service.context()` to
+> return `ServiceError::InvalidInput` / `ServiceError::NotFound`, so the
+> handler now inherits the documented 400 / 404 mapping via `respond()`.
+> The snippets below already reflect that final shape — a replay should
+> produce 400/404, not 500.
+
 **Files:**
 - Modify: `src/api.rs` (route registration + handler)
 - Test: `src/api_tests.rs`
@@ -299,7 +307,7 @@ In `src/mcp/actions.rs`, locate the existing `host_state` row (around line 106-1
         name: "fleet_state",
         scope: Scope::Read,
         description: "Fleet-wide heartbeat snapshot with pressure flags",
-        cost: Cost::Moderate,
+        cost: Cost::Expensive,
     },
 ```
 
