@@ -115,3 +115,4 @@ rmcp = { version = "1.6.0", default-features = false, features = [
 ] }
 # Mock HTTP server for CLI HTTP client tests (bead 0p8r.5).
 wiremock = "0.6"
+tracing-test = "0.2"

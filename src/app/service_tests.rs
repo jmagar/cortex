@@ -548,3 +548,19 @@ async fn ai_service_methods_return_seeded_data() {
         .unwrap();
     assert_eq!(tools.tools[0].tool, "claude");
 }
+
+// `tracing_test::traced_test` captures TRACE-level events by default, so the
+// `tracing::debug!` calls emitted by `run_db` are visible to `logs_contain`.
+// We verify both the message tag and the structured timing fields are present.
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn run_db_emits_timing_trace_on_success() {
+    let (service, _pool, _dir) = test_service();
+
+    service.health_check().await.unwrap();
+
+    assert!(logs_contain("db op ok"));
+    assert!(logs_contain("op=\"health_check\""));
+    assert!(logs_contain("permit_ms"));
+    assert!(logs_contain("exec_ms"));
+}
