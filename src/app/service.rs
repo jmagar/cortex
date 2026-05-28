@@ -484,7 +484,11 @@ impl SyslogService {
 
         let result = match join_result {
             Err(e) => {
-                tracing::warn!(op, permit_ms, exec_ms, error = %e, "db task panic");
+                if e.is_cancelled() {
+                    tracing::warn!(op, permit_ms, exec_ms, "db task cancelled");
+                } else {
+                    tracing::warn!(op, permit_ms, exec_ms, error = %e, "db task panic");
+                }
                 return Err(ServiceError::Internal(anyhow::anyhow!(
                     "Task join error: {e}"
                 )));
@@ -678,8 +682,7 @@ impl SyslogService {
                             [&h],
                             |row| row.get::<_, i64>(0),
                         )
-                        .map(|c| c > 0)
-                        .unwrap_or(false);
+                        .map(|c| c > 0)?;
                     if exists {
                         return Ok(Some(h));
                     }

@@ -602,3 +602,21 @@ async fn run_db_emits_warn_on_semaphore_closed() {
     assert!(logs_contain("db semaphore closed"));
     assert!(logs_contain("op=\"closed_test\""));
 }
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn run_db_emits_warn_on_slow_op_with_error() {
+    use std::time::Duration;
+    let (service, _pool, _dir) = test_service();
+
+    let _: ServiceResult<()> = service
+        .run_db("slow_err_test", |_pool| {
+            std::thread::sleep(Duration::from_millis(SLOW_DB_MS as u64 + 50));
+            Err(anyhow::anyhow!("simulated slow failure"))
+        })
+        .await;
+
+    assert!(logs_contain("slow db op err"));
+    assert!(logs_contain("op=\"slow_err_test\""));
+    assert!(logs_contain("error="));
+}
