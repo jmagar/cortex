@@ -583,32 +583,11 @@ async fn host_state(
     respond(state.service.host_state(req).await)
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ContextQuery {
-    log_id: Option<i64>,
-    hostname: Option<String>,
-    timestamp: Option<String>,
-    before: Option<u32>,
-    after: Option<u32>,
-}
-
 async fn context(
     State(state): State<ApiState>,
-    Query(query): Query<ContextQuery>,
+    Query(req): Query<ContextRequest>,
 ) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .context(ContextRequest {
-                log_id: query.log_id,
-                hostname: query.hostname,
-                timestamp: query.timestamp,
-                before: query.before,
-                after: query.after,
-            })
-            .await,
-    )
+    respond(state.service.context(req).await)
 }
 
 async fn fleet_state(
