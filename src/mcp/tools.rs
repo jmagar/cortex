@@ -442,12 +442,18 @@ async fn tool_compose_doctor(args: Value) -> anyhow::Result<Value> {
 }
 
 async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    // Default to last 30 days if no time range given — prevents full table scan
+    let from = string_arg(&args, "from").or_else(|| {
+        chrono::Utc::now()
+            .checked_sub_signed(chrono::Duration::days(30))
+            .map(|dt| dt.to_rfc3339())
+    });
     let response = state
         .service
         .timeline(TimelineRequest {
             bucket: string_arg(&args, "bucket"),
             group_by: string_arg(&args, "group_by"),
-            from: string_arg(&args, "from"),
+            from,
             to: string_arg(&args, "to"),
             hostname: string_arg(&args, "hostname"),
             app_name: string_arg(&args, "app_name"),

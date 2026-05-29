@@ -4,6 +4,7 @@ use super::output_common::print_json;
 use super::sparkline::sparkline;
 
 use anyhow::{bail, Result};
+use chrono::Utc;
 use syslog_mcp::app::{
     AckErrorRequest, IngestRateRequest, ListSourceIpsRequest, PatternsRequest, TimelineRequest,
     UnackErrorRequest, UnaddressedErrorsRequest,
@@ -27,10 +28,16 @@ impl SourceIpsArgs {
 
 impl TimelineArgs {
     pub(crate) fn into_request(self) -> TimelineRequest {
+        // Default to last 30 days if no time range given — prevents full table scan
+        let from = self.from.or_else(|| {
+            Utc::now()
+                .checked_sub_signed(chrono::Duration::days(30))
+                .map(|dt| dt.to_rfc3339())
+        });
         TimelineRequest {
             bucket: self.bucket,
             group_by: self.group_by,
-            from: self.from,
+            from,
             to: self.to,
             hostname: self.hostname,
             app_name: self.app_name,

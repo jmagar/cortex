@@ -1263,39 +1263,50 @@ async fn run_db_vacuum_force_absent_does_not_send_force_true() {
     assert_ne!(body["force"], serde_json::Value::Bool(true));
 }
 
-// ─── DB backup: HTTP mode bails with inline message ─────────────────────────
+// ─── DB backup: HTTP mode routes to POST /api/db/backup ─────────────────────
+//
+// HTTP mode now forwards to the server (xknb fix): the server runs the backup
+// via the rusqlite online backup API on its own pool connection, avoiding
+// SQLITE_BUSY when the container is actively ingesting logs.
 
 #[tokio::test]
-async fn run_db_backup_http_bails_with_inline_message() {
-    let mode = http_only_mode().await;
-    let err = run_db_backup(
+async fn run_db_backup_http_posts_to_api_endpoint() {
+    let (server, mode) = http_mode().await;
+    Mock::given(method("POST"))
+        .and(path("/api/db/backup"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "db_path": "/data/syslog.db",
+            "backup_path": "/data/backup.db",
+            "size_bytes": 1024
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    run_db_backup(
         &mode,
         DbBackupArgs {
-            output: Some("/tmp/x.db".into()),
+            output: Some("/data/backup.db".into()),
             json: true,
         },
     )
     .await
-    .expect_err("must bail in http mode");
-    assert_eq!(
-        err.to_string(),
-        "db backup currently runs locally; --output writes to a host filesystem path. \
-         Omit --http."
-    );
+    .expect("http backup must succeed");
 }
 
-// ─── HTTP client timeout (bead 0p8r.5) inherits the single 10-min budget ────
+// ─── HTTP client timeout (bead 0p8r.5 / bead syslog-mcp-qekb) ──────────────
 //
-// We don't actually wait 10 minutes. We just inspect the HttpClient's
-// configured timeout via a fast no-op request to confirm long-running calls
-// inherit the same timeout as the others.
+// bead 0p8r.5 originally specified no per-method timeout on `db integrity`.
+// bead syslog-mcp-qekb revised that: `run_db_integrity` now wraps the HTTP
+// arm in a 120s `tokio::time::timeout` (via `INTEGRITY_HTTP_TIMEOUT`) so a
+// 31 GB+ DB does not silently hit the global 600s reqwest timeout. Fast
+// requests (well under 120s) continue to complete normally — that is all this
+// test exercises. The timeout-fires path is covered by
+// `dispatch_db_tests::run_db_integrity_http_timeout_emits_actionable_message`.
 
 #[tokio::test]
-async fn db_integrity_http_request_inherits_long_timeout_budget() {
-    // Sanity-check that a fast request still completes under the 10-min
-    // budget. The bead's "long-timeout" test is really about NOT setting a
-    // shorter per-method timeout — verified structurally by the fact that
-    // dispatch never builds a one-off client.
+async fn db_integrity_http_request_completes_within_integrity_timeout_budget() {
+    // A 50ms mock response is well under the 120s INTEGRITY_HTTP_TIMEOUT, so
+    // the call should succeed and the timeout wrapper should be a no-op.
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
         .and(path("/api/db/integrity"))
@@ -1315,7 +1326,7 @@ async fn db_integrity_http_request_inherits_long_timeout_budget() {
         },
     )
     .await
-    .expect("db integrity ok under timeout budget");
+    .expect("db integrity ok under 120s timeout budget");
 }
 
 // ─── Surface parity snapshot tests (Task 5/6) ───────────────────────────────
@@ -1336,6 +1347,7 @@ fn source_ips_args_into_request_default() {
 
 #[test]
 fn timeline_args_into_request_snapshot() {
+    // When no from is specified, the default 30-day window should be applied.
     let args = TimelineArgs {
         bucket: Some("1h".to_string()),
         group_by: None,
@@ -1347,9 +1359,41 @@ fn timeline_args_into_request_snapshot() {
         json: false,
     };
     let req = args.into_request();
+    assert_eq!(req.bucket.as_deref(), Some("1h"));
+    assert!(
+        req.from.is_some(),
+        "from should default to last 30 days when not specified"
+    );
+    // Verify the default is a valid RFC3339 timestamp roughly 30 days ago
+    let from_str = req.from.as_deref().unwrap();
+    let parsed = chrono::DateTime::parse_from_rfc3339(from_str)
+        .expect("default from should be valid RFC3339");
+    let now = chrono::Utc::now();
+    let diff = now.signed_duration_since(parsed.with_timezone(&chrono::Utc));
+    assert!(
+        diff.num_days() >= 29 && diff.num_days() <= 31,
+        "default from should be ~30 days ago, got {diff:?}"
+    );
+}
+
+#[test]
+fn timeline_args_into_request_explicit_from_preserved() {
+    // Explicit from must override the default.
+    let args = TimelineArgs {
+        bucket: None,
+        group_by: None,
+        from: Some("2025-01-01T00:00:00Z".to_string()),
+        to: None,
+        hostname: None,
+        app_name: None,
+        severity_min: None,
+        json: false,
+    };
+    let req = args.into_request();
     assert_eq!(
-        format!("{req:?}"),
-        "TimelineRequest { bucket: Some(\"1h\"), group_by: None, from: None, to: None, hostname: None, app_name: None, severity_min: None }"
+        req.from.as_deref(),
+        Some("2025-01-01T00:00:00Z"),
+        "explicit from must not be overridden by the default"
     );
 }
 

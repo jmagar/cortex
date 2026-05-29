@@ -2,7 +2,8 @@ use super::dispatch::http_or_cancel;
 
 use anyhow::{bail, Result};
 use std::path::PathBuf;
-use syslog_mcp::app::{DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest};
+use std::time::Duration;
+use syslog_mcp::app::{DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest};
 
 use super::coordination::run_coordination_phases;
 use super::output_ops::{
@@ -10,6 +11,17 @@ use super::output_ops::{
     print_db_status_response, print_db_vacuum_response,
 };
 use super::{CliMode, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs};
+
+/// HTTP-side timeout for `db integrity`. On a 31 GB+ DB, `PRAGMA quick_check`
+/// (let alone full `integrity_check`) reads every page and can exceed the
+/// global 600s `REQUEST_TIMEOUT`. This shorter gate fires first and emits an
+/// actionable message directing the operator to run the check inside the
+/// container, where the local path has no timeout.
+///
+/// (bead syslog-mcp-qekb) — 120s is roughly a 10 GB/min I/O estimate, i.e.
+/// it is expected to complete on a DB up to ~20 GB; anything larger gets the
+/// actionable message.
+pub(crate) const INTEGRITY_HTTP_TIMEOUT: Duration = Duration::from_secs(120);
 
 // ─── DB Arg → Request conversions (bead 0p8r.9) ─────────────────────────────
 //
@@ -53,11 +65,39 @@ pub(crate) async fn run_db_status(mode: &CliMode, args: DbStatusArgs) -> Result<
 }
 
 pub(crate) async fn run_db_integrity(mode: &CliMode, args: DbIntegrityArgs) -> Result<()> {
+    run_db_integrity_with_timeout(mode, args, INTEGRITY_HTTP_TIMEOUT).await
+}
+
+/// Testable inner form of [`run_db_integrity`] — accepts an injected HTTP
+/// timeout so the timeout-fires path can be exercised in unit tests without
+/// waiting 120 seconds.
+pub(crate) async fn run_db_integrity_with_timeout(
+    mode: &CliMode,
+    args: DbIntegrityArgs,
+    http_timeout: Duration,
+) -> Result<()> {
     let DbIntegrityArgs { quick, json } = args;
     let req = DbIntegrityRequest { quick };
     let response = match mode {
         CliMode::Local(service) => service.db_integrity(quick).await?,
-        CliMode::Http(client) => http_or_cancel(client.db_integrity(&req)).await?,
+        CliMode::Http(client) => {
+            match tokio::time::timeout(http_timeout, http_or_cancel(client.db_integrity(&req)))
+                .await
+            {
+                Ok(result) => result?,
+                Err(_elapsed) => {
+                    bail!(
+                        "Integrity check timed out after {}s (DB may be very large).\n\
+                         Run the check inside the container where there is no timeout:\n\
+                         \n\
+                         \tdocker exec syslog-mcp syslog db integrity --quick\n\
+                         \n\
+                         This operation may take 10-30 minutes on a 31 GB+ database.",
+                        http_timeout.as_secs()
+                    );
+                }
+            }
+        }
     };
     print_db_integrity_response(&response, json)?;
     if !response.ok {
@@ -100,15 +140,51 @@ pub(crate) async fn run_db_vacuum(mode: &CliMode, args: DbVacuumArgs) -> Result<
 }
 
 pub(crate) async fn run_db_backup(mode: &CliMode, args: DbBackupArgs) -> Result<()> {
-    let service = match mode {
-        CliMode::Http(_) => bail!(
-            "db backup currently runs locally; --output writes to a host filesystem path. \
-             Omit --http."
-        ),
-        CliMode::Local(service) => service,
-    };
-    let response = service.db_backup(args.output.map(PathBuf::from)).await?;
-    print_db_backup_response(&response, args.json)
+    match mode {
+        CliMode::Http(client) => {
+            // Route through the server — the server holds the pool connection
+            // so the rusqlite backup API cooperates with WAL writers; no lock
+            // conflict even when the container is actively ingesting logs.
+            //
+            // Note: `output_path` is a **server-side** path (e.g.
+            // `/data/backup.db` inside the container, visible on the host via
+            // the Docker bind-mount). Pass `None` to let the server choose.
+            let req = DbBackupRequest {
+                output_path: args.output.clone(),
+            };
+            let response = http_or_cancel(client.db_backup(&req)).await?;
+            print_db_backup_response(&response, args.json)
+        }
+        CliMode::Local(service) => {
+            let response = service.db_backup(args.output.map(PathBuf::from)).await;
+            match response {
+                Ok(r) => print_db_backup_response(&r, args.json),
+                Err(e) => {
+                    let msg = e.to_string();
+                    // SQLITE_BUSY / "database is locked" means the container is
+                    // running and holds a WAL write lock. Guide the operator.
+                    if msg.contains("database is locked")
+                        || msg.contains("SQLITE_BUSY")
+                        || msg.contains("unable to open database file")
+                    {
+                        bail!(
+                            "{msg}\n\n\
+                             The container is likely running and holds the SQLite write lock.\n\
+                             To backup through the running server (recommended):\n\
+                             \n\
+                             \tsyslog --http db backup --output /data/backup-$(date +%Y%m%d).db\n\
+                             \n\
+                             Or backup inside the container directly:\n\
+                             \n\
+                             \tdocker exec syslog-mcp syslog db backup --output /data/backup-$(date +%Y%m%d).db"
+                        )
+                    } else {
+                        Err(e.into())
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1346,31 +1346,27 @@ impl SyslogService {
 
     pub async fn db_backup(&self, output: Option<PathBuf>) -> ServiceResult<DbBackupResult> {
         let db_path = self.storage.db_path.clone();
-        self.run_db(move |_pool| {
+        self.run_db(move |pool| {
             let backup_path = backup_path_for(&db_path, output)?;
             if let Some(parent) = backup_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            let escaped = backup_path.to_string_lossy().replace('\'', "''");
-            let output = std::process::Command::new("sqlite3")
-                .arg(&db_path)
-                .arg(format!(".backup '{escaped}'"))
-                .output()
-                .map_err(|error| {
-                    if error.kind() == std::io::ErrorKind::NotFound {
-                        anyhow::anyhow!(
-                            "sqlite3 command not found in PATH; install sqlite3 to use database backup"
-                        )
-                    } else {
-                        error.into()
-                    }
-                })?;
-            if !output.status.success() {
-                anyhow::bail!(
-                    "sqlite3 backup failed: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-            }
+            // Use rusqlite's online backup API (sqlite3_backup_*) rather than
+            // the external `sqlite3` CLI.  The external process opens its own
+            // connection with busy_timeout=0 and immediately hits SQLITE_BUSY
+            // when the container's WAL writer holds any lock.  The pool
+            // connection inherits busy_timeout=5000 and the backup API reads
+            // through WAL snapshots cooperatively — no lock contention.
+            let src_conn = pool.get()?;
+            let mut dst_conn = rusqlite::Connection::open(&backup_path)?;
+            let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)?;
+            // 100 pages per step, 50 ms sleep between steps — lets ingest
+            // writers proceed between steps (same cadence as the rusqlite docs
+            // "Online Backup of a Running Database" example).
+            backup.run_to_completion(100, std::time::Duration::from_millis(50), None)?;
+            drop(backup);
+            drop(dst_conn);
+            drop(src_conn);
             let size_bytes = std::fs::metadata(&backup_path)?.len();
             Ok(DbBackupResult {
                 db_path,

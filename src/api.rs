@@ -8,6 +8,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::Semaphore;
@@ -17,9 +18,9 @@ use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateLimitPolicy,
     AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest, AiLimitPolicy,
     AiParseErrorsRequest, AiPruneCheckpointsRequest, AnomaliesRequest, AskHistoryRequest,
-    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest, DbCheckpointRequest,
-    DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest,
-    GetLogRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
+    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest, DbBackupRequest,
+    DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, FleetStateRequest,
+    GetErrorsRequest, GetLogRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
     ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
     ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
     RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
@@ -263,7 +264,8 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/db/status", get(db_status))
         .route("/api/db/integrity", get(db_integrity))
         .route("/api/db/checkpoint", post(db_checkpoint))
-        .route("/api/db/vacuum", post(db_vacuum));
+        .route("/api/db/vacuum", post(db_vacuum))
+        .route("/api/db/backup", post(db_backup));
 
     // Force `AuthPolicy::Mounted` on /api/* regardless of the listener bind.
     // Loopback callers (CLI on the same host) MUST still present a bearer
@@ -498,13 +500,19 @@ async fn timeline(
     State(state): State<ApiState>,
     Query(query): Query<TimelineQuery>,
 ) -> impl IntoResponse {
+    // Default to last 30 days if no time range given — prevents full table scan
+    let from = query.from.or_else(|| {
+        Utc::now()
+            .checked_sub_signed(chrono::Duration::days(30))
+            .map(|dt| dt.to_rfc3339())
+    });
     respond(
         state
             .service
             .timeline(TimelineRequest {
                 bucket: query.bucket,
                 group_by: query.group_by,
-                from: query.from,
+                from,
                 to: query.to,
                 hostname: query.hostname,
                 app_name: query.app_name,
@@ -1449,6 +1457,57 @@ async fn db_vacuum(
         }
         other => respond(other),
     }
+}
+
+/// `POST /api/db/backup` — admin: online backup via rusqlite backup API.
+///
+/// The backup runs inside the server process using the pool connection, so it
+/// cooperates with WAL writers and never hits SQLITE_BUSY. The caller supplies
+/// an **optional server-side** `output_path`; the server resolves it to a path
+/// it can write (e.g. `/data/backups/...` via the Docker bind-mount).
+///
+/// Uses MAINTENANCE_PERMIT (single-flight, dual-permit pattern — see
+/// `MAINTENANCE_PERMIT` docs). On contention returns 409 immediately.
+async fn db_backup(
+    State(state): State<ApiState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let req: DbBackupRequest = if body.is_empty() {
+        DbBackupRequest::default()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(req) => req,
+            Err(err) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("invalid request body: {err}")})),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    tracing::warn!(
+        caller_ip = %peer,
+        action = "db_backup",
+        output_path = ?req.output_path,
+        "admin: db_backup invoked"
+    );
+
+    let _permit = match Arc::clone(&state.maintenance_permit).try_acquire_owned() {
+        Ok(p) => p,
+        Err(_) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({"error": "db maintenance already in progress"})),
+            )
+                .into_response();
+        }
+    };
+
+    let output = req.output_path.map(std::path::PathBuf::from);
+    respond(state.service.db_backup(output).await)
 }
 
 #[cfg(test)]

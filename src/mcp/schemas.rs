@@ -142,7 +142,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "from": {
                     "type": "string",
-                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or ask_history: start of time range as ISO 8601/RFC3339. Required for incident_context. Strongly recommended for timeline and patterns — omitting from/to causes a full-history scan."
+                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or ask_history: start of time range as ISO 8601/RFC3339. Required for incident_context. For action=timeline: defaults to last 30 days when omitted (prevents full-history scan). Strongly recommended for patterns — omitting from/to causes a full-history scan."
                 },
                 "to": {
                     "type": "string",
