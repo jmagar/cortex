@@ -1359,14 +1359,23 @@ impl SyslogService {
             // through WAL snapshots cooperatively — no lock contention.
             let src_conn = pool.get()?;
             let mut dst_conn = rusqlite::Connection::open(&backup_path)?;
-            let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)?;
-            // 100 pages per step, 50 ms sleep between steps — lets ingest
-            // writers proceed between steps (same cadence as the rusqlite docs
-            // "Online Backup of a Running Database" example).
-            backup.run_to_completion(100, std::time::Duration::from_millis(50), None)?;
-            drop(backup);
+            // Wrap the backup in a closure so we can remove the partial file on
+            // error rather than leaving a truncated or corrupted backup behind.
+            let backup_result = (|| -> anyhow::Result<()> {
+                let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)?;
+                // 100 pages per step, 50 ms sleep between steps — lets ingest
+                // writers proceed between steps (same cadence as the rusqlite docs
+                // "Online Backup of a Running Database" example).
+                backup.run_to_completion(100, std::time::Duration::from_millis(50), None)?;
+                drop(backup);
+                Ok(())
+            })();
             drop(dst_conn);
             drop(src_conn);
+            if let Err(e) = backup_result {
+                let _ = std::fs::remove_file(&backup_path);
+                return Err(e);
+            }
             let size_bytes = std::fs::metadata(&backup_path)?.len();
             Ok(DbBackupResult {
                 db_path,
@@ -2059,16 +2068,35 @@ fn shm_path(db_path: &std::path::Path) -> PathBuf {
 }
 
 fn backup_path_for(db_path: &std::path::Path, output: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    let allowed_root = db_path.parent().unwrap_or(std::path::Path::new("/data"));
     let timestamp = Utc::now().format("%Y-%m-%d-%H%M%S");
-    match output {
-        Some(path) if path.extension().is_some() => Ok(path),
-        Some(dir) => Ok(dir.join(format!("syslog-{timestamp}.db"))),
-        None => Ok(db_path
+    let raw_path = match output {
+        Some(path) if path.extension().is_some() => path,
+        Some(dir) => dir.join(format!("syslog-{timestamp}.db")),
+        None => db_path
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .join("backups")
-            .join(format!("syslog-{timestamp}.db"))),
+            .join(format!("syslog-{timestamp}.db")),
+    };
+
+    // Resolve the parent directory for path traversal validation.
+    // The file may not exist yet, so we canonicalize the parent rather than
+    // the full path to avoid ENOENT.
+    let parent = raw_path.parent().unwrap_or(raw_path.as_path());
+    std::fs::create_dir_all(parent)?;
+    let canonical_parent = parent.canonicalize()?;
+    let canonical_allowed = allowed_root
+        .canonicalize()
+        .unwrap_or_else(|_| allowed_root.to_path_buf());
+
+    if !canonical_parent.starts_with(&canonical_allowed) {
+        anyhow::bail!(
+            "output_path must be within the data directory ({})",
+            canonical_allowed.display()
+        );
     }
+    Ok(raw_path)
 }
 
 // ---------------------------------------------------------------------------
