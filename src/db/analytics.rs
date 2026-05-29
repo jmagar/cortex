@@ -538,7 +538,19 @@ impl Bucket {
         }
     }
 
-    pub fn strftime_format(self) -> &'static str {
+    /// SQLite `strftime` pattern for grouping timestamps into this bucket.
+    ///
+    /// `Week` uses `%W` (Monday-based week-of-year, 00–53). Days in early
+    /// January that fall *before* the year's first Monday land in week `00`,
+    /// producing labels like `2026-W00` (bead llto.2). Bucket tests deliberately
+    /// avoid that range. We do NOT use ISO-8601 week-numbering (`%G-%V`, which
+    /// would never emit week 00) because the SQLite version bundled here does
+    /// not support the `%G`/`%V` specifiers.
+    ///
+    /// `pub(crate)` (bead llto.3): the `db` module is `pub(crate)`, so this is
+    /// only reachable within the crate — widening past crate scope serves no
+    /// caller.
+    pub(crate) fn strftime_format(self) -> &'static str {
         match self {
             Self::Minute => "%Y-%m-%dT%H:%M:00Z",
             Self::Hour => "%Y-%m-%dT%H:00:00Z",
