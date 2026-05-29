@@ -17,6 +17,19 @@ use super::{
 
 // ─── Surface parity (source-ips, timeline, patterns, ingest-rate, sig, notify) ─
 
+/// Returns the default lookback window (days) for a given bucket string.
+/// Wider buckets benefit from longer default windows to avoid empty results.
+fn timeline_default_days(bucket: &str) -> i64 {
+    match bucket {
+        "minute" | "min" | "m" => 1,
+        "hour" | "h" => 7,
+        "day" | "d" => 30,
+        "week" | "w" => 180,
+        "month" => 730,
+        _ => 30, // unknown bucket — fall back; service will reject it anyway
+    }
+}
+
 impl SourceIpsArgs {
     pub(crate) fn into_request(self) -> ListSourceIpsRequest {
         ListSourceIpsRequest {
@@ -28,12 +41,14 @@ impl SourceIpsArgs {
 
 impl TimelineArgs {
     pub(crate) fn into_request(self) -> TimelineRequest {
-        // Default to last 30 days only when no time range is given — prevents full table scan.
+        // Default lookback window varies by bucket — wider buckets need longer windows.
+        // Only apply when no time range is given (prevents full table scans).
         // If `to` is already set, skip the default so we don't create an impossible range.
         let from = self.from.or_else(|| {
             if self.to.is_none() {
+                let days = timeline_default_days(self.bucket.as_deref().unwrap_or("hour"));
                 Utc::now()
-                    .checked_sub_signed(chrono::Duration::days(30))
+                    .checked_sub_signed(chrono::Duration::days(days))
                     .map(|dt| dt.to_rfc3339())
             } else {
                 None

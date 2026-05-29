@@ -914,3 +914,94 @@ fn list_source_ips_aggregates_hostnames() {
     assert_eq!(first.host_count, 2);
     assert_eq!(first.log_count, 3);
 }
+
+#[test]
+fn bucket_week_formats_correctly() {
+    // Week bucket uses ISO week number format: "YYYY-WNN"
+    assert_eq!(Bucket::Week.strftime_format(), "%Y-W%W");
+    assert_eq!(Bucket::parse("week"), Some(Bucket::Week));
+    assert_eq!(Bucket::parse("w"), Some(Bucket::Week));
+}
+
+#[test]
+fn bucket_month_formats_correctly() {
+    // Month bucket uses year-month format: "YYYY-MM"
+    assert_eq!(Bucket::Month.strftime_format(), "%Y-%m");
+    assert_eq!(Bucket::parse("month"), Some(Bucket::Month));
+}
+
+#[test]
+fn bucket_default_lookback_days_scales_with_bucket_size() {
+    assert!(Bucket::Minute.default_lookback_days() < Bucket::Hour.default_lookback_days());
+    assert!(Bucket::Hour.default_lookback_days() < Bucket::Day.default_lookback_days());
+    assert!(Bucket::Day.default_lookback_days() < Bucket::Week.default_lookback_days());
+    assert!(Bucket::Week.default_lookback_days() < Bucket::Month.default_lookback_days());
+    assert_eq!(Bucket::Week.default_lookback_days(), 180);
+    assert_eq!(Bucket::Month.default_lookback_days(), 730);
+}
+
+#[test]
+fn timeline_buckets_by_week() {
+    let (pool, _d) = test_pool();
+    // Two logs in the same week, one in a different week
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-01-05T00:00:00Z", "h1", "info", None, "a"), // week 1
+            entry("2026-01-06T00:00:00Z", "h1", "info", None, "b"), // same week 1
+            entry("2026-01-12T00:00:00Z", "h1", "info", None, "c"), // week 2
+        ],
+    )
+    .unwrap();
+    let pts = timeline(
+        &pool,
+        Bucket::Week,
+        TimelineGroupBy::None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(pts.len(), 2);
+    assert_eq!(pts[0].count, 2);
+    assert_eq!(pts[1].count, 1);
+    // Bucket labels should contain "W"
+    assert!(
+        pts[0].bucket.contains('W'),
+        "week bucket label must contain 'W': {}",
+        pts[0].bucket
+    );
+}
+
+#[test]
+fn timeline_buckets_by_month() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-01-01T00:00:00Z", "h1", "info", None, "a"),
+            entry("2026-01-15T00:00:00Z", "h1", "info", None, "b"),
+            entry("2026-02-01T00:00:00Z", "h1", "info", None, "c"),
+        ],
+    )
+    .unwrap();
+    let pts = timeline(
+        &pool,
+        Bucket::Month,
+        TimelineGroupBy::None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(pts.len(), 2);
+    assert_eq!(pts[0].count, 2);
+    assert_eq!(pts[1].count, 1);
+    // Bucket labels should look like "YYYY-MM"
+    assert_eq!(pts[0].bucket, "2026-01");
+    assert_eq!(pts[1].bucket, "2026-02");
+}

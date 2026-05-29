@@ -1558,7 +1558,7 @@ impl SyslogService {
         let bucket_str = req.bucket.unwrap_or_else(|| "hour".into());
         let bucket = Bucket::parse(&bucket_str).ok_or_else(|| {
             ServiceError::InvalidInput(format!(
-                "Invalid bucket '{bucket_str}'. Expected: minute, hour, day"
+                "Invalid bucket '{bucket_str}'. Expected: minute, hour, day, week, month"
             ))
         })?;
         let group_by = match req.group_by.as_deref() {

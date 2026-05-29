@@ -500,12 +500,16 @@ async fn timeline(
     State(state): State<ApiState>,
     Query(query): Query<TimelineQuery>,
 ) -> impl IntoResponse {
-    // Default to last 30 days only when no time range is given — prevents full table scan.
+    // Default lookback window varies by bucket — wider buckets need longer windows.
+    // Only apply when no time range is given (prevents full table scans).
     // If `to` is already set, skip the default so we don't create an impossible range.
     let from = query.from.or_else(|| {
         if query.to.is_none() {
+            let days = crate::db::Bucket::parse(query.bucket.as_deref().unwrap_or("hour"))
+                .map(|b| b.default_lookback_days())
+                .unwrap_or(30);
             Utc::now()
-                .checked_sub_signed(chrono::Duration::days(30))
+                .checked_sub_signed(chrono::Duration::days(days))
                 .map(|dt| dt.to_rfc3339())
         } else {
             None
