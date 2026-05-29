@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-05-29
+
+### Added
+
+- `feat(llto)`: week and month bucket sizes for the `timeline` action.
+- `feat(cli)`: Aurora color palette wired into all CLI output, porting the
+  formatter patterns from `axon_rust`.
+
+### Changed
+
+- `chore(dthv)`: `just test` now runs via `cargo nextest` for parallel test
+  execution.
+- `chore(421t)`: split oversized CLI modules below the 500-line limit.
+- `perf(zl9y)`: `timeline` defaults to the last 30 days to prevent a full
+  table scan (skipped when `--to` is already specified).
+- `perf(fvw4)`: per-phase tracing added to `PhaseTimer`.
+- `perf(2rap)`: index on `error_signature_windows(window_end)` to speed up
+  signature window queries.
+- Ignore the local `.superpowers/` working directory.
+
+### Fixed
+
+- `fix(xknb)`: path-traversal confinement, partial-file cleanup, and a backup
+  HTTP timeout.
+- `fix(z4eg)`: `just test-live` token handling — guard the `--token` arg and
+  inject `SYSLOG_API_TOKEN`.
+- `fix(soq2)`: remove the forbidden `version` field from the plugin manifest.
+- `fix(llto)`: document the `Bucket::default_lookback_days` sync constraint in
+  the CLI helper.
+
+### Docs
+
+- CLI performance benchmark report.
+- Cortex v1.0.0 rebrand design and implementation plan.
+
 ## [0.35.0] - 2026-05-27
 
 ### Added
