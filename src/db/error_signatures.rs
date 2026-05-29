@@ -264,6 +264,12 @@ pub(crate) fn read_signature_by_hash(
         .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
         .unwrap_or_default();
 
+    // The `USING (...)` join form is load-bearing for performance (bead q2e8):
+    // it lets SQLite push the outer `s.signature_hash = ?1` equality down into
+    // the materialized aggregate subquery, so only this hash's windows are summed
+    // (PK index seek, sub-ms). Rewriting it to an explicit `ON w.x = s.x` defeats
+    // that pushdown and degrades to a full GROUP BY over error_signature_windows
+    // (~100x slower at scale). Keep the `USING` form.
     let mut stmt = conn.prepare(
         "SELECT
              s.signature_hash,
@@ -276,15 +282,15 @@ pub(crate) fn read_signature_by_hash(
              s.first_seen_at,
              s.last_seen_at,
              s.total_count,
-             COALESCE((
-                 SELECT SUM(w.count_in_window)
-                 FROM error_signature_windows w
-                 WHERE w.signature_hash = s.signature_hash
-                   AND w.normalizer_version = s.normalizer_version
-                   AND w.window_end >= ?3
-             ), 0) AS count_last_1h,
+             COALESCE(w.total_1h, 0) AS count_last_1h,
              s.acknowledged_at
          FROM error_signatures s
+         LEFT JOIN (
+             SELECT signature_hash, normalizer_version, SUM(count_in_window) AS total_1h
+             FROM error_signature_windows
+             WHERE window_end >= ?3
+             GROUP BY signature_hash, normalizer_version
+         ) w USING (signature_hash, normalizer_version)
          WHERE s.signature_hash = ?1 AND s.normalizer_version = ?2
          LIMIT 1",
     )?;

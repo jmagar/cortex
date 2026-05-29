@@ -1,3 +1,12 @@
+# `set dotenv-load` is GLOBAL (bead i5lx): every recipe below runs with the
+# variables from `.env` injected into its environment — including
+# SYSLOG_API_TOKEN, NO_AUTH, and any OAuth secrets. Two consequences to keep in
+# mind:
+#   1. A local `.env` override silently changes what a recipe tests vs. CI.
+#   2. Test recipes that must exercise the no-auth path explicitly strip the
+#      auth vars (`env -u SYSLOG_API_TOKEN -u NO_AUTH ...`); any new test or
+#      release recipe that runs the suite MUST do the same, or it will test a
+#      different environment than `just test`.
 set dotenv-load
 
 dev:
@@ -178,8 +187,13 @@ publish bump="patch":
     scripts/bump-version.sh "{{bump}}"
     NEW=$(grep -m1 "^version" Cargo.toml | sed "s/.*\"\(.*\)\".*/\1/")
     scripts/check-version-sync.sh --require-changelog
-    cargo test
-    cargo clippy -- -D warnings
+    # Reuse the canonical gates (bead ok8c) so the release gate can't drift from
+    # them: `test` strips the auth vars `set dotenv-load` injects and runs
+    # nextest, `test-doc` covers doc tests (nextest skips those), `lint` is
+    # clippy -D warnings.
+    just test
+    just test-doc
+    just lint
     git add -A
     git commit -m "release: v${NEW}"
     git tag "v${NEW}"

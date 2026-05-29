@@ -156,6 +156,22 @@ pub(crate) async fn run_db_backup(mode: &CliMode, args: DbBackupArgs) -> Result<
             // Note: `output_path` is a **server-side** path (e.g.
             // `/data/backup.db` inside the container, visible on the host via
             // the Docker bind-mount). Pass `None` to let the server choose.
+            //
+            // Warn the operator (bead xknb.5): in HTTP mode `--output` is
+            // resolved by the *server* process, not the local shell. A path
+            // like `/tmp/backup.db` lands inside the container, not on the host.
+            if let Some(path) = args.output.as_deref() {
+                // Sanitize before writing to the terminal (same hardening as the
+                // xknb.4 audit log): `--output` is operator-supplied and may carry
+                // CR/LF/ESC; strip them so a crafted path can't inject newlines or
+                // ANSI escapes into stderr.
+                let path = path.replace(['\n', '\r', '\x1b'], "?");
+                eprintln!(
+                    "warning: --output '{path}' is a SERVER-SIDE path resolved inside \
+                     the server process (e.g. the container), not your local shell. \
+                     For a host-visible file use a path under the server's /data mount."
+                );
+            }
             let req = DbBackupRequest {
                 output_path: args.output.clone(),
             };
