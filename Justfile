@@ -20,7 +20,11 @@ fmt:
     cargo fmt
 
 test:
-    cargo test
+    env -u SYSLOG_API_TOKEN -u NO_AUTH cargo nextest run
+
+# Doc tests (nextest does not run these; no executable doc tests currently exist)
+test-doc:
+    cargo test --doc
 
 docker-build:
     docker build -t syslog-mcp .
