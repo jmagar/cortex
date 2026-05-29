@@ -517,11 +517,13 @@ fn truncate_chars(value: &str, max: usize) -> String {
 // timeline: bucketed counts
 // -----------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bucket {
     Minute,
     Hour,
     Day,
+    Week,
+    Month,
 }
 
 impl Bucket {
@@ -530,15 +532,31 @@ impl Bucket {
             "minute" | "min" | "m" => Some(Self::Minute),
             "hour" | "h" => Some(Self::Hour),
             "day" | "d" => Some(Self::Day),
+            "week" | "w" => Some(Self::Week),
+            "month" => Some(Self::Month),
             _ => None,
         }
     }
 
-    fn strftime_format(self) -> &'static str {
+    pub fn strftime_format(self) -> &'static str {
         match self {
             Self::Minute => "%Y-%m-%dT%H:%M:00Z",
             Self::Hour => "%Y-%m-%dT%H:00:00Z",
             Self::Day => "%Y-%m-%dT00:00:00Z",
+            Self::Week => "%Y-W%W",
+            Self::Month => "%Y-%m",
+        }
+    }
+
+    /// Default lookback window (days) when no explicit `from`/`to` is provided.
+    /// Wider buckets scan wider time ranges, so larger defaults are appropriate.
+    pub fn default_lookback_days(self) -> i64 {
+        match self {
+            Self::Minute => 1,
+            Self::Hour => 7,
+            Self::Day => 30,
+            Self::Week => 180,
+            Self::Month => 730,
         }
     }
 }

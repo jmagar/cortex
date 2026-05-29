@@ -1,3 +1,5 @@
+set dotenv-load
+
 dev:
     cargo run -- serve mcp
 
@@ -18,7 +20,11 @@ fmt:
     cargo fmt
 
 test:
-    cargo test
+    env -u SYSLOG_API_TOKEN -u NO_AUTH cargo nextest run
+
+# Doc tests (nextest does not run these; no executable doc tests currently exist)
+test-doc:
+    cargo test --doc
 
 docker-build:
     docker build -t syslog-mcp .
@@ -39,7 +45,18 @@ health:
     curl -sf http://localhost:3100/health | jq .
 
 test-live:
-    bash tests/test_live.sh
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Load the deployed env file so tokens are current
+    deployed_env="${HOME}/.syslog-mcp/.env"
+    if [[ -f "${deployed_env}" ]]; then
+        set -a; source "${deployed_env}"; set +a
+    fi
+    # SYSLOG_USE_HTTP must be unset so the local seed (ai add) uses SQLite directly
+    SYSLOG_SMOKE_DB_PATH="${HOME}/.syslog-mcp/data/syslog.db" \
+        env -u SYSLOG_USE_HTTP \
+        bash tests/test_live.sh --mode http --url http://localhost:3100 \
+            ${SYSLOG_MCP_TOKEN:+--token "${SYSLOG_MCP_TOKEN}"}
 
 setup:
     cp -n .env.example .env || true

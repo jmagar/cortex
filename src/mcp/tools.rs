@@ -442,12 +442,28 @@ async fn tool_compose_doctor(args: Value) -> anyhow::Result<Value> {
 }
 
 async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    // Default lookback window varies by bucket — wider buckets need longer windows.
+    // Only apply when no time range is given (prevents full table scans).
+    // If `to` is already set, skip the default so we don't create an impossible range.
+    let from = string_arg(&args, "from").or_else(|| {
+        if string_arg(&args, "to").is_none() {
+            let days =
+                crate::db::Bucket::parse(string_arg(&args, "bucket").as_deref().unwrap_or("hour"))
+                    .map(|b| b.default_lookback_days())
+                    .unwrap_or(30);
+            chrono::Utc::now()
+                .checked_sub_signed(chrono::Duration::days(days))
+                .map(|dt| dt.to_rfc3339())
+        } else {
+            None
+        }
+    });
     let response = state
         .service
         .timeline(TimelineRequest {
             bucket: string_arg(&args, "bucket"),
             group_by: string_arg(&args, "group_by"),
-            from: string_arg(&args, "from"),
+            from,
             to: string_arg(&args, "to"),
             hostname: string_arg(&args, "hostname"),
             app_name: string_arg(&args, "app_name"),
@@ -1122,7 +1138,7 @@ Bucketed log counts over a time range. Use to answer "when did errors start"
 or "is the incident still active". Each point reports `{bucket, group?, count}`.
 
 **Parameters:**
-- `bucket` (string, optional) — `minute`, `hour` (default), or `day`
+- `bucket` (string, optional) — `minute`, `hour` (default), `day`, `week`, or `month`
 - `group_by` (string, optional) — split each bucket by `hostname`, `severity`, or `app_name`
 - `from` (string, optional) — start of time range (ISO 8601)
 - `to` (string, optional) — end of time range (ISO 8601)

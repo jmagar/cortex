@@ -213,15 +213,15 @@ pub(crate) fn read_unaddressed(
              s.first_seen_at,
              s.last_seen_at,
              s.total_count,
-             COALESCE((
-                 SELECT SUM(w.count_in_window)
-                 FROM error_signature_windows w
-                 WHERE w.signature_hash = s.signature_hash
-                   AND w.normalizer_version = s.normalizer_version
-                   AND w.window_end >= ?1
-             ), 0) AS count_last_1h,
+             COALESCE(w.total_1h, 0) AS count_last_1h,
              s.acknowledged_at
          FROM error_signatures s
+         LEFT JOIN (
+             SELECT signature_hash, normalizer_version, SUM(count_in_window) AS total_1h
+             FROM error_signature_windows
+             WHERE window_end >= ?1
+             GROUP BY signature_hash, normalizer_version
+         ) w USING (signature_hash, normalizer_version)
          WHERE 1=1 {filter_clause}
          ORDER BY s.last_seen_at DESC
          LIMIT ?2"

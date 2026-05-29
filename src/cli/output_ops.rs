@@ -5,8 +5,10 @@ use syslog_mcp::app::{
 };
 use syslog_mcp::compose::{CommandOutput, ComposeCommandResult, ComposeStatus};
 
+use super::color::{cyan, error, muted, primary, success, warn};
 use super::output_common::print_json;
 use super::setup::{SetupPhase, SetupStatus};
+
 #[derive(Debug, Clone, Serialize)]
 struct DbStatusReport<'a> {
     #[serde(flatten)]
@@ -27,40 +29,86 @@ pub(crate) fn print_db_status_response(
         };
         return print_json(&report);
     }
-    println!("db_path: {}", status.db_path.display());
-    println!("page_count: {}", status.page_count);
-    println!("freelist_count: {}", status.freelist_count);
-    println!("page_size: {}", status.page_size);
-    println!("logical_size_bytes: {}", status.logical_size_bytes);
-    println!("physical_size_bytes: {}", status.physical_size_bytes);
     println!(
-        "wal_size_bytes: {}",
-        status
-            .wal_size_bytes
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "-".to_string())
+        "{}: {}",
+        muted("db_path"),
+        primary(&status.db_path.display().to_string())
     );
     println!(
-        "shm_size_bytes: {}",
-        status
-            .shm_size_bytes
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "-".to_string())
+        "{}: {}",
+        muted("page_count"),
+        cyan(&status.page_count.to_string())
     );
-    println!("auto_vacuum: {}", status.auto_vacuum);
-    println!("journal_mode: {}", status.journal_mode);
     println!(
-        "integrity_ok: {}",
-        status
-            .integrity_ok
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "not checked".to_string())
+        "{}: {}",
+        muted("freelist_count"),
+        cyan(&status.freelist_count.to_string())
     );
+    println!(
+        "{}: {}",
+        muted("page_size"),
+        cyan(&status.page_size.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("logical_size_bytes"),
+        cyan(&status.logical_size_bytes.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("physical_size_bytes"),
+        cyan(&status.physical_size_bytes.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("wal_size_bytes"),
+        cyan(
+            &status
+                .wal_size_bytes
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        )
+    );
+    println!(
+        "{}: {}",
+        muted("shm_size_bytes"),
+        cyan(
+            &status
+                .shm_size_bytes
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        )
+    );
+    println!(
+        "{}: {}",
+        muted("auto_vacuum"),
+        cyan(&status.auto_vacuum.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("journal_mode"),
+        primary(&status.journal_mode)
+    );
+    let integrity_str = status
+        .integrity_ok
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "not checked".to_string());
+    let integrity_colored = match status.integrity_ok {
+        Some(true) => success(&integrity_str),
+        Some(false) => error(&integrity_str),
+        None => muted(&integrity_str),
+    };
+    println!("{}: {}", muted("integrity_ok"), integrity_colored);
     if let Some(phases) = coordination {
         println!();
-        println!("coordination:");
+        println!("{}:", muted("coordination"));
         for phase in phases {
-            println!("  {:?} {} — {}", phase.status, phase.name, phase.detail);
+            println!(
+                "  {} {} — {}",
+                phase_status_colored(&phase.status),
+                primary(phase.name),
+                muted(&phase.detail)
+            );
         }
     }
     Ok(())
@@ -70,7 +118,13 @@ pub(crate) fn print_db_integrity_response(response: &DbIntegrityResult, json: bo
     if json {
         return print_json(response);
     }
-    println!("ok: {}", response.ok);
+    let ok_str = response.ok.to_string();
+    let ok_colored = if response.ok {
+        success(&ok_str)
+    } else {
+        error(&ok_str)
+    };
+    println!("{}: {}", muted("ok"), ok_colored);
     for message in &response.messages {
         println!("{message}");
     }
@@ -84,10 +138,18 @@ pub(crate) fn print_db_checkpoint_response(
     if json {
         return print_json(response);
     }
-    println!("mode: {}", response.mode);
-    println!("busy: {}", response.busy);
-    println!("log_frames: {}", response.log_frames);
-    println!("checkpointed_frames: {}", response.checkpointed_frames);
+    println!("{}: {}", muted("mode"), primary(&response.mode));
+    println!("{}: {}", muted("busy"), primary(&response.busy.to_string()));
+    println!(
+        "{}: {}",
+        muted("log_frames"),
+        cyan(&response.log_frames.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("checkpointed_frames"),
+        cyan(&response.checkpointed_frames.to_string())
+    );
     Ok(())
 }
 
@@ -95,15 +157,21 @@ pub(crate) fn print_db_vacuum_response(response: &DbVacuumResult, json: bool) ->
     if json {
         return print_json(response);
     }
-    println!("full: {}", response.full);
-    println!("incremental_pages: {}", response.incremental_pages);
+    println!("{}: {}", muted("full"), primary(&response.full.to_string()));
     println!(
-        "before_physical_size_bytes: {}",
-        response.before_physical_size_bytes
+        "{}: {}",
+        muted("incremental_pages"),
+        cyan(&response.incremental_pages.to_string())
     );
     println!(
-        "after_physical_size_bytes: {}",
-        response.after_physical_size_bytes
+        "{}: {}",
+        muted("before_physical_size_bytes"),
+        cyan(&response.before_physical_size_bytes.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("after_physical_size_bytes"),
+        cyan(&response.after_physical_size_bytes.to_string())
     );
     Ok(())
 }
@@ -112,9 +180,21 @@ pub(crate) fn print_db_backup_response(response: &DbBackupResult, json: bool) ->
     if json {
         return print_json(response);
     }
-    println!("db_path: {}", response.db_path.display());
-    println!("backup_path: {}", response.backup_path.display());
-    println!("size_bytes: {}", response.size_bytes);
+    println!(
+        "{}: {}",
+        muted("db_path"),
+        primary(&response.db_path.display().to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("backup_path"),
+        primary(&response.backup_path.display().to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("size_bytes"),
+        cyan(&response.size_bytes.to_string())
+    );
     Ok(())
 }
 
@@ -122,21 +202,29 @@ pub(crate) fn print_compose_status_response(status: &ComposeStatus, json: bool) 
     if json {
         return print_json(status);
     }
-    println!("Container: {}", status.container_name);
+    println!(
+        "{}: {}",
+        muted("Container"),
+        primary(&status.container_name)
+    );
     if let Some(value) = &status.status {
-        println!("Status: {value}");
+        println!("{}: {}", muted("Status"), primary(value));
     }
     if let Some(value) = &status.health {
-        println!("Docker health: {value}");
+        println!("{}: {}", muted("Docker health"), primary(value));
     }
     if let Some(value) = &status.image {
-        println!("Image: {value}");
+        println!("{}: {}", muted("Image"), primary(value));
     }
     if let Some(value) = &status.compose_project {
-        println!("Compose project: {value}");
+        println!("{}: {}", muted("Compose project"), primary(value));
     }
     if let Some(value) = &status.compose_working_dir {
-        println!("Compose working dir: {}", value.display());
+        println!(
+            "{}: {}",
+            muted("Compose working dir"),
+            primary(&value.display().to_string())
+        );
     }
     for diag in &status.diagnostics {
         println!("{:?}: {} - {}", diag.severity, diag.code, diag.message);
@@ -145,7 +233,6 @@ pub(crate) fn print_compose_status_response(status: &ComposeStatus, json: bool) 
 }
 
 #[derive(Debug, Clone, Serialize)]
-
 struct ComposeDoctorReport<'a> {
     #[serde(flatten)]
     status: &'a ComposeStatus,
@@ -166,9 +253,14 @@ pub(crate) fn print_compose_doctor_response(
     }
     print_compose_status_response(status, false)?;
     println!();
-    println!("coordination:");
+    println!("{}:", muted("coordination"));
     for phase in coordination {
-        println!("  {:?} {} — {}", phase.status, phase.name, phase.detail);
+        println!(
+            "  {} {} — {}",
+            phase_status_colored(&phase.status),
+            primary(phase.name),
+            muted(&phase.detail)
+        );
     }
     Ok(())
 }
@@ -206,7 +298,7 @@ pub(crate) fn print_compose_command_response(
             if json {
                 print_json(dry_run)?;
             } else {
-                println!("Dry run passed: {}", dry_run.command.join(" "));
+                println!("Dry run passed: {}", primary(&dry_run.command.join(" ")));
             }
             Ok(())
         }
@@ -223,6 +315,15 @@ pub(crate) fn ensure_command_success(output: &CommandOutput) -> Result<()> {
         output.timed_out,
         output.stderr
     )
+}
+
+fn phase_status_colored(status: &SetupStatus) -> String {
+    match status {
+        SetupStatus::Ok => success("ok"),
+        SetupStatus::Warn => warn("warn"),
+        SetupStatus::Error => error("error"),
+        SetupStatus::Skipped => muted("skipped"),
+    }
 }
 
 #[cfg(test)]

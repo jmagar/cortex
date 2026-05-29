@@ -9,7 +9,7 @@ use crate::config::StorageConfig;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 19;
+pub const KNOWN_SCHEMA_VERSION: i64 = 20;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -639,6 +639,18 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     if !migration_applied(&conn, 19)? {
         apply_migration_19_heartbeat_latest(&conn)?;
         tracing::info!("Migration 19: created host_heartbeats_latest fleet cache table");
+    }
+
+    // Migration 20: composite index on error_signature_windows(window_end, ...) for sig list queries.
+    // The `sig list` action filters unaddressed signatures by recency, ordering on window_end DESC.
+    // Without this index, every query does a full scan of error_signature_windows.
+    if !migration_applied(&conn, 20)? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_error_sig_windows_end
+                 ON error_signature_windows(window_end, signature_hash, normalizer_version);
+             INSERT INTO schema_migrations (version) VALUES (20);",
+        )?;
+        tracing::info!("Migration 20: added index on error_signature_windows(window_end)");
     }
 
     conn.execute_batch(

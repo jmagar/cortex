@@ -66,18 +66,19 @@ use syslog_mcp::app::{
     AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiParseErrorsRequest,
     AiPruneCheckpointsRequest, AnomaliesRequest, AnomaliesResponse, AskHistoryRequest,
     AskHistoryResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse,
-    CorrelateEventsRequest, CorrelateEventsResponse, DbCheckpointRequest, DbCheckpointResult,
-    DbIntegrityRequest, DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest,
-    DbVacuumResult, FilterLogsRequest, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
-    GetLogResponse, IncidentContextRequest, IncidentContextResponse, IngestRateRequest,
-    IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
-    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, PatternsRequest,
-    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
-    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
-    SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest,
-    TimelineRequest, TimelineResponse, UnackErrorRequest, UnackErrorResponse,
-    UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
+    CorrelateEventsRequest, CorrelateEventsResponse, DbBackupRequest, DbBackupResult,
+    DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest, DbIntegrityResult,
+    DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult, FilterLogsRequest,
+    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, IncidentContextRequest,
+    IncidentContextResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
+    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
+    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSourceIpsRequest, ListSourceIpsResponse, PatternsRequest, PatternsResponse,
+    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
+    SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
+    SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
+    TimelineResponse, UnackErrorRequest, UnackErrorResponse, UnaddressedErrorsRequest,
+    UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use syslog_mcp::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
 
@@ -526,6 +527,10 @@ impl HttpClient {
 
     pub async fn db_vacuum(&self, req: &DbVacuumRequest) -> Result<DbVacuumResult> {
         self.post_json("/api/db/vacuum", req).await
+    }
+
+    pub async fn db_backup(&self, req: &DbBackupRequest) -> Result<DbBackupResult> {
+        self.post_json("/api/db/backup", req).await
     }
 
     // ─── REST surface: surface parity ───────────────────────────────────────

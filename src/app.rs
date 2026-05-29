@@ -52,6 +52,7 @@ pub use models::{
     CorrelateEventsResponse,
     CorrelatedHost,
     CorrelatedSession,
+    DbBackupRequest,
     DbBackupResult,
     DbCheckpointRequest,
     DbCheckpointResult,

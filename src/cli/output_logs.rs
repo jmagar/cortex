@@ -5,12 +5,14 @@ use syslog_mcp::app::{
     SearchLogsResponse, SearchSessionsResponse, UsageBlocksResponse,
 };
 
+use super::color::{cyan, muted, primary, severity, violet};
 use super::output_common::{local_ts, print_json, print_log, truncate};
+
 pub(crate) fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);
     }
-    println!("{} log(s)", response.count);
+    println!("{} log(s)", cyan(&response.count.to_string()));
     for log in &response.logs {
         print_log(log);
     }
@@ -21,9 +23,14 @@ pub(crate) fn print_errors_response(response: &GetErrorsResponse, json: bool) ->
     if json {
         return print_json(response);
     }
-    println!("HOST                 SEVERITY COUNT");
+    println!("{}", muted("HOST                 SEVERITY COUNT"));
     for row in &response.summary {
-        println!("{:<20} {:<8} {}", row.hostname, row.severity, row.count);
+        println!(
+            "{:<20} {:<8} {}",
+            cyan(&row.hostname),
+            severity(&row.severity),
+            cyan(&row.count.to_string())
+        );
     }
     Ok(())
 }
@@ -32,13 +39,13 @@ pub(crate) fn print_hosts_response(response: &ListHostsResponse, json: bool) -> 
     if json {
         return print_json(response);
     }
-    println!("HOST                 COUNT LAST SEEN");
+    println!("{}", muted("HOST                 COUNT LAST SEEN"));
     for host in &response.hosts {
         println!(
             "{:<20} {:<5} {}",
-            host.hostname,
-            host.log_count,
-            local_ts(&host.last_seen)
+            cyan(&host.hostname),
+            cyan(&host.log_count.to_string()),
+            muted(&local_ts(&host.last_seen))
         );
     }
     Ok(())
@@ -51,19 +58,22 @@ pub(crate) fn print_sessions_response(
     if json {
         return print_json(response);
     }
-    println!("{} session(s)", response.count);
+    println!("{} session(s)", cyan(&response.count.to_string()));
     println!(
-        "{:<40} {:<10} {:<36} {:<15} COUNT",
-        "PROJECT", "TOOL", "SESSION ID", "HOST"
+        "{}",
+        muted(&format!(
+            "{:<40} {:<10} {:<36} {:<15} COUNT",
+            "PROJECT", "TOOL", "SESSION ID", "HOST"
+        ))
     );
     for s in &response.sessions {
         println!(
             "{:<40} {:<10} {:<36} {:<15} {}",
-            truncate(&s.project, 39),
-            s.tool,
-            s.session_id,
-            s.hostname,
-            s.event_count
+            primary(&truncate(&s.project, 39)),
+            violet(&s.tool),
+            muted(&s.session_id),
+            cyan(&s.hostname),
+            cyan(&s.event_count.to_string())
         );
     }
     Ok(())
@@ -78,8 +88,8 @@ pub(crate) fn print_search_sessions_response(
     }
     println!(
         "{} grouped session(s) from {} newest matching row(s){}",
-        response.sessions.len(),
-        response.candidate_rows,
+        cyan(&response.sessions.len().to_string()),
+        cyan(&response.candidate_rows.to_string()),
         if response.truncated {
             " (truncated)"
         } else {
@@ -89,21 +99,24 @@ pub(crate) fn print_search_sessions_response(
     if response.candidate_window_truncated {
         println!(
             "search window capped at {} matching rows; use --project, --tool, --from, or --to to narrow exact grouping",
-            response.candidate_cap
+            cyan(&response.candidate_cap.to_string())
         );
     }
     println!(
-        "{:<10} {:<30} {:<20} {:<6} MATCH",
-        "TOOL", "PROJECT", "SESSION ID", "EVENTS"
+        "{}",
+        muted(&format!(
+            "{:<10} {:<30} {:<20} {:<6} MATCH",
+            "TOOL", "PROJECT", "SESSION ID", "EVENTS"
+        ))
     );
     for session in &response.sessions {
         println!(
             "{:<10} {:<30} {:<20} {:<6} {}",
-            session.tool,
-            truncate(&session.project, 29),
-            truncate(&session.session_id, 19),
-            session.event_count,
-            session.match_count
+            violet(&session.tool),
+            primary(&truncate(&session.project, 29)),
+            muted(&truncate(&session.session_id, 19)),
+            cyan(&session.event_count.to_string()),
+            cyan(&session.match_count.to_string())
         );
     }
     Ok(())
@@ -118,8 +131,8 @@ pub(crate) fn print_abuse_search_response(
     }
     println!(
         "{} abuse match(es) from {} candidate row(s){}",
-        response.matches.len(),
-        response.candidate_rows,
+        cyan(&response.matches.len().to_string()),
+        cyan(&response.candidate_rows.to_string()),
         if response.truncated {
             " (truncated)"
         } else {
@@ -129,26 +142,30 @@ pub(crate) fn print_abuse_search_response(
     if response.candidate_window_truncated {
         println!(
             "abuse scan capped at {} candidate rows; use --project, --tool, --from, or --to to narrow it",
-            response.candidate_cap
+            cyan(&response.candidate_cap.to_string())
         );
     }
-    println!("terms: {}", response.terms.join(", "));
+    println!(
+        "{}: {}",
+        muted("terms"),
+        primary(&response.terms.join(", "))
+    );
     for item in &response.matches {
         println!();
         println!(
             "match term={} id={} {}",
-            item.term,
-            item.entry.id,
-            local_ts(&item.entry.timestamp)
+            primary(&item.term),
+            cyan(&item.entry.id.to_string()),
+            muted(&local_ts(&item.entry.timestamp))
         );
         for before in &item.before {
-            println!("  before:");
+            println!("  {}:", muted("before"));
             print_log(before);
         }
-        println!("  hit:");
+        println!("  {}:", muted("hit"));
         print_log(&item.entry);
         for after in &item.after {
-            println!("  after:");
+            println!("  {}:", muted("after"));
             print_log(after);
         }
     }
@@ -164,10 +181,10 @@ pub(crate) fn print_ai_correlate_response(
     }
     println!(
         "{} AI anchor(s), {} related non-AI event(s), +/-{}m, severity >= {}{}",
-        response.total_anchors,
-        response.total_related_events,
-        response.window_minutes,
-        response.severity_min,
+        cyan(&response.total_anchors.to_string()),
+        cyan(&response.total_related_events.to_string()),
+        cyan(&response.window_minutes.to_string()),
+        primary(&response.severity_min),
         if response.anchors_truncated {
             " (anchors truncated)"
         } else {
@@ -178,10 +195,10 @@ pub(crate) fn print_ai_correlate_response(
         println!();
         println!(
             "AI anchor id={} {} window={}..{}{}",
-            anchor.entry.id,
-            local_ts(&anchor.entry.timestamp),
-            local_ts(&anchor.window_from),
-            local_ts(&anchor.window_to),
+            cyan(&anchor.entry.id.to_string()),
+            muted(&local_ts(&anchor.entry.timestamp)),
+            muted(&local_ts(&anchor.window_from)),
+            muted(&local_ts(&anchor.window_to)),
             if anchor.related_truncated {
                 " (related truncated)"
             } else {
@@ -205,8 +222,8 @@ pub(crate) fn print_usage_blocks_response(
     }
     println!(
         "{} usage block(s) shown of {}{}",
-        response.blocks.len(),
-        response.total_blocks,
+        cyan(&response.blocks.len().to_string()),
+        cyan(&response.total_blocks.to_string()),
         if response.truncated {
             " (truncated)"
         } else {
@@ -216,12 +233,12 @@ pub(crate) fn print_usage_blocks_response(
     for block in &response.blocks {
         println!(
             "{} {} {} {} events={} sessions={}",
-            block.bucket_start,
-            block.bucket_end,
-            block.tool,
-            truncate(&block.project, 30),
-            block.event_count,
-            block.session_count
+            muted(&block.bucket_start),
+            muted(&block.bucket_end),
+            violet(&block.tool),
+            primary(&truncate(&block.project, 30)),
+            cyan(&block.event_count.to_string()),
+            cyan(&block.session_count.to_string())
         );
     }
     Ok(())
@@ -234,14 +251,27 @@ pub(crate) fn print_project_context_response(
     if json {
         return print_json(response);
     }
-    println!("project: {}", response.project);
-    println!("event_count: {}", response.event_count);
-    println!("tools: {}", response.tools.join(", "));
-    println!("sessions: {}", response.sessions.len());
-    println!("hosts: {}", response.hostnames.join(", "));
+    println!("{}: {}", muted("project"), primary(&response.project));
     println!(
-        "recent_entries: {}{}",
-        response.recent_entries.len(),
+        "{}: {}",
+        muted("event_count"),
+        cyan(&response.event_count.to_string())
+    );
+    println!("{}: {}", muted("tools"), violet(&response.tools.join(", ")));
+    println!(
+        "{}: {}",
+        muted("sessions"),
+        cyan(&response.sessions.len().to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("hosts"),
+        cyan(&response.hostnames.join(", "))
+    );
+    println!(
+        "{}: {}{}",
+        muted("recent_entries"),
+        cyan(&response.recent_entries.len().to_string()),
         if response.recent_entries_truncated {
             " (truncated)"
         } else {
@@ -260,22 +290,22 @@ pub(crate) fn print_ai_tools_response(response: &ListAiToolsResponse, json: bool
     }
     println!(
         "{} tool(s) shown of {}{}",
-        response.tools.len(),
-        response.total_tools,
+        cyan(&response.tools.len().to_string()),
+        cyan(&response.total_tools.to_string()),
         if response.truncated {
             " (truncated)"
         } else {
             ""
         }
     );
-    println!("TOOL       EVENTS SESSIONS LAST SEEN");
+    println!("{}", muted("TOOL       EVENTS SESSIONS LAST SEEN"));
     for tool in &response.tools {
         println!(
             "{:<10} {:<6} {:<8} {}",
-            tool.tool,
-            tool.event_count,
-            tool.session_count,
-            local_ts(&tool.last_seen)
+            violet(&tool.tool),
+            cyan(&tool.event_count.to_string()),
+            cyan(&tool.session_count.to_string()),
+            muted(&local_ts(&tool.last_seen))
         );
     }
     Ok(())
@@ -290,22 +320,25 @@ pub(crate) fn print_ai_projects_response(
     }
     println!(
         "{} project(s) shown of {}{}",
-        response.projects.len(),
-        response.total_projects,
+        cyan(&response.projects.len().to_string()),
+        cyan(&response.total_projects.to_string()),
         if response.truncated {
             " (truncated)"
         } else {
             ""
         }
     );
-    println!("PROJECT                          EVENTS SESSIONS TOOLS");
+    println!(
+        "{}",
+        muted("PROJECT                          EVENTS SESSIONS TOOLS")
+    );
     for project in &response.projects {
         println!(
             "{:<32} {:<6} {:<8} {}",
-            truncate(&project.project, 32),
-            project.event_count,
-            project.session_count,
-            project.tools.join(",")
+            primary(&truncate(&project.project, 32)),
+            cyan(&project.event_count.to_string()),
+            cyan(&project.session_count.to_string()),
+            violet(&project.tools.join(","))
         );
     }
     Ok(())
@@ -320,11 +353,11 @@ pub(crate) fn print_correlate_response(
     }
     println!(
         "{} event(s) across {} host(s), window {} to {}, severity >= {}{}",
-        response.total_events,
-        response.hosts_count,
-        response.window_from,
-        response.window_to,
-        response.severity_min,
+        cyan(&response.total_events.to_string()),
+        cyan(&response.hosts_count.to_string()),
+        muted(&response.window_from),
+        muted(&response.window_to),
+        primary(&response.severity_min),
         if response.truncated {
             " (truncated)"
         } else {
@@ -333,7 +366,11 @@ pub(crate) fn print_correlate_response(
     );
     for host in &response.hosts {
         println!();
-        println!("{} ({} event(s))", host.hostname, host.event_count);
+        println!(
+            "{} ({} event(s))",
+            cyan(&host.hostname),
+            cyan(&host.event_count.to_string())
+        );
         for log in &host.events {
             print_log(log);
         }
@@ -345,20 +382,61 @@ pub(crate) fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
     if json {
         return print_json(stats);
     }
-    println!("total_logs: {}", stats.total_logs);
-    println!("total_hosts: {}", stats.total_hosts);
-    println!("oldest_log: {}", stats.oldest_log.as_deref().unwrap_or("-"));
-    println!("newest_log: {}", stats.newest_log.as_deref().unwrap_or("-"));
-    println!("logical_db_size_mb: {}", stats.logical_db_size_mb);
-    println!("physical_db_size_mb: {}", stats.physical_db_size_mb);
     println!(
-        "free_disk_mb: {}",
-        stats.free_disk_mb.as_deref().unwrap_or("-")
+        "{}: {}",
+        muted("total_logs"),
+        cyan(&stats.total_logs.to_string())
     );
-    println!("max_db_size_mb: {}", stats.max_db_size_mb);
-    println!("min_free_disk_mb: {}", stats.min_free_disk_mb);
-    println!("write_blocked: {}", stats.write_blocked);
-    println!("phantom_fts_rows: {}", stats.phantom_fts_rows);
+    println!(
+        "{}: {}",
+        muted("total_hosts"),
+        cyan(&stats.total_hosts.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("oldest_log"),
+        primary(stats.oldest_log.as_deref().unwrap_or("-"))
+    );
+    println!(
+        "{}: {}",
+        muted("newest_log"),
+        primary(stats.newest_log.as_deref().unwrap_or("-"))
+    );
+    println!(
+        "{}: {}",
+        muted("logical_db_size_mb"),
+        cyan(&stats.logical_db_size_mb.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("physical_db_size_mb"),
+        cyan(&stats.physical_db_size_mb.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("free_disk_mb"),
+        primary(stats.free_disk_mb.as_deref().unwrap_or("-"))
+    );
+    println!(
+        "{}: {}",
+        muted("max_db_size_mb"),
+        cyan(&stats.max_db_size_mb.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("min_free_disk_mb"),
+        cyan(&stats.min_free_disk_mb.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("write_blocked"),
+        primary(&stats.write_blocked.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("phantom_fts_rows"),
+        cyan(&stats.phantom_fts_rows.to_string())
+    );
     Ok(())
 }
 

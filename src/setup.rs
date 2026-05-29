@@ -258,12 +258,21 @@ impl PhaseTimer {
         issue_kind: Option<SetupIssueKind>,
         detail: impl Into<String>,
     ) -> SetupPhase {
+        let elapsed_ms = self.start.elapsed().as_millis();
+        let detail = detail.into();
+        tracing::debug!(
+            phase = self.name,
+            elapsed_ms,
+            status = ?status,
+            detail = %detail,
+            "setup phase complete"
+        );
         SetupPhase {
             name: self.name,
             status,
             issue_kind,
-            detail: detail.into(),
-            elapsed_ms: self.start.elapsed().as_millis(),
+            detail,
+            elapsed_ms,
         }
     }
 }

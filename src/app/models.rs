@@ -141,6 +141,18 @@ pub struct DbIntegrityResult {
     pub messages: Vec<String>,
 }
 
+/// Request body for `POST /api/db/backup`.
+///
+/// `output_path` is **server-side** — it must be a path the server process can
+/// write to (e.g. `/data/backup-20240101.db` via the Docker bind-mount). When
+/// absent the server picks `<db_dir>/backups/syslog-<timestamp>.db`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbBackupRequest {
+    /// Optional server-side destination path (file or directory).
+    pub output_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbBackupResult {
     pub db_path: PathBuf,

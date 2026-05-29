@@ -32,16 +32,20 @@ pub(crate) use run::ENV_USE_HTTP;
 pub(crate) use run::{run, CliMode, GlobalFlags};
 
 mod ai_watch;
+mod color;
 mod config_cmd;
 mod config_toml;
 mod coordination;
 mod dispatch_command_log;
+mod format;
 mod heartbeat_agent;
+mod hyperlinks;
 mod output_ai;
 mod output_ai_more;
 mod output_common;
 mod output_logs;
 mod output_ops;
+mod panel;
 mod parse;
 mod parse_admin;
 mod parse_ai;
@@ -51,6 +55,8 @@ mod parse_common;
 mod parse_config;
 mod parse_logs;
 mod setup;
+mod sparkline;
+mod table;
 
 pub(crate) use config_cmd::run_config;
 pub(crate) use heartbeat_agent::run_heartbeat_no_db;
@@ -155,6 +161,7 @@ mod dispatch;
 mod dispatch_ai;
 mod dispatch_db;
 mod dispatch_surface;
+mod dispatch_surface_gap;
 #[allow(dead_code)]
 mod http_client;
 
