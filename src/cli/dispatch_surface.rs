@@ -28,11 +28,16 @@ impl SourceIpsArgs {
 
 impl TimelineArgs {
     pub(crate) fn into_request(self) -> TimelineRequest {
-        // Default to last 30 days if no time range given — prevents full table scan
+        // Default to last 30 days only when no time range is given — prevents full table scan.
+        // If `to` is already set, skip the default so we don't create an impossible range.
         let from = self.from.or_else(|| {
-            Utc::now()
-                .checked_sub_signed(chrono::Duration::days(30))
-                .map(|dt| dt.to_rfc3339())
+            if self.to.is_none() {
+                Utc::now()
+                    .checked_sub_signed(chrono::Duration::days(30))
+                    .map(|dt| dt.to_rfc3339())
+            } else {
+                None
+            }
         });
         TimelineRequest {
             bucket: self.bucket,

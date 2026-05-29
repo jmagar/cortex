@@ -23,6 +23,13 @@ use super::{CliMode, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusAr
 /// actionable message.
 pub(crate) const INTEGRITY_HTTP_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// HTTP-side timeout for `db backup`. A full online backup of a 31 GB+ DB
+/// can take several minutes due to the 50 ms inter-step sleep cadence used
+/// to let WAL writers proceed between steps. 600s (10 min) gives ample
+/// headroom for large databases while still giving an actionable error for
+/// hung or unreachable servers.
+pub(crate) const BACKUP_HTTP_TIMEOUT: Duration = Duration::from_secs(600);
+
 // ─── DB Arg → Request conversions (bead 0p8r.9) ─────────────────────────────
 //
 // DbIntegrityArgs / DbCheckpointArgs were identity maps to their *Request
@@ -152,7 +159,25 @@ pub(crate) async fn run_db_backup(mode: &CliMode, args: DbBackupArgs) -> Result<
             let req = DbBackupRequest {
                 output_path: args.output.clone(),
             };
-            let response = http_or_cancel(client.db_backup(&req)).await?;
+            let response = match tokio::time::timeout(
+                BACKUP_HTTP_TIMEOUT,
+                http_or_cancel(client.db_backup(&req)),
+            )
+            .await
+            {
+                Ok(result) => result?,
+                Err(_elapsed) => {
+                    bail!(
+                            "Backup timed out after {}s (DB may be very large).\n\
+                             Run the backup inside the container where there is no timeout:\n\
+                             \n\
+                             \tdocker exec syslog-mcp syslog db backup --output /data/backup-$(date +%Y%m%d).db\n\
+                             \n\
+                             This operation may take several minutes on a 31 GB+ database.",
+                            BACKUP_HTTP_TIMEOUT.as_secs()
+                        );
+                }
+            };
             print_db_backup_response(&response, args.json)
         }
         CliMode::Local(service) => {

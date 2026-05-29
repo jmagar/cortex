@@ -442,11 +442,16 @@ async fn tool_compose_doctor(args: Value) -> anyhow::Result<Value> {
 }
 
 async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    // Default to last 30 days if no time range given — prevents full table scan
+    // Default to last 30 days only when no time range is given — prevents full table scan.
+    // If `to` is already set, skip the default so we don't create an impossible range.
     let from = string_arg(&args, "from").or_else(|| {
-        chrono::Utc::now()
-            .checked_sub_signed(chrono::Duration::days(30))
-            .map(|dt| dt.to_rfc3339())
+        if string_arg(&args, "to").is_none() {
+            chrono::Utc::now()
+                .checked_sub_signed(chrono::Duration::days(30))
+                .map(|dt| dt.to_rfc3339())
+        } else {
+            None
+        }
     });
     let response = state
         .service

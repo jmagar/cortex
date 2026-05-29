@@ -500,11 +500,16 @@ async fn timeline(
     State(state): State<ApiState>,
     Query(query): Query<TimelineQuery>,
 ) -> impl IntoResponse {
-    // Default to last 30 days if no time range given — prevents full table scan
+    // Default to last 30 days only when no time range is given — prevents full table scan.
+    // If `to` is already set, skip the default so we don't create an impossible range.
     let from = query.from.or_else(|| {
-        Utc::now()
-            .checked_sub_signed(chrono::Duration::days(30))
-            .map(|dt| dt.to_rfc3339())
+        if query.to.is_none() {
+            Utc::now()
+                .checked_sub_signed(chrono::Duration::days(30))
+                .map(|dt| dt.to_rfc3339())
+        } else {
+            None
+        }
     });
     respond(
         state
