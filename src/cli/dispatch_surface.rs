@@ -4,7 +4,6 @@ use super::output_common::print_json;
 use super::sparkline::sparkline;
 
 use anyhow::{bail, Result};
-use chrono::Utc;
 use syslog_mcp::app::{
     AckErrorRequest, IngestRateRequest, ListSourceIpsRequest, PatternsRequest, TimelineRequest,
     UnackErrorRequest, UnaddressedErrorsRequest,
@@ -17,23 +16,6 @@ use super::{
 
 // ─── Surface parity (source-ips, timeline, patterns, ingest-rate, sig, notify) ─
 
-/// Returns the default lookback window (days) for a given bucket string.
-/// Values mirror `Bucket::default_lookback_days` in `src/db/analytics.rs` —
-/// keep in sync if bucket variants change.
-fn timeline_default_days(bucket: &str) -> i64 {
-    // `db` is pub(crate) in the library so Bucket is not reachable from this
-    // binary module. A thin public bridge function (`Bucket::default_lookback_days_str`)
-    // could be added to the app layer in a follow-up (bead llto.2).
-    match bucket {
-        "minute" | "min" | "m" => 1,
-        "hour" | "h" => 7,
-        "day" | "d" => 30,
-        "week" | "w" => 180,
-        "month" => 730,
-        _ => 30,
-    }
-}
-
 impl SourceIpsArgs {
     pub(crate) fn into_request(self) -> ListSourceIpsRequest {
         ListSourceIpsRequest {
@@ -45,23 +27,14 @@ impl SourceIpsArgs {
 
 impl TimelineArgs {
     pub(crate) fn into_request(self) -> TimelineRequest {
-        // Default lookback window varies by bucket — wider buckets need longer windows.
-        // Only apply when no time range is given (prevents full table scans).
-        // If `to` is already set, skip the default so we don't create an impossible range.
-        let from = self.from.or_else(|| {
-            if self.to.is_none() {
-                let days = timeline_default_days(self.bucket.as_deref().unwrap_or("hour"));
-                Utc::now()
-                    .checked_sub_signed(chrono::Duration::days(days))
-                    .map(|dt| dt.to_rfc3339())
-            } else {
-                None
-            }
-        });
+        // Default lookback is centralized in `SyslogService::timeline` (bead dyqw):
+        // it applies a bucket-sized window only when neither `from` nor `to` is set.
+        // Both CLI modes reach that service (local directly, HTTP via the server),
+        // so we pass `from`/`to` through verbatim — no per-binary duplication.
         TimelineRequest {
             bucket: self.bucket,
             group_by: self.group_by,
-            from,
+            from: self.from,
             to: self.to,
             hostname: self.hostname,
             app_name: self.app_name,
