@@ -203,6 +203,28 @@ fn test_get_stats_empty_db() {
 }
 
 #[test]
+fn test_get_stats_skips_fts_diagnostic_by_default() {
+    // Issue 4: the default stats path must NOT run COUNT(*) FROM logs_fts
+    // (expensive on large DBs), reflected as phantom_fts_rows == None. The
+    // opt-in path computes it.
+    let (pool, dir) = test_pool();
+    let cfg = test_storage_config(dir.path().join("test.db"));
+
+    let fast = get_stats(&pool, &cfg).unwrap();
+    assert_eq!(
+        fast.phantom_fts_rows, None,
+        "default stats must skip the FTS diagnostic"
+    );
+
+    let full = get_stats_with_options(&pool, &cfg, true).unwrap();
+    assert_eq!(
+        full.phantom_fts_rows,
+        Some(0),
+        "opt-in stats must compute phantom_fts_rows (0 on a clean DB)"
+    );
+}
+
+#[test]
 fn test_tail_filter_by_host() {
     let (pool, _dir) = test_pool();
     let entries = vec![

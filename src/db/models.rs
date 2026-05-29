@@ -130,7 +130,12 @@ pub struct DbStats {
     /// Phantom FTS rows: entries in logs_fts that no longer have a matching log row.
     /// Accumulate between merge cycles; non-zero value is normal and cleaned up by
     /// periodic fts_incremental_merge. High values indicate merge is falling behind.
-    pub phantom_fts_rows: i64,
+    ///
+    /// `None` when the FTS diagnostic was skipped: computing it requires
+    /// `COUNT(*) FROM logs_fts`, an external-content FTS5 index scan that is
+    /// expensive on very large databases. The default `stats` path skips it;
+    /// pass `include_fts_diagnostics` to compute it explicitly.
+    pub phantom_fts_rows: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -59,13 +59,13 @@ fn db_stats_conversion_preserves_guardrail_fields() {
         max_db_size_mb: 1024,
         min_free_disk_mb: 512,
         write_blocked: true,
-        phantom_fts_rows: 3,
+        phantom_fts_rows: Some(3),
     });
 
     assert_eq!(stats.total_logs, 10);
     assert_eq!(stats.free_disk_mb.as_deref(), Some("512.00"));
     assert!(stats.write_blocked);
-    assert_eq!(stats.phantom_fts_rows, 3);
+    assert_eq!(stats.phantom_fts_rows, Some(3));
 }
 
 #[test]

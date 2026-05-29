@@ -651,7 +651,13 @@ impl From<db::AbuseIncident> for AbuseIncident {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiInvestigateRequest {
-    #[serde(default)]
+    // `incident_id` exists on the service-layer request but is NOT part of the
+    // `/api/ai/investigate` query surface (`AiInvestigateQuery` in api.rs uses
+    // `deny_unknown_fields`). serde_qs emits `None` options as a bare key
+    // (`incident_id&project&...`), which the server rejects as an unknown
+    // field. Skipping when `None` keeps the CLI HTTP path (which always sets
+    // `None`) from emitting the param. See syslog-mcp-fzj7.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incident_id: Option<String>,
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -1147,7 +1153,10 @@ pub struct DbStats {
     pub max_db_size_mb: u64,
     pub min_free_disk_mb: u64,
     pub write_blocked: bool,
-    pub phantom_fts_rows: i64,
+    /// `None` when the (expensive) FTS diagnostic was skipped — the default
+    /// `stats` path skips it. Serialized as `null` so clients can distinguish
+    /// "not computed" from "zero phantom rows".
+    pub phantom_fts_rows: Option<i64>,
 }
 
 impl From<db::DbStats> for DbStats {

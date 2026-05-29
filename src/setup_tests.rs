@@ -254,6 +254,24 @@ fn installed_compose_asset_uses_published_image_only() {
 }
 
 #[test]
+fn installed_compose_asset_memory_limit_is_configurable_with_2g_default() {
+    // Issue 3: the memory limit must default to 2G (was 512M, which OOM'd on
+    // heavy stats queries) and be overridable via SYSLOG_MCP_MEMORY_LIMIT so a
+    // fresh deploy picks up the safer default and operators can tune it.
+    assert!(
+        COMPOSE_ASSET.contains("memory: ${SYSLOG_MCP_MEMORY_LIMIT:-2G}"),
+        "compose asset must use a configurable 2G memory limit"
+    );
+    assert!(
+        !COMPOSE_ASSET.contains("memory: 512M"),
+        "compose asset must not hardcode the old 512M limit"
+    );
+    // The installed transform must preserve the configurable limit.
+    let compose = installed_compose_asset();
+    assert!(compose.contains("memory: ${SYSLOG_MCP_MEMORY_LIMIT:-2G}"));
+}
+
+#[test]
 fn ai_index_timer_script_uses_host_syslog_and_disables_docker_ingest() {
     let script = ai_index_script();
     assert!(script.contains("command -v syslog"));

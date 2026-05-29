@@ -766,8 +766,13 @@ fn parse_doctor_command(args: &[String]) -> Result<DoctorBinaryCommand> {
 }
 
 fn print_usage() {
-    eprintln!(
-        "Usage:
+    eprintln!("{USAGE}");
+}
+
+/// Top-level CLI usage banner printed by `syslog --help` (and on parse errors).
+/// Kept in sync with the command surface in `src/cli/parse.rs`; the
+/// `usage_banner_lists_*` tests guard against drift.
+const USAGE: &str = "Usage:
   syslog --version     Print version
   syslog setup [check|repair] [--json]
   syslog setup ai-index-timer install|remove|check [--json]
@@ -838,6 +843,15 @@ fn print_usage() {
   syslog config list [--env|--toml] [--toml-path PATH] [--json]
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
   syslog stats [--json]
+  syslog source-ips [--limit N] [--offset N] [--json]
+  syslog timeline [--bucket minute|hour|day] [--group-by FIELD] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]
+  syslog patterns [--top-n N] [--scan-limit N] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]
+  syslog ingest-rate [--by-host] [--json]
+  syslog sig list [--include-acknowledged] [--limit N] [--json]
+  syslog sig ack HASH [--notes TEXT] [--json]
+  syslog sig unack HASH [--reason TEXT] [--json]
+  syslog notify recent [--rule-id ID] [--since TIME] [--limit N] [--json]
+  syslog notify test [--body TEXT] [--json]   (requires --http)
 
 Global CLI flags (apply to query commands above; not valid for serve/mcp/setup/doctor):
   --http              Route this invocation through the container's REST API instead of opening the local SQLite DB.
@@ -851,9 +865,7 @@ Environment:
                       SYSLOG_API_TOKEN alone does NOT trigger HTTP — must explicitly opt in via --http or SYSLOG_USE_HTTP=1.
   SYSLOG_MCP_URL      Default API base URL for --http mode (overridden by --server)
   SYSLOG_API_TOKEN    Bearer token for --http mode (overridden by --token)
-  RUST_LOG            Log filter; stdio logs always go to stderr"
-    );
-}
+  RUST_LOG            Log filter; stdio logs always go to stderr";
 
 async fn shutdown_signal() {
     let ctrl_c = async {

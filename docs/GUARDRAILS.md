@@ -94,15 +94,19 @@ docker inspect syslog-mcp:latest | jq '.[0].Config.Env'
 
 ### Resource limits
 
-The compose file sets memory and CPU limits:
+The compose file sets memory and CPU limits, both configurable via env vars:
 
 ```yaml
 deploy:
   resources:
     limits:
-      memory: 512M
-      cpus: '1.0'
+      memory: ${SYSLOG_MCP_MEMORY_LIMIT:-2G}
+      cpus: '${SYSLOG_MCP_CPU_LIMIT:-1.0}'
 ```
+
+The memory default is `2G`. Heavy `stats`/`sessions` aggregations over a large
+database can spike memory; the previous `512M` default triggered OOM restarts.
+Raise `SYSLOG_MCP_MEMORY_LIMIT` (e.g. `4G`) on hosts with very large databases.
 
 ## Network security
 

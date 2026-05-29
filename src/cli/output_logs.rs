@@ -432,11 +432,10 @@ pub(crate) fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
         muted("write_blocked"),
         primary(&stats.write_blocked.to_string())
     );
-    println!(
-        "{}: {}",
-        muted("phantom_fts_rows"),
-        cyan(&stats.phantom_fts_rows.to_string())
-    );
+    let phantom = stats
+        .phantom_fts_rows
+        .map_or_else(|| "skipped".to_string(), |v| v.to_string());
+    println!("{}: {}", muted("phantom_fts_rows"), cyan(&phantom));
     Ok(())
 }
 

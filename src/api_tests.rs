@@ -2185,6 +2185,65 @@ async fn ai_investigate_rejects_unsupported_indexed_terms_query() {
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
 }
 
+/// Regression for syslog-mcp-fzj7: the CLI HTTP client serializes
+/// `AiInvestigateRequest` with `serde_qs::to_string` and sends it as the raw
+/// query string. The investigate CLI path always sets `incident_id: None`, and
+/// the server-side `AiInvestigateQuery` uses `deny_unknown_fields` without an
+/// `incident_id` field. Before the fix, serde_qs emitted a bare `incident_id`
+/// key for the `None` option, so the server rejected the request with 400
+/// ("unknown field `incident_id`"). This test pins both halves: the query the
+/// client produces must not contain `incident_id`, and the server must accept
+/// the exact client-produced query string.
+#[tokio::test]
+async fn ai_investigate_cli_query_omits_incident_id_and_server_accepts() {
+    // `AiInvestigateRequest` is in scope via `use super::*` (api.rs re-export).
+    // Mirror the CLI investigate path: incident_id is always None.
+    let req = AiInvestigateRequest {
+        incident_id: None,
+        window_minutes: Some(60),
+        correlation_window_minutes: Some(30),
+        ..Default::default()
+    };
+    let qs = serde_qs::to_string(&req).expect("serialize investigate request");
+    assert!(
+        !qs.contains("incident_id"),
+        "serialized query must not contain incident_id, got: {qs}"
+    );
+
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let uri = format!("/api/ai/investigate?{qs}");
+    let (status, value) = get_json(app, &uri, Some("secret")).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::OK,
+        "server must accept CLI-produced query {uri}: {value}"
+    );
+}
+
+/// Discriminating test for syslog-mcp-fzj7: a *non-empty* `terms` Vec must
+/// also survive the CLI client serializer → server extractor round-trip.
+/// `serde_qs::to_string` emits indexed `terms[0]=..&terms[1]=..`; the server
+/// extractor must accept that exact encoding.
+#[tokio::test]
+async fn ai_investigate_cli_query_with_terms_server_accepts() {
+    let req = AiInvestigateRequest {
+        incident_id: None,
+        terms: vec!["foo".into(), "bar".into()],
+        ..Default::default()
+    };
+    let qs = serde_qs::to_string(&req).expect("serialize investigate request");
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let uri = format!("/api/ai/investigate?{qs}");
+    let (status, value) = get_json(app, &uri, Some("secret")).await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::OK,
+        "server must accept CLI-produced terms query {uri}: {value}"
+    );
+}
+
 #[tokio::test]
 async fn compose_status_route_exists() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));

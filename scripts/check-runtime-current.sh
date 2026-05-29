@@ -93,9 +93,48 @@ detect_mode() {
   echo none
 }
 
+# Resolve the env file the deployed compose stack actually uses for YAML
+# variable substitution (e.g. ${SYSLOG_MCP_VERSION:-...}). This MUST mirror
+# `compose_env_file()` in src/compose/mutation.rs: docker compose only auto-
+# loads `.env` from the project dir, but the installed bundle keeps compose
+# files under ~/.syslog-mcp/compose/ and its env file one level up at
+# ~/.syslog-mcp/.env. The stack is launched with `--env-file <home>/.env`
+# (src/setup/firstrun.rs), so without resolving the same file here the
+# version variable falls back to the compose-file default and we compare
+# against the wrong image tag.
+compose_env_file() {
+  if [[ -n "${SYSLOG_ENV_FILE:-}" && -f "$SYSLOG_ENV_FILE" ]]; then
+    printf '%s\n' "$SYSLOG_ENV_FILE"
+    return
+  fi
+  local parent_env="${COMPOSE_DIR%/}/../.env"
+  if [[ -f "$parent_env" ]]; then
+    printf '%s\n' "$parent_env"
+    return
+  fi
+  if [[ -f "${COMPOSE_DIR%/}/.env" ]]; then
+    printf '%s\n' "${COMPOSE_DIR%/}/.env"
+    return
+  fi
+  # No env file found — fall back to compose defaults (don't fail).
+  printf '%s\n' ""
+}
+
+# Populate the global ENV_FILE_ARGS array with `--env-file <path>` (or leave it
+# empty when no env file exists, so docker compose uses its YAML defaults).
+ENV_FILE_ARGS=()
+resolve_env_file_args() {
+  ENV_FILE_ARGS=()
+  local env_file
+  env_file="$(compose_env_file)"
+  if [[ -n "$env_file" ]]; then
+    ENV_FILE_ARGS=("--env-file" "$env_file")
+  fi
+}
+
 compose_image() {
   if [[ -d "$COMPOSE_DIR" ]]; then
-    (cd "$COMPOSE_DIR" && docker compose config --images 2>/dev/null | head -1) || true
+    (cd "$COMPOSE_DIR" && docker compose "${ENV_FILE_ARGS[@]}" config --images 2>/dev/null | head -1) || true
   fi
 }
 
@@ -132,6 +171,13 @@ check_docker() {
   canonical_compose_dir="$(realpath_or_echo "$COMPOSE_DIR")"
   canonical_default_dir="$(realpath_or_echo "$DEFAULT_COMPOSE_DIR")"
 
+  # Resolve the deploy env file now that COMPOSE_DIR is final (it may have been
+  # rewritten from the container's compose project-dir label above).
+  resolve_env_file_args
+  if [[ ${#ENV_FILE_ARGS[@]} -gt 0 ]]; then
+    status_line env_file "${ENV_FILE_ARGS[1]}"
+  fi
+
   image="$(compose_image)"
   [[ -n "$image" ]] || image="$(docker inspect "$cid" --format '{{.Config.Image}}')"
 
@@ -153,7 +199,7 @@ check_docker() {
   fi
 
   if [[ "$PULL" == "true" && -d "$COMPOSE_DIR" ]]; then
-    (cd "$COMPOSE_DIR" && docker compose pull --quiet "$SERVICE")
+    (cd "$COMPOSE_DIR" && docker compose "${ENV_FILE_ARGS[@]}" pull --quiet "$SERVICE")
   fi
 
   running_image="$(docker inspect "$cid" --format '{{.Image}}')"

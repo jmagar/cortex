@@ -1534,6 +1534,21 @@ fn ai_session_context(
 
 /// Get database stats
 pub fn get_stats(pool: &DbPool, config: &StorageConfig) -> Result<DbStats> {
+    get_stats_with_options(pool, config, false)
+}
+
+/// `get_stats`, but `include_fts_diagnostics` controls whether the
+/// `phantom_fts_rows` field is computed. That value requires
+/// `COUNT(*) FROM logs_fts` — an external-content FTS5 index scan that is
+/// cheap on small DBs but expensive on very large ones (the index has no
+/// O(1) row counter). The default `stats` path passes `false` so the common
+/// query stays fast; callers that specifically need the FTS merge-health
+/// diagnostic pass `true`.
+pub fn get_stats_with_options(
+    pool: &DbPool,
+    config: &StorageConfig,
+    include_fts_diagnostics: bool,
+) -> Result<DbStats> {
     let metrics = get_storage_metrics(pool, config)?;
     let write_blocked = exceeds_trigger(&metrics, config);
     let mut conn = pool.get()?;
@@ -1542,12 +1557,17 @@ pub fn get_stats(pool: &DbPool, config: &StorageConfig) -> Result<DbStats> {
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
     let total_logs: i64 = tx.query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))?;
     let total_hosts: i64 = tx.query_row("SELECT COUNT(*) FROM hosts", [], |r| r.get(0))?;
-    let fts_rows: i64 = tx
-        .query_row("SELECT COUNT(*) FROM logs_fts", [], |r| r.get(0))
-        .unwrap_or(0);
-    let phantom_fts_rows = (fts_rows - total_logs).max(0);
+    let phantom_fts_rows = if include_fts_diagnostics {
+        let fts_rows: i64 = tx
+            .query_row("SELECT COUNT(*) FROM logs_fts", [], |r| r.get(0))
+            .unwrap_or(0);
+        Some((fts_rows - total_logs).max(0))
+    } else {
+        None
+    };
     // MIN/MAX return a single nullable row; use get::<_, Option<_>> so NULL becomes
     // None while real query errors (e.g. missing table) still propagate via `?`.
+    // Both use the covering index idx_logs_timestamp (SEARCH, O(log n)).
     let oldest: Option<String> = tx.query_row("SELECT MIN(timestamp) FROM logs", [], |r| {
         r.get::<_, Option<String>>(0)
     })?;

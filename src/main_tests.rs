@@ -486,3 +486,23 @@ fn mode_parse_accepts_new_surface_parity_subcommands() {
         assert!(result.is_ok(), "Mode::parse rejected '{cmd}': {result:?}");
     }
 }
+
+#[test]
+fn usage_banner_lists_all_query_subcommands() {
+    // Issue 5: the --help banner must document every command the parser
+    // accepts. These were missing and silently undiscoverable before.
+    let usage = super::USAGE;
+    for needle in [
+        "syslog source-ips",
+        "syslog timeline",
+        "syslog patterns",
+        "syslog ingest-rate",
+        "syslog sig list",
+        "syslog sig ack",
+        "syslog sig unack",
+        "syslog notify recent",
+        "syslog notify test",
+    ] {
+        assert!(usage.contains(needle), "usage banner is missing `{needle}`");
+    }
+}

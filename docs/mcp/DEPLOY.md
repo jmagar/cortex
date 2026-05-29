@@ -111,8 +111,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: '1.0'
+          memory: ${SYSLOG_MCP_MEMORY_LIMIT:-2G}
+          cpus: '${SYSLOG_MCP_CPU_LIMIT:-1.0}'
 ```
 
 ```bash
