@@ -1,4 +1,4 @@
-use std::{borrow::Cow, net::Ipv6Addr, sync::Arc, time::Instant};
+use std::{borrow::Cow, net::Ipv6Addr, sync::Arc};
 
 use lab_auth::AuthContext;
 use rmcp::{
@@ -84,7 +84,6 @@ impl ServerHandler for SyslogRmcpServer {
             .arguments
             .map(Value::Object)
             .unwrap_or_else(|| Value::Object(Map::new()));
-        let started = Instant::now();
         tracing::info!(tool = %tool_name, "MCP tool execution started");
 
         match execute_tool(&self.state, &tool_name, arguments, auth).await {
@@ -92,7 +91,6 @@ impl ServerHandler for SyslogRmcpServer {
                 let result_count = safe_result_count(&result);
                 tracing::info!(
                     tool = %tool_name,
-                    elapsed_ms = started.elapsed().as_millis(),
                     result_count,
                     "MCP tool execution completed"
                 );
@@ -101,7 +99,6 @@ impl ServerHandler for SyslogRmcpServer {
             Err(error) if is_validation_error(&error) => {
                 tracing::warn!(
                     tool = %tool_name,
-                    elapsed_ms = started.elapsed().as_millis(),
                     error_class = "invalid_params",
                     "MCP tool execution rejected invalid params"
                 );
@@ -110,7 +107,6 @@ impl ServerHandler for SyslogRmcpServer {
             Err(error) => {
                 tracing::error!(
                     tool = %tool_name,
-                    elapsed_ms = started.elapsed().as_millis(),
                     error = %error,
                     error_class = "tool_execution",
                     "MCP tool execution failed"

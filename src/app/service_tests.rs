@@ -549,6 +549,80 @@ async fn ai_service_methods_return_seeded_data() {
     assert_eq!(tools.tools[0].tool, "claude");
 }
 
+// `tracing_test::traced_test` captures TRACE-level events by default, so the
+// `tracing::debug!` calls emitted by `run_db` are visible to `logs_contain`.
+// We verify both the message tag and the structured timing fields are present.
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn run_db_emits_timing_trace_on_success() {
+    let (service, _pool, _dir) = test_service();
+
+    service.health_check().await.unwrap();
+
+    assert!(logs_contain("db op ok"));
+    assert!(logs_contain("op=\"health_check\""));
+    assert!(logs_contain("permit_ms"));
+    assert!(logs_contain("exec_ms"));
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn run_db_emits_warn_on_slow_op() {
+    use std::time::Duration;
+    let (service, _pool, _dir) = test_service();
+
+    service
+        .run_db("slow_test", |_pool| {
+            std::thread::sleep(Duration::from_millis(SLOW_DB_MS as u64 + 50));
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // Slow ops escalate to WARN level; message stays "db op ok" so aggregators
+    // can filter a single message across all speeds, using exec_ms for the threshold.
+    assert!(logs_contain("WARN"));
+    assert!(logs_contain("db op ok"));
+    assert!(logs_contain("op=\"slow_test\""));
+    assert!(logs_contain("permit_ms"));
+    assert!(logs_contain("exec_ms"));
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn run_db_emits_warn_on_semaphore_closed() {
+    let (service, _pool, _dir) = test_service();
+    service.db_permits.close();
+
+    let err = service.run_db("closed_test", |_| Ok(())).await.unwrap_err();
+
+    assert!(
+        matches!(err, ServiceError::Busy(_)),
+        "expected Busy, got {err:?}"
+    );
+    assert!(logs_contain("db semaphore closed"));
+    assert!(logs_contain("op=\"closed_test\""));
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn run_db_emits_warn_on_slow_op_with_error() {
+    use std::time::Duration;
+    let (service, _pool, _dir) = test_service();
+
+    let _: ServiceResult<()> = service
+        .run_db("slow_err_test", |_pool| {
+            std::thread::sleep(Duration::from_millis(SLOW_DB_MS as u64 + 50));
+            Err(anyhow::anyhow!("simulated slow failure"))
+        })
+        .await;
+
+    assert!(logs_contain("WARN"));
+    assert!(logs_contain("db op err"));
+    assert!(logs_contain("op=\"slow_err_test\""));
+    assert!(logs_contain("error="));
+}
+
 #[tokio::test]
 async fn timeline_applies_default_lookback_only_when_from_and_to_both_absent() {
     // Bead dyqw: the bucket-sized default lookback was centralized into
