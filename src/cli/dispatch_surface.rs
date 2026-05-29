@@ -18,15 +18,19 @@ use super::{
 // ─── Surface parity (source-ips, timeline, patterns, ingest-rate, sig, notify) ─
 
 /// Returns the default lookback window (days) for a given bucket string.
-/// Wider buckets benefit from longer default windows to avoid empty results.
+/// Values mirror `Bucket::default_lookback_days` in `src/db/analytics.rs` —
+/// keep in sync if bucket variants change.
 fn timeline_default_days(bucket: &str) -> i64 {
+    // `db` is pub(crate) in the library so Bucket is not reachable from this
+    // binary module. A thin public bridge function (`Bucket::default_lookback_days_str`)
+    // could be added to the app layer in a follow-up (bead llto.2).
     match bucket {
         "minute" | "min" | "m" => 1,
         "hour" | "h" => 7,
         "day" | "d" => 30,
         "week" | "w" => 180,
         "month" => 730,
-        _ => 30, // unknown bucket — fall back; service will reject it anyway
+        _ => 30,
     }
 }
 
