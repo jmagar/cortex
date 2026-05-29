@@ -148,8 +148,17 @@ tx.commit().await?;
 
 ### Testing
 
+**Prerequisite:** `just test` uses [cargo-nextest](https://nexte.st), which is **not**
+bundled with the Rust toolchain. Fresh checkouts must install it once, or `just test`
+fails with `error: no such subcommand: nextest`:
+
 ```bash
-just test               # Run all unit and integration tests
+cargo install cargo-nextest --locked
+```
+
+```bash
+just test               # Run all unit and integration tests (requires cargo-nextest)
+just test-doc           # Run doc tests (nextest does not execute these)
 just test-live          # Live smoke test against a running server (tests/test_live.sh)
 bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of test-live)
 ```
