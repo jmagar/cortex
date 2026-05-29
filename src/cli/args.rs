@@ -1,6 +1,17 @@
 use super::args_config::ConfigCommand;
 use syslog_mcp::compose::{ComposeTarget, MutationOptions};
 
+mod ai;
+mod surface;
+
+pub(crate) use ai::{
+    AiAbuseArgs, AiAddArgs, AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs,
+    AiCommand, AiContextArgs, AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs,
+    AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs,
+    AiSearchArgs, AiSimilarArgs, AiWatchArgs,
+};
+pub(crate) use surface::{AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, SilentHostsArgs};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliCommand {
     Search(SearchArgs),
@@ -27,7 +38,6 @@ pub(crate) enum CliCommand {
     Shell(ShellCommand),
     AgentCommand(AgentCommandCommand),
     Heartbeat(HeartbeatCommand),
-    // ── Surface parity gap closure (2026-05-22) ─────────────────────────────
     SilentHosts(SilentHostsArgs),
     ClockSkew(ClockSkewArgs),
     Anomalies(AnomaliesArgs),
@@ -105,32 +115,6 @@ pub(crate) struct HeartbeatAgentArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AiCommand {
-    Search(AiSearchArgs),
-    Abuse(AiAbuseArgs),
-    Correlate(AiCorrelateArgs),
-    Blocks(AiBlocksArgs),
-    Context(AiContextArgs),
-    Tools(AiListArgs),
-    Projects(AiListArgs),
-    Index(AiIndexArgs),
-    Add(AiAddArgs),
-    Watch(AiWatchArgs),
-    Checkpoints(AiCheckpointsArgs),
-    Errors(AiErrorsArgs),
-    PruneCheckpoints(AiPruneCheckpointsArgs),
-    Doctor(AiDoctorArgs),
-    WatchStatus(OutputArgs),
-    SmokeWatch(OutputArgs),
-    SimilarIncidents(AiSimilarArgs),
-    AskHistory(AiAskHistoryArgs),
-    IncidentContext(AiIncidentContextArgs),
-    Incidents(AiIncidentsArgs),
-    Investigate(AiInvestigateArgs),
-    Assess(AiAssessArgs),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ComposeCommand {
     Status(ComposeArgs),
     Doctor(ComposeArgs),
@@ -187,10 +171,6 @@ pub(crate) struct OutputArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct DbStatusArgs {
     pub json: bool,
-    /// Opt-in: run the host/container coordination diagnostic phases
-    /// (`data-mount`, `ai-watch-coord`). These shell out to `docker inspect`
-    /// and `systemctl --user show` and add roughly 100-200ms per invocation,
-    /// so the default `db status` path is left untouched.
     pub check_coord: bool,
 }
 
@@ -213,10 +193,6 @@ impl Default for DbCheckpointArgs {
 pub(crate) struct DbVacuumArgs {
     pub full: bool,
     pub pages: u32,
-    /// CLI bool maps to server `Option<bool>` as
-    /// `present → Some(true)`, `absent → None`. The size pre-flight on
-    /// `--full` is bypassed only when the server receives `Some(true)`.
-    /// See [`crate::app::models::DbVacuumRequest`] (bead 0p8r.4 #C3).
     pub force: bool,
     pub json: bool,
 }
@@ -236,12 +212,6 @@ impl Default for DbVacuumArgs {
 pub(crate) struct DbBackupArgs {
     pub output: Option<String>,
     pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiDoctorArgs {
-    pub json: bool,
-    pub strict_permissions: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -378,171 +348,6 @@ pub(crate) struct CorrelateArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiSearchArgs {
-    pub query: String,
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAbuseArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: Option<u32>,
-    pub before: Option<u32>,
-    pub after: Option<u32>,
-    pub terms: Vec<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiCorrelateArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub session_id: Option<String>,
-    pub ai_query: Option<String>,
-    pub log_query: Option<String>,
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
-    pub app_name: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub window_minutes: Option<u32>,
-    pub severity_min: Option<String>,
-    pub limit: Option<u32>,
-    pub events_per_anchor: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiBlocksArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiContextArgs {
-    pub project: String,
-    pub tool: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiListArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiIndexArgs {
-    pub path: Option<String>,
-    pub force: bool,
-    pub since: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAddArgs {
-    pub file: String,
-    pub force: bool,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AiWatchArgs {
-    pub path: Option<String>,
-    pub debounce_ms: u64,
-    pub settle_ms: u64,
-    pub max_retries: u8,
-    pub no_initial_scan: bool,
-    pub json: bool,
-}
-
-impl Default for AiWatchArgs {
-    fn default() -> Self {
-        Self {
-            path: None,
-            debounce_ms: 750,
-            settle_ms: 500,
-            max_retries: 5,
-            no_initial_scan: false,
-            json: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiCheckpointsArgs {
-    pub errors_only: bool,
-    pub missing_only: bool,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiErrorsArgs {
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiPruneCheckpointsArgs {
-    pub missing_only: bool,
-    pub dry_run: bool,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiSimilarArgs {
-    pub query: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
-    pub severity_min: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub window_minutes: Option<u32>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAskHistoryArgs {
-    pub query: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiIncidentContextArgs {
-    pub from: String,
-    pub to: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
-    pub query: Option<String>,
-    pub severity_min: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SourceIpsArgs {
     pub limit: Option<u32>,
     pub offset: Option<u32>,
@@ -612,85 +417,4 @@ pub(crate) struct NotifyRecentArgs {
 pub(crate) struct NotifyTestArgs {
     pub body: Option<String>,
     pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiIncidentsArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: Option<u32>,
-    pub window_minutes: Option<u32>,
-    pub terms: Vec<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiInvestigateArgs {
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: Option<u32>,
-    pub window_minutes: Option<u32>,
-    pub correlation_window_minutes: Option<u32>,
-    pub terms: Vec<String>,
-    pub json: bool,
-}
-
-// ── Surface parity gap closure args (2026-05-22) ───────────────────────────
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SilentHostsArgs {
-    pub silent_minutes: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ClockSkewArgs {
-    pub since: Option<String>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AnomaliesArgs {
-    pub recent_minutes: Option<u32>,
-    pub baseline_minutes: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CompareArgs {
-    pub a_from: Option<String>,
-    pub a_to: Option<String>,
-    pub b_from: Option<String>,
-    pub b_to: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AppsArgs {
-    pub hostname: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: Option<u32>,
-    pub offset: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAssessArgs {
-    pub incident_id: String,
-    pub model: Option<String>,
-    pub json: bool,
-    pub project: Option<String>,
-    pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub window_minutes: Option<u32>,
-    pub correlation_window_minutes: Option<u32>,
-    pub terms: Vec<String>,
-    pub limit: Option<u32>,
 }
