@@ -187,13 +187,13 @@ publish bump="patch":
     scripts/bump-version.sh "{{bump}}"
     NEW=$(grep -m1 "^version" Cargo.toml | sed "s/.*\"\(.*\)\".*/\1/")
     scripts/check-version-sync.sh --require-changelog
-    # Mirror `just test` + `just test-doc` exactly (bead ok8c): strip the auth
-    # vars that `set dotenv-load` injects so the release gate exercises the same
-    # (no-auth) environment as `just test`, and keep running doc tests — which
-    # bare `cargo nextest run` does NOT execute.
-    env -u SYSLOG_API_TOKEN -u NO_AUTH cargo nextest run
-    cargo test --doc
-    cargo clippy -- -D warnings
+    # Reuse the canonical gates (bead ok8c) so the release gate can't drift from
+    # them: `test` strips the auth vars `set dotenv-load` injects and runs
+    # nextest, `test-doc` covers doc tests (nextest skips those), `lint` is
+    # clippy -D warnings.
+    just test
+    just test-doc
+    just lint
     git add -A
     git commit -m "release: v${NEW}"
     git tag "v${NEW}"
