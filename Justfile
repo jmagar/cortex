@@ -51,7 +51,8 @@ test-live:
     # SYSLOG_USE_HTTP must be unset so the local seed (ai add) uses SQLite directly
     SYSLOG_SMOKE_DB_PATH="${HOME}/.syslog-mcp/data/syslog.db" \
         env -u SYSLOG_USE_HTTP \
-        bash tests/test_live.sh --mode http --url http://localhost:3100 --token "${SYSLOG_MCP_TOKEN:-${SYSLOG_API_TOKEN}}"
+        bash tests/test_live.sh --mode http --url http://localhost:3100 \
+            ${SYSLOG_MCP_TOKEN:+--token "${SYSLOG_MCP_TOKEN}"}
 
 setup:
     cp -n .env.example .env || true
