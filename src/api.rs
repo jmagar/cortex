@@ -8,7 +8,6 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::Semaphore;
@@ -500,28 +499,16 @@ async fn timeline(
     State(state): State<ApiState>,
     Query(query): Query<TimelineQuery>,
 ) -> impl IntoResponse {
-    // Default lookback window varies by bucket — wider buckets need longer windows.
-    // Only apply when no time range is given (prevents full table scans).
-    // If `to` is already set, skip the default so we don't create an impossible range.
-    let from = query.from.or_else(|| {
-        if query.to.is_none() {
-            let days = crate::db::Bucket::parse(query.bucket.as_deref().unwrap_or("hour"))
-                .map(|b| b.default_lookback_days())
-                .unwrap_or(30);
-            Utc::now()
-                .checked_sub_signed(chrono::Duration::days(days))
-                .map(|dt| dt.to_rfc3339())
-        } else {
-            None
-        }
-    });
+    // Default lookback is centralized in `SyslogService::timeline` (bead dyqw):
+    // it applies a bucket-sized window only when neither `from` nor `to` is set,
+    // preventing full table scans without recreating the logic per transport.
     respond(
         state
             .service
             .timeline(TimelineRequest {
                 bucket: query.bucket,
                 group_by: query.group_by,
-                from,
+                from: query.from,
                 to: query.to,
                 hostname: query.hostname,
                 app_name: query.app_name,
@@ -1497,10 +1484,17 @@ async fn db_backup(
         }
     };
 
+    // Sanitize before logging (bead xknb.4): `output_path` is attacker-influenced
+    // input; strip CR/LF/ESC so it can't inject newlines or ANSI escapes into log
+    // aggregators or terminals tailing the audit stream.
+    let logged_output_path = req
+        .output_path
+        .as_deref()
+        .map(|p| p.replace(['\n', '\r', '\x1b'], "?"));
     tracing::warn!(
         caller_ip = %peer,
         action = "db_backup",
-        output_path = ?req.output_path,
+        output_path = ?logged_output_path,
         "admin: db_backup invoked"
     );
 

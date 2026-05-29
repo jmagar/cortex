@@ -548,3 +548,68 @@ async fn ai_service_methods_return_seeded_data() {
         .unwrap();
     assert_eq!(tools.tools[0].tool, "claude");
 }
+
+#[tokio::test]
+async fn timeline_applies_default_lookback_only_when_from_and_to_both_absent() {
+    // Bead dyqw: the bucket-sized default lookback was centralized into
+    // `SyslogService::timeline`. It must apply ONLY when both `from` and `to`
+    // are absent (preventing an unbounded full-table scan), and must be SKIPPED
+    // whenever `to` is supplied — preserving the zl9y guard against injecting a
+    // `from` that would create an impossible range.
+    let (service, pool, _dir) = test_service();
+    let now = chrono::Utc::now();
+    let fmt = |dt: chrono::DateTime<chrono::Utc>| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let recent = fmt(now - chrono::Duration::days(2));
+    let old = fmt(now - chrono::Duration::days(400));
+    insert_logs_batch(
+        &pool,
+        &[
+            entry(&recent, "host-a", "info", "recent", "10.0.0.1:514"),
+            entry(&old, "host-a", "info", "old", "10.0.0.1:514"),
+        ],
+    )
+    .unwrap();
+
+    // Both absent → day bucket default (30 days) excludes the 400-day-old log.
+    let resp = service
+        .timeline(TimelineRequest {
+            bucket: Some("day".into()),
+            group_by: None,
+            from: None,
+            to: None,
+            hostname: None,
+            app_name: None,
+            severity_min: None,
+        })
+        .await
+        .unwrap();
+    let total: i64 = resp.points.iter().map(|p| p.count).sum();
+    assert_eq!(
+        total, 1,
+        "default 30-day window must exclude the 400-day-old log"
+    );
+
+    // `to` set (1 day ago), `from` absent → the default MUST be skipped. The
+    // 400-day-old log predates any 30-day default window; it is counted only if
+    // no default `from` was injected. If the guard regressed (default applied
+    // whenever from is None), the range would be [now-30d, now-1d] and the old
+    // log would drop, yielding 1 instead of 2.
+    let to = fmt(now - chrono::Duration::days(1));
+    let resp2 = service
+        .timeline(TimelineRequest {
+            bucket: Some("day".into()),
+            group_by: None,
+            from: None,
+            to: Some(to),
+            hostname: None,
+            app_name: None,
+            severity_min: None,
+        })
+        .await
+        .unwrap();
+    let total2: i64 = resp2.points.iter().map(|p| p.count).sum();
+    assert_eq!(
+        total2, 2,
+        "with `to` set and `from` omitted, the default must be skipped so both logs (<= to) are counted"
+    );
+}

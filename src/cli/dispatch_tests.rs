@@ -1346,10 +1346,14 @@ fn source_ips_args_into_request_default() {
 }
 
 #[test]
-fn timeline_args_into_request_snapshot() {
-    // When no from is specified, the default 30-day window should be applied.
+fn timeline_args_into_request_passes_time_range_through() {
+    // The default-lookback injection now lives in `SyslogService::timeline`
+    // (bead dyqw) so the service is the single source of truth. `into_request`
+    // must therefore pass `from`/`to` through verbatim and NOT inject a default
+    // — verified end-to-end by the service-layer test
+    // `timeline_applies_default_lookback_only_when_from_and_to_both_absent`.
     let args = TimelineArgs {
-        bucket: Some("1h".to_string()),
+        bucket: Some("hour".to_string()),
         group_by: None,
         from: None,
         to: None,
@@ -1359,20 +1363,14 @@ fn timeline_args_into_request_snapshot() {
         json: false,
     };
     let req = args.into_request();
-    assert_eq!(req.bucket.as_deref(), Some("1h"));
+    assert_eq!(req.bucket.as_deref(), Some("hour"));
     assert!(
-        req.from.is_some(),
-        "from should default to last 30 days when not specified"
+        req.from.is_none(),
+        "into_request must not inject a default `from`; the service applies it"
     );
-    // Verify the default is a valid RFC3339 timestamp roughly 30 days ago
-    let from_str = req.from.as_deref().unwrap();
-    let parsed = chrono::DateTime::parse_from_rfc3339(from_str)
-        .expect("default from should be valid RFC3339");
-    let now = chrono::Utc::now();
-    let diff = now.signed_duration_since(parsed.with_timezone(&chrono::Utc));
     assert!(
-        diff.num_days() >= 29 && diff.num_days() <= 31,
-        "default from should be ~30 days ago, got {diff:?}"
+        req.to.is_none(),
+        "into_request must not inject a default `to`"
     );
 }
 
