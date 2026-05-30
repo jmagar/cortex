@@ -528,13 +528,13 @@ async fn mounted_cookie_without_bearer_is_rejected() {
 /// with `static_token_scopes: Vec::new()` in bearer-only mode because
 /// `AuthLayer::with_auth_state(None)` does not populate scopes.
 /// After the S-03 fix, `build_auth_layer` explicitly calls `.with_static_token_scopes`
-/// so the `AuthContext` injected by the layer carries `["syslog:read"]` by default
-/// (or `["syslog:read", "syslog:admin"]` when `static_token_is_admin=true`).
-/// `stats` requires only `syslog:read`, so it succeeds with the default token.
+/// so the `AuthContext` injected by the layer carries `["cortex:read"]` by default
+/// (or `["cortex:read", "cortex:admin"]` when `static_token_is_admin=true`).
+/// `stats` requires only `cortex:read`, so it succeeds with the default token.
 #[tokio::test]
 async fn mounted_static_bearer_valid_token_can_call_scope_gated_action() {
     let h = TestHarness::with_token("static-secret".into());
-    // `stats` requires syslog:read — it is scope-gated at the rmcp layer.
+    // `stats` requires cortex:read — it is scope-gated at the rmcp layer.
     let body = jsonrpc_request(
         25,
         "tools/call",
@@ -560,7 +560,7 @@ async fn static_bearer_token_cannot_call_admin_actions_by_default() {
     // `static_token_is_admin: false` (the default in test_state_with_token)
     let h = TestHarness::with_token("static-secret".into());
     let app = router(h.state);
-    // `ack_error` requires syslog:admin — must be denied for read-only static token
+    // `ack_error` requires cortex:admin — must be denied for read-only static token
     let body = jsonrpc_request(
         30,
         "tools/call",
@@ -578,8 +578,8 @@ async fn static_bearer_token_cannot_call_admin_actions_by_default() {
     );
     let msg = response["error"]["message"].as_str().unwrap_or("");
     assert!(
-        msg.contains("requires scope: syslog:admin"),
-        "denial message should name syslog:admin; got: {msg}"
+        msg.contains("requires scope: cortex:admin"),
+        "denial message should name cortex:admin; got: {msg}"
     );
 }
 
@@ -640,8 +640,8 @@ async fn test_state_with_oauth() -> (AppState, tempfile::TempDir) {
     let auth_config = lab_auth::config::AuthConfigBuilder::new()
         .env_prefix("CORTEX")
         .session_cookie_name("cortex_session")
-        .scopes_supported(vec!["syslog:read".into(), "syslog:admin".into()])
-        .default_scope("syslog:read")
+        .scopes_supported(vec!["cortex:read".into(), "cortex:admin".into()])
+        .default_scope("cortex:read")
         .resource_path("/mcp")
         .build_from_sources(vars)
         .expect("test auth config should build");

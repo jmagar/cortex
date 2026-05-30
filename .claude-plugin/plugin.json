@@ -82,22 +82,22 @@
       "description": "Optional extra non-loopback OAuth client redirect URIs. Setup automatically adds Claude's MCP callback URLs and, when present, the current Codex mcp_oauth_callback_url from ~/.codex/config.toml. Server mode only.",
       "default": ""
     },
-    "syslog_host": {
+    "cortex_receiver_host": {
       "type": "string",
       "title": "Syslog bind host",
       "description": "Interface address the syslog receiver binds to. 0.0.0.0 listens on every interface so other hosts on the LAN/VPN can forward to you (the normal homelab choice). 127.0.0.1 restricts to local-only ingestion (useful when only this host's rsyslog forwards in). Server mode only.",
       "default": "0.0.0.0"
     },
-    "syslog_port": {
+    "cortex_receiver_port": {
       "type": "number",
       "title": "Syslog port",
       "description": "UDP and TCP port the syslog receiver binds to inside the server process or Docker container (the same port serves both protocols). Keep this at 1514 unless you intentionally grant CAP_NET_BIND_SERVICE or run as root. Server mode only.",
       "default": 1514
     },
-    "syslog_host_port": {
+    "cortex_receiver_host_port": {
       "type": "number",
       "title": "Docker syslog host port",
-      "description": "Host port published by Docker Compose to the container's syslog bind port. Set this to 514 when devices can only forward to the privileged syslog port, while leaving syslog_port at 1514 inside the container. Docker server mode only.",
+      "description": "Host port published by Docker Compose to the container's syslog bind port. Set this to 514 when devices can only forward to the privileged syslog port, while leaving cortex_receiver_port at 1514 inside the container. Docker server mode only.",
       "default": 1514
     },
     "mcp_host": {
@@ -156,7 +156,7 @@
     "fleet_hosts": {
       "type": "string",
       "title": "Fleet hosts",
-      "description": "Hostnames or SSH config aliases for hosts in your fleet \u2014 used by TWO features. (1) Docker ingest: when docker_ingest_enabled is true, each entry becomes the docker-socket-proxy URL http://<host>:2375. (2) The syslog-deploy-dropins skill pushes rsyslog forwarding drop-ins to each host over SSH so they start forwarding logs here. Entries must be reachable by name (resolvable DNS or in /etc/hosts) AND, for deploy-dropins, configured in ~/.ssh/config with a working key. Add one entry per host, e.g. dookie, squirts, tootie. Leave empty if you don't want either feature.",
+      "description": "Hostnames or SSH config aliases for hosts in your fleet \u2014 used by TWO features. (1) Docker ingest: when docker_ingest_enabled is true, each entry becomes the docker-socket-proxy URL http://<host>:2375. (2) The cortex-deploy-dropins skill pushes rsyslog forwarding drop-ins to each host over SSH so they start forwarding logs here. Entries must be reachable by name (resolvable DNS or in /etc/hosts) AND, for deploy-dropins, configured in ~/.ssh/config with a working key. Add one entry per host, e.g. dookie, squirts, tootie. Leave empty if you don't want either feature.",
       "required": true,
       "multiple": true
     }

@@ -39,7 +39,7 @@ Performed a three-surface (CLI / HTTP API / MCP) parity audit, discovered five r
 - `SyslogService::host_state` at `src/app/service.rs:505` forwarded `req.since` raw to SQL `sampled_at >= ?2`, bypassing `parse_optional_timestamp` validation that every other timestamp-bearing service method uses.
 - `SyslogService::fleet_state` at `src/app/service.rs:534-538` issues N+1 DB calls (one `heartbeat_metric_snapshot` per host) — `Cost::Moderate` classification was dishonest; reclassified to `Expensive`.
 - The schema-coverage fence test (`src/mcp/tools_tests.rs:226-248`) auto-covers new actions through its `ACTION_SPECS` iteration — no payload-mapping change was needed for `fleet_state` once added to `ACTION_SPECS`.
-- `docs/INVENTORY.md` + `docs/mcp/SCHEMA.md` + `docs/mcp/TOOLS.md` + `docs/mcp/TESTS.md` + `plugins/syslog/skills/syslog/SKILL.md` + 3 smoke-test scripts all need a row per registered action (enforced by `public_action_references_cover_schema_registry` fence) — caught only at `just test`, not at `cargo check`.
+- `docs/INVENTORY.md` + `docs/mcp/SCHEMA.md` + `docs/mcp/TOOLS.md` + `docs/mcp/TESTS.md` + `plugins/syslog/skills/cortex/SKILL.md` + 3 smoke-test scripts all need a row per registered action (enforced by `public_action_references_cover_schema_registry` fence) — caught only at `just test`, not at `cargo check`.
 
 ## Technical Decisions
 
@@ -65,7 +65,7 @@ Performed a three-surface (CLI / HTTP API / MCP) parity audit, discovered five r
 | `src/cli/dispatch_ai.rs` | Removed 3 stale `bail!` guards; wrapped HTTP arms in `http_or_cancel` |
 | `src/app.rs` | Exported new request types needed by api.rs |
 | `docs/mcp/SCHEMA.md` | Bumped action count 41 → 42; added `fleet_state` row |
-| `docs/INVENTORY.md`, `docs/mcp/TOOLS.md`, `docs/mcp/TESTS.md`, `plugins/syslog/skills/syslog/SKILL.md` | Added `fleet_state` row (fence requirement) |
+| `docs/INVENTORY.md`, `docs/mcp/TOOLS.md`, `docs/mcp/TESTS.md`, `plugins/syslog/skills/cortex/SKILL.md` | Added `fleet_state` row (fence requirement) |
 | `scripts/smoke-test.sh`, `tests/test_live.sh`, `tests/mcporter/test-tools.sh` | Added `fleet_state` action to inventory lists |
 | `docs/superpowers/plans/2026-05-27-api-route-parity-completion.md` | The implementation plan itself |
 

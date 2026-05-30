@@ -800,21 +800,21 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
     assert!(response["result"].is_object(), "response: {response}");
 }
 
-/// `AuthPolicy::Mounted` + valid AuthContext with `syslog:read` → read
+/// `AuthPolicy::Mounted` + valid AuthContext with `cortex:read` → read
 /// actions permitted, but admin actions (ack_error, unack_error, notifications_test)
 /// are denied.
 #[tokio::test]
 async fn mounted_policy_with_read_scope_permits_read_actions() {
     let (state, pool, _dir) = mounted_state();
     seed_auth_action_log(&pool);
-    let auth = auth_ctx_with_scopes(vec!["syslog:read"]);
+    let auth = auth_ctx_with_scopes(vec!["cortex:read"]);
     let router = rmcp_router_with_auth(state, auth);
 
     for action in actions::ACTION_SPECS
         .iter()
         .map(|s| s.name)
         .filter(|action| {
-            *action != "help" && actions::required_scope_for(action) != Some("syslog:admin")
+            *action != "help" && actions::required_scope_for(action) != Some("cortex:admin")
         })
     {
         let (status, response) = post_rmcp(
@@ -838,11 +838,11 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
         );
     }
 
-    // Admin actions must be denied for syslog:read-only callers.
+    // Admin actions must be denied for cortex:read-only callers.
     for action in actions::ACTION_SPECS
         .iter()
         .map(|s| s.name)
-        .filter(|a| actions::required_scope_for(a) == Some("syslog:admin"))
+        .filter(|a| actions::required_scope_for(a) == Some("cortex:admin"))
     {
         let (status, response) = post_rmcp(
             router.clone(),
@@ -860,7 +860,7 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
         );
         let msg = response["error"]["message"].as_str().unwrap_or("");
         assert!(
-            msg.contains("requires scope: syslog:admin"),
+            msg.contains("requires scope: cortex:admin"),
             "denial message should reference admin scope; got: {msg}"
         );
     }
@@ -872,25 +872,25 @@ fn public_read_actions_require_syslog_read_scope() {
         .iter()
         .map(|s| s.name)
         .filter(|action| {
-            *action != "help" && actions::required_scope_for(action) != Some("syslog:admin")
+            *action != "help" && actions::required_scope_for(action) != Some("cortex:admin")
         })
     {
         assert_eq!(
             required_scope_for(action),
-            Some("syslog:read"),
-            "action={action} must require syslog:read"
+            Some("cortex:read"),
+            "action={action} must require cortex:read"
         );
     }
-    // Admin actions require syslog:admin, not syslog:read
+    // Admin actions require cortex:admin, not cortex:read
     for action in actions::ACTION_SPECS
         .iter()
         .map(|s| s.name)
-        .filter(|a| actions::required_scope_for(a) == Some("syslog:admin"))
+        .filter(|a| actions::required_scope_for(a) == Some("cortex:admin"))
     {
         assert_eq!(
             required_scope_for(action),
-            Some("syslog:admin"),
-            "admin action={action} must require syslog:admin"
+            Some("cortex:admin"),
+            "admin action={action} must require cortex:admin"
         );
     }
     assert_eq!(required_scope_for("help"), None);
@@ -902,23 +902,23 @@ fn public_read_actions_require_syslog_read_scope() {
 
 #[test]
 fn sessions_action_requires_read_scope() {
-    assert_eq!(required_scope_for("sessions"), Some("syslog:read"));
+    assert_eq!(required_scope_for("sessions"), Some("cortex:read"));
 }
 
 #[test]
 fn compose_actions_require_read_scope() {
-    assert_eq!(required_scope_for("compose_status"), Some("syslog:read"));
-    assert_eq!(required_scope_for("compose_doctor"), Some("syslog:read"));
+    assert_eq!(required_scope_for("compose_status"), Some("cortex:read"));
+    assert_eq!(required_scope_for("compose_doctor"), Some("cortex:read"));
 }
 
-/// `AuthPolicy::Mounted` + AuthContext with `syslog:admin` (superset) → read
-/// actions permitted because `syslog:admin` implies `syslog:read`.
+/// `AuthPolicy::Mounted` + AuthContext with `cortex:admin` (superset) → read
+/// actions permitted because `cortex:admin` implies `cortex:read`.
 #[tokio::test]
 async fn mounted_policy_with_admin_scope_permits_read_actions() {
     let (state, _pool, _dir) = mounted_state();
-    // syslog:admin is a superset of syslog:read — check_scope treats it as
-    // satisfying any syslog:read requirement (admin ⊃ read superset semantics).
-    let auth = auth_ctx_with_scopes(vec!["syslog:admin"]);
+    // cortex:admin is a superset of cortex:read — check_scope treats it as
+    // satisfying any cortex:read requirement (admin ⊃ read superset semantics).
+    let auth = auth_ctx_with_scopes(vec!["cortex:admin"]);
     let router = rmcp_router_with_auth(state, auth);
 
     let (status, response) = post_rmcp(
@@ -931,10 +931,10 @@ async fn mounted_policy_with_admin_scope_permits_read_actions() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    // syslog:admin implies syslog:read — must be permitted.
+    // cortex:admin implies cortex:read — must be permitted.
     assert_ne!(
         response["error"]["code"], -32600,
-        "syslog:admin should satisfy syslog:read requirement; response: {response}"
+        "cortex:admin should satisfy cortex:read requirement; response: {response}"
     );
     assert!(
         response["result"].is_object(),
@@ -946,7 +946,7 @@ async fn mounted_policy_with_admin_scope_permits_read_actions() {
 #[tokio::test]
 async fn mounted_policy_with_both_scopes_permits_all_actions() {
     let (state, _pool, _dir) = mounted_state();
-    let auth = auth_ctx_with_scopes(vec!["syslog:read", "syslog:admin"]);
+    let auth = auth_ctx_with_scopes(vec!["cortex:read", "cortex:admin"]);
     let router = rmcp_router_with_auth(state, auth);
 
     let (status, response) = post_rmcp(
@@ -970,7 +970,7 @@ async fn mounted_admin_actions_record_per_request_subject_actor() {
 
     let alice_router = rmcp_router_with_auth(
         state.clone(),
-        auth_ctx("alice-subject", vec!["syslog:admin"], None),
+        auth_ctx("alice-subject", vec!["cortex:admin"], None),
     );
     let (status, response) = post_rmcp(
         alice_router,
@@ -994,7 +994,7 @@ async fn mounted_admin_actions_record_per_request_subject_actor() {
 
     let bob_router = rmcp_router_with_auth(
         state,
-        auth_ctx("bob-subject", vec!["syslog:admin"], Some("bob@example.com")),
+        auth_ctx("bob-subject", vec!["cortex:admin"], Some("bob@example.com")),
     );
     let (status, response) = post_rmcp(
         bob_router,
@@ -1067,11 +1067,11 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
             "action={action} with empty scopes should be denied; response: {response}"
         );
         let msg = response["error"]["message"].as_str().unwrap_or("");
-        // Read actions require syslog:read; admin actions require syslog:admin.
-        let expected_scope = if actions::required_scope_for(action) == Some("syslog:admin") {
-            "syslog:admin"
+        // Read actions require cortex:read; admin actions require cortex:admin.
+        let expected_scope = if actions::required_scope_for(action) == Some("cortex:admin") {
+            "cortex:admin"
         } else {
-            "syslog:read"
+            "cortex:read"
         };
         assert!(
             msg.contains(&format!("requires scope: {expected_scope}")),
@@ -1211,7 +1211,7 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
     );
 }
 
-/// `AuthPolicy::Mounted` + valid AuthContext with `syslog:read` + `tools/list`
+/// `AuthPolicy::Mounted` + valid AuthContext with `cortex:read` + `tools/list`
 /// → capability discovery succeeds (AuthContext present, no scope required).
 #[tokio::test]
 async fn mounted_policy_with_auth_context_permits_tools_list() {
@@ -1434,12 +1434,12 @@ async fn scope_check_fires_before_db_execution() {
 /// — a scope that is never granted — so unknown actions are rejected at the
 /// auth layer rather than falling through to `execute_tool`.
 /// This prevents future actions added to dispatch but not to the scope map
-/// from being silently accessible with only `syslog:read`.
+/// from being silently accessible with only `cortex:read`.
 #[tokio::test]
 async fn unknown_action_is_denied_by_sentinel_scope() {
     let (state, _pool, _dir) = mounted_state();
-    // syslog:read + syslog:admin — both real scopes, but neither matches __deny__
-    let auth = auth_ctx_with_scopes(vec!["syslog:read", "syslog:admin"]);
+    // cortex:read + cortex:admin — both real scopes, but neither matches __deny__
+    let auth = auth_ctx_with_scopes(vec!["cortex:read", "cortex:admin"]);
     let router = rmcp_router_with_auth(state, auth);
 
     let (status, response) = post_rmcp(

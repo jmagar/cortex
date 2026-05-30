@@ -17,18 +17,18 @@ const GEMINI_AUTH_FILES: &[&str] = &[
     "google_accounts.json",
 ];
 
-pub(crate) const SKILL_NAME: &str = "syslog-frustration-assessment";
+pub(crate) const SKILL_NAME: &str = "cortex-frustration-assessment";
 pub(crate) const SKILL_MD: &str =
-    include_str!("../plugins/cortex/skills/syslog-frustration-assessment/SKILL.md");
+    include_str!("../plugins/cortex/skills/cortex-frustration-assessment/SKILL.md");
 
 pub(crate) const ASSESSMENT_SYSTEM_PROMPT: &str = concat!(
-    "Use the syslog-frustration-assessment skill to assess the supplied bounded ",
+    "Use the cortex-frustration-assessment skill to assess the supplied bounded ",
     "syslog abuse incident evidence bundle.\n\n",
     "Return the assessment as Markdown in the assistant response. Do not write ",
     "files, create plans, or persist artifacts.\n\n",
     "You must also follow these instructions directly if native skill activation ",
     "is unavailable:\n\n",
-    include_str!("../plugins/cortex/skills/syslog-frustration-assessment/SKILL.md"),
+    include_str!("../plugins/cortex/skills/cortex-frustration-assessment/SKILL.md"),
 );
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -287,7 +287,7 @@ fn write_assessment_skill(gemini_dir: &Path) -> Result<()> {
     let skill_dir = gemini_dir.join("skills").join(SKILL_NAME);
     fs::create_dir_all(&skill_dir).context("failed to create Gemini skill directory")?;
     fs::write(skill_dir.join("SKILL.md"), SKILL_MD)
-        .context("failed to write syslog-frustration-assessment skill")?;
+        .context("failed to write cortex-frustration-assessment skill")?;
     Ok(())
 }
 
@@ -608,7 +608,7 @@ mod tests {
     #[test]
     fn assessment_prompt_references_skill_and_wraps_evidence() {
         let prompt = build_assessment_prompt(r#"{"incident_id":"inc-1"}"#);
-        assert!(prompt.contains("syslog-frustration-assessment"));
+        assert!(prompt.contains("cortex-frustration-assessment"));
         assert!(prompt.contains("Do not write files"));
         assert!(prompt.contains("Use this skill after running"));
         assert!(prompt.contains("<untrusted-evidence"));

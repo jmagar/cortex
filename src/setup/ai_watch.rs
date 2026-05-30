@@ -25,7 +25,7 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
     let watch_env_path = config_dir.join("ai-watch.env");
     let state_dir = user_home.join(".local/state/cortex");
     let systemd_dir = user_home.join(".config/systemd/user");
-    let service_path = systemd_dir.join("syslog-ai-watch.service");
+    let service_path = systemd_dir.join("cortex-ai-watch.service");
     let mut phases = Vec::new();
 
     match action {
@@ -68,32 +68,32 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
             phases.push(systemctl_user_phase(&[
                 "disable",
                 "--now",
-                "syslog-ai-index.timer",
+                "cortex-ai-index.timer",
             ]));
             phases.push(ai_index_timer_disabled_phase());
             phases.push(systemctl_user_phase(&[
                 "reset-failed",
-                "syslog-ai-watch.service",
+                "cortex-ai-watch.service",
             ]));
             phases.push(super::systemd::systemctl_user_required_phase(&[
                 "enable",
                 "--now",
-                "syslog-ai-watch.service",
+                "cortex-ai-watch.service",
             ]));
             phases.push(systemctl_user_required_named_phase(
                 AI_WATCH_SERVICE_ENABLED_PHASE,
-                &["is-enabled", "syslog-ai-watch.service"],
+                &["is-enabled", "cortex-ai-watch.service"],
             ));
             phases.push(systemctl_user_required_named_phase(
                 AI_WATCH_SERVICE_ACTIVE_PHASE,
-                &["is-active", "syslog-ai-watch.service"],
+                &["is-active", "cortex-ai-watch.service"],
             ));
         }
         AiWatchServiceAction::Remove => {
             phases.push(systemctl_user_phase(&[
                 "disable",
                 "--now",
-                "syslog-ai-watch.service",
+                "cortex-ai-watch.service",
             ]));
             phases.push(remove_ai_watch_service_files(
                 &watch_env_path,
@@ -126,11 +126,11 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
             phases.push(ai_index_timer_disabled_phase());
             phases.push(systemctl_user_required_named_phase(
                 AI_WATCH_SERVICE_ENABLED_PHASE,
-                &["is-enabled", "syslog-ai-watch.service"],
+                &["is-enabled", "cortex-ai-watch.service"],
             ));
             phases.push(systemctl_user_required_named_phase(
                 AI_WATCH_SERVICE_ACTIVE_PHASE,
-                &["is-active", "syslog-ai-watch.service"],
+                &["is-active", "cortex-ai-watch.service"],
             ));
         }
     }
@@ -151,20 +151,20 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
 
 pub(super) fn ai_index_timer_disabled_phase() -> SetupPhase {
     let timer = PhaseTimer::start("ai-index-timer-disabled");
-    let active = systemctl_user_state("is-active", "syslog-ai-index.timer");
-    let enabled = systemctl_user_state("is-enabled", "syslog-ai-index.timer");
+    let active = systemctl_user_state("is-active", "cortex-ai-index.timer");
+    let enabled = systemctl_user_state("is-enabled", "cortex-ai-index.timer");
     if active.as_deref() == Some("active") || enabled.as_deref() == Some("enabled") {
         return timer.finish(
             SetupStatus::Error,
             format!(
-                "syslog-ai-index.timer still active/enabled (active={active:?}, enabled={enabled:?})"
+                "cortex-ai-index.timer still active/enabled (active={active:?}, enabled={enabled:?})"
             ),
         );
     }
     timer.finish(
         SetupStatus::Ok,
         format!(
-            "syslog-ai-index.timer inactive or absent (active={active:?}, enabled={enabled:?})"
+            "cortex-ai-index.timer inactive or absent (active={active:?}, enabled={enabled:?})"
         ),
     )
 }

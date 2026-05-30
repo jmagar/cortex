@@ -41,8 +41,8 @@ use crate::scanner;
 const DB_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 const SLOW_DB_MS: u128 = 500;
 const CORTEX_OWNED_USER_SERVICES: &[&str] = &[
-    "syslog-ai-watch.service",
-    "syslog-ai-index.service",
+    "cortex-ai-watch.service",
+    "cortex-ai-index.service",
     "cortex.service",
 ];
 

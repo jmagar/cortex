@@ -265,8 +265,8 @@ pub struct McpConfig {
     #[serde(default)]
     pub auth: AuthConfig,
     /// When `true`, the static bearer token (`CORTEX_TOKEN`) is granted
-    /// both `syslog:read` and `syslog:admin` scopes. Default is `false` —
-    /// static tokens receive `syslog:read` only, matching OAuth read-only
+    /// both `cortex:read` and `cortex:admin` scopes. Default is `false` —
+    /// static tokens receive `cortex:read` only, matching OAuth read-only
     /// tokens. Set `CORTEX_STATIC_TOKEN_ADMIN=true` or the TOML field
     /// `[mcp] static_token_is_admin = true` to opt in to admin grant.
     ///

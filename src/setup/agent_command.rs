@@ -19,7 +19,7 @@ pub async fn run_agent_command_setup(action: AgentCommandAction) -> io::Result<S
     let user_home = super::user_home_dir()?;
     let state_dir = user_home.join(".local/state/cortex");
     let spool_path = state_dir.join("agent-command.jsonl");
-    let wrapper_path = user_home.join(".local/bin/syslog-agent-command-wrapper");
+    let wrapper_path = user_home.join(".local/bin/cortex-agent-command-wrapper");
     let mut phases = Vec::new();
 
     match action {

@@ -484,7 +484,7 @@ fn require_auth_context<'a>(
 
 /// Enforce that `auth` carries `required_scope`.
 ///
-/// `syslog:admin` is treated as a superset of `syslog:read` — a caller with
+/// `cortex:admin` is treated as a superset of `cortex:read` — a caller with
 /// admin access implicitly satisfies any read-level scope requirement.
 ///
 /// Logs a warning with subject + action on denial (audit trail).
@@ -494,7 +494,7 @@ fn check_scope(auth: &AuthContext, required_scope: &str, action: &str) -> Result
     let satisfied = auth
         .scopes
         .iter()
-        .any(|s| s == required_scope || (required_scope == "syslog:read" && s == "syslog:admin"));
+        .any(|s| s == required_scope || (required_scope == "cortex:read" && s == "cortex:admin"));
     if satisfied {
         return Ok(());
     }

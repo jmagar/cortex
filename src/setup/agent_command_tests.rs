@@ -67,7 +67,7 @@ fn agent_command_env_phase_accepts_claude_settings_json() {
     let home = tempfile::tempdir().unwrap();
     let claude_dir = home.path().join(".claude");
     std::fs::create_dir(&claude_dir).unwrap();
-    let wrapper = home.path().join(".local/bin/syslog-agent-command-wrapper");
+    let wrapper = home.path().join(".local/bin/cortex-agent-command-wrapper");
     std::fs::write(
         claude_dir.join("settings.json"),
         format!(

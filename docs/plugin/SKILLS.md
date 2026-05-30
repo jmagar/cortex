@@ -16,9 +16,9 @@ plugins/
   skills/
     syslog/
       SKILL.md           # Skill definition with tool reference and workflows
-    syslog-dr/
+    cortex-dr/
       SKILL.md           # Full deployment diagnostic workflow
-    syslog-deploy-dropins/
+    cortex-deploy-dropins/
       SKILL.md           # Fleet rsyslog drop-in deployment workflow
     ...
 ```
@@ -28,17 +28,17 @@ plugins/
 | Skill | Purpose |
 | --- | --- |
 | `syslog` | Client-facing documentation for the syslog MCP tool and its action dispatch. |
-| `syslog-troubleshoot` | Narrow troubleshooting decision tree for MCP, ingest, service, and missing-host issues. |
-| `syslog-report` | Generate actionable 24-hour markdown reports from syslog MCP evidence. |
-| `syslog-dr` | Comprehensive deployment health check, including runtime freshness. |
-| `syslog-deploy-dropins` | Deploy rsyslog forwarding drop-ins to fleet hosts over SSH. |
-| `syslog-redeploy` | Re-run the plugin setup hook and verify health plus runtime freshness. |
-| `syslog-logs` | Tail or follow cortex service logs from Docker Compose. |
-| `syslog-version-check` | Check whether the running container matches the local Compose image. `--pull` checks after refreshing the local image; without it, Docker checks only the local cache. |
+| `cortex-troubleshoot` | Narrow troubleshooting decision tree for MCP, ingest, service, and missing-host issues. |
+| `cortex-report` | Generate actionable 24-hour markdown reports from syslog MCP evidence. |
+| `cortex-dr` | Comprehensive deployment health check, including runtime freshness. |
+| `cortex-deploy-dropins` | Deploy rsyslog forwarding drop-ins to fleet hosts over SSH. |
+| `cortex-redeploy` | Re-run the plugin setup hook and verify health plus runtime freshness. |
+| `cortex-logs` | Tail or follow cortex service logs from Docker Compose. |
+| `cortex-version-check` | Check whether the running container matches the local Compose image. `--pull` checks after refreshing the local image; without it, Docker checks only the local cache. |
 
 ### Contents
 
-`plugins/syslog/skills/syslog/SKILL.md` includes:
+`plugins/syslog/skills/cortex/SKILL.md` includes:
 - Tool inventory (1 tool: `syslog`, with the current MCP action set described)
 - Parameter reference for each tool
 - FTS5 query syntax guide

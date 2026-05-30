@@ -1058,8 +1058,8 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
     let auth_config = lab_auth::config::AuthConfigBuilder::new()
         .env_prefix("CORTEX")
         .session_cookie_name("cortex_session")
-        .scopes_supported(vec!["syslog:read".into(), "syslog:admin".into()])
-        .default_scope("syslog:read")
+        .scopes_supported(vec!["cortex:read".into(), "cortex:admin".into()])
+        .default_scope("cortex:read")
         .resource_path("/mcp")
         // Honour `static_token_is_admin` in OAuth+bearer hybrid mode too.
         // The same flag that gates `build_auth_layer` (bearer-only) must also
@@ -1067,9 +1067,9 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
         // OAuth path. Without this, setting `CORTEX_STATIC_TOKEN_ADMIN=false`
         // (the default) would be a no-op in OAuth+bearer hybrid deployments.
         .static_token_scopes(if config.mcp.static_token_is_admin {
-            vec!["syslog:read".into(), "syslog:admin".into()]
+            vec!["cortex:read".into(), "cortex:admin".into()]
         } else {
-            vec!["syslog:read".into()]
+            vec!["cortex:read".into()]
         })
         .disable_static_token_with_oauth(auth.disable_static_token_with_oauth)
         .enable_dynamic_registration(false)

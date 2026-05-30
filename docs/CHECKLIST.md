@@ -18,7 +18,7 @@ Pre-release and quality checklist. Complete all items before tagging a release.
 
 - [ ] `CLAUDE.md` is current and matches repo structure
 - [ ] `README.md` has up-to-date tool reference and environment variable table
-- [ ] `skills/syslog/SKILL.md` has correct frontmatter and tool descriptions
+- [ ] `skills/cortex/SKILL.md` has correct frontmatter and tool descriptions
 - [ ] Setup instructions work from a clean clone
 
 ## Security

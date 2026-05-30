@@ -137,7 +137,7 @@ pub struct ApiState {
     /// (eng-review C2) and the test-isolation rationale.
     pub maintenance_permit: Arc<Semaphore>,
     /// When `true`, the static bearer token (`CORTEX_TOKEN`) is granted
-    /// `syslog:admin` scope in addition to `syslog:read`. Mirrors
+    /// `cortex:admin` scope in addition to `cortex:read`. Mirrors
     /// [`crate::config::McpConfig::static_token_is_admin`]. Default: `false`.
     pub static_token_is_admin: bool,
 }

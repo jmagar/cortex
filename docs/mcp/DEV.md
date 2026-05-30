@@ -26,7 +26,7 @@ cortex/
   tests/                 # Live integration tests
   scripts/               # Smoke tests, backups, plugin checks
   hooks/                 # Claude Code hooks (sync-env and related session checks)
-  skills/syslog/         # Skill definition (SKILL.md)
+  skills/cortex/         # Skill definition (SKILL.md)
   .claude-plugin/        # Claude Code plugin manifest
   .codex-plugin/         # Codex CLI plugin manifest
   gemini-extension.json  # Gemini CLI manifest

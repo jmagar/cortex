@@ -114,10 +114,10 @@ pub struct AppState {
 /// bearer-only path grants the configured scopes for the static token.
 ///
 /// # Static token admin opt-in
-/// By default, static bearer tokens receive only `syslog:read`. Set
+/// By default, static bearer tokens receive only `cortex:read`. Set
 /// `static_token_is_admin = true` (via `CORTEX_STATIC_TOKEN_ADMIN=true`
 /// or `[mcp] static_token_is_admin = true` in config.toml) to also grant
-/// `syslog:admin`. OAuth tokens are unaffected — their scopes come from the
+/// `cortex:admin`. OAuth tokens are unaffected — their scopes come from the
 /// JWT claims.
 pub fn build_auth_layer(
     policy: &AuthPolicy,
@@ -132,9 +132,9 @@ pub fn build_auth_layer(
             // Opt-in: set CORTEX_STATIC_TOKEN_ADMIN=true to also grant admin.
             // OAuth tokens gate admin via the scope claims in the JWT.
             let static_scopes: Vec<String> = if static_token_is_admin {
-                vec!["syslog:read".to_string(), "syslog:admin".to_string()]
+                vec!["cortex:read".to_string(), "cortex:admin".to_string()]
             } else {
-                vec!["syslog:read".to_string()]
+                vec!["cortex:read".to_string()]
             };
             Some(
                 AuthLayer::new()

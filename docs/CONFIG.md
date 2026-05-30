@@ -138,7 +138,7 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 
 `syslog ai assess` is local-only and starts the Gemini CLI in an isolated
 temporary HOME. It copies Gemini auth files from the configured source HOME,
-installs the bundled `syslog-frustration-assessment` skill into that isolated
+installs the bundled `cortex-frustration-assessment` skill into that isolated
 HOME, disables MCP servers/hooks/context-file loading, and parses Gemini's
 `stream-json` output so only assistant text is emitted.
 

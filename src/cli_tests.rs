@@ -70,7 +70,7 @@ fn parse_service_logs_accepts_time_range_and_json() {
     let parsed = CliCommand::parse(strings(&[
         "service",
         "logs",
-        "syslog-ai-watch",
+        "cortex-ai-watch",
         "--from",
         "2026-05-19 19:55:00",
         "--to=2026-05-19 20:05:00",
@@ -83,7 +83,7 @@ fn parse_service_logs_accepts_time_range_and_json() {
     assert_eq!(
         parsed,
         CliCommand::Service(ServiceCommand::Logs(ServiceLogsArgs {
-            service: "syslog-ai-watch".into(),
+            service: "cortex-ai-watch".into(),
             from: Some("2026-05-19 19:55:00".into()),
             to: Some("2026-05-19 20:05:00".into()),
             tail: Some(50),
@@ -101,7 +101,7 @@ fn parse_incident_accepts_window_service_and_json() {
         "--minutes",
         "10",
         "--service",
-        "syslog-ai-watch",
+        "cortex-ai-watch",
         "--host",
         "dookie",
         "--limit",
@@ -115,7 +115,7 @@ fn parse_incident_accepts_window_service_and_json() {
         CliCommand::Incident(IncidentArgs {
             around: "2026-05-20T04:00:00Z".into(),
             minutes: Some(10),
-            service: Some("syslog-ai-watch".into()),
+            service: Some("cortex-ai-watch".into()),
             hostname: Some("dookie".into()),
             limit: Some(25),
             json: true,
@@ -805,7 +805,7 @@ fn ai_watch_coordination_skipped_when_unit_missing() {
     // test cannot leak CORTEX_AI_WATCH_UNIT into peers.
     let _g = EnvVarGuard::set(
         "CORTEX_AI_WATCH_UNIT",
-        "syslog-ai-watch-test-missing-9f3e.service",
+        "cortex-ai-watch-test-missing-9f3e.service",
     );
     let env_path = std::path::PathBuf::from("/nonexistent-env-9f3e");
     let mut cache = DoctorCache::default();

@@ -15,10 +15,10 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
     let compose_dir = home.join("compose");
     let data_dir = home.join("data");
     let user_home = super::user_home_dir()?;
-    let bin_path = user_home.join(".local/bin/syslog-ai-index");
+    let bin_path = user_home.join(".local/bin/cortex-ai-index");
     let systemd_dir = user_home.join(".config/systemd/user");
-    let service_path = systemd_dir.join("syslog-ai-index.service");
-    let timer_path = systemd_dir.join("syslog-ai-index.timer");
+    let service_path = systemd_dir.join("cortex-ai-index.service");
+    let timer_path = systemd_dir.join("cortex-ai-index.timer");
     let mut phases = Vec::new();
 
     match action {
@@ -33,14 +33,14 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
             phases.push(systemctl_user_required_phase(&[
                 "enable",
                 "--now",
-                "syslog-ai-index.timer",
+                "cortex-ai-index.timer",
             ]));
         }
         AiIndexTimerAction::Remove => {
             phases.push(systemctl_user_phase(&[
                 "disable",
                 "--now",
-                "syslog-ai-index.timer",
+                "cortex-ai-index.timer",
             ]));
             phases.push(remove_ai_index_timer_files(
                 &bin_path,
@@ -67,7 +67,7 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
             ));
             phases.push(systemctl_user_phase(&[
                 "is-enabled",
-                "syslog-ai-index.timer",
+                "cortex-ai-index.timer",
             ]));
         }
     }

@@ -1,0 +1,9 @@
+interface:
+  display_name: "Syslog Troubleshoot"
+  short_description: "Diagnose cortex failures"
+  default_prompt: "Use $cortex-troubleshoot to diagnose why cortex is not receiving logs from a host."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "syslog"
+      description: "cortex MCP server for hosts, stats, and recent log evidence"

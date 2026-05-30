@@ -40,7 +40,7 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://syslog.tootie.tv/mcp"
+      "url": "https://cortex.tootie.tv/mcp"
     }
   ]
 }

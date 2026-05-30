@@ -385,7 +385,7 @@ Docs to update:
 - `docs/mcp/SCHEMA.md`
 - `docs/mcp/TESTS.md`
 - `docs/expansion.md` if it still describes the feature as future work.
-- `plugins/syslog/skills/syslog/SKILL.md` if it references the session/action surface.
+- `plugins/syslog/skills/cortex/SKILL.md` if it references the session/action surface.
 
 Docs must include:
 

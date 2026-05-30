@@ -13,7 +13,7 @@ use super::{
     HeartbeatAgentAction, PhaseTimer, SetupPhase, SetupReport, SetupStatus,
 };
 
-const UNIT_NAME: &str = "syslog-heartbeat-agent.service";
+const UNIT_NAME: &str = "cortex-heartbeat-agent.service";
 
 pub async fn run_heartbeat_agent_setup(action: HeartbeatAgentAction) -> io::Result<SetupReport> {
     let started = Instant::now();

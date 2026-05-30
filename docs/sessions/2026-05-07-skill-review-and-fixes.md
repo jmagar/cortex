@@ -50,7 +50,7 @@ Dispatched the `plugin-dev:skill-reviewer` agent to review all 9 syslog plugin s
 
 | File | Change |
 |---|---|
-| `plugins/skills/syslog/SKILL.md` | Added `# /health is unauthenticated` comment to health check curl |
+| `plugins/skills/cortex/SKILL.md` | Added `# /health is unauthenticated` comment to health check curl |
 | `plugins/skills/syslog-redeploy/SKILL.md` | Replaced `${user_config.mcp_port:-3100}` with `$CLAUDE_PLUGIN_OPTION_SERVER_URL`; added 60s Docker starting timeout note |
 | `plugins/skills/syslog-deploy-dropins/SKILL.md` | Replaced all `${user_config.X}` with env vars; added SSH failure behavior (skip+FAILED); added syslog-ng to skip list |
 | `plugins/skills/syslog-cutover/SKILL.md` | Replaced `${user_config.use_docker/data_dir}` with env vars; removed `syslog@jmagar-lab` fallback; added 90s health timeout |

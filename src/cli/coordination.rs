@@ -315,7 +315,7 @@ pub(crate) fn data_mount_phase_cached(
     }
 }
 
-/// Verify the host systemd `syslog-ai-watch.service`'s effective
+/// Verify the host systemd `cortex-ai-watch.service`'s effective
 /// `CORTEX_DB_PATH` resolves to the same canonical host path as the
 /// container's `/data` bind source. A mismatch means the host ai-watch
 /// service is writing checkpoints to a DB the container will never read.
@@ -334,7 +334,7 @@ pub(crate) fn ai_watch_coordination_phase(
 ) -> SetupPhase {
     let name = "ai-watch-coord";
     let unit = std::env::var("CORTEX_AI_WATCH_UNIT")
-        .unwrap_or_else(|_| "syslog-ai-watch.service".to_string());
+        .unwrap_or_else(|_| "cortex-ai-watch.service".to_string());
     let container = std::env::var("CORTEX_CONTAINER_NAME").unwrap_or_else(|_| "cortex".to_string());
 
     let env = match cache.systemctl_env(&unit) {

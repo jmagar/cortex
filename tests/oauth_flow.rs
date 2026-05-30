@@ -82,21 +82,21 @@ fn stats_call() -> serde_json::Value {
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-/// Valid JWT with `syslog:read` → `tools/call action=stats` succeeds (200).
+/// Valid JWT with `cortex:read` → `tools/call action=stats` succeeds (200).
 #[tokio::test]
 async fn valid_jwt_with_read_scope_allows_stats() {
     let dir = TempDir::new().unwrap();
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
     let token = auth_state
         .signing_keys
-        .issue_access_token(&make_claims(&auth_state, "syslog:read", 60))
+        .issue_access_token(&make_claims(&auth_state, "cortex:read", 60))
         .unwrap();
 
     let (status, value) = post_mcp(router(state), "tools/call", Some(stats_call()), &token).await;
     assert_eq!(
         status,
         StatusCode::OK,
-        "valid JWT with syslog:read should succeed"
+        "valid JWT with cortex:read should succeed"
     );
     assert!(
         value["result"]["content"][0]["text"]
@@ -107,21 +107,21 @@ async fn valid_jwt_with_read_scope_allows_stats() {
     );
 }
 
-/// `syslog:admin` implicitly satisfies `syslog:read` — stats must succeed.
+/// `cortex:admin` implicitly satisfies `cortex:read` — stats must succeed.
 #[tokio::test]
 async fn valid_jwt_with_admin_scope_satisfies_read() {
     let dir = TempDir::new().unwrap();
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
     let token = auth_state
         .signing_keys
-        .issue_access_token(&make_claims(&auth_state, "syslog:admin", 60))
+        .issue_access_token(&make_claims(&auth_state, "cortex:admin", 60))
         .unwrap();
 
     let (status, _) = post_mcp(router(state), "tools/call", Some(stats_call()), &token).await;
     assert_eq!(
         status,
         StatusCode::OK,
-        "syslog:admin must implicitly satisfy syslog:read"
+        "cortex:admin must implicitly satisfy cortex:read"
     );
 }
 
@@ -133,7 +133,7 @@ async fn expired_jwt_returns_401() {
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
     let token = auth_state
         .signing_keys
-        .issue_access_token(&make_claims(&auth_state, "syslog:read", -120))
+        .issue_access_token(&make_claims(&auth_state, "cortex:read", -120))
         .unwrap();
 
     let (status, _) = post_mcp(router(state), "tools/call", Some(stats_call()), &token).await;
@@ -149,7 +149,7 @@ async fn expired_jwt_returns_401() {
 async fn jwt_with_wrong_issuer_returns_401() {
     let dir = TempDir::new().unwrap();
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
-    let mut bad_claims = make_claims(&auth_state, "syslog:read", 60);
+    let mut bad_claims = make_claims(&auth_state, "cortex:read", 60);
     bad_claims.iss = "https://attacker.example.com".to_string();
     let token = auth_state
         .signing_keys
@@ -201,7 +201,7 @@ async fn tools_list_succeeds_with_valid_jwt() {
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
     let token = auth_state
         .signing_keys
-        .issue_access_token(&make_claims(&auth_state, "syslog:read", 60))
+        .issue_access_token(&make_claims(&auth_state, "cortex:read", 60))
         .unwrap();
 
     let (status, value) = post_mcp(router(state), "tools/list", None, &token).await;
@@ -232,7 +232,7 @@ async fn jwt_signed_with_wrong_key_returns_401() {
     // separate TempDir — same config, different key material.
     let dir2 = TempDir::new().unwrap();
     let (_, auth_state2) = testing::oauth_state_with_auth_state(dir2.path()).await;
-    let claims = make_claims(&auth_state, "syslog:read", 60); // valid iss/aud for server
+    let claims = make_claims(&auth_state, "cortex:read", 60); // valid iss/aud for server
     let token = auth_state2
         .signing_keys
         .issue_access_token(&claims) // signed with wrong key
@@ -254,7 +254,7 @@ async fn jwt_signed_with_wrong_key_returns_401() {
 async fn jwt_with_wrong_audience_returns_401() {
     let dir = TempDir::new().unwrap();
     let (state, auth_state) = testing::oauth_state_with_auth_state(dir.path()).await;
-    let mut bad_claims = make_claims(&auth_state, "syslog:read", 60);
+    let mut bad_claims = make_claims(&auth_state, "cortex:read", 60);
     bad_claims.aud = "https://other-service.example.com/mcp".to_string();
     let token = auth_state
         .signing_keys

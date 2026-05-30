@@ -427,7 +427,7 @@ fn private_and_executable_writers_reject_symlinks() {
 fn ai_watch_service_content_phase_detects_stale_unit() {
     let dir = tempfile::tempdir().unwrap();
     let env_path = dir.path().join("ai-watch.env");
-    let service_path = dir.path().join("syslog-ai-watch.service");
+    let service_path = dir.path().join("cortex-ai-watch.service");
     let state_dir = dir.path().join("state");
     let db_path = dir.path().join("data/cortex.db");
     let user_home = dir.path().join("home");

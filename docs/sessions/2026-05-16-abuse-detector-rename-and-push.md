@@ -53,7 +53,7 @@ The user asked to rename the AI transcript detector terminology from cuss/profan
 
 - `CHANGELOG.md`, `Cargo.toml`, `Cargo.lock`, `server.json`: version `0.25.2` and release notes.
 - `README.md`, `docs/CLI.md`, `docs/INVENTORY.md`, `docs/mcp/SCHEMA.md`, `docs/mcp/TESTS.md`, `docs/mcp/TOOLS.md`: public docs for the abuse action and CLI.
-- `plugins/skills/syslog/SKILL.md`: plugin skill documentation terminology.
+- `plugins/skills/cortex/SKILL.md`: plugin skill documentation terminology.
 - `scripts/smoke-test.sh`, `tests/mcporter/test-tools.sh`, `tests/test_live.sh`: smoke and live test action names.
 - `src/app.rs`, `src/app/models.rs`, `src/app/service.rs`, `src/db.rs`, `src/db/models.rs`, `src/db/queries.rs`, `src/db/queries_tests.rs`: abuse detector model/query/service rename and count-regression fix.
 - `src/cli.rs`, `src/cli_tests.rs`, `src/main.rs`: CLI command rename and parser/output tests.

@@ -29,7 +29,7 @@ Wrote and executed a complete implementation plan for adding three MCP actions �
 5. Consulted advisor again before coding — confirmed `parse_required_timestamp` is `pub(super)` (fine for service.rs), identified `pool_size: 1` deadlock risk in `incident_context_summary`, and confirmed CLI dispatch pattern uses `into_request()` + `run_*` free functions in `src/cli/dispatch.rs`.
 6. Implemented Task 1 (DB models), Task 2 (DB queries + tests), Task 3 (db.rs exports), Task 4 (app models), Task 5 (service methods), Task 6 (MCP dispatch + schemas + rmcp_server), Task 7 (CLI — arg structs, parse functions, dispatch, print functions), Task 8 (verification).
 7. Fixed bugs discovered during `cargo test`: naming conflict in queries_tests.rs (`make_ai_entry` redefined), `SqlParams::new(1)` off-by-2 bug in `incident_context_summary` error log parameterized query, pool deadlock in `incident_context_summary` (inlined AI session query to avoid second `pool.get()`), `IncidentContextParams.query` field dead-code lint (removed from DB layer, kept in app layer as v2 placeholder), useless `format!()` lint fix.
-8. Updated test scaffolding: `rmcp_server.rs` READ_ONLY_ACTIONS, `tools_tests.rs` dispatch harness, `docs/mcp/TOOLS.md`, `docs/mcp/TESTS.md`, `plugins/syslog/skills/syslog/SKILL.md`, `scripts/smoke-test.sh`, `tests/test_live.sh`, `tests/mcporter/test-tools.sh`.
+8. Updated test scaffolding: `rmcp_server.rs` READ_ONLY_ACTIONS, `tools_tests.rs` dispatch harness, `docs/mcp/TOOLS.md`, `docs/mcp/TESTS.md`, `plugins/syslog/skills/cortex/SKILL.md`, `scripts/smoke-test.sh`, `tests/test_live.sh`, `tests/mcporter/test-tools.sh`.
 9. Pushed branch, created PR #42. CodeRabbit hit rate limit, no actionable review comments.
 
 ## Key Findings
@@ -37,7 +37,7 @@ Wrote and executed a complete implementation plan for adding three MCP actions �
 - `src/db/pool.rs:1314`: `StorageConfig::for_test` sets `pool_size: 1`, causing `incident_context_summary` to deadlock when `list_ai_sessions(pool, ...)` was called while a connection was already held — fixed by inlining the AI session SQL using the held `conn`.
 - `src/db/queries.rs` `SqlParams::new(1)`: manually pushing `from`/`to` to bindings before calling `push_text` skips index tracking — must use `SqlParams::new(3)` so that `push_text` starts at `?3` instead of `?1` (would overwrite `from`).
 - `src/mcp/rmcp_server.rs:34`: `READ_ONLY_ACTIONS` const must mirror `SYSLOG_ACTIONS` — new actions must be added here or the scope test `public_read_actions_require_syslog_read_scope` fails.
-- `src/mcp/tools_tests.rs:248`: `public_action_references_cover_schema_registry` checks `docs/mcp/TOOLS.md`, `docs/mcp/TESTS.md`, `plugins/syslog/skills/syslog/SKILL.md`, `scripts/smoke-test.sh`, `tests/test_live.sh`, `tests/mcporter/test-tools.sh` for every action in `SYSLOG_ACTIONS` — all six files must be updated when adding actions.
+- `src/mcp/tools_tests.rs:248`: `public_action_references_cover_schema_registry` checks `docs/mcp/TOOLS.md`, `docs/mcp/TESTS.md`, `plugins/syslog/skills/cortex/SKILL.md`, `scripts/smoke-test.sh`, `tests/test_live.sh`, `tests/mcporter/test-tools.sh` for every action in `SYSLOG_ACTIONS` — all six files must be updated when adding actions.
 - `GROUP_CONCAT(SUBSTR(message, 1, 256), '|||')` in `similar_incidents_clusters`: the `|||` separator could appear in log messages — acceptable v1 limitation documented.
 
 ## Technical Decisions
@@ -68,7 +68,7 @@ Wrote and executed a complete implementation plan for adding three MCP actions �
 | `src/cli/dispatch.rs` | Added 3 `into_request()` impls, 3 `run_*` functions, updated imports |
 | `docs/mcp/TOOLS.md` | Added table rows for 3 new actions |
 | `docs/mcp/TESTS.md` | Added action names to coverage list |
-| `plugins/syslog/skills/syslog/SKILL.md` | Added 3 action rows |
+| `plugins/syslog/skills/cortex/SKILL.md` | Added 3 action rows |
 | `scripts/smoke-test.sh` | Added 3 action names to comment inventory |
 | `tests/test_live.sh` | Added 3 action names to comment inventory |
 | `tests/mcporter/test-tools.sh` | Added 3 action names to comment inventory |

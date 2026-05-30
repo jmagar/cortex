@@ -224,7 +224,7 @@ M src/syslog/listener.rs
 ?? plugins/skills/syslog-report/
 ?? plugins/skills/syslog-troubleshoot/agents/
 ?? plugins/skills/syslog-version-check/
-?? plugins/skills/syslog/agents/
+?? plugins/skills/cortex/agents/
 ?? scripts/check-runtime-current.sh
 ?? scripts/test-check-runtime-current.sh
 ```

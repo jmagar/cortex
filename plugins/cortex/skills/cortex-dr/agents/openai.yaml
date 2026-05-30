@@ -1,0 +1,4 @@
+interface:
+  display_name: "Syslog Doctor"
+  short_description: "Run syslog deployment health checks"
+  default_prompt: "Use $cortex-dr to run a full cortex deployment health check."
