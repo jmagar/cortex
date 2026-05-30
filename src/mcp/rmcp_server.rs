@@ -236,9 +236,9 @@ pub fn streamable_http_service(
     )
 }
 
-const SCHEMA_RESOURCE_URI: &str = "syslog://schema/mcp-tool";
-const PROMPT_OUTPUT_SCHEMA_RESOURCE_URI: &str = "syslog://schema/prompt-output";
-pub(super) const QUERY_WIDGET_RESOURCE_URI: &str = "ui://syslog/query-widget";
+const SCHEMA_RESOURCE_URI: &str = "cortex://schema/mcp-tool";
+const PROMPT_OUTPUT_SCHEMA_RESOURCE_URI: &str = "cortex://schema/prompt-output";
+pub(super) const QUERY_WIDGET_RESOURCE_URI: &str = "ui://cortex/query-widget";
 pub(super) const MCP_APP_HTML_MIME_TYPE: &str = "text/html;profile=mcp-app";
 
 fn schema_resource() -> Resource {

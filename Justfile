@@ -94,8 +94,8 @@ validate-plugin:
 
     mcp_path = Path(plugin["mcpServers"])
     mcp = json.loads(mcp_path.read_text())
-    if "syslog" not in mcp.get("mcpServers", {}):
-        raise SystemExit(f"MISSING: syslog server in {mcp_path}")
+    if "cortex" not in mcp.get("mcpServers", {}):
+        raise SystemExit(f"MISSING: cortex server in {mcp_path}")
 
     hooks_path = Path(plugin["hooks"])
     hooks = json.loads(hooks_path.read_text()).get("hooks", {})

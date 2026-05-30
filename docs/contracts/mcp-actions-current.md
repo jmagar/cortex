@@ -8,7 +8,7 @@ markdown file:
 
 - `src/mcp/actions.rs::ACTION_SPECS` registers action names, scopes, costs, and descriptions.
 - `src/mcp/actions.rs::action_names()` derives the schema enum.
-- `src/mcp/schemas.rs::tool_definitions()` builds `tools/list` and `syslog://schema/mcp-tool`.
+- `src/mcp/schemas.rs::tool_definitions()` builds `tools/list` and `cortex://schema/mcp-tool`.
 - `src/mcp/tools.rs::tool_syslog()` dispatches handlers.
 - `src/app/models.rs` defines typed request and response payloads.
 

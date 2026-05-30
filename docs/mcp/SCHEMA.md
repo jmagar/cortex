@@ -8,7 +8,7 @@ Current source of truth:
 
 - `src/mcp/actions.rs::ACTION_SPECS` registers every action, its scope, cost, and description.
 - `src/mcp/actions.rs::action_names()` derives the schema action enum from `ACTION_SPECS`.
-- `src/mcp/schemas.rs::tool_definitions()` builds the MCP `tools/list` definition and the `syslog://schema/mcp-tool` resource from that action table.
+- `src/mcp/schemas.rs::tool_definitions()` builds the MCP `tools/list` definition and the `cortex://schema/mcp-tool` resource from that action table.
 - `src/mcp/tools.rs::tool_syslog()` dispatches the action handlers.
 - `src/app/models.rs` defines request and response structs for typed action payloads.
 

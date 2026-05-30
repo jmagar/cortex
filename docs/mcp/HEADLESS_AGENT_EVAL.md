@@ -8,7 +8,7 @@ The practical shape is:
 1. Render a prompt from the running MCP server with `prompts/get`.
 2. Let a headless agent run the prompt against the same syslog MCP server it
    normally uses.
-3. Ask the agent to return JSON conforming to `syslog://schema/prompt-output`.
+3. Ask the agent to return JSON conforming to `cortex://schema/prompt-output`.
 4. Score the final shape and, when session ingestion is enabled, inspect the
    recorded session for action order, bounds, and evidence-before-claim
    behavior.

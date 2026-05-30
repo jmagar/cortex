@@ -71,7 +71,7 @@ server = {"baseUrl": url}
 if token:
     server["headers"] = {"Authorization": f"Bearer {token}"}
 with open(path, "w", encoding="utf-8") as fh:
-    json.dump({"mcpServers": {"syslog": server}}, fh)
+    json.dump({"mcpServers": {"cortex": server}}, fh)
 PY
 fi
 
@@ -271,7 +271,7 @@ import sys, json
 try:
     d = json.load(sys.stdin)
     text = d['result']['messages'][0]['content']['text']
-    for needle in ['service \`plex\`', 'Host: tootie', 'bucket=minute', 'limit=10', 'syslog://schema/prompt-output']:
+    for needle in ['service \`plex\`', 'Host: tootie', 'bucket=minute', 'limit=10', 'cortex://schema/prompt-output']:
         assert needle in text, needle
     print('ok')
 except Exception as e:
@@ -279,7 +279,7 @@ except Exception as e:
 ")
 assert_eq "prompts/get renders bounded argument-aware prompt" "$PROMPT_VALID" "ok"
 
-PROMPT_SCHEMA=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":103,"method":"resources/read","params":{"uri":"syslog://schema/prompt-output"}}' || true)
+PROMPT_SCHEMA=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":103,"method":"resources/read","params":{"uri":"cortex://schema/prompt-output"}}' || true)
 PROMPT_SCHEMA_VALID=$(printf '%s\n' "$PROMPT_SCHEMA" | python3 -c "
 import sys, json
 try:

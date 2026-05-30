@@ -52,7 +52,7 @@ const COMMON_INVESTIGATION_RULES: &str = r#"Rules:
 - Use `action=context` with small bounds such as `before=3` and `after=3` around representative log ids.
 - Escalate to broad or slower actions only when the cheap pass leaves a specific question: `action=stats`, `action=anomalies`, `action=patterns`, `action=compare`, `action=clock_skew`, `action=ingest_rate`, or wide `action=correlate`.
 - Summarize representative evidence. Do not paste full JSON payloads or unbounded result sets.
-- If the client supports structured output, conform to the `syslog://schema/prompt-output` resource schema."#;
+- If the client supports structured output, conform to the `cortex://schema/prompt-output` resource schema."#;
 
 const SYNTHESIS_FORMAT: &str = r#"Return exactly these sections:
 - Verdict:

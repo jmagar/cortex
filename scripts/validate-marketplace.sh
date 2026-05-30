@@ -66,7 +66,7 @@ SKILLS_DIR="plugins/cortex/skills"
 
 check "plugin manifest exists" "test -f '${PLUGIN_JSON}'"
 check "plugin manifest is valid JSON" "jq empty '${PLUGIN_JSON}'"
-check "plugin name is syslog" "test \"\$(jq -er '.name' '${PLUGIN_JSON}')\" = 'syslog'"
+check "plugin name is cortex" "test \"\$(jq -er '.name' '${PLUGIN_JSON}')\" = 'cortex'"
 check "plugin manifest omits version" "jq -er 'has(\"version\") | not' '${PLUGIN_JSON}'"
 check "plugin points to MCP config" "test \"\$(jq -er '.mcpServers' '${PLUGIN_JSON}')\" = './plugins/cortex/.mcp.json'"
 check "plugin points to hooks config" "test \"\$(jq -er '.hooks' '${PLUGIN_JSON}')\" = './plugins/cortex/hooks/hooks.json'"
@@ -79,10 +79,10 @@ check "plugin declares api_token as sensitive" "jq -er '.userConfig.api_token.se
 
 check "MCP config exists" "test -f '${MCP_JSON}'"
 check "MCP config is valid JSON" "jq empty '${MCP_JSON}'"
-check "MCP server is named syslog" "jq -er '.mcpServers.syslog' '${MCP_JSON}'"
-check "MCP transport is HTTP" "jq -er '.mcpServers.syslog.type == \"http\"' '${MCP_JSON}'"
-check "MCP URL uses server_url and /mcp path" "jq -er '.mcpServers.syslog.url == \"\${user_config.server_url}/mcp\"' '${MCP_JSON}'"
-check "MCP Authorization header uses api_token" "jq -er '.mcpServers.syslog.headers.Authorization == \"Bearer \${user_config.api_token}\"' '${MCP_JSON}'"
+check "MCP server is named cortex" "jq -er '.mcpServers.cortex' '${MCP_JSON}'"
+check "MCP transport is HTTP" "jq -er '.mcpServers.cortex.type == \"http\"' '${MCP_JSON}'"
+check "MCP URL uses server_url and /mcp path" "jq -er '.mcpServers.cortex.url == \"\${user_config.server_url}/mcp\"' '${MCP_JSON}'"
+check "MCP Authorization header uses api_token" "jq -er '.mcpServers.cortex.headers.Authorization == \"Bearer \${user_config.api_token}\"' '${MCP_JSON}'"
 
 check "hooks config exists" "test -f '${HOOKS_JSON}'"
 check "hooks config is valid JSON" "jq empty '${HOOKS_JSON}'"

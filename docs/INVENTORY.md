@@ -5,7 +5,7 @@ Complete listing of all plugin components.
 MCP, REST, and CLI are transport surfaces over the shared service layer. The
 runtime MCP action schema is derived from `src/mcp/actions.rs::ACTION_SPECS`
 through `src/mcp/schemas.rs::tool_definitions()` and exposed as
-`syslog://schema/mcp-tool`; maintained Markdown docs are drift-checked rather
+`cortex://schema/mcp-tool`; maintained Markdown docs are drift-checked rather
 than automatically generated.
 
 ## MCP tools
@@ -89,7 +89,7 @@ methods as the MCP actions.
 
 | URI | Description | MIME type |
 | --- | --- | --- |
-| `syslog://schema/mcp-tool` | JSON schema for the `syslog` MCP tool and action-based parameters | `application/json` |
+| `cortex://schema/mcp-tool` | JSON schema for the `syslog` MCP tool and action-based parameters | `application/json` |
 
 ## Environment variables
 

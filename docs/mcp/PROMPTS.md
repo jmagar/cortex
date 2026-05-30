@@ -22,7 +22,7 @@ Every prompt is written as a bounded investigation runbook:
 - Return a consistent synthesis with `Verdict`, `Evidence`, `Likely Cause`,
   `Not Supported`, `Next Actions`, and `Telemetry Gaps`.
 - Clients that support structured output can read
-  `syslog://schema/prompt-output` and validate prompt answers against that
+  `cortex://schema/prompt-output` and validate prompt answers against that
   JSON Schema.
 
 | Prompt | Purpose | Useful arguments |

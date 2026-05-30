@@ -205,7 +205,7 @@ if "error" in data:
 print(data["result"]["messages"][0]["content"]["text"])
 PY
 
-curl_mcp '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"syslog://schema/prompt-output"}}' > "$SCHEMA_RESPONSE"
+curl_mcp '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"cortex://schema/prompt-output"}}' > "$SCHEMA_RESPONSE"
 python3 - "$SCHEMA_RESPONSE" > "$SCHEMA_FILE" <<'PY'
 import json
 import sys
@@ -225,7 +225,7 @@ tools_response = json.load(open(sys.argv[1]))
 if "error" in tools_response:
     raise SystemExit(f"FAIL: tools/list failed: {tools_response['error']}")
 names = {tool.get("name") for tool in tools_response["result"].get("tools", [])}
-if "syslog" not in names:
+if "cortex" not in names:
     raise SystemExit(f"FAIL: tools/list does not expose syslog tool: {sorted(names)}")
 
 schema = json.load(open(sys.argv[2]))
@@ -241,7 +241,7 @@ for key in ["source", "summary", "timestamp", "host", "app", "severity", "log_id
 print("PASS: MCP preflight found syslog tool and prompt output schema")
 PY
 
-curl_mcp '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"help"}}}' > "$MCP_HELP_RESPONSE"
+curl_mcp '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"help"}}}' > "$MCP_HELP_RESPONSE"
 python3 - "$MCP_HELP_RESPONSE" <<'PY'
 import json
 import sys
@@ -264,7 +264,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "---"
     cat "$PROMPT_TEXT"
     echo "---"
-    echo "Schema: syslog://schema/prompt-output"
+    echo "Schema: cortex://schema/prompt-output"
     if [[ -n "$REPORT_PATH" ]]; then
         python3 - "$REPORT_PATH" "$PROMPT_NAME" "$AGENT" "$MCP_URL" <<'PY'
 import json
