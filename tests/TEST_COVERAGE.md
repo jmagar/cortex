@@ -218,7 +218,7 @@ Then the public tool name is checked:
 
 | Test label | jq expression | Expected value |
 |---|---|---|
-| `tools/list — tool 'syslog' present` | `.result.tools[] \| select(.name == "syslog") \| .name` | `"syslog"` |
+| `tools/list — tool 'cortex' present` | `.result.tools[] \| select(.name == "cortex") \| .name` | `"cortex"` |
 
 A tool is considered present only if its `.name` field exactly matches the expected string.
 
