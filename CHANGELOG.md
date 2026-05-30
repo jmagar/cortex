@@ -15,7 +15,7 @@ This is a hard break. No backwards-compatibility shims. Update every deployed
 instance as part of the upgrade (see migration notes below).
 
 - **Product / crate** renamed `syslog-mcp` → `cortex`.
-- **Binary** renamed `syslog` → `cortex`, with a new short alias `cx`.
+- **Binary** renamed `syslog` → `cortex`.
 - **MCP tool** renamed `syslog` → `cortex`. All 42+ action strings are unchanged.
 - **Env vars** — the `SYSLOG_MCP_*` figment prefix is now `CORTEX`, and the entire
   bare `SYSLOG_*` family is renamed to `CORTEX_*`. Collision-disambiguated cases:

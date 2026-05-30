@@ -10,10 +10,6 @@ autobins = false
 name = "cortex"
 path = "src/main.rs"
 
-[[bin]]
-name = "cx"
-path = "src/main.rs"
-
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
