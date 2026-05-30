@@ -1610,6 +1610,166 @@ fn time_windowed_sessions_always_use_live_path() {
 }
 
 // ---------------------------------------------------------------------------
+// Rollup source-watermark dirty-check (bead syslog-mcp-g33v)
+// ---------------------------------------------------------------------------
+
+/// Helper: insert a single non-AI log row (no ai_* fields). Such rows must NOT
+/// move the AI watermark, so a refresh that follows them is skipped.
+fn insert_plain_log(pool: &DbPool, ts: &str, msg: &str) {
+    insert_logs_batch(pool, &[make_entry(ts, "host0", "info", msg)]).unwrap();
+}
+
+#[test]
+fn stale_check_first_refresh_runs_then_noop_is_skipped() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+
+    // Never refreshed yet => must refresh.
+    match refresh_ai_session_rollup_if_stale(&pool).unwrap() {
+        RollupRefresh::Refreshed { row_count } => assert!(row_count > 0),
+        RollupRefresh::Skipped => panic!("first refresh must not be skipped"),
+    }
+
+    // Nothing changed => the expensive re-aggregation must be skipped.
+    assert_eq!(
+        refresh_ai_session_rollup_if_stale(&pool).unwrap(),
+        RollupRefresh::Skipped,
+        "unchanged source must skip the refresh"
+    );
+}
+
+#[test]
+fn stale_check_detects_new_ai_row() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+    refresh_ai_session_rollup_if_stale(&pool).unwrap();
+    assert_eq!(
+        refresh_ai_session_rollup_if_stale(&pool).unwrap(),
+        RollupRefresh::Skipped
+    );
+
+    // A new AI row advances MAX(id) => must refresh.
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-07-01T00:00:00Z",
+            "host9",
+            "codex",
+            "/proj/new",
+            "sess-new",
+            "brand new ai event",
+        )],
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            refresh_ai_session_rollup_if_stale(&pool).unwrap(),
+            RollupRefresh::Refreshed { .. }
+        ),
+        "a new AI row must trigger a refresh"
+    );
+    // And the new session is now visible from the rollup path.
+    let rows = list_ai_sessions(&pool, &default_session_params()).unwrap();
+    assert!(rows.iter().any(|s| s.ai_session_id == "sess-new"));
+}
+
+#[test]
+fn stale_check_detects_deleted_ai_row() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+    refresh_ai_session_rollup_if_stale(&pool).unwrap();
+    assert_eq!(
+        refresh_ai_session_rollup_if_stale(&pool).unwrap(),
+        RollupRefresh::Skipped
+    );
+
+    // Deleting an AI row changes COUNT(*) (and likely MAX(id)) => must refresh.
+    {
+        let conn = pool.get().unwrap();
+        let deleted = conn
+            .execute(
+                "DELETE FROM logs WHERE id IN (
+                     SELECT id FROM logs WHERE ai_session_id IS NOT NULL LIMIT 1
+                 )",
+                [],
+            )
+            .unwrap();
+        assert_eq!(deleted, 1, "test must delete exactly one AI row");
+    }
+    assert!(
+        matches!(
+            refresh_ai_session_rollup_if_stale(&pool).unwrap(),
+            RollupRefresh::Refreshed { .. }
+        ),
+        "a deleted AI row must trigger a refresh"
+    );
+}
+
+#[test]
+fn stale_check_ignores_non_ai_rows() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+    refresh_ai_session_rollup_if_stale(&pool).unwrap();
+
+    // Plain syslog rows (the overwhelming majority of ingest) must NOT force a
+    // re-aggregation — that is the whole point of an AI-scoped watermark.
+    insert_plain_log(&pool, "2026-07-01T00:00:00Z", "ordinary syslog line");
+    insert_plain_log(&pool, "2026-07-01T00:00:01Z", "another ordinary line");
+    assert_eq!(
+        refresh_ai_session_rollup_if_stale(&pool).unwrap(),
+        RollupRefresh::Skipped,
+        "non-AI ingest must not trigger a rollup refresh"
+    );
+}
+
+#[test]
+fn stale_check_watermark_is_index_only_no_table_scan() {
+    // The watermark fingerprint must be cheap: served from the partial index
+    // idx_logs_ai_project_time (WHERE ai_project IS NOT NULL), NOT a full scan
+    // of `logs`. That index-only cost is the whole reason the dirty-check is
+    // worth running on every cadence tick. Mirrors ai_rows_watermark's query.
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+    let plan = query_plan(
+        &pool,
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM logs
+         WHERE ai_project IS NOT NULL AND ai_project != ''",
+        &[],
+    );
+    assert!(
+        plan.contains("idx_logs_ai_project_time"),
+        "watermark must use the AI partial index; plan was:\n{plan}"
+    );
+    assert!(
+        !plan.contains("SCAN logs\n") && !plan.ends_with("SCAN logs"),
+        "watermark must not full-scan logs; plan was:\n{plan}"
+    );
+}
+
+#[test]
+fn stale_check_skip_keeps_rollup_correct_vs_live() {
+    // A skipped refresh must leave the rollup serving results identical to a
+    // fresh live aggregation (i.e. skipping never serves stale data when the
+    // source genuinely did not change).
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+    refresh_ai_session_rollup_if_stale(&pool).unwrap();
+    assert_eq!(
+        refresh_ai_session_rollup_if_stale(&pool).unwrap(),
+        RollupRefresh::Skipped
+    );
+
+    let live = list_ai_sessions_live(&pool, &default_session_params()).unwrap();
+    let rolled = list_ai_sessions(&pool, &default_session_params()).unwrap();
+    assert_eq!(live.len(), rolled.len());
+    for (l, r) in live.iter().zip(rolled.iter()) {
+        assert_eq!(l.ai_session_id, r.ai_session_id);
+        assert_eq!(l.last_seen, r.last_seen);
+        assert_eq!(l.event_count, r.event_count);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // RAG v1 tests
 // ---------------------------------------------------------------------------
 

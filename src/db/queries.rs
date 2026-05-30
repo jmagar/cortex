@@ -517,8 +517,85 @@ impl AiSessionRollupStatus {
     }
 }
 
+/// Cheap source-side fingerprint of the AI-row partition used to decide whether
+/// the rollup is stale. `(COUNT(*), MAX(id))` over rows that *could* contribute
+/// to the rollup. Computed index-only from `idx_logs_ai_project_time`
+/// (partial index `WHERE ai_project IS NOT NULL`): the `!= ''` residual is on
+/// the index's leading column, and `id` is the implicit rowid carried in every
+/// index entry, so neither a table lookup nor a temp b-tree is needed.
+///
+/// The predicate is intentionally BROADER than the rollup's contributing-row
+/// filter (it omits the `ai_tool`/`ai_session_id` checks): any row that
+/// contributes to the rollup necessarily has `ai_project != ''`, so it is
+/// counted here too. That makes the fingerprint *conservative* — it may change
+/// (forcing a refresh) for a non-contributing row, but it can never miss a
+/// change to a contributing row. `id` is a monotonic AUTOINCREMENT PK, so an
+/// insert always advances `MAX(id)` and a delete always changes `COUNT(*)`
+/// and/or `MAX(id)`. In-place UPDATEs to a row's rollup-relevant columns would
+/// be invisible to this fingerprint, but the ingest path never does them:
+/// verified there is no `UPDATE ... logs` anywhere (the scanner re-indexes by
+/// `DELETE FROM logs` + re-INSERT, both of which the fingerprint catches).
+fn ai_rows_watermark(conn: &rusqlite::Connection) -> rusqlite::Result<(i64, i64)> {
+    conn.query_row(
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM logs
+         WHERE ai_project IS NOT NULL AND ai_project != ''",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+}
+
+/// Outcome of a conditional rollup refresh.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RollupRefresh {
+    /// The source fingerprint changed; the rollup was recomputed.
+    Refreshed { row_count: usize },
+    /// The source fingerprint was unchanged since the last refresh; the
+    /// expensive re-aggregation was skipped.
+    Skipped,
+}
+
+/// Refresh the rollup only if the AI-row partition changed since the last
+/// refresh (bead syslog-mcp-g33v). The full re-aggregation is a temp-btree
+/// `GROUP BY` over the whole AI partition (~4s at scale) and holds the
+/// maintenance permit while running; the common case on the background cadence
+/// is "nothing changed", so this skips that work via the cheap
+/// [`ai_rows_watermark`] fingerprint.
+///
+/// The skip is correct because [`refresh_ai_session_rollup`] stamps the exact
+/// fingerprint of the data it aggregated; if the live fingerprint still matches
+/// and we have refreshed at least once, the materialization is already current.
+pub fn refresh_ai_session_rollup_if_stale(pool: &DbPool) -> Result<RollupRefresh> {
+    {
+        let conn = pool.get()?;
+        let (cur_count, cur_max_id) = ai_rows_watermark(&conn)?;
+        let stored: Option<(Option<String>, i64, i64)> = conn
+            .query_row(
+                "SELECT refreshed_at, source_row_count, source_max_id
+                 FROM ai_session_rollup_meta WHERE id = 1",
+                [],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<String>>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        if let Some((Some(_refreshed_at), src_count, src_max_id)) = stored {
+            if src_count == cur_count && src_max_id == cur_max_id {
+                return Ok(RollupRefresh::Skipped);
+            }
+        }
+    }
+    let row_count = refresh_ai_session_rollup(pool)?;
+    Ok(RollupRefresh::Refreshed { row_count })
+}
+
 /// Recompute the `ai_session_rollup` materialization from `logs` in a single
-/// transaction, then stamp `refreshed_at`. Returns the number of session rows.
+/// transaction, then stamp `refreshed_at` and the source watermark. Returns the
+/// number of session rows. This is the unconditional/force path; the background
+/// task uses [`refresh_ai_session_rollup_if_stale`] to skip no-op refreshes.
 ///
 /// This runs the same full aggregation as the live path — the win is that it
 /// happens on a background cadence (not per request) so reads stay O(#sessions).
@@ -526,7 +603,20 @@ impl AiSessionRollupStatus {
 /// trigger-maintained rollup would corrupt MIN/MAX under DELETE.
 pub fn refresh_ai_session_rollup(pool: &DbPool) -> Result<usize> {
     let mut conn = pool.get()?;
-    let tx = conn.transaction()?;
+    // IMMEDIATE (not DEFERRED): take the write lock up front. This function now
+    // reads (the watermark) before it writes (the DELETE); a DEFERRED tx would
+    // take a WAL read snapshot on that first read, then have to UPGRADE to a
+    // writer at the DELETE — and if a concurrent ingest connection committed in
+    // between, the upgrade fails with SQLITE_BUSY_SNAPSHOT, which busy_timeout
+    // does NOT retry. Holding the write lock from the start also makes the
+    // watermark and the GROUP BY observe one consistent state.
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    // Capture the source fingerprint FIRST, within the same transaction as the
+    // aggregation. Under the held write lock the watermark and the GROUP BY
+    // observe identical committed state, so the stored fingerprint exactly
+    // describes the data we aggregate. Any rows that land after this commit
+    // advance the live fingerprint, correctly marking the rollup stale.
+    let (src_count, src_max_id) = ai_rows_watermark(&tx)?;
     tx.execute("DELETE FROM ai_session_rollup", [])?;
     tx.execute(
         "INSERT INTO ai_session_rollup
@@ -549,9 +639,11 @@ pub fn refresh_ai_session_rollup(pool: &DbPool) -> Result<usize> {
     tx.execute(
         "UPDATE ai_session_rollup_meta
             SET refreshed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                row_count = ?1
+                row_count = ?1,
+                source_row_count = ?2,
+                source_max_id = ?3
           WHERE id = 1",
-        params![row_count],
+        params![row_count, src_count, src_max_id],
     )?;
     tx.commit()?;
     Ok(row_count as usize)

@@ -316,13 +316,19 @@ impl RuntimeCore {
         }
     }
 
-    /// Periodically refresh the AI session rollup (bead syslog-mcp-2vre).
+    /// Periodically refresh the AI session rollup (beads syslog-mcp-2vre,
+    /// syslog-mcp-g33v).
     ///
     /// `list_ai_sessions` (unbounded) reads from `ai_session_rollup` for an
     /// O(#sessions) indexed scan instead of the O(#AI-rows) live aggregation.
     /// This task recomputes the rollup on a fixed cadence so reads stay fast and
     /// staleness is bounded by `SESSION_ROLLUP_REFRESH_SECS`. The first refresh
     /// runs shortly after start so the rollup is warm before the first request.
+    ///
+    /// Each tick uses a cheap AI-row watermark to skip the (expensive) full
+    /// re-aggregation when nothing changed since the last refresh — so an idle
+    /// or write-but-no-AI-traffic host pays only the index-only fingerprint
+    /// check, not a recurring GROUP-BY scan holding the maintenance permit.
     fn spawn_session_rollup_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
@@ -363,14 +369,20 @@ impl RuntimeCore {
                 let started = Instant::now();
                 match tokio::task::spawn_blocking(move || {
                     let _permit = permit;
-                    db::refresh_ai_session_rollup(&pool)?;
-                    db::ai_session_rollup_status(&pool)
+                    // Skip the full re-aggregation when the AI-row partition is
+                    // unchanged since the last refresh (bead syslog-mcp-g33v).
+                    let outcome = db::refresh_ai_session_rollup_if_stale(&pool)?;
+                    Ok::<_, anyhow::Error>((outcome, db::ai_session_rollup_status(&pool)?))
                 })
                 .await
                 .map_err(|e| anyhow::anyhow!("spawn_blocking error: {e}"))
                 .and_then(|r| r)
                 {
-                    Ok(status) => tracing::info!(
+                    Ok((db::RollupRefresh::Skipped, _)) => tracing::debug!(
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "session_rollup: source unchanged, refresh skipped"
+                    ),
+                    Ok((db::RollupRefresh::Refreshed { .. }, status)) => tracing::info!(
                         status = %status.summary(),
                         elapsed_ms = started.elapsed().as_millis(),
                         "session_rollup: refresh complete"

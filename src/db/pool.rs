@@ -690,6 +690,46 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 21: created AI session rollup table");
     }
 
+    // Migration 22: source watermark for the AI session rollup (bead
+    // syslog-mcp-g33v). The background refresh recomputed the full GROUP-BY
+    // over `logs` every cadence even when no AI rows had changed. These two
+    // columns record the source-side `(COUNT(*), MAX(id))` of AI rows captured
+    // by the last refresh; the refresh task compares the live watermark against
+    // them and skips the recompute entirely when nothing changed. Both default
+    // to 0 so the first post-migration refresh always runs (live watermark > 0
+    // whenever AI rows exist, and `refreshed_at` is still NULL regardless).
+    if !migration_applied(&conn, 22)? {
+        conn.execute_batch(
+            "ALTER TABLE ai_session_rollup_meta
+                 ADD COLUMN source_row_count INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE ai_session_rollup_meta
+                 ADD COLUMN source_max_id INTEGER NOT NULL DEFAULT 0;
+             INSERT INTO schema_migrations (version) VALUES (22);",
+        )?;
+        tracing::info!("Migration 22: added AI session rollup source watermark");
+    }
+
+    // Migration 22: source watermark for the AI session rollup (bead
+    // syslog-mcp-g33v). Migration 21 left the background refresh doing an
+    // unconditional DELETE + full GROUP-BY re-aggregation over all of `logs`
+    // every cadence tick, even when no AI rows changed — a recurring ~4s scan
+    // holding the maintenance permit for zero benefit. These columns record the
+    // source-side fingerprint captured at the last refresh: `source_row_count`
+    // and `source_max_id` are `COUNT(*)`/`MAX(id)` over the AI-row partition.
+    // The refresh is skipped when the live fingerprint is unchanged. Both
+    // default to 0, so an existing (refreshed) rollup looks stale once and gets
+    // recomputed on the first post-migration tick, re-stamping the watermark.
+    if !migration_applied(&conn, 22)? {
+        conn.execute_batch(
+            "ALTER TABLE ai_session_rollup_meta
+                 ADD COLUMN source_row_count INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE ai_session_rollup_meta
+                 ADD COLUMN source_max_id INTEGER NOT NULL DEFAULT 0;
+             INSERT INTO schema_migrations (version) VALUES (22);",
+        )?;
+        tracing::info!("Migration 22: added AI session rollup source watermark columns");
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
