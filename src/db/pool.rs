@@ -653,6 +653,43 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 20: added index on error_signature_windows(window_end)");
     }
 
+    // Migration 21: AI session rollup table (bead syslog-mcp-2vre).
+    // `list_ai_sessions` aggregates GROUP BY (project, tool, session, hostname)
+    // over the full AI-row partition then sorts by MAX(timestamp) — an
+    // unavoidable temp-btree that grows with AI-row count (~4s at 10M rows).
+    // The rollup is a periodically-refreshed materialization read in O(#sessions)
+    // via idx, decoupling read latency from row count. It is REFRESH-based, not
+    // trigger-based: trigger-maintained MIN/MAX is wrong on DELETE (deleting the
+    // row holding the current MAX can't recover the new extreme without a rescan,
+    // and that rescan reintroduces bulk-purge lock contention). Staleness is
+    // exposed via ai_session_rollup_meta.refreshed_at.
+    if !migration_applied(&conn, 21)? {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS ai_session_rollup (
+                 ai_project         TEXT NOT NULL,
+                 ai_tool            TEXT NOT NULL,
+                 ai_session_id      TEXT NOT NULL,
+                 hostname           TEXT NOT NULL,
+                 ai_transcript_path TEXT,
+                 first_seen         TEXT NOT NULL,
+                 last_seen          TEXT NOT NULL,
+                 event_count        INTEGER NOT NULL,
+                 PRIMARY KEY (ai_project, ai_tool, ai_session_id, hostname)
+             );
+             CREATE INDEX IF NOT EXISTS idx_ai_session_rollup_last_seen
+                 ON ai_session_rollup(last_seen DESC);
+             CREATE TABLE IF NOT EXISTS ai_session_rollup_meta (
+                 id           INTEGER PRIMARY KEY CHECK (id = 1),
+                 refreshed_at TEXT,
+                 row_count    INTEGER NOT NULL DEFAULT 0
+             );
+             INSERT OR IGNORE INTO ai_session_rollup_meta (id, refreshed_at, row_count)
+                 VALUES (1, NULL, 0);
+             INSERT INTO schema_migrations (version) VALUES (21);",
+        )?;
+        tracing::info!("Migration 21: created AI session rollup table");
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)

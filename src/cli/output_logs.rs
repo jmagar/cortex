@@ -59,6 +59,11 @@ pub(crate) fn print_sessions_response(
         return print_json(response);
     }
     println!("{} session(s)", cyan(&response.count.to_string()));
+    if let Some(as_of) = &response.rollup_as_of {
+        // Unbounded results are served from the periodically-refreshed rollup;
+        // tell the operator how fresh the data is (bead syslog-mcp-2vre).
+        println!("{}", muted(&format!("(as of rollup refresh {as_of})")));
+    }
     println!(
         "{}",
         muted(&format!(

@@ -855,6 +855,10 @@ impl SyslogService {
     ) -> ServiceResult<ListSessionsResponse> {
         let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
         let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        // The unbounded (no time-window) path reads from the periodically
+        // refreshed rollup; expose its staleness so callers know the `as_of`.
+        // Time-windowed queries run live, so no staleness applies.
+        let unbounded = from.is_none() && to.is_none();
         let params = db::ListAiSessionsParams {
             ai_project: req.project,
             ai_tool: req.tool,
@@ -863,15 +867,26 @@ impl SyslogService {
             to,
             limit: req.limit,
         };
-        let rows = self
+        let (rows, rollup_as_of) = self
             .run_db("list_sessions", move |pool| {
-                db::list_ai_sessions(pool, &params)
+                let rows = db::list_ai_sessions(pool, &params)?;
+                // Only attach staleness when the rollup path was actually used
+                // (unbounded query AND rollup populated). If unbounded but the
+                // rollup was empty, list_ai_sessions fell back to live, so
+                // report no staleness.
+                let as_of = if unbounded {
+                    db::ai_session_rollup_status(pool)?.refreshed_at
+                } else {
+                    None
+                };
+                Ok((rows, as_of))
             })
             .await?;
         let sessions: Vec<AiSessionEntry> = rows.into_iter().map(Into::into).collect();
         Ok(ListSessionsResponse {
             count: sessions.len(),
             sessions,
+            rollup_as_of,
         })
     }
 

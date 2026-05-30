@@ -401,6 +401,14 @@ pub struct ListSessionsRequest {
 pub struct ListSessionsResponse {
     pub count: usize,
     pub sessions: Vec<AiSessionEntry>,
+    /// When the unbounded (no time-window) result was served from the
+    /// periodically-refreshed AI session rollup, this is the RFC 3339 time of
+    /// that rollup's last refresh — i.e. the data's `as_of` staleness bound.
+    /// `None` means the result is live (a time-windowed query, or the rollup
+    /// had not been refreshed yet so the live aggregation was used). See bead
+    /// syslog-mcp-2vre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollup_as_of: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

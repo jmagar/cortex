@@ -51,6 +51,7 @@ pub struct MaintenanceHandles {
     notification_evaluator: Option<JoinHandle<()>>,
     notification_digest: Option<JoinHandle<()>>,
     inventory_backfill: Option<JoinHandle<()>>,
+    session_rollup: Option<JoinHandle<()>>,
 }
 
 impl MaintenanceHandles {
@@ -97,6 +98,7 @@ impl MaintenanceHandles {
             self.notification_evaluator,
             self.notification_digest,
             self.inventory_backfill,
+            self.session_rollup,
         ]
         .into_iter()
         .flatten()
@@ -130,6 +132,10 @@ pub(crate) fn background_interval(period: tokio::time::Duration) -> tokio::time:
 const ADGUARD_RETENTION_TAGS: &[&str] = &["adguard-allowed", "adguard-query", "adguard-rewrite"];
 const ADGUARD_RETENTION_DAYS: u32 = 7;
 const HEARTBEAT_RETENTION_DAYS: u32 = 14;
+/// Cadence for refreshing the AI session rollup (bead syslog-mcp-2vre). 5 min
+/// bounds staleness of unbounded `sessions` results while keeping the periodic
+/// full re-aggregation cost negligible relative to ingest.
+const SESSION_ROLLUP_REFRESH_SECS: u64 = 300;
 
 impl RuntimeCore {
     pub async fn load() -> Result<Self> {
@@ -295,6 +301,7 @@ impl RuntimeCore {
         let notification_evaluator = self.spawn_notification_evaluator(token.clone());
         let notification_digest = self.spawn_notification_digest(token.clone());
         let inventory_backfill = self.spawn_inventory_backfill_task(token.clone());
+        let session_rollup = self.spawn_session_rollup_task(token.clone());
         MaintenanceHandles {
             token,
             purge,
@@ -305,7 +312,76 @@ impl RuntimeCore {
             notification_evaluator,
             notification_digest,
             inventory_backfill,
+            session_rollup,
         }
+    }
+
+    /// Periodically refresh the AI session rollup (bead syslog-mcp-2vre).
+    ///
+    /// `list_ai_sessions` (unbounded) reads from `ai_session_rollup` for an
+    /// O(#sessions) indexed scan instead of the O(#AI-rows) live aggregation.
+    /// This task recomputes the rollup on a fixed cadence so reads stay fast and
+    /// staleness is bounded by `SESSION_ROLLUP_REFRESH_SECS`. The first refresh
+    /// runs shortly after start so the rollup is warm before the first request.
+    fn spawn_session_rollup_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
+        let pool = Arc::clone(&self.pool);
+        let limiter = Arc::clone(&self.maintenance_permit);
+        let handle = tokio::spawn(async move {
+            // Initial refresh after a short delay (lets startup settle), then on
+            // a fixed interval. `background_interval` fires the first tick after
+            // a full period, so do one eager refresh up front.
+            let mut interval = background_interval(tokio::time::Duration::from_secs(
+                SESSION_ROLLUP_REFRESH_SECS,
+            ));
+            let mut eager = true;
+            loop {
+                if !eager {
+                    tokio::select! {
+                        biased;
+                        _ = token.cancelled() => {
+                            tracing::debug!("session_rollup: cooperative shutdown");
+                            break;
+                        }
+                        _ = interval.tick() => {}
+                    }
+                } else {
+                    tokio::select! {
+                        biased;
+                        _ = token.cancelled() => {
+                            tracing::debug!("session_rollup: cancelled before first refresh");
+                            break;
+                        }
+                        _ = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {}
+                    }
+                    eager = false;
+                }
+                let Ok(permit) = Arc::clone(&limiter).acquire_owned().await else {
+                    tracing::error!("session_rollup: maintenance limiter closed");
+                    continue;
+                };
+                let pool = Arc::clone(&pool);
+                let started = Instant::now();
+                match tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    db::refresh_ai_session_rollup(&pool)?;
+                    db::ai_session_rollup_status(&pool)
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("spawn_blocking error: {e}"))
+                .and_then(|r| r)
+                {
+                    Ok(status) => tracing::info!(
+                        status = %status.summary(),
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "session_rollup: refresh complete"
+                    ),
+                    Err(error) => {
+                        tracing::error!(%error, "session_rollup: refresh failed")
+                    }
+                }
+            }
+        });
+        Some(handle)
     }
 
     fn spawn_inventory_backfill_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {

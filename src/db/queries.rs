@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::config::StorageConfig;
 
@@ -312,7 +312,36 @@ pub fn list_hosts(pool: &DbPool) -> Result<Vec<HostEntry>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// List AI transcript sessions ordered by recency.
+///
+/// Fast path (bead syslog-mcp-2vre): when the caller supplies NO time window
+/// (`from`/`to` both unset) the result is served from the periodically-refreshed
+/// `ai_session_rollup` materialization — an O(#sessions) indexed read instead of
+/// the O(#AI-rows) GROUP-BY + temp-btree sort that grew to ~4s at 10M rows. The
+/// rollup is refreshed on a background cadence, so unbounded results reflect data
+/// as of the last refresh; reach for [`ai_session_rollup_status`] to surface
+/// staleness. If the rollup has never been refreshed (e.g. immediately after a
+/// migration, before the background task runs) the fast path transparently falls
+/// back to the live aggregation, so correctness never depends on the rollup being
+/// warm.
+///
+/// Slow/exact path: when a time window IS supplied, the query is bounded by the
+/// timestamp index and runs live against `logs` (the rollup pre-aggregates across
+/// all time and cannot answer a windowed `event_count`/`first_seen`/`last_seen`).
 pub fn list_ai_sessions(
+    pool: &DbPool,
+    params: &ListAiSessionsParams,
+) -> Result<Vec<AiSessionEntry>> {
+    let time_filtered = params.from.is_some() || params.to.is_some();
+    if !time_filtered && ai_session_rollup_is_populated(pool)? {
+        return list_ai_sessions_from_rollup(pool, params);
+    }
+    list_ai_sessions_live(pool, params)
+}
+
+/// Live aggregation over `logs`. This is the ground-truth implementation used
+/// for time-windowed queries and to (re)compute the rollup.
+pub fn list_ai_sessions_live(
     pool: &DbPool,
     params: &ListAiSessionsParams,
 ) -> Result<Vec<AiSessionEntry>> {
@@ -381,6 +410,151 @@ pub fn list_ai_sessions(
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Indexed read from the `ai_session_rollup` materialization (no time window).
+fn list_ai_sessions_from_rollup(
+    pool: &DbPool,
+    params: &ListAiSessionsParams,
+) -> Result<Vec<AiSessionEntry>> {
+    let conn = pool.get()?;
+    let limit = params.limit.unwrap_or(100).min(1000);
+    let mut sql = String::from(
+        "SELECT ai_project, ai_tool, ai_session_id, ai_transcript_path,
+                hostname, first_seen, last_seen, event_count
+         FROM ai_session_rollup
+         WHERE 1=1",
+    );
+    let mut bindings: Vec<rusqlite::types::Value> = vec![];
+    let mut idx = 1;
+    if let Some(project) = &params.ai_project {
+        sql.push_str(&format!(" AND ai_project = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(project.clone()));
+        idx += 1;
+    }
+    if let Some(tool) = &params.ai_tool {
+        sql.push_str(&format!(" AND ai_tool = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(tool.clone()));
+        idx += 1;
+    }
+    if let Some(hostname) = &params.hostname {
+        sql.push_str(&format!(" AND hostname = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(hostname.clone()));
+    }
+    // Order by last_seen DESC ONLY — exactly mirroring the live path's
+    // `ORDER BY last_seen DESC`. A single-column order lets SQLite serve the
+    // sort straight from idx_ai_session_rollup_last_seen with NO temp b-tree
+    // (the cost that made the live aggregation slow). Adding tiebreak columns
+    // would reintroduce a temp b-tree, so ties stay engine-arbitrary here just
+    // as they are in the live query.
+    sql.push_str(&format!(" ORDER BY last_seen DESC LIMIT {limit}"));
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+        Ok(AiSessionEntry {
+            ai_project: row.get(0)?,
+            ai_tool: row.get(1)?,
+            ai_session_id: row.get(2)?,
+            ai_transcript_path: row.get(3)?,
+            hostname: row.get(4)?,
+            first_seen: row.get(5)?,
+            last_seen: row.get(6)?,
+            event_count: row.get(7)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// True once the rollup has been refreshed at least once (`refreshed_at` set).
+/// Before the first refresh, `list_ai_sessions` falls back to the live path.
+fn ai_session_rollup_is_populated(pool: &DbPool) -> Result<bool> {
+    let conn = pool.get()?;
+    let refreshed: Option<String> = conn
+        .query_row(
+            "SELECT refreshed_at FROM ai_session_rollup_meta WHERE id = 1",
+            [],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(refreshed.is_some())
+}
+
+/// Staleness snapshot for the AI session rollup.
+#[derive(Debug, Clone)]
+pub struct AiSessionRollupStatus {
+    /// RFC 3339 timestamp of the last successful refresh, or `None` if never.
+    pub refreshed_at: Option<String>,
+    /// Number of session rows in the rollup as of the last refresh.
+    pub row_count: i64,
+}
+
+/// Read the rollup staleness metadata (cheap single-row lookup).
+pub fn ai_session_rollup_status(pool: &DbPool) -> Result<AiSessionRollupStatus> {
+    let conn = pool.get()?;
+    let (refreshed_at, row_count) = conn
+        .query_row(
+            "SELECT refreshed_at, row_count FROM ai_session_rollup_meta WHERE id = 1",
+            [],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .optional()?
+        .unwrap_or((None, 0));
+    Ok(AiSessionRollupStatus {
+        refreshed_at,
+        row_count,
+    })
+}
+
+impl AiSessionRollupStatus {
+    /// Human-readable staleness summary, e.g. for `db status` / diagnostics:
+    /// `"42 sessions, refreshed 2026-05-29T12:00:00.000Z"` or `"never refreshed"`.
+    pub fn summary(&self) -> String {
+        match &self.refreshed_at {
+            Some(ts) => format!("{} sessions, refreshed {ts}", self.row_count),
+            None => "never refreshed".to_string(),
+        }
+    }
+}
+
+/// Recompute the `ai_session_rollup` materialization from `logs` in a single
+/// transaction, then stamp `refreshed_at`. Returns the number of session rows.
+///
+/// This runs the same full aggregation as the live path — the win is that it
+/// happens on a background cadence (not per request) so reads stay O(#sessions).
+/// Refresh-based by design: see the Migration 21 note in `pool.rs` for why a
+/// trigger-maintained rollup would corrupt MIN/MAX under DELETE.
+pub fn refresh_ai_session_rollup(pool: &DbPool) -> Result<usize> {
+    let mut conn = pool.get()?;
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM ai_session_rollup", [])?;
+    tx.execute(
+        "INSERT INTO ai_session_rollup
+             (ai_project, ai_tool, ai_session_id, hostname,
+              ai_transcript_path, first_seen, last_seen, event_count)
+         SELECT ai_project, ai_tool, ai_session_id, hostname,
+                MIN(ai_transcript_path) AS ai_transcript_path,
+                MIN(timestamp) AS first_seen,
+                MAX(timestamp) AS last_seen,
+                COUNT(*) AS event_count
+         FROM logs
+         WHERE ai_project IS NOT NULL AND ai_project != ''
+           AND ai_tool IS NOT NULL AND ai_tool != ''
+           AND ai_session_id IS NOT NULL AND ai_session_id != ''
+         GROUP BY ai_project, ai_tool, ai_session_id, hostname",
+        [],
+    )?;
+    let row_count: i64 =
+        tx.query_row("SELECT COUNT(*) FROM ai_session_rollup", [], |r| r.get(0))?;
+    tx.execute(
+        "UPDATE ai_session_rollup_meta
+            SET refreshed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                row_count = ?1
+          WHERE id = 1",
+        params![row_count],
+    )?;
+    tx.commit()?;
+    Ok(row_count as usize)
 }
 
 pub fn search_ai_sessions(

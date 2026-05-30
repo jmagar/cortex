@@ -1361,6 +1361,255 @@ fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
 }
 
 // ---------------------------------------------------------------------------
+// AI session rollup (bead syslog-mcp-2vre) correctness tests
+// ---------------------------------------------------------------------------
+
+/// Insert a spread of AI sessions across projects/tools/sessions/hosts so the
+/// rollup vs live comparison exercises real grouping.
+fn seed_ai_sessions(pool: &DbPool) {
+    let mut batch = Vec::new();
+    for s in 0..12u32 {
+        let tool = if s % 2 == 0 { "codex" } else { "claude" };
+        let project = format!("/proj/{}", s % 3);
+        let session = format!("sess-{s}");
+        let host = format!("host{}", s % 2);
+        let event_count = 3 + s % 4;
+        // Globally DISTINCT, strictly increasing timestamps per session so each
+        // session's MAX(last_seen) is unique — no ordering ties between the
+        // live and rollup paths (both order by last_seen DESC only).
+        for e in 0..event_count {
+            // Encode (session, event) into a unique minute/second so no two
+            // rows across sessions share a timestamp.
+            let total = s * 10 + e; // < 120, fits in minutes
+            let ts = format!("2026-05-01T{:02}:{:02}:00Z", total / 60, total % 60);
+            batch.push(make_ai_entry(
+                &ts,
+                &host,
+                tool,
+                &project,
+                &session,
+                &format!("event {e} of {session}"),
+            ));
+        }
+    }
+    insert_logs_batch(pool, &batch).unwrap();
+}
+
+fn default_session_params() -> ListAiSessionsParams {
+    ListAiSessionsParams {
+        ai_project: None,
+        ai_tool: None,
+        hostname: None,
+        from: None,
+        to: None,
+        limit: Some(100),
+    }
+}
+
+#[test]
+fn rollup_result_equals_live_aggregation() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+
+    // Before refresh: rollup empty => list_ai_sessions falls back to live.
+    let pre = list_ai_sessions(&pool, &default_session_params()).unwrap();
+    let live = list_ai_sessions_live(&pool, &default_session_params()).unwrap();
+    assert_eq!(
+        pre.len(),
+        live.len(),
+        "fallback must match live before refresh"
+    );
+
+    // After refresh: list_ai_sessions serves from the rollup and must match.
+    let total = refresh_ai_session_rollup(&pool).unwrap();
+    assert_eq!(total, live.len(), "rollup row count must equal #sessions");
+    assert_eq!(
+        ai_session_rollup_status(&pool).unwrap().row_count,
+        total as i64
+    );
+
+    let rolled = list_ai_sessions(&pool, &default_session_params()).unwrap();
+    assert_eq!(rolled.len(), live.len());
+    for (l, r) in live.iter().zip(rolled.iter()) {
+        assert_eq!(l.ai_project, r.ai_project);
+        assert_eq!(l.ai_tool, r.ai_tool);
+        assert_eq!(l.ai_session_id, r.ai_session_id);
+        assert_eq!(l.hostname, r.hostname);
+        assert_eq!(l.first_seen, r.first_seen, "first_seen drift");
+        assert_eq!(l.last_seen, r.last_seen, "last_seen drift");
+        assert_eq!(l.event_count, r.event_count, "event_count drift");
+        assert_eq!(l.ai_transcript_path, r.ai_transcript_path);
+    }
+}
+
+#[test]
+fn rollup_status_reports_refresh_time() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+
+    // Never refreshed => no staleness timestamp.
+    assert!(ai_session_rollup_status(&pool)
+        .unwrap()
+        .refreshed_at
+        .is_none());
+
+    refresh_ai_session_rollup(&pool).unwrap();
+    let status = ai_session_rollup_status(&pool).unwrap();
+    assert!(status.refreshed_at.is_some(), "refreshed_at must be set");
+    assert!(status.row_count > 0);
+    assert!(status.summary().contains("refreshed"));
+}
+
+/// The key correctness guarantee the design rests on: a REFRESH-based rollup
+/// stays exact under DELETE, including when the deleted rows held a session's
+/// MIN/MAX timestamp — the exact case where a trigger-maintained rollup would
+/// silently corrupt first_seen/last_seen.
+#[test]
+fn rollup_is_exact_after_deletes_recompute_min_max() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+    refresh_ai_session_rollup(&pool).unwrap();
+
+    // Delete the single newest event of every session (the rows holding MAX
+    // timestamp) plus the oldest of one session (holding MIN). A stale rollup
+    // would keep the now-deleted extremes; a refresh must recompute them.
+    {
+        let conn = pool.get().unwrap();
+        // Delete the global newest 12 rows (roughly the MAX-holding rows).
+        conn.execute(
+            "DELETE FROM logs WHERE id IN (
+                 SELECT id FROM logs
+                 WHERE ai_session_id IS NOT NULL
+                 ORDER BY timestamp DESC LIMIT 12
+             )",
+            [],
+        )
+        .unwrap();
+        // Delete the global oldest row (a MIN-holding row).
+        conn.execute(
+            "DELETE FROM logs WHERE id IN (
+                 SELECT id FROM logs
+                 WHERE ai_session_id IS NOT NULL
+                 ORDER BY timestamp ASC LIMIT 1
+             )",
+            [],
+        )
+        .unwrap();
+    }
+
+    // Stale rollup (not yet refreshed) may now disagree with live — prove the
+    // refresh restores exactness against a fresh live aggregation.
+    refresh_ai_session_rollup(&pool).unwrap();
+    let live = list_ai_sessions_live(&pool, &default_session_params()).unwrap();
+    let rolled = list_ai_sessions(&pool, &default_session_params()).unwrap();
+    assert_eq!(live.len(), rolled.len(), "post-delete row count mismatch");
+    for (l, r) in live.iter().zip(rolled.iter()) {
+        assert_eq!(l.ai_session_id, r.ai_session_id);
+        assert_eq!(
+            l.first_seen, r.first_seen,
+            "MIN not recomputed after delete"
+        );
+        assert_eq!(l.last_seen, r.last_seen, "MAX not recomputed after delete");
+        assert_eq!(
+            l.event_count, r.event_count,
+            "count not recomputed after delete"
+        );
+    }
+}
+
+#[test]
+fn rollup_read_uses_last_seen_index_no_temp_btree() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+    refresh_ai_session_rollup(&pool).unwrap();
+    // The unbounded rollup read must be served by the last_seen index, NOT a
+    // temp b-tree sort (the cost that plagued the live aggregation). The query
+    // mirrors list_ai_sessions_from_rollup.
+    let plan = query_plan(
+        &pool,
+        "SELECT ai_project, ai_tool, ai_session_id, ai_transcript_path,
+                hostname, first_seen, last_seen, event_count
+         FROM ai_session_rollup
+         WHERE 1=1
+         ORDER BY last_seen DESC LIMIT 100",
+        &[],
+    );
+    assert!(
+        plan.contains("idx_ai_session_rollup_last_seen"),
+        "rollup read must use the last_seen index; plan was:\n{plan}"
+    );
+    assert!(
+        !plan.contains("TEMP B-TREE"),
+        "rollup read must avoid a temp b-tree sort; plan was:\n{plan}"
+    );
+}
+
+#[test]
+fn rollup_respects_project_and_tool_filters() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+    refresh_ai_session_rollup(&pool).unwrap();
+
+    for (project, tool) in [
+        (Some("/proj/0".to_string()), None),
+        (None, Some("codex".to_string())),
+        (Some("/proj/1".to_string()), Some("claude".to_string())),
+    ] {
+        let params = ListAiSessionsParams {
+            ai_project: project.clone(),
+            ai_tool: tool.clone(),
+            ..default_session_params()
+        };
+        let live = list_ai_sessions_live(&pool, &params).unwrap();
+        let rolled = list_ai_sessions(&pool, &params).unwrap();
+        assert_eq!(
+            live.iter().map(|s| &s.ai_session_id).collect::<Vec<_>>(),
+            rolled.iter().map(|s| &s.ai_session_id).collect::<Vec<_>>(),
+            "filtered rollup ({project:?},{tool:?}) must match live"
+        );
+    }
+}
+
+#[test]
+fn time_windowed_sessions_always_use_live_path() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+    refresh_ai_session_rollup(&pool).unwrap();
+
+    // Insert a brand-new event AFTER the rollup was built. A time-windowed
+    // query must see it live (rollup is stale and must be bypassed).
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-06-01T12:00:00Z",
+            "host0",
+            "codex",
+            "/proj/0",
+            "sess-0",
+            "fresh post-refresh event",
+        )],
+    )
+    .unwrap();
+
+    let windowed = ListAiSessionsParams {
+        from: Some("2026-06-01T00:00:00Z".into()),
+        to: Some("2026-06-02T00:00:00Z".into()),
+        ..default_session_params()
+    };
+    let rows = list_ai_sessions(&pool, &windowed).unwrap();
+    assert_eq!(
+        rows.len(),
+        1,
+        "windowed query must see the fresh event live"
+    );
+    assert_eq!(rows[0].last_seen, "2026-06-01T12:00:00Z");
+    assert_eq!(
+        rows[0].event_count, 1,
+        "windowed count must be live, not rollup"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // RAG v1 tests
 // ---------------------------------------------------------------------------
 
@@ -1584,4 +1833,253 @@ fn ask_history_sessions_returns_session_hits() {
     let result = ask_history_sessions(&pool, &params).unwrap();
     assert!(!result.sessions.is_empty(), "expected session hits");
     assert_eq!(result.query, "certificate");
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Performance benchmark harness (Issue 4 / bead syslog-mcp-2vre).
+//
+// Builds a synthetic on-disk SQLite DB with a realistic row count and times
+// `get_stats` and `list_ai_sessions` before/after the optimization work.
+//
+// IGNORED by default — it builds millions of rows and takes minutes, so it
+// must never run in the normal `cargo nextest` suite. Run explicitly:
+//
+//   SYSLOG_BENCH_ROWS=10000000 cargo test --lib \
+//       db::queries::tests::bench_stats_and_sessions -- --ignored --nocapture
+//
+// Row count is controlled by SYSLOG_BENCH_ROWS (default 5_000_000).
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Insert `n` synthetic log rows through the live schema (FTS + inventory +
+/// counter triggers all fire), in large transactions for throughput. ~20% of
+/// rows carry AI session fields spread across many (project, tool, session)
+/// groups so the sessions query has realistic cardinality.
+fn bench_seed_rows(pool: &DbPool, n: usize) {
+    use std::time::Instant;
+    let started = Instant::now();
+    const CHUNK: usize = 50_000;
+    let mut inserted = 0usize;
+    while inserted < n {
+        let this = CHUNK.min(n - inserted);
+        let mut conn = pool.get().unwrap();
+        let tx = conn.transaction().unwrap();
+        {
+            let mut stmt = tx
+                .prepare_cached(
+                    "INSERT INTO logs (timestamp, hostname, facility, severity, app_name,
+                        process_id, message, raw, received_at, source_ip,
+                        ai_tool, ai_project, ai_session_id, ai_transcript_path)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                )
+                .unwrap();
+            for i in 0..this {
+                let x = inserted + i;
+                // Strictly-increasing timestamp per row (base + x seconds, full
+                // date rollover). Monotonic in `x` => each session's MAX(ts) is
+                // globally unique (no last_seen ties), so the rollup vs live
+                // top-N comparison is deterministic at the LIMIT boundary.
+                let base = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z").unwrap();
+                let dt = base + chrono::TimeDelta::seconds(x as i64);
+                let ts = dt.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+                let recv = ts.clone();
+                let host = format!("host{:02}", x % 25);
+                let app = format!("app{:02}", x % 60);
+                let msg = format!("synthetic log line {x} some error retry connection text");
+                let is_ai = x % 5 == 0;
+                let (tool, proj, sess, tpath): (
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                ) = if is_ai {
+                    let proj = format!("/proj/{}", x % 40);
+                    let tool = if x % 2 == 0 { "codex" } else { "claude" }.to_string();
+                    // ~20k distinct sessions => realistic group cardinality.
+                    let sess = format!("sess-{}", x % 20_000);
+                    let tpath = format!("{proj}/{sess}.jsonl");
+                    (Some(tool), Some(proj), Some(sess), Some(tpath))
+                } else {
+                    (None, None, None, None)
+                };
+                stmt.execute(rusqlite::params![
+                    ts,
+                    host,
+                    Option::<String>::None,
+                    "info",
+                    app,
+                    Option::<String>::None,
+                    msg,
+                    "raw",
+                    recv,
+                    "10.0.0.1:514",
+                    tool,
+                    proj,
+                    sess,
+                    tpath,
+                ])
+                .unwrap();
+            }
+        }
+        tx.commit().unwrap();
+        inserted += this;
+    }
+    eprintln!(
+        "[bench] seeded {inserted} rows in {:.1}s",
+        started.elapsed().as_secs_f64()
+    );
+}
+
+/// Median of N timed runs of `f`, in milliseconds. One warm-up run first.
+fn bench_median_ms(runs: usize, mut f: impl FnMut()) -> f64 {
+    use std::time::Instant;
+    f(); // warm-up
+    let mut samples: Vec<f64> = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let t = Instant::now();
+        f();
+        samples.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+    samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    samples[samples.len() / 2]
+}
+
+#[test]
+#[ignore = "performance benchmark; builds millions of rows. Run with --ignored."]
+fn bench_stats_and_sessions() {
+    let rows: usize = std::env::var("SYSLOG_BENCH_ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5_000_000);
+
+    // Optional persistent DB path so a seeded DB can be reused across runs
+    // (seeding 10M rows takes ~13 min). When unset, use a throwaway tempdir.
+    let _guard_dir;
+    let (pool, cfg) = if let Ok(path) = std::env::var("SYSLOG_BENCH_DB") {
+        let db_path = std::path::PathBuf::from(&path);
+        let fresh = !db_path.exists();
+        let cfg = test_storage_config(db_path);
+        let pool = init_pool(&cfg).unwrap();
+        if fresh {
+            bench_seed_rows(&pool, rows);
+        } else {
+            eprintln!("[bench] reusing existing DB at {path} (skipping seed)");
+        }
+        (pool, cfg)
+    } else {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = test_storage_config(dir.path().join("test.db"));
+        let pool = init_pool(&cfg).unwrap();
+        bench_seed_rows(&pool, rows);
+        _guard_dir = dir; // keep alive
+        (pool, cfg)
+    };
+
+    let ground_truth: i64 = {
+        let conn = pool.get().unwrap();
+        conn.query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
+            .unwrap()
+    };
+    eprintln!("[bench] ground-truth COUNT(*) FROM logs = {ground_truth}");
+
+    // --- stats (default: FTS diagnostic skipped) ---
+    let mut last_stats = None;
+    let stats_ms = bench_median_ms(5, || {
+        last_stats = Some(get_stats(&pool, &cfg).unwrap());
+    });
+    let stats = last_stats.unwrap();
+    eprintln!(
+        "[bench] get_stats (default, FTS skipped): {stats_ms:.1} ms  (total_logs={})",
+        stats.total_logs
+    );
+    assert_eq!(
+        stats.total_logs, ground_truth,
+        "stats total_logs must equal ground-truth COUNT(*)"
+    );
+
+    // --- stats with FTS diagnostic ON (the expensive COUNT(*) FROM logs_fts) ---
+    let stats_fts_ms = bench_median_ms(3, || {
+        let _ = get_stats_with_options(&pool, &cfg, true).unwrap();
+    });
+    eprintln!("[bench] get_stats (FTS diagnostic ON): {stats_fts_ms:.1} ms");
+
+    // --- sessions BEFORE: live aggregation (GROUP BY + temp-btree sort) ---
+    let params = ListAiSessionsParams {
+        ai_project: None,
+        ai_tool: None,
+        hostname: None,
+        from: None,
+        to: None,
+        limit: Some(100),
+    };
+    let mut live_rows = 0usize;
+    let sessions_live_ms = bench_median_ms(5, || {
+        live_rows = list_ai_sessions_live(&pool, &params).unwrap().len();
+    });
+    eprintln!(
+        "[bench] BEFORE list_ai_sessions_live(limit=100): {sessions_live_ms:.1} ms  ({live_rows} rows)"
+    );
+
+    // --- refresh cost (background cadence; not on the request path) ---
+    let mut rollup_total = 0usize;
+    let refresh_ms = bench_median_ms(3, || {
+        rollup_total = refresh_ai_session_rollup(&pool).unwrap();
+    });
+    eprintln!(
+        "[bench] refresh_ai_session_rollup: {refresh_ms:.1} ms  ({rollup_total} session rows total)"
+    );
+
+    // --- sessions AFTER: indexed read from the rollup materialization ---
+    let mut rollup_rows = 0usize;
+    let sessions_rollup_ms = bench_median_ms(5, || {
+        rollup_rows = list_ai_sessions(&pool, &params).unwrap().len();
+    });
+    eprintln!(
+        "[bench] AFTER list_ai_sessions(rollup, limit=100): {sessions_rollup_ms:.1} ms  ({rollup_rows} rows)"
+    );
+
+    // Correctness: the rollup-served top-N must equal the live top-N. Both
+    // paths order by `last_seen DESC` only, so rows that TIE on last_seen may
+    // appear in different relative order between the two plans. Compare in a
+    // tie-order-independent way: (a) the multiset of last_seen ordering keys
+    // must be identical, and (b) the per-session (last_seen, event_count) facts
+    // must match for every returned session.
+    let live = list_ai_sessions_live(&pool, &params).unwrap();
+    let rollup = list_ai_sessions(&pool, &params).unwrap();
+    assert_eq!(live.len(), rollup.len(), "rollup/live row count mismatch");
+    let mut live_keys: Vec<&String> = live.iter().map(|s| &s.last_seen).collect();
+    let mut rollup_keys: Vec<&String> = rollup.iter().map(|s| &s.last_seen).collect();
+    live_keys.sort();
+    rollup_keys.sort();
+    assert_eq!(
+        live_keys, rollup_keys,
+        "rollup/live last_seen ordering-key multisets differ"
+    );
+    let live_facts: std::collections::HashMap<_, _> = live
+        .iter()
+        .map(|s| {
+            (
+                (&s.ai_project, &s.ai_tool, &s.ai_session_id, &s.hostname),
+                (&s.last_seen, s.event_count),
+            )
+        })
+        .collect();
+    for r in &rollup {
+        let key = (&r.ai_project, &r.ai_tool, &r.ai_session_id, &r.hostname);
+        match live_facts.get(&key) {
+            Some((last_seen, count)) => {
+                assert_eq!(*last_seen, &r.last_seen, "last_seen mismatch for {key:?}");
+                assert_eq!(*count, r.event_count, "event_count mismatch for {key:?}");
+            }
+            None => panic!("rollup returned session not in live top-N: {key:?}"),
+        }
+    }
+
+    let speedup = sessions_live_ms / sessions_rollup_ms.max(0.001);
+    eprintln!(
+        "[bench] SUMMARY rows={rows} \
+         stats_default_ms={stats_ms:.1} stats_fts_on_ms={stats_fts_ms:.1} \
+         sessions_BEFORE_live_ms={sessions_live_ms:.1} \
+         sessions_AFTER_rollup_ms={sessions_rollup_ms:.1} \
+         refresh_ms={refresh_ms:.1} sessions_speedup={speedup:.1}x"
+    );
 }
