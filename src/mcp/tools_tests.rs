@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::SyslogService;
+use crate::app::CortexService;
 use crate::config::{McpConfig, StorageConfig};
 use crate::db;
 use crate::mcp::AppState;
@@ -12,11 +12,11 @@ fn test_state_with_token(token: Option<String>) -> (AppState, Arc<db::DbPool>, t
     let pool = Arc::new(db::init_pool(&storage).unwrap());
     (
         AppState {
-            service: SyslogService::new(Arc::clone(&pool), storage.clone()),
+            service: CortexService::new(Arc::clone(&pool), storage.clone()),
             config: McpConfig {
                 host: "127.0.0.1".into(),
                 port: 3100,
-                server_name: "syslog-mcp".into(),
+                server_name: "cortex".into(),
                 no_auth: false,
                 trusted_gateway_no_auth: false,
                 api_token: token,
@@ -102,7 +102,7 @@ async fn host_state_action_returns_bounded_heartbeat_state() {
 
     let value = execute_tool(
         &h.state,
-        "syslog",
+        "cortex",
         json!({"action": "host_state", "hostname": "tootie", "limit": 1}),
         None,
     )
@@ -116,7 +116,7 @@ async fn host_state_action_returns_bounded_heartbeat_state() {
 #[tokio::test]
 async fn fleet_state_action_returns_fleet_snapshot() {
     let h = TestHarness::new();
-    let value = execute_tool(&h.state, "syslog", json!({"action": "fleet_state"}), None)
+    let value = execute_tool(&h.state, "cortex", json!({"action": "fleet_state"}), None)
         .await
         .unwrap();
     assert!(
@@ -152,7 +152,7 @@ async fn host_state_action_reports_ambiguous_hostname() {
 
     let error = execute_tool(
         &h.state,
-        "syslog",
+        "cortex",
         json!({"action": "host_state", "hostname": "shared"}),
         None,
     )
@@ -166,7 +166,7 @@ async fn numeric_args_reject_out_of_range_values() {
     let h = TestHarness::new();
     let err = execute_tool(
         &h.state,
-        "syslog",
+        "cortex",
         json!({"action": "tail", "n": u64::from(u32::MAX) + 1}),
         None,
     )
@@ -184,7 +184,7 @@ async fn numeric_args_reject_wrong_type_values() {
         json!({"action": "correlate", "reference_time": "2026-01-01T00:00:00Z", "window_minutes": "5"}),
         json!({"action": "correlate", "reference_time": "2026-01-01T00:00:00Z", "limit": null}),
     ] {
-        let err = execute_tool(&h.state, "syslog", args, None)
+        let err = execute_tool(&h.state, "cortex", args, None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("must be an unsigned integer"));
@@ -266,7 +266,7 @@ async fn schema_actions_are_dispatchable() {
             }
             _ => json!({"action": action}),
         };
-        let result = execute_tool(&h.state, "syslog", args, None).await;
+        let result = execute_tool(&h.state, "cortex", args, None).await;
         if *action == "compose_doctor" {
             if let Err(error) = result {
                 assert!(
@@ -310,11 +310,11 @@ async fn schema_actions_are_dispatchable() {
 
 #[tokio::test]
 async fn public_action_references_cover_schema_registry() {
-    let help = tool_syslog_help().await.unwrap();
+    let help = tool_cortex_help().await.unwrap();
     let help = help["help"].as_str().unwrap().to_ascii_lowercase();
     for action in &super::actions::action_names() {
         assert!(
-            help.contains(&format!("## syslog {action}")),
+            help.contains(&format!("## cortex {action}")),
             "help text missing action section: {action}"
         );
     }
@@ -335,7 +335,7 @@ async fn public_action_references_cover_schema_registry() {
     ] {
         for action in &super::actions::action_names() {
             assert!(
-                content.contains(&format!("syslog {action}"))
+                content.contains(&format!("cortex {action}"))
                     || content.contains(&format!("mcp_call {action}"))
                     || content.contains(&format!("\"action\":\"{action}\"")),
                 "{path} missing action coverage for {action}"
@@ -352,14 +352,14 @@ async fn public_action_references_cover_schema_registry() {
         ("docs/mcp/TOOLS.md", include_str!("../../docs/mcp/TOOLS.md")),
         ("docs/mcp/TESTS.md", include_str!("../../docs/mcp/TESTS.md")),
         (
-            "plugins/syslog/skills/syslog/SKILL.md",
-            include_str!("../../plugins/syslog/skills/syslog/SKILL.md"),
+            "plugins/cortex/skills/cortex/SKILL.md",
+            include_str!("../../plugins/cortex/skills/cortex/SKILL.md"),
         ),
     ] {
         for action in &super::actions::action_names() {
             assert!(
                 content.contains(&format!("`{action}`"))
-                    || content.contains(&format!("syslog {action}")),
+                    || content.contains(&format!("cortex {action}")),
                 "{path} missing action reference for {action}"
             );
         }
@@ -369,15 +369,15 @@ async fn public_action_references_cover_schema_registry() {
 #[tokio::test]
 async fn syslog_tool_requires_known_action() {
     let h = TestHarness::new();
-    let missing = execute_tool(&h.state, "syslog", json!({}), None)
+    let missing = execute_tool(&h.state, "cortex", json!({}), None)
         .await
         .unwrap_err();
     assert!(missing.to_string().contains("action is required"));
 
-    let unknown = execute_tool(&h.state, "syslog", json!({"action": "reboot"}), None)
+    let unknown = execute_tool(&h.state, "cortex", json!({"action": "reboot"}), None)
         .await
         .unwrap_err();
-    assert!(unknown.to_string().contains("unknown syslog action"));
+    assert!(unknown.to_string().contains("unknown cortex action"));
 }
 
 #[tokio::test]
@@ -396,7 +396,7 @@ async fn compose_action_rejects_target_override() {
             args.as_object_mut()
                 .unwrap()
                 .insert(key.into(), json!("override-value"));
-            let err = execute_tool(&h.state, "syslog", args, None)
+            let err = execute_tool(&h.state, "cortex", args, None)
                 .await
                 .unwrap_err();
             assert!(

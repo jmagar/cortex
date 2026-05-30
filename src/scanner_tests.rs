@@ -485,7 +485,7 @@ fn index_file_parses_realistic_codex_transcript_shape() {
     std::fs::write(
         &file,
         concat!(
-            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-1\",\"cwd\":\"/home/jmagar/workspace/syslog-mcp\"}}\n",
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-1\",\"cwd\":\"/home/jmagar/workspace/cortex\"}}\n",
             "{\"type\":\"response_item\",\"payload\":{\"id\":\"codex-1\",\"content\":[{\"type\":\"output_text\",\"text\":\"fixed parser bug\"}]},\"timestamp\":\"2026-05-11T00:00:00Z\"}\n"
         ),
     )
@@ -506,7 +506,7 @@ fn index_file_parses_realistic_codex_transcript_shape() {
     assert_eq!(search.sessions[0].ai_tool, "codex");
     assert_eq!(
         search.sessions[0].ai_project,
-        "/home/jmagar/workspace/syslog-mcp"
+        "/home/jmagar/workspace/cortex"
     );
     assert_eq!(search.sessions[0].ai_session_id, "codex-1");
 }

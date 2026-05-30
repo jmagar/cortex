@@ -1,10 +1,10 @@
-// Regression test: verifies rmcp 1.6 axum-extension propagation (syslog-mcp-brt0.10).
+// Regression test: verifies rmcp 1.6 axum-extension propagation (cortex-brt0.10).
 // See docs/internal/rmcp-auth-spike.md for the investigation that confirmed Pattern (a).
 //
 // Proves that axum request extensions set by middleware ARE propagated into
 // rmcp 1.6's `RequestContext.extensions` for tool handlers, when using
 // `transport-streamable-http-server`. This is the empirical verification for
-// the syslog-mcp-brt0.10 spike.
+// the cortex-brt0.10 spike.
 //
 // rmcp 1.6 publishes `http::request::Parts` into the JSON-RPC request's
 // extensions before dispatching. Any axum middleware that calls
@@ -15,7 +15,7 @@
 //     let value = parts.extensions.get::<AuthContext>().unwrap();
 //
 // This works in BOTH `stateful_mode(true)` and `stateful_mode(false)`. The
-// current syslog-mcp deployment uses stateful_mode(false); no flip required.
+// current cortex deployment uses stateful_mode(false); no flip required.
 //
 // See `docs/internal/rmcp-auth-spike.md` for full write-up.
 
@@ -124,7 +124,7 @@ async fn auth_middleware(mut req: Request, next: Next) -> Response {
     // any non-None value confirms propagation works.
     req.extensions_mut().insert(AuthContext {
         subject: EXPECTED_SUBJECT.to_string(),
-        scopes: vec!["syslog:read".to_string(), "syslog:admin".to_string()],
+        scopes: vec!["cortex:read".to_string(), "cortex:admin".to_string()],
     });
     next.run(req).await
 }
@@ -178,7 +178,7 @@ const CALL_BODY: &str =
 
 #[tokio::test]
 async fn axum_extension_propagates_into_tool_handler_stateless() {
-    // Mirrors syslog-mcp's current production setup: stateful_mode=false,
+    // Mirrors cortex's current production setup: stateful_mode=false,
     // json_response=true. This is the case that matters most.
     let observed = Observed::default();
     let router = build_router(observed.clone(), false);
@@ -194,7 +194,7 @@ async fn axum_extension_propagates_into_tool_handler_stateless() {
         seen,
         Some(AuthContext {
             subject: EXPECTED_SUBJECT.to_string(),
-            scopes: vec!["syslog:read".to_string(), "syslog:admin".to_string()],
+            scopes: vec!["cortex:read".to_string(), "cortex:admin".to_string()],
         }),
         "tool handler did not observe the AuthContext set by middleware (body={body})",
     );
@@ -225,7 +225,7 @@ async fn axum_extension_propagates_into_tool_handler_stateful() {
         seen,
         Some(AuthContext {
             subject: EXPECTED_SUBJECT.to_string(),
-            scopes: vec!["syslog:read".to_string(), "syslog:admin".to_string()],
+            scopes: vec!["cortex:read".to_string(), "cortex:admin".to_string()],
         }),
         "tool handler did not observe the AuthContext set by middleware (body={body})",
     );

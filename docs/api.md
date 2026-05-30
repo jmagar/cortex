@@ -1,12 +1,12 @@
-# syslog-mcp REST API
+# cortex REST API
 
 > Canonical reference for the always-on `/api/*` surface introduced by
-> epic `syslog-mcp-0p8r` (v0.26). All endpoints require a bearer token
-> (`Authorization: Bearer $SYSLOG_API_TOKEN`); 401 is returned for
+> epic `cortex-0p8r` (v0.26). All endpoints require a bearer token
+> (`Authorization: Bearer $CORTEX_API_TOKEN`); 401 is returned for
 > missing/invalid tokens regardless of bind address.
 >
 > CLI commands route here by default since v0.26 via
-> `SYSLOG_USE_HTTP=true` written to `~/.syslog-mcp/.env` by
+> `CORTEX_USE_HTTP=true` written to `~/.cortex/.env` by
 > `syslog setup repair`. See [`docs/architecture.md`](architecture.md)
 > for the caller → DB diagram and [`docs/rollout.md`](rollout.md) for
 > the manual upgrade playbook.
@@ -88,7 +88,7 @@ startup. Two version-skew rules:
   Newer CLI calling an older container will see Axum's default 404 for
   routes added in later beads (`/api/db/vacuum`, `/api/ai/prune-checkpoints`,
   etc.). The CLI maps that to a user-facing "upgrade the container or
-  unset `SYSLOG_USE_HTTP` to use direct DB" message.
+  unset `CORTEX_USE_HTTP` to use direct DB" message.
 - **`/api/capabilities` is deferred.** No structured capability map ships
   in v0.26. The version + schema_version pair plus 404 semantics cover the
   current single-deployer use case; a capabilities endpoint can be added
@@ -108,7 +108,7 @@ query 100× both ways. Direct (default-pre-v0.26 path):
 
 ```bash
 # direct SQLite — bypasses /api/*
-unset SYSLOG_USE_HTTP
+unset CORTEX_USE_HTTP
 time for i in $(seq 1 100); do syslog hosts > /dev/null; done
 ```
 
@@ -116,8 +116,8 @@ HTTP:
 
 ```bash
 # REST transport — same call, with auth + transport overhead
-export SYSLOG_USE_HTTP=true
-# SYSLOG_MCP_URL + SYSLOG_API_TOKEN must already be set in env
+export CORTEX_USE_HTTP=true
+# CORTEX_URL + CORTEX_API_TOKEN must already be set in env
 time for i in $(seq 1 100); do syslog hosts > /dev/null; done
 ```
 
@@ -130,13 +130,13 @@ over local hostnames inside a maintenance script on the deploy host),
 operators can opt out of HTTP transport for the duration of the script:
 
 ```bash
-( unset SYSLOG_USE_HTTP; \
+( unset CORTEX_USE_HTTP; \
   for h in $(syslog hosts --json | jq -r '.hosts[].hostname'); do \
     syslog tail --hostname "$h" --n 50; \
   done )
 ```
 
-Inside the subshell `SYSLOG_USE_HTTP` is unset so each `syslog` call
+Inside the subshell `CORTEX_USE_HTTP` is unset so each `syslog` call
 goes straight to SQLite via `RuntimeCore::load_query_only`. The parent
 shell environment is unaffected.
 
@@ -144,22 +144,22 @@ shell environment is unaffected.
 
 ## Security / threat model
 
-- **Bearer tokens in env.** `SYSLOG_API_TOKEN` is passed via the
+- **Bearer tokens in env.** `CORTEX_API_TOKEN` is passed via the
   container/CLI environment. On a Linux host any process running as the
   same user can read `/proc/<pid>/environ` and recover the token. The
   homelab acceptance is: the host is single-owner; nothing untrusted
-  runs as the same user as the syslog-mcp container or the CLI. **Do
+  runs as the same user as the cortex container or the CLI. **Do
   not share container-host shell access with untrusted users** — this
   is the documented model, not a future bug to fix.
-- **Token storage.** `setup repair` writes `~/.syslog-mcp/.env` with
-  mode `0600` (`-rw-------`). Verify with `ls -l ~/.syslog-mcp/.env`
+- **Token storage.** `setup repair` writes `~/.cortex/.env` with
+  mode `0600` (`-rw-------`). Verify with `ls -l ~/.cortex/.env`
   before reporting a "leaked token" — a `0644` file is a configuration
   error, not a deliberate design.
 - **TLS termination is external.** The `/api/*` surface speaks plain
   HTTP. Production deployments terminate TLS at SWAG (or any reverse
   proxy) and forward to the container over the internal bridge. The
   API itself **emits a startup warning** when bound to a non-loopback
-  address while `SYSLOG_MCP_PUBLIC_URL` does not begin with `https://`,
+  address while `CORTEX_PUBLIC_URL` does not begin with `https://`,
   so a misconfiguration is loud at first boot rather than silent
   in production.
 - **Single-token model.** `build_auth_layer` accepts exactly one token;
@@ -228,10 +228,10 @@ caveats:
   and run the vacuum through the service layer directly:
 
   ```bash
-  ( unset SYSLOG_USE_HTTP && syslog db vacuum --full --force )
+  ( unset CORTEX_USE_HTTP && syslog db vacuum --full --force )
   ```
 
-  The subshell scoping keeps `SYSLOG_USE_HTTP` set for everything else.
+  The subshell scoping keeps `CORTEX_USE_HTTP` set for everything else.
   Pair with a downtime/ingest-quiesce window since `full` blocks
   writers regardless of transport.
 
@@ -240,7 +240,7 @@ caveats:
 ## Local-only commands
 
 A handful of CLI subcommands intentionally stay on the direct-SQLite or
-host-shell path even with `SYSLOG_USE_HTTP=true`. The per-command
+host-shell path even with `CORTEX_USE_HTTP=true`. The per-command
 reasons (no taxonomy):
 
 - `syslog ai watch` — long-running daemon. HTTP would require a
@@ -256,7 +256,7 @@ reasons (no taxonomy):
   the destination over HTTP would force a container-side filesystem
   the operator never asked for.
 
-These all keep working when `SYSLOG_USE_HTTP=true` because the CLI
+These all keep working when `CORTEX_USE_HTTP=true` because the CLI
 dispatch table never routes them through the HTTP client.
 
 ---
@@ -270,7 +270,7 @@ manual invocation is a weekly user-systemd timer:
 
 ```ini
 [Unit]
-Description=syslog-mcp drift check
+Description=cortex drift check
 
 [Service]
 Type=oneshot
@@ -284,7 +284,7 @@ WantedBy=default.target
 
 ```ini
 [Unit]
-Description=run syslog-mcp drift check weekly
+Description=run cortex drift check weekly
 
 [Timer]
 OnCalendar=Mon *-*-* 03:30:00
@@ -296,7 +296,7 @@ WantedBy=timers.target
 
 Pair with whatever push-notification path the operator already has
 (Gotify, ntfy, email) keyed off `systemctl --user status
-syslog-mcp-doctor.timer` exit codes. The `--json` output is stable
+cortex-doctor.timer` exit codes. The `--json` output is stable
 enough for jq/grep alerting.
 
 ---

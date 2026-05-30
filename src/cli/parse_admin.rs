@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Result};
-use syslog_mcp::compose::ComposeTarget;
+use cortex::compose::ComposeTarget;
 
 use super::parse_common::{parse_output_args, parse_u32_flag, value_after_equals, FlagCursor};
 use super::{
@@ -180,9 +180,9 @@ pub(crate) fn parse_compose(args: &[String]) -> Result<CliCommand> {
         "logs" => Ok(CliCommand::Compose(ComposeCommand::Logs(
             parse_compose_logs(rest)?,
         ))),
-        "config" => bail!("syslog compose config is deferred from the first pass"),
+        "config" => bail!("cortex compose config is deferred from the first pass"),
         "upgrade" => bail!(
-            "syslog compose upgrade is deferred; run `syslog compose pull` then `syslog compose up`"
+            "cortex compose upgrade is deferred; run `cortex compose pull` then `cortex compose up`"
         ),
         other => bail!("unknown compose subcommand: {other}"),
     }
@@ -272,7 +272,7 @@ pub(crate) fn parse_compose_logs(args: &[String]) -> Result<ComposeLogsArgs> {
                     value_after_equals(arg, "--tail")?,
                 )?)
             }
-            "--follow" => bail!("syslog compose logs --follow is deferred"),
+            "--follow" => bail!("cortex compose logs --follow is deferred"),
             _ if is_compose_common_arg(&arg) => {
                 consume_compose_common_value(&mut flags, &arg)?;
             }

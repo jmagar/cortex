@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test-tools.sh — Integration smoke-test for syslog-mcp MCP server tools
+# test-tools.sh — Integration smoke-test for cortex MCP server tools
 #
-# Exercises broad non-destructive checks for the action-based syslog MCP tool.
+# Exercises broad non-destructive checks for the action-based cortex MCP tool.
 # Action inventory reference (not every action is exercised below):
-#   syslog search, syslog filter, syslog tail, syslog errors, syslog hosts, syslog host_state, syslog fleet_state, syslog sessions,
-#   syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context,
-#   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
-#   syslog source_ips, syslog timeline, syslog patterns, syslog context,
-#   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
-#   syslog anomalies, syslog compare, syslog compose_status,
-#   syslog compose_doctor, syslog unaddressed_errors, syslog ack_error,
-#   syslog unack_error, syslog notifications_recent, syslog notifications_test,
-#   syslog similar_incidents, syslog ask_history, syslog incident_context,
-#   syslog help
+#   cortex search, cortex filter, cortex tail, cortex errors, cortex hosts, cortex host_state, cortex fleet_state, cortex sessions,
+#   cortex search_sessions, cortex abuse, cortex ai_correlate, cortex usage_blocks, cortex project_context,
+#   cortex list_ai_tools, cortex list_ai_projects, cortex correlate, cortex stats, cortex status, cortex apps,
+#   cortex source_ips, cortex timeline, cortex patterns, cortex context,
+#   cortex get, cortex ingest_rate, cortex silent_hosts, cortex clock_skew,
+#   cortex anomalies, cortex compare, cortex compose_status,
+#   cortex compose_doctor, cortex unaddressed_errors, cortex ack_error,
+#   cortex unack_error, cortex notifications_recent, cortex notifications_test,
+#   cortex similar_incidents, cortex ask_history, cortex incident_context,
+#   cortex help
 #
 # The server runs as a Docker container over HTTP. No stdio launch needed.
 # Credentials are sourced from ~/.claude-homelab/.env:
-#   SYSLOG_MCP_HOST  (default: localhost)
-#   SYSLOG_MCP_PORT  (default: 3100)
-#   SYSLOG_MCP_TOKEN (optional; SYSLOG_MCP_API_TOKEN is accepted as a deprecated alias)
+#   CORTEX_HOST  (default: localhost)
+#   CORTEX_PORT  (default: 3100)
+#   CORTEX_TOKEN (optional; CORTEX_API_TOKEN is accepted as a deprecated alias)
 #
 # Usage:
 #   ./tests/mcporter/test-tools.sh [--timeout-ms N] [--parallel] [--verbose]
@@ -47,7 +47,7 @@ readonly TS_START="$(date +%s%N)"
 readonly LOG_FILE="${TMPDIR:-/tmp}/${SCRIPT_NAME%.sh}.$(date +%Y%m%d-%H%M%S).log"
 readonly ENV_FILE="${HOME}/.claude-homelab/.env"
 readonly AI_SMOKE_FIXTURE="${PROJECT_DIR}/tests/fixtures/ai-session-smoke.jsonl"
-readonly AI_SMOKE_PROJECT="/tmp/syslog-mcp-ai-smoke"
+readonly AI_SMOKE_PROJECT="/tmp/cortex-ai-smoke"
 readonly AI_SMOKE_QUERY='"ai-smoke-authentication"'
 
 # Colours (disabled automatically when stdout is not a terminal)
@@ -151,17 +151,17 @@ load_env() {
     log_warn "${ENV_FILE} not found — using defaults / environment"
   fi
 
-  local host="${SYSLOG_MCP_HOST:-localhost}"
-  # SYSLOG_MCP_HOST in .env is set to "0.0.0.0" (bind address), not the access address.
+  local host="${CORTEX_HOST:-localhost}"
+  # CORTEX_HOST in .env is set to "0.0.0.0" (bind address), not the access address.
   # Remap 0.0.0.0 → localhost for outbound connections.
   if [[ "${host}" == "0.0.0.0" ]]; then
     host="localhost"
   fi
-  local port="${SYSLOG_MCP_PORT:-3100}"
+  local port="${CORTEX_PORT:-3100}"
   MCP_URL="http://${host}:${port}/mcp"
 
-  # Auth is enabled by the server only when SYSLOG_MCP_TOKEN is configured.
-  local token="${SYSLOG_MCP_TOKEN:-${SYSLOG_MCP_API_TOKEN:-}}"
+  # Auth is enabled by the server only when CORTEX_TOKEN is configured.
+  local token="${CORTEX_TOKEN:-${CORTEX_API_TOKEN:-}}"
 
   MCPORTER_HEADER_ARGS=()
   if [[ -n "${token}" ]]; then
@@ -172,7 +172,7 @@ load_env() {
   if [[ ${#MCPORTER_HEADER_ARGS[@]} -gt 0 ]]; then
     log_info "Auth: Bearer token configured"
   else
-    log_info "Auth: none (SYSLOG_MCP_TOKEN unset)"
+    log_info "Auth: none (CORTEX_TOKEN unset)"
   fi
 }
 
@@ -180,15 +180,15 @@ run_local_syslog_ai_add() {
   local db_path="$1"
   local fixture="$2"
   if [[ -x "${PROJECT_DIR}/target/debug/syslog" ]]; then
-    SYSLOG_MCP_DB_PATH="${db_path}" "${PROJECT_DIR}/target/debug/syslog" ai add --file "${fixture}" --json
+    CORTEX_DB_PATH="${db_path}" "${PROJECT_DIR}/target/debug/syslog" ai add --file "${fixture}" --json
   else
-    (cd "${PROJECT_DIR}" && SYSLOG_MCP_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${fixture}" --json)
+    (cd "${PROJECT_DIR}" && CORTEX_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${fixture}" --json)
   fi
 }
 
 seed_ai_fixture() {
   [[ -f "${AI_SMOKE_FIXTURE}" ]] || return 1
-  local db_path="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-${PROJECT_DIR}/data/syslog.db}}"
+  local db_path="${CORTEX_SMOKE_DB_PATH:-${CORTEX_DB_PATH:-${PROJECT_DIR}/data/cortex.db}}"
   run_local_syslog_ai_add "${db_path}" "${AI_SMOKE_FIXTURE}" >/dev/null || return $?
   AI_SEEDED=true
 }
@@ -237,7 +237,7 @@ smoke_test_server() {
 
   if [[ "${health_status}" != "ok" ]]; then
     log_error "Health endpoint at ${base_url}/health did not return status=ok (got: '${health_status}')"
-    log_error "Is the syslog-mcp container running?  docker ps | grep syslog-mcp"
+    log_error "Is the cortex container running?  docker ps | grep cortex"
     return 2
   fi
   log_info "Health endpoint OK"
@@ -278,7 +278,7 @@ mcporter_call() {
   local args_json="${1:?args_json required}"
   local action=''
 
-  if [[ "${tool}" == "syslog" && "${args_json}" != \{* ]]; then
+  if [[ "${tool}" == "cortex" && "${args_json}" != \{* ]]; then
     action="${args_json}"
     args_json="${2:?args_json required}"
   else
@@ -295,7 +295,7 @@ mcporter_call() {
 
   if [[ -n "${action}" ]]; then
     args_json="$(printf '%s' "${args_json}" | jq -c --arg action "${action}" '. + {action: $action}')"
-    tool="syslog"
+    tool="cortex"
   fi
 
   mcporter call \
@@ -320,7 +320,7 @@ run_test() {
   local expected_key="${4:-}"
   local action=''
 
-  if [[ "${tool}" == "syslog" && "${args}" != \{* ]]; then
+  if [[ "${tool}" == "cortex" && "${args}" != \{* ]]; then
     action="${args}"
     args="${4:?args required}"
     expected_key="${5:-}"
@@ -438,7 +438,7 @@ _json_payload() {
 # Returns the hostname with the highest log_count (most data = best for testing)
 get_primary_host() {
   local raw
-  raw="$(mcporter_call syslog hosts '{}'  2>/dev/null)" || return 0
+  raw="$(mcporter_call cortex hosts '{}'  2>/dev/null)" || return 0
   printf '%s' "${raw}" | python3 -c "
 import sys, json
 try:
@@ -455,13 +455,13 @@ except Exception:
 " 2>/dev/null || true
 }
 
-# Returns a recent error timestamp from syslog errors, used for syslog correlate
+# Returns a recent error timestamp from cortex errors, used for cortex correlate
 get_recent_error_time() {
   local raw
-  raw="$(mcporter_call syslog errors '{}'  2>/dev/null)" || return 0
-  # syslog stats has newest_log which is more reliable
+  raw="$(mcporter_call cortex errors '{}'  2>/dev/null)" || return 0
+  # cortex stats has newest_log which is more reliable
   local stats
-  stats="$(mcporter_call syslog stats '{}' 2>/dev/null)" || return 0
+  stats="$(mcporter_call cortex stats '{}' 2>/dev/null)" || return 0
   printf '%s' "${stats}" | python3 -c "
 import sys, json
 try:
@@ -480,111 +480,111 @@ except Exception:
 
 suite_meta() {
   printf '\n%b== meta (help + health) ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
-  run_test "syslog help: returns documentation"    syslog help '{}'
-  run_test "syslog status: returns lightweight status" syslog status '{}' "status"
-  run_test "syslog status: db_ok field present"        syslog status '{}' "db_ok"
-  run_test "syslog status: runtime observability"      syslog status '{}' "runtime_observability"
-  run_test "syslog status: otlp counters present"      syslog status '{}' "otlp"
-  run_test "syslog stats: returns database statistics" syslog stats   '{}' "total_logs"
-  run_test "syslog stats: write_blocked field present" syslog stats   '{}' "write_blocked"
-  run_test "syslog stats: free_disk_mb field present"  syslog stats   '{}' "free_disk_mb"
-  run_test "syslog compose_status: redacted diagnostics" syslog compose_status '{}' "runtime_state"
+  run_test "cortex help: returns documentation"    cortex help '{}'
+  run_test "cortex status: returns lightweight status" cortex status '{}' "status"
+  run_test "cortex status: db_ok field present"        cortex status '{}' "db_ok"
+  run_test "cortex status: runtime observability"      cortex status '{}' "runtime_observability"
+  run_test "cortex status: otlp counters present"      cortex status '{}' "otlp"
+  run_test "cortex stats: returns database statistics" cortex stats   '{}' "total_logs"
+  run_test "cortex stats: write_blocked field present" cortex stats   '{}' "write_blocked"
+  run_test "cortex stats: free_disk_mb field present"  cortex stats   '{}' "free_disk_mb"
+  run_test "cortex compose_status: redacted diagnostics" cortex compose_status '{}' "runtime_state"
 
   local compose_status compose_runtime compose_ownership
-  compose_status="$(mcporter_call syslog compose_status '{}')" || compose_status=""
+  compose_status="$(mcporter_call cortex compose_status '{}')" || compose_status=""
   compose_runtime="$(printf '%s' "${compose_status}" | jq -r '.runtime_state // "unknown"' 2>/dev/null)" || compose_runtime="unknown"
   compose_ownership="$(printf '%s' "${compose_status}" | jq -r '.ownership // "unknown"' 2>/dev/null)" || compose_ownership="unknown"
   if [[ "${compose_runtime}" != "docker_unavailable" && "${compose_ownership}" == "compose_owned" ]]; then
-    run_test "syslog compose_doctor: redacted diagnostics" syslog compose_doctor '{}' "ownership"
-    run_test "syslog compose_doctor: published ports present" syslog compose_doctor '{}' "published_ports"
+    run_test "cortex compose_doctor: redacted diagnostics" cortex compose_doctor '{}' "ownership"
+    run_test "cortex compose_doctor: published ports present" cortex compose_doctor '{}' "published_ports"
   else
-    skip_test "syslog compose_doctor: redacted diagnostics" "runtime=${compose_runtime}, ownership=${compose_ownership}"
-    skip_test "syslog compose_doctor: published ports present" "runtime=${compose_runtime}, ownership=${compose_ownership}"
+    skip_test "cortex compose_doctor: redacted diagnostics" "runtime=${compose_runtime}, ownership=${compose_ownership}"
+    skip_test "cortex compose_doctor: published ports present" "runtime=${compose_runtime}, ownership=${compose_ownership}"
   fi
 }
 
 suite_hosts() {
-  printf '\n%b== syslog hosts ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
-  run_test "syslog hosts: returns hosts array"     syslog hosts '{}' "hosts"
-  run_test "syslog hosts: hosts have hostname key" syslog hosts '{}' "hosts.0.hostname"
-  run_test "syslog hosts: hosts have log_count"    syslog hosts '{}' "hosts.0.log_count"
-  run_test "syslog hosts: hosts have first_seen"   syslog hosts '{}' "hosts.0.first_seen"
-  run_test "syslog hosts: hosts have last_seen"    syslog hosts '{}' "hosts.0.last_seen"
+  printf '\n%b== cortex hosts ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
+  run_test "cortex hosts: returns hosts array"     cortex hosts '{}' "hosts"
+  run_test "cortex hosts: hosts have hostname key" cortex hosts '{}' "hosts.0.hostname"
+  run_test "cortex hosts: hosts have log_count"    cortex hosts '{}' "hosts.0.log_count"
+  run_test "cortex hosts: hosts have first_seen"   cortex hosts '{}' "hosts.0.first_seen"
+  run_test "cortex hosts: hosts have last_seen"    cortex hosts '{}' "hosts.0.last_seen"
 }
 
 suite_sessions() {
-  printf '\n%b== syslog sessions ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
-  run_test "syslog sessions: returns sessions array"     syslog sessions '{"limit":10}' "sessions"
-  run_test "syslog sessions: count field present"         syslog sessions '{"limit":5}' "count"
-  run_test "syslog search_sessions: returns sessions array" \
-    syslog search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "sessions"
-  run_test "syslog search_sessions: total_candidates present" \
-    syslog search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "total_candidates"
-  run_test "syslog abuse: returns matches array" \
-    syslog abuse "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"project":$project,"terms":$term,"limit":5,"before":1,"after":1}')" "matches"
-  run_test "syslog abuse_incidents: returns incidents array" \
-    syslog abuse_incidents "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":5}')" "incidents"
-  run_test "syslog abuse_investigate: returns evidence array" \
-    syslog abuse_investigate "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":1}')" "evidence"
-  run_test "syslog ai_correlate: returns anchors array" \
-    syslog ai_correlate "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":2,"events_per_anchor":3}')" "anchors"
-  run_test "syslog usage_blocks: returns blocks array" \
-    syslog usage_blocks '{}' "blocks"
-  run_test "syslog project_context: returns project field" \
-    syslog project_context "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":5}')" "project"
-  run_test "syslog list_ai_tools: returns tools array" \
-    syslog list_ai_tools '{}' "tools"
-  run_test "syslog list_ai_projects: returns projects array" \
-    syslog list_ai_projects '{}' "projects"
+  printf '\n%b== cortex sessions ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
+  run_test "cortex sessions: returns sessions array"     cortex sessions '{"limit":10}' "sessions"
+  run_test "cortex sessions: count field present"         cortex sessions '{"limit":5}' "count"
+  run_test "cortex search_sessions: returns sessions array" \
+    cortex search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "sessions"
+  run_test "cortex search_sessions: total_candidates present" \
+    cortex search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "total_candidates"
+  run_test "cortex abuse: returns matches array" \
+    cortex abuse "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"project":$project,"terms":$term,"limit":5,"before":1,"after":1}')" "matches"
+  run_test "cortex abuse_incidents: returns incidents array" \
+    cortex abuse_incidents "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":5}')" "incidents"
+  run_test "cortex abuse_investigate: returns evidence array" \
+    cortex abuse_investigate "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":1}')" "evidence"
+  run_test "cortex ai_correlate: returns anchors array" \
+    cortex ai_correlate "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":2,"events_per_anchor":3}')" "anchors"
+  run_test "cortex usage_blocks: returns blocks array" \
+    cortex usage_blocks '{}' "blocks"
+  run_test "cortex project_context: returns project field" \
+    cortex project_context "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":5}')" "project"
+  run_test "cortex list_ai_tools: returns tools array" \
+    cortex list_ai_tools '{}' "tools"
+  run_test "cortex list_ai_projects: returns projects array" \
+    cortex list_ai_projects '{}' "projects"
   if [[ "${AI_SEEDED}" == true ]]; then
-    run_test "syslog search_sessions: seeded fixture searchable" \
-      syslog search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "sessions.0.project"
-    run_test "syslog abuse: custom detector finds seeded fixture" \
-      syslog abuse "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"project":$project,"terms":$term,"limit":5,"before":1,"after":1}')" "matches.0.entry.message"
-    run_test "syslog project_context: seeded fixture entries" \
-      syslog project_context "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":5}')" "recent_entries.0.message"
+    run_test "cortex search_sessions: seeded fixture searchable" \
+      cortex search_sessions "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"query":$q,"limit":10}')" "sessions.0.project"
+    run_test "cortex abuse: custom detector finds seeded fixture" \
+      cortex abuse "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"project":$project,"terms":$term,"limit":5,"before":1,"after":1}')" "matches.0.entry.message"
+    run_test "cortex project_context: seeded fixture entries" \
+      cortex project_context "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":5}')" "recent_entries.0.message"
   fi
 }
 
 suite_tail() {
-  printf '\n%b== syslog tail ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
-  run_test "syslog tail: default (50 entries)"  syslog tail '{}' "logs"
-  run_test "syslog tail: count field present"   syslog tail '{}' "count"
-  run_test "syslog tail: n=10 returns entries"  syslog tail '{"n":10}' "logs"
-  run_test "syslog tail: log entry has message" syslog tail '{"n":5}' "logs.0.message"
-  run_test "syslog tail: log entry has hostname" syslog tail '{"n":5}' "logs.0.hostname"
-  run_test "syslog tail: log entry has severity" syslog tail '{"n":5}' "logs.0.severity"
-  run_test "syslog tail: log entry has timestamp" syslog tail '{"n":5}' "logs.0.timestamp"
+  printf '\n%b== cortex tail ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
+  run_test "cortex tail: default (50 entries)"  cortex tail '{}' "logs"
+  run_test "cortex tail: count field present"   cortex tail '{}' "count"
+  run_test "cortex tail: n=10 returns entries"  cortex tail '{"n":10}' "logs"
+  run_test "cortex tail: log entry has message" cortex tail '{"n":5}' "logs.0.message"
+  run_test "cortex tail: log entry has hostname" cortex tail '{"n":5}' "logs.0.hostname"
+  run_test "cortex tail: log entry has severity" cortex tail '{"n":5}' "logs.0.severity"
+  run_test "cortex tail: log entry has timestamp" cortex tail '{"n":5}' "logs.0.timestamp"
 
   # Host-scoped tail
   local primary_host
   primary_host="$(get_primary_host)" || primary_host=''
   if [[ -n "${primary_host}" ]]; then
-    run_test "syslog tail: host=${primary_host} filter" \
-      syslog tail \
+    run_test "cortex tail: host=${primary_host} filter" \
+      cortex tail \
       "$(_json_payload '{"hostname":$h,"n":10}' h="${primary_host}")" \
       "logs"
   else
-    skip_test "syslog tail: host-scoped" "no usable hostname found"
+    skip_test "cortex tail: host-scoped" "no usable hostname found"
   fi
 }
 
 suite_search() {
-  printf '\n%b== syslog search ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
+  printf '\n%b== cortex search ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
 
-  run_test "syslog search: basic query (error)"         syslog search '{"query":"error","limit":10}' "logs"
-  run_test "syslog search: count field present"         syslog search '{"query":"error","limit":5}' "count"
-  run_test "syslog search: severity filter (err)"       syslog search '{"severity":"err","limit":10}' "logs"
-  run_test "syslog search: severity filter (warning)"   syslog search '{"severity":"warning","limit":10}' "logs"
-  run_test "syslog search: limit respected"             syslog search '{"query":"info","limit":3}' "logs"
-  run_test "syslog search: no query (list recent)"      syslog search '{"limit":20}' "logs"
-  run_test "syslog filter: structured list recent"      syslog filter '{"limit":20}' "logs"
-  run_test "syslog filter: severity filter (warning)"   syslog filter '{"severity":"warning","limit":10}' "logs"
+  run_test "cortex search: basic query (error)"         cortex search '{"query":"error","limit":10}' "logs"
+  run_test "cortex search: count field present"         cortex search '{"query":"error","limit":5}' "count"
+  run_test "cortex search: severity filter (err)"       cortex search '{"severity":"err","limit":10}' "logs"
+  run_test "cortex search: severity filter (warning)"   cortex search '{"severity":"warning","limit":10}' "logs"
+  run_test "cortex search: limit respected"             cortex search '{"query":"info","limit":3}' "logs"
+  run_test "cortex search: no query (list recent)"      cortex search '{"limit":20}' "logs"
+  run_test "cortex filter: structured list recent"      cortex filter '{"limit":20}' "logs"
+  run_test "cortex filter: severity filter (warning)"   cortex filter '{"severity":"warning","limit":10}' "logs"
 
   # App-name filter — discover real app name from tail first
   local app_name
   app_name="$(
-    mcporter_call syslog tail '{"n":20}' 2>/dev/null | python3 -c "
+    mcporter_call cortex tail '{"n":20}' 2>/dev/null | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -600,70 +600,70 @@ except Exception:
   )" || app_name=''
 
   if [[ -n "${app_name}" ]]; then
-    run_test "syslog search: app_name=${app_name} filter" \
-      syslog search \
+    run_test "cortex search: app_name=${app_name} filter" \
+      cortex search \
       "$(_json_payload '{"app_name":$a,"limit":10}' a="${app_name}")" \
       "logs"
   else
-    skip_test "syslog search: app_name filter" "no usable app_name found in recent logs"
+    skip_test "cortex search: app_name filter" "no usable app_name found in recent logs"
   fi
 
   # Host-scoped search
   local primary_host
   primary_host="$(get_primary_host)" || primary_host=''
   if [[ -n "${primary_host}" ]]; then
-    run_test "syslog search: hostname=${primary_host} filter" \
-      syslog search \
+    run_test "cortex search: hostname=${primary_host} filter" \
+      cortex search \
       "$(_json_payload '{"hostname":$h,"limit":10}' h="${primary_host}")" \
       "logs"
   else
-    skip_test "syslog search: hostname filter" "no usable hostname found"
+    skip_test "cortex search: hostname filter" "no usable hostname found"
   fi
 
   # FTS5 phrase matching
-  run_test "syslog search: FTS5 phrase query"    syslog search '{"query":"\"connection refused\"","limit":10}' "logs"
+  run_test "cortex search: FTS5 phrase query"    cortex search '{"query":"\"connection refused\"","limit":10}' "logs"
   # Prefix matching
-  run_test "syslog search: FTS5 prefix query"    syslog search '{"query":"kernel*","limit":10}' "logs"
+  run_test "cortex search: FTS5 prefix query"    cortex search '{"query":"kernel*","limit":10}' "logs"
   # Time-bounded search — last 24 hours
   local since
   since="$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-24H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
   if [[ -n "${since}" ]]; then
-    run_test "syslog search: time range (last 24h)" \
-      syslog search \
+    run_test "cortex search: time range (last 24h)" \
+      cortex search \
       "$(_json_payload '{"from":$f,"limit":20}' f="${since}")" \
       "logs"
   else
-    skip_test "syslog search: time range filter" "could not compute timestamp"
+    skip_test "cortex search: time range filter" "could not compute timestamp"
   fi
 }
 
 suite_errors() {
-  printf '\n%b== syslog errors ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
+  printf '\n%b== cortex errors ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
 
-  run_test "syslog errors: all time"       syslog errors '{}' "summary"
-  run_test "syslog errors: summary has hostname" syslog errors '{}' "summary.0.hostname"
-  run_test "syslog errors: summary has severity" syslog errors '{}' "summary.0.severity"
-  run_test "syslog errors: summary has count"    syslog errors '{}' "summary.0.count"
+  run_test "cortex errors: all time"       cortex errors '{}' "summary"
+  run_test "cortex errors: summary has hostname" cortex errors '{}' "summary.0.hostname"
+  run_test "cortex errors: summary has severity" cortex errors '{}' "summary.0.severity"
+  run_test "cortex errors: summary has count"    cortex errors '{}' "summary.0.count"
 
-  # Time-bounded syslog errors (last 1 hour)
+  # Time-bounded cortex errors (last 1 hour)
   local since
   since="$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
   local until_now
   until_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if [[ -n "${since}" ]]; then
-    run_test "syslog errors: time range (last 1h)" \
-      syslog errors \
+    run_test "cortex errors: time range (last 1h)" \
+      cortex errors \
       "$(_json_payload '{"from":$f,"to":$t}' f="${since}" t="${until_now}")" \
       "summary"
   else
-    skip_test "syslog errors: time range filter" "could not compute timestamp"
+    skip_test "cortex errors: time range filter" "could not compute timestamp"
   fi
 }
 
 suite_correlate() {
-  printf '\n%b== syslog correlate ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
+  printf '\n%b== cortex correlate ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
 
-  # syslog correlate requires reference_time (the only required field)
+  # cortex correlate requires reference_time (the only required field)
   local ref_time
   ref_time="$(get_recent_error_time)" || ref_time=''
 
@@ -672,46 +672,46 @@ suite_correlate() {
     ref_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   fi
 
-  run_test "syslog correlate: default window (5m)" \
-    syslog correlate \
+  run_test "cortex correlate: default window (5m)" \
+    cortex correlate \
     "$(_json_payload '{"reference_time":$t}' t="${ref_time}")"
 
-  run_test "syslog correlate: wider window (15m)" \
-    syslog correlate \
+  run_test "cortex correlate: wider window (15m)" \
+    cortex correlate \
     "$(_json_payload '{"reference_time":$t,"window_minutes":15}' t="${ref_time}")"
 
-  run_test "syslog correlate: severity_min=err" \
-    syslog correlate \
+  run_test "cortex correlate: severity_min=err" \
+    cortex correlate \
     "$(_json_payload '{"reference_time":$t,"severity_min":"err"}' t="${ref_time}")"
 
-  run_test "syslog correlate: severity_min=debug (all)" \
-    syslog correlate \
+  run_test "cortex correlate: severity_min=debug (all)" \
+    cortex correlate \
     "$(_json_payload '{"reference_time":$t,"window_minutes":2,"severity_min":"debug","limit":50}' t="${ref_time}")"
 
-  run_test "syslog correlate: with FTS query" \
-    syslog correlate \
+  run_test "cortex correlate: with FTS query" \
+    cortex correlate \
     "$(_json_payload '{"reference_time":$t,"query":"error*","window_minutes":10}' t="${ref_time}")"
 
   # Host-scoped correlation
   local primary_host
   primary_host="$(get_primary_host)" || primary_host=''
   if [[ -n "${primary_host}" ]]; then
-    run_test "syslog correlate: host=${primary_host} scoped" \
-      syslog correlate \
+    run_test "cortex correlate: host=${primary_host} scoped" \
+      cortex correlate \
       "$(_json_payload '{"reference_time":$t,"hostname":$h,"window_minutes":5}' t="${ref_time}" h="${primary_host}")"
   else
-    skip_test "syslog correlate: host-scoped" "no usable hostname found"
+    skip_test "cortex correlate: host-scoped" "no usable hostname found"
   fi
 }
 
 # ---------------------------------------------------------------------------
-# Auth enforcement tests (only run when SYSLOG_MCP_TOKEN is set)
+# Auth enforcement tests (only run when CORTEX_TOKEN is set)
 # ---------------------------------------------------------------------------
 suite_auth() {
-  if [[ -z "${SYSLOG_MCP_TOKEN:-${SYSLOG_MCP_API_TOKEN:-}}" ]]; then
+  if [[ -z "${CORTEX_TOKEN:-${CORTEX_API_TOKEN:-}}" ]]; then
     printf '\n%b== auth (skipped — token unset) ==%b\n' "${C_BOLD}" "${C_RESET}" | tee -a "${LOG_FILE}"
-    skip_test "auth: unauthenticated request returns 401" "SYSLOG_MCP_TOKEN unset"
-    skip_test "auth: bad token returns 401"                "SYSLOG_MCP_TOKEN unset"
+    skip_test "auth: unauthenticated request returns 401" "CORTEX_TOKEN unset"
+    skip_test "auth: bad token returns 401"                "CORTEX_TOKEN unset"
     return
   fi
 
@@ -856,7 +856,7 @@ main() {
   load_env
 
   printf '%b%s%b\n' "${C_BOLD}" "$(printf '=%.0s' {1..65})" "${C_RESET}"
-  printf '%b  syslog-mcp integration smoke-test%b\n' "${C_BOLD}" "${C_RESET}"
+  printf '%b  cortex integration smoke-test%b\n' "${C_BOLD}" "${C_RESET}"
   printf '%b  Project:  %s%b\n' "${C_BOLD}" "${PROJECT_DIR}" "${C_RESET}"
   printf '%b  MCP URL:  %s%b\n' "${C_BOLD}" "${MCP_URL}" "${C_RESET}"
   printf '%b  Timeout:  %dms/call | Parallel: %s%b\n' \
@@ -871,7 +871,7 @@ main() {
     log_error "Server connectivity check failed. Aborting — no tests will run."
     log_error ""
     log_error "To diagnose:"
-    log_error "  docker ps | grep syslog-mcp"
+    log_error "  docker ps | grep cortex"
     log_error "  curl http://localhost:3100/health"
     log_error "  curl -X POST http://localhost:3100/mcp -H 'Content-Type: application/json' \\"
     log_error "    -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}'"

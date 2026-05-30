@@ -1,24 +1,24 @@
-name: syslog-mcp
+name: cortex
 
 # Local development stack. Builds from this checkout.
 services:
-  syslog-mcp:
+  cortex:
     build:
       context: .
       dockerfile: config/Dockerfile
-    container_name: syslog-mcp
-    user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"
+    container_name: cortex
+    user: "${CORTEX_UID:-1000}:${CORTEX_GID:-1000}"
     env_file:
-      - path: ${SYSLOG_ENV_FILE:-.env}
+      - path: ${CORTEX_ENV_FILE:-.env}
         required: false
     ports:
-      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/udp"
-      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/tcp"
-      - "${SYSLOG_MCP_PORT:-3100}:3100/tcp"
+      - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/udp"
+      - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/tcp"
+      - "${CORTEX_PORT:-3100}:3100/tcp"
     volumes:
-      - ${SYSLOG_MCP_DATA_VOLUME:-syslog-mcp-data}:/data
+      - ${CORTEX_DATA_VOLUME:-cortex-data}:/data
     networks:
-      - syslog-mcp
+      - cortex
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -41,10 +41,10 @@ services:
       start_period: 10s
 
 volumes:
-  syslog-mcp-data:
-    name: ${SYSLOG_MCP_VOLUME_NAME:-syslog-mcp-data}
+  cortex-data:
+    name: ${CORTEX_VOLUME_NAME:-cortex-data}
 
 networks:
-  syslog-mcp:
-    name: ${DOCKER_NETWORK:-syslog-mcp}
+  cortex:
+    name: ${DOCKER_NETWORK:-cortex}
     external: true

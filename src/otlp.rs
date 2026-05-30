@@ -1,9 +1,9 @@
 //! OTLP/HTTP receiver — accepts OpenTelemetry log records over HTTP and feeds
-//! them into the existing syslog-mcp ingest pipeline. Logs only — `/v1/traces`
+//! them into the existing cortex ingest pipeline. Logs only — `/v1/traces`
 //! returns 404 (deferred) and `/v1/metrics` returns 404 (deferred).
 //!
 //! Mounted on the same axum server as MCP. Body limit: 4 MiB. Optional Bearer
-//! auth via the same `SYSLOG_MCP_TOKEN` as MCP (`SYSLOG_MCP_API_TOKEN` is
+//! auth via the same `CORTEX_TOKEN` as MCP (`CORTEX_API_TOKEN` is
 //! accepted as a deprecated alias).
 
 use std::collections::HashMap;

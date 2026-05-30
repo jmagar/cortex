@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::SyslogService;
+use crate::app::CortexService;
 use crate::config::{McpConfig, StorageConfig};
 use crate::db;
 use crate::mcp::{AppState, AuthPolicy};
@@ -15,11 +15,11 @@ fn test_state_no_auth() -> (AppState, tempfile::TempDir) {
     let pool = Arc::new(db::init_pool(&storage).unwrap());
     (
         AppState {
-            service: SyslogService::new(pool, storage.clone()),
+            service: CortexService::new(pool, storage.clone()),
             config: McpConfig {
                 host: "127.0.0.1".into(),
                 port: 3100,
-                server_name: "syslog-mcp".into(),
+                server_name: "cortex".into(),
                 no_auth: false,
                 trusted_gateway_no_auth: false,
                 api_token: None,
@@ -44,11 +44,11 @@ fn test_state_with_token(token: String) -> (AppState, tempfile::TempDir) {
     let pool = Arc::new(db::init_pool(&storage).unwrap());
     (
         AppState {
-            service: SyslogService::new(pool, storage.clone()),
+            service: CortexService::new(pool, storage.clone()),
             config: McpConfig {
                 host: "127.0.0.1".into(),
                 port: 3100,
-                server_name: "syslog-mcp".into(),
+                server_name: "cortex".into(),
                 no_auth: false,
                 trusted_gateway_no_auth: false,
                 api_token: Some(token),
@@ -163,7 +163,7 @@ async fn integration_get_stats() {
     let body = jsonrpc_request(
         3,
         "tools/call",
-        Some(serde_json::json!({"name": "syslog", "arguments": {"action": "stats"}})),
+        Some(serde_json::json!({"name": "cortex", "arguments": {"action": "stats"}})),
     );
     let (status, value) = mcp_post(router(h.state), body, None).await;
     assert_eq!(status, StatusCode::OK);
@@ -180,7 +180,7 @@ async fn integration_tail_logs_empty_db() {
     let body = jsonrpc_request(
         4,
         "tools/call",
-        Some(serde_json::json!({"name": "syslog", "arguments": {"action": "tail", "n": 10}})),
+        Some(serde_json::json!({"name": "cortex", "arguments": {"action": "tail", "n": 10}})),
     );
     let (status, value) = mcp_post(router(h.state), body, None).await;
     assert_eq!(status, StatusCode::OK);
@@ -194,7 +194,7 @@ async fn integration_search_logs_empty_db() {
         5,
         "tools/call",
         Some(
-            serde_json::json!({"name": "syslog", "arguments": {"action": "search", "query": "error", "limit": 5}}),
+            serde_json::json!({"name": "cortex", "arguments": {"action": "search", "query": "error", "limit": 5}}),
         ),
     );
     let (status, value) = mcp_post(router(h.state), body, None).await;
@@ -528,17 +528,17 @@ async fn mounted_cookie_without_bearer_is_rejected() {
 /// with `static_token_scopes: Vec::new()` in bearer-only mode because
 /// `AuthLayer::with_auth_state(None)` does not populate scopes.
 /// After the S-03 fix, `build_auth_layer` explicitly calls `.with_static_token_scopes`
-/// so the `AuthContext` injected by the layer carries `["syslog:read"]` by default
-/// (or `["syslog:read", "syslog:admin"]` when `static_token_is_admin=true`).
-/// `stats` requires only `syslog:read`, so it succeeds with the default token.
+/// so the `AuthContext` injected by the layer carries `["cortex:read"]` by default
+/// (or `["cortex:read", "cortex:admin"]` when `static_token_is_admin=true`).
+/// `stats` requires only `cortex:read`, so it succeeds with the default token.
 #[tokio::test]
 async fn mounted_static_bearer_valid_token_can_call_scope_gated_action() {
     let h = TestHarness::with_token("static-secret".into());
-    // `stats` requires syslog:read — it is scope-gated at the rmcp layer.
+    // `stats` requires cortex:read — it is scope-gated at the rmcp layer.
     let body = jsonrpc_request(
         25,
         "tools/call",
-        Some(serde_json::json!({"name": "syslog", "arguments": {"action": "stats"}})),
+        Some(serde_json::json!({"name": "cortex", "arguments": {"action": "stats"}})),
     );
     let (status, response) = mcp_post(router(h.state), body, Some("static-secret")).await;
     assert_eq!(status, StatusCode::OK, "response: {response}");
@@ -553,19 +553,19 @@ async fn mounted_static_bearer_valid_token_can_call_scope_gated_action() {
     );
 }
 
-/// S-03: Static bearer token without SYSLOG_MCP_STATIC_TOKEN_ADMIN=true
+/// S-03: Static bearer token without CORTEX_STATIC_TOKEN_ADMIN=true
 /// must NOT be able to call admin actions (ack_error, unack_error, notifications_test).
 #[tokio::test]
 async fn static_bearer_token_cannot_call_admin_actions_by_default() {
     // `static_token_is_admin: false` (the default in test_state_with_token)
     let h = TestHarness::with_token("static-secret".into());
     let app = router(h.state);
-    // `ack_error` requires syslog:admin — must be denied for read-only static token
+    // `ack_error` requires cortex:admin — must be denied for read-only static token
     let body = jsonrpc_request(
         30,
         "tools/call",
         Some(serde_json::json!({
-            "name": "syslog",
+            "name": "cortex",
             "arguments": {"action": "ack_error", "signature_hash": "0000000000000000000000000000000000000000000000000000000000000000"}
         })),
     );
@@ -578,8 +578,8 @@ async fn static_bearer_token_cannot_call_admin_actions_by_default() {
     );
     let msg = response["error"]["message"].as_str().unwrap_or("");
     assert!(
-        msg.contains("requires scope: syslog:admin"),
-        "denial message should name syslog:admin; got: {msg}"
+        msg.contains("requires scope: cortex:admin"),
+        "denial message should name cortex:admin; got: {msg}"
     );
 }
 
@@ -612,42 +612,36 @@ async fn test_state_with_oauth() -> (AppState, tempfile::TempDir) {
 
     // Key names match lab-auth's AuthConfigBuilder env_key() function:
     // env_key(prefix, suffix) → "{PREFIX}_{SUFFIX}" (uppercased).
-    // e.g. env_key("SYSLOG_MCP", "AUTH_MODE") → "SYSLOG_MCP_AUTH_MODE"
-    //      env_key("SYSLOG_MCP", "GOOGLE_CLIENT_ID") → "SYSLOG_MCP_GOOGLE_CLIENT_ID"
+    // e.g. env_key("CORTEX", "AUTH_MODE") → "CORTEX_AUTH_MODE"
+    //      env_key("CORTEX", "GOOGLE_CLIENT_ID") → "CORTEX_GOOGLE_CLIENT_ID"
     let vars: Vec<(String, String)> = vec![
-        ("SYSLOG_MCP_AUTH_MODE".into(), "oauth".into()),
+        ("CORTEX_AUTH_MODE".into(), "oauth".into()),
         (
-            "SYSLOG_MCP_PUBLIC_URL".into(),
+            "CORTEX_PUBLIC_URL".into(),
             "https://syslog.example.com".into(),
         ),
         // Google credential keys do NOT have "AUTH_" prefix in lab-auth's schema.
+        ("CORTEX_GOOGLE_CLIENT_ID".into(), "test-client-id".into()),
         (
-            "SYSLOG_MCP_GOOGLE_CLIENT_ID".into(),
-            "test-client-id".into(),
-        ),
-        (
-            "SYSLOG_MCP_GOOGLE_CLIENT_SECRET".into(),
+            "CORTEX_GOOGLE_CLIENT_SECRET".into(),
             "test-client-secret".into(),
         ),
+        ("CORTEX_AUTH_ADMIN_EMAIL".into(), "admin@example.com".into()),
         (
-            "SYSLOG_MCP_AUTH_ADMIN_EMAIL".into(),
-            "admin@example.com".into(),
-        ),
-        (
-            "SYSLOG_MCP_AUTH_SQLITE_PATH".into(),
+            "CORTEX_AUTH_SQLITE_PATH".into(),
             auth_db.to_str().unwrap().into(),
         ),
         (
-            "SYSLOG_MCP_AUTH_KEY_PATH".into(),
+            "CORTEX_AUTH_KEY_PATH".into(),
             auth_key.to_str().unwrap().into(),
         ),
     ];
 
     let auth_config = lab_auth::config::AuthConfigBuilder::new()
-        .env_prefix("SYSLOG_MCP")
-        .session_cookie_name("syslog_mcp_session")
-        .scopes_supported(vec!["syslog:read".into(), "syslog:admin".into()])
-        .default_scope("syslog:read")
+        .env_prefix("CORTEX")
+        .session_cookie_name("cortex_session")
+        .scopes_supported(vec!["cortex:read".into(), "cortex:admin".into()])
+        .default_scope("cortex:read")
         .resource_path("/mcp")
         .build_from_sources(vars)
         .expect("test auth config should build");
@@ -660,11 +654,11 @@ async fn test_state_with_oauth() -> (AppState, tempfile::TempDir) {
     let pool = Arc::new(db::init_pool(&storage).unwrap());
 
     let state = AppState {
-        service: SyslogService::new(pool, storage.clone()),
+        service: CortexService::new(pool, storage.clone()),
         config: McpConfig {
             host: "127.0.0.1".into(),
             port: 3100,
-            server_name: "syslog-mcp".into(),
+            server_name: "cortex".into(),
             no_auth: false,
             trusted_gateway_no_auth: false,
             api_token: None,

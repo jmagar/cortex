@@ -82,7 +82,7 @@ Closed 12 already-completed beads, implemented and merged three feature PRs (#35
 - `src/mcp/rmcp_server.rs` — `READ_ONLY_ACTIONS` updated
 - `scripts/smoke-test.sh`, `tests/test_live.sh`, `tests/mcporter/test-tools.sh` — smoke coverage for new actions
 - `docs/mcp/TOOLS.md`, `docs/mcp/TESTS.md` — documented new actions
-- `plugins/syslog/skills/syslog/SKILL.md` — new actions added
+- `plugins/syslog/skills/cortex/SKILL.md` — new actions added
 - `plugins/syslog/skills/syslog-frustration-assessment/SKILL.md` — new skill (8-section assessment, injection-hardened)
 - `plugins/syslog/skills/syslog-frustration-assessment/references/assessment-template.md` — filled example
 

@@ -1,6 +1,6 @@
 # Syslog MCP Documentation
 
-Complete documentation for `syslog-mcp` -- a Rust syslog receiver and MCP server for homelab log intelligence.
+Complete documentation for `cortex` -- a Rust syslog receiver and MCP server for homelab log intelligence.
 
 ## Directory index
 
@@ -27,7 +27,7 @@ Complete documentation for `syslog-mcp` -- a Rust syslog receiver and MCP server
 | `plugin/` | Plugin system docs: manifests, hooks, skills, commands, channels |
 | `repo/` | Repository docs: git conventions, scripts, memory, rules |
 | `stack/` | Technology stack docs: prerequisites, architecture, Rust dependencies |
-| `upstream/` | Upstream service docs (syslog-mcp is self-contained -- no external API) |
+| `upstream/` | Upstream service docs (cortex is self-contained -- no external API) |
 
 ### Preserved directories
 

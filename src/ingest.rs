@@ -3,12 +3,12 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
-use crate::config::{StorageConfig, SyslogConfig};
+use crate::config::{ReceiverConfig, StorageConfig};
 use crate::db::{self, DbPool};
 use crate::enrich::EnrichmentPipeline;
 use crate::observability::RuntimeObservability;
-use crate::syslog;
-use crate::syslog::enrichment::EnrichmentConfig;
+use crate::receiver;
+use crate::receiver::enrichment::EnrichmentConfig;
 
 /// Lightweight error type for [`IngestTx::try_send`] — the entry is dropped on
 /// backpressure rather than returned to the caller.
@@ -40,7 +40,7 @@ struct WriterTuning {
 }
 
 impl WriterTuning {
-    fn from_syslog_config(config: &SyslogConfig) -> Self {
+    fn from_receiver_config(config: &ReceiverConfig) -> Self {
         Self {
             batch_size: config.batch_size,
             flush_interval_ms: config.flush_interval,
@@ -156,7 +156,7 @@ fn start_writer(
     observability.set_queue_capacity(channel_capacity);
     let writer_observability = Arc::clone(&observability);
     let handle = tokio::spawn(async move {
-        let context = syslog::writer::WriterContext::new(
+        let context = receiver::writer::WriterContext::new(
             pool,
             storage,
             storage_state,
@@ -164,7 +164,7 @@ fn start_writer(
             Arc::new(EnrichmentPipeline::new()),
             writer_observability,
         );
-        syslog::writer::batch_writer(
+        receiver::writer::batch_writer(
             rx,
             context,
             batch_size,
@@ -182,8 +182,8 @@ fn start_writer(
     }
 }
 
-pub(crate) fn start_writer_from_syslog_config(
-    syslog: &SyslogConfig,
+pub(crate) fn start_writer_from_receiver_config(
+    syslog: &ReceiverConfig,
     storage: StorageConfig,
     pool: Arc<DbPool>,
     storage_state: Arc<Mutex<Option<db::StorageBudgetState>>>,
@@ -194,7 +194,7 @@ pub(crate) fn start_writer_from_syslog_config(
         storage,
         pool,
         storage_state,
-        WriterTuning::from_syslog_config(syslog),
+        WriterTuning::from_receiver_config(syslog),
         enrichment,
         observability,
     )

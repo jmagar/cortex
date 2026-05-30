@@ -124,20 +124,20 @@ fn labelled_container() -> ContainerInfo {
         "com.docker.compose.project.config_files".into(),
         compose_file.display().to_string(),
     );
-    labels.insert("com.docker.compose.service".into(), "syslog-mcp".into());
+    labels.insert("com.docker.compose.service".into(), "cortex".into());
     ContainerInfo {
         id: "abc".into(),
-        name: "syslog-mcp".into(),
+        name: "cortex".into(),
         status: Some("Up".into()),
         health: Some("healthy".into()),
-        image: Some("ghcr.io/jmagar/syslog-mcp:latest".into()),
+        image: Some("ghcr.io/jmagar/cortex:latest".into()),
         image_id: Some("sha256:abc".into()),
         labels,
         mounts: vec![MountInfo {
             source: None,
             target: "/data".into(),
             kind: "volume".into(),
-            volume_name: Some("syslog-mcp-data".into()),
+            volume_name: Some("cortex-data".into()),
         }],
         ports: vec![PortInfo {
             private_port: 3100,
@@ -157,7 +157,7 @@ fn unlabelled_container() -> ContainerInfo {
 
 #[test]
 fn redacts_sensitive_lines() {
-    let input = "ok=true\nSYSLOG_MCP_TOKEN=abc\nclient_secret = \"secret\"\nport=3100";
+    let input = "ok=true\nCORTEX_TOKEN=abc\nclient_secret = \"secret\"\nport=3100";
     let redacted = redact_sensitive(input);
     assert!(redacted.contains("ok=true"));
     assert!(redacted.contains("port=3100"));
@@ -169,16 +169,16 @@ fn redacts_sensitive_lines() {
 #[test]
 fn mcp_projection_omits_host_paths_and_image_ids() {
     let status = ComposeStatus {
-        container_name: "syslog-mcp".into(),
+        container_name: "cortex".into(),
         container_id: Some("container-id".into()),
         status: Some("Up 1 minute".into()),
         health: Some("healthy".into()),
-        image: Some("ghcr.io/jmagar/syslog-mcp:latest".into()),
+        image: Some("ghcr.io/jmagar/cortex:latest".into()),
         image_id: Some("sha256:secret-image-id".into()),
         compose_project: Some("syslog-jmagar-lab".into()),
         compose_working_dir: Some(PathBuf::from("/home/jmagar/private")),
         compose_files: vec![PathBuf::from("/home/jmagar/private/docker-compose.yml")],
-        service: Some("syslog-mcp".into()),
+        service: Some("cortex".into()),
         data_mounts: vec![MountInfo {
             source: Some(PathBuf::from("/home/jmagar/private/data")),
             target: "/data".into(),
@@ -208,16 +208,16 @@ fn mcp_projection_omits_host_paths_and_image_ids() {
 #[test]
 fn mcp_projection_treats_lowercase_docker_exited_as_stopped() {
     let status = ComposeStatus {
-        container_name: "syslog-mcp".into(),
+        container_name: "cortex".into(),
         container_id: Some("container-id".into()),
         status: Some("exited".into()),
         health: None,
-        image: Some("ghcr.io/jmagar/syslog-mcp:latest".into()),
+        image: Some("ghcr.io/jmagar/cortex:latest".into()),
         image_id: Some("sha256:secret-image-id".into()),
         compose_project: Some("syslog-jmagar-lab".into()),
         compose_working_dir: None,
         compose_files: Vec::new(),
-        service: Some("syslog-mcp".into()),
+        service: Some("cortex".into()),
         data_mounts: Vec::new(),
         ports: Vec::new(),
         systemd: None,
@@ -232,16 +232,16 @@ fn mcp_projection_treats_lowercase_docker_exited_as_stopped() {
 #[test]
 fn mcp_projection_degrades_hard_diagnostics() {
     let mut status = ComposeStatus {
-        container_name: "syslog-mcp".into(),
+        container_name: "cortex".into(),
         container_id: Some("container-id".into()),
         status: Some("running".into()),
         health: Some("healthy".into()),
-        image: Some("ghcr.io/jmagar/syslog-mcp:latest".into()),
+        image: Some("ghcr.io/jmagar/cortex:latest".into()),
         image_id: None,
         compose_project: Some("syslog-jmagar-lab".into()),
         compose_working_dir: None,
         compose_files: Vec::new(),
-        service: Some("syslog-mcp".into()),
+        service: Some("cortex".into()),
         data_mounts: Vec::new(),
         ports: Vec::new(),
         systemd: None,
@@ -292,17 +292,17 @@ fn resolves_live_container_labels() {
 fn inspect_json_extracts_compose_fields_ports_and_mounts() {
     let info = container_info_from_inspect(serde_json::json!({
         "Id": "abcdef123456",
-        "Name": "/syslog-mcp",
+        "Name": "/cortex",
         "Image": "sha256:image-id",
         "State": {
             "Status": "running",
             "Health": {"Status": "healthy"}
         },
         "Config": {
-            "Image": "ghcr.io/jmagar/syslog-mcp:latest",
+            "Image": "ghcr.io/jmagar/cortex:latest",
             "Labels": {
                 "com.docker.compose.project": "syslog-jmagar-lab",
-                "com.docker.compose.service": "syslog-mcp",
+                "com.docker.compose.service": "cortex",
                 "com.docker.compose.project.working_dir": "/srv/syslog",
                 "com.docker.compose.project.config_files": "/srv/syslog/docker-compose.yml"
             }
@@ -320,13 +320,10 @@ fn inspect_json_extracts_compose_fields_ports_and_mounts() {
     .unwrap();
 
     assert_eq!(info.id, "abcdef123456");
-    assert_eq!(info.name, "syslog-mcp");
+    assert_eq!(info.name, "cortex");
     assert_eq!(info.status.as_deref(), Some("running"));
     assert_eq!(info.health.as_deref(), Some("healthy"));
-    assert_eq!(
-        info.image.as_deref(),
-        Some("ghcr.io/jmagar/syslog-mcp:latest")
-    );
+    assert_eq!(info.image.as_deref(), Some("ghcr.io/jmagar/cortex:latest"));
     assert_eq!(info.image_id.as_deref(), Some("sha256:image-id"));
     assert_eq!(info.mounts[0].target, "/data");
     assert_eq!(info.ports.len(), 2);
@@ -404,7 +401,7 @@ fn matching_requested_selectors_are_accepted() {
     let target = service
         .resolve_target(&ComposeTarget {
             project_name: Some("syslog-jmagar-lab".into()),
-            service: Some("syslog-mcp".into()),
+            service: Some("cortex".into()),
             ..Default::default()
         })
         .unwrap();
@@ -423,21 +420,19 @@ fn output_with_status(code: i32, stdout: &str, stderr: &str) -> Output {
 #[cfg(unix)]
 #[test]
 fn systemd_status_distinguishes_inactive_from_probe_failure() {
-    let active = systemd_status_from_output("syslog-mcp.service", &output_with_status(0, "", ""))
+    let active = systemd_status_from_output("cortex.service", &output_with_status(0, "", ""))
         .unwrap()
         .unwrap();
     assert!(active.active);
 
-    let inactive = systemd_status_from_output(
-        "syslog-mcp.service",
-        &output_with_status(3, "inactive\n", ""),
-    )
-    .unwrap()
-    .unwrap();
+    let inactive =
+        systemd_status_from_output("cortex.service", &output_with_status(3, "inactive\n", ""))
+            .unwrap()
+            .unwrap();
     assert!(!inactive.active);
 
     let failed = systemd_status_from_output(
-        "syslog-mcp.service",
+        "cortex.service",
         &output_with_status(1, "", "dbus unavailable"),
     )
     .unwrap_err();
@@ -456,9 +451,9 @@ fn docker_unavailable_code_uses_typed_error() {
 #[test]
 fn status_reports_systemd_check_failures_as_diagnostics() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
-    env.remove("SYSLOG_ENV_FILE");
+    let env = EnvGuard::new(&["CORTEX_DATA_VOLUME", "CORTEX_ENV_FILE"]);
+    env.set("CORTEX_DATA_VOLUME", "cortex-data");
+    env.remove("CORTEX_ENV_FILE");
 
     let service = ComposeService::new(
         FakeInspector {
@@ -479,16 +474,16 @@ fn status_reports_systemd_check_failures_as_diagnostics() {
 #[test]
 fn status_errors_when_data_volume_has_unexpected_name() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_MCP_VOLUME_NAME"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "");
-    env.remove("SYSLOG_MCP_VOLUME_NAME");
+    let env = EnvGuard::new(&["CORTEX_DATA_VOLUME", "CORTEX_VOLUME_NAME"]);
+    env.set("CORTEX_DATA_VOLUME", "");
+    env.remove("CORTEX_VOLUME_NAME");
 
     // Regression guard: if the container was started with a stale COMPOSE_PROJECT_NAME
-    // the named volume gets an unexpected prefix (e.g. "compose_syslog-mcp-data" instead
-    // of "syslog-mcp-data"). The status check must detect and surface this as an Error.
+    // the named volume gets an unexpected prefix (e.g. "compose_cortex-data" instead
+    // of "cortex-data"). The status check must detect and surface this as an Error.
     let mut container = labelled_container();
     container.mounts[0].kind = "volume".into();
-    container.mounts[0].volume_name = Some("compose_syslog-mcp-data".into()); // wrong prefix
+    container.mounts[0].volume_name = Some("compose_cortex-data".into()); // wrong prefix
     let service = ComposeService::new(
         FakeInspector {
             container: Some(container),
@@ -506,12 +501,12 @@ fn status_errors_when_data_volume_has_unexpected_name() {
         .find(|d| d.code == "data_mount_unexpected")
         .expect("drift diagnostic must be present");
     assert_eq!(drift.severity, DiagnosticSeverity::Error);
-    assert!(drift.message.contains("compose_syslog-mcp-data"));
+    assert!(drift.message.contains("compose_cortex-data"));
 
     // Sanity: a named volume with the correct name should NOT produce an error.
     let mut good_container = labelled_container();
     good_container.mounts[0].kind = "volume".into();
-    good_container.mounts[0].volume_name = Some("syslog-mcp-data".into()); // correct name
+    good_container.mounts[0].volume_name = Some("cortex-data".into()); // correct name
     let good_service = ComposeService::new(
         FakeInspector {
             container: Some(good_container),
@@ -533,9 +528,9 @@ fn status_errors_when_data_volume_has_unexpected_name() {
 #[test]
 fn status_errors_when_bind_mount_does_not_match_configured_data_volume() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "/home/jmagar/.syslog-mcp/data");
-    env.remove("SYSLOG_ENV_FILE");
+    let env = EnvGuard::new(&["CORTEX_DATA_VOLUME", "CORTEX_ENV_FILE"]);
+    env.set("CORTEX_DATA_VOLUME", "/home/jmagar/.cortex/data");
+    env.remove("CORTEX_ENV_FILE");
 
     let mut container = labelled_container();
     container.mounts[0].kind = "bind".into();
@@ -557,24 +552,24 @@ fn status_errors_when_bind_mount_does_not_match_configured_data_volume() {
         .find(|d| d.code == "data_mount_unexpected")
         .expect("bind drift diagnostic must be present");
     assert_eq!(drift.severity, DiagnosticSeverity::Error);
-    assert!(drift.message.contains("/home/jmagar/.syslog-mcp/data"));
+    assert!(drift.message.contains("/home/jmagar/.cortex/data"));
 }
 
 #[test]
 fn status_expected_data_mount_uses_configured_env_file() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_ENV_FILE", "SYSLOG_MCP_DATA_VOLUME"]);
-    env.remove("SYSLOG_MCP_DATA_VOLUME");
+    let env = EnvGuard::new(&["CORTEX_ENV_FILE", "CORTEX_DATA_VOLUME"]);
+    env.remove("CORTEX_DATA_VOLUME");
     let dir = tempfile::tempdir().unwrap();
     let data_dir = dir.path().join("data");
     std::fs::create_dir(&data_dir).unwrap();
     let env_file = dir.path().join("syslog.env");
     std::fs::write(
         &env_file,
-        format!("SYSLOG_MCP_DATA_VOLUME=\"{}\"\n", data_dir.display()),
+        format!("CORTEX_DATA_VOLUME=\"{}\"\n", data_dir.display()),
     )
     .unwrap();
-    env.set("SYSLOG_ENV_FILE", env_file.to_str().unwrap());
+    env.set("CORTEX_ENV_FILE", env_file.to_str().unwrap());
 
     let mut container = labelled_container();
     container.mounts[0].kind = "bind".into();
@@ -596,16 +591,16 @@ fn status_expected_data_mount_uses_configured_env_file() {
             .diagnostics
             .iter()
             .all(|d| d.code != "data_mount_unexpected"),
-        "SYSLOG_ENV_FILE should drive the same /data expectation as compose invocation"
+        "CORTEX_ENV_FILE should drive the same /data expectation as compose invocation"
     );
 }
 
 #[test]
 fn status_errors_when_data_volume_is_missing() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
-    env.remove("SYSLOG_ENV_FILE");
+    let env = EnvGuard::new(&["CORTEX_DATA_VOLUME", "CORTEX_ENV_FILE"]);
+    env.set("CORTEX_DATA_VOLUME", "cortex-data");
+    env.remove("CORTEX_ENV_FILE");
     let mut container = labelled_container();
     container.mounts.clear(); // no /data mount at all
     let service = ComposeService::new(
@@ -684,16 +679,16 @@ fn project_name_alone_is_rejected_for_mutation() {
         target: ComposeTargetSummary {
             project_dir: None,
             compose_file: None,
-            project_name: Some("syslog".into()),
-            service: "syslog-mcp".into(),
-            container_name: "syslog-mcp".into(),
+            project_name: Some("cortex".into()),
+            service: "cortex".into(),
+            container_name: "cortex".into(),
         },
         source: TargetSource::Explicit,
         confidence: TargetConfidence::Confirmed,
         diagnostics: Vec::new(),
         compose_files: Vec::new(),
         compose_working_dir: None,
-        compose_project: Some("syslog".into()),
+        compose_project: Some("cortex".into()),
     };
     let err = service
         .preflight_mutation(ComposeMutation::Up, &target, &MutationOptions::default())
@@ -706,7 +701,7 @@ fn up_refuses_active_systemd_owner() {
     let service = ComposeService::new(
         FakeInspector {
             systemd: Some(SystemdStatus {
-                unit: "syslog-mcp.service".into(),
+                unit: "cortex.service".into(),
                 active: true,
             }),
             ..Default::default()
@@ -811,9 +806,7 @@ fn down_requires_yes_and_stops_only_target_service() {
         )
         .unwrap();
     let invocation = service.compose_invocation(&target, ComposeMutation::Down);
-    assert!(invocation
-        .args
-        .ends_with(&["stop".into(), "syslog-mcp".into()]));
+    assert!(invocation.args.ends_with(&["stop".into(), "cortex".into()]));
     assert!(!invocation.args.iter().any(|arg| arg == "down"));
 }
 
@@ -842,9 +835,9 @@ fn up_refuses_non_target_listener() {
 #[test]
 fn live_target_allows_listener_on_published_target_port() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
-    env.remove("SYSLOG_ENV_FILE");
+    let env = EnvGuard::new(&["CORTEX_DATA_VOLUME", "CORTEX_ENV_FILE"]);
+    env.set("CORTEX_DATA_VOLUME", "cortex-data");
+    env.remove("CORTEX_ENV_FILE");
 
     let mut owners = BTreeMap::new();
     owners.insert(3100, "abc".into());
@@ -871,9 +864,9 @@ fn live_target_allows_listener_on_published_target_port() {
 #[test]
 fn live_target_refuses_foreign_docker_proxy_on_published_port() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
-    env.remove("SYSLOG_ENV_FILE");
+    let env = EnvGuard::new(&["CORTEX_DATA_VOLUME", "CORTEX_ENV_FILE"]);
+    env.set("CORTEX_DATA_VOLUME", "cortex-data");
+    env.remove("CORTEX_ENV_FILE");
 
     let mut owners = BTreeMap::new();
     owners.insert(3100, "foreign-container".into());
@@ -901,9 +894,9 @@ fn live_target_refuses_foreign_docker_proxy_on_published_port() {
 #[test]
 fn live_target_refuses_listener_on_unpublished_target_port() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
-    env.remove("SYSLOG_ENV_FILE");
+    let env = EnvGuard::new(&["CORTEX_DATA_VOLUME", "CORTEX_ENV_FILE"]);
+    env.set("CORTEX_DATA_VOLUME", "cortex-data");
+    env.remove("CORTEX_ENV_FILE");
 
     let service = ComposeService::new(
         FakeInspector {
@@ -928,9 +921,9 @@ fn live_target_refuses_listener_on_unpublished_target_port() {
 #[test]
 fn live_target_refuses_foreign_listener_even_on_published_port() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
-    env.remove("SYSLOG_ENV_FILE");
+    let env = EnvGuard::new(&["CORTEX_DATA_VOLUME", "CORTEX_ENV_FILE"]);
+    env.set("CORTEX_DATA_VOLUME", "cortex-data");
+    env.remove("CORTEX_ENV_FILE");
 
     let service = ComposeService::new(
         FakeInspector {
@@ -955,9 +948,9 @@ fn live_target_refuses_foreign_listener_even_on_published_port() {
 #[test]
 fn live_target_refuses_published_listener_with_unknown_owner() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
-    env.remove("SYSLOG_ENV_FILE");
+    let env = EnvGuard::new(&["CORTEX_DATA_VOLUME", "CORTEX_ENV_FILE"]);
+    env.set("CORTEX_DATA_VOLUME", "cortex-data");
+    env.remove("CORTEX_ENV_FILE");
 
     let service = ComposeService::new(
         FakeInspector {
@@ -982,9 +975,9 @@ fn live_target_refuses_published_listener_with_unknown_owner() {
 #[test]
 fn live_target_allows_listener_without_process_info_when_docker_confirms_owner() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_MCP_DATA_VOLUME", "SYSLOG_ENV_FILE"]);
-    env.set("SYSLOG_MCP_DATA_VOLUME", "syslog-mcp-data");
-    env.remove("SYSLOG_ENV_FILE");
+    let env = EnvGuard::new(&["CORTEX_DATA_VOLUME", "CORTEX_ENV_FILE"]);
+    env.set("CORTEX_DATA_VOLUME", "cortex-data");
+    env.remove("CORTEX_ENV_FILE");
 
     // Non-root scenario: ss cannot report process names so the listener has no
     // "users:" field, but docker ps confirms the target container owns the port.
@@ -1013,8 +1006,8 @@ fn live_target_allows_listener_without_process_info_when_docker_confirms_owner()
 #[test]
 fn up_invocation_is_detached_and_uses_project_directory_and_all_files() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_ENV_FILE"]);
-    env.remove("SYSLOG_ENV_FILE");
+    let env = EnvGuard::new(&["CORTEX_ENV_FILE"]);
+    env.remove("CORTEX_ENV_FILE");
     let service = ComposeService::new(
         FakeInspector::default(),
         FakeRunner,
@@ -1025,8 +1018,8 @@ fn up_invocation_is_detached_and_uses_project_directory_and_all_files() {
             project_dir: Some(PathBuf::from("/tmp/project")),
             compose_file: Some(PathBuf::from("/tmp/project/base.yml")),
             project_name: Some("syslog-jmagar-lab".into()),
-            service: "syslog-mcp".into(),
-            container_name: "syslog-mcp".into(),
+            service: "cortex".into(),
+            container_name: "cortex".into(),
         },
         source: TargetSource::LiveContainerLabels,
         confidence: TargetConfidence::Confirmed,
@@ -1056,7 +1049,7 @@ fn up_invocation_is_detached_and_uses_project_directory_and_all_files() {
             "syslog-jmagar-lab",
             "up",
             "-d",
-            "syslog-mcp",
+            "cortex",
         ]
     );
 }
@@ -1064,11 +1057,11 @@ fn up_invocation_is_detached_and_uses_project_directory_and_all_files() {
 #[test]
 fn compose_invocation_uses_syslog_env_file_for_substitution() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["SYSLOG_ENV_FILE"]);
+    let env = EnvGuard::new(&["CORTEX_ENV_FILE"]);
     let dir = tempfile::tempdir().unwrap();
     let env_file = dir.path().join("runtime.env");
-    std::fs::write(&env_file, "SYSLOG_MCP_DATA_VOLUME=/tmp/syslog-data\n").unwrap();
-    env.set("SYSLOG_ENV_FILE", env_file.to_str().unwrap());
+    std::fs::write(&env_file, "CORTEX_DATA_VOLUME=/tmp/syslog-data\n").unwrap();
+    env.set("CORTEX_ENV_FILE", env_file.to_str().unwrap());
     let compose_file = dir.path().join("docker-compose.yml");
     std::fs::write(&compose_file, "services: {}\n").unwrap();
 
@@ -1082,8 +1075,8 @@ fn compose_invocation_uses_syslog_env_file_for_substitution() {
             project_dir: Some(dir.path().to_path_buf()),
             compose_file: Some(compose_file.clone()),
             project_name: Some("syslog-jmagar-lab".into()),
-            service: "syslog-mcp".into(),
-            container_name: "syslog-mcp".into(),
+            service: "cortex".into(),
+            container_name: "cortex".into(),
         },
         source: TargetSource::Explicit,
         confidence: TargetConfidence::Confirmed,
@@ -1110,9 +1103,9 @@ fn mutation_invocations_scope_service_where_supported() {
     );
     let target = target_from_container(&labelled_container(), &ComposeDefaults::default());
     for (mutation, expected) in [
-        (ComposeMutation::Pull, vec!["pull", "syslog-mcp"]),
-        (ComposeMutation::Restart, vec!["restart", "syslog-mcp"]),
-        (ComposeMutation::Down, vec!["stop", "syslog-mcp"]),
+        (ComposeMutation::Pull, vec!["pull", "cortex"]),
+        (ComposeMutation::Restart, vec!["restart", "cortex"]),
+        (ComposeMutation::Down, vec!["stop", "cortex"]),
     ] {
         let invocation = service.compose_invocation(&target, mutation);
         assert!(
@@ -1149,9 +1142,7 @@ fn dry_run_does_not_invoke_runner() {
         panic!("expected dry-run result");
     };
     assert!(dry_run.dry_run);
-    assert!(dry_run
-        .command
-        .ends_with(&["pull".into(), "syslog-mcp".into()]));
+    assert!(dry_run.command.ends_with(&["pull".into(), "cortex".into()]));
     assert_eq!(dry_run.preflight, "passed");
 }
 
@@ -1168,7 +1159,7 @@ fn logs_invocation_is_bounded_tail() {
         "logs".into(),
         "--tail".into(),
         "20".into(),
-        "syslog-mcp".into(),
+        "cortex".into(),
     ]));
 }
 

@@ -25,7 +25,7 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
             "--received-from" => parsed.received_from = Some(flags.value("--received-from")?),
             "--received-to" => parsed.received_to = Some(flags.value("--received-to")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            "-h" | "--help" => bail!("use `syslog --help` for usage"),
+            "-h" | "--help" => bail!("use `cortex --help` for usage"),
             _ if arg.starts_with("--hostname=") => {
                 parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
             }
@@ -96,7 +96,7 @@ pub(crate) fn parse_filter(args: &[String]) -> Result<CliCommand> {
             "--docker-host" => parsed.docker_host = Some(flags.value("--docker-host")?),
             "--stream" => parsed.stream = Some(flags.value("--stream")?),
             "--event-action" => parsed.event_action = Some(flags.value("--event-action")?),
-            "-h" | "--help" => bail!("use `syslog --help` for usage"),
+            "-h" | "--help" => bail!("use `cortex --help` for usage"),
             _ if arg.starts_with("--hostname=") => {
                 parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
             }

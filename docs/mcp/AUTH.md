@@ -1,15 +1,15 @@
-# Authentication Reference -- syslog-mcp
+# Authentication Reference -- cortex
 
 ## Overview
 
-syslog-mcp has a single authentication boundary: MCP clients authenticating to the MCP HTTP server. There is no outbound authentication -- syslog-mcp is a self-contained syslog receiver with no upstream API dependency.
+cortex has a single authentication boundary: MCP clients authenticating to the MCP HTTP server. There is no outbound authentication -- cortex is a self-contained syslog receiver with no upstream API dependency.
 
 ## Bearer token
 
-When `SYSLOG_MCP_TOKEN` is set, all requests to `/mcp` require:
+When `CORTEX_TOKEN` is set, all requests to `/mcp` require:
 
 ```
-Authorization: Bearer {SYSLOG_MCP_TOKEN}
+Authorization: Bearer {CORTEX_TOKEN}
 ```
 
 Generate a token:
@@ -21,10 +21,10 @@ openssl rand -hex 32
 Set it in `.env`:
 
 ```bash
-SYSLOG_MCP_TOKEN=<generated-token>
+CORTEX_TOKEN=<generated-token>
 ```
 
-`SYSLOG_MCP_API_TOKEN` is still accepted as a deprecated compatibility alias when `SYSLOG_MCP_TOKEN` is unset.
+`CORTEX_API_TOKEN` is still accepted as a deprecated compatibility alias when `CORTEX_TOKEN` is unset.
 
 ## Authentication middleware
 
@@ -56,11 +56,11 @@ The health endpoint is intentionally unauthenticated so Docker HEALTHCHECK, dock
 
 ## No-auth mode
 
-When `SYSLOG_MCP_TOKEN` is not set (the default), the MCP endpoint passes through without authentication. This is acceptable for:
+When `CORTEX_TOKEN` is not set (the default), the MCP endpoint passes through without authentication. This is acceptable for:
 - LAN-only deployments behind a firewall
 - Deployments behind a reverse proxy that handles its own auth (SWAG with Authelia, Cloudflare Access)
 
-When exposed to the internet or untrusted networks, always set `SYSLOG_MCP_TOKEN`.
+When exposed to the internet or untrusted networks, always set `CORTEX_TOKEN`.
 
 ## Plugin userConfig integration
 
@@ -87,7 +87,7 @@ When installed as a Claude Code plugin, the token is managed via `userConfig` in
 Fields marked `"sensitive": true` are stored encrypted by Claude Code.
 When `"no_auth": true`, token enforcement is disabled and `api_token` is not
 required on loopback binds. Non-loopback binds also require
-`SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true`.
+`CORTEX_TRUSTED_GATEWAY_NO_AUTH=true`.
 
 ## Security practices
 

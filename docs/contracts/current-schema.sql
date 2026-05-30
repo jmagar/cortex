@@ -1,5 +1,5 @@
 -- =============================================================================
--- syslog-mcp: Current Production DB Schema (Baseline Contract)
+-- cortex: Current Production DB Schema (Baseline Contract)
 -- =============================================================================
 --
 -- Pinning
@@ -152,7 +152,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(
 -- ---------------------------------------------------------------------------
 -- 2.5 `docker_ingest_checkpoints` — replay cursor for docker socket proxy
 -- Source: migration 2 (`src/db/pool.rs` ~L162).
--- One row per (host, container). Lets short syslog-mcp outages replay from
+-- One row per (host, container). Lets short cortex outages replay from
 -- Docker's local log store with `/containers/{id}/logs?since=`.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS docker_ingest_checkpoints (

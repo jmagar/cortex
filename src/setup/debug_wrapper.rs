@@ -9,7 +9,7 @@ use super::{
 
 pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<SetupReport> {
     let started = Instant::now();
-    let home = super::syslog_home_dir()?;
+    let home = super::cortex_home_dir()?;
     let env_path = home.join(".env");
     let compose_dir = home.join("compose");
     let data_dir = home.join("data");
@@ -46,7 +46,7 @@ pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<S
             phases.push(check_file_phase(
                 "debug-wrapper",
                 &wrapper_path,
-                "run syslog setup debug-wrapper install",
+                "run cortex setup debug-wrapper install",
             ));
             phases.push(check_debug_wrapper_content_phase(&wrapper_path, &repo_path));
         }
@@ -68,7 +68,7 @@ pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<S
 
 pub async fn run_debug_compose_setup(action: DebugComposeAction) -> io::Result<SetupReport> {
     let started = Instant::now();
-    let home = super::syslog_home_dir()?;
+    let home = super::cortex_home_dir()?;
     let env_path = home.join(".env");
     let compose_dir = home.join("compose");
     let data_dir = home.join("data");
@@ -102,7 +102,7 @@ pub async fn run_debug_compose_setup(action: DebugComposeAction) -> io::Result<S
             phases.push(check_file_phase(
                 "debug-compose",
                 &override_path,
-                "run syslog setup debug-compose install",
+                "run cortex setup debug-compose install",
             ));
             phases.push(check_debug_compose_content_phase(
                 &override_path,
@@ -133,9 +133,9 @@ pub(crate) fn debug_wrapper_script(repo_path: &Path) -> String {
         r#"#!/usr/bin/env bash
 set -euo pipefail
 
-repo="${{SYSLOG_MCP_REPO:-{repo_path}}}"
+repo="${{CORTEX_REPO:-{repo_path}}}"
 if [[ ! -d "${{repo}}" ]]; then
-  repo="${{HOME}}/workspace/syslog-mcp"
+  repo="${{HOME}}/workspace/cortex"
 fi
 
 cd "${{repo}}"
@@ -145,8 +145,8 @@ case "${{1:-}}" in
   serve|setup)
     ;;
   *)
-    export SYSLOG_DOCKER_INGEST_ENABLED="${{SYSLOG_DOCKER_INGEST_ENABLED:-false}}"
-    export SYSLOG_MCP_AUTH_MODE="${{SYSLOG_MCP_AUTH_MODE:-bearer}}"
+    export CORTEX_DOCKER_INGEST_ENABLED="${{CORTEX_DOCKER_INGEST_ENABLED:-false}}"
+    export CORTEX_AUTH_MODE="${{CORTEX_AUTH_MODE:-bearer}}"
     ;;
 esac
 
@@ -159,7 +159,7 @@ exec "${{CARGO_TARGET_DIR}}/debug/syslog" "$@"
 pub(crate) fn debug_compose_override(repo_path: &Path) -> String {
     let repo_path = setup_path_value(repo_path).expect("validated debug compose repo path");
     format!(
-        "services:\n  syslog-mcp:\n    image: syslog-mcp:local-debug\n    build:\n      context: {repo_path}\n      dockerfile: config/Dockerfile\n      args:\n        SYSLOG_BUILD_PROFILE: debug\n"
+        "services:\n  cortex:\n    image: cortex:local-debug\n    build:\n      context: {repo_path}\n      dockerfile: config/Dockerfile\n      args:\n        CORTEX_BUILD_PROFILE: debug\n"
     )
 }
 

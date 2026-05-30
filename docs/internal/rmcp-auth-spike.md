@@ -1,4 +1,4 @@
-# rmcp 1.6 axum-extension propagation spike (syslog-mcp-brt0.10)
+# rmcp 1.6 axum-extension propagation spike (cortex-brt0.10)
 
 ## Outcome
 
@@ -59,10 +59,10 @@ Router::new()
 
 ## stateful_mode requirement
 
-**No flip required.** Pattern (a) works under syslog-mcp's current `stateful_mode(false)` setup. Both branches in `tower.rs` inject the parts into the JSON-RPC request extensions; the only difference is that stateful mode also routes the message through `SessionManager`, which is orthogonal to extension propagation.
+**No flip required.** Pattern (a) works under cortex's current `stateful_mode(false)` setup. Both branches in `tower.rs` inject the parts into the JSON-RPC request extensions; the only difference is that stateful mode also routes the message through `SessionManager`, which is orthogonal to extension propagation.
 
 This means:
-- syslog-mcp keeps `with_stateful_mode(false)` (current `src/mcp/rmcp_server.rs:148`).
+- cortex keeps `with_stateful_mode(false)` (current `src/mcp/rmcp_server.rs:148`).
 - `LocalSessionManager` continues to be used as-is.
 - No `Arc<DashMap<SessionId, AuthContext>>` is required on `AppState` — auth lives on each request.
 - No `tokio::task_local!` is required — no scoping concerns across rmcp-spawned tasks.
@@ -72,7 +72,7 @@ This means:
 ### Pattern (a) — direct extension propagation [CHOSEN]
 - **Verdict**: works against rmcp 1.6.0, no transport-mode change required.
 - **Pros**: zero AppState surface area for auth; fail-closed is trivial; per-request lifetime matches the auth check perfectly; no race conditions.
-- **Cons**: ties tool handlers to `axum::http::request::Parts` import — minor coupling, acceptable for syslog-mcp's single-transport reality.
+- **Cons**: ties tool handlers to `axum::http::request::Parts` import — minor coupling, acceptable for cortex's single-transport reality.
 
 ### Pattern (b) — AppState session-keyed map [REJECTED]
 - Would require flipping `stateful_mode` to `true` to obtain stable session IDs, plus an `Arc<DashMap<SessionId, AuthContext>>` on `AppState`, plus middleware that fishes the `Mcp-Session-Id` header out of the request. Three moving parts where one suffices.
@@ -87,14 +87,14 @@ This means:
 
 1. **Type-name ambiguity**: `axum::http::request::Parts` and `http::request::Parts` are the same type; axum re-exports the `http` crate. The handler import must match what middleware inserted (in our spike, both used `axum::http`). If a future middleware pulls from `hyper::http::request::Parts` and the handler reads `axum::http::request::Parts`, they're still the same `TypeId` because axum and hyper depend on the same `http` crate version, but pin the crate explicitly to avoid surprises if `http` ever splits.
 2. **Body is consumed before tool dispatch**: only `Parts` reaches the handler — no streaming body access. Auth middleware MUST do its work BEFORE rmcp consumes the body, which is the natural axum middleware ordering.
-3. **`#[non_exhaustive]` on `RequestContext`**: cannot pattern-match exhaustively; always construct/access by field name. Already true in syslog-mcp's existing handlers.
+3. **`#[non_exhaustive]` on `RequestContext`**: cannot pattern-match exhaustively; always construct/access by field name. Already true in cortex's existing handlers.
 4. **Cloning cost**: `RequestContext.extensions` is cloned in `service/server.rs:210`. `http::request::Parts` is `Clone`, but the Parts contains an `Extensions` map which is internally a `HashMap<TypeId, Box<dyn Any>>`. Cloning copies the map but the `Box<dyn Any>` inside is NOT cloned — clones share. This is fine for a read-only AuthContext, but DO NOT mutate inserted values.
 5. **Spike test isolation**: the spike test uses `tower::ServiceExt::oneshot` so each test gets a fresh router. Production wiring does NOT need anything special.
 
 ## References
 
-- Spike test: `tests/spike_rmcp_extensions.rs` (DELETE AFTER syslog-mcp-brt0.10 closed)
+- Spike test: `tests/spike_rmcp_extensions.rs` (DELETE AFTER cortex-brt0.10 closed)
 - Documented pattern: `~/.cargo/registry/src/index.crates.io-*/rmcp-1.6.0/src/transport/streamable_http_server/tower.rs:473-495`
 - Injection sites: `tower.rs:1039` (stateful), `tower.rs:1102` (stateful init), `tower.rs:1179` (stateless)
 - RequestContext construction: `service/server.rs:210` and `service.rs:955`
-- Current syslog-mcp setup: `src/mcp/rmcp_server.rs:146-163`
+- Current cortex setup: `src/mcp/rmcp_server.rs:146-163`

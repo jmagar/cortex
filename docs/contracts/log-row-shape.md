@@ -3,8 +3,8 @@
 **Status:** contract — source of truth
 **Owners:** every ingest source MUST produce this shape before handing rows to the writer.
 **Companion specs:**
-- `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` (epic `syslog-mcp-1wjr`) — adds the four enrichment columns.
-- `docs/superpowers/specs/2026-05-16-api-pollers-design.md` (epic `syslog-mcp-awvr`) — defines the API-poller envelopes and the `source_ip` URI conventions used here.
+- `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` (epic `cortex-1wjr`) — adds the four enrichment columns.
+- `docs/superpowers/specs/2026-05-16-api-pollers-design.md` (epic `cortex-awvr`) — defines the API-poller envelopes and the `source_ip` URI conventions used here.
 - Live struct: `src/db/models.rs::LogBatchEntry`.
 
 ---
@@ -50,7 +50,7 @@ The table reflects the current struct in `src/db/models.rs` *plus* the four inde
 | `event_action` | `Option<String>` | yes | **(added by enrichment migration 10.)** Normalised event verb (`oom_kill`, `link_up`, `die`, `ban`, …). Indexed (partial). |
 | `parse_error` | `Option<String>` | yes | **(added by enrichment migration 10.)** `"{parser_name}: {ParserError::Display}"`, truncated to 512 bytes. Not indexed. |
 
-The enrichment fields (`http_status`, `auth_outcome`, `dns_blocked`, `event_action`, `parse_error`) are present in `LogBatchEntry` as of epic B (syslog-mcp-1wjr). Ingest sources leave them `None`; the enrichment pipeline populates them at flush time.
+The enrichment fields (`http_status`, `auth_outcome`, `dns_blocked`, `event_action`, `parse_error`) are present in `LogBatchEntry` as of epic B (cortex-1wjr). Ingest sources leave them `None`; the enrichment pipeline populates them at flush time.
 
 ---
 
@@ -62,12 +62,12 @@ The enrichment fields (`http_status`, `auth_outcome`, `dns_blocked`, `event_acti
 |---|---|---|---|
 | Syslog (UDP) | `syslog-udp` | `src/syslog/listener.rs` UDP path | `udp://203.0.113.7:48132` |
 | Syslog (TCP) | `syslog-tcp` | `src/syslog/listener.rs` TCP path | `tcp://203.0.113.7:51422` |
-| Agent | `agent` | per-host agent WS (`syslog-mcp-qgnx`) | `agent://dookie/` |
+| Agent | `agent` | per-host agent WS (`cortex-qgnx`) | `agent://dookie/` |
 | Docker stream | `docker-stream` | `src/docker_ingest/` `log_output_to_entry` | `docker://rkx/postgres/stdout` |
 | Docker event | `docker-event` | `src/docker_ingest/` `docker_event_to_entry` | `docker-event://rkx/postgres/die` |
 | OTLP | `otlp` | `src/otlp.rs` | `otlp://10.0.0.5/<service.name>` |
-| UniFi API | `unifi-api` | UniFi poller (`syslog-mcp-awvr` UniFi half) | `unifi://controller.lan/` |
-| AdGuard API | `adguard-api` | AdGuard poller (`syslog-mcp-awvr` AdGuard half) | `adguard://adguard.lan/192.168.10.55` |
+| UniFi API | `unifi-api` | UniFi poller (`cortex-awvr` UniFi half) | `unifi://controller.lan/` |
+| AdGuard API | `adguard-api` | AdGuard poller (`cortex-awvr` AdGuard half) | `adguard://adguard.lan/192.168.10.55` |
 
 Adding a new ingest source requires registering a new `source_kind` here **and** a new URI scheme in §4 — pick a name that does not collide.
 
@@ -181,7 +181,7 @@ pub struct LogBatchEntry {
     pub ai_transcript_path: Option<String>,
     pub metadata_json: Option<String>,
 
-    // --- added by enrichment migration 10 (epic syslog-mcp-1wjr) -----------
+    // --- added by enrichment migration 10 (epic cortex-1wjr) -----------
     pub http_status: Option<i32>,
     pub auth_outcome: Option<&'static str>,
     pub dns_blocked: Option<bool>,

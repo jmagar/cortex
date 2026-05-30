@@ -1,8 +1,8 @@
-# Transport Methods Reference -- syslog-mcp
+# Transport Methods Reference -- cortex
 
 ## Overview
 
-syslog-mcp supports two first-party MCP transports:
+cortex supports two first-party MCP transports:
 
 - `syslog serve mcp`: receives syslog over UDP/TCP and exposes RMCP Streamable HTTP.
 - `syslog mcp`: query-only child process mode for local stdio MCP clients.
@@ -21,12 +21,12 @@ the MCP tool, but they are terminal commands, not MCP transports.
 
 ## HTTP transport
 
-The MCP server listens on port 3100 (configurable via `SYSLOG_MCP_PORT`).
+The MCP server listens on port 3100 (configurable via `CORTEX_PORT`).
 
 ```bash
-SYSLOG_MCP_HOST=0.0.0.0
-SYSLOG_MCP_PORT=3100
-SYSLOG_MCP_TOKEN=your-token-here   # optional
+CORTEX_HOST=0.0.0.0
+CORTEX_PORT=3100
+CORTEX_TOKEN=your-token-here   # optional
 ```
 
 ### Endpoints
@@ -44,7 +44,7 @@ SYSLOG_MCP_TOKEN=your-token-here   # optional
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "cortex": {
       "type": "http",
       "url": "http://localhost:3100/mcp",
       "headers": {
@@ -62,7 +62,7 @@ SYSLOG_MCP_TOKEN=your-token-here   # optional
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "cortex": {
       "type": "http",
       "url": "http://localhost:3100/mcp",
       "headers": {
@@ -80,7 +80,7 @@ SYSLOG_MCP_TOKEN=your-token-here   # optional
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "cortex": {
       "type": "http",
       "url": "http://localhost:3100/mcp",
       "headers": {
@@ -109,8 +109,8 @@ curl -s -X POST http://localhost:3100/mcp \
 RMCP validates the `Host` header to reduce DNS rebinding risk. Loopback hosts and the configured bind host are allowed by default. Add public names or proxy authorities with:
 
 ```bash
-SYSLOG_MCP_ALLOWED_HOSTS=syslog.example.com,syslog.example.com:443
-SYSLOG_MCP_ALLOWED_ORIGINS=https://syslog.example.com
+CORTEX_ALLOWED_HOSTS=syslog.example.com,syslog.example.com:443
+CORTEX_ALLOWED_ORIGINS=https://syslog.example.com
 ```
 
 ## Direct stdio transport
@@ -123,18 +123,18 @@ SYSLOG_MCP_ALLOWED_ORIGINS=https://syslog.example.com
 - It does not start the HTTP server.
 - It does not run retention purge or storage-budget cleanup tasks.
 - It logs to stderr only; stdout is reserved for MCP protocol messages.
-- It does not require `SYSLOG_MCP_TOKEN`.
+- It does not require `CORTEX_TOKEN`.
 
 Ingestion still requires the daemon to be running somewhere. Stdio mode only queries the configured SQLite database.
 
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "cortex": {
       "command": "/path/to/syslog",
       "args": ["mcp"],
       "env": {
-        "SYSLOG_MCP_DB_PATH": "/data/syslog.db",
+        "CORTEX_DB_PATH": "/data/cortex.db",
         "RUST_LOG": "warn"
       }
     }
@@ -165,12 +165,12 @@ reference.
 
 ## HTTP-to-stdio bridge mode
 
-Use `mcp-remote` instead of direct stdio when the database path is not local to the MCP host, when syslog-mcp is only available through Docker/reverse proxy, or when you want to preserve HTTP bearer auth:
+Use `mcp-remote` instead of direct stdio when the database path is not local to the MCP host, when cortex is only available through Docker/reverse proxy, or when you want to preserve HTTP bearer auth:
 
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "cortex": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "http://localhost:3100/mcp", "--transport", "http-only"]
     }
@@ -182,9 +182,9 @@ Use `mcp-remote` instead of direct stdio when the database path is not local to 
 
 | Service | Default Port | Env Var |
 | --- | --- | --- |
-| Syslog receiver (UDP + TCP) | 1514 | `SYSLOG_PORT` |
-| MCP HTTP server | 3100 | `SYSLOG_MCP_PORT` |
-| MCP stdio process | n/a | `SYSLOG_MCP_DB_PATH` |
+| Syslog receiver (UDP + TCP) | 1514 | `CORTEX_RECEIVER_PORT` |
+| MCP HTTP server | 3100 | `CORTEX_PORT` |
+| MCP stdio process | n/a | `CORTEX_DB_PATH` |
 
 ## See also
 

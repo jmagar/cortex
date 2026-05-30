@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# tests/test_live.sh — Canonical integration test for syslog-mcp
+# tests/test_live.sh — Canonical integration test for cortex
 #
 # Modes:
 #   --mode docker  Build image, start container, run all test phases, teardown
@@ -9,25 +9,25 @@
 #
 # Flags:
 #   --url URL        Base URL of the MCP server (default: http://localhost:3100)
-#   --token TOKEN    Bearer token (also read from SYSLOG_MCP_TOKEN env var)
+#   --token TOKEN    Bearer token (also read from CORTEX_TOKEN env var)
 #   --verbose        Print raw JSON responses for every call
 #   --help           Show this help
 #
 # Environment variables:
-#   SYSLOG_MCP_TOKEN       Bearer token for auth (optional — server may run without it)
+#   CORTEX_TOKEN       Bearer token for auth (optional — server may run without it)
 #   PORT                   Override server port (default: 3100)
 #
 # Action inventory reference (not every action is exercised by this live test):
-#   syslog search, syslog filter, syslog tail, syslog errors, syslog hosts, syslog host_state, syslog fleet_state, syslog sessions,
-#   syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context,
-#   syslog list_ai_tools, syslog list_ai_projects, syslog correlate, syslog stats, syslog status, syslog apps,
-#   syslog source_ips, syslog timeline, syslog patterns, syslog context,
-#   syslog get, syslog ingest_rate, syslog silent_hosts, syslog clock_skew,
-#   syslog anomalies, syslog compare, syslog compose_status,
-#   syslog compose_doctor, syslog unaddressed_errors, syslog ack_error,
-#   syslog unack_error, syslog notifications_recent, syslog notifications_test,
-#   syslog similar_incidents, syslog ask_history, syslog incident_context,
-#   syslog help
+#   cortex search, cortex filter, cortex tail, cortex errors, cortex hosts, cortex host_state, cortex fleet_state, cortex sessions,
+#   cortex search_sessions, cortex abuse, cortex ai_correlate, cortex usage_blocks, cortex project_context,
+#   cortex list_ai_tools, cortex list_ai_projects, cortex correlate, cortex stats, cortex status, cortex apps,
+#   cortex source_ips, cortex timeline, cortex patterns, cortex context,
+#   cortex get, cortex ingest_rate, cortex silent_hosts, cortex clock_skew,
+#   cortex anomalies, cortex compare, cortex compose_status,
+#   cortex compose_doctor, cortex unaddressed_errors, cortex ack_error,
+#   cortex unack_error, cortex notifications_recent, cortex notifications_test,
+#   cortex similar_incidents, cortex ask_history, cortex incident_context,
+#   cortex help
 #
 # Exit codes:
 #   0 — all tests passed (SKIPs do not count as failures)
@@ -36,7 +36,7 @@
 #
 # Examples:
 #   # Docker mode (default — builds image, runs tests, tears down)
-#   SYSLOG_MCP_TOKEN=ci-integration-value bash tests/test_live.sh
+#   CORTEX_TOKEN=ci-integration-value bash tests/test_live.sh
 #
 #   # HTTP mode — test an already-running server
 #   bash tests/test_live.sh --mode http --url http://192.168.1.10:3100
@@ -52,10 +52,10 @@ BASE_URL=""         # populated after arg parsing
 TOKEN=""            # populated from args or env
 VERBOSE=false
 PORT="${PORT:-3100}"
-CONTAINER_NAME="syslog-mcp-test-$$"
-IMAGE_NAME="syslog-mcp-test"
+CONTAINER_NAME="cortex-test-$$"
+IMAGE_NAME="cortex-test"
 AI_SMOKE_FIXTURE="tests/fixtures/ai-session-smoke.jsonl"
-AI_SMOKE_PROJECT="/tmp/syslog-mcp-ai-smoke"
+AI_SMOKE_PROJECT="/tmp/cortex-ai-smoke"
 AI_SMOKE_QUERY='"ai-smoke-authentication"'
 AI_SEEDED=false
 CLI_PARITY_CONTAINER=""
@@ -130,7 +130,7 @@ parse_args() {
 
   # Env var fallback for token
   if [[ -z "${TOKEN}" ]]; then
-    TOKEN="${SYSLOG_MCP_TOKEN:-${SYSLOG_MCP_API_TOKEN:-}}"
+    TOKEN="${CORTEX_TOKEN:-${CORTEX_API_TOKEN:-}}"
   fi
 
   # Default BASE_URL
@@ -219,15 +219,15 @@ run_local_syslog_ai_add() {
   local db_path="$1"
   local fixture="$2"
   if [[ -x "target/debug/syslog" ]]; then
-    SYSLOG_MCP_DB_PATH="${db_path}" target/debug/syslog ai add --file "${fixture}" --json
+    CORTEX_DB_PATH="${db_path}" target/debug/cortex ai add --file "${fixture}" --json
   else
-    SYSLOG_MCP_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${fixture}" --json
+    CORTEX_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${fixture}" --json
   fi
 }
 
 seed_ai_fixture_local() {
   [[ -f "${AI_SMOKE_FIXTURE}" ]] || return 1
-  local db_path="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-data/syslog.db}}"
+  local db_path="${CORTEX_SMOKE_DB_PATH:-${CORTEX_DB_PATH:-data/cortex.db}}"
   run_local_syslog_ai_add "${db_path}" "${AI_SMOKE_FIXTURE}" >/dev/null || return $?
   AI_SEEDED=true
 }
@@ -236,7 +236,7 @@ seed_ai_fixture_container() {
   local project_dir="$1"
   local container_fixture="/tmp/ai-session-smoke.jsonl"
   docker cp "${project_dir}/${AI_SMOKE_FIXTURE}" "${CONTAINER_NAME}:${container_fixture}" >/dev/null || return $?
-  docker exec "${CONTAINER_NAME}" syslog ai add --file "${container_fixture}" --json >/dev/null || return $?
+  docker exec "${CONTAINER_NAME}" cortex ai add --file "${container_fixture}" --json >/dev/null || return $?
   AI_SEEDED=true
 }
 
@@ -359,8 +359,8 @@ phase_auth() {
   section "Phase 2 — Auth"
 
   if [[ -z "${TOKEN}" ]]; then
-    _skip "auth: unauthenticated /mcp returns 401" "SYSLOG_MCP_TOKEN not set — auth assumed disabled"
-    _skip "auth: bad token returns 401"             "SYSLOG_MCP_TOKEN not set — auth assumed disabled"
+    _skip "auth: unauthenticated /mcp returns 401" "CORTEX_TOKEN not set — auth assumed disabled"
+    _skip "auth: bad token returns 401"             "CORTEX_TOKEN not set — auth assumed disabled"
     return 0
   fi
 
@@ -400,7 +400,7 @@ phase_auth() {
 phase_protocol() {
   section "Phase 3 — Protocol"
 
-  local expected_tools=("syslog")
+  local expected_tools=("cortex")
 
   # initialize
   local init_resp
@@ -442,233 +442,233 @@ phase_protocol() {
 phase_tools() {
   section "Phase 4 — Tool calls"
 
-  # --- syslog help ---
-  section "  syslog help"
+  # --- cortex help ---
+  section "  cortex help"
   local help_result
-  help_result="$(call_tool syslog '{"action":"help"}')" || help_result=""
+  help_result="$(call_tool cortex '{"action":"help"}')" || help_result=""
 
-  assert_jq "syslog help — help field present"          "${help_result}" '.help'
-  assert_jq "syslog help — help text is non-empty"      "${help_result}" '.help | length > 0'
-  assert_jq "syslog help — help text contains 'syslog'" "${help_result}" '.help | ascii_downcase | contains("syslog")'
+  assert_jq "cortex help — help field present"          "${help_result}" '.help'
+  assert_jq "cortex help — help text is non-empty"      "${help_result}" '.help | length > 0'
+  assert_jq "cortex help — help text contains 'syslog'" "${help_result}" '.help | ascii_downcase | contains("syslog")'
 
-  # --- syslog status ---
-  section "  syslog status"
+  # --- cortex status ---
+  section "  cortex status"
   local status_result
-  status_result="$(call_tool syslog '{"action":"status"}')" || status_result=""
+  status_result="$(call_tool cortex '{"action":"status"}')" || status_result=""
 
-  assert_jq "syslog status — status is ok"                    "${status_result}" '.status' "ok"
-  assert_jq "syslog status — db_ok field present"             "${status_result}" '.db_ok != null'
-  assert_jq "syslog status — runtime_observability present"   "${status_result}" '.runtime_observability'
-  assert_jq "syslog status — otlp counters present"           "${status_result}" '.otlp'
+  assert_jq "cortex status — status is ok"                    "${status_result}" '.status' "ok"
+  assert_jq "cortex status — db_ok field present"             "${status_result}" '.db_ok != null'
+  assert_jq "cortex status — runtime_observability present"   "${status_result}" '.runtime_observability'
+  assert_jq "cortex status — otlp counters present"           "${status_result}" '.otlp'
 
-  # --- syslog stats ---
-  section "  syslog stats"
+  # --- cortex stats ---
+  section "  cortex stats"
   local stats_result
-  stats_result="$(call_tool syslog '{"action":"stats"}')" || stats_result=""
+  stats_result="$(call_tool cortex '{"action":"stats"}')" || stats_result=""
 
-  assert_jq "syslog stats — total_logs field present"         "${stats_result}" '.total_logs != null'
-  assert_jq "syslog stats — total_hosts field present"        "${stats_result}" '.total_hosts != null'
-  assert_jq "syslog stats — logical_db_size_mb present"       "${stats_result}" '.logical_db_size_mb'
-  assert_jq "syslog stats — physical_db_size_mb present"      "${stats_result}" '.physical_db_size_mb'
-  assert_jq "syslog stats — write_blocked field present"      "${stats_result}" '.write_blocked != null'
-  assert_jq "syslog stats — total_logs is a number >= 0"      "${stats_result}" '.total_logs >= 0'
-  assert_jq "syslog stats — total_hosts is a number >= 0"     "${stats_result}" '.total_hosts >= 0'
+  assert_jq "cortex stats — total_logs field present"         "${stats_result}" '.total_logs != null'
+  assert_jq "cortex stats — total_hosts field present"        "${stats_result}" '.total_hosts != null'
+  assert_jq "cortex stats — logical_db_size_mb present"       "${stats_result}" '.logical_db_size_mb'
+  assert_jq "cortex stats — physical_db_size_mb present"      "${stats_result}" '.physical_db_size_mb'
+  assert_jq "cortex stats — write_blocked field present"      "${stats_result}" '.write_blocked != null'
+  assert_jq "cortex stats — total_logs is a number >= 0"      "${stats_result}" '.total_logs >= 0'
+  assert_jq "cortex stats — total_hosts is a number >= 0"     "${stats_result}" '.total_hosts >= 0'
 
   # --- compose diagnostics ---
-  section "  syslog compose diagnostics"
+  section "  cortex compose diagnostics"
   local compose_status_result
-  compose_status_result="$(call_tool syslog '{"action":"compose_status"}')" || compose_status_result=""
-  assert_jq "syslog compose_status — runtime_state present" "${compose_status_result}" '.runtime_state'
-  assert_jq "syslog compose_status — no host working dir leaks" "${compose_status_result}" 'has("compose_working_dir") | not'
-  assert_jq "syslog compose_status — no image id leaks" "${compose_status_result}" 'has("image_id") | not'
+  compose_status_result="$(call_tool cortex '{"action":"compose_status"}')" || compose_status_result=""
+  assert_jq "cortex compose_status — runtime_state present" "${compose_status_result}" '.runtime_state'
+  assert_jq "cortex compose_status — no host working dir leaks" "${compose_status_result}" 'has("compose_working_dir") | not'
+  assert_jq "cortex compose_status — no image id leaks" "${compose_status_result}" 'has("image_id") | not'
   local compose_runtime compose_ownership
   compose_runtime="$(printf '%s' "${compose_status_result}" | jq -r '.runtime_state // "unknown"' 2>/dev/null)" || compose_runtime="unknown"
   compose_ownership="$(printf '%s' "${compose_status_result}" | jq -r '.ownership // "unknown"' 2>/dev/null)" || compose_ownership="unknown"
   if [[ "${compose_runtime}" != "docker_unavailable" && "${compose_ownership}" == "compose_owned" ]]; then
-    assert_jq "syslog compose_status — ownership known" "${compose_status_result}" '.ownership != "unknown"'
-    assert_jq "syslog compose_status — no unsafe diagnostics" "${compose_status_result}" '[.diagnostics[]?.severity] | all(. != "error" and . != "unsafe")'
+    assert_jq "cortex compose_status — ownership known" "${compose_status_result}" '.ownership != "unknown"'
+    assert_jq "cortex compose_status — no unsafe diagnostics" "${compose_status_result}" '[.diagnostics[]?.severity] | all(. != "error" and . != "unsafe")'
 
     local compose_doctor_result
-    compose_doctor_result="$(call_tool syslog '{"action":"compose_doctor"}')" || compose_doctor_result=""
-    assert_jq "syslog compose_doctor — ownership present" "${compose_doctor_result}" '.ownership'
-    assert_jq "syslog compose_doctor — runtime_state present" "${compose_doctor_result}" '.runtime_state'
-    assert_jq "syslog compose_doctor — no unsafe diagnostics" "${compose_doctor_result}" '[.diagnostics[]?.severity] | all(. != "error" and . != "unsafe")'
+    compose_doctor_result="$(call_tool cortex '{"action":"compose_doctor"}')" || compose_doctor_result=""
+    assert_jq "cortex compose_doctor — ownership present" "${compose_doctor_result}" '.ownership'
+    assert_jq "cortex compose_doctor — runtime_state present" "${compose_doctor_result}" '.runtime_state'
+    assert_jq "cortex compose_doctor — no unsafe diagnostics" "${compose_doctor_result}" '[.diagnostics[]?.severity] | all(. != "error" and . != "unsafe")'
   else
-    _skip "syslog compose_status strict diagnostics" "runtime=${compose_runtime}, ownership=${compose_ownership}"
-    _skip "syslog compose_doctor strict diagnostics" "runtime=${compose_runtime}, ownership=${compose_ownership}"
+    _skip "cortex compose_status strict diagnostics" "runtime=${compose_runtime}, ownership=${compose_ownership}"
+    _skip "cortex compose_doctor strict diagnostics" "runtime=${compose_runtime}, ownership=${compose_ownership}"
   fi
 
-  # --- syslog hosts ---
-  section "  syslog hosts"
+  # --- cortex hosts ---
+  section "  cortex hosts"
   local hosts_result
-  hosts_result="$(call_tool syslog '{"action":"hosts"}')" || hosts_result=""
+  hosts_result="$(call_tool cortex '{"action":"hosts"}')" || hosts_result=""
 
-  assert_jq "syslog hosts — hosts field is an array"       "${hosts_result}" '.hosts | type' "array"
+  assert_jq "cortex hosts — hosts field is an array"       "${hosts_result}" '.hosts | type' "array"
 
-  # Structure check (only if hosts are present — may be empty in CI with no syslog data)
+  # Structure check (only if hosts are present — may be empty in CI with no cortex data)
   local host_count
   host_count="$(printf '%s' "${hosts_result}" | jq '.hosts | length' 2>/dev/null)" || host_count=0
 
   if [[ "${host_count}" -gt 0 ]]; then
-    assert_jq "syslog hosts — entry has hostname field"  "${hosts_result}" '.hosts[0].hostname'
-    assert_jq "syslog hosts — entry has log_count field" "${hosts_result}" '.hosts[0].log_count != null'
-    assert_jq "syslog hosts — entry has first_seen field" "${hosts_result}" '.hosts[0].first_seen'
-    assert_jq "syslog hosts — entry has last_seen field"  "${hosts_result}" '.hosts[0].last_seen'
+    assert_jq "cortex hosts — entry has hostname field"  "${hosts_result}" '.hosts[0].hostname'
+    assert_jq "cortex hosts — entry has log_count field" "${hosts_result}" '.hosts[0].log_count != null'
+    assert_jq "cortex hosts — entry has first_seen field" "${hosts_result}" '.hosts[0].first_seen'
+    assert_jq "cortex hosts — entry has last_seen field"  "${hosts_result}" '.hosts[0].last_seen'
   else
-    _skip "syslog hosts — entry field validation" "no hosts in DB (no syslog data ingested)"
+    _skip "cortex hosts — entry field validation" "no hosts in DB (no cortex data ingested)"
   fi
 
-  # --- syslog sessions ---
-  section "  syslog sessions"
+  # --- cortex sessions ---
+  section "  cortex sessions"
   local sessions_result
-  sessions_result="$(call_tool syslog '{"action":"sessions","limit":10}')" || sessions_result=""
+  sessions_result="$(call_tool cortex '{"action":"sessions","limit":10}')" || sessions_result=""
 
-  assert_jq "syslog sessions — count field present" "${sessions_result}" '.count != null'
-  assert_jq "syslog sessions — sessions field is array" "${sessions_result}" '.sessions | type' "array"
+  assert_jq "cortex sessions — count field present" "${sessions_result}" '.count != null'
+  assert_jq "cortex sessions — sessions field is array" "${sessions_result}" '.sessions | type' "array"
   if [[ "${AI_SEEDED}" == true ]]; then
-    assert_jq "syslog sessions — seeded AI project appears" "${sessions_result}" \
+    assert_jq "cortex sessions — seeded AI project appears" "${sessions_result}" \
       "any(.sessions[]?; .project == \"${AI_SMOKE_PROJECT}\")" "true"
   fi
 
   local search_sessions_result
-  search_sessions_result="$(call_tool syslog "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"action":"search_sessions","query":$q,"limit":10}')")" || search_sessions_result=""
-  assert_jq "syslog search_sessions — total_candidates present" "${search_sessions_result}" '.total_candidates != null'
-  assert_jq "syslog search_sessions — sessions field is array" "${search_sessions_result}" '.sessions | type' "array"
+  search_sessions_result="$(call_tool cortex "$(jq -nc --arg q "${AI_SMOKE_QUERY}" '{"action":"search_sessions","query":$q,"limit":10}')")" || search_sessions_result=""
+  assert_jq "cortex search_sessions — total_candidates present" "${search_sessions_result}" '.total_candidates != null'
+  assert_jq "cortex search_sessions — sessions field is array" "${search_sessions_result}" '.sessions | type' "array"
   if [[ "${AI_SEEDED}" == true ]]; then
-    assert_jq "syslog search_sessions — seeded fixture is searchable" "${search_sessions_result}" '.total_candidates >= 1' "true"
+    assert_jq "cortex search_sessions — seeded fixture is searchable" "${search_sessions_result}" '.total_candidates >= 1' "true"
   fi
 
   local abuse_result
-  abuse_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"action":"abuse","project":$project,"terms":$term,"limit":5,"before":1,"after":1}')")" || abuse_result=""
-  assert_jq "syslog abuse — terms field is array" "${abuse_result}" '.terms | type' "array"
-  assert_jq "syslog abuse — matches field is array" "${abuse_result}" '.matches | type' "array"
+  abuse_result="$(call_tool cortex "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"action":"abuse","project":$project,"terms":$term,"limit":5,"before":1,"after":1}')")" || abuse_result=""
+  assert_jq "cortex abuse — terms field is array" "${abuse_result}" '.terms | type' "array"
+  assert_jq "cortex abuse — matches field is array" "${abuse_result}" '.matches | type' "array"
   if [[ "${AI_SEEDED}" == true ]]; then
-    assert_jq "syslog abuse — custom detector finds seeded fixture" "${abuse_result}" '.matches | length >= 1' "true"
+    assert_jq "cortex abuse — custom detector finds seeded fixture" "${abuse_result}" '.matches | length >= 1' "true"
   fi
 
   local abuse_incidents_result
-  abuse_incidents_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"abuse_incidents","project":$project,"limit":5}')")" || abuse_incidents_result=""
-  assert_jq "syslog abuse_incidents — incidents field is array" "${abuse_incidents_result}" '.incidents | type' "array"
-  assert_jq "syslog abuse_incidents — total_incidents present" "${abuse_incidents_result}" '.total_incidents != null'
+  abuse_incidents_result="$(call_tool cortex "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"abuse_incidents","project":$project,"limit":5}')")" || abuse_incidents_result=""
+  assert_jq "cortex abuse_incidents — incidents field is array" "${abuse_incidents_result}" '.incidents | type' "array"
+  assert_jq "cortex abuse_incidents — total_incidents present" "${abuse_incidents_result}" '.total_incidents != null'
 
   local abuse_investigate_result
-  abuse_investigate_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"abuse_investigate","project":$project,"limit":1}')")" || abuse_investigate_result=""
-  assert_jq "syslog abuse_investigate — evidence field is array" "${abuse_investigate_result}" '.evidence | type' "array"
-  assert_jq "syslog abuse_investigate — total_incidents present" "${abuse_investigate_result}" '.total_incidents != null'
+  abuse_investigate_result="$(call_tool cortex "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"abuse_investigate","project":$project,"limit":1}')")" || abuse_investigate_result=""
+  assert_jq "cortex abuse_investigate — evidence field is array" "${abuse_investigate_result}" '.evidence | type' "array"
+  assert_jq "cortex abuse_investigate — total_incidents present" "${abuse_investigate_result}" '.total_incidents != null'
 
   local ai_correlate_result
-  ai_correlate_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"ai_correlate","project":$project,"limit":2,"events_per_anchor":3}')")" || ai_correlate_result=""
-  assert_jq "syslog ai_correlate — anchors field is array" "${ai_correlate_result}" '.anchors | type' "array"
-  assert_jq "syslog ai_correlate — total_related_events present" "${ai_correlate_result}" '.total_related_events != null'
+  ai_correlate_result="$(call_tool cortex "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"ai_correlate","project":$project,"limit":2,"events_per_anchor":3}')")" || ai_correlate_result=""
+  assert_jq "cortex ai_correlate — anchors field is array" "${ai_correlate_result}" '.anchors | type' "array"
+  assert_jq "cortex ai_correlate — total_related_events present" "${ai_correlate_result}" '.total_related_events != null'
 
   local usage_blocks_result
-  usage_blocks_result="$(call_tool syslog '{"action":"usage_blocks"}')" || usage_blocks_result=""
-  assert_jq "syslog usage_blocks — blocks field is array" "${usage_blocks_result}" '.blocks | type' "array"
-  assert_jq "syslog usage_blocks — truncated field present" "${usage_blocks_result}" '.truncated != null'
+  usage_blocks_result="$(call_tool cortex '{"action":"usage_blocks"}')" || usage_blocks_result=""
+  assert_jq "cortex usage_blocks — blocks field is array" "${usage_blocks_result}" '.blocks | type' "array"
+  assert_jq "cortex usage_blocks — truncated field present" "${usage_blocks_result}" '.truncated != null'
 
   local project_context_result
-  project_context_result="$(call_tool syslog "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"project_context","project":$project,"limit":5}')")" || project_context_result=""
-  assert_jq "syslog project_context — project field present" "${project_context_result}" '.project' "${AI_SMOKE_PROJECT}"
-  assert_jq "syslog project_context — recent_entries field is array" "${project_context_result}" '.recent_entries | type' "array"
+  project_context_result="$(call_tool cortex "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"action":"project_context","project":$project,"limit":5}')")" || project_context_result=""
+  assert_jq "cortex project_context — project field present" "${project_context_result}" '.project' "${AI_SMOKE_PROJECT}"
+  assert_jq "cortex project_context — recent_entries field is array" "${project_context_result}" '.recent_entries | type' "array"
   if [[ "${AI_SEEDED}" == true ]]; then
-    assert_jq "syslog project_context — seeded fixture has entries" "${project_context_result}" '.recent_entries | length >= 1' "true"
+    assert_jq "cortex project_context — seeded fixture has entries" "${project_context_result}" '.recent_entries | length >= 1' "true"
   fi
 
   local ai_tools_result
-  ai_tools_result="$(call_tool syslog '{"action":"list_ai_tools"}')" || ai_tools_result=""
-  assert_jq "syslog list_ai_tools — tools field is array" "${ai_tools_result}" '.tools | type' "array"
+  ai_tools_result="$(call_tool cortex '{"action":"list_ai_tools"}')" || ai_tools_result=""
+  assert_jq "cortex list_ai_tools — tools field is array" "${ai_tools_result}" '.tools | type' "array"
 
   local ai_projects_result
-  ai_projects_result="$(call_tool syslog '{"action":"list_ai_projects"}')" || ai_projects_result=""
-  assert_jq "syslog list_ai_projects — projects field is array" "${ai_projects_result}" '.projects | type' "array"
+  ai_projects_result="$(call_tool cortex '{"action":"list_ai_projects"}')" || ai_projects_result=""
+  assert_jq "cortex list_ai_projects — projects field is array" "${ai_projects_result}" '.projects | type' "array"
 
-  # --- syslog search ---
-  section "  syslog search"
+  # --- cortex search ---
+  section "  cortex search"
   local search_result
-  search_result="$(call_tool syslog '{"action":"search","query":"error","limit":10}')" || search_result=""
+  search_result="$(call_tool cortex '{"action":"search","query":"error","limit":10}')" || search_result=""
 
-  assert_jq "syslog search — count field present"   "${search_result}" '.count != null'
-  assert_jq "syslog search — logs field is array"   "${search_result}" '.logs | type' "array"
-  assert_jq "syslog search — count is number >= 0"  "${search_result}" '.count >= 0'
+  assert_jq "cortex search — count field present"   "${search_result}" '.count != null'
+  assert_jq "cortex search — logs field is array"   "${search_result}" '.logs | type' "array"
+  assert_jq "cortex search — count is number >= 0"  "${search_result}" '.count >= 0'
 
   local log_count
   log_count="$(printf '%s' "${search_result}" | jq '.logs | length' 2>/dev/null)" || log_count=0
   if [[ "${log_count}" -gt 0 ]]; then
-    assert_jq "syslog search — log entry has message field"   "${search_result}" '.logs[0].message'
-    assert_jq "syslog search — log entry has hostname field"  "${search_result}" '.logs[0].hostname'
-    assert_jq "syslog search — log entry has severity field"  "${search_result}" '.logs[0].severity'
-    assert_jq "syslog search — log entry has timestamp field" "${search_result}" '.logs[0].timestamp'
+    assert_jq "cortex search — log entry has message field"   "${search_result}" '.logs[0].message'
+    assert_jq "cortex search — log entry has hostname field"  "${search_result}" '.logs[0].hostname'
+    assert_jq "cortex search — log entry has severity field"  "${search_result}" '.logs[0].severity'
+    assert_jq "cortex search — log entry has timestamp field" "${search_result}" '.logs[0].timestamp'
   else
-    _skip "syslog search — log entry field validation" "no matching logs (empty DB)"
+    _skip "cortex search — log entry field validation" "no matching logs (empty DB)"
   fi
 
-  # syslog search with no query (list recent)
+  # cortex search with no query (list recent)
   local search_noq
-  search_noq="$(call_tool syslog '{"action":"search","limit":5}')" || search_noq=""
-  assert_jq "syslog search (no query) — count field present" "${search_noq}" '.count != null'
-  assert_jq "syslog search (no query) — logs field is array" "${search_noq}" '.logs | type' "array"
+  search_noq="$(call_tool cortex '{"action":"search","limit":5}')" || search_noq=""
+  assert_jq "cortex search (no query) — count field present" "${search_noq}" '.count != null'
+  assert_jq "cortex search (no query) — logs field is array" "${search_noq}" '.logs | type' "array"
 
-  # --- syslog filter ---
-  section "  syslog filter"
+  # --- cortex filter ---
+  section "  cortex filter"
   local filter_result
-  filter_result="$(call_tool syslog '{"action":"filter","limit":5}')" || filter_result=""
-  assert_jq "syslog filter — count field present" "${filter_result}" '.count != null'
-  assert_jq "syslog filter — logs field is array" "${filter_result}" '.logs | type' "array"
+  filter_result="$(call_tool cortex '{"action":"filter","limit":5}')" || filter_result=""
+  assert_jq "cortex filter — count field present" "${filter_result}" '.count != null'
+  assert_jq "cortex filter — logs field is array" "${filter_result}" '.logs | type' "array"
 
-  # --- syslog errors ---
-  section "  syslog errors"
+  # --- cortex errors ---
+  section "  cortex errors"
   local errors_result
-  errors_result="$(call_tool syslog '{"action":"errors"}')" || errors_result=""
+  errors_result="$(call_tool cortex '{"action":"errors"}')" || errors_result=""
 
-  assert_jq "syslog errors — summary field is array" "${errors_result}" '.summary | type' "array"
+  assert_jq "cortex errors — summary field is array" "${errors_result}" '.summary | type' "array"
 
   local err_count
   err_count="$(printf '%s' "${errors_result}" | jq '.summary | length' 2>/dev/null)" || err_count=0
   if [[ "${err_count}" -gt 0 ]]; then
-    assert_jq "syslog errors — entry has hostname field" "${errors_result}" '.summary[0].hostname'
-    assert_jq "syslog errors — entry has severity field" "${errors_result}" '.summary[0].severity'
-    assert_jq "syslog errors — entry has count field"    "${errors_result}" '.summary[0].count != null'
+    assert_jq "cortex errors — entry has hostname field" "${errors_result}" '.summary[0].hostname'
+    assert_jq "cortex errors — entry has severity field" "${errors_result}" '.summary[0].severity'
+    assert_jq "cortex errors — entry has count field"    "${errors_result}" '.summary[0].count != null'
   else
-    _skip "syslog errors — entry field validation" "no error-level logs in DB"
+    _skip "cortex errors — entry field validation" "no error-level logs in DB"
   fi
 
-  # --- syslog tail ---
-  section "  syslog tail"
+  # --- cortex tail ---
+  section "  cortex tail"
   local tail_result
-  tail_result="$(call_tool syslog '{"action":"tail","n":10}')" || tail_result=""
+  tail_result="$(call_tool cortex '{"action":"tail","n":10}')" || tail_result=""
 
-  assert_jq "syslog tail — count field present"   "${tail_result}" '.count != null'
-  assert_jq "syslog tail — logs field is array"   "${tail_result}" '.logs | type' "array"
-  assert_jq "syslog tail — count is number >= 0"  "${tail_result}" '.count >= 0'
+  assert_jq "cortex tail — count field present"   "${tail_result}" '.count != null'
+  assert_jq "cortex tail — logs field is array"   "${tail_result}" '.logs | type' "array"
+  assert_jq "cortex tail — count is number >= 0"  "${tail_result}" '.count >= 0'
 
   local tail_count
   tail_count="$(printf '%s' "${tail_result}" | jq '.logs | length' 2>/dev/null)" || tail_count=0
   if [[ "${tail_count}" -gt 0 ]]; then
-    assert_jq "syslog tail — entry has message field"   "${tail_result}" '.logs[0].message'
-    assert_jq "syslog tail — entry has hostname field"  "${tail_result}" '.logs[0].hostname'
-    assert_jq "syslog tail — entry has severity field"  "${tail_result}" '.logs[0].severity'
-    assert_jq "syslog tail — entry has timestamp field" "${tail_result}" '.logs[0].timestamp'
+    assert_jq "cortex tail — entry has message field"   "${tail_result}" '.logs[0].message'
+    assert_jq "cortex tail — entry has hostname field"  "${tail_result}" '.logs[0].hostname'
+    assert_jq "cortex tail — entry has severity field"  "${tail_result}" '.logs[0].severity'
+    assert_jq "cortex tail — entry has timestamp field" "${tail_result}" '.logs[0].timestamp'
   else
-    _skip "syslog tail — entry field validation" "no logs in DB"
+    _skip "cortex tail — entry field validation" "no logs in DB"
   fi
 
-  # --- syslog correlate ---
-  section "  syslog correlate"
+  # --- cortex correlate ---
+  section "  cortex correlate"
   local ref_time
   ref_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   local correlate_result
-  correlate_result="$(call_tool syslog \
+  correlate_result="$(call_tool cortex \
     "$(jq -nc --arg t "${ref_time}" '{"action":"correlate","reference_time":$t,"window_minutes":5,"severity_min":"debug","limit":50}')")" \
     || correlate_result=""
 
-  assert_jq "syslog correlate — reference_time present"  "${correlate_result}" '.reference_time'
-  assert_jq "syslog correlate — window_minutes present"  "${correlate_result}" '.window_minutes != null'
-  assert_jq "syslog correlate — window_from present"     "${correlate_result}" '.window_from'
-  assert_jq "syslog correlate — window_to present"       "${correlate_result}" '.window_to'
-  assert_jq "syslog correlate — hosts field is array"    "${correlate_result}" '.hosts | type' "array"
-  assert_jq "syslog correlate — total_events >= 0"       "${correlate_result}" '.total_events >= 0'
-  assert_jq "syslog correlate — truncated field present" "${correlate_result}" '.truncated != null'
+  assert_jq "cortex correlate — reference_time present"  "${correlate_result}" '.reference_time'
+  assert_jq "cortex correlate — window_minutes present"  "${correlate_result}" '.window_minutes != null'
+  assert_jq "cortex correlate — window_from present"     "${correlate_result}" '.window_from'
+  assert_jq "cortex correlate — window_to present"       "${correlate_result}" '.window_to'
+  assert_jq "cortex correlate — hosts field is array"    "${correlate_result}" '.hosts | type' "array"
+  assert_jq "cortex correlate — total_events >= 0"       "${correlate_result}" '.total_events >= 0'
+  assert_jq "cortex correlate — truncated field present" "${correlate_result}" '.truncated != null'
 }
 
 # ---------------------------------------------------------------------------
@@ -715,22 +715,22 @@ run_docker_mode() {
   )
 
   # /api/* is always mounted post-v0.26, so the container will refuse to
-  # start without SYSLOG_API_TOKEN. Fail fast here with a clear message
+  # start without CORTEX_API_TOKEN. Fail fast here with a clear message
   # instead of leaving the user to debug a crash inside docker run.
   if [[ -z "${TOKEN}" ]]; then
-    log_error "TOKEN must be set for docker-mode live tests (the server requires SYSLOG_API_TOKEN to start)"
+    log_error "TOKEN must be set for docker-mode live tests (the server requires CORTEX_API_TOKEN to start)"
     return 2
   fi
-  docker_args+=("-e" "SYSLOG_MCP_HOST=0.0.0.0")
-  docker_args+=("-e" "SYSLOG_MCP_TOKEN=${TOKEN}")
-  docker_args+=("-e" "SYSLOG_API_TOKEN=${TOKEN}")
+  docker_args+=("-e" "CORTEX_HOST=0.0.0.0")
+  docker_args+=("-e" "CORTEX_TOKEN=${TOKEN}")
+  docker_args+=("-e" "CORTEX_API_TOKEN=${TOKEN}")
 
   # Remove storage budget env vars that conflict with tmpfs size limits
   docker_args+=(
-    "-e" "SYSLOG_MCP_MAX_DB_SIZE_MB=0"
-    "-e" "SYSLOG_MCP_RECOVERY_DB_SIZE_MB=0"
-    "-e" "SYSLOG_MCP_MIN_FREE_DISK_MB=0"
-    "-e" "SYSLOG_MCP_RECOVERY_FREE_DISK_MB=0"
+    "-e" "CORTEX_MAX_DB_SIZE_MB=0"
+    "-e" "CORTEX_RECOVERY_DB_SIZE_MB=0"
+    "-e" "CORTEX_MIN_FREE_DISK_MB=0"
+    "-e" "CORTEX_RECOVERY_FREE_DISK_MB=0"
   )
 
   log_info "Starting container..."
@@ -811,7 +811,7 @@ run_http_mode() {
 }
 
 # ---------------------------------------------------------------------------
-# Phase 5 — CLI parity (bead syslog-mcp-0p8r.10)
+# Phase 5 — CLI parity (bead cortex-0p8r.10)
 # For each HTTP-supported CLI command, run both local + --http transports
 # and assert their JSON shapes agree after filtering volatile fields. This
 # is the load-bearing check that the cutover (default → HTTP) does not
@@ -819,22 +819,22 @@ run_http_mode() {
 #
 # We only run this phase when:
 #   - the `syslog` binary is on PATH (host CLI installed)
-#   - a SYSLOG_API_TOKEN value is available (env or --token arg)
+#   - a CORTEX_API_TOKEN value is available (env or --token arg)
 # Otherwise the phase is skipped cleanly with a single SKIP entry.
 # ---------------------------------------------------------------------------
 phase_cli_parity() {
   section "Phase 5 — CLI parity (local vs --http)"
 
-  local cli_token="${SYSLOG_API_TOKEN:-${TOKEN:-}}"
+  local cli_token="${CORTEX_API_TOKEN:-${TOKEN:-}}"
   if [[ -z "${cli_token}" ]]; then
-    _skip "cli parity phase" "no SYSLOG_API_TOKEN / TOKEN available"
+    _skip "cli parity phase" "no CORTEX_API_TOKEN / TOKEN available"
     return 0
   fi
 
   local cli_bin=""
   if [[ -z "${CLI_PARITY_CONTAINER}" ]]; then
-    if ! cli_bin="$(command -v "${SYSLOG_BIN:-syslog}" 2>/dev/null)"; then
-      _skip "cli parity phase" "syslog binary not on PATH (set SYSLOG_BIN)"
+    if ! cli_bin="$(command -v "${CORTEX_BIN:-syslog}" 2>/dev/null)"; then
+      _skip "cli parity phase" "cortex binary not on PATH (set CORTEX_BIN)"
       return 0
     fi
   fi
@@ -880,10 +880,10 @@ phase_cli_parity() {
     args="${pair#*|}"
     if [[ -n "${CLI_PARITY_CONTAINER}" ]]; then
       # shellcheck disable=SC2086  # word splitting on $args is intentional
-      local_out="$(docker exec "${CLI_PARITY_CONTAINER}" env -u SYSLOG_USE_HTTP RUST_LOG=off syslog ${args} --json 2>&1)"
+      local_out="$(docker exec "${CLI_PARITY_CONTAINER}" env -u CORTEX_USE_HTTP RUST_LOG=off cortex ${args} --json 2>&1)"
     else
       # shellcheck disable=SC2086  # word splitting on $args is intentional
-      local_out="$(env -u SYSLOG_USE_HTTP RUST_LOG=off "${cli_bin}" ${args} --json 2>&1)"
+      local_out="$(env -u CORTEX_USE_HTTP RUST_LOG=off "${cli_bin}" ${args} --json 2>&1)"
     fi
     if [[ $? -ne 0 ]]; then
       _fail "cli parity: local ${label} (exit non-zero)"
@@ -892,7 +892,7 @@ phase_cli_parity() {
     fi
     if [[ -n "${CLI_PARITY_CONTAINER}" ]]; then
       # shellcheck disable=SC2086  # word splitting on $args is intentional
-      http_out="$(docker exec "${CLI_PARITY_CONTAINER}" env RUST_LOG=off syslog --http --server "http://127.0.0.1:3100" --token "${cli_token}" ${args} --json 2>&1)"
+      http_out="$(docker exec "${CLI_PARITY_CONTAINER}" env RUST_LOG=off cortex --http --server "http://127.0.0.1:3100" --token "${cli_token}" ${args} --json 2>&1)"
     else
       # shellcheck disable=SC2086
       http_out="$(RUST_LOG=off "${cli_bin}" --http --server "${BASE_URL}" --token "${cli_token}" ${args} --json 2>&1)"
@@ -1022,7 +1022,7 @@ main() {
   parse_args "$@"
 
   printf '%b%s%b\n'                 "${C_BOLD}" "$(printf '=%.0s' {1..65})" "${C_RESET}"
-  printf '%b  syslog-mcp integration tests%b\n' "${C_BOLD}" "${C_RESET}"
+  printf '%b  cortex integration tests%b\n' "${C_BOLD}" "${C_RESET}"
   printf '%b  Mode:    %s%b\n'      "${C_BOLD}" "${MODE}" "${C_RESET}"
   printf '%b  URL:     %s%b\n'      "${C_BOLD}" "${BASE_URL}" "${C_RESET}"
   printf '%b  Token:   %s%b\n'      "${C_BOLD}" "${TOKEN:+(set)}" "${C_RESET}"

@@ -1,8 +1,8 @@
-# Plan: Port mnemo AI Session Features to syslog-mcp
+# Plan: Port mnemo AI Session Features to cortex
 
 ## Objective
 
-Bring the useful `mnemo` AI-session intelligence into `syslog-mcp` without breaking the existing syslog or AI-session contracts.
+Bring the useful `mnemo` AI-session intelligence into `cortex` without breaking the existing syslog or AI-session contracts.
 
 The current repo already has:
 
@@ -311,7 +311,7 @@ Tasks:
 - Add help text in `src/mcp/tools.rs`.
 - Add read-scope mappings in `src/mcp/rmcp_server.rs`.
 - Extend `scripts/smoke-test.sh` with structure checks for each new action.
-- Add or update tests that fail if `SYSLOG_ACTIONS`, `tool_syslog`, help text, and `READ_ONLY_ACTIONS` drift.
+- Add or update tests that fail if `CORTEX_ACTIONS`, `tool_syslog`, help text, and `READ_ONLY_ACTIONS` drift.
 
 Compatibility requirements:
 
@@ -370,7 +370,7 @@ Tasks:
 - Start with deterministic ranking that is easy to test.
 - Include deterministic tie-breakers.
 - Add BM25, temporal decay, and density scoring only after baseline ranking is measurable and stable.
-- Document whether ranking is intended to match mnemo exactly or is syslog-mcp-specific.
+- Document whether ranking is intended to match mnemo exactly or is cortex-specific.
 - Add ranking tests that account for FTS5 BM25 polarity, where lower values rank better.
 
 ### Phase 8: Docs and Smoke Coverage
@@ -385,7 +385,7 @@ Docs to update:
 - `docs/mcp/SCHEMA.md`
 - `docs/mcp/TESTS.md`
 - `docs/expansion.md` if it still describes the feature as future work.
-- `plugins/syslog/skills/syslog/SKILL.md` if it references the session/action surface.
+- `plugins/syslog/skills/cortex/SKILL.md` if it references the session/action surface.
 
 Docs must include:
 
@@ -432,4 +432,4 @@ Verification:
 - Whether to add `ai_metadata` JSON.
 - Whether to extract `src/db/ai.rs` or `src/app/ai.rs`.
 - Whether to add a SQL view for reusable grouped session summaries.
-- Whether ranking should exactly match mnemo or remain a simpler syslog-mcp-specific scoring model.
+- Whether ranking should exactly match mnemo or remain a simpler cortex-specific scoring model.

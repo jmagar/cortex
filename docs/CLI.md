@@ -1,4 +1,4 @@
-# Direct CLI Reference -- syslog-mcp
+# Direct CLI Reference -- cortex
 
 The `syslog` binary includes direct query and deployment-lifecycle commands for
 humans and shell scripts. Query commands read the configured SQLite database and
@@ -15,15 +15,15 @@ tasks. Keep `syslog serve mcp` running somewhere for ingestion.
 CLI commands use the normal config loader:
 
 1. `config.toml` in the working directory, when present
-2. `SYSLOG_*`, `SYSLOG_MCP_*`, `SYSLOG_API_*`, and `SYSLOG_DOCKER_*` environment overrides
+2. `CORTEX_*`, `CORTEX_*`, `CORTEX_API_*`, and `CORTEX_DOCKER_*` environment overrides
 
 For local query use, the important setting is:
 
 ```bash
-SYSLOG_MCP_DB_PATH=/data/syslog.db
+CORTEX_DB_PATH=/data/cortex.db
 ```
 
-`SYSLOG_MCP_TOKEN` is not used by direct CLI mode because it is local database
+`CORTEX_TOKEN` is not used by direct CLI mode because it is local database
 access, not HTTP access.
 
 ## Output
@@ -114,7 +114,7 @@ syslog hosts --json
 List AI transcript sessions grouped by project.
 
 ```bash
-syslog sessions --project /home/jmagar/workspace/syslog-mcp --limit 20
+syslog sessions --project /home/jmagar/workspace/cortex --limit 20
 ```
 
 Flags:
@@ -149,7 +149,7 @@ Detect abuse in AI transcript rows and return surrounding rows from the same
 AI session.
 
 ```bash
-syslog ai abuse --project /home/jmagar/workspace/syslog-mcp --limit 10 --before 3 --after 3
+syslog ai abuse --project /home/jmagar/workspace/cortex --limit 10 --before 3 --after 3
 syslog ai abuse --tool codex --term dang --term heck --json
 ```
 
@@ -163,7 +163,7 @@ with a custom detector. JSON includes `candidate_rows`, `candidate_cap`,
 Group abuse hits into scored incident candidates.
 
 ```bash
-syslog ai incidents --project /home/jmagar/workspace/syslog-mcp --limit 10
+syslog ai incidents --project /home/jmagar/workspace/cortex --limit 10
 syslog ai incidents --tool codex --term dang --term heck --json
 ```
 
@@ -176,7 +176,7 @@ incident. JSON includes `total_incidents`, `candidate_rows`, `candidate_cap`,
 Expand top incidents into deterministic evidence bundles without calling an LLM.
 
 ```bash
-syslog ai investigate --project /home/jmagar/workspace/syslog-mcp --limit 3
+syslog ai investigate --project /home/jmagar/workspace/cortex --limit 3
 syslog ai investigate --correlation-window-minutes 15 --json
 ```
 
@@ -205,7 +205,7 @@ investigation bundles.
 Bucket AI activity into 5-hour UTC windows.
 
 ```bash
-syslog ai blocks --project /home/jmagar/workspace/syslog-mcp
+syslog ai blocks --project /home/jmagar/workspace/cortex
 ```
 
 When `--from` is omitted, usage blocks default to the last 30 days. Returned
@@ -216,7 +216,7 @@ JSON includes `total_blocks` and `truncated`; at most 1000 buckets are returned.
 Summarize one AI project path.
 
 ```bash
-syslog ai context --project /home/jmagar/workspace/syslog-mcp --limit 5
+syslog ai context --project /home/jmagar/workspace/cortex --limit 5
 ```
 
 Recent representative entries are capped at 20 rows, and message snippets are
@@ -227,7 +227,7 @@ bounded to 256 characters for predictable MCP/CLI payload size.
 Cross-reference AI transcript rows against nearby non-AI logs.
 
 ```bash
-syslog ai correlate --project /home/jmagar/workspace/syslog-mcp --limit 5
+syslog ai correlate --project /home/jmagar/workspace/cortex --limit 5
 syslog ai correlate --ai-query deploy --log-query container --window-minutes 10 --severity-min warning --json
 ```
 
@@ -399,7 +399,7 @@ syslog ai smoke-watch --json
 ```
 
 This is a live command. It requires `syslog-ai-watch.service` to be running and
-writing to the same `SYSLOG_MCP_DB_PATH` used by the CLI process.
+writing to the same `CORTEX_DB_PATH` used by the CLI process.
 
 ### `syslog shell index`
 
@@ -416,7 +416,7 @@ are counted as skipped because they cannot be correlated reliably. Commands are
 scrubbed before storage, written with `source_kind="shell-history"`, and use
 `source_ip` identities shaped like `shell-history://<hostname>/<user>/<shell>`.
 Rows are deduped by source identity, timestamp, and scrubbed command text, and
-the importer records a private byte-offset cursor under the syslog-mcp state
+the importer records a private byte-offset cursor under the cortex state
 directory so repeated imports only read newly appended history.
 
 ### `syslog agent-command`
@@ -428,8 +428,8 @@ spool into SQLite.
 syslog setup agent-command install
 export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/syslog-agent-command-wrapper"
 
-syslog agent-command ingest-spool --path ~/.local/state/syslog-mcp/agent-command.jsonl
-syslog agent-command wrap --spool ~/.local/state/syslog-mcp/agent-command.jsonl -- cargo test
+syslog agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
+syslog agent-command wrap --spool ~/.local/state/cortex/agent-command.jsonl -- cargo test
 ```
 
 `CLAUDE_CODE_SHELL_PREFIX` is the Claude Code hook point for commands spawned by
@@ -464,7 +464,7 @@ syslog setup ai-watch-service remove
 ```
 
 Install resolves an absolute `syslog` binary and a concrete SQLite DB path,
-writes a private environment file under `~/.config/syslog-mcp/`, runs one
+writes a private environment file under `~/.config/cortex/`, runs one
 initial `syslog ai index --json` phase, disables the older polling timer, and
 starts `syslog-ai-watch.service` with `syslog ai watch --no-initial-scan
 --json`. The helper is intentionally outside the container because it must read
@@ -507,12 +507,12 @@ or worktree, builds `cargo build --bin syslog` into `.cache/cargo`, then execs
 the fresh debug binary. For non-server commands it defaults Docker ingest off
 and bearer auth mode on, so regular CLI checks do not accidentally start
 container-log ingestion or OAuth-only config paths. Override the source checkout
-with `SYSLOG_MCP_REPO=/path/to/syslog-mcp syslog ...`.
+with `CORTEX_REPO=/path/to/cortex syslog ...`.
 
 ### `syslog setup debug-compose`
 
 Install, remove, or inspect the local debug Compose override under
-`~/.syslog-mcp/compose/docker-compose.override.yml`.
+`~/.cortex/compose/docker-compose.override.yml`.
 
 ```bash
 syslog setup debug-compose install
@@ -521,7 +521,7 @@ syslog setup debug-compose remove
 ```
 
 The override is machine-local. It points the canonical Docker Compose project at
-the current repo/worktree and builds the `syslog-mcp:local-debug` image with the
+the current repo/worktree and builds the `cortex:local-debug` image with the
 debug profile. This keeps `docker compose up -d --build` aligned with the same
 code that the host debug wrapper builds. `syslog setup` also writes
 `COMPOSE_PROJECT_NAME=syslog-jmagar-lab` to the setup `.env`, so direct
@@ -558,10 +558,10 @@ syslog deploy remote tootie --json
 ```
 
 `deploy preflight` and `deploy local --dry-run` do not mutate Docker state.
-`deploy local` repairs `~/.syslog-mcp/.env`, rewrites managed Compose assets,
+`deploy local` repairs `~/.cortex/.env`, rewrites managed Compose assets,
 pulls the configured image, starts the stack, and checks `/health`.
 `deploy remote` uses SSH and Docker Compose on the target host. Non-dry-run
-remote deploy writes/replaces `~/.syslog-mcp/.env`, the managed Compose YAML,
+remote deploy writes/replaces `~/.cortex/.env`, the managed Compose YAML,
 and `config/Dockerfile` on the target; set token/env values in the local
 environment before running it when you need to preserve specific values. It is
 CLI-only, requires an explicit host argument, and does not add REST or MCP
@@ -604,7 +604,7 @@ bash scripts/smoke-ai.sh
 bash scripts/smoke-ai-mcp.sh
 ```
 
-The smoke scripts resolve `SYSLOG_BIN` first, then `syslog` on `PATH`, then the
+The smoke scripts resolve `CORTEX_BIN` first, then `syslog` on `PATH`, then the
 repo-local debug binary at `target/debug/syslog`.
 
 With `syslog-ai-watch.service` installed, new transcript lines usually become
@@ -704,7 +704,7 @@ Create a WAL-safe SQLite backup using the `sqlite3` CLI `.backup` command.
 
 ```bash
 syslog db backup
-syslog db backup --output ~/.syslog-mcp/backups
+syslog db backup --output ~/.cortex/backups
 syslog db backup --output /tmp/syslog-copy.db --json
 ```
 
@@ -734,8 +734,8 @@ Common target flags:
 | `--compose-file FILE` | Explicit Compose file |
 | `--project-dir DIR` | Explicit Compose project directory |
 | `--project-name NAME` | Compose project name, only safe with a file/dir or live labels |
-| `--service NAME` | Compose service name, default `syslog-mcp` |
-| `--container NAME` | Container name, default `syslog-mcp` |
+| `--service NAME` | Compose service name, default `cortex` |
+| `--container NAME` | Container name, default `cortex` |
 | `--json` | Print JSON response |
 
 Mutation flags:
@@ -751,7 +751,7 @@ project/service selectors, cwd fallback without confirmation,
 project-name-only mutations, missing Compose files, legacy service conflicts,
 non-target listeners on syslog ports, and destructive service stop without
 `--yes`. `down` is intentionally service-scoped (`docker compose stop
-syslog-mcp`), not a project-wide `docker compose down`.
+cortex`), not a project-wide `docker compose down`.
 
 ## Relationship to MCP
 

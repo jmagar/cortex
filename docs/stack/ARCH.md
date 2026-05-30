@@ -1,8 +1,8 @@
-# Architecture Overview -- syslog-mcp
+# Architecture Overview -- cortex
 
 ## Dual-port design
 
-syslog-mcp is a dual-port server combining a syslog receiver and an MCP query interface:
+cortex is a dual-port server combining a syslog receiver and an MCP query interface:
 
 ```
                     ┌──────────────────────────────────────┐

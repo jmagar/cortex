@@ -1,13 +1,13 @@
 use super::dispatch::http_or_cancel;
 
 use anyhow::{bail, Result};
-use std::io::Write;
-use syslog_mcp::app::{
+use cortex::app::{
     AbuseSearchRequest, AiAssessRequest, AiCheckpointsRequest, AiCorrelateRequest,
     AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
     AskHistoryRequest, IncidentContextRequest, ListAiProjectsRequest, ListAiToolsRequest,
     ProjectContextRequest, SearchSessionsRequest, SimilarIncidentsRequest, UsageBlocksRequest,
 };
+use std::io::Write;
 
 use super::ai_watch::ai_smoke_watch;
 use super::output_ai::{
@@ -373,7 +373,7 @@ pub(crate) async fn run_ai_watch(mode: &CliMode, args: AiWatchArgs) -> Result<()
         CliMode::Http(_) => bail!("ai watch is a long-running daemon; omit --http"),
         CliMode::Local(service) => service.clone(),
     };
-    let options = syslog_mcp::ai_watch::WatchOptions {
+    let options = cortex::ai_watch::WatchOptions {
         path: args.path.map(std::path::PathBuf::from),
         debounce: std::time::Duration::from_millis(args.debounce_ms),
         settle: std::time::Duration::from_millis(args.settle_ms),
@@ -381,7 +381,7 @@ pub(crate) async fn run_ai_watch(mode: &CliMode, args: AiWatchArgs) -> Result<()
         initial_scan: !args.no_initial_scan,
         json: args.json,
     };
-    syslog_mcp::ai_watch::run(service, options).await
+    cortex::ai_watch::run(service, options).await
 }
 
 // ─── RAG v1 dispatch (LOCAL-only) ────────────────────────────────────────────

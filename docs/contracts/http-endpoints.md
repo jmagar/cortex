@@ -3,7 +3,7 @@
 ## 1. Purpose & status
 
 This document is the canonical catalog of every HTTP and WebSocket route the
-`syslog-mcp` axum server exposes, the auth/CORS/body-limit policy attached to
+`cortex` axum server exposes, the auth/CORS/body-limit policy attached to
 each, and the rules under which the surface evolves. It is **normative** for
 any consumer (clients, reverse proxies, monitoring, integration tests).
 
@@ -32,8 +32,8 @@ may evolve and what compatibility guarantee operators get.
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `stable`       | Committed surface. Method+path is fixed for the major version. Renames or removals require a major version bump on the prefix (e.g. `/v1/logs` → `/v2/logs`) and an overlap window of ≥1 minor release. |
 | `experimental` | May change with one minor release of warning in `CHANGELOG.md`. Consumers should pin server version. Used for routes that exist for operator/diagnostic convenience.                                   |
-| `internal`     | For `syslog-mcp`'s own components (agents, sibling services). External consumers MUST NOT depend on the shape. May change in any release with a CHANGELOG entry.                                       |
-| `deferred`     | Currently returns `404` but the path is **reserved**. Promise: `syslog-mcp` will never repurpose a `deferred` path for unrelated semantics. When the feature lands the route is promoted to `stable` or `experimental` without changing path. |
+| `internal`     | For `cortex`'s own components (agents, sibling services). External consumers MUST NOT depend on the shape. May change in any release with a CHANGELOG entry.                                       |
+| `deferred`     | Currently returns `404` but the path is **reserved**. Promise: `cortex` will never repurpose a `deferred` path for unrelated semantics. When the feature lands the route is promoted to `stable` or `experimental` without changing path. |
 
 ## 3. Auth flow matrix
 
@@ -50,7 +50,7 @@ epic, post eng-review):
 | `Bearer`               | unset           | loopback      | `LoopbackDev`                                    | Unauthenticated — the loopback bind *is* the trust boundary. Scope checks are bypassed.                                                                               |
 | `Bearer`               | unset           | non-loopback  | **rejected at startup** (see §9)                 | n/a — process exits.                                                                                                                                                  |
 | any                    | any             | loopback      | `LoopbackDev` when `mcp.no_auth = true`           | Unauthenticated — local development only.                                                                                                                            |
-| any                    | any             | non-loopback  | `TrustedGatewayUnscoped` when `mcp.no_auth = true` and `mcp.trusted_gateway_no_auth = true` | Unauthenticated by syslog-mcp. The operator is asserting that an upstream gateway enforces access.                                                                    |
+| any                    | any             | non-loopback  | `TrustedGatewayUnscoped` when `mcp.no_auth = true` and `mcp.trusted_gateway_no_auth = true` | Unauthenticated by cortex. The operator is asserting that an upstream gateway enforces access.                                                                    |
 
 Notes:
 
@@ -73,7 +73,7 @@ contract, not an accident). "Auth" abbreviations: **none** = no auth check;
 **bearer** = static Bearer token only; **oauth** = OAuth JWT only (when
 `disable_static_token_with_oauth = true`); **bearer-or-oauth** = either,
 mixed mode; **optional-bearer** = check enforced only when
-`SYSLOG_MCP_TOKEN` is set, otherwise the route is unauthenticated **but**
+`CORTEX_TOKEN` is set, otherwise the route is unauthenticated **but**
 the non-loopback safety gate (§9) bars this combo at startup.
 
 | Method+Path                                              | Tier           | Auth                  | Body limit | CORS                       | Rate limit          | Introduced | Source                          | Purpose                                                                                          |
@@ -90,12 +90,12 @@ the non-loopback safety gate (§9) bars this combo at startup.
 | `GET /mcp/.well-known/oauth-authorization-server`        | `stable`       | none                  | n/a        | configured allowlist       | —                   | OAuth GA   | `mcp/routes.rs`                 | Path-prefixed mirror of the AS discovery doc for clients that probe under `/mcp/`.               |
 | `GET /mcp/.well-known/oauth-protected-resource`          | `stable`       | none                  | n/a        | configured allowlist       | —                   | OAuth GA   | `mcp/routes.rs`                 | Path-prefixed mirror of the protected-resource discovery doc.                                    |
 | `GET /mcp/.well-known/openid-configuration`              | `stable`       | none                  | n/a        | configured allowlist       | —                   | OAuth GA   | `mcp/routes.rs`                 | OpenID Connect discovery alias for the AS metadata document.                                     |
-| `GET /jwks`                                              | `stable`       | none                  | n/a        | configured allowlist       | —                   | OAuth GA   | `mcp/routes.rs` (lab-auth)      | JSON Web Key Set used to verify JWTs issued by syslog-mcp. Same condition as discovery.          |
+| `GET /jwks`                                              | `stable`       | none                  | n/a        | configured allowlist       | —                   | OAuth GA   | `mcp/routes.rs` (lab-auth)      | JSON Web Key Set used to verify JWTs issued by cortex. Same condition as discovery.          |
 | `GET /authorize`                                         | `stable`       | none                  | n/a        | configured allowlist       | `authorize_rpm` (default 60/min, per process) | OAuth GA   | `mcp/routes.rs` (lab-auth)      | OAuth authorization-request endpoint. Rate-limited.                                              |
 | `GET /auth/google/callback`                              | `stable`       | none                  | n/a        | configured allowlist       | —                   | OAuth GA   | `mcp/routes.rs` (lab-auth)      | Google OIDC redirect URI.                                                                         |
 | `POST /token`                                            | `stable`       | none                  | small §    | configured allowlist       | —                   | OAuth GA   | `mcp/routes.rs` (lab-auth)      | OAuth token-exchange endpoint.                                                                    |
 | `POST /register`                                         | `stable`       | none                  | small §    | configured allowlist       | `register_rpm` (default 20/min, per process) | OAuth GA   | `mcp/routes.rs` (lab-auth)      | OAuth 2.0 Dynamic Client Registration. Enabled because MCP clients require DCR.                  |
-| `GET /api/search`                                        | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::search`                | Mounted **only** when `SYSLOG_API_ENABLED=true`. Mirrors the `search` MCP action via querystring. |
+| `GET /api/search`                                        | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::search`                | Mounted **only** when `CORTEX_API_ENABLED=true`. Mirrors the `search` MCP action via querystring. |
 | `GET /api/tail`                                          | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::tail`                  | Same condition. Tail-latest-N rows.                                                              |
 | `GET /api/errors`                                        | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::errors`                | Same condition. Error rollup.                                                                    |
 | `GET /api/hosts`                                         | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.1.x      | `api.rs::hosts`                 | Same condition. Known-hosts list.                                                                |
@@ -111,7 +111,7 @@ the non-loopback safety gate (§9) bars this combo at startup.
 | `POST /api/errors/unack`                                 | `experimental` | bearer-or-oauth †     | 64 KiB     | localhost-only             | —                   | 0.27.x     | `api.rs::unack_error`           | Revoke an acknowledgement so the signature resurfaces. Actor set to `"api"`.                     |
 | `GET /api/notifications/recent`                          | `experimental` | bearer-or-oauth †     | n/a        | localhost-only             | —                   | 0.27.x     | `api.rs::notifications_recent`  | Recent notification firings from `notification_firings` table.                                   |
 | `POST /api/notifications/test`                           | `experimental` | bearer-or-oauth †     | 64 KiB     | localhost-only             | 10/min per actor    | 0.27.x     | `api.rs::notifications_test`    | Send a test notification via the configured Apprise endpoint (SSRF-safe: URLs from server config only). |
-| `WS /ws/agent` (Upgrade)                                 | `deferred`     | first-message token ¶ | 1 KiB pre-hello / 1 MiB per frame post-hello | n/a (subprotocol-gated) | per-agent leaky bucket (`-32030 QuotaExceeded`) | Epic A (`syslog-mcp-qgnx`) | `mcp/ws_agent.rs` (planned — **not yet mounted**) | Path reserved. Currently returns `404`. Will carry JSON-RPC 2.0 over WebSocket (`agent.hello`, `logs.push`, `metrics.push`, `agent.heartbeat`, `probe.request/response`, `config.update`, `agent.shutdown`) when Epic A lands. See `agent-protocol.md` for envelopes, methods, error codes. |
+| `WS /ws/agent` (Upgrade)                                 | `deferred`     | first-message token ¶ | 1 KiB pre-hello / 1 MiB per frame post-hello | n/a (subprotocol-gated) | per-agent leaky bucket (`-32030 QuotaExceeded`) | Epic A (`cortex-qgnx`) | `mcp/ws_agent.rs` (planned — **not yet mounted**) | Path reserved. Currently returns `404`. Will carry JSON-RPC 2.0 over WebSocket (`agent.hello`, `logs.push`, `metrics.push`, `agent.heartbeat`, `probe.request/response`, `config.update`, `agent.shutdown`) when Epic A lands. See `agent-protocol.md` for envelopes, methods, error codes. |
 | `* /*` (fallback)                                        | `stable`       | none                  | 64 KiB     | configured allowlist       | —                   | 0.1.x      | `mcp/routes.rs::router` (fallback) | Returns `404 {"error":"not_found"}` for any unmatched path. The 64 KiB body limit applies to the merged MCP router. |
 
 Footnotes:
@@ -121,7 +121,7 @@ Footnotes:
   `/mcp` surfaces share the same `AuthLayer` construction via
   `mcp::build_auth_layer`.
 - **‡** "optional-bearer": `OtlpState::api_token` is the `mcp.api_token`
-  (with `SYSLOG_MCP_API_TOKEN` accepted as a deprecated alias). When unset
+  (with `CORTEX_API_TOKEN` accepted as a deprecated alias). When unset
   the route is unauthenticated, but the non-loopback safety gate (§9)
   prevents that state from coexisting with a non-loopback bind without
   the operator explicitly setting both no-auth gateway flags.
@@ -155,7 +155,7 @@ Two CORS regimes coexist, applied at the router boundary:
 
 1. **Configured allowlist (`/mcp` + `/health` + OAuth + fallback).**
    Built by `mcp::rmcp_server::allowed_origins(config)` from
-   `[mcp].allowed_origins` (env: `SYSLOG_MCP_ALLOWED_ORIGINS`). Methods:
+   `[mcp].allowed_origins` (env: `CORTEX_ALLOWED_ORIGINS`). Methods:
    `GET, POST`. Headers: `Any`. Invalid entries log a warning and are
    dropped. If no origins are configured, browser clients cannot call
    `/mcp` from a different origin.
@@ -194,8 +194,8 @@ carries its own per-agent leaky-bucket budget (`-32030 QuotaExceeded`) inside
 - `/api/*` is implicitly v1. A future `/api/v2/*` is a sibling and the
   existing `/api/*` remains as the v1 surface for one minor release. The
   `experimental` tier means consumers should already be prepared for this.
-- `/ws/agent` is gated by the WebSocket subprotocol `syslog-mcp.v1`. A v2
-  protocol bumps the subprotocol to `syslog-mcp.v2` and the `protocol_version`
+- `/ws/agent` is gated by the WebSocket subprotocol `cortex.v1`. A v2
+  protocol bumps the subprotocol to `cortex.v2` and the `protocol_version`
   integer in `agent.hello`. See `agent-protocol.md` §9.
 - `.well-known` and OAuth routes follow OAuth 2.1 / OIDC versioning at the
   spec level; the path names themselves are fixed by those specs.
@@ -215,20 +215,20 @@ Three blocked combinations:
 2. `auth.mode = Bearer` **and** `api_token` unset **and** bind is non-loopback
    — rejected because no auth is configured and the bind is publicly
    reachable.
-3. Either of the above can be overridden by `SYSLOG_MCP_NO_AUTH=true` plus
-   `SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true`. The operator is asserting that
+3. Either of the above can be overridden by `CORTEX_NO_AUTH=true` plus
+   `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true`. The operator is asserting that
    an upstream gateway (typically SWAG with Authelia) enforces access for all
    mounted routes.
 
 Additionally, when `/v1/logs` is mounted **without** a token on a non-loopback
 bind (which is only reachable via the trusted-gateway no-auth path), `main.rs`
 logs a `WARN` with the exact bind address and a pointer to set
-`SYSLOG_MCP_TOKEN`. The server still starts.
+`CORTEX_TOKEN`. The server still starts.
 
 ## 10. Reverse proxy guidance
 
 Production deployments terminate TLS at SWAG (`syslog.tootie.tv`) and forward
-to syslog-mcp on its plaintext bind. SWAG MUST:
+to cortex on its plaintext bind. SWAG MUST:
 
 - Preserve `Host` so `[mcp.auth].public_url` matches.
 - Forward `X-Forwarded-For` and `X-Forwarded-Proto: https` so logs record
@@ -276,9 +276,9 @@ quick read:
   "unauthenticated `/v1/logs` on `0.0.0.0`" is therefore an explicit operator
   choice, not an oversight.
 - `/api/*` uses a **separate** bearer token from `/mcp`. The `/api/*` gate
-  is `SYSLOG_API_TOKEN` (env var for `[api].api_token`), which is distinct
-  from `SYSLOG_MCP_TOKEN` (the MCP + OTLP token). Operators setting up
-  monitoring against `/api/stats` must provision `SYSLOG_API_TOKEN`; the
+  is `CORTEX_API_TOKEN` (env var for `[api].api_token`), which is distinct
+  from `CORTEX_TOKEN` (the MCP + OTLP token). Operators setting up
+  monitoring against `/api/stats` must provision `CORTEX_API_TOKEN`; the
   MCP token alone is not sufficient. Both tokens pass through the same
   `AuthLayer` construction mechanism, but they are distinct secrets.
 - `/register` is a public, unauthenticated endpoint **by design** — OAuth

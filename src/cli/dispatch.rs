@@ -9,7 +9,7 @@
 //!   per-arm field drift (eng-review #A37). The unit tests below pin the
 //!   shape via `format!("{req:?}")` snapshots.
 //! - A `run_X(mode, args)` free `async fn` that branches on [`CliMode`] and
-//!   either calls the local [`SyslogService`] directly or routes through
+//!   either calls the local [`CortexService`] directly or routes through
 //!   [`HttpClient`]. The HTTP arm is wrapped in [`http_or_cancel`] so a
 //!   SIGINT during a long-running request bails with `"interrupted"`
 //!   (eng-review #A29). The Local arm is sync SQL — no cancellation needed.
@@ -19,11 +19,11 @@
 //! proxies the same service the Local path would invoke server-side.
 
 use anyhow::{bail, Result};
-use std::future::Future;
-use syslog_mcp::app::{
+use cortex::app::{
     CorrelateEventsRequest, FilterLogsRequest, GetErrorsRequest, IncidentRequest,
     ListSessionsRequest, SearchLogsRequest, TailLogsRequest,
 };
+use std::future::Future;
 
 use super::output_ai::print_incident_response;
 use super::output_logs::{

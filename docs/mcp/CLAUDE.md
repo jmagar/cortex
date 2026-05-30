@@ -1,4 +1,4 @@
-# MCP Server Documentation -- syslog-mcp
+# MCP Server Documentation -- cortex
 
 Index for the `mcp/` documentation subdirectory. These docs cover the MCP server implementation, transport, tools, testing, and deployment.
 
@@ -12,7 +12,7 @@ Index for the `mcp/` documentation subdirectory. These docs cover the MCP server
 | `DEPLOY.md` | Deployment: local dev, Docker, Docker Compose, port assignment |
 | `DEV.md` | Development workflow: build cycle, adding tools, debugging, code style |
 | `CORRELATION.md` | Correlation behavior: time-window, AI anchor, historical incident, and context actions |
-| `ELICITATION.md` | MCP elicitation: syslog-mcp does not use elicitation; admin writes use scope gates |
+| `ELICITATION.md` | MCP elicitation: cortex does not use elicitation; admin writes use scope gates |
 | `ENV.md` | Environment variable reference (concise cross-ref to CONFIG.md) |
 | `LOGS.md` | Logging: RUST_LOG, tracing, structured output, error handling |
 | `MCPORTER.md` | Live smoke testing with mcporter |

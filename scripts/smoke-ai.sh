@@ -3,11 +3,11 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SYSLOG_BIN="${SYSLOG_BIN:-}"
+CORTEX_BIN="${CORTEX_BIN:-}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-DB_PATH="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-${PROJECT_DIR}/data/syslog.db}}"
-SOURCE_FIXTURE="${SYSLOG_AI_SMOKE_FIXTURE:-${PROJECT_DIR}/tests/fixtures/ai-session-smoke.jsonl}"
-QUERY="${SYSLOG_AI_SMOKE_QUERY:-\"ai-smoke\"}"
+DB_PATH="${CORTEX_SMOKE_DB_PATH:-${CORTEX_DB_PATH:-${PROJECT_DIR}/data/cortex.db}}"
+SOURCE_FIXTURE="${CORTEX_AI_SMOKE_FIXTURE:-${PROJECT_DIR}/tests/fixtures/ai-session-smoke.jsonl}"
+QUERY="${CORTEX_AI_SMOKE_QUERY:-\"ai-smoke\"}"
 
 pass() {
   printf 'PASS  %s\n' "$1"
@@ -19,28 +19,28 @@ fail() {
 }
 
 resolve_syslog_bin() {
-  if [[ -n "$SYSLOG_BIN" ]]; then
-    if [[ -x "$SYSLOG_BIN" ]]; then
-      printf '%s\n' "$SYSLOG_BIN"
-    elif command -v "$SYSLOG_BIN" >/dev/null 2>&1; then
-      command -v "$SYSLOG_BIN"
+  if [[ -n "$CORTEX_BIN" ]]; then
+    if [[ -x "$CORTEX_BIN" ]]; then
+      printf '%s\n' "$CORTEX_BIN"
+    elif command -v "$CORTEX_BIN" >/dev/null 2>&1; then
+      command -v "$CORTEX_BIN"
     else
-      fail "SYSLOG_BIN is not executable or on PATH: $SYSLOG_BIN"
+      fail "CORTEX_BIN is not executable or on PATH: $CORTEX_BIN"
     fi
-  elif command -v syslog >/dev/null 2>&1; then
-    command -v syslog
-  elif [[ -x "${PROJECT_DIR}/target/debug/syslog" ]]; then
-    printf '%s\n' "${PROJECT_DIR}/target/debug/syslog"
+  elif command -v cortex >/dev/null 2>&1; then
+    command -v cortex
+  elif [[ -x "${PROJECT_DIR}/target/debug/cortex" ]]; then
+    printf '%s\n' "${PROJECT_DIR}/target/debug/cortex"
   else
-    fail "syslog binary not found; install syslog on PATH, set SYSLOG_BIN, or run cargo build"
+    fail "syslog binary not found; install syslog on PATH, set CORTEX_BIN, or run cargo build"
   fi
 }
 
 run_syslog() {
-  SYSLOG_MCP_DB_PATH="$DB_PATH" \
-    SYSLOG_DOCKER_INGEST_ENABLED="${SYSLOG_DOCKER_INGEST_ENABLED:-false}" \
+  CORTEX_DB_PATH="$DB_PATH" \
+    CORTEX_DOCKER_INGEST_ENABLED="${CORTEX_DOCKER_INGEST_ENABLED:-false}" \
     RUST_LOG="${RUST_LOG:-error}" \
-    "$SYSLOG_BIN" "$@"
+    "$CORTEX_BIN" "$@"
 }
 
 require_json_count() {
@@ -61,8 +61,8 @@ PY
 
 cd "$PROJECT_DIR"
 
-SYSLOG_BIN="$(resolve_syslog_bin)"
-[[ -x "$SYSLOG_BIN" ]] || fail "$SYSLOG_BIN is not executable"
+CORTEX_BIN="$(resolve_syslog_bin)"
+[[ -x "$CORTEX_BIN" ]] || fail "$CORTEX_BIN is not executable"
 [[ -f "$SOURCE_FIXTURE" ]] || fail "fixture missing: $SOURCE_FIXTURE"
 
 SMOKE_DIR="$(mktemp -d)"
@@ -70,11 +70,11 @@ trap 'rm -rf "$SMOKE_DIR"' EXIT
 FIXTURE="$SMOKE_DIR/ai-session-smoke.jsonl"
 now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 {
-  printf '{"sessionId":"ai-smoke-session","timestamp":"%s","cwd":"/tmp/syslog-mcp-ai-smoke","content":"ai-smoke-authentication smoke transcript seed from Claude"}\n' "$now"
-  printf '{"sessionId":"ai-smoke-session","timestamp":"%s","cwd":"/tmp/syslog-mcp-ai-smoke","content":[{"type":"text","text":"ai-smoke-project-context object array content"}]}\n' "$now"
+  printf '{"sessionId":"ai-smoke-session","timestamp":"%s","cwd":"/tmp/cortex-ai-smoke","content":"ai-smoke-authentication smoke transcript seed from Claude"}\n' "$now"
+  printf '{"sessionId":"ai-smoke-session","timestamp":"%s","cwd":"/tmp/cortex-ai-smoke","content":[{"type":"text","text":"ai-smoke-project-context object array content"}]}\n' "$now"
 } >"$FIXTURE"
 
-printf 'syslog: %s\n' "$("$SYSLOG_BIN" --version)"
+printf 'syslog: %s\n' "$("$CORTEX_BIN" --version)"
 printf 'db:     %s\n' "$DB_PATH"
 printf 'query:  %s\n' "$QUERY"
 
@@ -90,11 +90,11 @@ inventory="$(run_syslog ai tools --json)"
 require_json_count "ai tools did not include any tools" "$inventory" "len(data.get('tools', [])) >= 1"
 pass "ai tools"
 
-sessions="$(run_syslog sessions --tool claude --project /tmp/syslog-mcp-ai-smoke --limit 5 --json)"
+sessions="$(run_syslog sessions --tool claude --project /tmp/cortex-ai-smoke --limit 5 --json)"
 require_json_count "sessions did not include fixture session" "$sessions" "any(s.get('session_id') == 'ai-smoke-session' for s in data.get('sessions', []))"
 pass "sessions --tool claude"
 
-search="$(run_syslog ai search "$QUERY" --tool claude --project /tmp/syslog-mcp-ai-smoke --limit 5 --json)"
+search="$(run_syslog ai search "$QUERY" --tool claude --project /tmp/cortex-ai-smoke --limit 5 --json)"
 require_json_count "ai search did not return the fixture session" "$search" "any(s.get('session_id') == 'ai-smoke-session' for s in data.get('sessions', []))"
 pass "ai search"
 
@@ -109,7 +109,7 @@ if grep -qE '\blocalhost\b' <<<"$tail_output"; then
 fi
 pass "tail transcript rendering"
 
-if [[ "${SYSLOG_AI_SMOKE_CHECK_RUNTIME:-1}" == "1" ]]; then
+if [[ "${CORTEX_AI_SMOKE_CHECK_RUNTIME:-1}" == "1" ]]; then
   if bash scripts/check-runtime-current.sh >/tmp/syslog-ai-runtime-current.out 2>&1; then
     pass "compose runtime current"
   else
@@ -117,7 +117,7 @@ if [[ "${SYSLOG_AI_SMOKE_CHECK_RUNTIME:-1}" == "1" ]]; then
     sed 's/^/      /' /tmp/syslog-ai-runtime-current.out >&2
     exit 1
   fi
-elif [[ "${SYSLOG_AI_SMOKE_CHECK_RUNTIME:-1}" == "warn" ]]; then
+elif [[ "${CORTEX_AI_SMOKE_CHECK_RUNTIME:-1}" == "warn" ]]; then
   if bash scripts/check-runtime-current.sh >/tmp/syslog-ai-runtime-current.out 2>&1; then
     pass "compose runtime current"
   else

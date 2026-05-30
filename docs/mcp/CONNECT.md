@@ -1,31 +1,31 @@
-# Connect to MCP -- syslog-mcp
+# Connect to MCP -- cortex
 
-How to connect to the syslog-mcp server from every supported client.
+How to connect to the cortex server from every supported client.
 
 ## Via plugin (simplest)
 
 ```bash
 # Claude Code
 /plugin marketplace add jmagar/claude-homelab
-/plugin install syslog-mcp @jmagar-claude-homelab
+/plugin install cortex @jmagar-claude-homelab
 ```
 
 The plugin manifest handles transport and tool registration. Configure the MCP URL and optional API token when prompted.
 
-syslog-mcp uses RMCP Streamable HTTP in stateless JSON-response mode for daemon deployments. Local stdio clients can launch `syslog mcp` when they can read the SQLite database directly.
+cortex uses RMCP Streamable HTTP in stateless JSON-response mode for daemon deployments. Local stdio clients can launch `syslog mcp` when they can read the SQLite database directly.
 
 ## Claude Code CLI
 
 ```bash
-claude mcp add --transport http syslog-mcp http://localhost:3100/mcp
+claude mcp add --transport http cortex http://localhost:3100/mcp
 ```
 
 With bearer auth:
 
 ```bash
 claude mcp add --transport http \
-  --header "Authorization: Bearer $SYSLOG_MCP_TOKEN" \
-  syslog-mcp http://localhost:3100/mcp
+  --header "Authorization: Bearer $CORTEX_TOKEN" \
+  cortex http://localhost:3100/mcp
 ```
 
 ### Scopes
@@ -43,7 +43,7 @@ claude mcp add --transport http \
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "cortex": {
       "type": "http",
       "url": "http://localhost:3100/mcp",
       "headers": {
@@ -61,7 +61,7 @@ claude mcp add --transport http \
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "cortex": {
       "type": "http",
       "url": "http://localhost:3100/mcp",
       "headers": {
@@ -76,16 +76,16 @@ claude mcp add --transport http \
 
 Use `syslog mcp` for local query-only access. It exposes the same query-oriented
 `syslog` tool actions as HTTP, but it does not receive syslog, start `/mcp`,
-run cleanup jobs, or require `SYSLOG_MCP_TOKEN`.
+run cleanup jobs, or require `CORTEX_TOKEN`.
 
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "cortex": {
       "command": "/path/to/syslog",
       "args": ["mcp"],
       "env": {
-        "SYSLOG_MCP_DB_PATH": "/data/syslog.db",
+        "CORTEX_DB_PATH": "/data/cortex.db",
         "RUST_LOG": "warn"
       }
     }
@@ -103,14 +103,14 @@ Build a Linux MCP Bundle from the existing stdio server:
 just build-mcpb
 ```
 
-The generated `dist/syslog-mcp-<version>-linux.mcpb` bundles the release
+The generated `dist/cortex-<version>-linux.mcpb` bundles the release
 `syslog` binary and launches it as:
 
 ```bash
 server/syslog mcp
 ```
 
-The bundle is query-only. It reads `syslog.db` from the configured data
+The bundle is query-only. It reads `cortex.db` from the configured data
 directory and does not start the syslog listener, HTTP MCP server, REST API,
 Docker Compose, or deployment flows.
 
@@ -121,7 +121,7 @@ Use an HTTP bridge when the DB path is not local to the MCP client, or when the 
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "cortex": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "http://localhost:3100/mcp", "--transport", "http-only"]
     }
@@ -146,10 +146,10 @@ All clients use the same `mcpServers` JSON structure. The only difference is the
 
 ## Via SWAG reverse proxy
 
-When syslog-mcp is behind SWAG, the MCP endpoint becomes:
+When cortex is behind SWAG, the MCP endpoint becomes:
 
 ```
-https://syslog-mcp.tootie.tv/mcp
+https://cortex.tootie.tv/mcp
 ```
 
 Configure clients to use this URL instead of `localhost:3100`.
@@ -179,7 +179,7 @@ If connection fails, check:
 1. Server is running (`just up` or `just dev`)
 2. Port 3100 is not blocked by firewall
 3. Bearer token matches between client config and server `.env`
-4. Docker port mapping is correct: `docker port syslog-mcp`
+4. Docker port mapping is correct: `docker port cortex`
 
 ## See also
 

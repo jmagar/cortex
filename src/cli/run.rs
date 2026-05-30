@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Result};
-use syslog_mcp::app::SyslogService;
+use cortex::app::CortexService;
 
 use super::args::{
     AgentCommandCommand, AiCommand, CliCommand, DbCommand, NotifyCommand, ShellCommand, SigCommand,
@@ -9,7 +9,7 @@ use super::dispatch;
 /// Env var that opts a process into HTTP transport without passing `--http`.
 /// Accepts `1` or `true` (case-insensitive). Any other value is treated as
 /// unset to avoid surprising "I typoed `falze`" silent flips.
-pub(crate) const ENV_USE_HTTP: &str = "SYSLOG_USE_HTTP";
+pub(crate) const ENV_USE_HTTP: &str = "CORTEX_USE_HTTP";
 
 /// CLI transport mode resolved from global flags + env. Built once per
 /// invocation; passed by value into [`run`].
@@ -18,14 +18,14 @@ pub(crate) const ENV_USE_HTTP: &str = "SYSLOG_USE_HTTP";
 /// binary — acknowledged limitation, tracked for the v0.30 successor (bead
 /// .12 doc note + epic acceptance criteria).
 pub(crate) enum CliMode {
-    Local(SyslogService),
+    Local(CortexService),
     Http(super::http_client::HttpClient),
 }
 
 impl std::fmt::Debug for CliMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Local(_) => f.write_str("CliMode::Local(SyslogService)"),
+            Self::Local(_) => f.write_str("CliMode::Local(CortexService)"),
             Self::Http(_) => f.write_str("CliMode::Http(HttpClient)"),
         }
     }
@@ -33,7 +33,7 @@ impl std::fmt::Debug for CliMode {
 
 /// Top-level dispatch entry point. Built once per CLI invocation by `run_cli`
 /// in `main.rs`. The [`CliMode`] decides whether we hit a local SQLite-backed
-/// [`SyslogService`] or a remote container via [`HttpClient`].
+/// [`CortexService`] or a remote container via [`HttpClient`].
 ///
 /// HTTP dispatch is implemented incrementally by bead .7+ — for now, the
 /// `Http` arm returns a clear placeholder error per command. The mode wiring
@@ -158,7 +158,7 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
 /// arg (`--server URL`) or `=`-glued form (`--server=URL`). Passing `--server`
 /// or `--token` implies HTTP mode even without an explicit `--http`.
 ///
-/// `SYSLOG_API_TOKEN` alone does **not** flip the default to HTTP — that
+/// `CORTEX_API_TOKEN` alone does **not** flip the default to HTTP — that
 /// would silently change behaviour for users who already exported the token
 /// from earlier deploys (locked decision, eng-review #C6).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -173,7 +173,7 @@ impl GlobalFlags {
     ///
     /// Unknown args are left in place untouched so the existing per-subcommand
     /// parsers see exactly what they used to. We deliberately allow both
-    /// `syslog --http search foo` and `syslog search --http foo` — the
+    /// `cortex --http search foo` and `cortex search --http foo` — the
     /// stripper walks the command args until a `--` wrapped-command sentinel.
     ///
     /// `--server` / `--token` without a following value error out; an empty
@@ -240,26 +240,26 @@ impl GlobalFlags {
     }
 
     /// Returns `Some(trigger_label)` if HTTP mode was requested via any of:
-    /// `--http`, `--server`, `--token`, or `SYSLOG_USE_HTTP=1|true`. Returns
+    /// `--http`, `--server`, `--token`, or `CORTEX_USE_HTTP=1|true`. Returns
     /// `None` for the default Local mode. The label is the literal flag the
     /// user passed, used verbatim in error messages.
     ///
-    /// Note: `SYSLOG_API_TOKEN` being set does NOT trigger HTTP — only the
+    /// Note: `CORTEX_API_TOKEN` being set does NOT trigger HTTP — only the
     /// explicit opt-ins above do (locked decision).
     pub(crate) fn http_trigger(&self) -> Option<&'static str> {
         if let Some(flag) = self.http_flag_trigger() {
             return Some(flag);
         }
         if env_opts_into_http() {
-            return Some("SYSLOG_USE_HTTP=1");
+            return Some("CORTEX_USE_HTTP=1");
         }
         None
     }
 
     /// Like [`http_trigger`] but only considers explicit command-line FLAGS,
-    /// ignoring the `SYSLOG_USE_HTTP` env var. Used by local-only commands
+    /// ignoring the `CORTEX_USE_HTTP` env var. Used by local-only commands
     /// (`compose`, `setup`) that must not bail just because operators have
-    /// `SYSLOG_USE_HTTP=true` written into `~/.syslog-mcp/.env`.
+    /// `CORTEX_USE_HTTP=true` written into `~/.cortex/.env`.
     pub(crate) fn http_flag_trigger(&self) -> Option<&'static str> {
         if self.force_http {
             return Some("--http");
@@ -286,7 +286,7 @@ impl GlobalFlags {
     }
 }
 
-/// Returns `true` when `SYSLOG_USE_HTTP` is set to `1` or `true`
+/// Returns `true` when `CORTEX_USE_HTTP` is set to `1` or `true`
 /// (case-insensitive). Any other value — including empty string, `0`, `false`,
 /// or typos — is treated as unset.
 fn env_opts_into_http() -> bool {

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::db::{self, LogBatchEntry};
 use crate::enrich::{stamp_source_kind, SourceKind};
 use crate::ingest_metadata::bounded_metadata_json;
-use crate::syslog::enrichment::scrub_ai_message;
+use crate::receiver::enrichment::scrub_ai_message;
 
 static COMMAND_SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
@@ -329,22 +329,22 @@ pub fn run_agent_command_wrapper(spool_path: &Path, command_args: &[String]) -> 
         exit_status: status.code(),
         command: scrub_command(&command),
         cwd,
-        agent: std::env::var("SYSLOG_AGENT_COMMAND_AGENT")
+        agent: std::env::var("CORTEX_AGENT_COMMAND_AGENT")
             .unwrap_or_else(|_| "claude-code".to_string()),
-        command_surface: std::env::var("SYSLOG_AGENT_COMMAND_SURFACE").ok(),
+        command_surface: std::env::var("CORTEX_AGENT_COMMAND_SURFACE").ok(),
         hostname: hostname(),
         user: username(),
         pid: std::process::id(),
         session_id: std::env::var("CLAUDE_CODE_SESSION_ID")
             .ok()
             .or_else(|| std::env::var("CLAUDE_SESSION_ID").ok())
-            .or_else(|| std::env::var("SYSLOG_AGENT_COMMAND_SESSION").ok()),
+            .or_else(|| std::env::var("CORTEX_AGENT_COMMAND_SESSION").ok()),
         schema_version: 1,
         content_scrubbed: true,
     };
     if let Err(error) = append_spool_record(spool_path, &record) {
         eprintln!(
-            "syslog agent-command: failed to append to {}: {error:#}",
+            "cortex agent-command: failed to append to {}: {error:#}",
             spool_path.display()
         );
     }
@@ -378,7 +378,7 @@ fn command_args_to_shell_command(command_args: &[String]) -> String {
 }
 
 fn should_run_agent_command_unwrapped(command_args: &[String]) -> bool {
-    std::env::var("SYSLOG_AGENT_COMMAND_WRAPPER")
+    std::env::var("CORTEX_AGENT_COMMAND_WRAPPER")
         .ok()
         .as_deref()
         == Some("1")
@@ -393,7 +393,7 @@ fn is_agent_command_ingest_spool_invocation(command_args: &[String]) -> bool {
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or(program);
-    program_name == "syslog"
+    program_name == "cortex"
         && command_args.get(1).map(String::as_str) == Some("agent-command")
         && command_args.get(2).map(String::as_str) == Some("ingest-spool")
 }
@@ -420,7 +420,7 @@ fn command_status(command_args: &[String], fallback_shell_command: &str) -> Resu
         .ok_or_else(|| anyhow::anyhow!("internal error: command_status called with empty args"))?;
     Command::new(program)
         .args(args)
-        .env("SYSLOG_AGENT_COMMAND_WRAPPER", "1")
+        .env("CORTEX_AGENT_COMMAND_WRAPPER", "1")
         .env_remove("CLAUDE_CODE_SHELL_PREFIX")
         .status()
         .with_context(|| format!("run command {}", shell_quote(program)))
@@ -431,7 +431,7 @@ fn shell_command_status(command: &str) -> Result<ExitStatus> {
     Command::new(shell)
         .arg("-lc")
         .arg(command)
-        .env("SYSLOG_AGENT_COMMAND_WRAPPER", "1")
+        .env("CORTEX_AGENT_COMMAND_WRAPPER", "1")
         .env_remove("CLAUDE_CODE_SHELL_PREFIX")
         .status()
         .context("run command")
@@ -712,18 +712,18 @@ fn atuin_history_state_path(path: &Path) -> Result<PathBuf> {
 }
 
 fn command_log_state_dir(path: &Path) -> Result<PathBuf> {
-    if let Some(value) = std::env::var_os("SYSLOG_COMMAND_LOG_STATE_DIR") {
+    if let Some(value) = std::env::var_os("CORTEX_COMMAND_LOG_STATE_DIR") {
         let state_dir = PathBuf::from(value);
         ensure_private_parent(&state_dir.join(".keep"))?;
         return Ok(state_dir);
     }
     if let Some(value) = std::env::var_os("XDG_STATE_HOME") {
-        let state_dir = PathBuf::from(value).join("syslog-mcp");
+        let state_dir = PathBuf::from(value).join("cortex");
         ensure_private_parent(&state_dir.join(".keep"))?;
         return Ok(state_dir);
     }
     if let Some(value) = std::env::var_os("HOME") {
-        let state_dir = PathBuf::from(value).join(".local/state/syslog-mcp");
+        let state_dir = PathBuf::from(value).join(".local/state/cortex");
         ensure_private_parent(&state_dir.join(".keep"))?;
         return Ok(state_dir);
     }
@@ -731,7 +731,7 @@ fn command_log_state_dir(path: &Path) -> Result<PathBuf> {
         .parent()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".syslog-mcp-state");
+        .join(".cortex-state");
     ensure_private_parent(&fallback.join(".keep"))?;
     Ok(fallback)
 }

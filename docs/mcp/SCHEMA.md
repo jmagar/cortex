@@ -1,4 +1,4 @@
-# Tool Schema Documentation -- syslog-mcp
+# Tool Schema Documentation -- cortex
 
 ## Source Of Truth
 
@@ -8,7 +8,7 @@ Current source of truth:
 
 - `src/mcp/actions.rs::ACTION_SPECS` registers every action, its scope, cost, and description.
 - `src/mcp/actions.rs::action_names()` derives the schema action enum from `ACTION_SPECS`.
-- `src/mcp/schemas.rs::tool_definitions()` builds the MCP `tools/list` definition and the `syslog://schema/mcp-tool` resource from that action table.
+- `src/mcp/schemas.rs::tool_definitions()` builds the MCP `tools/list` definition and the `cortex://schema/mcp-tool` resource from that action table.
 - `src/mcp/tools.rs::tool_syslog()` dispatches the action handlers.
 - `src/app/models.rs` defines request and response structs for typed action payloads.
 
@@ -19,7 +19,7 @@ wins.
 
 ## Current Actions
 
-syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument
+cortex exposes one MCP tool named `syslog`. The required `action` argument
 selects one of these 42 actions:
 
 | Action | Scope | Cost | Purpose |
@@ -74,7 +74,7 @@ The runtime tool definition is a flat action-dispatched JSON schema:
 ```json
 {
   "name": "syslog",
-  "description": "Query syslog-mcp logs with action-based subcommands...",
+  "description": "Query cortex logs with action-based subcommands...",
   "x-syslog-action-metadata": [
     { "name": "search", "cost": "cheap", "description": "..." }
   ],

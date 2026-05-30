@@ -5,13 +5,13 @@ License: MIT
 Description: Plugin configuration and user-facing settings for Claude Code plugin deployment.
 -->
 
-# Plugin Settings -- syslog-mcp
+# Plugin Settings -- cortex
 
 Plugin configuration and user-facing settings for Claude Code plugin deployment.
 
 ## How it works
 
-syslog-mcp ships one `syslog` binary with two MCP modes:
+cortex ships one `syslog` binary with two MCP modes:
 
 - `syslog serve mcp` -- long-lived daemon with syslog listener + MCP HTTP server.
 - `syslog mcp` -- local query-only stdio MCP server.
@@ -30,7 +30,7 @@ Connection credentials flow through two files:
 ```text
 plugin.json userConfig (user enters values)
   --> .mcp.json (${user_config.*} interpolated by Claude Code)
-    --> HTTP connection to running syslog-mcp server
+    --> HTTP connection to running cortex server
 ```
 
 Server-mode plugin installs also run the same setup path as the one-line
@@ -38,10 +38,10 @@ installer:
 
 ```text
 plugin userConfig
-  --> scripts/plugin-setup.sh exports SYSLOG_* / SYSLOG_MCP_* overrides
+  --> scripts/plugin-setup.sh exports CORTEX_* / CORTEX_* overrides
     --> syslog setup repair (same engine as syslog deploy local)
-      --> ~/.syslog-mcp/.env + ~/.syslog-mcp/compose/docker-compose.yml
-        --> Docker Compose syslog-mcp container
+      --> ~/.cortex/.env + ~/.cortex/compose/docker-compose.yml
+        --> Docker Compose cortex container
 ```
 
 Client-mode installs only connect to an existing server and skip local setup.
@@ -53,9 +53,9 @@ Client-mode installs only connect to an existing server and skip local setup.
 | `is_server` | boolean | no | Whether this machine should run the local ingest/MCP server |
 | `server_url` | string | no | Base server URL (the plugin appends `/mcp`) |
 | `api_token` | string | yes | Bearer token for MCP authentication |
-| `no_auth` | boolean | no | Disable service-local auth; non-loopback server binds require `SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true` |
+| `no_auth` | boolean | no | Disable service-local auth; non-loopback server binds require `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true` |
 | `auth_mode` | string | no | `bearer` or `oauth` |
-| `data_dir` | directory | no | Optional database directory override; empty uses `~/.syslog-mcp/data` |
+| `data_dir` | directory | no | Optional database directory override; empty uses `~/.cortex/data` |
 | `fleet_hosts` | string | no | Fleet hosts for Docker ingest and rsyslog drop-in deployment |
 
 Sensitive fields are stored encrypted by Claude Code and masked in the UI.
@@ -71,7 +71,7 @@ ingestion and query surfaces attached to the same running service.
 The plugin does not maintain a separate deployment model. Server mode delegates
 to `syslog setup repair` (the same local reconcile path exposed as
 `syslog deploy local`), and the generated Compose assets live under
-`~/.syslog-mcp/compose`. Stale user-level `syslog-mcp.service` units/drop-ins
+`~/.cortex/compose`. Stale user-level `cortex.service` units/drop-ins
 from older releases are disabled and removed during repair.
 
 ## See also

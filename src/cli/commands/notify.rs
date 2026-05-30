@@ -1,4 +1,4 @@
-//! Parse functions for `syslog notify` subcommands.
+//! Parse functions for `cortex notify` subcommands.
 //!
 //! Extracted from `src/cli.rs` as part of Q-C1 (cli.rs split).
 
@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Result};
 use super::super::args::{CliCommand, NotifyCommand, NotifyRecentArgs, NotifyTestArgs};
 use super::super::{parse_i64_flag, FlagCursor};
 
-/// Dispatch `syslog notify <subcommand> [args]`.
+/// Dispatch `cortex notify <subcommand> [args]`.
 pub(crate) fn parse_notify(args: &[String]) -> Result<CliCommand> {
     let (subcommand, rest) = args
         .split_first()

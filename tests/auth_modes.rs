@@ -16,7 +16,7 @@ use axum::{
     body::to_bytes,
     http::{header, Request, StatusCode},
 };
-use syslog_mcp::{mcp::router, testing};
+use cortex::{mcp::router, testing};
 use tempfile::TempDir;
 use tower::util::ServiceExt;
 
@@ -251,7 +251,7 @@ async fn mcp_without_credentials_succeeds_when_loopback_dev() {
     let tools = value["result"]["tools"].as_array();
     assert!(
         tools.is_some_and(|t| !t.is_empty()),
-        "tools/list should return the syslog tool in LoopbackDev mode"
+        "tools/list should return the cortex tool in LoopbackDev mode"
     );
 }
 
@@ -276,8 +276,8 @@ async fn tools_list_succeeds_with_auth_context() {
     );
     let tools = value["result"]["tools"].as_array();
     assert!(
-        tools.is_some_and(|t| t.iter().any(|tool| tool["name"] == "syslog")),
-        "tools/list must return the syslog tool"
+        tools.is_some_and(|t| t.iter().any(|tool| tool["name"] == "cortex")),
+        "tools/list must return the cortex tool"
     );
 }
 

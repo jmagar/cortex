@@ -1,7 +1,7 @@
 //! Single authoritative table of all MCP actions.
 //!
 //! Previously the action list was spread across three arrays in two files:
-//! `SYSLOG_ACTIONS` in `schemas.rs` (for the JSON schema `enum`),
+//! `CORTEX_ACTIONS` in `schemas.rs` (for the JSON schema `enum`),
 //! `READ_ONLY_ACTIONS` and `ADMIN_ACTIONS` in `rmcp_server.rs` (for scope
 //! gating). Adding a new action required editing all three in lockstep; drift
 //! was a constant source of bugs.
@@ -13,10 +13,10 @@
 /// The scope required to invoke a given action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Scope {
-    /// Read-only query. Requires `syslog:read`.
+    /// Read-only query. Requires `cortex:read`.
     Read,
     /// State-mutating or outbound-notification operation. Requires
-    /// `syslog:admin`.
+    /// `cortex:admin`.
     Admin,
     /// Informational action — auth context required when policy is `Mounted`,
     /// but no scope gate. Currently only `help`.
@@ -340,7 +340,7 @@ pub(super) fn action_names() -> Vec<&'static str> {
 ///
 /// - `None` for `InfoOnly` actions (auth context required when Mounted, but no
 ///   scope gate).
-/// - `Some("syslog:read")` / `Some("syslog:admin")` for normal actions.
+/// - `Some("cortex:read")` / `Some("cortex:admin")` for normal actions.
 /// - `Some("syslog:__deny__")` for unknown actions — a sentinel scope that is
 ///   never granted, so unknown actions are denied at the auth layer rather than
 ///   falling through to the dispatcher. Fail-closed.
@@ -348,8 +348,8 @@ pub(super) fn required_scope_for(action: &str) -> Option<&'static str> {
     match ACTION_SPECS.iter().find(|s| s.name == action) {
         Some(spec) => match spec.scope {
             Scope::InfoOnly => None,
-            Scope::Read => Some("syslog:read"),
-            Scope::Admin => Some("syslog:admin"),
+            Scope::Read => Some("cortex:read"),
+            Scope::Admin => Some("cortex:admin"),
         },
         None => Some("syslog:__deny__"),
     }

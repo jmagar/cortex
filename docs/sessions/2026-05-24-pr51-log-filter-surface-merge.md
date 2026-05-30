@@ -59,7 +59,7 @@ PR #51, "feat: add structured log filter surface", was implemented, reviewed, fi
 | modified | `docs/mcp/TOOLS.md` | | MCP tool documentation | `git show --name-status c94b5a6` |
 | created | `docs/superpowers/plans/2026-05-25-first-class-log-filter-surface.md` | | implementation plan | `git show --name-status c94b5a6` |
 | modified | `mcpb/manifest.json` | | package version metadata | `git show --name-status c94b5a6` |
-| modified | `plugins/syslog/skills/syslog/SKILL.md` | | skill help/update surface | `git show --name-status c94b5a6` |
+| modified | `plugins/syslog/skills/cortex/SKILL.md` | | skill help/update surface | `git show --name-status c94b5a6` |
 | modified | `scripts/smoke-test.sh` | | smoke coverage for new filter actions | `git show --name-status c94b5a6` |
 | modified | `server.json` | | package version metadata | `git show --name-status c94b5a6` |
 | modified | `src/api.rs` | | REST `/api/filter` route | `git show --name-status c94b5a6` |

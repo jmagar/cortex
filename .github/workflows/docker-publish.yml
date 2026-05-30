@@ -117,7 +117,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          jq --arg v "$VERSION" --arg img "ghcr.io/jmagar/syslog-mcp:${VERSION}" '
+          jq --arg v "$VERSION" --arg img "ghcr.io/jmagar/cortex:${VERSION}" '
             .version = $v |
             .packages = [.packages[] | if .registryType == "oci" then .identifier = $img else . end]
           ' server.json > server.tmp && mv server.tmp server.json

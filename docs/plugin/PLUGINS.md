@@ -1,13 +1,13 @@
 <!--
-plugin: syslog-mcp
+plugin: cortex
 surface: plugin-manifests
 version: 0.21.7
 author: Jacob Magar
 license: MIT
-description: Current syslog-mcp Claude Code plugin manifest reference.
+description: Current cortex Claude Code plugin manifest reference.
 -->
 
-# Plugin Manifest Reference -- syslog-mcp
+# Plugin Manifest Reference -- cortex
 
 This repo currently ships the Claude Code plugin manifest at
 `.claude-plugin/plugin.json`. The manifest version is kept in sync with
@@ -36,9 +36,9 @@ The current manifest declares:
 | `mcpServers` | Points Claude Code at `./plugins/syslog/.mcp.json` |
 | `hooks` | Runs `plugins/syslog/hooks/hooks.json` |
 | `skills` | Exposes repo-local plugin skills |
-| `userConfig.server_url` | Base HTTP URL for the running syslog-mcp server |
+| `userConfig.server_url` | Base HTTP URL for the running cortex server |
 | `userConfig.api_token` | Required Bearer token used by the plugin MCP client; enforced by the server unless `no_auth=true` |
-| `userConfig.no_auth` | Explicitly disables static-token enforcement for loopback deployments; non-loopback server deployments also require `SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true` |
+| `userConfig.no_auth` | Explicitly disables static-token enforcement for loopback deployments; non-loopback server deployments also require `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true` |
 | `userConfig.is_server` | Whether this machine owns the local Docker Compose deployment |
 | `userConfig.syslog_port` / `syslog_host_port` / `mcp_port` | Container port mapping controls |
 | `userConfig.data_dir` | Host data directory for the Compose deployment |

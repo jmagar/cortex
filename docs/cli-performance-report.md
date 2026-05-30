@@ -1,4 +1,4 @@
-# syslog-mcp CLI Performance Report
+# cortex CLI Performance Report
 
 Generated: 2026-05-28 | DB size: ~31 GB (~8.1M pages) | Log count: ~4.9M rows
 
@@ -69,7 +69,7 @@ Generated: 2026-05-28 | DB size: ~31 GB (~8.1M pages) | Log count: ~4.9M rows
 |-----|------|
 | 1 (cached, no recompile) | 1,610ms |
 
-**Notes:** Acceptable when cached. Cold (after any source change) triggers a full dev-profile compile of `syslog-mcp`, which adds ~18s (see `just check`). The 1.6s is the incremental lint pass.
+**Notes:** Acceptable when cached. Cold (after any source change) triggers a full dev-profile compile of `cortex`, which adds ~18s (see `just check`). The 1.6s is the incremental lint pass.
 
 **Suggestion:** Add `sccache` to the compile pipeline if not already configured — it caches object files across clean checkouts and CI runs, cutting cold lint from ~20s to ~3–5s.
 
@@ -93,9 +93,9 @@ Generated: 2026-05-28 | DB size: ~31 GB (~8.1M pages) | Log count: ~4.9M rows
 
 | Run | Time |
 |-----|------|
-| 1 (incremental, syslog-mcp crate only) | 20,125ms |
+| 1 (incremental, cortex crate only) | 20,125ms |
 
-**Notes:** The 20s is incremental — only the top-level `syslog-mcp` crate was rebuilt. A from-scratch `cargo build` takes ~7 minutes (confirmed during this session). Release profile (`cargo build --release`) adds significant additional time.
+**Notes:** The 20s is incremental — only the top-level `cortex` crate was rebuilt. A from-scratch `cargo build` takes ~7 minutes (confirmed during this session). Release profile (`cargo build --release`) adds significant additional time.
 
 **Suggestion:** The incremental build time (20s) is dominated by LLVM codegen for the large binary. Splitting the crate into smaller workspace members would reduce per-change rebuild time.
 
@@ -122,12 +122,12 @@ Generated: 2026-05-28 | DB size: ~31 GB (~8.1M pages) | Log count: ~4.9M rows
 | 1 (no token injected via `just`) | 172,392ms (2m52s) |
 | 2 (token passed explicitly) | 9,127ms |
 
-**Notes:** The 172-second run had `Token: ` empty in the test header — `just test-live` does not inject `SYSLOG_API_TOKEN` into the script environment, so all authenticated requests fail and the test suite falls back to slow retry/timeout paths. With the token passed directly to `test_live.sh`, the suite completes in ~9 seconds.
+**Notes:** The 172-second run had `Token: ` empty in the test header — `just test-live` does not inject `CORTEX_API_TOKEN` into the script environment, so all authenticated requests fail and the test suite falls back to slow retry/timeout paths. With the token passed directly to `test_live.sh`, the suite completes in ~9 seconds.
 
 **Suggestion:** Update the `just test-live` recipe to inject the token:
 ```makefile
 test-live:
-    bash tests/test_live.sh --url http://localhost:3100 --token $(SYSLOG_API_TOKEN)
+    bash tests/test_live.sh --url http://localhost:3100 --token $(CORTEX_API_TOKEN)
 ```
 Or add `set dotenv-load` at the top of the `Justfile` to auto-load `.env`.
 
@@ -204,7 +204,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 **Suggestions:**
 1. Use `PRAGMA wal_checkpoint(PASSIVE)` before backup to reduce lock contention, but this doesn't guarantee the lock is released.
 2. Expose `db backup` as an HTTP endpoint that the running server executes — the server already holds the pool and can initiate the backup from within the WAL-sharing connection pool.
-3. As a workaround, run `docker exec syslog-mcp syslog db backup --output /data/backup.db` from within the container where the pool connection is shared.
+3. As a workaround, run `docker exec cortex syslog db backup --output /data/backup.db` from within the container where the pool connection is shared.
 
 ---
 
@@ -349,7 +349,7 @@ This runs one pass over `error_signature_windows` instead of 50, cutting time to
 ---
 
 ### `syslog setup check`
-**What it does:** Validates the syslog-mcp installation: home directory, `.env`, compose, data directory, and a liveness check against the running server.
+**What it does:** Validates the cortex installation: home directory, `.env`, compose, data directory, and a liveness check against the running server.
 
 | Run | Time |
 |-----|------|
@@ -360,7 +360,7 @@ This runs one pass over `error_signature_windows` instead of 50, cutting time to
 ---
 
 ### `syslog setup repair`
-**What it does:** Auto-fixes the syslog-mcp installation — creates missing directories, merges missing `.env` keys, updates compose files from embedded templates, and validates the result.
+**What it does:** Auto-fixes the cortex installation — creates missing directories, merges missing `.env` keys, updates compose files from embedded templates, and validates the result.
 
 | Run | Time |
 |-----|------|
@@ -374,7 +374,7 @@ This runs one pass over `error_signature_windows` instead of 50, cutting time to
 ---
 
 ### `syslog compose status`
-**What it does:** Checks whether the syslog-mcp Docker container is running, its health status, image, and compose project details.
+**What it does:** Checks whether the cortex Docker container is running, its health status, image, and compose project details.
 
 | Run | Time |
 |-----|------|
@@ -440,7 +440,7 @@ All three `timeline` bucket sizes take 72–99 seconds on 4.9M rows. Add a defau
 `db integrity --quick` exceeds the 600-second HTTP timeout on a 31 GB DB. Move to an async background job model with a polling endpoint, or add a CLI-side warning that this will take >10 minutes.
 
 ### P1 — Fix `just test-live` token injection
-`just test-live` runs the integration suite without a token, causing 172-second timeout-heavy failure paths. Inject `SYSLOG_API_TOKEN` from the `.env` file in the recipe.
+`just test-live` runs the integration suite without a token, causing 172-second timeout-heavy failure paths. Inject `CORTEX_API_TOKEN` from the `.env` file in the recipe.
 
 ### P2 — Fix `sig list` correlated subquery
 Replace the 50-query correlated subquery in `sig list` with a single aggregating JOIN. Expected improvement: 1–2s → ~100ms.

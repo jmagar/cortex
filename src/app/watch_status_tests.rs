@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::app::os_adapter::OsAdapter;
-use crate::app::service::SyslogService;
+use crate::app::service::CortexService;
 use crate::app::{ServiceError, ServiceResult};
 use crate::config::StorageConfig;
 use crate::db::init_pool;
@@ -86,11 +86,11 @@ impl OsAdapter for MockPidOs {
     }
 }
 
-fn make_service(os: MockPidOs) -> SyslogService {
+fn make_service(os: MockPidOs) -> CortexService {
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("pid_test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
-    SyslogService::with_os_adapter(pool, storage, Arc::new(os))
+    CortexService::with_os_adapter(pool, storage, Arc::new(os))
 }
 
 struct FailingJournalOs;
@@ -129,16 +129,16 @@ async fn ai_watch_status_returns_journal_lines_from_os_adapter() {
     let pool = Arc::new(init_pool(&storage).unwrap());
     let os = Arc::new(MockProbeOs {
         journal_output:
-            "May 26 10:00:00 host syslog-ai-watch[123]: started\nMay 26 10:01:00 host syslog-ai-watch[123]: indexed 5 files\n"
+            "May 26 10:00:00 host cortex-ai-watch[123]: started\nMay 26 10:01:00 host cortex-ai-watch[123]: indexed 5 files\n"
                 .to_string(),
         probe_stdout: b"active\n".to_vec(),
         probe_success: true,
     });
-    let service = SyslogService::with_os_adapter(pool, storage, os);
+    let service = CortexService::with_os_adapter(pool, storage, os);
 
     let report = service.ai_watch_status().await.unwrap();
 
-    assert_eq!(report.service, "syslog-ai-watch.service");
+    assert_eq!(report.service, "cortex-ai-watch.service");
     assert_eq!(report.latest_journal.len(), 2);
     assert!(report.latest_journal[0].contains("started"));
     assert_eq!(report.active.as_deref(), Some("active"));
@@ -151,7 +151,7 @@ async fn ai_watch_status_degrades_gracefully_when_journalctl_fails() {
     let storage = StorageConfig::for_test(dir.path().join("test2.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
     let os = Arc::new(FailingJournalOs);
-    let service = SyslogService::with_os_adapter(pool, storage, os);
+    let service = CortexService::with_os_adapter(pool, storage, os);
 
     let report = service.ai_watch_status().await.unwrap();
 
@@ -161,7 +161,7 @@ async fn ai_watch_status_degrades_gracefully_when_journalctl_fails() {
         report.journal_error.is_some(),
         "journal_error should be set when journalctl fails"
     );
-    assert_eq!(report.service, "syslog-ai-watch.service");
+    assert_eq!(report.service, "cortex-ai-watch.service");
     // systemctl probe returned "inactive" from the mock (non-zero exit but non-empty stdout)
     assert_eq!(report.active.as_deref(), Some("inactive"));
 }
@@ -185,7 +185,7 @@ async fn ai_watch_status_health_is_some_with_valid_db() {
         probe_stdout: b"active\n".to_vec(),
         probe_success: true,
     });
-    let service = SyslogService::with_os_adapter(pool, storage, os);
+    let service = CortexService::with_os_adapter(pool, storage, os);
 
     let result = service.ai_watch_status().await;
     assert!(result.is_ok(), "ai_watch_status must never return Err");
@@ -217,7 +217,7 @@ async fn ai_watch_status_health_is_none_when_db_schema_broken() {
         probe_stdout: b"active\n".to_vec(),
         probe_success: true,
     });
-    let service = SyslogService::with_os_adapter(pool, storage, os);
+    let service = CortexService::with_os_adapter(pool, storage, os);
 
     let result = service.ai_watch_status().await;
     assert!(result.is_ok(), "ai_watch_status must never return Err");

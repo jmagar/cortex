@@ -542,7 +542,7 @@ fn can_write_directory(path: &Path) -> bool {
     if !path.is_dir() {
         return false;
     }
-    let probe = path.join(format!(".syslog-mcp-write-check-{}", std::process::id()));
+    let probe = path.join(format!(".cortex-write-check-{}", std::process::id()));
     match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)

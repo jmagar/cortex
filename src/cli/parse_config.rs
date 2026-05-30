@@ -147,7 +147,7 @@ pub(crate) fn parse_config_flags(
             _ if arg.starts_with("--toml-path=") => {
                 *toml_path = Some(PathBuf::from(value_after_equals(arg, "--toml-path")?));
             }
-            "-h" | "--help" => bail!("use `syslog --help` for usage"),
+            "-h" | "--help" => bail!("use `cortex --help` for usage"),
             _ if arg.starts_with('-') => bail!("unknown config {sub} option: {arg}"),
             _ => positionals.push(arg),
         }

@@ -1,4 +1,4 @@
-//! Parse functions for `syslog sig` subcommands.
+//! Parse functions for `cortex sig` subcommands.
 //!
 //! Extracted from `src/cli.rs` as part of Q-C1 (cli.rs split).
 
@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Result};
 use super::super::args::{CliCommand, SigAckArgs, SigCommand, SigListArgs, SigUnackArgs};
 use super::super::{parse_u32_flag, FlagCursor};
 
-/// Dispatch `syslog sig <subcommand> [args]`.
+/// Dispatch `cortex sig <subcommand> [args]`.
 pub(crate) fn parse_sig(args: &[String]) -> Result<CliCommand> {
     let (subcommand, rest) = args
         .split_first()

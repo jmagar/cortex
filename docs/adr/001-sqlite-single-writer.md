@@ -5,7 +5,7 @@
 
 ## Context
 
-syslog-mcp uses a single SQLite file (`/data/syslog.db`) for all persistence: log ingest, FTS5, notifications outbox, error signatures, AI transcript index, docker checkpoints, and schema migrations. WAL mode enables concurrent readers but enforces a single writer at a time.
+cortex uses a single SQLite file (`/data/cortex.db`) for all persistence: log ingest, FTS5, notifications outbox, error signatures, AI transcript index, docker checkpoints, and schema migrations. WAL mode enables concurrent readers but enforces a single writer at a time.
 
 All write paths contend on this file:
 - Syslog batch writer (up to 10k entries/flush)
@@ -37,7 +37,7 @@ Accept the single-writer ceiling for the homelab use-case. Do not add multi-writ
 ## Planned Mitigation (when ceiling is hit)
 
 Use `ATTACH DATABASE` to split into:
-- **Hot ingest DB** (`syslog.db`): `logs` table + FTS5 index. Write-heavy. Retention and WAL tuned for throughput.
+- **Hot ingest DB** (`cortex.db`): `logs` table + FTS5 index. Write-heavy. Retention and WAL tuned for throughput.
 - **Control-plane DB** (`control.db`): `notifications_outbox`, `notification_firings`, `error_signatures`, `transcript_sources`, `docker_checkpoints`, `schema_migrations`, `hosts`. Write-occasional. Different durability requirements.
 
 Both databases share the same `r2d2` pool abstraction and can be split with minimal API changes. This is the first escalation step before considering a different storage engine.

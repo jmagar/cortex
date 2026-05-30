@@ -1,5 +1,5 @@
 use anyhow::Result;
-use syslog_mcp::app::{
+use cortex::app::{
     AiIncidentResponse, AiInvestigateResponse, AskHistoryResponse, IncidentContextResponse,
     SimilarIncidentsResponse,
 };

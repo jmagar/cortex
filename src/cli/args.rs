@@ -1,5 +1,5 @@
 use super::args_config::ConfigCommand;
-use syslog_mcp::compose::{ComposeTarget, MutationOptions};
+use cortex::compose::{ComposeTarget, MutationOptions};
 
 mod ai;
 mod surface;

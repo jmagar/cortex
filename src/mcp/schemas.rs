@@ -7,7 +7,7 @@ use super::actions;
 ///
 /// The action `enum` list is derived from [`actions::ACTION_SPECS`] so it
 /// stays in sync with the scope-gating table automatically. Previously it was
-/// a separate `SYSLOG_ACTIONS` const that could drift.
+/// a separate `CORTEX_ACTIONS` const that could drift.
 pub(super) fn tool_definitions() -> Vec<Value> {
     let action_names: Vec<&str> = actions::action_names();
     let action_metadata: Vec<Value> = actions::ACTION_SPECS
@@ -25,13 +25,12 @@ pub(super) fn tool_definitions() -> Vec<Value> {
         .map(|n| format!("syslog {n}"))
         .collect::<Vec<_>>()
         .join(", ");
-    let description =
-        format!("Query syslog-mcp logs with action-based subcommands: {action_desc}.");
+    let description = format!("Query cortex logs with action-based subcommands: {action_desc}.");
     vec![json!({
-        "name": "syslog",
+        "name": "cortex",
         "description": description,
-        "x-syslog-action-metadata": action_metadata,
-        "x-syslog-agent-guidance": {
+        "x-cortex-action-metadata": action_metadata,
+        "x-cortex-agent-guidance": {
             "cost_order": ["cheap", "moderate", "expensive", "write"],
             "first_pass": ["status", "errors", "tail", "search", "timeline", "context"],
             "escalate_only_when_scoped": ["stats", "patterns", "anomalies", "compare", "clock_skew", "ingest_rate", "compose_doctor"],
@@ -61,7 +60,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "project": {
                     "type": "string",
-                    "description": "For action=filter, sessions, search_sessions, abuse, ai_correlate, usage_blocks, project_context, or list_ai_tools: exact project path, e.g. /home/jmagar/workspace/syslog-mcp."
+                    "description": "For action=filter, sessions, search_sessions, abuse, ai_correlate, usage_blocks, project_context, or list_ai_tools: exact project path, e.g. /home/jmagar/workspace/cortex."
                 },
                 "tool": {
                     "type": "string",

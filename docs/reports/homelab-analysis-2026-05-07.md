@@ -1,7 +1,7 @@
 # Homelab Log Analysis Report
 **Period:** 2026-05-07 04:00 UTC → 2026-05-08 03:57 UTC (24 hours)
 **Generated:** 2026-05-08T04:00 UTC
-**Data source:** syslog-mcp (918,919 total logs across 9 hosts)
+**Data source:** cortex (918,919 total logs across 9 hosts)
 
 ---
 

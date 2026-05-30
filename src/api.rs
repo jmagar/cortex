@@ -17,14 +17,14 @@ use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateLimitPolicy,
     AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest, AiLimitPolicy,
     AiParseErrorsRequest, AiPruneCheckpointsRequest, AnomaliesRequest, AskHistoryRequest,
-    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest, DbBackupRequest,
-    DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest, FleetStateRequest,
-    GetErrorsRequest, GetLogRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
-    RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
-    SimilarIncidentsRequest, SyslogService, TailLogsRequest, TimelineRequest, UnackErrorRequest,
-    UnaddressedErrorsRequest, UsageBlocksRequest,
+    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest, CortexService,
+    DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest,
+    FleetStateRequest, GetErrorsRequest, GetLogRequest, HostStateRequest, IncidentContextRequest,
+    IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest,
+    ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest,
+    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError,
+    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
+    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::db::DbPool;
@@ -51,7 +51,7 @@ pub const FULL_VACUUM_SIZE_GUARD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// which clones the `Arc<Semaphore>` populated here at first call.
 ///
 /// **Dual-permit pattern (eng-review C2)**: this gate is SEPARATE from
-/// `SyslogService::db_permits` (the read-worker pool). Handlers
+/// `CortexService::db_permits` (the read-worker pool). Handlers
 /// `try_acquire_owned` this permit BEFORE calling the service; on `NoPermits`
 /// they return 409 with `{"error": "db maintenance already in progress"}`.
 /// Holding the gate outside the read pool means VACUUM can't starve
@@ -100,7 +100,7 @@ pub struct VersionInfo {
 /// 409 contract simple: while the route reports work, the gate is held.
 #[derive(Clone)]
 pub struct ApiState {
-    pub service: SyslogService,
+    pub service: CortexService,
     pub config: ApiConfig,
     pub cors_port: u16,
     /// `true` when the MCP HTTP listener binds to a loopback address (e.g.
@@ -108,12 +108,12 @@ pub struct ApiState {
     /// and `127.0.0.1:{port}` allowlist entries when this is set; on external
     /// binds (homelab IP, Tailscale, etc.) those defaults are skipped because
     /// they'd let a malicious page on the operator's *workstation* speak to
-    /// the remote API (bead 0p8r.21). `SYSLOG_MCP_ALLOWED_ORIGINS` is
+    /// the remote API (bead 0p8r.21). `CORTEX_ALLOWED_ORIGINS` is
     /// authoritative on external binds.
     pub loopback_bind: bool,
     /// Origins to allow via CORS (in addition to the default `cors_port`
     /// loopback variants when `loopback_bind` is true). Sourced from
-    /// `SYSLOG_MCP_ALLOWED_ORIGINS` — single env shared with the /mcp
+    /// `CORTEX_ALLOWED_ORIGINS` — single env shared with the /mcp
     /// surface. Mirrors `src/mcp/routes.rs:cors_layer`.
     pub allowed_origins: Vec<String>,
     /// Authentication policy. The `/api/*` router forces bearer enforcement
@@ -136,8 +136,8 @@ pub struct ApiState {
     /// `SHARED_MAINTENANCE_PERMIT` docs for the dual-permit rationale
     /// (eng-review C2) and the test-isolation rationale.
     pub maintenance_permit: Arc<Semaphore>,
-    /// When `true`, the static bearer token (`SYSLOG_MCP_TOKEN`) is granted
-    /// `syslog:admin` scope in addition to `syslog:read`. Mirrors
+    /// When `true`, the static bearer token (`CORTEX_TOKEN`) is granted
+    /// `cortex:admin` scope in addition to `cortex:read`. Mirrors
     /// [`crate::config::McpConfig::static_token_is_admin`]. Default: `false`.
     pub static_token_is_admin: bool,
 }
@@ -147,7 +147,7 @@ impl ApiState {
     /// startup. Caching avoids per-request DB hits on `/api/version`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        service: SyslogService,
+        service: CortexService,
         config: ApiConfig,
         cors_port: u16,
         loopback_bind: bool,
@@ -205,7 +205,7 @@ fn read_schema_version(pool: &DbPool) -> anyhow::Result<i64> {
 pub fn router(state: ApiState) -> anyhow::Result<Router> {
     if state.config.api_token.is_none() {
         anyhow::bail!(
-            "SYSLOG_API_TOKEN required for the REST API — run 'syslog setup repair' to generate one"
+            "CORTEX_API_TOKEN required for the REST API — run 'cortex setup repair' to generate one"
         );
     }
 
@@ -499,7 +499,7 @@ async fn timeline(
     State(state): State<ApiState>,
     Query(query): Query<TimelineQuery>,
 ) -> impl IntoResponse {
-    // Default lookback is centralized in `SyslogService::timeline` (bead dyqw):
+    // Default lookback is centralized in `CortexService::timeline` (bead dyqw):
     // it applies a bucket-sized window only when neither `from` nor `to` is set,
     // preventing full table scans without recreating the logic per transport.
     respond(
@@ -1102,7 +1102,7 @@ async fn ai_projects(
 // ─── AI diagnostic + admin (bead 0p8r.3) ─────────────────────────────────────
 //
 // `list_ai_checkpoints`, `list_ai_parse_errors`, `prune_ai_checkpoints` keep
-// their loose primitive signatures on `SyslogService` (eng-review #S3 — the
+// their loose primitive signatures on `CortexService` (eng-review #S3 — the
 // service refactor was cut). Handlers build the typed Request struct from
 // query/body, then unpack into positional args.
 
@@ -1266,7 +1266,7 @@ fn cors_layer(port: u16, loopback_bind: bool, allowed_origins: &[String]) -> Cor
     // on a loopback address — otherwise they grant CORS access from the
     // operator's *workstation* (where `localhost:port` points at unrelated
     // services) to a remote API (bead 0p8r.21). On external binds,
-    // `SYSLOG_MCP_ALLOWED_ORIGINS` is the only authority.
+    // `CORTEX_ALLOWED_ORIGINS` is the only authority.
     let mut origins: Vec<HeaderValue> = if loopback_bind {
         vec![
             format!("http://localhost:{port}")
@@ -1292,7 +1292,7 @@ fn cors_layer(port: u16, loopback_bind: bool, allowed_origins: &[String]) -> Cor
                 tracing::warn!(
                     origin = %origin,
                     error = %error,
-                    "Ignoring invalid CORS origin from SYSLOG_MCP_ALLOWED_ORIGINS"
+                    "Ignoring invalid CORS origin from CORTEX_ALLOWED_ORIGINS"
                 );
             }
         }
@@ -1326,7 +1326,7 @@ fn cors_layer(port: u16, loopback_bind: bool, allowed_origins: &[String]) -> Cor
 // Maintenance routes use the dual-permit pattern described on
 // `MAINTENANCE_PERMIT` above: vacuum/checkpoint hold MAINTENANCE_PERMIT for the
 // duration of the awaited service call, while reads continue to acquire from
-// `SyslogService::db_permits` independently. `db_status` and `db_integrity` are
+// `CortexService::db_permits` independently. `db_status` and `db_integrity` are
 // read-side and bypass MAINTENANCE_PERMIT entirely.
 
 /// `GET /api/db/status` — cached PRAGMA snapshot (read).

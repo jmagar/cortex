@@ -1,4 +1,4 @@
-# Prerequisites -- syslog-mcp
+# Prerequisites -- cortex
 
 Required tools and versions before developing or deploying.
 

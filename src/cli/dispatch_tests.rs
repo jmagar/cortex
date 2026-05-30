@@ -99,7 +99,7 @@ fn filter_args_into_request_snapshot() {
     let args = FilterArgs {
         source_kind: Some("docker-stream".into()),
         docker_host: Some("dookie".into()),
-        container: Some("syslog-mcp".into()),
+        container: Some("cortex".into()),
         stream: Some("stdout".into()),
         event_action: Some("die".into()),
         tool: Some("claude".into()),
@@ -112,7 +112,7 @@ fn filter_args_into_request_snapshot() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "FilterLogsRequest { hostname: None, source_ip: None, severity: None, app_name: None, facility: None, exclude_facility: None, process_id: None, from: None, to: None, received_from: None, received_to: None, limit: Some(25), source_kind: Some(\"docker-stream\"), tool: Some(\"claude\"), project: Some(\"/tmp/project\"), session_id: Some(\"abc123\"), container: Some(\"syslog-mcp\"), docker_host: Some(\"dookie\"), stream: Some(\"stdout\"), event_action: Some(\"die\") }"
+        "FilterLogsRequest { hostname: None, source_ip: None, severity: None, app_name: None, facility: None, exclude_facility: None, process_id: None, from: None, to: None, received_from: None, received_to: None, limit: Some(25), source_kind: Some(\"docker-stream\"), tool: Some(\"claude\"), project: Some(\"/tmp/project\"), session_id: Some(\"abc123\"), container: Some(\"cortex\"), docker_host: Some(\"dookie\"), stream: Some(\"stdout\"), event_action: Some(\"die\") }"
     );
 }
 
@@ -260,7 +260,7 @@ async fn run_hosts_http_sends_exactly_one_request() {
 async fn run_stats_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     // DbStats has a number of fields; we only need a 200 body that
-    // deserialises into DbStats. The shape comes from `syslog_mcp::app::DbStats`.
+    // deserialises into DbStats. The shape comes from `cortex::app::DbStats`.
     Mock::given(method("GET"))
         .and(path("/api/stats"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1027,7 +1027,7 @@ fn db_vacuum_args_into_request_snapshot_force_present_maps_to_some_true() {
 
 fn db_status_body() -> serde_json::Value {
     serde_json::json!({
-        "db_path": "/data/syslog.db",
+        "db_path": "/data/cortex.db",
         "page_count": 1,
         "freelist_count": 0,
         "page_size": 4096,
@@ -1275,7 +1275,7 @@ async fn run_db_backup_http_posts_to_api_endpoint() {
     Mock::given(method("POST"))
         .and(path("/api/db/backup"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "db_path": "/data/syslog.db",
+            "db_path": "/data/cortex.db",
             "backup_path": "/data/backup.db",
             "size_bytes": 1024
         })))
@@ -1293,10 +1293,10 @@ async fn run_db_backup_http_posts_to_api_endpoint() {
     .expect("http backup must succeed");
 }
 
-// ─── HTTP client timeout (bead 0p8r.5 / bead syslog-mcp-qekb) ──────────────
+// ─── HTTP client timeout (bead 0p8r.5 / bead cortex-qekb) ──────────────
 //
 // bead 0p8r.5 originally specified no per-method timeout on `db integrity`.
-// bead syslog-mcp-qekb revised that: `run_db_integrity` now wraps the HTTP
+// bead cortex-qekb revised that: `run_db_integrity` now wraps the HTTP
 // arm in a 120s `tokio::time::timeout` (via `INTEGRITY_HTTP_TIMEOUT`) so a
 // 31 GB+ DB does not silently hit the global 600s reqwest timeout. Fast
 // requests (well under 120s) continue to complete normally — that is all this
@@ -1347,7 +1347,7 @@ fn source_ips_args_into_request_default() {
 
 #[test]
 fn timeline_args_into_request_passes_time_range_through() {
-    // The default-lookback injection now lives in `SyslogService::timeline`
+    // The default-lookback injection now lives in `CortexService::timeline`
     // (bead dyqw) so the service is the single source of truth. `into_request`
     // must therefore pass `from`/`to` through verbatim and NOT inject a default
     // — verified end-to-end by the service-layer test

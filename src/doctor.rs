@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug, Clone, Serialize)]
 pub struct BinaryDoctorReport {
     current_exe: String,
-    path_syslog: Option<String>,
+    path_cortex: Option<String>,
     repo_version: String,
     container_version: Option<String>,
     runtime_current: Option<bool>,
@@ -25,13 +25,13 @@ impl BinaryDoctorReport {
         let current_exe = std::env::current_exe()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|error| format!("unknown: {error}"));
-        let path_syslog = command_stdout("sh", &["-c", "command -v syslog"]);
+        let path_cortex = command_stdout("sh", &["-c", "command -v syslog"]);
         let container_version =
-            command_stdout("docker", &["exec", "syslog-mcp", "syslog", "--version"]);
+            command_stdout("docker", &["exec", "cortex", "cortex", "--version"]);
         let (runtime_current, runtime_current_error) = runtime_current_status();
         Self {
             current_exe,
-            path_syslog,
+            path_cortex,
             repo_version: env!("CARGO_PKG_VERSION").to_string(),
             container_version,
             runtime_current,
@@ -50,8 +50,8 @@ impl BinaryDoctorReport {
     pub fn render_text(&self) {
         println!("current_exe: {}", self.current_exe);
         println!(
-            "path_syslog: {}",
-            self.path_syslog.as_deref().unwrap_or("-")
+            "path_cortex: {}",
+            self.path_cortex.as_deref().unwrap_or("-")
         );
         println!("repo_version: {}", self.repo_version);
         println!(
@@ -360,8 +360,8 @@ fn collect_compose_section() -> DoctorSection {
                     status.health.as_deref().unwrap_or("no healthcheck")
                 ),
             ));
-            let expected_volume = std::env::var("SYSLOG_MCP_VOLUME_NAME")
-                .unwrap_or_else(|_| "syslog-mcp-data".to_string());
+            let expected_volume =
+                std::env::var("CORTEX_VOLUME_NAME").unwrap_or_else(|_| "cortex-data".to_string());
             match status.data_mounts.iter().find(|m| m.target == "/data") {
                 Some(m) if m.kind == "bind" => {
                     let src = m
@@ -453,7 +453,7 @@ fn collect_binary_section() -> DoctorSection {
                 reason.to_string()
             } else {
                 format!(
-                    "container {} != repo {} - run: syslog compose up",
+                    "container {} != repo {} - run: cortex compose up",
                     binary.container_version.as_deref().unwrap_or("-"),
                     binary.repo_version
                 )
@@ -555,7 +555,7 @@ async fn collect_ai_section() -> DoctorSection {
                                     SetupStatus::Error,
                                     "ai_watch_schema_drift",
                                     format!(
-                                        "watcher started {start}; {} migration(s) applied later; fix: systemctl --user restart syslog-ai-watch.service",
+                                        "watcher started {start}; {} migration(s) applied later; fix: systemctl --user restart cortex-ai-watch.service",
                                         health.schema_drift_migrations.len()
                                     ),
                                 ));
@@ -597,7 +597,7 @@ async fn collect_ai_section() -> DoctorSection {
 }
 
 pub fn ai_watcher_process_start_time() -> Option<String> {
-    const SERVICE: &str = "syslog-ai-watch.service";
+    const SERVICE: &str = "cortex-ai-watch.service";
     // systemd 247+ renders ExecMainStartTimestamp as `@<unix_seconds>` when
     // passed `--timestamp=unix` — locale/TZ-independent. Older systemd
     // ignores the flag and returns the human form, parsed by the fallback.
@@ -615,14 +615,14 @@ pub fn ai_watcher_process_start_time() -> Option<String> {
     parse_systemctl_timestamp_utc(String::from_utf8_lossy(&output.stdout).trim())
 }
 
-/// Best-effort check: is `syslog-ai-watch.service` loaded and active right
+/// Best-effort check: is `cortex-ai-watch.service` loaded and active right
 /// now? Used to distinguish "watcher down, start time legitimately n/a" from
 /// "watcher running but start-time parsing failed" — the latter is a
 /// diagnostic the operator needs to see.
 fn ai_watcher_is_active() -> bool {
     let Ok(output) = std::process::Command::new("systemctl")
         .arg("--user")
-        .args(["is-active", "syslog-ai-watch.service"])
+        .args(["is-active", "cortex-ai-watch.service"])
         .output()
     else {
         return false;
@@ -741,7 +741,7 @@ fn runtime_current_status() -> (Option<bool>, Option<String>) {
 }
 
 fn runtime_current_script_path() -> Option<std::path::PathBuf> {
-    if let Some(path) = std::env::var_os("SYSLOG_RUNTIME_CHECK_SCRIPT")
+    if let Some(path) = std::env::var_os("CORTEX_RUNTIME_CHECK_SCRIPT")
         .map(std::path::PathBuf::from)
         .filter(|path| path.exists())
     {

@@ -1,6 +1,6 @@
-# MCP Prompts Reference -- syslog-mcp
+# MCP Prompts Reference -- cortex
 
-syslog-mcp exposes reusable MCP prompts for common infrastructure debugging
+cortex exposes reusable MCP prompts for common infrastructure debugging
 workflows. Prompts do not add new data access paths; they guide MCP clients to
 call the existing `syslog` tool actions in a useful order and to report evidence
 before conclusions.
@@ -22,7 +22,7 @@ Every prompt is written as a bounded investigation runbook:
 - Return a consistent synthesis with `Verdict`, `Evidence`, `Likely Cause`,
   `Not Supported`, `Next Actions`, and `Telemetry Gaps`.
 - Clients that support structured output can read
-  `syslog://schema/prompt-output` and validate prompt answers against that
+  `cortex://schema/prompt-output` and validate prompt answers against that
   JSON Schema.
 
 | Prompt | Purpose | Useful arguments |

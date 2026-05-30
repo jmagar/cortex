@@ -10,6 +10,30 @@
 
 ---
 
+## Corrections applied (post-codebase-verification)
+
+The first draft of this plan made assumptions that did not survive contact with the code.
+Corrected per the design spec:
+
+1. **`SyslogEntry` / `SyslogRecord` do not exist** — removed from the script. The code
+   already uses `LogEntry` / `LogRecord`. Nothing to rename there.
+2. **`SyslogRmcpServer` was missed** — it is a real type and is renamed in Task 5b.
+3. **Type renames are not compiler-forced** — `SyslogService`, `SyslogRmcpServer`,
+   `SyslogConfig` are self-consistent, so the script leaving them alone compiles fine.
+   They get an explicit rename pass (Task 5b) verified by `cargo check`.
+4. **Config field/section coupling** — `Config.syslog: SyslogConfig` (serde, no alias)
+   ↔ `[syslog]` TOML section. Renaming one without the other breaks deserialization at
+   runtime, invisible to `cargo check`. Handled together in Task 5c with a parse test.
+5. **The rename script is narrowed** to `syslog-mcp` / `syslog_mcp` / `SYSLOG_MCP_` only.
+   Bare-word `syslog` is never substituted (KEEP list in the spec).
+6. **DB file renamed** `syslog.db` → `cortex.db` (Task 5d) and **plugin renamed**
+   `syslog` → `cortex` (Task 12) — both per user decision; migration steps in Task 15.
+
+New/changed task order: 1, 2, 3, 4, **5 (MCP tool name), 5b (type renames), 5c (config
+coupling), 5d (DB filename)**, 6, 7, 8 … 15.
+
+---
+
 ## File Map
 
 ### Created
@@ -88,7 +112,12 @@ sedi() {
   fi
 }
 
-FILES=$(grep -rl "syslog.mcp\|SYSLOG_MCP_\|SyslogService\|SyslogEntry\|SyslogRecord\|syslog_mcp" \
+# NARROW BY DESIGN: only the three high-volume, unambiguous tokens.
+# Type renames (SyslogService, SyslogRmcpServer, SyslogConfig) are handled by the
+# compiler-driven Task 5b. Config field/section/fns are handled by Task 5c.
+# Bare-word `syslog` is NEVER substituted (KEEP list: syslog-udp/-tcp aliases,
+# facility values, RFC protocol references, the on-wire protocol name).
+FILES=$(grep -rl "syslog-mcp\|SYSLOG_MCP_\|syslog_mcp" \
   $(build_exclude_args) \
   --include="*.rs" --include="*.toml" --include="*.md" \
   --include="*.yml" --include="*.yaml" --include="*.json" \
@@ -103,10 +132,6 @@ for f in $FILES; do
     -e 's/syslog-mcp/cortex/g' \
     -e 's/syslog_mcp/cortex/g' \
     -e 's/SYSLOG_MCP_/CORTEX_/g' \
-    -e 's/SyslogService/CortexService/g' \
-    -e 's/SyslogEntry/LogEntry/g' \
-    -e 's/SyslogRecord/LogRecord/g' \
-    -e 's/SyslogConfig/ReceiverConfig/g' \
     "$f"
 done
 

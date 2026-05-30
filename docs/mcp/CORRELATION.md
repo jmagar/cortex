@@ -1,6 +1,6 @@
-# Correlation Reference -- syslog-mcp
+# Correlation Reference -- cortex
 
-syslog-mcp has several correlation-style actions. They all work against the
+cortex has several correlation-style actions. They all work against the
 same SQLite `logs` table, but they use different anchors and inclusion rules.
 
 ## Summary

@@ -16,7 +16,7 @@ Quick-push working tree, audit branches/worktrees, then design and build a Claud
 
 ## Session Overview
 
-Across two phases. **Phase 1 (sonnet):** routine cleanup — pushed `chore/mcp-stdio-local-dev-config` (gitignore + stdio transport switch + version bump 0.10.0→0.10.1), pushed 4 unpushed bollard fixes from main to origin, removed three stale worktrees, fixed Dependabot alert (rand 0.10.0→0.10.1), pushed docs/scripts cleanup. **Phase 2 (sonnet → opus 4.7):** designed and built the plugin deployment layer — full `userConfig` (13 fields including server vs client mode, systemd vs docker, fleet hosts), SessionStart hook (`scripts/plugin-setup.sh`) that writes `.env`, generates systemd unit or runs docker compose, symlinks the binary into `~/.local/bin`, two slash commands (`/syslog:doctor`, `/syslog:deploy-dropins`), updated smoke-test for the action-dispatch tool model, removed the `docker-hosts.toml` config file in favor of a `SYSLOG_DOCKER_HOSTS` env var (with code change to `config.rs`), fully rewrote `skills/syslog/SKILL.md` after a skill-reviewer audit found it referenced the pre-collapse tool names. Plugin manifest validated with `claude plugin validate`.
+Across two phases. **Phase 1 (sonnet):** routine cleanup — pushed `chore/mcp-stdio-local-dev-config` (gitignore + stdio transport switch + version bump 0.10.0→0.10.1), pushed 4 unpushed bollard fixes from main to origin, removed three stale worktrees, fixed Dependabot alert (rand 0.10.0→0.10.1), pushed docs/scripts cleanup. **Phase 2 (sonnet → opus 4.7):** designed and built the plugin deployment layer — full `userConfig` (13 fields including server vs client mode, systemd vs docker, fleet hosts), SessionStart hook (`scripts/plugin-setup.sh`) that writes `.env`, generates systemd unit or runs docker compose, symlinks the binary into `~/.local/bin`, two slash commands (`/syslog:doctor`, `/syslog:deploy-dropins`), updated smoke-test for the action-dispatch tool model, removed the `docker-hosts.toml` config file in favor of a `SYSLOG_DOCKER_HOSTS` env var (with code change to `config.rs`), fully rewrote `skills/cortex/SKILL.md` after a skill-reviewer audit found it referenced the pre-collapse tool names. Plugin manifest validated with `claude plugin validate`.
 
 ## Sequence of Events
 
@@ -41,7 +41,7 @@ Across two phases. **Phase 1 (sonnet):** routine cleanup — pushed `chore/mcp-s
 19. Tested hook locally — symlink, env file generation in both docker and systemd modes
 20. Updated README.md plugin section with full `userConfig` table + auto-deploy description
 21. Switched to opus 4.7 mid-session for the SKILL.md rewrite work
-22. Dispatched skill-reviewer agent on `skills/syslog/SKILL.md` — found it was severely stale (pre-collapse tool names, wrong userConfig refs, wrong HTTP fallback payloads, missing `source_ip` everywhere)
+22. Dispatched skill-reviewer agent on `skills/cortex/SKILL.md` — found it was severely stale (pre-collapse tool names, wrong userConfig refs, wrong HTTP fallback payloads, missing `source_ip` everywhere)
 23. Rewrote SKILL.md addressing all 14 reviewer findings
 
 ## Key Findings
@@ -74,7 +74,7 @@ Across two phases. **Phase 1 (sonnet):** routine cleanup — pushed `chore/mcp-s
 | `scripts/plugin-setup.sh` | New — idempotent deployment hook (env file, systemd unit / docker compose, binary symlink) |
 | `commands/doctor.md` | New — health check with config display, MCP probes, service logs on failure, fleet drop-in checks |
 | `commands/deploy-dropins.md` | New — SSH-based rsyslog drop-in deployment to fleet hosts |
-| `skills/syslog/SKILL.md` | Full rewrite — single-tool action dispatch, correct userConfig refs, sensitive-value note, `source_ip` parameter, `help` action |
+| `skills/cortex/SKILL.md` | Full rewrite — single-tool action dispatch, correct userConfig refs, sensitive-value note, `source_ip` parameter, `help` action |
 | `src/config.rs` | `SYSLOG_DOCKER_HOSTS` env var parsing — comma-separated hostnames → `DockerHostConfig` entries |
 | `scripts/smoke-test.sh` | Updated for action dispatch + tightened assertions (filter leakage, severity filtering, negative tests, help action coverage) |
 | `config/mcporter.json` | Server name `syslog-mcp` → `syslog` |
@@ -167,7 +167,7 @@ CLAUDE_PLUGIN_OPTION_IS_SERVER=false bash scripts/plugin-setup.sh
 
 - https://code.claude.com/docs/en/plugins-reference (scraped via axon, lines 388-420 for `userConfig` schema, lines 504-540 for `${CLAUDE_PLUGIN_DATA}` patterns)
 - https://code.claude.com/docs/en/plugins (scraped via axon)
-- Skill-reviewer subagent output for `skills/syslog/SKILL.md` — full review preserved in transcript
+- Skill-reviewer subagent output for `skills/cortex/SKILL.md` — full review preserved in transcript
 - Dependabot alert #1: https://github.com/jmagar/syslog-mcp/security/dependabot/1
 
 ## Open Questions

@@ -53,7 +53,7 @@ for file in "${VERSION_FILES[@]}"; do
     [ -f "$file" ] || { echo "  skip (not found): $file"; continue; }
     sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW}\"/" "$file"
     sed -i "s/^version = \"${CURRENT}\"/version = \"${NEW}\"/" "$file"
-    sed -i "s/syslog-mcp:v${CURRENT}/syslog-mcp:v${NEW}/g" "$file"
+    sed -i "s/cortex:v${CURRENT}/cortex:v${NEW}/g" "$file"
     echo "  updated: ${file#"${REPO_ROOT}/"}"
 done
 

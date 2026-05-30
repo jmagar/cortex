@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use lab_auth::AuthLayer;
 
-use crate::app::SyslogService;
+use crate::app::CortexService;
 use crate::config::{McpConfig, NotificationsConfig};
 use crate::observability::RuntimeObservability;
 use crate::otlp::OtlpCounters;
@@ -15,7 +15,7 @@ mod schemas;
 mod tools;
 
 pub use rmcp_server::{
-    rmcp_server, streamable_http_config, streamable_http_service, SyslogRmcpServer,
+    rmcp_server, streamable_http_config, streamable_http_service, CortexRmcpServer,
 };
 pub use routes::router;
 
@@ -41,14 +41,14 @@ pub enum AuthPolicy {
     /// trust boundary.
     LoopbackDev,
     /// No authentication is wired because an upstream gateway is expected to
-    /// enforce access before traffic reaches syslog-mcp.
+    /// enforce access before traffic reaches cortex.
     TrustedGatewayUnscoped,
     /// Authentication middleware is mounted. Scope checks MUST run.
     /// `auth_state` is:
     /// - `Some` when OAuth mode is active (Google flow + JWKS issuance
     ///   available; the OAuth router is mounted on these paths);
     /// - `None` when only static-bearer mode is active (no OAuth router
-    ///   mounted; middleware validates `SYSLOG_MCP_TOKEN` via lab-auth's
+    ///   mounted; middleware validates `CORTEX_TOKEN` via lab-auth's
     ///   `AuthLayer::with_static_token`).
     Mounted {
         auth_state: Option<Arc<lab_auth::state::AuthState>>,
@@ -77,7 +77,7 @@ impl std::fmt::Debug for AuthPolicy {
 /// Shared app state
 #[derive(Clone)]
 pub struct AppState {
-    pub service: SyslogService,
+    pub service: CortexService,
     pub config: McpConfig,
     /// Notifications subsystem configuration. Carried separately from `config`
     /// because `McpConfig` is the MCP-layer slice; notifications config lives
@@ -114,10 +114,10 @@ pub struct AppState {
 /// bearer-only path grants the configured scopes for the static token.
 ///
 /// # Static token admin opt-in
-/// By default, static bearer tokens receive only `syslog:read`. Set
-/// `static_token_is_admin = true` (via `SYSLOG_MCP_STATIC_TOKEN_ADMIN=true`
+/// By default, static bearer tokens receive only `cortex:read`. Set
+/// `static_token_is_admin = true` (via `CORTEX_STATIC_TOKEN_ADMIN=true`
 /// or `[mcp] static_token_is_admin = true` in config.toml) to also grant
-/// `syslog:admin`. OAuth tokens are unaffected — their scopes come from the
+/// `cortex:admin`. OAuth tokens are unaffected — their scopes come from the
 /// JWT claims.
 pub fn build_auth_layer(
     policy: &AuthPolicy,
@@ -129,12 +129,12 @@ pub fn build_auth_layer(
         AuthPolicy::LoopbackDev | AuthPolicy::TrustedGatewayUnscoped => None,
         AuthPolicy::Mounted { auth_state } => {
             // Default: static bearer tokens receive read-only scope.
-            // Opt-in: set SYSLOG_MCP_STATIC_TOKEN_ADMIN=true to also grant admin.
+            // Opt-in: set CORTEX_STATIC_TOKEN_ADMIN=true to also grant admin.
             // OAuth tokens gate admin via the scope claims in the JWT.
             let static_scopes: Vec<String> = if static_token_is_admin {
-                vec!["syslog:read".to_string(), "syslog:admin".to_string()]
+                vec!["cortex:read".to_string(), "cortex:admin".to_string()]
             } else {
-                vec!["syslog:read".to_string()]
+                vec!["cortex:read".to_string()]
             };
             Some(
                 AuthLayer::new()

@@ -3,18 +3,18 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SYSLOG_BIN="${SYSLOG_BIN:-}"
+CORTEX_BIN="${CORTEX_BIN:-}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-MCP_URL="${SYSLOG_MCP_URL:-http://localhost:3100/mcp}"
-DB_PATH="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-${PROJECT_DIR}/data/syslog.db}}"
-RUN_ID="${SYSLOG_AI_SMOKE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+MCP_URL="${CORTEX_URL:-http://localhost:3100/mcp}"
+DB_PATH="${CORTEX_SMOKE_DB_PATH:-${CORTEX_DB_PATH:-${PROJECT_DIR}/data/cortex.db}}"
+RUN_ID="${CORTEX_AI_SMOKE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
-  echo "FAIL  SYSLOG_AI_SMOKE_RUN_ID contains unsafe characters" >&2
+  echo "FAIL  CORTEX_AI_SMOKE_RUN_ID contains unsafe characters" >&2
   exit 1
 fi
-QUERY="${SYSLOG_AI_SMOKE_QUERY:-aismoke${RUN_ID//[^A-Za-z0-9]/}}"
+QUERY="${CORTEX_AI_SMOKE_QUERY:-aismoke${RUN_ID//[^A-Za-z0-9]/}}"
 SESSION_ID="ai-smoke-session-${RUN_ID}"
-PROJECT="/tmp/syslog-mcp-ai-smoke-${RUN_ID}"
+PROJECT="/tmp/cortex-ai-smoke-${RUN_ID}"
 
 pass() {
   printf 'PASS  %s\n' "$1"
@@ -26,39 +26,39 @@ fail() {
 }
 
 resolve_syslog_bin() {
-  if [[ -n "$SYSLOG_BIN" ]]; then
-    if [[ -x "$SYSLOG_BIN" ]]; then
-      printf '%s\n' "$SYSLOG_BIN"
-    elif command -v "$SYSLOG_BIN" >/dev/null 2>&1; then
-      command -v "$SYSLOG_BIN"
+  if [[ -n "$CORTEX_BIN" ]]; then
+    if [[ -x "$CORTEX_BIN" ]]; then
+      printf '%s\n' "$CORTEX_BIN"
+    elif command -v "$CORTEX_BIN" >/dev/null 2>&1; then
+      command -v "$CORTEX_BIN"
     else
-      fail "SYSLOG_BIN is not executable or on PATH: $SYSLOG_BIN"
+      fail "CORTEX_BIN is not executable or on PATH: $CORTEX_BIN"
     fi
-  elif command -v syslog >/dev/null 2>&1; then
-    command -v syslog
-  elif [[ -x "${PROJECT_DIR}/target/debug/syslog" ]]; then
-    printf '%s\n' "${PROJECT_DIR}/target/debug/syslog"
+  elif command -v cortex >/dev/null 2>&1; then
+    command -v cortex
+  elif [[ -x "${PROJECT_DIR}/target/debug/cortex" ]]; then
+    printf '%s\n' "${PROJECT_DIR}/target/debug/cortex"
   else
-    fail "syslog binary not found; install syslog on PATH, set SYSLOG_BIN, or run cargo build"
+    fail "syslog binary not found; install syslog on PATH, set CORTEX_BIN, or run cargo build"
   fi
 }
 
 load_token() {
-  if [[ -n "${SYSLOG_MCP_TOKEN:-}" ]]; then
-    printf '%s' "$SYSLOG_MCP_TOKEN"
+  if [[ -n "${CORTEX_TOKEN:-}" ]]; then
+    printf '%s' "$CORTEX_TOKEN"
     return
   fi
-  local env_file="${SYSLOG_MCP_ENV_FILE:-${SYSLOG_MCP_HOME:-${HOME}/.syslog-mcp}/.env}"
+  local env_file="${CORTEX_ENV_FILE:-${CORTEX_HOME:-${HOME}/.cortex}/.env}"
   if [[ -f "$env_file" ]]; then
-    awk '$0 ~ /^SYSLOG_MCP_TOKEN=/ {sub(/^SYSLOG_MCP_TOKEN=/, ""); print; exit}' "$env_file"
+    awk '$0 ~ /^CORTEX_TOKEN=/ {sub(/^CORTEX_TOKEN=/, ""); print; exit}' "$env_file"
   fi
 }
 
 run_syslog() {
-  SYSLOG_MCP_DB_PATH="$DB_PATH" \
-    SYSLOG_DOCKER_INGEST_ENABLED="${SYSLOG_DOCKER_INGEST_ENABLED:-false}" \
+  CORTEX_DB_PATH="$DB_PATH" \
+    CORTEX_DOCKER_INGEST_ENABLED="${CORTEX_DOCKER_INGEST_ENABLED:-false}" \
     RUST_LOG="${RUST_LOG:-error}" \
-    "$SYSLOG_BIN" "$@"
+    "$CORTEX_BIN" "$@"
 }
 
 mcp_call() {
@@ -104,8 +104,8 @@ PY
 
 cd "$PROJECT_DIR"
 
-SYSLOG_BIN="$(resolve_syslog_bin)"
-[[ -x "$SYSLOG_BIN" ]] || fail "$SYSLOG_BIN is not executable"
+CORTEX_BIN="$(resolve_syslog_bin)"
+[[ -x "$CORTEX_BIN" ]] || fail "$CORTEX_BIN is not executable"
 TOKEN="$(load_token || true)"
 export TOKEN
 
@@ -119,7 +119,7 @@ from="$(date -u -d '10 minutes ago' +'%Y-%m-%dT%H:%M:%SZ')"
   printf '{"sessionId":"%s","timestamp":"%s","cwd":"%s","content":[{"type":"text","text":"%s project context MCP smoke content"}]}\n' "$SESSION_ID" "$now" "$PROJECT" "$QUERY"
 } >"$FIXTURE"
 
-printf 'syslog: %s\n' "$("$SYSLOG_BIN" --version)"
+printf 'syslog: %s\n' "$("$CORTEX_BIN" --version)"
 printf 'db:     %s\n' "$DB_PATH"
 printf 'mcp:    %s\n' "$MCP_URL"
 

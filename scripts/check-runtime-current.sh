@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Check whether the running syslog-mcp Docker Compose container is using the
+# Check whether the running cortex Docker Compose container is using the
 # current local compose image and binary version.
 set -euo pipefail
 
 MODE="auto"
 PULL="false"
-SERVICE="syslog-mcp"
+SERVICE="cortex"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DEFAULT_COMPOSE_DIR="${SYSLOG_MCP_HOME:-${HOME}/.syslog-mcp}/compose"
-COMPOSE_DIR="${SYSLOG_MCP_COMPOSE_DIR:-$DEFAULT_COMPOSE_DIR}"
+DEFAULT_COMPOSE_DIR="${CORTEX_HOME:-${HOME}/.cortex}/compose"
+COMPOSE_DIR="${CORTEX_COMPOSE_DIR:-$DEFAULT_COMPOSE_DIR}"
 ALLOW_LEGACY="false"
 ALLOW_LOCAL_IMAGE="false"
 
@@ -25,11 +25,11 @@ Options:
   --pull                  Docker only: pull compose image before comparing.
                           Without this, Docker mode only proves the container
                           matches the image already present in the local cache.
-  --compose-dir DIR       Docker compose project dir (default: ~/.syslog-mcp/compose)
+  --compose-dir DIR       Docker compose project dir (default: ~/.cortex/compose)
   --allow-legacy          Permit a running container from a non-canonical
                           Compose working directory.
-  --allow-local-image     Permit arbitrary non-ghcr.io/jmagar/syslog-mcp
-                          images. The repo-supported syslog-mcp:local-debug
+  --allow-local-image     Permit arbitrary non-ghcr.io/jmagar/cortex
+                          images. The repo-supported cortex:local-debug
                           image is accepted by default.
 EOF
 }
@@ -94,17 +94,17 @@ detect_mode() {
 }
 
 # Resolve the env file the deployed compose stack actually uses for YAML
-# variable substitution (e.g. ${SYSLOG_MCP_VERSION:-...}). This MUST mirror
+# variable substitution (e.g. ${CORTEX_VERSION:-...}). This MUST mirror
 # `compose_env_file()` in src/compose/mutation.rs: docker compose only auto-
 # loads `.env` from the project dir, but the installed bundle keeps compose
-# files under ~/.syslog-mcp/compose/ and its env file one level up at
-# ~/.syslog-mcp/.env. The stack is launched with `--env-file <home>/.env`
+# files under ~/.cortex/compose/ and its env file one level up at
+# ~/.cortex/.env. The stack is launched with `--env-file <home>/.env`
 # (src/setup/firstrun.rs), so without resolving the same file here the
 # version variable falls back to the compose-file default and we compare
 # against the wrong image tag.
 compose_env_file() {
-  if [[ -n "${SYSLOG_ENV_FILE:-}" && -f "$SYSLOG_ENV_FILE" ]]; then
-    printf '%s\n' "$SYSLOG_ENV_FILE"
+  if [[ -n "${CORTEX_ENV_FILE:-}" && -f "$CORTEX_ENV_FILE" ]]; then
+    printf '%s\n' "$CORTEX_ENV_FILE"
     return
   fi
   local parent_env="${COMPOSE_DIR%/}/../.env"
@@ -160,7 +160,7 @@ check_docker() {
     cid="$(docker ps --filter "name=^/${SERVICE}$" --format '{{.ID}}' 2>/dev/null | head -1)"
   fi
   if [[ -z "$cid" ]]; then
-    echo "FAIL: syslog-mcp container is not running"
+    echo "FAIL: cortex container is not running"
     return 1
   fi
   label_compose_dir="$(docker inspect "$cid" --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' 2>/dev/null || true)"
@@ -181,9 +181,9 @@ check_docker() {
   image="$(compose_image)"
   [[ -n "$image" ]] || image="$(docker inspect "$cid" --format '{{.Config.Image}}')"
 
-  # Dev images are built from the repo working dir, not ~/.syslog-mcp/compose — allow automatically.
+  # Dev images are built from the repo working dir, not ~/.cortex/compose — allow automatically.
   local is_local_image="false"
-  if [[ "$image" == "syslog-mcp:dev" || "$image" == "syslog-mcp:local-debug" ]]; then
+  if [[ "$image" == "cortex:dev" || "$image" == "cortex:local-debug" ]]; then
     is_local_image="true"
   fi
   if [[ "$ALLOW_LEGACY" != "true" && "$is_local_image" != "true" && "$canonical_compose_dir" != "$canonical_default_dir" ]]; then
@@ -192,9 +192,9 @@ check_docker() {
     return 1
   fi
 
-  if [[ "$ALLOW_LOCAL_IMAGE" != "true" && "$image" != ghcr.io/jmagar/syslog-mcp:* && "$image" != "syslog-mcp:local-debug" && "$image" != "syslog-mcp:dev" ]]; then
+  if [[ "$ALLOW_LOCAL_IMAGE" != "true" && "$image" != ghcr.io/jmagar/cortex:* && "$image" != "cortex:local-debug" && "$image" != "cortex:dev" ]]; then
     echo "FAIL: running container uses unsupported image: $image"
-    echo "fix: use ghcr.io/jmagar/syslog-mcp:<version>, syslog-mcp:local-debug, or rerun with --allow-local-image for an intentional custom deployment"
+    echo "fix: use ghcr.io/jmagar/cortex:<version>, cortex:local-debug, or rerun with --allow-local-image for an intentional custom deployment"
     return 1
   fi
 
@@ -246,7 +246,7 @@ fi
 case "$MODE" in
   docker) check_docker ;;
   none)
-    echo "FAIL: no running syslog-mcp Docker container detected"
+    echo "FAIL: no running cortex Docker container detected"
     exit 1
     ;;
   *)

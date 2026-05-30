@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
-use syslog_mcp::command_log::{self, CommandLogImportResult};
+use cortex::command_log::{self, CommandLogImportResult};
 
 use super::{
     AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, CliMode, ShellAtuinIndexArgs, ShellIndexArgs,

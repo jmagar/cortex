@@ -1,9 +1,9 @@
 use anyhow::{bail, Result};
-use serde::Serialize;
-use syslog_mcp::app::{
+use cortex::app::{
     DbBackupResult, DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbVacuumResult,
 };
-use syslog_mcp::compose::{CommandOutput, ComposeCommandResult, ComposeStatus};
+use cortex::compose::{CommandOutput, ComposeCommandResult, ComposeStatus};
+use serde::Serialize;
 
 use super::color::{cyan, error, muted, primary, success, warn};
 use super::output_common::print_json;

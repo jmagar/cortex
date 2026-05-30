@@ -1,4 +1,4 @@
-# Deploy Runbook — syslog-mcp
+# Deploy Runbook — cortex
 
 ## Rolling Update
 
@@ -47,7 +47,7 @@ Docker will mark the container unhealthy after 3 consecutive failures (30s inter
 
 ```bash
 # Check container health status
-docker inspect --format='{{.State.Health.Status}}' syslog-mcp
+docker inspect --format='{{.State.Health.Status}}' cortex
 ```
 
 ## Pre-deploy Checklist
@@ -62,7 +62,7 @@ docker inspect --format='{{.State.Health.Status}}' syslog-mcp
 
 ```bash
 # WAL-safe online backup (no downtime)
-docker compose exec syslog-mcp sqlite3 /data/syslog.db ".backup /data/syslog-pre-deploy.db"
+docker compose exec cortex sqlite3 /data/cortex.db ".backup /data/syslog-pre-deploy.db"
 ```
 
 The repo also includes `scripts/backup.sh`, which performs a WAL-safe checkpoint and SQLite backup from the host when the database path is reachable.
@@ -75,18 +75,18 @@ Use this path when release notes, startup logs, or `docs/CONFIG.md` indicate a h
 
 ```bash
 # 1. Confirm current database size and baseline counts.
-docker compose exec syslog-mcp sqlite3 /data/syslog.db \
+docker compose exec cortex sqlite3 /data/cortex.db \
   "SELECT COUNT(*) FROM logs; PRAGMA page_count; PRAGMA page_size;"
 
 # 2. Take a WAL-safe backup.
-docker compose exec syslog-mcp sqlite3 /data/syslog.db ".backup /data/syslog-pre-heavy-migration.db"
+docker compose exec cortex sqlite3 /data/cortex.db ".backup /data/syslog-pre-heavy-migration.db"
 
 # 3. Build or pull the new version, then start it.
 docker compose build
 docker compose up -d
 
 # 4. Watch for migration start/completion lines.
-docker compose logs -f syslog-mcp
+docker compose logs -f cortex
 
 # 5. Verify health and storage state after completion.
 curl -sf http://localhost:3100/health
@@ -100,15 +100,15 @@ Expected operator signals:
 - `/health` may fail until the migration commits.
 - UDP senders can lose packets while the listener is unavailable; TCP senders may reconnect or buffer depending on their own config.
 
-Rollback while a migration is running is a restore operation, not a partial schema edit. Stop the new process, restore the WAL-safe backup to `/data/syslog.db`, then start the previous image or binary.
+Rollback while a migration is running is a restore operation, not a partial schema edit. Stop the new process, restore the WAL-safe backup to `/data/cortex.db`, then start the previous image or binary.
 
 ## Docker Ingest Integration Check
 
 The default `scripts/smoke-test.sh` covers live UDP and TCP ingest plus MCP actions. Docker ingest is heavier because it requires a docker-socket-proxy-compatible endpoint and a container log stream, so run it explicitly during Docker ingest changes:
 
 1. Start a disposable docker-socket-proxy or mocked Docker HTTP fixture with `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, and `POST=0`.
-2. Start syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` and `SYSLOG_DOCKER_HOSTS=<fixture-host>`.
+2. Start cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` and `CORTEX_DOCKER_HOSTS=<fixture-host>`.
 3. Run a short-lived container that writes a unique marker to stdout and stderr.
 4. Verify `search` or `tail` returns the marker and that stream rows use `source_ip=docker://<host>/<container>/<stream>`.
 5. Restart or recreate the disposable container and verify lifecycle rows use `source_ip=docker-event://<host>/<container>/<action>` with `facility=docker`.
-5. Stop the fixture and confirm syslog-mcp logs reconnect/backoff without crashing.
+5. Stop the fixture and confirm cortex logs reconnect/backoff without crashing.

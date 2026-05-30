@@ -41,16 +41,13 @@ fn doctor_cache_keeps_container_results_keyed_by_name() {
 #[test]
 fn systemctl_env_parser_keeps_equals_in_values_and_flags_missing_units() {
     let env = parse_systemctl_env_output(
-        "Environment=SYSLOG_MCP_DB_PATH=/data/syslog.db TOKEN=a=b\nLoadState=not-found\n",
+        "Environment=CORTEX_DB_PATH=/data/cortex.db TOKEN=a=b\nLoadState=not-found\n",
     );
 
     assert_eq!(
         env.inline,
         vec![
-            (
-                "SYSLOG_MCP_DB_PATH".to_string(),
-                "/data/syslog.db".to_string()
-            ),
+            ("CORTEX_DB_PATH".to_string(), "/data/cortex.db".to_string()),
             ("TOKEN".to_string(), "a=b".to_string()),
         ]
     );

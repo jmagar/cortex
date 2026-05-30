@@ -100,7 +100,7 @@ Expected: `test tests::test_looks_like_timestamp_true ... ok` and `test tests::t
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/jmagar/workspace/syslog-mcp
+cd /home/jmagar/workspace/cortex
 git add src/syslog.rs
 git commit -m "test: add looks_like_timestamp with unit tests"
 ```
@@ -486,7 +486,7 @@ git commit -m "fix: parse UniFi CEF hostname from UNIFIdeviceName extension fiel
 - [ ] **Step 1: Rebuild and redeploy**
 
 ```bash
-cd /home/jmagar/workspace/syslog-mcp
+cd /home/jmagar/workspace/cortex
 docker compose build && docker compose up -d
 ```
 

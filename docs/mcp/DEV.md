@@ -1,12 +1,12 @@
-# Development Workflow -- syslog-mcp
+# Development Workflow -- cortex
 
-Day-to-day development guide for the syslog-mcp server.
+Day-to-day development guide for the cortex server.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/jmagar/syslog-mcp.git
-cd syslog-mcp
+git clone https://github.com/jmagar/cortex.git
+cd cortex
 cp .env.example .env
 chmod 600 .env
 
@@ -16,7 +16,7 @@ just dev          # Start dev server (cargo run)
 ## Project structure
 
 ```
-syslog-mcp/
+cortex/
   src/
     main.rs              # Entry point, task wiring, graceful shutdown
     config.rs            # Config: config.toml + env var overlay
@@ -26,7 +26,7 @@ syslog-mcp/
   tests/                 # Live integration tests
   scripts/               # Smoke tests, backups, plugin checks
   hooks/                 # Claude Code hooks (sync-env and related session checks)
-  skills/syslog/         # Skill definition (SKILL.md)
+  skills/cortex/         # Skill definition (SKILL.md)
   .claude-plugin/        # Claude Code plugin manifest
   .codex-plugin/         # Codex CLI plugin manifest
   gemini-extension.json  # Gemini CLI manifest
@@ -89,7 +89,7 @@ Set `RUST_LOG` in `.env` or environment:
 Targeted filtering:
 
 ```bash
-RUST_LOG=syslog_mcp=debug,tower_http=info cargo run
+RUST_LOG=cortex=debug,tower_http=info cargo run
 ```
 
 ### mcporter testing

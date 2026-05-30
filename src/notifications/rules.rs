@@ -235,7 +235,7 @@ pub fn evaluate_ingest_queue_pressure(
         "[WARNING] syslog ingest queue pressure on {hostname}"
     ));
     let body = escape_for_notification(&format!(
-        "syslog-mcp observed queue pressure on **{hostname}** since the last check:\n\n\
+        "cortex observed queue pressure on **{hostname}** since the last check:\n\n\
          - queue-full transitions: `{full_transitions_delta}`\n\
          - UDP drops from full queue: `{udp_drops_delta}`\n\
          - TCP drops from full queue: `{tcp_drops_delta}`\n\

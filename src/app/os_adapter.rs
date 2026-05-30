@@ -14,12 +14,12 @@
 //!
 //! # Current status
 //!
-//! `SyslogService` carries an `os: Arc<dyn OsAdapter + Send + Sync>` field.
+//! `CortexService` carries an `os: Arc<dyn OsAdapter + Send + Sync>` field.
 //! The service layer calls `self.os.run_command(program, args).await` instead
 //! of the old module-level `command_output(program, args)`. Production code
 //! uses `SystemOsAdapter`; tests can supply a `MockOsAdapter`.
 //!
-//! Splitting `SyslogService` into sub-services (`LogQueryService`,
+//! Splitting `CortexService` into sub-services (`LogQueryService`,
 //! `AiAnalyticsService`, etc.) is deferred — the OsAdapter extraction is the
 //! prerequisite and is delivered here.
 

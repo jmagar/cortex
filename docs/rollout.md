@@ -1,15 +1,15 @@
-# syslog-mcp v0.26 rollout — HTTP CLI cutover
+# cortex v0.26 rollout — HTTP CLI cutover
 
-> **v0.26 BREAKING**: `SYSLOG_API_ENABLED` was removed. The REST API at
+> **v0.26 BREAKING**: `CORTEX_API_ENABLED` was removed. The REST API at
 > `/api/*` is now always-on and the container fails to start without a
-> `SYSLOG_API_TOKEN`. Run `syslog setup repair` BEFORE upgrading the
-> container so the token is provisioned and `SYSLOG_USE_HTTP=true` is
+> `CORTEX_API_TOKEN`. Run `syslog setup repair` BEFORE upgrading the
+> container so the token is provisioned and `CORTEX_USE_HTTP=true` is
 > written to `.env`. The CLI defaults to HTTP transport from v0.26
 > onwards; to keep direct-DB behaviour, remove the line or set
-> `SYSLOG_USE_HTTP=false` before running `syslog`.
+> `CORTEX_USE_HTTP=false` before running `syslog`.
 
 This document is the manual rollout playbook for upgrading a deployed
-syslog-mcp host from a pre-v0.26 release. It assumes a single deploy
+cortex host from a pre-v0.26 release. It assumes a single deploy
 host running Docker Compose plus zero or more remote hosts running the
 `syslog` CLI.
 
@@ -21,17 +21,17 @@ touching the container. None of them mutate state.
 ```bash
 # 1. Baseline DB shape — used to confirm post-deploy growth and verify
 #    no schema migration re-applied.
-sqlite3 ~/.syslog-mcp/data/syslog.db \
+sqlite3 ~/.cortex/data/cortex.db \
   'SELECT COUNT(*), MAX(id), (SELECT MAX(version) FROM schema_migrations) FROM logs'
 
 # 2. Confirm the API token exists in .env. If missing, run
 #    `syslog setup repair` BEFORE step 1 of "Deploy order".
-grep SYSLOG_API_TOKEN ~/.syslog-mcp/.env
+grep CORTEX_API_TOKEN ~/.cortex/.env
 
 # 3. Parity check: query the same data via local + HTTP and assert
 #    the JSON shapes agree. Empty diff = safe to cut over.
 syslog --json hosts | jq -S . > /tmp/syslog-local.json
-SYSLOG_USE_HTTP=1 syslog --json hosts | jq -S . > /tmp/syslog-http.json
+CORTEX_USE_HTTP=1 syslog --json hosts | jq -S . > /tmp/syslog-http.json
 diff /tmp/syslog-local.json /tmp/syslog-http.json && echo "parity OK"
 
 # 4. ai-watch daemon must be active + binary SHA recorded so we know
@@ -50,14 +50,14 @@ syslog compose doctor --json | jq '.diagnostics | length'
 Order matters. Each step's failure mode is documented inline.
 
 1. **`syslog setup repair`** — idempotent. Provisions
-   `SYSLOG_API_TOKEN` if missing and writes `SYSLOG_USE_HTTP=true` if
+   `CORTEX_API_TOKEN` if missing and writes `CORTEX_USE_HTTP=true` if
    absent. Preserves any existing operator override (including
-   `SYSLOG_USE_HTTP=false`). Run BEFORE pulling the new image so the
+   `CORTEX_USE_HTTP=false`). Run BEFORE pulling the new image so the
    container has a token to start with.
 
 2. **`syslog compose pull && syslog compose up`** — pull the v0.26
    image and recreate the container. The container fails fast if
-   `SYSLOG_API_TOKEN` is missing; step 1 prevents that. Wait until
+   `CORTEX_API_TOKEN` is missing; step 1 prevents that. Wait until
    `syslog compose ps` reports `healthy` before proceeding.
 
 3. **Install new CLI binary on the deploy host** —
@@ -72,20 +72,20 @@ Order matters. Each step's failure mode is documented inline.
    the new server's expectations (schema, write-path semantics).
 
 5. **Multi-host token propagation** — for every remote host that runs
-   the `syslog` CLI, the new `SYSLOG_API_TOKEN` must reach
-   `~/.syslog-mcp/.env` (or wherever the host reads it). **DO NOT**
-   run `export SYSLOG_API_TOKEN=...` in an interactive shell — it
+   the `syslog` CLI, the new `CORTEX_API_TOKEN` must reach
+   `~/.cortex/.env` (or wherever the host reads it). **DO NOT**
+   run `export CORTEX_API_TOKEN=...` in an interactive shell — it
    leaks into shell history. Use one of:
 
    ```bash
    # File-based propagation over SSH (recommended)
-   ssh remote-host "mkdir -p ~/.syslog-mcp && chmod 700 ~/.syslog-mcp"
-   scp ~/.syslog-mcp/.env remote-host:~/.syslog-mcp/.env
-   ssh remote-host "chmod 600 ~/.syslog-mcp/.env"
+   ssh remote-host "mkdir -p ~/.cortex && chmod 700 ~/.cortex"
+   scp ~/.cortex/.env remote-host:~/.cortex/.env
+   ssh remote-host "chmod 600 ~/.cortex/.env"
    ```
 
    For systemd-managed CLIs, use an `EnvironmentFile=` unit pointing
-   at `~/.syslog-mcp/.env` rather than `Environment=SYSLOG_API_TOKEN=...`
+   at `~/.cortex/.env` rather than `Environment=CORTEX_API_TOKEN=...`
    (which is world-readable via `systemctl cat`).
 
 ## Post-deploy verification
@@ -98,7 +98,7 @@ Three verification windows. All checks are non-destructive.
 # Container reports healthy, no recent errors in logs.
 docker compose ps
 syslog tail -n 10
-docker compose logs syslog-mcp --since 5m | grep -E "500|ERROR|panic" | wc -l   # expect: 0
+docker compose logs cortex --since 5m | grep -E "500|ERROR|panic" | wc -l   # expect: 0
 ```
 
 ### +1 hour
@@ -114,7 +114,7 @@ time syslog tail -n 100 --json > /dev/null   # expect: < 0.2s on a warm cache
 
 ```bash
 # No migration re-apply lines in container logs.
-docker compose logs syslog-mcp --since 24h | grep -i "applying migration" | wc -l   # expect: 0
+docker compose logs cortex --since 24h | grep -i "applying migration" | wc -l   # expect: 0
 # ai-watch is still processing — checkpoint count grew.
 syslog ai checkpoints --json | jq '.checkpoints | length'
 ```
@@ -130,7 +130,7 @@ syslog compose down
 
 # 2. Remove the existing line — keep your editor away from .env, the
 #    sed is safer because it preserves every other key/value.
-sed -i '/^SYSLOG_API_TOKEN=/d' ~/.syslog-mcp/.env
+sed -i '/^CORTEX_API_TOKEN=/d' ~/.cortex/.env
 
 # 3. Regenerate. setup repair writes a fresh 64-char hex token.
 syslog setup repair
@@ -154,7 +154,7 @@ cp ~/.local/bin/syslog.backup ~/.local/bin/syslog
 
 # 2. Revert to direct-DB default. setup repair will NOT re-add the
 #    line unless the key is fully absent, so deletion is sufficient.
-sed -i '/^SYSLOG_USE_HTTP=/d' ~/.syslog-mcp/.env
+sed -i '/^CORTEX_USE_HTTP=/d' ~/.cortex/.env
 
 # 3. Restart the ai-watch daemon so it picks up the restored binary.
 systemctl --user restart syslog-ai-watch
@@ -169,14 +169,14 @@ is required for a same-day revert.
 
 - **VACUUM on large databases**: `db vacuum --full` on a database
   larger than ~10 GB may exceed the 10-minute HTTP request timeout.
-  Workaround: `SYSLOG_USE_HTTP=false syslog db vacuum --full --force`
+  Workaround: `CORTEX_USE_HTTP=false syslog db vacuum --full --force`
   to bypass the API and run VACUUM directly against the SQLite file.
   This is a known limitation tracked for the v0.27 successor.
 
 - **`db backup` is local-only**: backup writes the file to a path on
   the host invoking the CLI, which the container has no way to
   service. Always invoke `db backup` in default mode
-  (no `--http`, no `SYSLOG_USE_HTTP=true`).
+  (no `--http`, no `CORTEX_USE_HTTP=true`).
 
 - **`ai watch`, `ai index`, `ai add`, `ai doctor`, `ai smoke-watch`,
   `ai watch-status`** — these read host filesystems or run host

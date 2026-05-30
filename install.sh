@@ -4,20 +4,20 @@ if (set -o pipefail) 2>/dev/null; then
   set -o pipefail
 fi
 
-CRATE="${SYSLOG_INSTALL_CRATE:-syslog-mcp}"
-VERSION="${SYSLOG_VERSION:-latest}"
-PREFIX="${SYSLOG_INSTALL_PREFIX:-$HOME/.local}"
+CRATE="${CORTEX_INSTALL_CRATE:-cortex}"
+VERSION="${CORTEX_VERSION:-latest}"
+PREFIX="${CORTEX_INSTALL_PREFIX:-$HOME/.local}"
 BIN_DIR="$PREFIX/bin"
-BIN="$BIN_DIR/syslog"
-DRY_RUN="${SYSLOG_INSTALL_DRY_RUN:-0}"
-SKIP_SETUP="${SYSLOG_INSTALL_SKIP_SETUP:-0}"
+BIN="$BIN_DIR/cortex"
+DRY_RUN="${CORTEX_INSTALL_DRY_RUN:-0}"
+SKIP_SETUP="${CORTEX_INSTALL_SKIP_SETUP:-0}"
 
 say() {
   printf '%s\n' "$*" >&2
 }
 
 fail() {
-  say "syslog install: $*"
+  say "cortex install: $*"
   exit 1
 }
 
@@ -36,8 +36,8 @@ check_setup_prereqs() {
 
 install_binary() {
   mkdir -p "$BIN_DIR"
-  if [ "${SYSLOG_INSTALL_FROM_PATH:-}" ]; then
-    cargo install --locked --path "$SYSLOG_INSTALL_FROM_PATH" --root "$PREFIX" --force
+  if [ "${CORTEX_INSTALL_FROM_PATH:-}" ]; then
+    cargo install --locked --path "$CORTEX_INSTALL_FROM_PATH" --root "$PREFIX" --force
   elif [ "$VERSION" = "latest" ]; then
     cargo install --locked "$CRATE" --root "$PREFIX" --force
   else

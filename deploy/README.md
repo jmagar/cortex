@@ -1,9 +1,9 @@
-# Fleet Deployment — syslog-mcp expansion
+# Fleet Deployment — cortex expansion
 
 These artifacts deploy the operational side of epic
-`syslog-mcp-6uoy` (full-fleet log ingest + OTLP). Phase 1 (OTLP receiver)
+`cortex-6uoy` (full-fleet log ingest + OTLP). Phase 1 (OTLP receiver)
 and Phase 2 (enrichment + retention) are pure Rust changes already in the
-syslog-mcp binary; the files in this directory are the manual deployment
+cortex binary; the files in this directory are the manual deployment
 steps for Phases 3–5.
 
 **Deploy mechanism: manual SSH per host.** No Ansible, no automation — match
@@ -53,10 +53,10 @@ WSL alternative to `systemctl restart`: `sudo service rsyslog restart`.
 ```bash
 # Generate a test journald entry, confirm it arrives
 ssh <host> 'logger -t deploy-test "hello from journald"'
-mcporter call --config config/mcporter.json syslog-mcp.search query=deploy-test limit=5
+mcporter call --config config/mcporter.json cortex.search query=deploy-test limit=5
 
 # After a claude session runs, confirm transcripts arrive
-mcporter call --config config/mcporter.json syslog-mcp.search 'tag:claude-transcript' limit=5
+mcporter call --config config/mcporter.json cortex.search 'tag:claude-transcript' limit=5
 ```
 
 ---
@@ -88,9 +88,9 @@ grant the `syslog` user read ACLs for private Authelia/AdGuard logs and AI
 transcript trees before restarting rsyslog:
 
 ```bash
-scp deploy/apparmor/usr.sbin.rsyslogd.syslog-mcp squirts:/tmp/
+scp deploy/apparmor/usr.sbin.rsyslogd.cortex squirts:/tmp/
 ssh squirts 'sudo install -o root -g root -m 0644 \
-  /tmp/usr.sbin.rsyslogd.syslog-mcp /etc/apparmor.d/local/usr.sbin.rsyslogd \
+  /tmp/usr.sbin.rsyslogd.cortex /etc/apparmor.d/local/usr.sbin.rsyslogd \
   && sudo apparmor_parser -r /etc/apparmor.d/usr.sbin.rsyslogd \
   && sudo setfacl -m u:syslog:rx \
     /mnt/appdata/authelia /mnt/appdata/authelia/logs \
@@ -148,7 +148,7 @@ Before adding a vaultwarden imfile drop-in, check whether its events are
 already arriving via container stdout ingestion:
 
 ```bash
-mcporter call --config config/mcporter.json syslog-mcp.search query=vaultwarden limit=10
+mcporter call --config config/mcporter.json cortex.search query=vaultwarden limit=10
 ```
 
 If you see auth events, no further action. If empty, add a drop-in similar
@@ -156,13 +156,13 @@ to `35-authelia.conf` pointed at vaultwarden's log file.
 
 ### Optional source-IP gating
 
-Set these in syslog-mcp's environment (`/.env` or compose) to prevent other
+Set these in cortex's environment (`/.env` or compose) to prevent other
 tailnet hosts from sending crafted messages with `tag=authelia` or
 `tag=adguard-query` to spoof severity/classification:
 
 ```bash
-SYSLOG_MCP_AUTHELIA_SOURCE_IP=100.74.16.82   # squirts tailnet IP
-SYSLOG_MCP_ADGUARD_SOURCE_IP=100.74.16.82
+CORTEX_AUTHELIA_SOURCE_IP=100.74.16.82   # squirts tailnet IP
+CORTEX_ADGUARD_SOURCE_IP=100.74.16.82
 ```
 
 ---
@@ -200,7 +200,7 @@ After each config change, start a new claude/codex session, then:
 curl -s http://dookie:3100/health | jq .otlp_logs_received
 
 # Records should be searchable
-mcporter call --config config/mcporter.json syslog-mcp.search 'service:claude-code' limit=5
+mcporter call --config config/mcporter.json cortex.search 'service:claude-code' limit=5
 ```
 
 ---
@@ -212,7 +212,7 @@ mcporter call --config config/mcporter.json syslog-mcp.search 'service:claude-co
   flowing.
 * **OTel client config (Phase 5):** unset the env keys (Claude) or remove
   the `[otel]` block (Codex). Already-stored records remain.
-* **OTLP receiver (Phase 1):** revert the syslog-mcp container to a
+* **OTLP receiver (Phase 1):** revert the cortex container to a
   pre-0.11 image. The receiver routes simply disappear; existing syslog
   ingest continues unaffected.
 * **Migration v3 (Phase 2):** the composite index can be dropped with

@@ -1,6 +1,6 @@
-# Setup Guide -- syslog-mcp
+# Setup Guide -- cortex
 
-Step-by-step instructions to get syslog-mcp running locally, in Docker, or as a Claude Code plugin.
+Step-by-step instructions to get cortex running locally, in Docker, or as a Claude Code plugin.
 
 ## Prerequisites
 
@@ -18,8 +18,8 @@ Step-by-step instructions to get syslog-mcp running locally, in Docker, or as a 
 ## 1. Clone the repository
 
 ```bash
-git clone https://github.com/jmagar/syslog-mcp.git
-cd syslog-mcp
+git clone https://github.com/jmagar/cortex.git
+cd cortex
 ```
 
 ## 2. Install Rust toolchain
@@ -55,21 +55,21 @@ Edit `.env` and set values as needed:
 
 ```bash
 # Syslog listener
-SYSLOG_HOST=0.0.0.0
-SYSLOG_PORT=1514
+CORTEX_RECEIVER_HOST=0.0.0.0
+CORTEX_RECEIVER_PORT=1514
 
 # MCP server
-SYSLOG_MCP_HOST=0.0.0.0
-SYSLOG_MCP_PORT=3100
+CORTEX_HOST=0.0.0.0
+CORTEX_PORT=3100
 
 # Recommended for non-loopback binds: enable bearer auth on /mcp and OTLP endpoints
 #   openssl rand -hex 32
-SYSLOG_MCP_TOKEN=
+CORTEX_TOKEN=
 
 # Storage
-SYSLOG_MCP_DB_PATH=/data/syslog.db
-SYSLOG_MCP_POOL_SIZE=4
-SYSLOG_MCP_RETENTION_DAYS=90
+CORTEX_DB_PATH=/data/cortex.db
+CORTEX_POOL_SIZE=4
+CORTEX_RETENTION_DAYS=90
 
 # Log verbosity
 RUST_LOG=info
@@ -138,7 +138,7 @@ curl -s -X POST http://localhost:3100/mcp \
 
 ```bash
 /plugin marketplace add jmagar/claude-homelab
-/plugin install syslog-mcp @jmagar-claude-homelab
+/plugin install cortex @jmagar-claude-homelab
 ```
 
 Configure the plugin with your MCP URL and optional API token when prompted.
@@ -155,9 +155,9 @@ See [docs/](.) for per-host configuration:
 
 ### Optional Docker host log ingest
 
-If your hosts already run `docker-socket-proxy`, syslog-mcp can pull Docker container logs from those hosts without switching the Docker daemon to the syslog logging driver.
+If your hosts already run `docker-socket-proxy`, cortex can pull Docker container logs from those hosts without switching the Docker daemon to the syslog logging driver.
 
-On each remote Docker host, expose only the read endpoints syslog-mcp needs:
+On each remote Docker host, expose only the read endpoints cortex needs:
 
 ```env
 CONTAINERS=1
@@ -167,50 +167,50 @@ VERSION=1
 POST=0
 ```
 
-Set `SYSLOG_DOCKER_HOSTS` to a comma-separated list of hostnames in `.env`:
+Set `CORTEX_DOCKER_HOSTS` to a comma-separated list of hostnames in `.env`:
 
 ```env
-SYSLOG_DOCKER_INGEST_ENABLED=true
-SYSLOG_DOCKER_HOSTS=squirts,tootie,dookie
+CORTEX_DOCKER_INGEST_ENABLED=true
+CORTEX_DOCKER_HOSTS=squirts,tootie,dookie
 ```
 
 Each hostname resolves to `http://<host>:2375`. Use only on trusted private networks (e.g. tailscale).
 
-The ingest loop follows existing containers, listens for container start events, records checkpoints in SQLite, and reconnects with backoff if a host is unavailable. Remote containers still start normally if syslog-mcp is down because this path does not use Docker's daemon-level syslog logging driver.
+The ingest loop follows existing containers, listens for container start events, records checkpoints in SQLite, and reconnects with backoff if a host is unavailable. Remote containers still start normally if cortex is down because this path does not use Docker's daemon-level syslog logging driver.
 
-Plain `http://` docker-socket-proxy URLs require `allow_insecure_http = true`. Use that only on trusted private networks, firewall the proxy so only syslog-mcp can connect, or put the proxy behind authenticated TLS. `CONTAINERS=1` exposes Docker's broader read-only container API to anything that can reach the proxy, not just the log endpoints syslog-mcp calls.
+Plain `http://` docker-socket-proxy URLs require `allow_insecure_http = true`. Use that only on trusted private networks, firewall the proxy so only cortex can connect, or put the proxy behind authenticated TLS. `CONTAINERS=1` exposes Docker's broader read-only container API to anything that can reach the proxy, not just the log endpoints cortex calls.
 
-For Docker ingest integration testing, keep the default smoke test focused on UDP/TCP syslog and run Docker ingest as a separate fixture-backed check. Start syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP endpoint, emit a unique marker from a short-lived container, then verify it with `search` or `tail`. Container stdout/stderr rows should report `source_ip` as `docker://<host>/<container>/<stream>`. Container lifecycle events such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, and `oom` should report `source_ip` as `docker-event://<host>/<container>/<action>`.
+For Docker ingest integration testing, keep the default smoke test focused on UDP/TCP syslog and run Docker ingest as a separate fixture-backed check. Start cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP endpoint, emit a unique marker from a short-lived container, then verify it with `search` or `tail`. Container stdout/stderr rows should report `source_ip` as `docker://<host>/<container>/<stream>`. Container lifecycle events such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, and `oom` should report `source_ip` as `docker-event://<host>/<container>/<action>`.
 
 ## Troubleshooting
 
 ### "Connection refused" on health check
 
-- Confirm the server is running: `docker compose ps` or `ps aux | grep syslog-mcp`
-- Verify `SYSLOG_MCP_PORT` matches the port you are curling
+- Confirm the server is running: `docker compose ps` or `ps aux | grep cortex`
+- Verify `CORTEX_PORT` matches the port you are curling
 - If running in Docker, ensure port 3100 is published in `docker-compose.yml`
 
 ### "401 Unauthorized" on tool calls
 
-- Verify `SYSLOG_MCP_TOKEN` in `.env` matches the token configured in your MCP client
-- If behind a reverse proxy (SWAG), either bind `SYSLOG_MCP_HOST` to loopback, keep `SYSLOG_MCP_TOKEN` set, or explicitly set both `SYSLOG_MCP_NO_AUTH=true` and `SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true` only when the proxy enforces upstream auth before traffic reaches syslog-mcp.
+- Verify `CORTEX_TOKEN` in `.env` matches the token configured in your MCP client
+- If behind a reverse proxy (SWAG), either bind `CORTEX_HOST` to loopback, keep `CORTEX_TOKEN` set, or explicitly set both `CORTEX_NO_AUTH=true` and `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true` only when the proxy enforces upstream auth before traffic reaches cortex.
 
 ### No syslog messages arriving
 
 - Confirm the syslog port is reachable: `nc -zvu <host> 1514`
 - Check iptables rules if redirecting 514 to 1514
 - Verify rsyslog config on the sending host: `systemctl status rsyslog`
-- Check Docker port mapping: `docker port syslog-mcp`
+- Check Docker port mapping: `docker port cortex`
 
 ### Database errors at startup
 
 - Ensure the data directory exists and is writable by UID 1000
-- Check volume mounts: `docker inspect syslog-mcp | jq '.[0].Mounts'`
-- Verify `SYSLOG_MCP_DB_PATH` points to a writable location
+- Check volume mounts: `docker inspect cortex | jq '.[0].Mounts'`
+- Verify `CORTEX_DB_PATH` points to a writable location
 
 ### Plugin not discovered by Claude Code
 
-- Run `/plugin list` and confirm syslog-mcp appears
+- Run `/plugin list` and confirm cortex appears
 - Check `~/.claude/plugins/cache/` for the plugin directory
 - Re-run `/plugin marketplace add jmagar/claude-homelab` to refresh
 
@@ -218,9 +218,9 @@ For Docker ingest integration testing, keep the default smoke test focused on UD
 
 ## OAuth Authentication
 
-syslog-mcp supports Google OAuth 2.0 in addition to the static bearer token. See **[docs/OAUTH.md](OAUTH.md)** for the full setup guide, including:
+cortex supports Google OAuth 2.0 in addition to the static bearer token. See **[docs/OAUTH.md](OAUTH.md)** for the full setup guide, including:
 
 - Google Console configuration (redirect URI, credentials)
-- Required env vars (`SYSLOG_MCP_AUTH_MODE`, `SYSLOG_MCP_PUBLIC_URL`, Google client ID/secret)
+- Required env vars (`CORTEX_AUTH_MODE`, `CORTEX_PUBLIC_URL`, Google client ID/secret)
 - `config.toml` fields for `admin_email`, TTLs, and signing key path
 - Operator FAQ (revoking users, rotating the JWT key)

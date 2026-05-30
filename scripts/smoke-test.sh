@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# smoke-test.sh — Live end-to-end smoke test for syslog-mcp
+# smoke-test.sh — Live end-to-end smoke test for cortex
 # Tests all MCP actions via mcporter with strict PASS/FAIL validation.
 # Exit code 0 = all passed. Exit code 1 = one or more failures.
 #
@@ -26,19 +26,19 @@
 set -euo pipefail
 
 # ─── Config ──────────────────────────────────────────────────────────────────
-MCP_URL="${SYSLOG_MCP_URL:-http://localhost:3100/mcp}"
+MCP_URL="${CORTEX_URL:-http://localhost:3100/mcp}"
 HEALTH_URL="${MCP_URL%/mcp}/health"
-SYSLOG_HOST="${SYSLOG_HOST:-127.0.0.1}"
-SYSLOG_PORT="${SYSLOG_PORT:-1514}"
+CORTEX_RECEIVER_HOST="${CORTEX_RECEIVER_HOST:-127.0.0.1}"
+CORTEX_RECEIVER_PORT="${CORTEX_RECEIVER_PORT:-1514}"
 SKIP_SEED=0
 MCPORTER_CONFIG="config/mcporter.json"
 _MCPORTER_CONFIG_TMPFILE=""
 SEED_HOST="smoke-test-host"
 GHOST_HOST="nonexistent-host-xyz-404"
-RUN_ID="${SYSLOG_SMOKE_RUN_ID:-$(date -u +%Y%m%d%H%M%S)}"
+RUN_ID="${CORTEX_SMOKE_RUN_ID:-$(date -u +%Y%m%d%H%M%S)}"
 TCP_MARKER="smoketcp${RUN_ID}"
-AI_SMOKE_FIXTURE="${SYSLOG_SMOKE_AI_FIXTURE:-tests/fixtures/ai-session-smoke.jsonl}"
-AI_SMOKE_PROJECT="/tmp/syslog-mcp-ai-smoke"
+AI_SMOKE_FIXTURE="${CORTEX_SMOKE_AI_FIXTURE:-tests/fixtures/ai-session-smoke.jsonl}"
+AI_SMOKE_PROJECT="/tmp/cortex-ai-smoke"
 AI_SMOKE_QUERY='"ai-smoke-authentication"'
 AI_SEEDED=0
 
@@ -57,12 +57,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -n "${SYSLOG_MCP_TOKEN:-}" || -n "$_MCPORTER_CONFIG_TMPFILE" ]]; then
+if [[ -n "${CORTEX_TOKEN:-}" || -n "$_MCPORTER_CONFIG_TMPFILE" ]]; then
     if [[ -z "$_MCPORTER_CONFIG_TMPFILE" ]]; then
         _MCPORTER_CONFIG_TMPFILE=$(mktemp /tmp/mcporter-XXXXXX.json)
         MCPORTER_CONFIG="$_MCPORTER_CONFIG_TMPFILE"
     fi
-    python3 - "$MCPORTER_CONFIG" "$MCP_URL" "${SYSLOG_MCP_TOKEN:-}" <<'PY'
+    python3 - "$MCPORTER_CONFIG" "$MCP_URL" "${CORTEX_TOKEN:-}" <<'PY'
 import json
 import sys
 
@@ -71,7 +71,7 @@ server = {"baseUrl": url}
 if token:
     server["headers"] = {"Authorization": f"Bearer {token}"}
 with open(path, "w", encoding="utf-8") as fh:
-    json.dump({"mcpServers": {"syslog": server}}, fh)
+    json.dump({"mcpServers": {"cortex": server}}, fh)
 PY
 fi
 
@@ -98,8 +98,8 @@ mcp_call() {
 mcp_jsonrpc() {
     local payload="$1"
     local auth_args=()
-    if [[ -n "${SYSLOG_MCP_TOKEN:-}" ]]; then
-        auth_args=(-H "Authorization: Bearer ${SYSLOG_MCP_TOKEN}")
+    if [[ -n "${CORTEX_TOKEN:-}" ]]; then
+        auth_args=(-H "Authorization: Bearer ${CORTEX_TOKEN}")
     fi
     curl -fsS -X POST "$MCP_URL" \
         -H "Content-Type: application/json" \
@@ -177,35 +177,35 @@ except Exception:
 
 send_tcp_seed() {
     local message="$1"
-    if printf '%s\n' "$message" | nc -w2 -N "$SYSLOG_HOST" "$SYSLOG_PORT" >/dev/null 2>&1; then
+    if printf '%s\n' "$message" | nc -w2 -N "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT" >/dev/null 2>&1; then
         return 0
     fi
-    printf '%s\n' "$message" | nc -w2 "$SYSLOG_HOST" "$SYSLOG_PORT" >/dev/null
+    printf '%s\n' "$message" | nc -w2 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT" >/dev/null
 }
 
 run_syslog_ai_add() {
     local db_path="$1"
     local fixture="$2"
-    local syslog_bin="${SYSLOG_BIN:-}"
+    local syslog_bin="${CORTEX_BIN:-}"
 
     if [[ -z "$syslog_bin" ]]; then
-        if command -v syslog >/dev/null 2>&1; then
-            syslog_bin="$(command -v syslog)"
-        elif [[ -x "target/debug/syslog" ]]; then
-            syslog_bin="target/debug/syslog"
+        if command -v cortex >/dev/null 2>&1; then
+            syslog_bin="$(command -v cortex)"
+        elif [[ -x "target/debug/cortex" ]]; then
+            syslog_bin="target/debug/cortex"
         else
-            echo "syslog binary not found; install syslog on PATH, set SYSLOG_BIN, or run cargo build" >&2
+            echo "cortex binary not found; install cortex on PATH, set CORTEX_BIN, or run cargo build" >&2
             return 127
         fi
     fi
 
-    SYSLOG_MCP_DB_PATH="$db_path" "$syslog_bin" ai add --file "$fixture" --json
+    CORTEX_DB_PATH="$db_path" "$syslog_bin" ai add --file "$fixture" --json
 }
 
 seed_ai_fixture() {
     [[ -f "$AI_SMOKE_FIXTURE" ]] || return 1
 
-    local db_path="${SYSLOG_SMOKE_DB_PATH:-${SYSLOG_MCP_DB_PATH:-data/syslog.db}}"
+    local db_path="${CORTEX_SMOKE_DB_PATH:-${CORTEX_DB_PATH:-data/cortex.db}}"
     local output
     if output="$(run_syslog_ai_add "$db_path" "$AI_SMOKE_FIXTURE" 2>&1)"; then
         AI_SEEDED=1
@@ -219,7 +219,7 @@ seed_ai_fixture() {
 
 # ─── Phase 1: Pre-flight ─────────────────────────────────────────────────────
 echo ""
-echo -e "${COLOR_BOLD}=== syslog-mcp smoke test ===${COLOR_RESET}"
+echo -e "${COLOR_BOLD}=== cortex smoke test ===${COLOR_RESET}"
 echo "MCP URL: $MCP_URL"
 echo ""
 
@@ -229,7 +229,7 @@ HEALTH=$(curl -sf "$HEALTH_URL" 2>&1) || { echo -e "${COLOR_RED}ABORT${COLOR_RES
 HEALTH_STATUS=$(json_get "$HEALTH" "['status']")
 assert_eq "Health endpoint responds with ok" "$HEALTH_STATUS" "ok"
 
-TOOL_LIST=$(mcporter list syslog --config "$MCPORTER_CONFIG" 2>&1)
+TOOL_LIST=$(mcporter list cortex --config "$MCPORTER_CONFIG" 2>&1)
 TOOL_COUNT=$(printf '%s\n' "$TOOL_LIST" | grep -c "^  function " || true)
 assert_eq "mcporter lists exactly 1 tool (syslog)" "$TOOL_COUNT" "1"
 
@@ -271,7 +271,7 @@ import sys, json
 try:
     d = json.load(sys.stdin)
     text = d['result']['messages'][0]['content']['text']
-    for needle in ['service \`plex\`', 'Host: tootie', 'bucket=minute', 'limit=10', 'syslog://schema/prompt-output']:
+    for needle in ['service \`plex\`', 'Host: tootie', 'bucket=minute', 'limit=10', 'cortex://schema/prompt-output']:
         assert needle in text, needle
     print('ok')
 except Exception as e:
@@ -279,7 +279,7 @@ except Exception as e:
 ")
 assert_eq "prompts/get renders bounded argument-aware prompt" "$PROMPT_VALID" "ok"
 
-PROMPT_SCHEMA=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":103,"method":"resources/read","params":{"uri":"syslog://schema/prompt-output"}}' || true)
+PROMPT_SCHEMA=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":103,"method":"resources/read","params":{"uri":"cortex://schema/prompt-output"}}' || true)
 PROMPT_SCHEMA_VALID=$(printf '%s\n' "$PROMPT_SCHEMA" | python3 -c "
 import sys, json
 try:
@@ -299,10 +299,10 @@ echo ""
 echo -e "${COLOR_BOLD}[2/4] Seeding test data${COLOR_RESET}"
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
-    printf '<14>%s %s sshd[42]: smoke-test: info message\n'           "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
-    printf '<11>%s %s sshd[42]: smoke-test: error authentication failure\n' "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
-    printf '<2>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
-    printf '<12>%s %s dockerd[99]: smoke-test: warning container restart\n'  "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$SYSLOG_HOST" "$SYSLOG_PORT"
+    printf '<14>%s %s sshd[42]: smoke-test: info message\n'           "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
+    printf '<11>%s %s sshd[42]: smoke-test: error authentication failure\n' "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
+    printf '<2>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
+    printf '<12>%s %s dockerd[99]: smoke-test: warning container restart\n'  "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
     send_tcp_seed "<14>$(date '+%b %e %H:%M:%S') ${SEED_HOST} tcpsmoke[77]: smoke-test tcp seed ${TCP_MARKER} bounded frame ok"
     if ! seed_ai_fixture; then
         echo -e "${COLOR_RED}ABORT${COLOR_RESET}  AI transcript fixture seed failed"
@@ -898,16 +898,16 @@ else
     echo "INFO: OAuth not enabled (/.well-known returned $DISCOVERY) — skipping OAuth endpoint checks"
 fi
 
-# ─── Enrichment framework smoke (epic syslog-mcp-1wjr) ─────────────────────
+# ─── Enrichment framework smoke (epic cortex-1wjr) ─────────────────────
 # Forward a synthetic SWAG access line, then assert http_status materialised.
 echo ""
 echo "Enrichment framework smoke"
 SWAG_LINE='<134>1 2026-05-16T10:00:00Z localhost swag - - - 192.0.2.55 - - [16/May/2026:10:00:00 +0000] "GET /smoke HTTP/1.1" 418 13 "-" "smoketest/1.0"'
-echo "$SWAG_LINE" | nc -w1 -u "${SYSLOG_HOST:-127.0.0.1}" "${SYSLOG_PORT:-1514}" || true
+echo "$SWAG_LINE" | nc -w1 -u "${CORTEX_RECEIVER_HOST:-127.0.0.1}" "${CORTEX_RECEIVER_PORT:-1514}" || true
 sleep 1
 
 if command -v sqlite3 >/dev/null 2>&1; then
-    DB_PATH="${SYSLOG_MCP_DB_PATH:-/data/syslog.db}"
+    DB_PATH="${CORTEX_DB_PATH:-/data/cortex.db}"
     COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM logs WHERE http_status = 418" 2>/dev/null || echo "0")
     if [ "$COUNT" = "0" ]; then
         echo "WARN: enrichment smoke — http_status=418 not found (sqlite3 check)"

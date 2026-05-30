@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
-use syslog_mcp::config::StorageConfig;
-use syslog_mcp::enrich::{EnrichmentPipeline, SourceKind};
-use syslog_mcp::testing::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
+use cortex::config::StorageConfig;
+use cortex::enrich::{EnrichmentPipeline, SourceKind};
+use cortex::testing::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
 use tempfile::TempDir;
 
 /// Create an isolated SQLite pool backed by a temp directory.

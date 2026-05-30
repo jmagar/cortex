@@ -314,7 +314,7 @@ pub fn list_hosts(pool: &DbPool) -> Result<Vec<HostEntry>> {
 
 /// List AI transcript sessions ordered by recency.
 ///
-/// Fast path (bead syslog-mcp-2vre): when the caller supplies NO time window
+/// Fast path (bead cortex-2vre): when the caller supplies NO time window
 /// (`from`/`to` both unset) the result is served from the periodically-refreshed
 /// `ai_session_rollup` materialization — an O(#sessions) indexed read instead of
 /// the O(#AI-rows) GROUP-BY + temp-btree sort that grew to ~4s at 10M rows. The
@@ -555,7 +555,7 @@ pub enum RollupRefresh {
 }
 
 /// Refresh the rollup only if the AI-row partition changed since the last
-/// refresh (bead syslog-mcp-g33v). The full re-aggregation is a temp-btree
+/// refresh (bead cortex-g33v). The full re-aggregation is a temp-btree
 /// `GROUP BY` over the whole AI partition (~4s at scale) and holds the
 /// maintenance permit while running; the common case on the background cadence
 /// is "nothing changed", so this skips that work via the cheap

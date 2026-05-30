@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-28
+
+### Breaking Changes — Renamed from syslog-mcp to cortex
+
+This is a hard break. No backwards-compatibility shims. Update every deployed
+instance as part of the upgrade (see migration notes below).
+
+- **Product / crate** renamed `syslog-mcp` → `cortex`.
+- **Binary** renamed `syslog` → `cortex`.
+- **MCP tool** renamed `syslog` → `cortex`. All 42+ action strings are unchanged.
+- **Env vars** — the `SYSLOG_MCP_*` figment prefix is now `CORTEX`, and the entire
+  bare `SYSLOG_*` family is renamed to `CORTEX_*`. Collision-disambiguated cases:
+  - `SYSLOG_PORT` → `CORTEX_RECEIVER_PORT` (the UDP/TCP receiver port; distinct from
+    `CORTEX_PORT`, the MCP/HTTP server port formerly `SYSLOG_MCP_PORT`).
+  - `SYSLOG_HOST` → `CORTEX_RECEIVER_HOST`; `SYSLOG_HOST_PORT` → `CORTEX_RECEIVER_HOST_PORT`.
+- **Removed** the deprecated `SYSLOG_MCP_API_TOKEN` MCP-token alias. Its post-rename
+  name `CORTEX_API_TOKEN` now belongs exclusively to the API/OTLP token; use
+  `CORTEX_TOKEN` for the MCP static token.
+- **Config** — the `[syslog]` section is now `[receiver]` (struct field `Config.syslog`
+  → `Config.receiver`).
+- **Database file** renamed `syslog.db` → `cortex.db` (a data-file migration — move the
+  existing DB during upgrade).
+- **Docker image** `jmagar/syslog-mcp` → `ghcr.io/jmagar/cortex` (Docker Hub mirror).
+- **Plugin** renamed `syslog` → `cortex` (plugin data dir `syslog-jmagar-lab` →
+  `cortex-jmagar-lab`).
+- **Internal** — module `src/syslog/` → `src/receiver/`; types `SyslogService` →
+  `CortexService`, `SyslogRmcpServer` → `CortexRmcpServer`, `SyslogConfig` →
+  `ReceiverConfig`.
+
+Unchanged: SQLite schema and on-disk format, HTTP API routes, RFC 3164/5424 wire
+protocol support, the `syslog-udp`/`syslog-tcp` source aliases, and observability
+metric names.
+
+Per-host migration: stop the service; checkpoint and `mv syslog.db cortex.db`; rename
+`SYSLOG_*` env vars to `CORTEX_*` in `.env`; rename the `[syslog]` config section to
+`[receiver]`; point clients at the `cortex` MCP tool; pull `ghcr.io/jmagar/cortex:1.0.0`;
+start and verify with `cortex --http db status`.
+
 ## [0.36.1] - 2026-05-29
 
 ### Changed

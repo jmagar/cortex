@@ -1,8 +1,8 @@
-# Logging and Error Handling -- syslog-mcp
+# Logging and Error Handling -- cortex
 
 ## Log configuration
 
-syslog-mcp uses the `tracing` crate with `tracing-subscriber` for structured logging.
+cortex uses the `tracing` crate with `tracing-subscriber` for structured logging.
 
 | Env Var | Values | Default |
 | --- | --- | --- |
@@ -13,8 +13,8 @@ syslog-mcp uses the `tracing` crate with `tracing-subscriber` for structured log
 ```bash
 RUST_LOG=info                           # Default: info level for all modules
 RUST_LOG=debug                          # All modules at debug
-RUST_LOG=syslog_mcp=debug              # Only syslog-mcp at debug
-RUST_LOG=syslog_mcp=trace,tower_http=info  # Trace syslog-mcp, info for HTTP layer
+RUST_LOG=cortex=debug              # Only cortex at debug
+RUST_LOG=cortex=trace,tower_http=info  # Trace cortex, info for HTTP layer
 RUST_LOG=warn                           # Quiet mode: warnings and errors only
 ```
 
@@ -23,11 +23,11 @@ RUST_LOG=warn                           # Quiet mode: warnings and errors only
 All log output goes to stdout in human-readable format with timestamps, levels, and target modules:
 
 ```
-2025-01-15T14:30:00.123Z  INFO syslog_mcp::main: syslog-mcp v0.3.1
-2025-01-15T14:30:00.125Z  INFO syslog_mcp::main: Configuration loaded syslog_bind=0.0.0.0:1514 mcp_bind=0.0.0.0:3100
-2025-01-15T14:30:00.130Z  INFO syslog_mcp::db: Database initialized path=/data/syslog.db
-2025-01-15T14:30:00.132Z  INFO syslog_mcp::syslog: Syslog listeners started bind=0.0.0.0:1514
-2025-01-15T14:30:00.133Z  INFO syslog_mcp::mcp: MCP server listening bind=0.0.0.0:3100
+2025-01-15T14:30:00.123Z  INFO cortex::main: cortex v0.3.1
+2025-01-15T14:30:00.125Z  INFO cortex::main: Configuration loaded syslog_bind=0.0.0.0:1514 mcp_bind=0.0.0.0:3100
+2025-01-15T14:30:00.130Z  INFO cortex::db: Database initialized path=/data/cortex.db
+2025-01-15T14:30:00.132Z  INFO cortex::syslog: Syslog listeners started bind=0.0.0.0:1514
+2025-01-15T14:30:00.133Z  INFO cortex::mcp: MCP server listening bind=0.0.0.0:3100
 ```
 
 ### Key log events
@@ -98,7 +98,7 @@ SIGTERM and SIGINT are handled by tokio signal handlers:
 
 - Bearer tokens are never logged at any level
 - Auth failure logs include method and path but not the submitted token
-- `SYSLOG_MCP_TOKEN` value is never printed in startup config summary (only `mcp_auth_enabled = true/false`)
+- `CORTEX_TOKEN` value is never printed in startup config summary (only `mcp_auth_enabled = true/false`)
 
 ## See also
 

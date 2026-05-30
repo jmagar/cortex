@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use tower::util::ServiceExt;
 
 use crate::{
-    app::SyslogService,
+    app::CortexService,
     config::{McpConfig, StorageConfig},
     db::{self, DbPool, LogBatchEntry},
     mcp::{streamable_http_config, streamable_http_service, AppState, AuthPolicy},
@@ -25,11 +25,11 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let storage = StorageConfig::for_test(dir.path().join("rmcp-server-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
     let state = AppState {
-        service: SyslogService::new(Arc::clone(&pool), storage.clone()),
+        service: CortexService::new(Arc::clone(&pool), storage.clone()),
         config: McpConfig {
             host: "127.0.0.1".into(),
             port: 3100,
-            server_name: "syslog-mcp".into(),
+            server_name: "cortex".into(),
             no_auth: false,
             trusted_gateway_no_auth: false,
             api_token: None,
@@ -52,11 +52,11 @@ fn mounted_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let storage = StorageConfig::for_test(dir.path().join("rmcp-mounted-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
     let state = AppState {
-        service: SyslogService::new(Arc::clone(&pool), storage.clone()),
+        service: CortexService::new(Arc::clone(&pool), storage.clone()),
         config: McpConfig {
             host: "127.0.0.1".into(),
             port: 3100,
-            server_name: "syslog-mcp".into(),
+            server_name: "cortex".into(),
             no_auth: false,
             trusted_gateway_no_auth: false,
             api_token: None,
@@ -242,7 +242,7 @@ fn allowed_hosts_include_bracketed_ipv6_authority_variants() {
     let mut config = McpConfig {
         host: "::1".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -288,7 +288,7 @@ async fn rmcp_tools_list_exposes_one_action_tool() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["syslog"]);
+    assert_eq!(names, vec!["cortex"]);
     assert_eq!(tools[0]["inputSchema"]["required"], json!(["action"]));
     assert_eq!(
         tools[0]["_meta"]["ui"]["resourceUri"],
@@ -413,7 +413,7 @@ async fn rmcp_get_stats_works_against_temp_db() {
         jsonrpc_request(
             2,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -443,7 +443,7 @@ async fn rmcp_search_logs_works_against_seeded_data() {
         jsonrpc_request(
             3,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "search", "query": "disk", "limit": 5}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "search", "query": "disk", "limit": 5}})),
         ),
     )
     .await;
@@ -470,7 +470,7 @@ async fn rmcp_correlate_events_rejects_bad_reference_time_as_invalid_params() {
         jsonrpc_request(
             4,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "correlate", "reference_time": "bad"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "correlate", "reference_time": "bad"}})),
         ),
     )
     .await;
@@ -487,7 +487,7 @@ async fn rmcp_correlate_events_rejects_bad_severity_as_invalid_params() {
             5,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "cortex",
                 "arguments": {
                     "action": "correlate",
                     "reference_time": "2026-01-01T00:00:00Z",
@@ -510,7 +510,7 @@ async fn rmcp_search_rejects_bad_severity_as_invalid_params() {
             6,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "cortex",
                 "arguments": {
                     "action": "search",
                     "severity": "bogus"
@@ -551,7 +551,7 @@ async fn rmcp_numeric_args_reject_wrong_type_values() {
             jsonrpc_request(
                 id,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": arguments})),
+                Some(json!({"name": "cortex", "arguments": arguments})),
             ),
         )
         .await;
@@ -590,7 +590,7 @@ async fn rmcp_correlate_events_preserves_truncation_and_host_grouping() {
             11,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "cortex",
                 "arguments": {
                     "action": "correlate",
                     "reference_time": "2026-01-01T00:00:00Z",
@@ -611,13 +611,13 @@ async fn rmcp_correlate_events_preserves_truncation_and_host_grouping() {
 
 // ── PUBLIC_URL host/origin allowlist extension ───────────────────────────────
 
-/// `SYSLOG_MCP_PUBLIC_URL` bare host is added to `allowed_hosts`.
+/// `CORTEX_PUBLIC_URL` bare host is added to `allowed_hosts`.
 #[test]
 fn public_url_host_added_to_allowed_hosts() {
     let config = McpConfig {
         host: "0.0.0.0".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -637,14 +637,14 @@ fn public_url_host_added_to_allowed_hosts() {
     );
 }
 
-/// `SYSLOG_MCP_PUBLIC_URL` standard-port https origin is added to `allowed_origins`
+/// `CORTEX_PUBLIC_URL` standard-port https origin is added to `allowed_origins`
 /// without the port (browsers omit default ports from the Origin header).
 #[test]
 fn public_url_origin_added_to_allowed_origins() {
     let config = McpConfig {
         host: "0.0.0.0".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -671,7 +671,7 @@ fn public_url_non_standard_port_included_in_host_and_origin() {
     let config = McpConfig {
         host: "0.0.0.0".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -712,7 +712,7 @@ fn public_url_standard_https_port_host_variants() {
     let config = McpConfig {
         host: "0.0.0.0".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -740,7 +740,7 @@ fn public_url_standard_https_port_host_variants() {
 
 // ── Scope-based authorization tests ──────────────────────────────────────────
 //
-// These tests verify the fail-closed scope check added in syslog-mcp-brt0.8.
+// These tests verify the fail-closed scope check added in cortex-brt0.8.
 // Pattern: middleware injects AuthContext into request extensions; rmcp
 // propagates it into RequestContext.extensions via http::request::Parts.
 
@@ -792,7 +792,7 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
         jsonrpc_request(
             11,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -800,21 +800,21 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
     assert!(response["result"].is_object(), "response: {response}");
 }
 
-/// `AuthPolicy::Mounted` + valid AuthContext with `syslog:read` → read
+/// `AuthPolicy::Mounted` + valid AuthContext with `cortex:read` → read
 /// actions permitted, but admin actions (ack_error, unack_error, notifications_test)
 /// are denied.
 #[tokio::test]
 async fn mounted_policy_with_read_scope_permits_read_actions() {
     let (state, pool, _dir) = mounted_state();
     seed_auth_action_log(&pool);
-    let auth = auth_ctx_with_scopes(vec!["syslog:read"]);
+    let auth = auth_ctx_with_scopes(vec!["cortex:read"]);
     let router = rmcp_router_with_auth(state, auth);
 
     for action in actions::ACTION_SPECS
         .iter()
         .map(|s| s.name)
         .filter(|action| {
-            *action != "help" && actions::required_scope_for(action) != Some("syslog:admin")
+            *action != "help" && actions::required_scope_for(action) != Some("cortex:admin")
         })
     {
         let (status, response) = post_rmcp(
@@ -822,7 +822,7 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
             jsonrpc_request(
                 20,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
+                Some(json!({"name": "cortex", "arguments": minimal_args_for_action(action)})),
             ),
         )
         .await;
@@ -838,18 +838,18 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
         );
     }
 
-    // Admin actions must be denied for syslog:read-only callers.
+    // Admin actions must be denied for cortex:read-only callers.
     for action in actions::ACTION_SPECS
         .iter()
         .map(|s| s.name)
-        .filter(|a| actions::required_scope_for(a) == Some("syslog:admin"))
+        .filter(|a| actions::required_scope_for(a) == Some("cortex:admin"))
     {
         let (status, response) = post_rmcp(
             router.clone(),
             jsonrpc_request(
                 21,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
+                Some(json!({"name": "cortex", "arguments": minimal_args_for_action(action)})),
             ),
         )
         .await;
@@ -860,7 +860,7 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
         );
         let msg = response["error"]["message"].as_str().unwrap_or("");
         assert!(
-            msg.contains("requires scope: syslog:admin"),
+            msg.contains("requires scope: cortex:admin"),
             "denial message should reference admin scope; got: {msg}"
         );
     }
@@ -872,25 +872,25 @@ fn public_read_actions_require_syslog_read_scope() {
         .iter()
         .map(|s| s.name)
         .filter(|action| {
-            *action != "help" && actions::required_scope_for(action) != Some("syslog:admin")
+            *action != "help" && actions::required_scope_for(action) != Some("cortex:admin")
         })
     {
         assert_eq!(
             required_scope_for(action),
-            Some("syslog:read"),
-            "action={action} must require syslog:read"
+            Some("cortex:read"),
+            "action={action} must require cortex:read"
         );
     }
-    // Admin actions require syslog:admin, not syslog:read
+    // Admin actions require cortex:admin, not cortex:read
     for action in actions::ACTION_SPECS
         .iter()
         .map(|s| s.name)
-        .filter(|a| actions::required_scope_for(a) == Some("syslog:admin"))
+        .filter(|a| actions::required_scope_for(a) == Some("cortex:admin"))
     {
         assert_eq!(
             required_scope_for(action),
-            Some("syslog:admin"),
-            "admin action={action} must require syslog:admin"
+            Some("cortex:admin"),
+            "admin action={action} must require cortex:admin"
         );
     }
     assert_eq!(required_scope_for("help"), None);
@@ -902,23 +902,23 @@ fn public_read_actions_require_syslog_read_scope() {
 
 #[test]
 fn sessions_action_requires_read_scope() {
-    assert_eq!(required_scope_for("sessions"), Some("syslog:read"));
+    assert_eq!(required_scope_for("sessions"), Some("cortex:read"));
 }
 
 #[test]
 fn compose_actions_require_read_scope() {
-    assert_eq!(required_scope_for("compose_status"), Some("syslog:read"));
-    assert_eq!(required_scope_for("compose_doctor"), Some("syslog:read"));
+    assert_eq!(required_scope_for("compose_status"), Some("cortex:read"));
+    assert_eq!(required_scope_for("compose_doctor"), Some("cortex:read"));
 }
 
-/// `AuthPolicy::Mounted` + AuthContext with `syslog:admin` (superset) → read
-/// actions permitted because `syslog:admin` implies `syslog:read`.
+/// `AuthPolicy::Mounted` + AuthContext with `cortex:admin` (superset) → read
+/// actions permitted because `cortex:admin` implies `cortex:read`.
 #[tokio::test]
 async fn mounted_policy_with_admin_scope_permits_read_actions() {
     let (state, _pool, _dir) = mounted_state();
-    // syslog:admin is a superset of syslog:read — check_scope treats it as
-    // satisfying any syslog:read requirement (admin ⊃ read superset semantics).
-    let auth = auth_ctx_with_scopes(vec!["syslog:admin"]);
+    // cortex:admin is a superset of cortex:read — check_scope treats it as
+    // satisfying any cortex:read requirement (admin ⊃ read superset semantics).
+    let auth = auth_ctx_with_scopes(vec!["cortex:admin"]);
     let router = rmcp_router_with_auth(state, auth);
 
     let (status, response) = post_rmcp(
@@ -926,15 +926,15 @@ async fn mounted_policy_with_admin_scope_permits_read_actions() {
         jsonrpc_request(
             30,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    // syslog:admin implies syslog:read — must be permitted.
+    // cortex:admin implies cortex:read — must be permitted.
     assert_ne!(
         response["error"]["code"], -32600,
-        "syslog:admin should satisfy syslog:read requirement; response: {response}"
+        "cortex:admin should satisfy cortex:read requirement; response: {response}"
     );
     assert!(
         response["result"].is_object(),
@@ -946,7 +946,7 @@ async fn mounted_policy_with_admin_scope_permits_read_actions() {
 #[tokio::test]
 async fn mounted_policy_with_both_scopes_permits_all_actions() {
     let (state, _pool, _dir) = mounted_state();
-    let auth = auth_ctx_with_scopes(vec!["syslog:read", "syslog:admin"]);
+    let auth = auth_ctx_with_scopes(vec!["cortex:read", "cortex:admin"]);
     let router = rmcp_router_with_auth(state, auth);
 
     let (status, response) = post_rmcp(
@@ -954,7 +954,7 @@ async fn mounted_policy_with_both_scopes_permits_all_actions() {
         jsonrpc_request(
             40,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -970,7 +970,7 @@ async fn mounted_admin_actions_record_per_request_subject_actor() {
 
     let alice_router = rmcp_router_with_auth(
         state.clone(),
-        auth_ctx("alice-subject", vec!["syslog:admin"], None),
+        auth_ctx("alice-subject", vec!["cortex:admin"], None),
     );
     let (status, response) = post_rmcp(
         alice_router,
@@ -978,7 +978,7 @@ async fn mounted_admin_actions_record_per_request_subject_actor() {
             41,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "cortex",
                 "arguments": {
                     "action": "ack_error",
                     "signature_hash": signature_hash,
@@ -994,7 +994,7 @@ async fn mounted_admin_actions_record_per_request_subject_actor() {
 
     let bob_router = rmcp_router_with_auth(
         state,
-        auth_ctx("bob-subject", vec!["syslog:admin"], Some("bob@example.com")),
+        auth_ctx("bob-subject", vec!["cortex:admin"], Some("bob@example.com")),
     );
     let (status, response) = post_rmcp(
         bob_router,
@@ -1002,7 +1002,7 @@ async fn mounted_admin_actions_record_per_request_subject_actor() {
             42,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "cortex",
                 "arguments": {
                     "action": "unack_error",
                     "signature_hash": signature_hash,
@@ -1057,7 +1057,7 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
             jsonrpc_request(
                 50,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
+                Some(json!({"name": "cortex", "arguments": minimal_args_for_action(action)})),
             ),
         )
         .await;
@@ -1067,11 +1067,11 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
             "action={action} with empty scopes should be denied; response: {response}"
         );
         let msg = response["error"]["message"].as_str().unwrap_or("");
-        // Read actions require syslog:read; admin actions require syslog:admin.
-        let expected_scope = if actions::required_scope_for(action) == Some("syslog:admin") {
-            "syslog:admin"
+        // Read actions require cortex:read; admin actions require cortex:admin.
+        let expected_scope = if actions::required_scope_for(action) == Some("cortex:admin") {
+            "cortex:admin"
         } else {
-            "syslog:read"
+            "cortex:read"
         };
         assert!(
             msg.contains(&format!("requires scope: {expected_scope}")),
@@ -1093,7 +1093,7 @@ async fn mounted_policy_with_empty_scopes_permits_help_action() {
         jsonrpc_request(
             60,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "help"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "help"}})),
         ),
     )
     .await;
@@ -1184,7 +1184,7 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
         jsonrpc_request(
             71,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "help"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "help"}})),
         ),
     )
     .await;
@@ -1200,7 +1200,7 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
         jsonrpc_request(
             72,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -1211,7 +1211,7 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
     );
 }
 
-/// `AuthPolicy::Mounted` + valid AuthContext with `syslog:read` + `tools/list`
+/// `AuthPolicy::Mounted` + valid AuthContext with `cortex:read` + `tools/list`
 /// → capability discovery succeeds (AuthContext present, no scope required).
 #[tokio::test]
 async fn mounted_policy_with_auth_context_permits_tools_list() {
@@ -1224,8 +1224,8 @@ async fn mounted_policy_with_auth_context_permits_tools_list() {
     assert_eq!(status, StatusCode::OK);
     let tools = response["result"]["tools"].as_array().unwrap();
     assert_eq!(
-        tools[0]["name"], "syslog",
-        "tools/list should return syslog tool; response: {response}"
+        tools[0]["name"], "cortex",
+        "tools/list should return cortex tool; response: {response}"
     );
 }
 
@@ -1272,8 +1272,8 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
     assert!(
         response["result"]["contents"][0]["text"]
             .as_str()
-            .is_some_and(|text| text.contains("\"name\": \"syslog\"")
-                && text.contains("x-syslog-action-metadata")),
+            .is_some_and(|text| text.contains("\"name\": \"cortex\"")
+                && text.contains("x-cortex-action-metadata")),
         "resources/read should return schema JSON; response: {response}"
     );
 
@@ -1412,7 +1412,7 @@ async fn scope_check_fires_before_db_execution() {
         jsonrpc_request(
             90,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "search", "query": "error"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "search", "query": "error"}})),
         ),
     )
     .await;
@@ -1434,12 +1434,12 @@ async fn scope_check_fires_before_db_execution() {
 /// — a scope that is never granted — so unknown actions are rejected at the
 /// auth layer rather than falling through to `execute_tool`.
 /// This prevents future actions added to dispatch but not to the scope map
-/// from being silently accessible with only `syslog:read`.
+/// from being silently accessible with only `cortex:read`.
 #[tokio::test]
 async fn unknown_action_is_denied_by_sentinel_scope() {
     let (state, _pool, _dir) = mounted_state();
-    // syslog:read + syslog:admin — both real scopes, but neither matches __deny__
-    let auth = auth_ctx_with_scopes(vec!["syslog:read", "syslog:admin"]);
+    // cortex:read + cortex:admin — both real scopes, but neither matches __deny__
+    let auth = auth_ctx_with_scopes(vec!["cortex:read", "cortex:admin"]);
     let router = rmcp_router_with_auth(state, auth);
 
     let (status, response) = post_rmcp(
@@ -1447,7 +1447,7 @@ async fn unknown_action_is_denied_by_sentinel_scope() {
         jsonrpc_request(
             100,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "not_a_real_action"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "not_a_real_action"}})),
         ),
     )
     .await;

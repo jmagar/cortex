@@ -8,18 +8,18 @@
 
 set -euo pipefail
 
-MCP_URL="${SYSLOG_MCP_URL:-http://localhost:3100/mcp}"
-AGENT="${SYSLOG_PROMPT_EVAL_AGENT:-codex}"
+MCP_URL="${CORTEX_URL:-http://localhost:3100/mcp}"
+AGENT="${CORTEX_PROMPT_EVAL_AGENT:-codex}"
 PROMPT_NAME="infra.incident-triage"
 DRY_RUN=0
-MCP_CONFIG="${SYSLOG_PROMPT_EVAL_MCP_CONFIG:-}"
-WORKDIR="${SYSLOG_PROMPT_EVAL_WORKDIR:-$(pwd)}"
-REPORT_PATH="${SYSLOG_PROMPT_EVAL_REPORT:-}"
-RUN_TIMEOUT_SECS="${SYSLOG_PROMPT_EVAL_TIMEOUT_SECS:-300}"
-PREFLIGHT_TIMEOUT_SECS="${SYSLOG_PROMPT_EVAL_PREFLIGHT_TIMEOUT_SECS:-90}"
-MAX_TOKENS="${SYSLOG_PROMPT_EVAL_MAX_TOKENS:-25000}"
-MAX_BUDGET_USD="${SYSLOG_PROMPT_EVAL_MAX_BUDGET_USD:-}"
-SKIP_AGENT_PREFLIGHT="${SYSLOG_PROMPT_EVAL_SKIP_AGENT_PREFLIGHT:-0}"
+MCP_CONFIG="${CORTEX_PROMPT_EVAL_MCP_CONFIG:-}"
+WORKDIR="${CORTEX_PROMPT_EVAL_WORKDIR:-$(pwd)}"
+REPORT_PATH="${CORTEX_PROMPT_EVAL_REPORT:-}"
+RUN_TIMEOUT_SECS="${CORTEX_PROMPT_EVAL_TIMEOUT_SECS:-300}"
+PREFLIGHT_TIMEOUT_SECS="${CORTEX_PROMPT_EVAL_PREFLIGHT_TIMEOUT_SECS:-90}"
+MAX_TOKENS="${CORTEX_PROMPT_EVAL_MAX_TOKENS:-25000}"
+MAX_BUDGET_USD="${CORTEX_PROMPT_EVAL_MAX_BUDGET_USD:-}"
+SKIP_AGENT_PREFLIGHT="${CORTEX_PROMPT_EVAL_SKIP_AGENT_PREFLIGHT:-0}"
 declare -a PROMPT_ARGS=()
 
 usage() {
@@ -43,12 +43,12 @@ Options:
   -h, --help                  Show this help
 
 Auth:
-  If SYSLOG_MCP_TOKEN is set, it is sent as a Bearer token to syslog-mcp.
+  If CORTEX_TOKEN is set, it is sent as a Bearer token to cortex.
 
 Examples:
   scripts/prompt-headless-eval.sh --dry-run --prompt infra.service-outage --arg service=plex
-  SYSLOG_MCP_TOKEN=... scripts/prompt-headless-eval.sh --agent codex --prompt infra.after-deploy-check --arg service=syslog-mcp
-  SYSLOG_MCP_TOKEN=... scripts/prompt-headless-eval.sh --report /tmp/eval.json --max-tokens 20000 --prompt infra.storage-pressure
+  CORTEX_TOKEN=... scripts/prompt-headless-eval.sh --agent codex --prompt infra.after-deploy-check --arg service=cortex
+  CORTEX_TOKEN=... scripts/prompt-headless-eval.sh --report /tmp/eval.json --max-tokens 20000 --prompt infra.storage-pressure
 USAGE
 }
 
@@ -134,8 +134,8 @@ TMPDIR="$(mktemp -d /tmp/syslog-prompt-eval-XXXXXX)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
 AUTH_HEADER=()
-if [[ -n "${SYSLOG_MCP_TOKEN:-}" ]]; then
-    AUTH_HEADER=(-H "Authorization: Bearer ${SYSLOG_MCP_TOKEN}")
+if [[ -n "${CORTEX_TOKEN:-}" ]]; then
+    AUTH_HEADER=(-H "Authorization: Bearer ${CORTEX_TOKEN}")
 fi
 
 ARGS_JSON="$(python3 - "${PROMPT_ARGS[@]}" <<'PY'
@@ -205,7 +205,7 @@ if "error" in data:
 print(data["result"]["messages"][0]["content"]["text"])
 PY
 
-curl_mcp '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"syslog://schema/prompt-output"}}' > "$SCHEMA_RESPONSE"
+curl_mcp '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"cortex://schema/prompt-output"}}' > "$SCHEMA_RESPONSE"
 python3 - "$SCHEMA_RESPONSE" > "$SCHEMA_FILE" <<'PY'
 import json
 import sys
@@ -225,7 +225,7 @@ tools_response = json.load(open(sys.argv[1]))
 if "error" in tools_response:
     raise SystemExit(f"FAIL: tools/list failed: {tools_response['error']}")
 names = {tool.get("name") for tool in tools_response["result"].get("tools", [])}
-if "syslog" not in names:
+if "cortex" not in names:
     raise SystemExit(f"FAIL: tools/list does not expose syslog tool: {sorted(names)}")
 
 schema = json.load(open(sys.argv[2]))
@@ -241,7 +241,7 @@ for key in ["source", "summary", "timestamp", "host", "app", "severity", "log_id
 print("PASS: MCP preflight found syslog tool and prompt output schema")
 PY
 
-curl_mcp '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"help"}}}' > "$MCP_HELP_RESPONSE"
+curl_mcp '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"help"}}}' > "$MCP_HELP_RESPONSE"
 python3 - "$MCP_HELP_RESPONSE" <<'PY'
 import json
 import sys
@@ -264,7 +264,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "---"
     cat "$PROMPT_TEXT"
     echo "---"
-    echo "Schema: syslog://schema/prompt-output"
+    echo "Schema: cortex://schema/prompt-output"
     if [[ -n "$REPORT_PATH" ]]; then
         python3 - "$REPORT_PATH" "$PROMPT_NAME" "$AGENT" "$MCP_URL" <<'PY'
 import json
@@ -345,7 +345,7 @@ Use only the configured syslog MCP server. Do not use shell commands, curl, loca
 
 Call the syslog MCP tool with action=help. Return JSON:
 - can_access_syslog: true only if the MCP tool call succeeded.
-- evidence: a short phrase from the tool result proving it was syslog-mcp help.
+- evidence: a short phrase from the tool result proving it was cortex help.
 - failure_reason: null on success, otherwise the concise reason.
 EOF
     cp "$SCHEMA_FILE" "$TMPDIR/full-schema.keep"

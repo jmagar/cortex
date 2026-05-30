@@ -15,7 +15,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 fn base_url_flag_wins_over_env() {
     // Use a guard to clear the env var so this test doesn't depend on
     // ambient state.
-    let _g = EnvVarGuard::set("SYSLOG_MCP_URL", "http://envhost:3100");
+    let _g = EnvVarGuard::set("CORTEX_URL", "http://envhost:3100");
     let resolved =
         resolve_base_url(Some("http://flaghost:9000".into())).expect("flag should override env");
     assert_eq!(resolved.as_str(), "http://flaghost:9000/");
@@ -24,7 +24,7 @@ fn base_url_flag_wins_over_env() {
 #[test]
 #[serial]
 fn base_url_env_used_when_no_flag() {
-    let _g = EnvVarGuard::set("SYSLOG_MCP_URL", "http://envhost:3100");
+    let _g = EnvVarGuard::set("CORTEX_URL", "http://envhost:3100");
     let resolved = resolve_base_url(None).expect("env should resolve");
     assert_eq!(resolved.as_str(), "http://envhost:3100/");
 }
@@ -32,17 +32,17 @@ fn base_url_env_used_when_no_flag() {
 #[test]
 #[serial]
 fn base_url_default_when_no_flag_no_env() {
-    let _g1 = EnvVarGuard::unset("SYSLOG_MCP_URL");
-    let _g2 = EnvVarGuard::unset("SYSLOG_MCP_PORT");
+    let _g1 = EnvVarGuard::unset("CORTEX_URL");
+    let _g2 = EnvVarGuard::unset("CORTEX_PORT");
     let resolved = resolve_base_url(None).expect("default should resolve");
     assert_eq!(resolved.as_str(), "http://127.0.0.1:3100/");
 }
 
 #[test]
 #[serial]
-fn base_url_default_respects_syslog_mcp_port_env() {
-    let _g1 = EnvVarGuard::unset("SYSLOG_MCP_URL");
-    let _g2 = EnvVarGuard::set("SYSLOG_MCP_PORT", "9999");
+fn base_url_default_respects_cortex_port_env() {
+    let _g1 = EnvVarGuard::unset("CORTEX_URL");
+    let _g2 = EnvVarGuard::set("CORTEX_PORT", "9999");
     let resolved = resolve_base_url(None).expect("port-overridden default should resolve");
     assert_eq!(resolved.as_str(), "http://127.0.0.1:9999/");
 }
@@ -85,7 +85,7 @@ fn base_url_normalised_to_trailing_slash() {
 #[test]
 #[serial]
 fn token_flag_wins_over_env() {
-    let _g = EnvVarGuard::set("SYSLOG_API_TOKEN", "env-value");
+    let _g = EnvVarGuard::set("CORTEX_API_TOKEN", "env-value");
     let resolved = resolve_token(Some("flag-value".into())).unwrap();
     assert_eq!(resolved, "flag-value");
 }
@@ -93,7 +93,7 @@ fn token_flag_wins_over_env() {
 #[test]
 #[serial]
 fn token_env_used_when_no_flag() {
-    let _g = EnvVarGuard::set("SYSLOG_API_TOKEN", "env-value");
+    let _g = EnvVarGuard::set("CORTEX_API_TOKEN", "env-value");
     let resolved = resolve_token(None).unwrap();
     assert_eq!(resolved, "env-value");
 }
@@ -101,7 +101,7 @@ fn token_env_used_when_no_flag() {
 #[test]
 #[serial]
 fn token_missing_error_mentions_setup_repair_and_copy_and_history_warning() {
-    let _g = EnvVarGuard::unset("SYSLOG_API_TOKEN");
+    let _g = EnvVarGuard::unset("CORTEX_API_TOKEN");
     let err = resolve_token(None).expect_err("must fail closed when token is missing");
     let msg = err.to_string();
     assert!(
@@ -121,7 +121,7 @@ fn token_missing_error_mentions_setup_repair_and_copy_and_history_warning() {
 #[test]
 #[serial]
 fn token_empty_flag_falls_through_to_env() {
-    let _g = EnvVarGuard::set("SYSLOG_API_TOKEN", "env-value");
+    let _g = EnvVarGuard::set("CORTEX_API_TOKEN", "env-value");
     let resolved = resolve_token(Some("".into())).unwrap();
     assert_eq!(resolved, "env-value");
 }
@@ -131,8 +131,8 @@ fn token_empty_flag_falls_through_to_env() {
 #[test]
 #[serial]
 fn discover_constructs_client() {
-    let _g_url = EnvVarGuard::set("SYSLOG_MCP_URL", "http://localhost:3100");
-    let _g_tok = EnvVarGuard::set("SYSLOG_API_TOKEN", "test-value");
+    let _g_url = EnvVarGuard::set("CORTEX_URL", "http://localhost:3100");
+    let _g_tok = EnvVarGuard::set("CORTEX_API_TOKEN", "test-value");
     let client = HttpClient::discover(None, None).expect("discover should succeed");
     drop(client);
 }
@@ -140,7 +140,7 @@ fn discover_constructs_client() {
 #[test]
 #[serial]
 fn discover_rejects_userinfo_url() {
-    let _g = EnvVarGuard::set("SYSLOG_API_TOKEN", "test-value");
+    let _g = EnvVarGuard::set("CORTEX_API_TOKEN", "test-value");
     let err = HttpClient::discover(Some("http://t@localhost:3100".into()), None)
         .expect_err("must reject userinfo URL at discovery");
     assert!(err.to_string().contains("URL userinfo"));
@@ -149,8 +149,8 @@ fn discover_rejects_userinfo_url() {
 #[test]
 #[serial]
 fn discover_fails_when_token_missing() {
-    let _g_url = EnvVarGuard::set("SYSLOG_MCP_URL", "http://localhost:3100");
-    let _g_tok = EnvVarGuard::unset("SYSLOG_API_TOKEN");
+    let _g_url = EnvVarGuard::set("CORTEX_URL", "http://localhost:3100");
+    let _g_tok = EnvVarGuard::unset("CORTEX_API_TOKEN");
     let err = HttpClient::discover(None, None).expect_err("must fail closed");
     assert!(err.to_string().contains("setup repair"));
 }
@@ -277,7 +277,7 @@ async fn not_found_enriched_with_server_version() {
         "server version in error; got: {msg}"
     );
     assert!(msg.contains("abc123"), "git sha in error; got: {msg}");
-    assert!(msg.contains("syslog compose pull"));
+    assert!(msg.contains("cortex compose pull"));
 }
 
 #[tokio::test]
@@ -482,7 +482,7 @@ async fn version_endpoint_round_trip() {
 /// `terms[1..]`).
 #[tokio::test]
 async fn ai_abuse_request_round_trips_through_serde_qs() {
-    use syslog_mcp::app::AbuseSearchRequest;
+    use cortex::app::AbuseSearchRequest;
 
     let req = AbuseSearchRequest {
         project: Some("proj".into()),
@@ -519,7 +519,7 @@ async fn ai_abuse_request_round_trips_through_serde_qs() {
 
 #[tokio::test]
 async fn similar_incidents_round_trips_typed_response() {
-    use syslog_mcp::app::SimilarIncidentsRequest;
+    use cortex::app::SimilarIncidentsRequest;
 
     let (server, client) = start_mock_with_client().await;
     Mock::given(method("GET"))
@@ -557,7 +557,7 @@ async fn similar_incidents_round_trips_typed_response() {
 
 #[tokio::test]
 async fn ask_history_round_trips_typed_response() {
-    use syslog_mcp::app::AskHistoryRequest;
+    use cortex::app::AskHistoryRequest;
 
     let (server, client) = start_mock_with_client().await;
     Mock::given(method("GET"))
@@ -590,7 +590,7 @@ async fn ask_history_round_trips_typed_response() {
 
 #[tokio::test]
 async fn incident_context_round_trips_typed_response() {
-    use syslog_mcp::app::IncidentContextRequest;
+    use cortex::app::IncidentContextRequest;
 
     let (server, client) = start_mock_with_client().await;
     Mock::given(method("GET"))

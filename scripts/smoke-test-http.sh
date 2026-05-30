@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/smoke-test-http.sh — bead syslog-mcp-0p8r.10 cutover smoke test
+# scripts/smoke-test-http.sh — bead cortex-0p8r.10 cutover smoke test
 #
 # Exercises every CLI command that was routed through the container REST API
 # in waves 7-9 (queries + AI + DB), plus verifies that LOCAL-only commands
@@ -8,15 +8,15 @@
 # documented error.
 #
 # Required environment:
-#   SYSLOG_API_TOKEN     Bearer token for the /api/* endpoints. If unset,
+#   CORTEX_API_TOKEN     Bearer token for the /api/* endpoints. If unset,
 #                        this script falls back to grep'ing
-#                        ${SYSLOG_ENV_FILE:-${HOME}/.syslog-mcp/.env}.
+#                        ${CORTEX_ENV_FILE:-${HOME}/.cortex/.env}.
 #
 # Optional environment:
-#   SYSLOG_BIN           Path to the `syslog` binary (default: `syslog` on PATH).
-#   SYSLOG_SERVER        Base URL of the REST API (default: http://localhost:3100).
-#   SYSLOG_ENV_FILE      Path to .env containing SYSLOG_API_TOKEN
-#                        (default: ${HOME}/.syslog-mcp/.env).
+#   CORTEX_BIN           Path to the `syslog` binary (default: `syslog` on PATH).
+#   CORTEX_SERVER        Base URL of the REST API (default: http://localhost:3100).
+#   CORTEX_ENV_FILE      Path to .env containing CORTEX_API_TOKEN
+#                        (default: ${HOME}/.cortex/.env).
 #
 # Exit:
 #   0  — every assertion passed.
@@ -31,9 +31,9 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
-SYSLOG_BIN="${SYSLOG_BIN:-syslog}"
-SYSLOG_SERVER="${SYSLOG_SERVER:-http://localhost:3100}"
-SYSLOG_ENV_FILE="${SYSLOG_ENV_FILE:-${HOME}/.syslog-mcp/.env}"
+CORTEX_BIN="${CORTEX_BIN:-syslog}"
+CORTEX_SERVER="${CORTEX_SERVER:-http://localhost:3100}"
+CORTEX_ENV_FILE="${CORTEX_ENV_FILE:-${HOME}/.cortex/.env}"
 
 pass() { printf 'PASS  %s\n' "$1"; }
 info() { printf 'INFO  %s\n' "$1"; }
@@ -47,26 +47,26 @@ need() { printf 'NEED  %s\n' "$1" >&2; exit 2; }
 
 # ─── Prereqs ────────────────────────────────────────────────────────────────
 
-command -v "$SYSLOG_BIN" >/dev/null 2>&1 || need "syslog binary not on PATH (set SYSLOG_BIN=...)"
+command -v "$CORTEX_BIN" >/dev/null 2>&1 || need "syslog binary not on PATH (set CORTEX_BIN=...)"
 command -v jq >/dev/null 2>&1            || need "jq is required (install jq)"
 
-if [[ -z "${SYSLOG_API_TOKEN:-}" ]]; then
-  if [[ -r "$SYSLOG_ENV_FILE" ]]; then
+if [[ -z "${CORTEX_API_TOKEN:-}" ]]; then
+  if [[ -r "$CORTEX_ENV_FILE" ]]; then
     # shellcheck disable=SC2155
-    SYSLOG_API_TOKEN="$(grep -E '^SYSLOG_API_TOKEN=' "$SYSLOG_ENV_FILE" | head -n1 | cut -d= -f2-)"
+    CORTEX_API_TOKEN="$(grep -E '^CORTEX_API_TOKEN=' "$CORTEX_ENV_FILE" | head -n1 | cut -d= -f2-)"
   fi
 fi
 # Trim leading/trailing whitespace so blank-padded values are rejected.
 # Guard against `set -u` blowing up if the var is entirely unset.
-SYSLOG_API_TOKEN="${SYSLOG_API_TOKEN:-}"
-SYSLOG_API_TOKEN="${SYSLOG_API_TOKEN#"${SYSLOG_API_TOKEN%%[![:space:]]*}"}"
-SYSLOG_API_TOKEN="${SYSLOG_API_TOKEN%"${SYSLOG_API_TOKEN##*[![:space:]]}"}"
-[[ -n "${SYSLOG_API_TOKEN}" ]] || need "SYSLOG_API_TOKEN not set/blank (checked env and $SYSLOG_ENV_FILE)"
-export SYSLOG_API_TOKEN
+CORTEX_API_TOKEN="${CORTEX_API_TOKEN:-}"
+CORTEX_API_TOKEN="${CORTEX_API_TOKEN#"${CORTEX_API_TOKEN%%[![:space:]]*}"}"
+CORTEX_API_TOKEN="${CORTEX_API_TOKEN%"${CORTEX_API_TOKEN##*[![:space:]]}"}"
+[[ -n "${CORTEX_API_TOKEN}" ]] || need "CORTEX_API_TOKEN not set/blank (checked env and $CORTEX_ENV_FILE)"
+export CORTEX_API_TOKEN
 
-info "binary  : $(command -v "$SYSLOG_BIN")"
-info "version : $("$SYSLOG_BIN" --version 2>/dev/null || echo unknown)"
-info "server  : $SYSLOG_SERVER"
+info "binary  : $(command -v "$CORTEX_BIN")"
+info "version : $("$CORTEX_BIN" --version 2>/dev/null || echo unknown)"
+info "server  : $CORTEX_SERVER"
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -103,12 +103,12 @@ assert_fails_with() {
 }
 
 http() {
-  "$SYSLOG_BIN" --http --server "$SYSLOG_SERVER" --token "$SYSLOG_API_TOKEN" "$@"
+  "$CORTEX_BIN" --http --server "$CORTEX_SERVER" --token "$CORTEX_API_TOKEN" "$@"
 }
 
-# Default mode = no --http, no SYSLOG_USE_HTTP. Local SQL path.
+# Default mode = no --http, no CORTEX_USE_HTTP. Local SQL path.
 local_mode() {
-  env -u SYSLOG_USE_HTTP "$SYSLOG_BIN" "$@"
+  env -u CORTEX_USE_HTTP "$CORTEX_BIN" "$@"
 }
 
 # ─── HTTP-supported query commands (7) ──────────────────────────────────────
@@ -117,13 +117,13 @@ local_mode() {
 # subcommand parsing; per-command flags (including --json) MUST follow the
 # subcommand or they're rejected as an unknown leading argument.
 
-SYSLOG_SMOKE_REFTIME="${SYSLOG_SMOKE_REFTIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
+CORTEX_SMOKE_REFTIME="${CORTEX_SMOKE_REFTIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
 
 assert_json "http: search (limit 1)"     http search --json --limit 1
 assert_json "http: tail (limit 1)"       http tail --json --limit 1
 assert_json "http: errors"               http errors --json
 assert_json "http: hosts"                http hosts --json
-assert_json "http: correlate (1m, h=_)"  http correlate --json --reference-time "$SYSLOG_SMOKE_REFTIME" --hostname _smoke_ --window-minutes 1
+assert_json "http: correlate (1m, h=_)"  http correlate --json --reference-time "$CORTEX_SMOKE_REFTIME" --hostname _smoke_ --window-minutes 1
 assert_json "http: stats"                http stats --json
 assert_json "http: sessions (limit 1)"   http sessions --json --limit 1
 
@@ -160,23 +160,23 @@ assert_json "http: db vacuum (pages=1)"  http db vacuum --json --pages 1
 assert_json "local: ai doctor"           local_mode ai doctor --json
 assert_json "local: ai watch-status"     local_mode ai watch-status --json
 # `ai index` writes to the DB; keep it side-effect-light by indexing an
-# empty tempdir if SYSLOG_SMOKE_AI_INDEX_PATH is set, else skip the index
+# empty tempdir if CORTEX_SMOKE_AI_INDEX_PATH is set, else skip the index
 # side-effect and just exercise `ai add` against /dev/null which bails
 # cleanly. We assert the default `ai index --help` path produces help
 # output (still part of the CLI surface) rather than mutating DB state.
-SYSLOG_SMOKE_AI_TMP="$(mktemp -d)"
-trap 'rm -rf "$SYSLOG_SMOKE_AI_TMP"' EXIT
-assert_json "local: ai index (empty dir)" local_mode ai index --path "$SYSLOG_SMOKE_AI_TMP" --json
+CORTEX_SMOKE_AI_TMP="$(mktemp -d)"
+trap 'rm -rf "$CORTEX_SMOKE_AI_TMP"' EXIT
+assert_json "local: ai index (empty dir)" local_mode ai index --path "$CORTEX_SMOKE_AI_TMP" --json
 # `ai add` requires a real file path; create a minimal stub.
-printf '{}\n' >"$SYSLOG_SMOKE_AI_TMP/empty.jsonl"
-assert_json "local: ai add (stub)"       local_mode ai add --file "$SYSLOG_SMOKE_AI_TMP/empty.jsonl" --json
+printf '{}\n' >"$CORTEX_SMOKE_AI_TMP/empty.jsonl"
+assert_json "local: ai add (stub)"       local_mode ai add --file "$CORTEX_SMOKE_AI_TMP/empty.jsonl" --json
 # `ai smoke-watch` writes a synthetic transcript and runs ai-watch briefly.
 # Gate behind a flag — it's slower (~30s) and not appropriate for every
-# CI run. Operators opt in via SYSLOG_SMOKE_RUN_AI_WATCH=1.
-if [[ "${SYSLOG_SMOKE_RUN_AI_WATCH:-0}" == "1" ]]; then
+# CI run. Operators opt in via CORTEX_SMOKE_RUN_AI_WATCH=1.
+if [[ "${CORTEX_SMOKE_RUN_AI_WATCH:-0}" == "1" ]]; then
   assert_json "local: ai smoke-watch"    local_mode ai smoke-watch --json
 else
-  info "skip: ai smoke-watch (set SYSLOG_SMOKE_RUN_AI_WATCH=1 to include)"
+  info "skip: ai smoke-watch (set CORTEX_SMOKE_RUN_AI_WATCH=1 to include)"
 fi
 # `ai watch` is a daemon — we do NOT run it from a smoke test.
 info "skip: ai watch (long-running daemon; tested by systemd unit healthchecks)"
@@ -184,9 +184,9 @@ info "skip: ai watch (long-running daemon; tested by systemd unit healthchecks)"
 # ─── LOCAL-only DB: backup ──────────────────────────────────────────────────
 
 # `db backup` must succeed in DEFAULT mode.
-SYSLOG_SMOKE_BACKUP="$SYSLOG_SMOKE_AI_TMP/backup.db"
-assert_json "local: db backup (default)" local_mode db backup --output "$SYSLOG_SMOKE_BACKUP" --json
-[[ -s "$SYSLOG_SMOKE_BACKUP" ]] || fail "local: db backup did not produce a non-empty file at $SYSLOG_SMOKE_BACKUP"
+CORTEX_SMOKE_BACKUP="$CORTEX_SMOKE_AI_TMP/backup.db"
+assert_json "local: db backup (default)" local_mode db backup --output "$CORTEX_SMOKE_BACKUP" --json
+[[ -s "$CORTEX_SMOKE_BACKUP" ]] || fail "local: db backup did not produce a non-empty file at $CORTEX_SMOKE_BACKUP"
 
 # `db backup --http` must bail with the documented error from
 # src/cli/dispatch.rs run_db_backup (substring check tolerates minor
@@ -195,6 +195,6 @@ assert_json "local: db backup (default)" local_mode db backup --output "$SYSLOG_
 assert_fails_with \
   "http: db backup bails as documented" \
   "db backup currently runs locally" \
-  http --json db backup --output "$SYSLOG_SMOKE_AI_TMP/should-not-exist.db"
+  http --json db backup --output "$CORTEX_SMOKE_AI_TMP/should-not-exist.db"
 
 printf '\nAll %s assertions passed.\n' "$SCRIPT_NAME"

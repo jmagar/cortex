@@ -1,8 +1,8 @@
-name: syslog-mcp
+name: cortex
 
 x-common-service: &common-service
   networks:
-    - syslog-mcp
+    - cortex
   restart: unless-stopped
   extra_hosts:
     - "host.docker.internal:host-gateway"
@@ -18,22 +18,22 @@ x-common-service: &common-service
       compress: "true"
 
 services:
-  syslog-mcp:
+  cortex:
     <<: *common-service
-    image: ghcr.io/jmagar/syslog-mcp:${SYSLOG_MCP_VERSION:-0.28.2}
-    container_name: syslog-mcp
-    user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"
+    image: ghcr.io/jmagar/cortex:${CORTEX_VERSION:-1.0.0}
+    container_name: cortex
+    user: "${CORTEX_UID:-1000}:${CORTEX_GID:-1000}"
     env_file:
       - path: .env
         required: false
     ports:
-      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/udp"
-      - "${SYSLOG_HOST_PORT:-1514}:${SYSLOG_PORT:-1514}/tcp"
-      - "${SYSLOG_MCP_PORT:-3100}:3100/tcp"
+      - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/udp"
+      - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/tcp"
+      - "${CORTEX_PORT:-3100}:3100/tcp"
     volumes:
-      - ${SYSLOG_MCP_DATA_VOLUME:-syslog-mcp-data}:/data
-    # The container listens on SYSLOG_PORT (default 1514). To serve host port
-    # 514, set SYSLOG_HOST_PORT=514 while leaving SYSLOG_PORT at 1514, or add
+      - ${CORTEX_DATA_VOLUME:-cortex-data}:/data
+    # The container listens on CORTEX_RECEIVER_PORT (default 1514). To serve host port
+    # 514, set CORTEX_RECEIVER_HOST_PORT=514 while leaving CORTEX_RECEIVER_PORT at 1514, or add
     # host-level firewall/NAT redirects from 514 to 1514.
     # NET_BIND_SERVICE is only needed if the container itself binds port 514.
     # cap_add:
@@ -49,19 +49,19 @@ services:
         limits:
           # Default 2G headroom: heavy `stats`/`sessions` aggregations over a
           # large DB can spike memory; 512M previously triggered OOM restarts.
-          # Tune per-host via SYSLOG_MCP_MEMORY_LIMIT (e.g. 1G, 4G).
-          memory: ${SYSLOG_MCP_MEMORY_LIMIT:-2G}
-          cpus: '${SYSLOG_MCP_CPU_LIMIT:-1.0}'
+          # Tune per-host via CORTEX_MEMORY_LIMIT (e.g. 1G, 4G).
+          memory: ${CORTEX_MEMORY_LIMIT:-2G}
+          cpus: '${CORTEX_CPU_LIMIT:-1.0}'
 
 volumes:
   # Named volume with an explicit stable name — never gets project-prefixed, so
   # COMPOSE_PROJECT_NAME changes don't orphan the database.
-  # To use a bind mount instead: set SYSLOG_MCP_DATA_VOLUME=/absolute/host/path
-  # To rename the volume:       set SYSLOG_MCP_VOLUME_NAME=my-volume-name
-  syslog-mcp-data:
-    name: ${SYSLOG_MCP_VOLUME_NAME:-syslog-mcp-data}
+  # To use a bind mount instead: set CORTEX_DATA_VOLUME=/absolute/host/path
+  # To rename the volume:       set CORTEX_VOLUME_NAME=my-volume-name
+  cortex-data:
+    name: ${CORTEX_VOLUME_NAME:-cortex-data}
 
 networks:
-  syslog-mcp:
-    name: ${DOCKER_NETWORK:-syslog-mcp}
+  cortex:
+    name: ${DOCKER_NETWORK:-cortex}
     external: true

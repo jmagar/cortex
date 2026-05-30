@@ -4,17 +4,17 @@ use super::*;
 fn env_write_replaces_file_atomically_visible_content() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(".env");
-    std::fs::write(&path, "# keep\nSYSLOG_HOST=old\n").unwrap();
+    std::fs::write(&path, "# keep\nCORTEX_RECEIVER_HOST=old\n").unwrap();
 
-    write_env_value(&path, "SYSLOG_HOST", "0.0.0.0").unwrap();
+    write_env_value(&path, "CORTEX_RECEIVER_HOST", "0.0.0.0").unwrap();
 
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "# keep\nSYSLOG_HOST=0.0.0.0\n"
+        "# keep\nCORTEX_RECEIVER_HOST=0.0.0.0\n"
     );
     assert_eq!(
         list_env_entries(&path).unwrap(),
-        vec![("SYSLOG_HOST".to_string(), "0.0.0.0".to_string())]
+        vec![("CORTEX_RECEIVER_HOST".to_string(), "0.0.0.0".to_string())]
     );
     assert!(!dir.path().read_dir().unwrap().any(|entry| entry
         .unwrap()

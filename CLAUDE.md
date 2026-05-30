@@ -1,4 +1,4 @@
-# syslog-mcp
+# cortex
 
 ## Purpose
 
@@ -21,13 +21,13 @@
 | `src/compose.rs` | Docker Compose lifecycle management |
 | `src/scanner.rs` | AI transcript indexer (Claude/Codex sessions) |
 | `src/doctor.rs` | Self-debugging diagnostics — binary, DB, and AI-watch health |
-| `src/deploy.rs` | CLI remote deploy — provisions syslog-mcp on remote hosts |
+| `src/deploy.rs` | CLI remote deploy — provisions cortex on remote hosts |
 | `src/api.rs` | HTTP API surface — all routes for CLI HTTP transport |
 
 ## Project Structure
 
 ```
-syslog-mcp/
+cortex/
 ├── src/
 │   ├── main.rs                  # CLI entrypoint (serve mcp / mcp stdio)
 │   ├── lib.rs                   # Library root, module declarations
@@ -114,7 +114,7 @@ Runtime Core (src/runtime.rs)
   ↓  Batching → Transaction
 Database Layer (src/db/)
   ↓
-SQLite Database (/data/syslog.db)
+SQLite Database (/data/cortex.db)
   ↑
 Service Layer (src/app/)
   ↑
@@ -206,9 +206,9 @@ Two coordination diagnostics guard against the CLI and the container talking
 to different SQLite files:
 
 - `data-mount` — verifies the host directory bind-mounted at `/data` matches
-  `SYSLOG_MCP_DATA_VOLUME`.
+  `CORTEX_DATA_VOLUME`.
 - `ai-watch-coord` — verifies the host systemd `syslog-ai-watch.service`
-  resolves `SYSLOG_MCP_DB_PATH` to the same canonical directory as the
+  resolves `CORTEX_DB_PATH` to the same canonical directory as the
   container's `/data` bind.
 
 Where they run:

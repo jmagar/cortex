@@ -1,4 +1,0 @@
-interface:
-  display_name: "Syslog Service Logs"
-  short_description: "Tail syslog-mcp service logs"
-  default_prompt: "Use $syslog-logs to tail or follow syslog-mcp service logs."

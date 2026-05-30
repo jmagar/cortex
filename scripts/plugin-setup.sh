@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# SessionStart / ConfigChange hook for syslog-mcp.
+# SessionStart / ConfigChange hook for cortex.
 # Keep setup policy in the syslog binary; this script adapts plugin settings to env.
 set -euo pipefail
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
-: "${CLAUDE_PLUGIN_DATA:=${HOME}/.claude/plugins/data/syslog-jmagar-lab}"
-: "${SYSLOG_DATA_DIR:=${CLAUDE_PLUGIN_DATA}}"
+: "${CLAUDE_PLUGIN_DATA:=${HOME}/.claude/plugins/data/cortex-jmagar-lab}"
+: "${CORTEX_DATA_DIR:=${CLAUDE_PLUGIN_DATA}}"
 
 reject_unsafe_value() {
   local name="$1" value="${2:-}"
@@ -24,18 +24,18 @@ export_if_set() {
 }
 
 ensure_syslog_binary() {
-  if command -v syslog >/dev/null 2>&1; then
+  if command -v cortex >/dev/null 2>&1; then
     return 0
   fi
 
-  local bundled="${CLAUDE_PLUGIN_ROOT}/bin/syslog"
+  local bundled="${CLAUDE_PLUGIN_ROOT}/bin/cortex"
   if [[ -x "${bundled}" ]]; then
     mkdir -p "${HOME}/.local/bin"
-    ln -sf "${bundled}" "${HOME}/.local/bin/syslog"
+    ln -sf "${bundled}" "${HOME}/.local/bin/cortex"
     export PATH="${HOME}/.local/bin:${PATH}"
   fi
 
-  command -v syslog >/dev/null 2>&1 || {
+  command -v cortex >/dev/null 2>&1 || {
     printf 'syslog plugin setup: syslog binary not found on PATH or at %s\n' "${bundled}" >&2
     exit 1
   }
@@ -45,9 +45,9 @@ validate_client() {
   local server_url
   server_url="$(strip_trailing_mcp_path "${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}")"
   if curl -fsS --connect-timeout 2 --max-time 5 "${server_url%/}/health" >/dev/null 2>&1; then
-    echo "syslog-mcp: connected to ${server_url%/}"
+    echo "cortex: connected to ${server_url%/}"
   else
-    echo "WARNING: syslog-mcp server at ${server_url%/} is not reachable" >&2
+    echo "WARNING: cortex server at ${server_url%/} is not reachable" >&2
   fi
 }
 
@@ -92,15 +92,15 @@ codex_oauth_callback_url() {
 }
 
 prepare_oauth_env() {
-  local auth_mode="${SYSLOG_MCP_AUTH_MODE:-bearer}"
+  local auth_mode="${CORTEX_AUTH_MODE:-bearer}"
   local server_url="${CLAUDE_PLUGIN_OPTION_SERVER_URL:-http://localhost:3100}"
-  local redirects="${SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS:-}"
+  local redirects="${CORTEX_AUTH_ALLOWED_REDIRECT_URIS:-}"
   local codex_callback
 
   [[ "${auth_mode}" == "oauth" ]] || return 0
-  if [[ -z "${SYSLOG_MCP_PUBLIC_URL:-}" && "${server_url}" == https://* ]]; then
-    export SYSLOG_MCP_PUBLIC_URL
-    SYSLOG_MCP_PUBLIC_URL="$(strip_trailing_mcp_path "${server_url}")"
+  if [[ -z "${CORTEX_PUBLIC_URL:-}" && "${server_url}" == https://* ]]; then
+    export CORTEX_PUBLIC_URL
+    CORTEX_PUBLIC_URL="$(strip_trailing_mcp_path "${server_url}")"
   fi
 
   redirects="$(append_csv_unique "${redirects}" "https://claude.ai/api/mcp/auth_callback")"
@@ -109,34 +109,34 @@ prepare_oauth_env() {
   if [[ -n "${codex_callback}" ]]; then
     redirects="$(append_csv_unique "${redirects}" "${codex_callback}")"
   fi
-  export SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS="${redirects}"
-  export SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH="${SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH:-false}"
+  export CORTEX_AUTH_ALLOWED_REDIRECT_URIS="${redirects}"
+  export CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH="${CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH:-false}"
 }
 
 main() {
   local is_server="${CLAUDE_PLUGIN_OPTION_IS_SERVER:-true}"
 
   reject_unsafe_value "CLAUDE_PLUGIN_OPTION_API_TOKEN" "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}"
-  export_if_set SYSLOG_MCP_TOKEN CLAUDE_PLUGIN_OPTION_API_TOKEN
-  export_if_set SYSLOG_SERVER_URL CLAUDE_PLUGIN_OPTION_SERVER_URL
-  export_if_set SYSLOG_MCP_AUTH_MODE CLAUDE_PLUGIN_OPTION_AUTH_MODE
-  export_if_set SYSLOG_MCP_PUBLIC_URL CLAUDE_PLUGIN_OPTION_PUBLIC_URL
-  export_if_set SYSLOG_MCP_GOOGLE_CLIENT_ID CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_ID
-  export_if_set SYSLOG_MCP_GOOGLE_CLIENT_SECRET CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_SECRET
-  export_if_set SYSLOG_MCP_AUTH_ADMIN_EMAIL CLAUDE_PLUGIN_OPTION_AUTH_ADMIN_EMAIL
-  export_if_set SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS CLAUDE_PLUGIN_OPTION_AUTH_ALLOWED_REDIRECT_URIS
-  export_if_set SYSLOG_HOST CLAUDE_PLUGIN_OPTION_SYSLOG_HOST
-  export_if_set SYSLOG_PORT CLAUDE_PLUGIN_OPTION_SYSLOG_PORT
-  export_if_set SYSLOG_HOST_PORT CLAUDE_PLUGIN_OPTION_SYSLOG_HOST_PORT
-  export_if_set SYSLOG_MCP_HOST CLAUDE_PLUGIN_OPTION_MCP_HOST
-  export_if_set SYSLOG_MCP_PORT CLAUDE_PLUGIN_OPTION_MCP_PORT
-  export_if_set SYSLOG_MCP_MAX_DB_SIZE_MB CLAUDE_PLUGIN_OPTION_MAX_DB_SIZE_MB
-  export_if_set SYSLOG_MCP_DATA_VOLUME CLAUDE_PLUGIN_OPTION_DATA_DIR
-  export_if_set SYSLOG_MCP_RETENTION_DAYS CLAUDE_PLUGIN_OPTION_RETENTION_DAYS
-  export_if_set SYSLOG_BATCH_SIZE CLAUDE_PLUGIN_OPTION_BATCH_SIZE
-  export_if_set SYSLOG_WRITE_CHANNEL_CAPACITY CLAUDE_PLUGIN_OPTION_WRITE_CHANNEL_CAPACITY
-  export_if_set SYSLOG_DOCKER_INGEST_ENABLED CLAUDE_PLUGIN_OPTION_DOCKER_INGEST_ENABLED
-  export_if_set SYSLOG_DOCKER_HOSTS CLAUDE_PLUGIN_OPTION_FLEET_HOSTS
+  export_if_set CORTEX_TOKEN CLAUDE_PLUGIN_OPTION_API_TOKEN
+  export_if_set CORTEX_SERVER_URL CLAUDE_PLUGIN_OPTION_SERVER_URL
+  export_if_set CORTEX_AUTH_MODE CLAUDE_PLUGIN_OPTION_AUTH_MODE
+  export_if_set CORTEX_PUBLIC_URL CLAUDE_PLUGIN_OPTION_PUBLIC_URL
+  export_if_set CORTEX_GOOGLE_CLIENT_ID CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_ID
+  export_if_set CORTEX_GOOGLE_CLIENT_SECRET CLAUDE_PLUGIN_OPTION_GOOGLE_CLIENT_SECRET
+  export_if_set CORTEX_AUTH_ADMIN_EMAIL CLAUDE_PLUGIN_OPTION_AUTH_ADMIN_EMAIL
+  export_if_set CORTEX_AUTH_ALLOWED_REDIRECT_URIS CLAUDE_PLUGIN_OPTION_AUTH_ALLOWED_REDIRECT_URIS
+  export_if_set CORTEX_RECEIVER_HOST CLAUDE_PLUGIN_OPTION_CORTEX_RECEIVER_HOST
+  export_if_set CORTEX_RECEIVER_PORT CLAUDE_PLUGIN_OPTION_CORTEX_RECEIVER_PORT
+  export_if_set CORTEX_RECEIVER_HOST_PORT CLAUDE_PLUGIN_OPTION_CORTEX_RECEIVER_HOST_PORT
+  export_if_set CORTEX_HOST CLAUDE_PLUGIN_OPTION_MCP_HOST
+  export_if_set CORTEX_PORT CLAUDE_PLUGIN_OPTION_MCP_PORT
+  export_if_set CORTEX_MAX_DB_SIZE_MB CLAUDE_PLUGIN_OPTION_MAX_DB_SIZE_MB
+  export_if_set CORTEX_DATA_VOLUME CLAUDE_PLUGIN_OPTION_DATA_DIR
+  export_if_set CORTEX_RETENTION_DAYS CLAUDE_PLUGIN_OPTION_RETENTION_DAYS
+  export_if_set CORTEX_BATCH_SIZE CLAUDE_PLUGIN_OPTION_BATCH_SIZE
+  export_if_set CORTEX_WRITE_CHANNEL_CAPACITY CLAUDE_PLUGIN_OPTION_WRITE_CHANNEL_CAPACITY
+  export_if_set CORTEX_DOCKER_INGEST_ENABLED CLAUDE_PLUGIN_OPTION_DOCKER_INGEST_ENABLED
+  export_if_set CORTEX_DOCKER_HOSTS CLAUDE_PLUGIN_OPTION_FLEET_HOSTS
   export_if_set NO_AUTH CLAUDE_PLUGIN_OPTION_NO_AUTH
   prepare_oauth_env
 
@@ -145,9 +145,9 @@ main() {
     return 0
   fi
 
-  mkdir -p "${SYSLOG_DATA_DIR}"
-  chmod 700 "${SYSLOG_DATA_DIR}" 2>/dev/null || true
-  export SYSLOG_DATA_DIR
+  mkdir -p "${CORTEX_DATA_DIR}"
+  chmod 700 "${CORTEX_DATA_DIR}" 2>/dev/null || true
+  export CORTEX_DATA_DIR
 
   ensure_syslog_binary
   syslog setup plugin-hook "$@"

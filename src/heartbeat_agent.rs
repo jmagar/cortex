@@ -38,13 +38,13 @@ pub struct HeartbeatAgentConfig {
 
 impl HeartbeatAgentConfig {
     pub fn from_env(host_id_path: PathBuf) -> Self {
-        let target = std::env::var("SYSLOG_HEARTBEAT_TARGET")
+        let target = std::env::var("CORTEX_HEARTBEAT_TARGET")
             .ok()
-            .or_else(|| std::env::var("SYSLOG_MCP_URL").ok())
+            .or_else(|| std::env::var("CORTEX_URL").ok())
             .or_else(|| Some(DEFAULT_TARGET.to_string()));
-        let token = std::env::var("SYSLOG_HEARTBEAT_TOKEN")
+        let token = std::env::var("CORTEX_HEARTBEAT_TOKEN")
             .ok()
-            .or_else(|| std::env::var("SYSLOG_MCP_TOKEN").ok());
+            .or_else(|| std::env::var("CORTEX_TOKEN").ok());
         Self {
             target,
             token,
@@ -1167,7 +1167,7 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
         }
 
         let target = config.target.as_deref().ok_or_else(|| {
-            anyhow!("heartbeat agent requires --target or SYSLOG_HEARTBEAT_TARGET")
+            anyhow!("heartbeat agent requires --target or CORTEX_HEARTBEAT_TARGET")
         })?;
 
         flush_retry_buffer(&client, &mut retry, target, config.token.as_deref()).await;

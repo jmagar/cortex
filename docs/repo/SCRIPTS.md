@@ -1,4 +1,4 @@
-# Scripts Reference -- syslog-mcp
+# Scripts Reference -- cortex
 
 Scripts used for maintenance, hooks, and testing.
 

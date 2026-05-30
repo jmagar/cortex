@@ -13,11 +13,11 @@ use super::{
     HeartbeatAgentAction, PhaseTimer, SetupPhase, SetupReport, SetupStatus,
 };
 
-const UNIT_NAME: &str = "syslog-heartbeat-agent.service";
+const UNIT_NAME: &str = "cortex-heartbeat-agent.service";
 
 pub async fn run_heartbeat_agent_setup(action: HeartbeatAgentAction) -> io::Result<SetupReport> {
     let started = Instant::now();
-    let home = super::syslog_home_dir()?;
+    let home = super::cortex_home_dir()?;
     let env_path = home.join("heartbeat-agent.env");
     let compose_dir = home.join("compose");
     let data_dir = home.join("data");
@@ -29,12 +29,12 @@ pub async fn run_heartbeat_agent_setup(action: HeartbeatAgentAction) -> io::Resu
 
     match action {
         HeartbeatAgentAction::Install => {
-            let syslog_bin = super::resolve_syslog_binary()?;
+            let cortex_bin = super::resolve_cortex_binary()?;
             std::fs::create_dir_all(&unit_dir)?;
             phases.push(write_heartbeat_agent_env(&env_path)?);
             phases.push(write_heartbeat_agent_unit(
                 &unit_path,
-                &syslog_bin,
+                &cortex_bin,
                 &env_path,
                 &host_id_path,
             )?);
@@ -59,20 +59,20 @@ pub async fn run_heartbeat_agent_setup(action: HeartbeatAgentAction) -> io::Resu
             ));
         }
         HeartbeatAgentAction::Check => {
-            let syslog_bin = super::resolve_syslog_binary()?;
+            let cortex_bin = super::resolve_cortex_binary()?;
             phases.push(check_file_phase(
                 "heartbeat-agent-env",
                 &env_path,
-                "run syslog setup heartbeat-agent install",
+                "run cortex setup heartbeat-agent install",
             ));
             phases.push(check_file_phase(
                 "heartbeat-agent-unit",
                 &unit_path,
-                "run syslog setup heartbeat-agent install",
+                "run cortex setup heartbeat-agent install",
             ));
             phases.push(check_heartbeat_agent_content(
                 &unit_path,
-                &syslog_bin,
+                &cortex_bin,
                 &env_path,
                 &host_id_path,
             ));
@@ -99,21 +99,21 @@ fn write_heartbeat_agent_env(env_path: &Path) -> io::Result<SetupPhase> {
     if let Some(parent) = env_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let target = std::env::var("SYSLOG_HEARTBEAT_TARGET")
+    let target = std::env::var("CORTEX_HEARTBEAT_TARGET")
         .ok()
-        .or_else(|| read_setup_env_value("SYSLOG_HEARTBEAT_TARGET"))
+        .or_else(|| read_setup_env_value("CORTEX_HEARTBEAT_TARGET"))
         .unwrap_or_else(|| heartbeat_agent::DEFAULT_TARGET.to_string());
-    let token = std::env::var("SYSLOG_HEARTBEAT_TOKEN")
+    let token = std::env::var("CORTEX_HEARTBEAT_TOKEN")
         .ok()
-        .or_else(|| read_setup_env_value("SYSLOG_MCP_TOKEN"))
-        .or_else(|| read_setup_env_value("SYSLOG_HEARTBEAT_TOKEN"));
+        .or_else(|| read_setup_env_value("CORTEX_TOKEN"))
+        .or_else(|| read_setup_env_value("CORTEX_HEARTBEAT_TOKEN"));
     let mut body = format!(
-        "SYSLOG_HEARTBEAT_TARGET={}\nRUST_LOG=warn\n",
+        "CORTEX_HEARTBEAT_TARGET={}\nRUST_LOG=warn\n",
         shell_safe_value(&target)?
     );
     if let Some(token) = token.filter(|value| !value.trim().is_empty()) {
         body.push_str(&format!(
-            "SYSLOG_HEARTBEAT_TOKEN={}\n",
+            "CORTEX_HEARTBEAT_TOKEN={}\n",
             shell_safe_value(&token)?
         ));
     }
@@ -123,7 +123,7 @@ fn write_heartbeat_agent_env(env_path: &Path) -> io::Result<SetupPhase> {
 
 fn write_heartbeat_agent_unit(
     unit_path: &Path,
-    syslog_bin: &Path,
+    cortex_bin: &Path,
     env_path: &Path,
     host_id_path: &Path,
 ) -> io::Result<SetupPhase> {
@@ -133,19 +133,19 @@ fn write_heartbeat_agent_unit(
     }
     std::fs::write(
         unit_path,
-        heartbeat_agent_unit(syslog_bin, env_path, host_id_path)?,
+        heartbeat_agent_unit(cortex_bin, env_path, host_id_path)?,
     )?;
     Ok(timer.finish(SetupStatus::Ok, format!("wrote {}", unit_path.display())))
 }
 
 fn check_heartbeat_agent_content(
     unit_path: &Path,
-    syslog_bin: &Path,
+    cortex_bin: &Path,
     env_path: &Path,
     host_id_path: &Path,
 ) -> SetupPhase {
     let timer = PhaseTimer::start("heartbeat-agent-content");
-    let expected = match heartbeat_agent_unit(syslog_bin, env_path, host_id_path) {
+    let expected = match heartbeat_agent_unit(cortex_bin, env_path, host_id_path) {
         Ok(expected) => expected,
         Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
     };
@@ -196,22 +196,22 @@ fn remove_file_phase(name: &'static str, path: &Path) -> io::Result<SetupPhase> 
 }
 
 fn heartbeat_agent_unit(
-    syslog_bin: &Path,
+    cortex_bin: &Path,
     env_path: &Path,
     host_id_path: &Path,
 ) -> io::Result<String> {
     let read_write_dir = setup_path_value(host_id_path.parent().unwrap_or_else(|| Path::new("/")))?;
-    let syslog_bin = setup_path_value(syslog_bin)?;
+    let cortex_bin = setup_path_value(cortex_bin)?;
     let env_path = setup_path_value(env_path)?;
     let host_id_path = setup_path_value(host_id_path)?;
     Ok(format!(
-        "[Unit]\nDescription=syslog-mcp heartbeat agent\nDocumentation=https://github.com/jmagar/syslog-mcp\nAfter=network-online.target\nWants=network-online.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nExecStart={syslog_bin} heartbeat agent --host-id-path {host_id_path}\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nReadWritePaths={}\n\n[Install]\nWantedBy=default.target\n",
+        "[Unit]\nDescription=cortex heartbeat agent\nDocumentation=https://github.com/jmagar/cortex\nAfter=network-online.target\nWants=network-online.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nExecStart={cortex_bin} heartbeat agent --host-id-path {host_id_path}\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nReadWritePaths={}\n\n[Install]\nWantedBy=default.target\n",
         read_write_dir
     ))
 }
 
 fn read_setup_env_value(key: &str) -> Option<String> {
-    let path = super::syslog_home_dir().ok()?.join(".env");
+    let path = super::cortex_home_dir().ok()?.join(".env");
     match std::fs::read_to_string(&path) {
         Ok(raw) => parse_env(&raw).remove(key),
         Err(error) if error.kind() == ErrorKind::NotFound => None,
@@ -242,13 +242,13 @@ mod tests {
     #[test]
     fn unit_runs_heartbeat_agent_with_private_host_id_path() {
         let unit = heartbeat_agent_unit(
-            Path::new("/usr/local/bin/syslog"),
-            Path::new("/home/me/.syslog-mcp/heartbeat-agent.env"),
-            Path::new("/home/me/.syslog-mcp/heartbeat-host-id"),
+            Path::new("/usr/local/bin/cortex"),
+            Path::new("/home/me/.cortex/heartbeat-agent.env"),
+            Path::new("/home/me/.cortex/heartbeat-host-id"),
         )
         .unwrap();
-        assert!(unit.contains("ExecStart=/usr/local/bin/syslog heartbeat agent --host-id-path /home/me/.syslog-mcp/heartbeat-host-id"));
-        assert!(unit.contains("EnvironmentFile=/home/me/.syslog-mcp/heartbeat-agent.env"));
-        assert!(unit.contains("ReadWritePaths=/home/me/.syslog-mcp"));
+        assert!(unit.contains("ExecStart=/usr/local/bin/cortex heartbeat agent --host-id-path /home/me/.cortex/heartbeat-host-id"));
+        assert!(unit.contains("EnvironmentFile=/home/me/.cortex/heartbeat-agent.env"));
+        assert!(unit.contains("ReadWritePaths=/home/me/.cortex"));
     }
 }

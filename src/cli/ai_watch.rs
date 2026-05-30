@@ -1,8 +1,8 @@
 use anyhow::{bail, Result};
+use cortex::app::CortexService;
+use cortex::scanner::AiDoctorReport;
 use serde::Serialize;
 use std::path::PathBuf;
-use syslog_mcp::app::SyslogService;
-use syslog_mcp::scanner::AiDoctorReport;
 
 #[derive(Debug, Clone, Serialize)]
 
@@ -21,7 +21,7 @@ pub(crate) struct AiSmokeWatchTarget {
     pub(crate) body: String,
 }
 
-pub(crate) async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWatchReport> {
+pub(crate) async fn ai_smoke_watch(service: &CortexService) -> Result<AiSmokeWatchReport> {
     let doctor = service.ai_doctor().await?;
     let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
     let session_id = format!("syslogsmokewatch{stamp}{}", std::process::id());
@@ -36,7 +36,7 @@ pub(crate) async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWat
     let mut ingested = false;
     for _ in 0..30 {
         let response = service
-            .search_sessions(syslog_mcp::app::SearchSessionsRequest {
+            .search_sessions(cortex::app::SearchSessionsRequest {
                 query: session_id.clone(),
                 project: Some(target.project.clone()),
                 tool: Some(target.tool.into()),
@@ -66,7 +66,7 @@ pub(crate) async fn ai_smoke_watch(service: &SyslogService) -> Result<AiSmokeWat
     let mut pruned_missing_checkpoint = false;
     for _ in 0..30 {
         let result = service
-            .prune_ai_checkpoints_checked(syslog_mcp::app::AiPruneCheckpointsRequest {
+            .prune_ai_checkpoints_checked(cortex::app::AiPruneCheckpointsRequest {
                 dry_run: false,
                 missing_only: true,
                 limit: Some(500),

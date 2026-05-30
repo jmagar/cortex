@@ -17,10 +17,10 @@ pub mod mcp;
 pub(crate) mod notifications;
 pub mod observability;
 pub mod otlp;
+pub mod receiver;
 pub mod runtime;
 pub mod scanner;
 pub mod setup;
-pub mod syslog;
 
 pub(crate) mod db;
 pub(crate) mod docker_ingest;
@@ -43,7 +43,7 @@ pub mod testing {
     use std::{path::Path, sync::Arc};
 
     use crate::{
-        app::SyslogService,
+        app::CortexService,
         config::{McpConfig, StorageConfig},
         db,
         mcp::{AppState, AuthPolicy},
@@ -110,7 +110,7 @@ pub mod testing {
         let storage = minimal_storage(data_dir);
         let pool = Arc::new(db::init_pool(&storage).expect("test db pool should init"));
         AppState {
-            service: SyslogService::new(pool, storage),
+            service: CortexService::new(pool, storage),
             config: base_config(None, token),
             notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(OtlpCounters::default()),
@@ -127,7 +127,7 @@ pub mod testing {
         let storage = minimal_storage(data_dir);
         let pool = Arc::new(db::init_pool(&storage).expect("test db pool should init"));
         AppState {
-            service: SyslogService::new(pool, storage),
+            service: CortexService::new(pool, storage),
             config: base_config(Some("https://syslog.example.com"), token),
             notifications_config: crate::config::NotificationsConfig::default(),
             otlp_counters: Arc::new(OtlpCounters::default()),
@@ -142,7 +142,7 @@ pub mod testing {
         McpConfig {
             host: "127.0.0.1".into(),
             port: 3100,
-            server_name: "syslog-mcp".into(),
+            server_name: "cortex".into(),
             no_auth: false,
             trusted_gateway_no_auth: false,
             api_token: token,
@@ -158,25 +158,19 @@ pub mod testing {
 
     pub async fn build_auth_state(data_dir: &Path) -> lab_auth::state::AuthState {
         let vars: Vec<(String, String)> = vec![
-            ("SYSLOG_MCP_AUTH_MODE".into(), "oauth".into()),
+            ("CORTEX_AUTH_MODE".into(), "oauth".into()),
             (
-                "SYSLOG_MCP_PUBLIC_URL".into(),
+                "CORTEX_PUBLIC_URL".into(),
                 "https://syslog.example.com".into(),
             ),
+            ("CORTEX_GOOGLE_CLIENT_ID".into(), "test-client-id".into()),
             (
-                "SYSLOG_MCP_GOOGLE_CLIENT_ID".into(),
-                "test-client-id".into(),
-            ),
-            (
-                "SYSLOG_MCP_GOOGLE_CLIENT_SECRET".into(),
+                "CORTEX_GOOGLE_CLIENT_SECRET".into(),
                 "test-client-secret".into(),
             ),
+            ("CORTEX_AUTH_ADMIN_EMAIL".into(), "admin@example.com".into()),
             (
-                "SYSLOG_MCP_AUTH_ADMIN_EMAIL".into(),
-                "admin@example.com".into(),
-            ),
-            (
-                "SYSLOG_MCP_AUTH_SQLITE_PATH".into(),
+                "CORTEX_AUTH_SQLITE_PATH".into(),
                 data_dir
                     .join("auth.db")
                     .to_str()
@@ -184,7 +178,7 @@ pub mod testing {
                     .into(),
             ),
             (
-                "SYSLOG_MCP_AUTH_KEY_PATH".into(),
+                "CORTEX_AUTH_KEY_PATH".into(),
                 data_dir
                     .join("auth-jwt.pem")
                     .to_str()
@@ -194,10 +188,10 @@ pub mod testing {
         ];
 
         let auth_config = lab_auth::config::AuthConfigBuilder::new()
-            .env_prefix("SYSLOG_MCP")
-            .session_cookie_name("syslog_mcp_session")
-            .scopes_supported(vec!["syslog:read".into(), "syslog:admin".into()])
-            .default_scope("syslog:read")
+            .env_prefix("CORTEX")
+            .session_cookie_name("cortex_session")
+            .scopes_supported(vec!["cortex:read".into(), "cortex:admin".into()])
+            .default_scope("cortex:read")
             .resource_path("/mcp")
             .build_from_sources(vars)
             .expect("test auth config should build");

@@ -296,7 +296,7 @@ fn fts_incremental_merge(pool: &DbPool, deleted_rows: usize, merge_pages: u32) {
     // M=0 forces unconditional merge regardless of segment count, which is
     // the right choice after bulk DELETEs (level-0 segments may be too few
     // to satisfy the default M=250 threshold). Operators can raise M via
-    // SYSLOG_MCP_FTS_MERGE_PAGES if M=0 holds the write lock too long on a
+    // CORTEX_FTS_MERGE_PAGES if M=0 holds the write lock too long on a
     // very large index — config rollback rather than binary rollback.
     let merge_stmt = format!("INSERT INTO logs_fts(logs_fts) VALUES('merge=500,{merge_pages}');");
 

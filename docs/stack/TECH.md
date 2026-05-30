@@ -1,10 +1,10 @@
-# Technology Choices -- syslog-mcp
+# Technology Choices -- cortex
 
 Technology stack reference and rationale.
 
 ## Language: Rust
 
-Rust was chosen for syslog-mcp because:
+Rust was chosen for cortex because:
 - High-throughput syslog ingestion requires low-latency, zero-copy message handling
 - Memory safety without garbage collection prevents the pauses that would cause UDP packet loss
 - Single static binary simplifies Docker image and deployment
@@ -29,7 +29,7 @@ Minimal, composable HTTP framework built on tokio and tower:
 
 ## MCP SDK: rmcp
 
-RMCP owns MCP lifecycle, Streamable HTTP framing, Host/Origin validation, tool listing, and tool calls. syslog-mcp uses stateless JSON-response mode so normal request/response calls return `Content-Type: application/json`.
+RMCP owns MCP lifecycle, Streamable HTTP framing, Host/Origin validation, tool listing, and tool calls. cortex uses stateless JSON-response mode so normal request/response calls return `Content-Type: application/json`.
 
 ## Database: SQLite (rusqlite + r2d2)
 

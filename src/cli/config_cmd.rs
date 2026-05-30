@@ -190,7 +190,7 @@ fn validate_env_key(key: &str) -> Result<()> {
 }
 
 fn env_file_path() -> Result<PathBuf> {
-    let home = syslog_mcp::setup::syslog_home_dir()
+    let home = cortex::setup::cortex_home_dir()
         .map_err(|e| anyhow!("could not determine syslog home for .env: {e}"))?;
     Ok(home.join(".env"))
 }

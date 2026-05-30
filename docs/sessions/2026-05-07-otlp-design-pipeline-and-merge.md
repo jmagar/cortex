@@ -144,7 +144,7 @@ python3 .../mark_resolved.py PRRT_... × 18  # All 18 review threads resolved
 - **Clippy `result_large_err` on `IngestTx::try_send`** — `TrySendError<LogBatchEntry>` carries the entry by value. Fix: introduced `TrySendErr { Full, Closed }` enum, dropping the entry on backpressure (acceptable contract).
 - **Test failures from `AppState` field addition** — `routes_tests.rs`, `tools_tests.rs`, `rmcp_server_tests.rs` all construct `AppState` literals. Updated each to include `otlp_counters: Arc::new(OtlpCounters::default())`.
 - **`tokio::sync::mpsc::channel` requires runtime** — auth tests in `otlp_tests.rs` panicked with "no reactor running". Fix: added `IngestTx::from_sender_for_test` so the auth helper can build an `IngestTx` from a raw channel without spawning the writer.
-- **Pre-commit hook `validate-skills` failed** — `Justfile:51` referenced the old `skills/syslog/SKILL.md` path; the plugin restructure moved it to `plugins/skills/syslog/SKILL.md`. Fixed inline.
+- **Pre-commit hook `validate-skills` failed** — `Justfile:51` referenced the old `skills/cortex/SKILL.md` path; the plugin restructure moved it to `plugins/skills/cortex/SKILL.md`. Fixed inline.
 - **CI `build-and-push` and `MCP Integration Tests` both failed with `failed to read dockerfile`** — Dockerfile is at `config/Dockerfile` after restructure. Fixed workflow + integration test script.
 - **`bd create --tags` flag not supported** — wasted ~10 bead-create attempts with `--tags`. The actual flag is `--label`. Pivoted to single tracking bead instead of refiling.
 

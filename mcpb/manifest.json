@@ -1,46 +1,47 @@
 {
   "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
   "manifest_version": "0.4",
-  "name": "syslog-mcp",
-  "display_name": "Syslog MCP",
-  "version": "0.36.1",
-  "description": "Query local syslog-mcp SQLite logs through a bundled stdio MCP server.",
-  "long_description": "Syslog MCP packages the existing syslog mcp stdio entrypoint as a local MCP Bundle. It is query-only: it reads the configured SQLite database and does not start syslog listeners, HTTP servers, Docker Compose, REST, or deploy flows.",
+  "name": "cortex",
+  "display_name": "Cortex",
+  "version": "1.0.0",
+  "description": "Query local cortex SQLite logs through a bundled stdio MCP server.",
+  "long_description": "cortex packages the existing cortex stdio entrypoint as a local MCP Bundle. It is query-only: it reads the configured SQLite database and does not start syslog listeners, HTTP servers, Docker Compose, REST, or deploy flows.",
   "author": {
     "name": "jmagar",
     "url": "https://github.com/jmagar"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/jmagar/syslog-mcp"
+    "url": "https://github.com/jmagar/cortex"
   },
-  "documentation": "https://github.com/jmagar/syslog-mcp/tree/main/docs/mcp",
+  "documentation": "https://github.com/jmagar/cortex/tree/main/docs/mcp",
   "server": {
     "type": "binary",
-    "entry_point": "server/syslog",
+    "entry_point": "server/cortex",
     "mcp_config": {
-      "command": "${__dirname}/server/syslog",
+      "command": "${__dirname}/server/cortex",
       "args": [
         "mcp"
       ],
       "env": {
-        "SYSLOG_MCP_DB_PATH": "${user_config.data_dir}/syslog.db",
-        "SYSLOG_MCP_RETENTION_DAYS": "0",
-        "SYSLOG_MCP_MAX_DB_SIZE_MB": "0",
-        "SYSLOG_MCP_RECOVERY_DB_SIZE_MB": "0",
-        "SYSLOG_MCP_MIN_FREE_DISK_MB": "0",
-        "SYSLOG_MCP_RECOVERY_FREE_DISK_MB": "0",
+        "CORTEX_DB_PATH": "${user_config.data_dir}/cortex.db",
+        "CORTEX_RETENTION_DAYS": "0",
+        "CORTEX_MAX_DB_SIZE_MB": "0",
+        "CORTEX_RECOVERY_DB_SIZE_MB": "0",
+        "CORTEX_MIN_FREE_DISK_MB": "0",
+        "CORTEX_RECOVERY_FREE_DISK_MB": "0",
         "RUST_LOG": "warn"
       }
     }
   },
   "tools": [
     {
-      "name": "syslog",
-      "description": "Search, tail, summarize, and inspect logs from the configured local syslog-mcp SQLite database."
+      "name": "cortex",
+      "description": "Search, tail, summarize, and inspect logs from the configured local cortex SQLite database."
     }
   ],
   "keywords": [
+    "cortex",
     "syslog",
     "mcp",
     "logging",
@@ -56,9 +57,9 @@
     "data_dir": {
       "type": "directory",
       "title": "Data directory",
-      "description": "Directory containing syslog.db plus WAL/SHM sidecars. The bundled stdio server reads this database as SYSLOG_MCP_DB_PATH=<data_dir>/syslog.db.",
+      "description": "Directory containing cortex.db plus WAL/SHM sidecars. The bundled stdio server reads this database as CORTEX_DB_PATH=<data_dir>/cortex.db.",
       "required": true,
-      "default": "${HOME}/.syslog-mcp/data"
+      "default": "${HOME}/.cortex/data"
     }
   }
 }

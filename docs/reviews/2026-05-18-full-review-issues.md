@@ -31,7 +31,7 @@ This document consolidates every distinct issue surfaced across all `.full-revie
 - References: `src/config.rs:1039`, `src/runtime.rs:574`
 - Issue: OAuth startup validation accepts a non-empty `allowed_emails` list as satisfying the allowlist requirement, but `build_auth_policy` documents that `lab-auth` has no `allowed_emails` field and only enforces `admin_email`.
 - Impact: Operators can configure `allowed_emails = ["ops@example.com"]` with no enforced allowlist and believe access is restricted when it is not.
-- Fix: Either enforce `allowed_emails` in syslog-mcp before issuing sessions, or reject OAuth configs that rely on `allowed_emails` until `lab-auth` supports it. Update docs and tests to match the chosen contract.
+- Fix: Either enforce `allowed_emails` in cortex before issuing sessions, or reject OAuth configs that rely on `allowed_emails` until `lab-auth` supports it. Update docs and tests to match the chosen contract.
 
 ### CFR-002 — Tests lock in unsupported OAuth allowlist behavior
 

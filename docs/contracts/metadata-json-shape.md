@@ -5,9 +5,9 @@
 **Pinning header:**
 
 > Contract for the shape of `logs.metadata_json` across every writer.
-> Three concurrent writers: parsers (epic B `syslog-mcp-1wjr`), pollers
-> (epic C `syslog-mcp-awvr`), and the agent (epic A `syslog-mcp-qgnx`).
-> One reader namespace: the rule engine (epic E `syslog-mcp-h6dg`) field
+> Three concurrent writers: parsers (epic B `cortex-1wjr`), pollers
+> (epic C `cortex-awvr`), and the agent (epic A `cortex-qgnx`).
+> One reader namespace: the rule engine (epic E `cortex-h6dg`) field
 > paths. Supersedes scattered `metadata.X.Y` references in spec B §3 / §7,
 > spec C §4 / §5, spec A §4.4, spec E §4, and spec F §6.
 > Changing this requires updating all dependents.

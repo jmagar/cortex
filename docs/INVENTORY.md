@@ -1,16 +1,16 @@
-# Component Inventory -- syslog-mcp
+# Component Inventory -- cortex
 
 Complete listing of all plugin components.
 
 MCP, REST, and CLI are transport surfaces over the shared service layer. The
 runtime MCP action schema is derived from `src/mcp/actions.rs::ACTION_SPECS`
 through `src/mcp/schemas.rs::tool_definitions()` and exposed as
-`syslog://schema/mcp-tool`; maintained Markdown docs are drift-checked rather
+`cortex://schema/mcp-tool`; maintained Markdown docs are drift-checked rather
 than automatically generated.
 
 ## MCP tools
 
-syslog-mcp exposes one MCP tool named `syslog`. The required `action`
+cortex exposes one MCP tool named `syslog`. The required `action`
 argument selects the operation. The authoritative action registry lives in
 `src/mcp/actions.rs::ACTION_SPECS`; the runtime schema enum is derived from
 that registry by `src/mcp/schemas.rs::tool_definitions()`.
@@ -89,33 +89,33 @@ methods as the MCP actions.
 
 | URI | Description | MIME type |
 | --- | --- | --- |
-| `syslog://schema/mcp-tool` | JSON schema for the `syslog` MCP tool and action-based parameters | `application/json` |
+| `cortex://schema/mcp-tool` | JSON schema for the `syslog` MCP tool and action-based parameters | `application/json` |
 
 ## Environment variables
 
 | Variable | Required | Default | Sensitive |
 | --- | --- | --- | --- |
-| `SYSLOG_HOST` | no | `0.0.0.0` | no |
-| `SYSLOG_PORT` | no | `1514` | no |
-| `SYSLOG_MAX_MESSAGE_SIZE` | no | `8192` | no |
-| `SYSLOG_BATCH_SIZE` | no | `100` | no |
-| `SYSLOG_FLUSH_INTERVAL` | no | `500` | no |
-| `SYSLOG_MCP_HOST` | no | `0.0.0.0` | no |
-| `SYSLOG_MCP_PORT` | no | `3100` | no |
-| `SYSLOG_MCP_TOKEN` | no | (none) | yes |
-| `SYSLOG_MCP_ALLOWED_HOSTS` | no | (none) | no |
-| `SYSLOG_MCP_ALLOWED_ORIGINS` | no | (none) | no |
-| `SYSLOG_API_ENABLED` | no | `false` | no |
-| `SYSLOG_API_TOKEN` | yes when enabled | (none) | yes |
-| `SYSLOG_MCP_DB_PATH` | no | `/data/syslog.db` | no |
-| `SYSLOG_MCP_POOL_SIZE` | no | `4` | no |
-| `SYSLOG_MCP_RETENTION_DAYS` | no | `90` | no |
-| `SYSLOG_MCP_MAX_DB_SIZE_MB` | no | `1024` | no |
-| `SYSLOG_MCP_RECOVERY_DB_SIZE_MB` | no | `900` | no |
-| `SYSLOG_MCP_MIN_FREE_DISK_MB` | no | `512` | no |
-| `SYSLOG_MCP_RECOVERY_FREE_DISK_MB` | no | `768` | no |
-| `SYSLOG_MCP_CLEANUP_INTERVAL_SECS` | no | `60` | no |
-| `SYSLOG_MCP_CLEANUP_CHUNK_SIZE` | no | `2000` | no |
+| `CORTEX_RECEIVER_HOST` | no | `0.0.0.0` | no |
+| `CORTEX_RECEIVER_PORT` | no | `1514` | no |
+| `CORTEX_MAX_MESSAGE_SIZE` | no | `8192` | no |
+| `CORTEX_BATCH_SIZE` | no | `100` | no |
+| `CORTEX_FLUSH_INTERVAL` | no | `500` | no |
+| `CORTEX_HOST` | no | `0.0.0.0` | no |
+| `CORTEX_PORT` | no | `3100` | no |
+| `CORTEX_TOKEN` | no | (none) | yes |
+| `CORTEX_ALLOWED_HOSTS` | no | (none) | no |
+| `CORTEX_ALLOWED_ORIGINS` | no | (none) | no |
+| `CORTEX_API_ENABLED` | no | `false` | no |
+| `CORTEX_API_TOKEN` | yes when enabled | (none) | yes |
+| `CORTEX_DB_PATH` | no | `/data/cortex.db` | no |
+| `CORTEX_POOL_SIZE` | no | `4` | no |
+| `CORTEX_RETENTION_DAYS` | no | `90` | no |
+| `CORTEX_MAX_DB_SIZE_MB` | no | `1024` | no |
+| `CORTEX_RECOVERY_DB_SIZE_MB` | no | `900` | no |
+| `CORTEX_MIN_FREE_DISK_MB` | no | `512` | no |
+| `CORTEX_RECOVERY_FREE_DISK_MB` | no | `768` | no |
+| `CORTEX_CLEANUP_INTERVAL_SECS` | no | `60` | no |
+| `CORTEX_CLEANUP_CHUNK_SIZE` | no | `2000` | no |
 | `RUST_LOG` | no | `info` | no |
 
 ## Plugin surfaces
@@ -159,7 +159,7 @@ methods as the MCP actions.
 
 | Component | Value |
 | --- | --- |
-| Image | `ghcr.io/jmagar/syslog-mcp:latest` |
+| Image | `ghcr.io/jmagar/cortex:latest` |
 | Syslog port | `1514/udp`, `1514/tcp` |
 | MCP port | `3100/tcp` |
 | Health endpoint | `GET /health` (unauthenticated) |

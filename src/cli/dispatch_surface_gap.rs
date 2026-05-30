@@ -2,7 +2,7 @@ use super::dispatch::http_or_cancel;
 use super::output_common::print_json;
 
 use anyhow::Result;
-use syslog_mcp::app::{
+use cortex::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, ListAppsRequest, SilentHostsRequest,
 };
 

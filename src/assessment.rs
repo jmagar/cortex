@@ -17,18 +17,18 @@ const GEMINI_AUTH_FILES: &[&str] = &[
     "google_accounts.json",
 ];
 
-pub(crate) const SKILL_NAME: &str = "syslog-frustration-assessment";
+pub(crate) const SKILL_NAME: &str = "cortex-frustration-assessment";
 pub(crate) const SKILL_MD: &str =
-    include_str!("../plugins/syslog/skills/syslog-frustration-assessment/SKILL.md");
+    include_str!("../plugins/cortex/skills/cortex-frustration-assessment/SKILL.md");
 
 pub(crate) const ASSESSMENT_SYSTEM_PROMPT: &str = concat!(
-    "Use the syslog-frustration-assessment skill to assess the supplied bounded ",
+    "Use the cortex-frustration-assessment skill to assess the supplied bounded ",
     "syslog abuse incident evidence bundle.\n\n",
     "Return the assessment as Markdown in the assistant response. Do not write ",
     "files, create plans, or persist artifacts.\n\n",
     "You must also follow these instructions directly if native skill activation ",
     "is unavailable:\n\n",
-    include_str!("../plugins/syslog/skills/syslog-frustration-assessment/SKILL.md"),
+    include_str!("../plugins/cortex/skills/cortex-frustration-assessment/SKILL.md"),
 );
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,12 +50,12 @@ pub(crate) struct GeminiAssessConfig {
 impl GeminiAssessConfig {
     pub(crate) fn from_env(model_override: Option<String>) -> Self {
         Self {
-            program: env_or_default("SYSLOG_HEADLESS_GEMINI_CMD", "gemini"),
+            program: env_or_default("CORTEX_HEADLESS_GEMINI_CMD", "gemini"),
             model: model_override
-                .or_else(|| non_empty_env("SYSLOG_HEADLESS_GEMINI_MODEL"))
+                .or_else(|| non_empty_env("CORTEX_HEADLESS_GEMINI_MODEL"))
                 .unwrap_or_else(|| DEFAULT_GEMINI_MODEL.to_string()),
-            source_home: non_empty_env("SYSLOG_HEADLESS_GEMINI_HOME").map(PathBuf::from),
-            timeout_secs: non_empty_env("SYSLOG_LLM_COMPLETION_TIMEOUT_SECS")
+            source_home: non_empty_env("CORTEX_HEADLESS_GEMINI_HOME").map(PathBuf::from),
+            timeout_secs: non_empty_env("CORTEX_LLM_COMPLETION_TIMEOUT_SECS")
                 .and_then(|value| value.parse::<u64>().ok())
                 .unwrap_or(DEFAULT_COMPLETION_TIMEOUT_SECS)
                 .max(1),
@@ -287,7 +287,7 @@ fn write_assessment_skill(gemini_dir: &Path) -> Result<()> {
     let skill_dir = gemini_dir.join("skills").join(SKILL_NAME);
     fs::create_dir_all(&skill_dir).context("failed to create Gemini skill directory")?;
     fs::write(skill_dir.join("SKILL.md"), SKILL_MD)
-        .context("failed to write syslog-frustration-assessment skill")?;
+        .context("failed to write cortex-frustration-assessment skill")?;
     Ok(())
 }
 
@@ -608,7 +608,7 @@ mod tests {
     #[test]
     fn assessment_prompt_references_skill_and_wraps_evidence() {
         let prompt = build_assessment_prompt(r#"{"incident_id":"inc-1"}"#);
-        assert!(prompt.contains("syslog-frustration-assessment"));
+        assert!(prompt.contains("cortex-frustration-assessment"));
         assert!(prompt.contains("Do not write files"));
         assert!(prompt.contains("Use this skill after running"));
         assert!(prompt.contains("<untrusted-evidence"));
@@ -838,9 +838,9 @@ mod tests {
     #[test]
     #[serial]
     fn env_config_uses_syslog_specific_knobs() {
-        let _cmd = EnvGuard::set("SYSLOG_HEADLESS_GEMINI_CMD", "custom-gemini");
-        let _model = EnvGuard::set("SYSLOG_HEADLESS_GEMINI_MODEL", "gemini-custom");
-        let _timeout = EnvGuard::set("SYSLOG_LLM_COMPLETION_TIMEOUT_SECS", "7");
+        let _cmd = EnvGuard::set("CORTEX_HEADLESS_GEMINI_CMD", "custom-gemini");
+        let _model = EnvGuard::set("CORTEX_HEADLESS_GEMINI_MODEL", "gemini-custom");
+        let _timeout = EnvGuard::set("CORTEX_LLM_COMPLETION_TIMEOUT_SECS", "7");
         let config = GeminiAssessConfig::from_env(None);
         assert_eq!(config.program, "custom-gemini");
         assert_eq!(config.model, "gemini-custom");

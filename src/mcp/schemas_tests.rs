@@ -7,7 +7,7 @@ fn tool_definitions_include_expected_public_tools() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["syslog"]);
+    assert_eq!(names, vec!["cortex"]);
 
     let action = &tools[0]["inputSchema"]["properties"]["action"];
     assert_eq!(action["type"], "string");
@@ -23,7 +23,7 @@ fn tool_definitions_include_expected_public_tools() {
 #[test]
 fn tool_definition_exposes_agent_cost_metadata() {
     let tools = tool_definitions();
-    let metadata = tools[0]["x-syslog-action-metadata"].as_array().unwrap();
+    let metadata = tools[0]["x-cortex-action-metadata"].as_array().unwrap();
     assert_eq!(metadata.len(), super::actions::ACTION_SPECS.len());
     assert!(metadata
         .iter()
@@ -32,7 +32,7 @@ fn tool_definition_exposes_agent_cost_metadata() {
         .iter()
         .any(|action| { action["name"] == "patterns" && action["cost"] == "expensive" }));
     assert_eq!(
-        tools[0]["x-syslog-agent-guidance"]["default_bounds"]["timeline_bucket"],
+        tools[0]["x-cortex-agent-guidance"]["default_bounds"]["timeline_bucket"],
         "minute"
     );
 }

@@ -1,5 +1,5 @@
 -- =============================================================================
--- syslog-mcp: Canonical DB Schema Additions (6 Epics)
+-- cortex: Canonical DB Schema Additions (6 Epics)
 -- =============================================================================
 --
 -- Purpose
@@ -11,12 +11,12 @@
 --   definitions captured here.
 --
 -- Source specs (paths relative to repo root)
---   - docs/superpowers/specs/2026-05-16-agent-mode-design.md            (Epic A: syslog-mcp-qgnx)
---   - docs/superpowers/specs/2026-05-16-enrichment-framework-design.md  (Epic B: syslog-mcp-1wjr)
---   - docs/superpowers/specs/2026-05-16-api-pollers-design.md           (Epic C: syslog-mcp-awvr)
---   - docs/superpowers/specs/2026-05-16-probe-registry-design.md        (Epic D: syslog-mcp-fue9)
---   - docs/superpowers/specs/2026-05-16-digest-notifications-design.md  (Epic E: syslog-mcp-h6dg)
---   - docs/superpowers/specs/2026-05-16-rag-incidents-design.md         (Epic F: syslog-mcp-h6da)
+--   - docs/superpowers/specs/2026-05-16-agent-mode-design.md            (Epic A: cortex-qgnx)
+--   - docs/superpowers/specs/2026-05-16-enrichment-framework-design.md  (Epic B: cortex-1wjr)
+--   - docs/superpowers/specs/2026-05-16-api-pollers-design.md           (Epic C: cortex-awvr)
+--   - docs/superpowers/specs/2026-05-16-probe-registry-design.md        (Epic D: cortex-fue9)
+--   - docs/superpowers/specs/2026-05-16-digest-notifications-design.md  (Epic E: cortex-h6dg)
+--   - docs/superpowers/specs/2026-05-16-rag-incidents-design.md         (Epic F: cortex-h6da)
 --
 -- Ordering rules
 --   - Statements are arranged so the file executes top-to-bottom against a
@@ -49,11 +49,11 @@
 -- =============================================================================
 
 
--- ====== Epic A: Agent Mode — WebSocket + JSON-RPC 2.0 (syslog-mcp-qgnx) ======
+-- ====== Epic A: Agent Mode — WebSocket + JSON-RPC 2.0 (cortex-qgnx) ======
 -- Source: docs/superpowers/specs/2026-05-16-agent-mode-design.md
 --   §9 (`agents` table + indices)
 -- NOTE: spec A §16 open-question #4 originally pre-created a `host_metrics`
--- table for Epic D's writer. Resolved (bead syslog-mcp-swv9): the table is
+-- table for Epic D's writer. Resolved (bead cortex-swv9): the table is
 -- removed from Epic A entirely; Epic D's `metrics_gauge` is the canonical
 -- target for both probe results AND any future `metrics.push` payloads.
 -- V1 still drops incoming `metrics.push` on the floor.
@@ -92,12 +92,12 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(connection_state);
 -- Sort agents by recency for dashboards / silent-host detection. (Source: §9)
 CREATE INDEX IF NOT EXISTS idx_agents_lastseen ON agents(last_seen);
 
--- (host_metrics table removed per bead syslog-mcp-swv9 — see header note above.
+-- (host_metrics table removed per bead cortex-swv9 — see header note above.
 -- Epic D's metrics_gauge replaces it. If a future Epic A v2 wires the agent's
 -- metrics.push path to a writer, it lands rows in metrics_gauge directly.)
 
 
--- ====== Epic B: Enrichment / Parser Framework (syslog-mcp-1wjr) ==============
+-- ====== Epic B: Enrichment / Parser Framework (cortex-1wjr) ==============
 -- Source: docs/superpowers/specs/2026-05-16-enrichment-framework-design.md
 --   §5 (indexed-column migration: http_status, auth_outcome, dns_blocked, event_action)
 --   §6 (parse_error column — no index)
@@ -150,7 +150,7 @@ CREATE INDEX IF NOT EXISTS idx_logs_event_action_time
     WHERE event_action IS NOT NULL;
 
 
--- ====== Epic C: API Pollers — UniFi + AdGuard (syslog-mcp-awvr) ==============
+-- ====== Epic C: API Pollers — UniFi + AdGuard (cortex-awvr) ==============
 -- Source: docs/superpowers/specs/2026-05-16-api-pollers-design.md
 --   §4 (poller_checkpoints schema — UniFi events + alarms)
 --   §5 (AdGuard query-log cursor)
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS poller_checkpoints (
 );
 
 
--- ====== Epic D: Probe Registry + Live-state MCP Actions (syslog-mcp-fue9) ====
+-- ====== Epic D: Probe Registry + Live-state MCP Actions (cortex-fue9) ====
 -- Source: docs/superpowers/specs/2026-05-16-probe-registry-design.md
 --   §6 (metrics_gauge — coarse time-series for operational triage)
 --   §7 (probe_results — structured JSON payloads)
@@ -261,7 +261,7 @@ CREATE INDEX IF NOT EXISTS idx_probe_results_status
     ON probe_results(status, response_ts DESC);
 
 
--- ====== Epic E: Digest + Push Notifications (syslog-mcp-h6dg) ================
+-- ====== Epic E: Digest + Push Notifications (cortex-h6dg) ================
 -- Source: docs/superpowers/specs/2026-05-16-digest-notifications-design.md
 --   §6 (alert_state table — dedup, cooldown, fingerprinting)
 
@@ -293,7 +293,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_state_rule_lastfired
     ON alert_state(rule_id, last_fired_at);
 
 
--- ====== Epic F: RAG over Historical Incidents (syslog-mcp-h6da) ==============
+-- ====== Epic F: RAG over Historical Incidents (cortex-h6da) ==============
 -- Source: docs/superpowers/specs/2026-05-16-rag-incidents-design.md
 --   §6 (incidents table — host/xhost signatures, embed lifecycle, resolution link)
 

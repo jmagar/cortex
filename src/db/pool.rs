@@ -179,7 +179,7 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     }
 
     // Migration 2: store per Docker host/container checkpoints for optional
-    // docker-socket-proxy log ingestion. This lets short syslog-mcp outages
+    // docker-socket-proxy log ingestion. This lets short cortex outages
     // replay from Docker's local log store with /containers/{id}/logs?since=.
     let migration_2_applied: bool = conn
         .query_row(
@@ -653,7 +653,7 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 20: added index on error_signature_windows(window_end)");
     }
 
-    // Migration 21: AI session rollup table (bead syslog-mcp-2vre).
+    // Migration 21: AI session rollup table (bead cortex-2vre).
     // `list_ai_sessions` aggregates GROUP BY (project, tool, session, hostname)
     // over the full AI-row partition then sorts by MAX(timestamp) — an
     // unavoidable temp-btree that grows with AI-row count (~4s at 10M rows).
@@ -691,7 +691,7 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     }
 
     // Migration 22: source watermark for the AI session rollup (bead
-    // syslog-mcp-g33v). The background refresh recomputed the full GROUP-BY
+    // cortex-g33v). The background refresh recomputed the full GROUP-BY
     // over `logs` every cadence even when no AI rows had changed. These two
     // columns record the source-side `(COUNT(*), MAX(id))` of AI rows captured
     // by the last refresh; the refresh task compares the live watermark against
@@ -710,7 +710,7 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     }
 
     // Migration 22: source watermark for the AI session rollup (bead
-    // syslog-mcp-g33v). Migration 21 left the background refresh doing an
+    // cortex-g33v). Migration 21 left the background refresh doing an
     // unconditional DELETE + full GROUP-BY re-aggregation over all of `logs`
     // every cadence tick, even when no AI rows changed — a recurring ~4s scan
     // holding the maintenance permit for zero benefit. These columns record the

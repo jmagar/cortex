@@ -52,7 +52,7 @@ const COMMON_INVESTIGATION_RULES: &str = r#"Rules:
 - Use `action=context` with small bounds such as `before=3` and `after=3` around representative log ids.
 - Escalate to broad or slower actions only when the cheap pass leaves a specific question: `action=stats`, `action=anomalies`, `action=patterns`, `action=compare`, `action=clock_skew`, `action=ingest_rate`, or wide `action=correlate`.
 - Summarize representative evidence. Do not paste full JSON payloads or unbounded result sets.
-- If the client supports structured output, conform to the `syslog://schema/prompt-output` resource schema."#;
+- If the client supports structured output, conform to the `cortex://schema/prompt-output` resource schema."#;
 
 const SYNTHESIS_FORMAT: &str = r#"Return exactly these sections:
 - Verdict:
@@ -249,7 +249,7 @@ fn incident_triage_prompt(args: &Map<String, serde_json::Value>) -> String {
     let host = arg(args, "host", "all hosts");
     let service = arg(args, "service", "all relevant services");
     format!(
-        r#"Investigate an infrastructure incident in syslog-mcp.
+        r#"Investigate an infrastructure incident in cortex.
 
 Scope:
 - Time window: {window}
@@ -279,7 +279,7 @@ fn host_health_prompt(args: &Map<String, serde_json::Value>) -> String {
     let host = arg(args, "host", "the target host");
     let window = arg(args, "window", "the last 24 hours");
     format!(
-        r#"Assess health for host `{host}` using syslog-mcp.
+        r#"Assess health for host `{host}` using cortex.
 
 Use the `syslog` MCP tool:
 Cheap first pass:
@@ -322,7 +322,7 @@ Cheap first pass:
 Escalate only if needed:
 1. Use `action=correlate` with `limit=20` around the earliest failure to find host, Docker, network, DNS, auth, or proxy events nearby.
 2. Use `action=anomalies` or `action=compare` only when baseline behavior matters.
-3. If this is syslog-mcp itself, inspect `action=compose_status` first and `action=compose_doctor` only if the status projection is inconclusive.
+3. If this is cortex itself, inspect `action=compose_status` first and `action=compose_doctor` only if the status projection is inconclusive.
 
 {COMMON_INVESTIGATION_RULES}
 
@@ -432,7 +432,7 @@ fn docker_container_regression_prompt(args: &Map<String, serde_json::Value>) -> 
     let service = arg(args, "service", "the affected service");
     let window = arg(args, "window", "the regression window");
     format!(
-        r#"Investigate a Docker container regression with syslog-mcp.
+        r#"Investigate a Docker container regression with cortex.
 
 Scope:
 - Container: {container}
@@ -448,7 +448,7 @@ Cheap first pass:
 4. Use `action=context` with `before=3` and `after=3` around representative Docker or service failures.
 
 Escalate only if needed:
-1. Use `action=compose_status` to inspect the canonical syslog-mcp deployment if the affected service is syslog-mcp.
+1. Use `action=compose_status` to inspect the canonical cortex deployment if the affected service is cortex.
 2. Use `action=correlate` with `limit=20` around the first restart, healthcheck, pull, or OOM event.
 3. Use `action=patterns` with `limit=10` only after identifying repeated container messages.
 
@@ -463,7 +463,7 @@ fn network_dns_failure_prompt(args: &Map<String, serde_json::Value>) -> String {
     let service = arg(args, "service", "the affected service or upstream");
     let window = arg(args, "window", "the network failure window");
     format!(
-        r#"Investigate a network or DNS failure with syslog-mcp.
+        r#"Investigate a network or DNS failure with cortex.
 
 Scope:
 - Host/client: {host}
@@ -493,7 +493,7 @@ fn storage_pressure_prompt(args: &Map<String, serde_json::Value>) -> String {
     let service = arg(args, "service", "the service writing data");
     let window = arg(args, "window", "the storage pressure window");
     format!(
-        r#"Investigate storage pressure with syslog-mcp.
+        r#"Investigate storage pressure with cortex.
 
 Scope:
 - Host: {host}
@@ -524,7 +524,7 @@ fn auth_bruteforce_prompt(args: &Map<String, serde_json::Value>) -> String {
     let host = arg(args, "host", "authentication hosts");
     let service = arg(args, "service", "authentication service");
     format!(
-        r#"Investigate possible authentication brute force with syslog-mcp.
+        r#"Investigate possible authentication brute force with cortex.
 
 Scope:
 - Window: {window}
@@ -554,7 +554,7 @@ fn syslog_forwarding_gap_prompt(args: &Map<String, serde_json::Value>) -> String
     let host = arg(args, "host", "the host or device expected to forward logs");
     let window = arg(args, "window", "the suspected forwarding gap window");
     format!(
-        r#"Investigate a syslog forwarding gap with syslog-mcp.
+        r#"Investigate a syslog forwarding gap with cortex.
 
 Scope:
 - Host/device: {host}
@@ -583,7 +583,7 @@ fn after_deploy_check_prompt(args: &Map<String, serde_json::Value>) -> String {
     let host = arg(args, "host", "the deployment host");
     let window = arg(args, "window", "the post-deploy window");
     format!(
-        r#"Run an after-deploy check with syslog-mcp.
+        r#"Run an after-deploy check with cortex.
 
 Scope:
 - Service: {service}
@@ -592,7 +592,7 @@ Scope:
 
 Use the `syslog` MCP tool:
 Cheap first pass:
-1. Use `action=status` to verify syslog-mcp is answering.
+1. Use `action=status` to verify cortex is answering.
 2. Use `action=search` with service, deploy, migration, restart, healthcheck, error, and warning terms plus `limit=5`.
 3. Use `action=errors` with `limit=10` for the deployed service and host.
 4. Use `action=timeline` with `bucket=minute` to compare pre/post deploy activity.
@@ -601,7 +601,7 @@ Cheap first pass:
 Escalate only if needed:
 1. Use `action=compare` when you have a known pre-deploy window.
 2. Use `action=correlate` with `limit=20` around the deploy timestamp.
-3. Use `action=compose_status` or `action=compose_doctor` only for syslog-mcp deployment health.
+3. Use `action=compose_status` or `action=compose_doctor` only for cortex deployment health.
 
 {COMMON_INVESTIGATION_RULES}
 

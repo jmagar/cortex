@@ -1,7 +1,7 @@
 use anyhow::Result;
 use axum::Router;
+use cortex::{api, doctor, logging, mcp, runtime::RuntimeCore};
 use rmcp::{transport::stdio, ServiceExt};
-use syslog_mcp::{api, doctor, logging, mcp, runtime::RuntimeCore};
 use tracing::info;
 
 mod cli;
@@ -14,13 +14,13 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if mode == Mode::Version {
-        println!("syslog-mcp {}", env!("CARGO_PKG_VERSION"));
+        println!("cortex {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
     logging::init(mode.default_log_filter());
 
-    info!("syslog-mcp v{}", env!("CARGO_PKG_VERSION"));
+    info!("cortex v{}", env!("CARGO_PKG_VERSION"));
 
     match mode {
         Mode::ServeMcp => serve_mcp().await,
@@ -49,8 +49,8 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
     // manage local host state (systemd units, Docker compose stacks, on-disk
     // config, user journal logs) that has no HTTP analogue. Reject explicit
     // HTTP-mode FLAGS up front, but
-    // silently ignore the `SYSLOG_USE_HTTP` env trigger — `setup repair`
-    // writes that into `~/.syslog-mcp/.env` as the post-cutover default, and
+    // silently ignore the `CORTEX_USE_HTTP` env trigger — `setup repair`
+    // writes that into `~/.cortex/.env` as the post-cutover default, and
     // bailing on it would break the very command operators run to repair.
     if matches!(
         command,
@@ -143,19 +143,17 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
 
 async fn run_deploy(command: DeployCommand) -> Result<()> {
     let (mode, label) = match command.kind {
-        DeployCommandKind::Preflight => (syslog_mcp::setup::SetupMode::Check, "preflight"),
+        DeployCommandKind::Preflight => (cortex::setup::SetupMode::Check, "preflight"),
         DeployCommandKind::Local { dry_run: true } => {
-            (syslog_mcp::setup::SetupMode::Check, "local dry-run")
+            (cortex::setup::SetupMode::Check, "local dry-run")
         }
-        DeployCommandKind::Local { dry_run: false } => {
-            (syslog_mcp::setup::SetupMode::Repair, "local")
-        }
+        DeployCommandKind::Local { dry_run: false } => (cortex::setup::SetupMode::Repair, "local"),
         DeployCommandKind::Remote { host, dry_run } => {
-            let report = syslog_mcp::deploy::run_remote_deploy(&host, dry_run)?;
+            let report = cortex::deploy::run_remote_deploy(&host, dry_run)?;
             if command.json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!("syslog deploy remote {host}");
+                println!("cortex deploy remote {host}");
                 println!("mode: {}", report.mode);
                 println!("host: {}", report.host);
                 println!("home: {}", report.home);
@@ -172,16 +170,16 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
                 }
             }
             if report.has_errors {
-                anyhow::bail!("syslog deploy remote {host} completed with failed phases");
+                anyhow::bail!("cortex deploy remote {host} completed with failed phases");
             }
             return Ok(());
         }
     };
-    let report = syslog_mcp::setup::run_setup(mode).await?;
+    let report = cortex::setup::run_setup(mode).await?;
     if command.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!("syslog deploy {label}");
+        println!("cortex deploy {label}");
         println!("mode: {}", report.mode);
         println!("home: {}", report.home.display());
         println!("env: {}", report.env_path.display());
@@ -197,38 +195,38 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
         }
     }
     if report.has_errors {
-        anyhow::bail!("syslog deploy {label} completed with failed phases");
+        anyhow::bail!("cortex deploy {label} completed with failed phases");
     }
     Ok(())
 }
 
 async fn run_setup(command: SetupCommand) -> Result<()> {
     let report = match command.kind {
-        SetupCommandKind::Main(mode) => syslog_mcp::setup::run_setup(mode).await?,
+        SetupCommandKind::Main(mode) => cortex::setup::run_setup(mode).await?,
         SetupCommandKind::AiIndexTimer(action) => {
-            syslog_mcp::setup::run_ai_index_timer_setup(action).await?
+            cortex::setup::run_ai_index_timer_setup(action).await?
         }
         SetupCommandKind::AiWatchService(action) => {
-            syslog_mcp::setup::run_ai_watch_service_setup(action).await?
+            cortex::setup::run_ai_watch_service_setup(action).await?
         }
         SetupCommandKind::AgentCommand(action) => {
-            syslog_mcp::setup::run_agent_command_setup(action).await?
+            cortex::setup::run_agent_command_setup(action).await?
         }
         SetupCommandKind::HeartbeatAgent(action) => {
-            syslog_mcp::setup::run_heartbeat_agent_setup(action).await?
+            cortex::setup::run_heartbeat_agent_setup(action).await?
         }
         SetupCommandKind::DebugWrapper(action) => {
-            syslog_mcp::setup::run_debug_wrapper_setup(action).await?
+            cortex::setup::run_debug_wrapper_setup(action).await?
         }
         SetupCommandKind::DebugCompose(action) => {
-            syslog_mcp::setup::run_debug_compose_setup(action).await?
+            cortex::setup::run_debug_compose_setup(action).await?
         }
-        SetupCommandKind::Doctor => syslog_mcp::setup::run_setup_doctor().await?,
+        SetupCommandKind::Doctor => cortex::setup::run_setup_doctor().await?,
     };
     if command.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!("syslog setup mode: {}", report.mode);
+        println!("cortex setup mode: {}", report.mode);
         println!("home: {}", report.home.display());
         println!("env: {}", report.env_path.display());
         println!("compose: {}", report.compose_dir.display());
@@ -243,7 +241,7 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         }
     }
     if report.has_errors {
-        anyhow::bail!("syslog setup completed with failed phases");
+        anyhow::bail!("cortex setup completed with failed phases");
     }
     Ok(())
 }
@@ -266,7 +264,7 @@ fn parse_doctor_full_command(args: &[String]) -> Result<DoctorFullCommand> {
 async fn serve_mcp() -> Result<()> {
     let runtime = RuntimeCore::load().await?;
     info!(
-        syslog_bind = %runtime.config.syslog.bind_addr(),
+        syslog_bind = %runtime.config.receiver.bind_addr(),
         mcp_bind = %runtime.config.mcp.bind_addr(),
         db_path = %runtime.config.storage.db_path.display(),
         retention_days = runtime.config.storage.retention_days,
@@ -288,14 +286,14 @@ async fn serve_mcp() -> Result<()> {
 
     let mut app: Router = mcp::router(runtime.mcp_state());
     // /api/* is always-on. The container fails to start without
-    // SYSLOG_API_TOKEN — `api::router` enforces that explicitly with a
-    // recovery hint pointing at `syslog setup repair`.
+    // CORTEX_API_TOKEN — `api::router` enforces that explicitly with a
+    // recovery hint pointing at `cortex setup repair`.
     {
         let api_state = api::ApiState::new(
             runtime.service(),
             runtime.config.api.clone(),
             runtime.config.mcp.port,
-            syslog_mcp::config::mcp_bind_is_loopback(&runtime.config),
+            cortex::config::mcp_bind_is_loopback(&runtime.config),
             runtime.config.mcp.allowed_origins.clone(),
             runtime.auth_policy().clone(),
             runtime.pool(),
@@ -304,13 +302,13 @@ async fn serve_mcp() -> Result<()> {
         app = app.merge(api::router(api_state)?);
         info!("Non-MCP API mounted under /api");
     }
-    if syslog_mcp::config::api_token_plaintext_exposure(&runtime.config) {
+    if cortex::config::api_token_plaintext_exposure(&runtime.config) {
         tracing::warn!(
             bind = %runtime.config.mcp.bind_addr(),
             public_url = ?runtime.config.mcp.auth.public_url,
-            "SYSLOG_API_TOKEN will traverse the wire in plaintext: non-loopback bind with no \
+            "CORTEX_API_TOKEN will traverse the wire in plaintext: non-loopback bind with no \
              https:// public URL configured. Front the listener with a TLS-terminating reverse \
-             proxy (e.g. SWAG) and set SYSLOG_MCP_PUBLIC_URL=https://..."
+             proxy (e.g. SWAG) and set CORTEX_PUBLIC_URL=https://..."
         );
     }
     app = app.merge(runtime.otlp_router());
@@ -322,7 +320,7 @@ async fn serve_mcp() -> Result<()> {
             bind = %runtime.config.mcp.bind_addr(),
             "OTLP /v1/logs and heartbeat /v1/heartbeats are mounted WITHOUT authentication on a \
              non-loopback bind. Anyone reachable on this address can write telemetry. \
-             Set SYSLOG_MCP_TOKEN to require Bearer auth."
+             Set CORTEX_TOKEN to require Bearer auth."
         );
     }
     app = app.layer(tower_http::trace::TraceLayer::new_for_http());
@@ -403,13 +401,13 @@ enum DeployCommandKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SetupCommandKind {
-    Main(syslog_mcp::setup::SetupMode),
-    AiIndexTimer(syslog_mcp::setup::AiIndexTimerAction),
-    AiWatchService(syslog_mcp::setup::AiWatchServiceAction),
-    AgentCommand(syslog_mcp::setup::AgentCommandAction),
-    HeartbeatAgent(syslog_mcp::setup::HeartbeatAgentAction),
-    DebugWrapper(syslog_mcp::setup::DebugWrapperAction),
-    DebugCompose(syslog_mcp::setup::DebugComposeAction),
+    Main(cortex::setup::SetupMode),
+    AiIndexTimer(cortex::setup::AiIndexTimerAction),
+    AiWatchService(cortex::setup::AiWatchServiceAction),
+    AgentCommand(cortex::setup::AgentCommandAction),
+    HeartbeatAgent(cortex::setup::HeartbeatAgentAction),
+    DebugWrapper(cortex::setup::DebugWrapperAction),
+    DebugCompose(cortex::setup::DebugComposeAction),
     Doctor,
 }
 
@@ -422,7 +420,7 @@ impl Mode {
     fn parse(args: Vec<String>) -> Result<Self> {
         // `--help` / `--version` MUST bypass everything else: no global flag
         // extraction, no env reads, no service construction. Per bead .6
-        // contract these work even with `SYSLOG_API_TOKEN` unset.
+        // contract these work even with `CORTEX_API_TOKEN` unset.
         if let Some(first) = args.first() {
             if first == "--help" || first == "-h" || first == "help" {
                 return Ok(Self::Help);
@@ -434,7 +432,7 @@ impl Mode {
 
         // Strip CLI-only global flags (`--http`, `--server`, `--token`) from
         // the arg list before subcommand dispatch so they work in any
-        // position: `syslog --http search foo` AND `syslog search --http foo`.
+        // position: `cortex --http search foo` AND `cortex search --http foo`.
         // Non-CLI modes (serve/mcp/setup/deploy/doctor) reject them below — the
         // flags imply HTTP transport, which only applies to the query CLI.
         let mut remaining = args.clone();
@@ -551,7 +549,7 @@ impl Mode {
 }
 
 fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
-    let mut mode = syslog_mcp::setup::SetupMode::FirstRun;
+    let mut mode = cortex::setup::SetupMode::FirstRun;
     let mut json = false;
     let mut iter = args.iter();
     if matches!(iter.clone().next().map(String::as_str), Some("doctor")) {
@@ -579,9 +577,9 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         let (action, json) = parse_setup_subcommand_args("ai-index-timer", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::AiIndexTimer(match action {
-                "install" => syslog_mcp::setup::AiIndexTimerAction::Install,
-                "remove" => syslog_mcp::setup::AiIndexTimerAction::Remove,
-                _ => syslog_mcp::setup::AiIndexTimerAction::Check,
+                "install" => cortex::setup::AiIndexTimerAction::Install,
+                "remove" => cortex::setup::AiIndexTimerAction::Remove,
+                _ => cortex::setup::AiIndexTimerAction::Check,
             }),
             json,
         });
@@ -594,9 +592,9 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         let (action, json) = parse_setup_subcommand_args("ai-watch-service", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::AiWatchService(match action {
-                "install" => syslog_mcp::setup::AiWatchServiceAction::Install,
-                "remove" => syslog_mcp::setup::AiWatchServiceAction::Remove,
-                _ => syslog_mcp::setup::AiWatchServiceAction::Check,
+                "install" => cortex::setup::AiWatchServiceAction::Install,
+                "remove" => cortex::setup::AiWatchServiceAction::Remove,
+                _ => cortex::setup::AiWatchServiceAction::Check,
             }),
             json,
         });
@@ -609,9 +607,9 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         let (action, json) = parse_setup_subcommand_args("agent-command", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::AgentCommand(match action {
-                "install" => syslog_mcp::setup::AgentCommandAction::Install,
-                "remove" => syslog_mcp::setup::AgentCommandAction::Remove,
-                _ => syslog_mcp::setup::AgentCommandAction::Check,
+                "install" => cortex::setup::AgentCommandAction::Install,
+                "remove" => cortex::setup::AgentCommandAction::Remove,
+                _ => cortex::setup::AgentCommandAction::Check,
             }),
             json,
         });
@@ -624,9 +622,9 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         let (action, json) = parse_setup_subcommand_args("heartbeat-agent", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::HeartbeatAgent(match action {
-                "install" => syslog_mcp::setup::HeartbeatAgentAction::Install,
-                "remove" => syslog_mcp::setup::HeartbeatAgentAction::Remove,
-                _ => syslog_mcp::setup::HeartbeatAgentAction::Check,
+                "install" => cortex::setup::HeartbeatAgentAction::Install,
+                "remove" => cortex::setup::HeartbeatAgentAction::Remove,
+                _ => cortex::setup::HeartbeatAgentAction::Check,
             }),
             json,
         });
@@ -639,9 +637,9 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         let (action, json) = parse_setup_subcommand_args("debug-wrapper", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::DebugWrapper(match action {
-                "install" => syslog_mcp::setup::DebugWrapperAction::Install,
-                "remove" => syslog_mcp::setup::DebugWrapperAction::Remove,
-                _ => syslog_mcp::setup::DebugWrapperAction::Check,
+                "install" => cortex::setup::DebugWrapperAction::Install,
+                "remove" => cortex::setup::DebugWrapperAction::Remove,
+                _ => cortex::setup::DebugWrapperAction::Check,
             }),
             json,
         });
@@ -654,17 +652,17 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
         let (action, json) = parse_setup_subcommand_args("debug-compose", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::DebugCompose(match action {
-                "install" => syslog_mcp::setup::DebugComposeAction::Install,
-                "remove" => syslog_mcp::setup::DebugComposeAction::Remove,
-                _ => syslog_mcp::setup::DebugComposeAction::Check,
+                "install" => cortex::setup::DebugComposeAction::Install,
+                "remove" => cortex::setup::DebugComposeAction::Remove,
+                _ => cortex::setup::DebugComposeAction::Check,
             }),
             json,
         });
     }
     for arg in args {
         match arg.as_str() {
-            "check" => mode = syslog_mcp::setup::SetupMode::Check,
-            "repair" => mode = syslog_mcp::setup::SetupMode::Repair,
+            "check" => mode = cortex::setup::SetupMode::Check,
+            "repair" => mode = cortex::setup::SetupMode::Repair,
             "--json" => json = true,
             "--help" | "-h" => {
                 print_usage();
@@ -769,102 +767,102 @@ fn print_usage() {
     eprintln!("{USAGE}");
 }
 
-/// Top-level CLI usage banner printed by `syslog --help` (and on parse errors).
+/// Top-level CLI usage banner printed by `cortex --help` (and on parse errors).
 /// Kept in sync with the command surface in `src/cli/parse.rs`; the
 /// `usage_banner_lists_*` tests guard against drift.
 const USAGE: &str = "Usage:
-  syslog --version     Print version
-  syslog setup [check|repair] [--json]
-  syslog setup ai-index-timer install|remove|check [--json]
-  syslog setup ai-watch-service install|remove|check [--json]
-  syslog setup agent-command install|remove|check [--json]
-  syslog setup heartbeat-agent install|remove|check [--json]
-  syslog setup debug-wrapper install|remove|check [--json]
-  syslog setup debug-compose install|remove|check [--json]
-  syslog setup doctor [--json]
-  syslog deploy preflight [--json]
-  syslog deploy local [--dry-run] [--json]
-  syslog deploy remote HOST [--dry-run] [--json]
-  syslog doctor [--json]          Run all health checks (setup, compose, binary, AI)
-  syslog doctor binary [--json]
-  syslog serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
-  syslog mcp          Start query-only MCP stdio transport
-  syslog search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]
-  syslog filter [--hostname HOST] [--source-ip SOURCE] [--source-kind KIND] [--tool TOOL] [--project PATH] [--session-id ID] [--container NAME] [--docker-host HOST] [--stream stdout|stderr] [--event-action ACTION] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]
-  syslog tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
-  syslog errors [--from TIME] [--to TIME] [--limit N] [--json]
-  syslog hosts [--json]
-  syslog sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
-  syslog incident --around TIME [--minutes N] [--service SERVICE] [--host HOST] [--limit N] [--json]
-  syslog ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]
-  syslog ai abuse [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]
-  syslog ai incidents [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]
-  syslog ai investigate [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]
-  syslog ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]
-  syslog ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--from TIME] [--to TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]
-  syslog ai blocks [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--json]
-  syslog ai context --project PATH [--tool TOOL] [--limit N] [--json]
-  syslog ai tools [--project PATH] [--from TIME] [--to TIME] [--json]
-  syslog ai projects [--tool TOOL] [--from TIME] [--to TIME] [--json]
-  syslog ai index [--path PATH] [--since TIME] [--force] [--json]
-  syslog ai add --file FILE [--force] [--json]
-  syslog ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]
-  syslog ai checkpoints [--errors] [--missing] [--limit N] [--json]
-  syslog ai errors [--limit N] [--json]
-  syslog ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]
-  syslog ai doctor [--strict-permissions] [--json]
-  syslog ai watch-status [--json]
-  syslog ai smoke-watch [--json]
-  syslog shell index --path PATH [--shell zsh] [--json]
-  syslog shell atuin-index --path PATH [--json]
-  syslog agent-command ingest-spool --path PATH [--json]
-  syslog agent-command wrap --spool PATH -- COMMAND...
-  syslog heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]
-  syslog db status [--check-coord] [--json]
-  syslog db integrity [--quick] [--json]
-  syslog db checkpoint [--mode passive|full|restart|truncate] [--json]
-  syslog db vacuum [--pages N|--full] [--force] [--json]
-  syslog db backup [--output PATH] [--json]
-  syslog compose doctor [--json]
-  syslog compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]
-  syslog compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]
-  syslog compose down --yes [--dry-run] [--allow-cwd-target] [--json]
-  syslog compose logs [--tail N] [--json]
+  cortex --version     Print version
+  cortex setup [check|repair] [--json]
+  cortex setup ai-index-timer install|remove|check [--json]
+  cortex setup ai-watch-service install|remove|check [--json]
+  cortex setup agent-command install|remove|check [--json]
+  cortex setup heartbeat-agent install|remove|check [--json]
+  cortex setup debug-wrapper install|remove|check [--json]
+  cortex setup debug-compose install|remove|check [--json]
+  cortex setup doctor [--json]
+  cortex deploy preflight [--json]
+  cortex deploy local [--dry-run] [--json]
+  cortex deploy remote HOST [--dry-run] [--json]
+  cortex doctor [--json]          Run all health checks (setup, compose, binary, AI)
+  cortex doctor binary [--json]
+  cortex serve mcp    Start syslog UDP/TCP ingest plus HTTP MCP server
+  cortex mcp          Start query-only MCP stdio transport
+  cortex search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]
+  cortex filter [--hostname HOST] [--source-ip SOURCE] [--source-kind KIND] [--tool TOOL] [--project PATH] [--session-id ID] [--container NAME] [--docker-host HOST] [--stream stdout|stderr] [--event-action ACTION] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]
+  cortex tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]
+  cortex errors [--from TIME] [--to TIME] [--limit N] [--json]
+  cortex hosts [--json]
+  cortex sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
+  cortex incident --around TIME [--minutes N] [--service SERVICE] [--host HOST] [--limit N] [--json]
+  cortex ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]
+  cortex ai abuse [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]
+  cortex ai incidents [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]
+  cortex ai investigate [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]
+  cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]
+  cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--from TIME] [--to TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]
+  cortex ai blocks [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--json]
+  cortex ai context --project PATH [--tool TOOL] [--limit N] [--json]
+  cortex ai tools [--project PATH] [--from TIME] [--to TIME] [--json]
+  cortex ai projects [--tool TOOL] [--from TIME] [--to TIME] [--json]
+  cortex ai index [--path PATH] [--since TIME] [--force] [--json]
+  cortex ai add --file FILE [--force] [--json]
+  cortex ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]
+  cortex ai checkpoints [--errors] [--missing] [--limit N] [--json]
+  cortex ai errors [--limit N] [--json]
+  cortex ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]
+  cortex ai doctor [--strict-permissions] [--json]
+  cortex ai watch-status [--json]
+  cortex ai smoke-watch [--json]
+  cortex shell index --path PATH [--shell zsh] [--json]
+  cortex shell atuin-index --path PATH [--json]
+  cortex agent-command ingest-spool --path PATH [--json]
+  cortex agent-command wrap --spool PATH -- COMMAND...
+  cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]
+  cortex db status [--check-coord] [--json]
+  cortex db integrity [--quick] [--json]
+  cortex db checkpoint [--mode passive|full|restart|truncate] [--json]
+  cortex db vacuum [--pages N|--full] [--force] [--json]
+  cortex db backup [--output PATH] [--json]
+  cortex compose doctor [--json]
+  cortex compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]
+  cortex compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]
+  cortex compose down --yes [--dry-run] [--allow-cwd-target] [--json]
+  cortex compose logs [--tail N] [--json]
   syslog service logs SERVICE [--from TIME] [--to TIME] [--tail N] [--json]
-  syslog setup check|repair [--json]
-  syslog setup agent-command install|remove|check [--json]
-  syslog setup plugin-hook [--no-repair] [--json]
-  syslog deploy preflight [--json]
-  syslog deploy local [--dry-run] [--json]
-  syslog deploy remote HOST [--dry-run] [--json]
-  syslog config get KEY [--env|--toml] [--toml-path PATH] [--json]
-  syslog config set KEY VALUE [--env|--toml] [--toml-path PATH] [--json]
-  syslog config unset KEY [--env|--toml] [--toml-path PATH] [--json]
-  syslog config list [--env|--toml] [--toml-path PATH] [--json]
+  cortex setup check|repair [--json]
+  cortex setup agent-command install|remove|check [--json]
+  cortex setup plugin-hook [--no-repair] [--json]
+  cortex deploy preflight [--json]
+  cortex deploy local [--dry-run] [--json]
+  cortex deploy remote HOST [--dry-run] [--json]
+  cortex config get KEY [--env|--toml] [--toml-path PATH] [--json]
+  cortex config set KEY VALUE [--env|--toml] [--toml-path PATH] [--json]
+  cortex config unset KEY [--env|--toml] [--toml-path PATH] [--json]
+  cortex config list [--env|--toml] [--toml-path PATH] [--json]
   syslog correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]
-  syslog stats [--json]
-  syslog source-ips [--limit N] [--offset N] [--json]
-  syslog timeline [--bucket minute|hour|day] [--group-by FIELD] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]
-  syslog patterns [--top-n N] [--scan-limit N] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]
-  syslog ingest-rate [--by-host] [--json]
-  syslog sig list [--include-acknowledged] [--limit N] [--json]
-  syslog sig ack HASH [--notes TEXT] [--json]
-  syslog sig unack HASH [--reason TEXT] [--json]
-  syslog notify recent [--rule-id ID] [--since TIME] [--limit N] [--json]
-  syslog notify test [--body TEXT] [--json]   (requires --http)
+  cortex stats [--json]
+  cortex source-ips [--limit N] [--offset N] [--json]
+  cortex timeline [--bucket minute|hour|day] [--group-by FIELD] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]
+  cortex patterns [--top-n N] [--scan-limit N] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]
+  cortex ingest-rate [--by-host] [--json]
+  cortex sig list [--include-acknowledged] [--limit N] [--json]
+  cortex sig ack HASH [--notes TEXT] [--json]
+  cortex sig unack HASH [--reason TEXT] [--json]
+  cortex notify recent [--rule-id ID] [--since TIME] [--limit N] [--json]
+  cortex notify test [--body TEXT] [--json]   (requires --http)
 
 Global CLI flags (apply to query commands above; not valid for serve/mcp/setup/doctor):
   --http              Route this invocation through the container's REST API instead of opening the local SQLite DB.
                       Fails closed: if no token/server is discoverable, the CLI exits non-zero (never silently uses local).
-  --server URL        Override the API base URL (implies --http). Default: SYSLOG_MCP_URL or http://127.0.0.1:3100
-  --token TOKEN       Override the bearer token (implies --http). Default: SYSLOG_API_TOKEN
+  --server URL        Override the API base URL (implies --http). Default: CORTEX_URL or http://127.0.0.1:3100
+  --token TOKEN       Override the bearer token (implies --http). Default: CORTEX_API_TOKEN
 
 Environment:
-  SYSLOG_MCP_DB_PATH  SQLite database path used by both transports
-  SYSLOG_USE_HTTP     Set to 1 or true to default to HTTP mode without passing --http (fail-closed if discovery fails).
-                      SYSLOG_API_TOKEN alone does NOT trigger HTTP — must explicitly opt in via --http or SYSLOG_USE_HTTP=1.
-  SYSLOG_MCP_URL      Default API base URL for --http mode (overridden by --server)
-  SYSLOG_API_TOKEN    Bearer token for --http mode (overridden by --token)
+  CORTEX_DB_PATH  SQLite database path used by both transports
+  CORTEX_USE_HTTP     Set to 1 or true to default to HTTP mode without passing --http (fail-closed if discovery fails).
+                      CORTEX_API_TOKEN alone does NOT trigger HTTP — must explicitly opt in via --http or CORTEX_USE_HTTP=1.
+  CORTEX_URL      Default API base URL for --http mode (overridden by --server)
+  CORTEX_API_TOKEN    Bearer token for --http mode (overridden by --token)
   RUST_LOG            Log filter; stdio logs always go to stderr";
 
 async fn shutdown_signal() {

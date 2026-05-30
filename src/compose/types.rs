@@ -14,8 +14,8 @@ pub struct ComposeDefaults {
 impl Default for ComposeDefaults {
     fn default() -> Self {
         Self {
-            service: "syslog-mcp".into(),
-            container_name: "syslog-mcp".into(),
+            service: "cortex".into(),
+            container_name: "cortex".into(),
             timeout: Duration::from_secs(120),
             output_limit_bytes: 64 * 1024,
         }

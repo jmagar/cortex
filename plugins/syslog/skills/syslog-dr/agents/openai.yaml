@@ -1,4 +1,0 @@
-interface:
-  display_name: "Syslog Doctor"
-  short_description: "Run syslog deployment health checks"
-  default_prompt: "Use $syslog-dr to run a full syslog-mcp deployment health check."
