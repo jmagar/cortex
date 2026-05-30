@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use tower::util::ServiceExt;
 
 use crate::{
-    app::SyslogService,
+    app::CortexService,
     config::{McpConfig, StorageConfig},
     db::{self, DbPool, LogBatchEntry},
     mcp::{streamable_http_config, streamable_http_service, AppState, AuthPolicy},
@@ -25,11 +25,11 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let storage = StorageConfig::for_test(dir.path().join("rmcp-server-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
     let state = AppState {
-        service: SyslogService::new(Arc::clone(&pool), storage.clone()),
+        service: CortexService::new(Arc::clone(&pool), storage.clone()),
         config: McpConfig {
             host: "127.0.0.1".into(),
             port: 3100,
-            server_name: "syslog-mcp".into(),
+            server_name: "cortex".into(),
             no_auth: false,
             trusted_gateway_no_auth: false,
             api_token: None,
@@ -52,11 +52,11 @@ fn mounted_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let storage = StorageConfig::for_test(dir.path().join("rmcp-mounted-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
     let state = AppState {
-        service: SyslogService::new(Arc::clone(&pool), storage.clone()),
+        service: CortexService::new(Arc::clone(&pool), storage.clone()),
         config: McpConfig {
             host: "127.0.0.1".into(),
             port: 3100,
-            server_name: "syslog-mcp".into(),
+            server_name: "cortex".into(),
             no_auth: false,
             trusted_gateway_no_auth: false,
             api_token: None,
@@ -242,7 +242,7 @@ fn allowed_hosts_include_bracketed_ipv6_authority_variants() {
     let mut config = McpConfig {
         host: "::1".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -288,7 +288,7 @@ async fn rmcp_tools_list_exposes_one_action_tool() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["syslog"]);
+    assert_eq!(names, vec!["cortex"]);
     assert_eq!(tools[0]["inputSchema"]["required"], json!(["action"]));
     assert_eq!(
         tools[0]["_meta"]["ui"]["resourceUri"],
@@ -413,7 +413,7 @@ async fn rmcp_get_stats_works_against_temp_db() {
         jsonrpc_request(
             2,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -443,7 +443,7 @@ async fn rmcp_search_logs_works_against_seeded_data() {
         jsonrpc_request(
             3,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "search", "query": "disk", "limit": 5}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "search", "query": "disk", "limit": 5}})),
         ),
     )
     .await;
@@ -470,7 +470,7 @@ async fn rmcp_correlate_events_rejects_bad_reference_time_as_invalid_params() {
         jsonrpc_request(
             4,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "correlate", "reference_time": "bad"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "correlate", "reference_time": "bad"}})),
         ),
     )
     .await;
@@ -487,7 +487,7 @@ async fn rmcp_correlate_events_rejects_bad_severity_as_invalid_params() {
             5,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "cortex",
                 "arguments": {
                     "action": "correlate",
                     "reference_time": "2026-01-01T00:00:00Z",
@@ -510,7 +510,7 @@ async fn rmcp_search_rejects_bad_severity_as_invalid_params() {
             6,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "cortex",
                 "arguments": {
                     "action": "search",
                     "severity": "bogus"
@@ -551,7 +551,7 @@ async fn rmcp_numeric_args_reject_wrong_type_values() {
             jsonrpc_request(
                 id,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": arguments})),
+                Some(json!({"name": "cortex", "arguments": arguments})),
             ),
         )
         .await;
@@ -590,7 +590,7 @@ async fn rmcp_correlate_events_preserves_truncation_and_host_grouping() {
             11,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "cortex",
                 "arguments": {
                     "action": "correlate",
                     "reference_time": "2026-01-01T00:00:00Z",
@@ -611,13 +611,13 @@ async fn rmcp_correlate_events_preserves_truncation_and_host_grouping() {
 
 // ── PUBLIC_URL host/origin allowlist extension ───────────────────────────────
 
-/// `SYSLOG_MCP_PUBLIC_URL` bare host is added to `allowed_hosts`.
+/// `CORTEX_PUBLIC_URL` bare host is added to `allowed_hosts`.
 #[test]
 fn public_url_host_added_to_allowed_hosts() {
     let config = McpConfig {
         host: "0.0.0.0".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -637,14 +637,14 @@ fn public_url_host_added_to_allowed_hosts() {
     );
 }
 
-/// `SYSLOG_MCP_PUBLIC_URL` standard-port https origin is added to `allowed_origins`
+/// `CORTEX_PUBLIC_URL` standard-port https origin is added to `allowed_origins`
 /// without the port (browsers omit default ports from the Origin header).
 #[test]
 fn public_url_origin_added_to_allowed_origins() {
     let config = McpConfig {
         host: "0.0.0.0".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -671,7 +671,7 @@ fn public_url_non_standard_port_included_in_host_and_origin() {
     let config = McpConfig {
         host: "0.0.0.0".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -712,7 +712,7 @@ fn public_url_standard_https_port_host_variants() {
     let config = McpConfig {
         host: "0.0.0.0".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -740,7 +740,7 @@ fn public_url_standard_https_port_host_variants() {
 
 // ── Scope-based authorization tests ──────────────────────────────────────────
 //
-// These tests verify the fail-closed scope check added in syslog-mcp-brt0.8.
+// These tests verify the fail-closed scope check added in cortex-brt0.8.
 // Pattern: middleware injects AuthContext into request extensions; rmcp
 // propagates it into RequestContext.extensions via http::request::Parts.
 
@@ -792,7 +792,7 @@ async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
         jsonrpc_request(
             11,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -822,7 +822,7 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
             jsonrpc_request(
                 20,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
+                Some(json!({"name": "cortex", "arguments": minimal_args_for_action(action)})),
             ),
         )
         .await;
@@ -849,7 +849,7 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
             jsonrpc_request(
                 21,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
+                Some(json!({"name": "cortex", "arguments": minimal_args_for_action(action)})),
             ),
         )
         .await;
@@ -926,7 +926,7 @@ async fn mounted_policy_with_admin_scope_permits_read_actions() {
         jsonrpc_request(
             30,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -954,7 +954,7 @@ async fn mounted_policy_with_both_scopes_permits_all_actions() {
         jsonrpc_request(
             40,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -978,7 +978,7 @@ async fn mounted_admin_actions_record_per_request_subject_actor() {
             41,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "cortex",
                 "arguments": {
                     "action": "ack_error",
                     "signature_hash": signature_hash,
@@ -1002,7 +1002,7 @@ async fn mounted_admin_actions_record_per_request_subject_actor() {
             42,
             "tools/call",
             Some(json!({
-                "name": "syslog",
+                "name": "cortex",
                 "arguments": {
                     "action": "unack_error",
                     "signature_hash": signature_hash,
@@ -1057,7 +1057,7 @@ async fn mounted_policy_with_empty_scopes_denies_read_actions() {
             jsonrpc_request(
                 50,
                 "tools/call",
-                Some(json!({"name": "syslog", "arguments": minimal_args_for_action(action)})),
+                Some(json!({"name": "cortex", "arguments": minimal_args_for_action(action)})),
             ),
         )
         .await;
@@ -1093,7 +1093,7 @@ async fn mounted_policy_with_empty_scopes_permits_help_action() {
         jsonrpc_request(
             60,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "help"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "help"}})),
         ),
     )
     .await;
@@ -1184,7 +1184,7 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
         jsonrpc_request(
             71,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "help"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "help"}})),
         ),
     )
     .await;
@@ -1200,7 +1200,7 @@ async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools
         jsonrpc_request(
             72,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "stats"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "stats"}})),
         ),
     )
     .await;
@@ -1224,8 +1224,8 @@ async fn mounted_policy_with_auth_context_permits_tools_list() {
     assert_eq!(status, StatusCode::OK);
     let tools = response["result"]["tools"].as_array().unwrap();
     assert_eq!(
-        tools[0]["name"], "syslog",
-        "tools/list should return syslog tool; response: {response}"
+        tools[0]["name"], "cortex",
+        "tools/list should return cortex tool; response: {response}"
     );
 }
 
@@ -1272,8 +1272,8 @@ async fn mounted_policy_with_auth_context_permits_schema_resources() {
     assert!(
         response["result"]["contents"][0]["text"]
             .as_str()
-            .is_some_and(|text| text.contains("\"name\": \"syslog\"")
-                && text.contains("x-syslog-action-metadata")),
+            .is_some_and(|text| text.contains("\"name\": \"cortex\"")
+                && text.contains("x-cortex-action-metadata")),
         "resources/read should return schema JSON; response: {response}"
     );
 
@@ -1412,7 +1412,7 @@ async fn scope_check_fires_before_db_execution() {
         jsonrpc_request(
             90,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "search", "query": "error"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "search", "query": "error"}})),
         ),
     )
     .await;
@@ -1447,7 +1447,7 @@ async fn unknown_action_is_denied_by_sentinel_scope() {
         jsonrpc_request(
             100,
             "tools/call",
-            Some(json!({"name": "syslog", "arguments": {"action": "not_a_real_action"}})),
+            Some(json!({"name": "cortex", "arguments": {"action": "not_a_real_action"}})),
         ),
     )
     .await;

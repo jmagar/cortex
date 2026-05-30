@@ -1,4 +1,4 @@
-# Memory Files -- syslog-mcp
+# Memory Files -- cortex
 
 Claude Code memory system for persistent knowledge across sessions.
 
@@ -6,7 +6,7 @@ Claude Code memory system for persistent knowledge across sessions.
 
 Claude Code stores session learnings in memory files under `.claude/projects/`. These persist across conversations and help maintain context about project decisions, patterns, and gotchas.
 
-## Key memory topics for syslog-mcp
+## Key memory topics for cortex
 
 | Topic | Key facts |
 | --- | --- |
@@ -25,7 +25,7 @@ Claude Code stores session learnings in memory files under `.claude/projects/`. 
 ## Memory file location
 
 ```
-~/.claude/projects/-home-jmagar-workspace-syslog-mcp/memory/
+~/.claude/projects/-home-jmagar-workspace-cortex/memory/
 ```
 
 ## See also

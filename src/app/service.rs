@@ -40,10 +40,10 @@ use crate::scanner;
 
 const DB_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 const SLOW_DB_MS: u128 = 500;
-const SYSLOG_OWNED_USER_SERVICES: &[&str] = &[
+const CORTEX_OWNED_USER_SERVICES: &[&str] = &[
     "syslog-ai-watch.service",
     "syslog-ai-index.service",
-    "syslog-mcp.service",
+    "cortex.service",
 ];
 
 fn normalize_syslog_owned_service(service: &str) -> ServiceResult<String> {
@@ -52,12 +52,12 @@ fn normalize_syslog_owned_service(service: &str) -> ServiceResult<String> {
     } else {
         format!("{service}.service")
     };
-    if SYSLOG_OWNED_USER_SERVICES.contains(&unit.as_str()) {
+    if CORTEX_OWNED_USER_SERVICES.contains(&unit.as_str()) {
         Ok(unit)
     } else {
         Err(ServiceError::InvalidInput(format!(
             "unsupported syslog-owned service '{service}'; expected one of {}",
-            SYSLOG_OWNED_USER_SERVICES.join(", ")
+            CORTEX_OWNED_USER_SERVICES.join(", ")
         )))
     }
 }
@@ -92,7 +92,7 @@ fn parse_journal_json_line(line: &str) -> ServiceResult<ServiceJournalEntry> {
         unit: journal_string(&value, "_SYSTEMD_USER_UNIT")
             .or_else(|| journal_string(&value, "_SYSTEMD_UNIT")),
         priority: journal_string(&value, "PRIORITY"),
-        syslog_identifier: journal_string(&value, "SYSLOG_IDENTIFIER"),
+        syslog_identifier: journal_string(&value, "CORTEX_IDENTIFIER"),
         pid: journal_string(&value, "_PID"),
         message: journal_string(&value, "MESSAGE"),
         cursor: journal_string(&value, "__CURSOR"),
@@ -166,7 +166,7 @@ fn incident_sort_key(timestamp: &str) -> i64 {
 }
 
 /// Read a syslog-owned service's journal via `journalctl`. Free function so
-/// callers can invoke it without standing up a [`SyslogService`] (and the
+/// callers can invoke it without standing up a [`CortexService`] (and the
 /// SQLite pool that backs it) — `syslog service logs` is a self-debugging
 /// surface that must work when the DB is corrupted, locked, or full.
 ///
@@ -252,13 +252,13 @@ pub async fn run_compose_status() -> ServiceResult<crate::compose::ComposeStatus
 /// scalar — and the type is intentionally Clone-friendly so callers like
 /// `ai_watch::run` can take ownership without forcing a borrow through async
 /// task boundaries (bead 0p8r.24). The other 5 LOCAL-only command dispatchers
-/// take `&SyslogService` because they don't move the service into a spawned
+/// take `&CortexService` because they don't move the service into a spawned
 /// task; both patterns are correct.
 /// Facade for all syslog MCP service operations.
 ///
 /// # Architecture note (Arch-C2 — partial)
 ///
-/// `SyslogService` is a 1,983 LOC god class. The immediate win delivered here
+/// `CortexService` is a 1,983 LOC god class. The immediate win delivered here
 /// is extracting OS-level shell-outs (`journalctl`, `sqlite3`) behind the
 /// `OsAdapter` trait so they are testable and injectable. The full split into
 /// `LogQueryService`, `AiAnalyticsService`, `MaintenanceService`, and
@@ -269,7 +269,7 @@ pub async fn run_compose_status() -> ServiceResult<crate::compose::ComposeStatus
 /// `SystemOsAdapter`; tests can swap in a `MockOsAdapter` that returns canned
 /// output without spawning real processes.
 #[derive(Clone)]
-pub struct SyslogService {
+pub struct CortexService {
     pool: Arc<DbPool>,
     pub(super) storage: StorageConfig,
     db_permits: Arc<Semaphore>,
@@ -278,7 +278,7 @@ pub struct SyslogService {
     pub(super) os: Arc<dyn OsAdapter + Send + Sync>,
 }
 
-impl SyslogService {
+impl CortexService {
     pub(crate) fn new(pool: Arc<DbPool>, storage: StorageConfig) -> Self {
         let permits = storage.pool_size.max(1) as usize;
         Self {
@@ -2208,7 +2208,7 @@ fn backup_path_for(db_path: &std::path::Path, output: Option<PathBuf>) -> anyhow
 // ---------------------------------------------------------------------------
 // Notifications service methods
 
-impl SyslogService {
+impl CortexService {
     /// List recent notification firings.
     pub async fn notifications_recent(
         &self,
@@ -2433,7 +2433,7 @@ impl SyslogService {
 
         if matching.is_empty() {
             return Err(ServiceError::InvalidInput(format!(
-                "no incident found with id '{}'; run `syslog ai incidents` to list available ids",
+                "no incident found with id '{}'; run `cortex ai incidents` to list available ids",
                 incident_id
             )));
         }

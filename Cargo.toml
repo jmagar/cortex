@@ -1,13 +1,17 @@
 [package]
-name = "syslog-mcp"
-version = "0.36.1"
+name = "cortex"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.86"
-description = "Syslog receiver + MCP server for homelab log intelligence"
+description = "Homelab intelligence platform — syslog/OTLP/Docker log aggregation, fleet awareness, and AI agent coordination over MCP, CLI, and HTTP"
 autobins = false
 
 [[bin]]
-name = "syslog"
+name = "cortex"
+path = "src/main.rs"
+
+[[bin]]
+name = "cx"
 path = "src/main.rs"
 
 [dependencies]
@@ -110,7 +114,7 @@ notify = "8.2.0"
 test-support = []
 
 [dev-dependencies]
-syslog-mcp = { path = ".", features = ["test-support"] }
+cortex = { path = ".", features = ["test-support"] }
 serial_test = "3"
 tower = { version = "0.5", features = ["util"] }
 rmcp = { version = "1.6.0", default-features = false, features = [

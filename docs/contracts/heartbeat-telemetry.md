@@ -29,14 +29,14 @@ The v1 heartbeat surface uses these tiers:
 
 ## 3. Transport
 
-Heartbeat agents push snapshots to the existing `syslog-mcp` HTTP listener.
+Heartbeat agents push snapshots to the existing `cortex` HTTP listener.
 
 ### 3.1 Endpoint
 
 ```http
 POST /v1/heartbeats
 Content-Type: application/json
-Authorization: Bearer <SYSLOG_MCP_TOKEN>
+Authorization: Bearer <CORTEX_TOKEN>
 ```
 
 The route is mounted beside OTLP on the same server process. It MUST use a
@@ -47,7 +47,7 @@ router's smaller body limit or OTLP's larger body limit by accident.
 
 The route follows the OTLP trust model:
 
-- When `SYSLOG_MCP_TOKEN` is configured, requests MUST include a valid bearer
+- When `CORTEX_TOKEN` is configured, requests MUST include a valid bearer
   token.
 - When no token is configured, loopback-only development MAY be unauthenticated.
 - Non-loopback unauthenticated exposure MUST be rejected at startup unless the
@@ -65,7 +65,7 @@ malformed, wrong, query-parameter, and valid bearer-token cases MUST have tests.
 The maximum request body size is **256 KiB**.
 
 This is an ingest-side HTTP request limit for one heartbeat snapshot sent from
-an agent to `syslog-mcp`. It does not permit returning full heartbeat snapshots
+an agent to `cortex`. It does not permit returning full heartbeat snapshots
 through MCP actions or other LLM-facing query surfaces. Query surfaces MUST
 return bounded summaries, bounded sample arrays, and explicit truncation signals
 where applicable.

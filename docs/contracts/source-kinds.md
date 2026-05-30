@@ -76,8 +76,8 @@ no-match, §7). Renaming an existing value is a major version bump.
 | `docker-stream` | `src/docker_ingest/parser.rs::log_output_to_entry` | Container stdout/stderr via Docker socket proxy |
 | `docker-event` | `src/docker_ingest/parser.rs::docker_event_to_entry` | Docker lifecycle events from the `/events` stream |
 | `otlp` | `src/otlp.rs` | OpenTelemetry logs received on `/v1/logs` |
-| `unifi-api` | UniFi poller (epic C `syslog-mcp-awvr`) | UniFi controller events + alarms poller |
-| `adguard-api` | AdGuard poller (epic C `syslog-mcp-awvr`) | AdGuard Home `/control/querylog` poller |
+| `unifi-api` | UniFi poller (epic C `cortex-awvr`) | UniFi controller events + alarms poller |
+| `adguard-api` | AdGuard poller (epic C `cortex-awvr`) | AdGuard Home `/control/querylog` poller |
 | `shell-history` | `src/command_log.rs` | Local shell history backfill, currently zsh extended history |
 | `agent-command` | `src/command_log.rs` | AI agent-launched shell commands imported from a private JSONL spool |
 
@@ -226,15 +226,15 @@ scheme reconstruction):
 
 | File | Drift | Status |
 |---|---|---|
-| `docs/contracts/parser-trait.rs` line 52 | `#[serde(rename_all = "snake_case")]` on `SourceKind` | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — `rename_all = "kebab-case"` |
-| `docs/contracts/parser-trait.rs` lines 40–60 | Comment lists snake_case forms | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — doc comments updated to kebab-case |
-| `docs/contracts/parser-trait.rs` line 53 | Enum variant `Syslog` (no UDP/TCP distinction) | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — split into `SyslogUdp` and `SyslogTcp` + `is_syslog()` helper + `as_str()` method |
-| `docs/superpowers/specs/2026-05-16-agent-mode-design.md` §12 | Lists `docker-ingest` as a member | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — replaced with `docker-stream` + `docker-event`; `unifi-api` and `adguard-api` added |
-| `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` §3 / §4 | Uses bare `syslog` and `_`-style names | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — dispatch matrix rewritten in kebab-case with UDP/TCP rows merged via `app_name`-only dispatch (transport tag lives in `source_kind`/`source_ip`) |
-| `docs/contracts/log-row-shape.md` §4 line 88 | `unifi://<controller_host>/site/<site_id>` | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — path dropped; v1 single-site |
-| `docs/contracts/log-row-shape.md` §4 line 89 | `adguard://<adguard_host>/<client_ip_or_name>` | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — path dropped; per-client filtering uses `metadata_json.adguard.client` |
-| `docs/contracts/metadata-json-shape.md` §3 line 46 | Used `docker_stream` (snake_case) for ingest envelope | ✅ **RESOLVED** (bead `syslog-mcp-s6et`) — rewritten to `docker-stream` / `docker-event` kebab forms |
-| `src/syslog/listener.rs` | Today's UDP/TCP listener may not yet write the kebab-case `source_kind` to `metadata_json` | ⏳ **DEFERRED** — implementation work for epic B (`syslog-mcp-1wjr`). When migration 10 lands, listener populates `metadata_json.source_kind` to `"syslog-udp"` or `"syslog-tcp"` based on transport. |
+| `docs/contracts/parser-trait.rs` line 52 | `#[serde(rename_all = "snake_case")]` on `SourceKind` | ✅ **RESOLVED** (bead `cortex-s6et`) — `rename_all = "kebab-case"` |
+| `docs/contracts/parser-trait.rs` lines 40–60 | Comment lists snake_case forms | ✅ **RESOLVED** (bead `cortex-s6et`) — doc comments updated to kebab-case |
+| `docs/contracts/parser-trait.rs` line 53 | Enum variant `Syslog` (no UDP/TCP distinction) | ✅ **RESOLVED** (bead `cortex-s6et`) — split into `SyslogUdp` and `SyslogTcp` + `is_syslog()` helper + `as_str()` method |
+| `docs/superpowers/specs/2026-05-16-agent-mode-design.md` §12 | Lists `docker-ingest` as a member | ✅ **RESOLVED** (bead `cortex-s6et`) — replaced with `docker-stream` + `docker-event`; `unifi-api` and `adguard-api` added |
+| `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` §3 / §4 | Uses bare `syslog` and `_`-style names | ✅ **RESOLVED** (bead `cortex-s6et`) — dispatch matrix rewritten in kebab-case with UDP/TCP rows merged via `app_name`-only dispatch (transport tag lives in `source_kind`/`source_ip`) |
+| `docs/contracts/log-row-shape.md` §4 line 88 | `unifi://<controller_host>/site/<site_id>` | ✅ **RESOLVED** (bead `cortex-s6et`) — path dropped; v1 single-site |
+| `docs/contracts/log-row-shape.md` §4 line 89 | `adguard://<adguard_host>/<client_ip_or_name>` | ✅ **RESOLVED** (bead `cortex-s6et`) — path dropped; per-client filtering uses `metadata_json.adguard.client` |
+| `docs/contracts/metadata-json-shape.md` §3 line 46 | Used `docker_stream` (snake_case) for ingest envelope | ✅ **RESOLVED** (bead `cortex-s6et`) — rewritten to `docker-stream` / `docker-event` kebab forms |
+| `src/syslog/listener.rs` | Today's UDP/TCP listener may not yet write the kebab-case `source_kind` to `metadata_json` | ⏳ **DEFERRED** — implementation work for epic B (`cortex-1wjr`). When migration 10 lands, listener populates `metadata_json.source_kind` to `"syslog-udp"` or `"syslog-tcp"` based on transport. |
 | `src/db/models.rs` | `LogBatchEntry` doc comment lists URI patterns | ✅ No change needed — already kebab. |
 
 Per agent-mode spec §12, a `source_kind` column on `logs` is proposed

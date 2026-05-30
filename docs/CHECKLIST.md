@@ -1,4 +1,4 @@
-# Plugin Checklist -- syslog-mcp
+# Plugin Checklist -- cortex
 
 Pre-release and quality checklist. Complete all items before tagging a release.
 
@@ -27,7 +27,7 @@ Pre-release and quality checklist. Complete all items before tagging a release.
 - [ ] `.gitignore` includes `.env`, `*.secret`, credentials files
 - [ ] `.dockerignore` includes `.env`, `.git/`, `*.secret`
 
-- [ ] `/health` endpoint is unauthenticated; `/mcp` requires bearer auth when `SYSLOG_MCP_TOKEN` is set
+- [ ] `/health` endpoint is unauthenticated; `/mcp` requires bearer auth when `CORTEX_TOKEN` is set
 - [ ] Container runs as non-root (UID 1000)
 - [ ] No baked environment variables in Docker image
 - [ ] Bearer token comparison uses constant-time equality (`subtle::ConstantTimeEq`)
@@ -49,9 +49,9 @@ Pre-release and quality checklist. Complete all items before tagging a release.
 ## Registry (if publishing)
 
 - [ ] `server.json` for MCP registry is valid JSON with correct version
-- [ ] OCI image published to `ghcr.io/jmagar/syslog-mcp`
+- [ ] OCI image published to `ghcr.io/jmagar/cortex`
 - [ ] Crate published to crates.io (if applicable)
-- [ ] DNS verification for `tv.tootie/syslog-mcp`
+- [ ] DNS verification for `tv.tootie/cortex`
 
 ## Marketplace (if applicable)
 

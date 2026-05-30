@@ -126,7 +126,7 @@ pub use models::{
     UsageBlocksResponse,
 };
 pub use os_adapter::SystemOsAdapter;
-pub use service::{run_compose_status, run_service_logs, SyslogService};
+pub use service::{run_compose_status, run_service_logs, CortexService};
 pub use time::parse_optional_timestamp;
 
 #[cfg(test)]

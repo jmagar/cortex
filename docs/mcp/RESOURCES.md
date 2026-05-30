@@ -1,4 +1,4 @@
-# MCP Resources Reference -- syslog-mcp
+# MCP Resources Reference -- cortex
 
 ## Overview
 
@@ -6,7 +6,7 @@ MCP resources expose read-only data via URI-based access. Unlike tools, resource
 
 ## Available resources
 
-syslog-mcp exposes one MCP resource:
+cortex exposes one MCP resource:
 
 | URI | Description | MIME type |
 | --- | --- | --- |

@@ -1,5 +1,5 @@
 //! Parser trait contract — **source of truth** for the enrichment-framework
-//! parser interface (epic `syslog-mcp-1wjr`).
+//! parser interface (epic `cortex-1wjr`).
 //!
 //! This file lives at `docs/contracts/parser-trait.rs` and is **the contract**.
 //! Implementations in `src/enrich/parsers/*` (kernel, docker_event, authelia,
@@ -56,7 +56,7 @@ use thiserror::Error;
 ///
 /// **History:** prior versions of this contract used `snake_case` with a
 /// bare `Syslog` variant. Both were corrected during the cross-cutting audit
-/// (bead `syslog-mcp-s6et`); kebab-case matches the existing production data
+/// (bead `cortex-s6et`); kebab-case matches the existing production data
 /// that already carries kebab forms in `source_ip` schemes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

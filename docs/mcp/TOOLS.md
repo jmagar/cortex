@@ -1,8 +1,8 @@
-# MCP Tools Reference -- syslog-mcp
+# MCP Tools Reference -- cortex
 
 ## Design Philosophy
 
-syslog-mcp exposes one MCP tool named `syslog`. The required
+cortex exposes one MCP tool named `syslog`. The required
 `action` argument selects the operation:
 
 | Action | Purpose |
@@ -211,7 +211,7 @@ Required argument: `action = "status"`
 
 ## syslog compose_status
 
-Get redacted read-only Docker Compose diagnostics for the canonical syslog-mcp deployment. MCP output omits host paths, mount sources, image ids, and raw command output.
+Get redacted read-only Docker Compose diagnostics for the canonical cortex deployment. MCP output omits host paths, mount sources, image ids, and raw command output.
 
 Required argument: `action = "compose_status"`
 
@@ -219,7 +219,7 @@ Target override arguments such as `project_dir`, `compose_file`, `project_name`,
 
 ## syslog compose_doctor
 
-Run strict deployment-health checks for the canonical syslog-mcp Compose deployment. It returns the same redacted diagnostic shape as `compose_status` when healthy, and returns a tool error when Docker/Compose ownership or runtime checks are not ready for lifecycle work. Compose lifecycle mutations are CLI-only.
+Run strict deployment-health checks for the canonical cortex Compose deployment. It returns the same redacted diagnostic shape as `compose_status` when healthy, and returns a tool error when Docker/Compose ownership or runtime checks are not ready for lifecycle work. Compose lifecycle mutations are CLI-only.
 
 Required argument: `action = "compose_doctor"`
 

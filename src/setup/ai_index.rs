@@ -53,17 +53,17 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
             phases.push(check_file_phase(
                 "ai-index-bin",
                 &bin_path,
-                "run syslog setup ai-index-timer install",
+                "run cortex setup ai-index-timer install",
             ));
             phases.push(check_file_phase(
                 "ai-index-service",
                 &service_path,
-                "run syslog setup ai-index-timer install",
+                "run cortex setup ai-index-timer install",
             ));
             phases.push(check_file_phase(
                 "ai-index-timer",
                 &timer_path,
-                "run syslog setup ai-index-timer install",
+                "run cortex setup ai-index-timer install",
             ));
             phases.push(systemctl_user_phase(&[
                 "is-enabled",
@@ -131,27 +131,27 @@ pub(crate) fn ai_index_script() -> String {
     r#"#!/usr/bin/env bash
 set -euo pipefail
 
-STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/syslog-mcp"
+STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/cortex"
 mkdir -p "$STATE_DIR"
 LOCK_FILE="$STATE_DIR/ai-index.lock"
 LOG_FILE="$STATE_DIR/ai-index.log"
 
-if [[ -z "${SYSLOG_MCP_DB_PATH:-}" ]]; then
-  if [[ -f "${HOME}/.claude/plugins/data/syslog-jmagar-lab/syslog.db" ]]; then
-    export SYSLOG_MCP_DB_PATH="${HOME}/.claude/plugins/data/syslog-jmagar-lab/syslog.db"
+if [[ -z "${CORTEX_DB_PATH:-}" ]]; then
+  if [[ -f "${HOME}/.claude/plugins/data/syslog-jmagar-lab/cortex.db" ]]; then
+    export CORTEX_DB_PATH="${HOME}/.claude/plugins/data/syslog-jmagar-lab/cortex.db"
   else
-    export SYSLOG_MCP_DB_PATH="${SYSLOG_MCP_HOME:-${HOME}/.syslog-mcp}/data/syslog.db"
+    export CORTEX_DB_PATH="${CORTEX_HOME:-${HOME}/.cortex}/data/cortex.db"
   fi
 fi
 
-export SYSLOG_DOCKER_INGEST_ENABLED="${SYSLOG_DOCKER_INGEST_ENABLED:-false}"
+export CORTEX_DOCKER_INGEST_ENABLED="${CORTEX_DOCKER_INGEST_ENABLED:-false}"
 export RUST_LOG="${RUST_LOG:-warn}"
 
 {
   printf '== %s ==\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   command -v syslog
-  syslog --version
-  syslog ai index --json
+  cortex --version
+  cortex ai index --json
 } >>"$LOG_FILE" 2>&1
 "#
     .to_string()
@@ -159,13 +159,13 @@ export RUST_LOG="${RUST_LOG:-warn}"
 
 pub(crate) fn ai_index_service_unit(bin_path: &Path) -> String {
     format!(
-        "[Unit]\nDescription=syslog-mcp local AI transcript index\nDocumentation=https://github.com/jmagar/syslog-mcp\n\n[Service]\nType=oneshot\nExecStart={}\n",
+        "[Unit]\nDescription=cortex local AI transcript index\nDocumentation=https://github.com/jmagar/cortex\n\n[Service]\nType=oneshot\nExecStart={}\n",
         bin_path.display()
     )
 }
 
 pub(crate) fn ai_index_timer_unit() -> &'static str {
-    "[Unit]\nDescription=Run syslog-mcp local AI transcript index\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=30min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
+    "[Unit]\nDescription=Run cortex local AI transcript index\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=30min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
 }
 
 // write_executable_file lives in the parent module (setup.rs) to avoid duplication.

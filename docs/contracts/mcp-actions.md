@@ -7,12 +7,12 @@ design targets and are not active behavior today.
 
 This file is a contract derived from:
 
-- `docs/superpowers/specs/2026-05-16-probe-registry-design.md` (epic D — `syslog-mcp-fue9`)
-- `docs/superpowers/specs/2026-05-16-digest-notifications-design.md` (epic E — `syslog-mcp-h6dg`)
-- `docs/superpowers/specs/2026-05-16-rag-incidents-design.md` (epic F — `syslog-mcp-h6da`)
-- `docs/superpowers/specs/2026-05-16-agent-mode-design.md` (epic A — `syslog-mcp-qgnx`) — for `status.agents` extension
-- `docs/superpowers/specs/2026-05-16-api-pollers-design.md` (epic C — `syslog-mcp-awvr`) — for `status.pollers` extension
-- `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` (epic B — `syslog-mcp-1wjr`) — for `search` filter additions
+- `docs/superpowers/specs/2026-05-16-probe-registry-design.md` (epic D — `cortex-fue9`)
+- `docs/superpowers/specs/2026-05-16-digest-notifications-design.md` (epic E — `cortex-h6dg`)
+- `docs/superpowers/specs/2026-05-16-rag-incidents-design.md` (epic F — `cortex-h6da`)
+- `docs/superpowers/specs/2026-05-16-agent-mode-design.md` (epic A — `cortex-qgnx`) — for `status.agents` extension
+- `docs/superpowers/specs/2026-05-16-api-pollers-design.md` (epic C — `cortex-awvr`) — for `status.pollers` extension
+- `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` (epic B — `cortex-1wjr`) — for `search` filter additions
 
 Changing it requires updating the spec first.
 
@@ -359,7 +359,7 @@ Response:
 
 **Source:** epic F §8.2.
 
-**Purpose:** Natural-language question over the incident corpus + correlated AI sessions, answered by `axon ask` with synthesis. Used for "what causes qbittorrent to keep dying on squirts?" style queries. Resolves to a Qdrant collection scoped to `syslog-mcp-incidents` (locked decision F-§13.1).
+**Purpose:** Natural-language question over the incident corpus + correlated AI sessions, answered by `axon ask` with synthesis. Used for "what causes qbittorrent to keep dying on squirts?" style queries. Resolves to a Qdrant collection scoped to `cortex-incidents` (locked decision F-§13.1).
 
 **Params:**
 
@@ -474,7 +474,7 @@ Response:
 {
   "ok": true,
   "result": {
-    "markdown": "# syslog-mcp digest — Fri 2026-05-16\n\n**TL;DR** — 0 critical · 2 warn · 14 errors...",
+    "markdown": "# cortex digest — Fri 2026-05-16\n\n**TL;DR** — 0 critical · 2 warn · 14 errors...",
     "rendered_at": "2026-05-16T14:00:00Z"
   }
 }
@@ -555,7 +555,7 @@ Response:
   "ok": true,
   "result": {
     "entries": [
-      { "path": "/home/jmagar/workspace/syslog-mcp/target", "total_bytes": 24863129088, "file_count": 412091, "dir_count": 21873, "newest_mtime": 1747410000, "oldest_mtime": 1746000000, "completed": true },
+      { "path": "/home/jmagar/workspace/cortex/target", "total_bytes": 24863129088, "file_count": 412091, "dir_count": 21873, "newest_mtime": 1747410000, "oldest_mtime": 1746000000, "completed": true },
       { "path": "/home/jmagar/.cargo/registry", "total_bytes": 4112002432, "file_count": 188103, "dir_count": 9032, "completed": true }
     ],
     "truncated_paths": [],
@@ -1396,7 +1396,7 @@ If no resolved priors exist:
 
 ### mark_incident_resolved
 
-**Source:** epic F §8.4 (and §13.2 freshness note). Resolves audit bead `syslog-mcp-q22k` by promoting the spec-body reference into a first-class action.
+**Source:** epic F §8.4 (and §13.2 freshness note). Resolves audit bead `cortex-q22k` by promoting the spec-body reference into a first-class action.
 
 **Purpose:** Operator (or an AI agent on the operator's behalf) marks an incident as fixed and optionally pins the AI session where the fix happened. Updates the `incidents` row (`resolution_session_id`, `resolution_notes`, `resolution_present = 1`), then enqueues a re-embed of the incident card so the new resolution boost (epic F §7.4) takes effect on future retrieval.
 

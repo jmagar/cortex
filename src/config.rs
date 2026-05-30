@@ -9,7 +9,7 @@ const MAX_CLEANUP_CHUNK_SIZE: usize = 1_000_000;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
-    pub syslog: SyslogConfig,
+    pub receiver: ReceiverConfig,
     pub storage: StorageConfig,
     pub mcp: McpConfig,
     pub api: ApiConfig,
@@ -123,7 +123,7 @@ impl Default for ErrorDetectionConfig {
 }
 
 /// Enrichment + scrubbing knobs. Loaded from `[enrichment]` in `config.toml`
-/// or from `SYSLOG_MCP_*` env vars at runtime startup.
+/// or from `CORTEX_*` env vars at runtime startup.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EnrichmentConfigToml {
@@ -157,12 +157,12 @@ impl Default for EnrichmentConfigToml {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct SyslogConfig {
+pub struct ReceiverConfig {
     /// Listen host (shared by UDP + TCP)
-    #[serde(default = "default_syslog_host")]
+    #[serde(default = "default_receiver_host")]
     pub host: String,
     /// Listen port (shared by UDP + TCP)
-    #[serde(default = "default_syslog_port")]
+    #[serde(default = "default_receiver_port")]
     pub port: u16,
     /// Max message size in bytes
     #[serde(default = "default_max_message_size")]
@@ -185,12 +185,12 @@ pub struct SyslogConfig {
     /// Optional CIDR allowlist for syslog senders. When non-empty, UDP packets
     /// and TCP connections from addresses not matching any CIDR are silently
     /// dropped. Empty = accept all (default).
-    /// Set via `SYSLOG_ALLOWED_SOURCE_CIDRS=10.0.0.0/8,192.168.0.0/16`
+    /// Set via `CORTEX_ALLOWED_SOURCE_CIDRS=10.0.0.0/8,192.168.0.0/16`
     #[serde(default)]
     pub allowed_source_cidrs: Vec<String>,
 }
 
-impl SyslogConfig {
+impl ReceiverConfig {
     /// Returns "host:port" for binding UDP/TCP listeners.
     pub fn bind_addr(&self) -> String {
         format!("{}:{}", self.host, self.port)
@@ -249,7 +249,7 @@ pub struct McpConfig {
     #[serde(default)]
     pub no_auth: bool,
     /// Permit `no_auth` on non-loopback binds only when an upstream gateway
-    /// enforces authentication before requests reach syslog-mcp.
+    /// enforces authentication before requests reach cortex.
     #[serde(default)]
     pub trusted_gateway_no_auth: bool,
     /// Optional bearer token for authenticating MCP requests.
@@ -264,10 +264,10 @@ pub struct McpConfig {
     /// OAuth / JWT authentication policy (consumed by lab-auth at runtime).
     #[serde(default)]
     pub auth: AuthConfig,
-    /// When `true`, the static bearer token (`SYSLOG_MCP_TOKEN`) is granted
+    /// When `true`, the static bearer token (`CORTEX_TOKEN`) is granted
     /// both `syslog:read` and `syslog:admin` scopes. Default is `false` —
     /// static tokens receive `syslog:read` only, matching OAuth read-only
-    /// tokens. Set `SYSLOG_MCP_STATIC_TOKEN_ADMIN=true` or the TOML field
+    /// tokens. Set `CORTEX_STATIC_TOKEN_ADMIN=true` or the TOML field
     /// `[mcp] static_token_is_admin = true` to opt in to admin grant.
     ///
     /// # Security
@@ -299,23 +299,23 @@ pub enum AuthMode {
 #[serde(default)]
 pub struct AuthConfig {
     /// Runtime mode toggle. Defaults to `bearer`; set to `oauth` to activate
-    /// the dual-mode middleware. Overridable via `SYSLOG_MCP_AUTH_MODE`.
+    /// the dual-mode middleware. Overridable via `CORTEX_AUTH_MODE`.
     #[serde(default)]
     pub mode: AuthMode,
     /// Base URL the OAuth issuer + audience are derived from. Required when
-    /// `mode == OAuth`. Overridable via `SYSLOG_MCP_PUBLIC_URL`.
+    /// `mode == OAuth`. Overridable via `CORTEX_PUBLIC_URL`.
     #[serde(default)]
     pub public_url: Option<String>,
     /// Google OAuth client id. Required when `mode == OAuth`. Overridable via
-    /// `SYSLOG_MCP_GOOGLE_CLIENT_ID`.
+    /// `CORTEX_GOOGLE_CLIENT_ID`.
     #[serde(default)]
     pub google_client_id: Option<String>,
     /// Google OAuth client secret. Required when `mode == OAuth`. Overridable
-    /// via `SYSLOG_MCP_GOOGLE_CLIENT_SECRET`.
+    /// via `CORTEX_GOOGLE_CLIENT_SECRET`.
     #[serde(default)]
     pub google_client_secret: Option<String>,
     /// Single admin email permitted to log in via Google OAuth. Overridable via
-    /// `SYSLOG_MCP_AUTH_ADMIN_EMAIL`.
+    /// `CORTEX_AUTH_ADMIN_EMAIL`.
     #[serde(default)]
     pub admin_email: String,
     /// Future multi-user email allowlist. Parsed for schema compatibility, but
@@ -340,7 +340,7 @@ pub struct AuthConfig {
     /// Authorization-code TTL in seconds (default 5m).
     #[serde(default = "default_auth_code_ttl_secs")]
     pub auth_code_ttl_secs: u64,
-    /// Per-process rate limit on `/register`. Moot for syslog-mcp (the
+    /// Per-process rate limit on `/register`. Moot for cortex (the
     /// bearer-only router defined in lab-auth's L2 work does not mount
     /// `/register`) but kept for lab-auth signature parity.
     #[serde(default = "default_register_rpm")]
@@ -348,14 +348,14 @@ pub struct AuthConfig {
     /// Per-process rate limit on `/authorize`.
     #[serde(default = "default_authorize_rpm")]
     pub authorize_rpm: u32,
-    /// When `mode == OAuth`, also reject the static `SYSLOG_MCP_TOKEN`. Set
+    /// When `mode == OAuth`, also reject the static `CORTEX_TOKEN`. Set
     /// `false` to keep the static token as a break-glass path. Default `true`.
-    /// Overridable via `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH`.
+    /// Overridable via `CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH`.
     #[serde(default = "default_true")]
     pub disable_static_token_with_oauth: bool,
     /// Allowed redirect URIs for OAuth clients (loopback URIs are accepted
     /// implicitly by lab-auth; entries here are non-loopback URIs).
-    /// Overridable via `SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS`.
+    /// Overridable via `CORTEX_AUTH_ALLOWED_REDIRECT_URIS`.
     #[serde(default)]
     pub allowed_client_redirect_uris: Vec<String>,
 }
@@ -371,7 +371,7 @@ impl McpConfig {
 #[serde(default)]
 pub struct ApiConfig {
     /// Required bearer token for the always-on non-MCP JSON API.
-    /// Provisioned by `syslog setup repair`. The server fails to start without it.
+    /// Provisioned by `cortex setup repair`. The server fails to start without it.
     #[serde(default)]
     pub api_token: Option<String>,
 }
@@ -413,18 +413,18 @@ struct DockerHostsFile {
 
 // --- Defaults ---
 
-fn default_syslog_host() -> String {
+fn default_receiver_host() -> String {
     "0.0.0.0".into()
 }
-fn default_syslog_port() -> u16 {
+fn default_receiver_port() -> u16 {
     1514
 }
 fn default_db_path() -> PathBuf {
-    PathBuf::from("/data/syslog.db")
+    PathBuf::from("/data/cortex.db")
 }
 fn default_mcp_host() -> String {
     // Loopback by default — operators exposing the query API to a network
-    // interface set SYSLOG_MCP_HOST=0.0.0.0 (or bind a reverse proxy).
+    // interface set CORTEX_HOST=0.0.0.0 (or bind a reverse proxy).
     // The syslog ingest port (1514) intentionally keeps 0.0.0.0 because
     // log receivers need to accept from all sending hosts.
     "127.0.0.1".into()
@@ -478,7 +478,7 @@ fn default_true() -> bool {
     true
 }
 fn default_server_name() -> String {
-    "syslog-mcp".into()
+    "cortex".into()
 }
 fn default_docker_reconnect_initial_ms() -> u64 {
     1_000
@@ -508,11 +508,11 @@ fn default_authorize_rpm() -> u32 {
     60
 }
 
-impl Default for SyslogConfig {
+impl Default for ReceiverConfig {
     fn default() -> Self {
         Self {
-            host: default_syslog_host(),
-            port: default_syslog_port(),
+            host: default_receiver_host(),
+            port: default_receiver_port(),
             max_message_size: default_max_message_size(),
             max_tcp_connections: default_max_tcp_connections(),
             tcp_idle_timeout_secs: default_tcp_idle_timeout_secs(),
@@ -596,7 +596,7 @@ impl Config {
     /// Load config for stdio / query-only mode.
     ///
     /// Identical to [`Config::load`] but skips the non-loopback bind safety
-    /// gate in `validate_auth_config`. In stdio mode syslog-mcp never binds an
+    /// gate in `validate_auth_config`. In stdio mode cortex never binds an
     /// HTTP port, so the gate is irrelevant and would falsely reject
     /// configurations like `mcp.host = "0.0.0.0"` that are valid for the HTTP
     /// server but harmless in stdio mode.
@@ -627,195 +627,171 @@ impl Config {
         load_setup_env_file();
 
         // 3. Overlay environment variables (highest priority)
-        //    SYSLOG_*     → syslog listener settings
-        //    SYSLOG_MCP_* → MCP server + storage settings
-        env_override_str("SYSLOG_HOST", &mut config.syslog.host);
-        env_override_parse("SYSLOG_PORT", &mut config.syslog.port)?;
+        //    CORTEX_*     → syslog listener settings
+        //    CORTEX_* → MCP server + storage settings
+        env_override_str("CORTEX_RECEIVER_HOST", &mut config.receiver.host);
+        env_override_parse("CORTEX_RECEIVER_PORT", &mut config.receiver.port)?;
         env_override_parse(
-            "SYSLOG_MAX_MESSAGE_SIZE",
-            &mut config.syslog.max_message_size,
+            "CORTEX_MAX_MESSAGE_SIZE",
+            &mut config.receiver.max_message_size,
         )?;
         env_override_parse(
-            "SYSLOG_MAX_TCP_CONNECTIONS",
-            &mut config.syslog.max_tcp_connections,
+            "CORTEX_MAX_TCP_CONNECTIONS",
+            &mut config.receiver.max_tcp_connections,
         )?;
         env_override_parse(
-            "SYSLOG_TCP_IDLE_TIMEOUT_SECS",
-            &mut config.syslog.tcp_idle_timeout_secs,
+            "CORTEX_TCP_IDLE_TIMEOUT_SECS",
+            &mut config.receiver.tcp_idle_timeout_secs,
         )?;
-        env_override_parse("SYSLOG_BATCH_SIZE", &mut config.syslog.batch_size)?;
-        env_override_parse("SYSLOG_FLUSH_INTERVAL", &mut config.syslog.flush_interval)?;
+        env_override_parse("CORTEX_BATCH_SIZE", &mut config.receiver.batch_size)?;
+        env_override_parse("CORTEX_FLUSH_INTERVAL", &mut config.receiver.flush_interval)?;
         env_override_parse(
-            "SYSLOG_WRITE_CHANNEL_CAPACITY",
-            &mut config.syslog.write_channel_capacity,
+            "CORTEX_WRITE_CHANNEL_CAPACITY",
+            &mut config.receiver.write_channel_capacity,
         )?;
         env_override_list(
-            "SYSLOG_ALLOWED_SOURCE_CIDRS",
-            &mut config.syslog.allowed_source_cidrs,
+            "CORTEX_ALLOWED_SOURCE_CIDRS",
+            &mut config.receiver.allowed_source_cidrs,
         );
 
-        env_override_str("SYSLOG_MCP_HOST", &mut config.mcp.host);
-        env_override_parse("SYSLOG_MCP_PORT", &mut config.mcp.port)?;
+        env_override_str("CORTEX_HOST", &mut config.mcp.host);
+        env_override_parse("CORTEX_PORT", &mut config.mcp.port)?;
         env_override_bool("NO_AUTH", &mut config.mcp.no_auth)?;
-        env_override_bool("SYSLOG_MCP_NO_AUTH", &mut config.mcp.no_auth)?;
+        env_override_bool("CORTEX_NO_AUTH", &mut config.mcp.no_auth)?;
         env_override_bool(
-            "SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH",
+            "CORTEX_TRUSTED_GATEWAY_NO_AUTH",
             &mut config.mcp.trusted_gateway_no_auth,
         )?;
         env_override_bool(
-            "SYSLOG_MCP_STATIC_TOKEN_ADMIN",
+            "CORTEX_STATIC_TOKEN_ADMIN",
             &mut config.mcp.static_token_is_admin,
         )?;
-        env_override_list("SYSLOG_MCP_ALLOWED_HOSTS", &mut config.mcp.allowed_hosts);
-        env_override_list(
-            "SYSLOG_MCP_ALLOWED_ORIGINS",
-            &mut config.mcp.allowed_origins,
-        );
-        // Primary name: SYSLOG_MCP_TOKEN
-        env_override_opt_str("SYSLOG_MCP_TOKEN", &mut config.mcp.api_token);
-        // Deprecated: SYSLOG_MCP_API_TOKEN (removed in a future version)
-        if config.mcp.api_token.is_none() {
-            if let Ok(v) = std::env::var("SYSLOG_MCP_API_TOKEN") {
-                if !v.is_empty() {
-                    tracing::warn!(
-                        "SYSLOG_MCP_API_TOKEN is deprecated; rename to SYSLOG_MCP_TOKEN"
-                    );
-                    config.mcp.api_token = Some(v);
-                }
-            }
-        }
-        env_override_path("SYSLOG_MCP_DB_PATH", &mut config.storage.db_path);
-        // Fail fast when SYSLOG_MCP_DB_PATH is explicitly set but its parent
+        env_override_list("CORTEX_ALLOWED_HOSTS", &mut config.mcp.allowed_hosts);
+        env_override_list("CORTEX_ALLOWED_ORIGINS", &mut config.mcp.allowed_origins);
+        // MCP static token. (The pre-v1 `SYSLOG_MCP_API_TOKEN` deprecated alias was
+        // dropped in the cortex v1.0.0 rebrand — its post-rename name `CORTEX_API_TOKEN`
+        // now belongs exclusively to the API/OTLP token, `config.api.api_token`.)
+        env_override_opt_str("CORTEX_TOKEN", &mut config.mcp.api_token);
+        env_override_path("CORTEX_DB_PATH", &mut config.storage.db_path);
+        // Fail fast when CORTEX_DB_PATH is explicitly set but its parent
         // directory doesn't exist. This catches the common Docker misconfiguration
         // where the variable is set to a host filesystem path that was never
         // bind-mounted into the container, producing a cryptic "Permission denied"
         // error deep in SQLite pool initialisation.
-        if std::env::var_os("SYSLOG_MCP_DB_PATH").is_some() {
+        if std::env::var_os("CORTEX_DB_PATH").is_some() {
             if let Some(parent) = config.storage.db_path.parent() {
                 if !parent.as_os_str().is_empty() && !parent.exists() {
                     anyhow::bail!(
-                        "SYSLOG_MCP_DB_PATH parent directory does not exist: {}\n\
+                        "CORTEX_DB_PATH parent directory does not exist: {}\n\
                          In Docker: mount the data directory at /data and set\n\
-                         SYSLOG_MCP_DB_PATH=/data/syslog.db",
+                         CORTEX_DB_PATH=/data/cortex.db",
                         parent.display()
                     );
                 }
             }
         }
-        env_override_parse("SYSLOG_MCP_POOL_SIZE", &mut config.storage.pool_size)?;
+        env_override_parse("CORTEX_POOL_SIZE", &mut config.storage.pool_size)?;
+        env_override_parse("CORTEX_RETENTION_DAYS", &mut config.storage.retention_days)?;
+        env_override_parse("CORTEX_MAX_DB_SIZE_MB", &mut config.storage.max_db_size_mb)?;
         env_override_parse(
-            "SYSLOG_MCP_RETENTION_DAYS",
-            &mut config.storage.retention_days,
-        )?;
-        env_override_parse(
-            "SYSLOG_MCP_MAX_DB_SIZE_MB",
-            &mut config.storage.max_db_size_mb,
-        )?;
-        env_override_parse(
-            "SYSLOG_MCP_RECOVERY_DB_SIZE_MB",
+            "CORTEX_RECOVERY_DB_SIZE_MB",
             &mut config.storage.recovery_db_size_mb,
         )?;
         env_override_parse(
-            "SYSLOG_MCP_MIN_FREE_DISK_MB",
+            "CORTEX_MIN_FREE_DISK_MB",
             &mut config.storage.min_free_disk_mb,
         )?;
         env_override_parse(
-            "SYSLOG_MCP_RECOVERY_FREE_DISK_MB",
+            "CORTEX_RECOVERY_FREE_DISK_MB",
             &mut config.storage.recovery_free_disk_mb,
         )?;
         env_override_parse(
-            "SYSLOG_MCP_CLEANUP_INTERVAL_SECS",
+            "CORTEX_CLEANUP_INTERVAL_SECS",
             &mut config.storage.cleanup_interval_secs,
         )?;
         env_override_parse(
-            "SYSLOG_MCP_CLEANUP_CHUNK_SIZE",
+            "CORTEX_CLEANUP_CHUNK_SIZE",
             &mut config.storage.cleanup_chunk_size,
         )?;
 
         // [mcp.auth] env overrides.
-        env_override_auth_mode("SYSLOG_MCP_AUTH_MODE", &mut config.mcp.auth.mode)?;
-        env_override_opt_str("SYSLOG_MCP_PUBLIC_URL", &mut config.mcp.auth.public_url);
+        env_override_auth_mode("CORTEX_AUTH_MODE", &mut config.mcp.auth.mode)?;
+        env_override_opt_str("CORTEX_PUBLIC_URL", &mut config.mcp.auth.public_url);
         env_override_opt_str(
-            "SYSLOG_MCP_GOOGLE_CLIENT_ID",
+            "CORTEX_GOOGLE_CLIENT_ID",
             &mut config.mcp.auth.google_client_id,
         );
         env_override_opt_str(
-            "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
+            "CORTEX_GOOGLE_CLIENT_SECRET",
             &mut config.mcp.auth.google_client_secret,
         );
-        env_override_str(
-            "SYSLOG_MCP_AUTH_ADMIN_EMAIL",
-            &mut config.mcp.auth.admin_email,
-        );
+        env_override_str("CORTEX_AUTH_ADMIN_EMAIL", &mut config.mcp.auth.admin_email);
         env_override_list(
-            "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+            "CORTEX_AUTH_ALLOWED_REDIRECT_URIS",
             &mut config.mcp.auth.allowed_client_redirect_uris,
         );
         env_override_bool(
-            "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
+            "CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
             &mut config.mcp.auth.disable_static_token_with_oauth,
         )?;
 
-        env_override_opt_str("SYSLOG_API_TOKEN", &mut config.api.api_token);
+        env_override_opt_str("CORTEX_API_TOKEN", &mut config.api.api_token);
 
         env_override_opt_str(
-            "SYSLOG_MCP_AUTHELIA_SOURCE_IP",
+            "CORTEX_AUTHELIA_SOURCE_IP",
             &mut config.enrichment.authelia_source_ip,
         );
         env_override_opt_str(
-            "SYSLOG_MCP_ADGUARD_SOURCE_IP",
+            "CORTEX_ADGUARD_SOURCE_IP",
             &mut config.enrichment.adguard_source_ip,
         );
-        env_override_bool(
-            "SYSLOG_MCP_SCRUB_PROMPTS",
-            &mut config.enrichment.scrub_prompts,
-        )?;
+        env_override_bool("CORTEX_SCRUB_PROMPTS", &mut config.enrichment.scrub_prompts)?;
         env_override_parse(
-            "SYSLOG_MCP_FTS_MERGE_PAGES",
+            "CORTEX_FTS_MERGE_PAGES",
             &mut config.enrichment.fts_merge_pages,
         )?;
         if config.enrichment.fts_merge_pages > 10_000 {
             return Err(anyhow::anyhow!(
-                "SYSLOG_MCP_FTS_MERGE_PAGES must be in 0..=10000, got {}",
+                "CORTEX_FTS_MERGE_PAGES must be in 0..=10000, got {}",
                 config.enrichment.fts_merge_pages
             ));
         }
 
         env_override_bool(
-            "SYSLOG_MCP_ERROR_DETECTION_ENABLED",
+            "CORTEX_ERROR_DETECTION_ENABLED",
             &mut config.error_detection.enabled,
         )?;
         env_override_parse(
-            "SYSLOG_MCP_ERROR_DETECTION_SCAN_INTERVAL_SECS",
+            "CORTEX_ERROR_DETECTION_SCAN_INTERVAL_SECS",
             &mut config.error_detection.scan_interval_secs,
         )?;
         env_override_bool(
-            "SYSLOG_MCP_NOTIFICATIONS_ENABLED",
+            "CORTEX_NOTIFICATIONS_ENABLED",
             &mut config.notifications.enabled,
         )?;
         env_override_str(
-            "SYSLOG_MCP_NOTIFICATIONS_APPRISE_URL",
+            "CORTEX_NOTIFICATIONS_APPRISE_URL",
             &mut config.notifications.apprise_url,
         );
 
         env_override_bool(
-            "SYSLOG_DOCKER_INGEST_ENABLED",
+            "CORTEX_DOCKER_INGEST_ENABLED",
             &mut config.docker_ingest.enabled,
         )?;
         env_override_parse(
-            "SYSLOG_DOCKER_RECONNECT_INITIAL_MS",
+            "CORTEX_DOCKER_RECONNECT_INITIAL_MS",
             &mut config.docker_ingest.reconnect_initial_ms,
         )?;
         env_override_parse(
-            "SYSLOG_DOCKER_RECONNECT_MAX_MS",
+            "CORTEX_DOCKER_RECONNECT_MAX_MS",
             &mut config.docker_ingest.reconnect_max_ms,
         )?;
         env_override_list(
-            "SYSLOG_DOCKER_EXCLUDED_CONTAINERS",
+            "CORTEX_DOCKER_EXCLUDED_CONTAINERS",
             &mut config.docker_ingest.excluded_containers,
         );
         if config.docker_ingest.enabled {
-            if let Ok(val) = std::env::var("SYSLOG_DOCKER_HOSTS") {
+            if let Ok(val) = std::env::var("CORTEX_DOCKER_HOSTS") {
                 if !val.is_empty() {
                     config.docker_ingest.hosts = val
                         .split(',')
@@ -832,18 +808,18 @@ impl Config {
                         tracing::warn!(
                             host = %host.name,
                             base_url = %host.base_url,
-                            "SYSLOG_DOCKER_HOSTS expands to insecure HTTP docker-socket-proxy endpoints; use only on trusted private networks or SYSLOG_DOCKER_HOSTS_FILE with TLS/custom base_url"
+                            "CORTEX_DOCKER_HOSTS expands to insecure HTTP docker-socket-proxy endpoints; use only on trusted private networks or CORTEX_DOCKER_HOSTS_FILE with TLS/custom base_url"
                         );
                     }
                 }
-            } else if let Ok(path) = std::env::var("SYSLOG_DOCKER_HOSTS_FILE") {
+            } else if let Ok(path) = std::env::var("CORTEX_DOCKER_HOSTS_FILE") {
                 if !path.is_empty() {
                     match std::fs::read_to_string(&path) {
                         Ok(contents) => {
                             let parsed: DockerHostsFile =
                                 toml::from_str(&contents).map_err(|e| {
                                     anyhow::anyhow!(
-                                        "Failed to parse SYSLOG_DOCKER_HOSTS_FILE={path}: {e}"
+                                        "Failed to parse CORTEX_DOCKER_HOSTS_FILE={path}: {e}"
                                     )
                                 })?;
                             config.docker_ingest.hosts = parsed.hosts;
@@ -851,13 +827,13 @@ impl Config {
                         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                             tracing::warn!(
                                 path = %path,
-                                "SYSLOG_DOCKER_HOSTS_FILE not found — no docker hosts loaded. \
-                                 Create the file or use SYSLOG_DOCKER_HOSTS instead."
+                                "CORTEX_DOCKER_HOSTS_FILE not found — no docker hosts loaded. \
+                                 Create the file or use CORTEX_DOCKER_HOSTS instead."
                             );
                         }
                         Err(e) => {
                             return Err(anyhow::anyhow!(
-                                "Failed to read SYSLOG_DOCKER_HOSTS_FILE={path}: {e}"
+                                "Failed to read CORTEX_DOCKER_HOSTS_FILE={path}: {e}"
                             ));
                         }
                     }
@@ -867,13 +843,13 @@ impl Config {
 
         // Validation
         if config.storage.pool_size == 0 {
-            return Err(anyhow::anyhow!("SYSLOG_MCP_POOL_SIZE must be > 0"));
+            return Err(anyhow::anyhow!("CORTEX_POOL_SIZE must be > 0"));
         }
-        validate_syslog_config(&config.syslog)?;
+        validate_receiver_config(&config.receiver)?;
         validate_storage_config(&config.storage)?;
         validate_notifications_config(&config.notifications)?;
         validate_error_detection_config(&config.error_detection)?;
-        validate_host(&config.syslog.host)?;
+        validate_host(&config.receiver.host)?;
         validate_host(&config.mcp.host)?;
         validate_auth_config(&config, check_bind)?;
         validate_docker_ingest_config(&config.docker_ingest)?;
@@ -896,7 +872,7 @@ fn load_setup_env_file() {
     if metadata.file_type().is_symlink() {
         tracing::trace!(path = %path.display(), "load_setup_env_file: refusing symlinked env file");
         eprintln!(
-            "syslog-mcp: warning: refusing to load symlinked env file {}",
+            "cortex: warning: refusing to load symlinked env file {}",
             path.display()
         );
         return;
@@ -934,14 +910,11 @@ fn load_setup_env_file() {
 
     let data_volume = entries
         .iter()
-        .find(|(key, _)| key == "SYSLOG_MCP_DATA_VOLUME")
+        .find(|(key, _)| key == "CORTEX_DATA_VOLUME")
         .filter(|(_, value)| !value.trim().is_empty())
         .map(|(_, value)| value.clone());
     if let Some(data_volume) = data_volume.as_deref() {
-        tracing::trace!(
-            data_volume,
-            "load_setup_env_file: found SYSLOG_MCP_DATA_VOLUME"
-        );
+        tracing::trace!(data_volume, "load_setup_env_file: found CORTEX_DATA_VOLUME");
     }
 
     for (key, mut value) in entries {
@@ -949,14 +922,14 @@ fn load_setup_env_file() {
             tracing::trace!(key, "load_setup_env_file: process env already set");
             continue;
         }
-        if key == "SYSLOG_MCP_DB_PATH" {
+        if key == "CORTEX_DB_PATH" {
             if let Some(suffix) = value.strip_prefix("/data/") {
                 if let Some(data_volume) = data_volume.as_deref() {
                     value = PathBuf::from(data_volume)
                         .join(suffix)
                         .display()
                         .to_string();
-                    tracing::trace!(value, "load_setup_env_file: rewrote SYSLOG_MCP_DB_PATH");
+                    tracing::trace!(value, "load_setup_env_file: rewrote CORTEX_DB_PATH");
                 }
             }
         }
@@ -968,10 +941,10 @@ fn load_setup_env_file() {
 #[cfg(not(test))]
 fn is_supported_setup_env_key(key: &str) -> bool {
     key == "NO_AUTH"
-        || key.starts_with("SYSLOG_")
-        || key.starts_with("SYSLOG_MCP_")
-        || key.starts_with("SYSLOG_API_")
-        || key.starts_with("SYSLOG_DOCKER_")
+        || key.starts_with("CORTEX_")
+        || key.starts_with("CORTEX_")
+        || key.starts_with("CORTEX_API_")
+        || key.starts_with("CORTEX_DOCKER_")
 }
 
 // --- Env var helpers ---
@@ -1059,7 +1032,7 @@ pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow:
     if token_is_set_but_blank(&config.api.api_token) {
         return Err(anyhow::anyhow!("api.api_token must not be empty"));
     }
-    // Note: SYSLOG_API_TOKEN being entirely unset is enforced at
+    // Note: CORTEX_API_TOKEN being entirely unset is enforced at
     // route-mount time by `api::router` (anyhow::bail) rather than here.
     // Failing in `Config::load()` would break stdio-mode invocations
     // (which call `load_for_stdio()` with check_bind=false but still hit
@@ -1074,10 +1047,10 @@ pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow:
         let bind_is_loopback = mcp_bind_is_loopback(config);
         if check_bind && !bind_is_loopback && !config.mcp.trusted_gateway_no_auth {
             return Err(anyhow::anyhow!(
-                "MCP host `{}` is not a loopback address and SYSLOG_MCP_NO_AUTH=true was set \
-                 without SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true. Bind to 127.0.0.1 / ::1, \
-                 configure SYSLOG_MCP_TOKEN or OAuth, or set the trusted-gateway flag only \
-                 when an upstream gateway enforces authentication before syslog-mcp.",
+                "MCP host `{}` is not a loopback address and CORTEX_NO_AUTH=true was set \
+                 without CORTEX_TRUSTED_GATEWAY_NO_AUTH=true. Bind to 127.0.0.1 / ::1, \
+                 configure CORTEX_TOKEN or OAuth, or set the trusted-gateway flag only \
+                 when an upstream gateway enforces authentication before cortex.",
                 config.mcp.host
             ));
         }
@@ -1087,18 +1060,18 @@ pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow:
     if auth.mode == AuthMode::OAuth {
         if option_is_blank(&auth.public_url) {
             return Err(anyhow::anyhow!(
-                "SYSLOG_MCP_PUBLIC_URL is required when SYSLOG_MCP_AUTH_MODE=oauth — \
+                "CORTEX_PUBLIC_URL is required when CORTEX_AUTH_MODE=oauth — \
                  set the externally reachable base URL (e.g. https://syslog.example.com)"
             ));
         }
         if option_is_blank(&auth.google_client_id) {
             return Err(anyhow::anyhow!(
-                "SYSLOG_MCP_GOOGLE_CLIENT_ID is required when SYSLOG_MCP_AUTH_MODE=oauth"
+                "CORTEX_GOOGLE_CLIENT_ID is required when CORTEX_AUTH_MODE=oauth"
             ));
         }
         if option_is_blank(&auth.google_client_secret) {
             return Err(anyhow::anyhow!(
-                "SYSLOG_MCP_GOOGLE_CLIENT_SECRET is required when SYSLOG_MCP_AUTH_MODE=oauth"
+                "CORTEX_GOOGLE_CLIENT_SECRET is required when CORTEX_AUTH_MODE=oauth"
             ));
         }
         let admin_blank = auth.admin_email.trim().is_empty();
@@ -1110,13 +1083,13 @@ pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow:
             return Err(anyhow::anyhow!(
                 "[mcp.auth].allowed_emails is not passed to lab-auth; remove \
                  `allowed_emails` and use `admin_email` or lab-auth-managed allowed_users until \
-                 syslog-mcp can enforce the config list"
+                 cortex can enforce the config list"
             ));
         }
         if admin_blank {
             return Err(anyhow::anyhow!(
                 "[mcp.auth] requires a non-empty `admin_email` when \
-                 SYSLOG_MCP_AUTH_MODE=oauth — `allowed_emails` is parsed but not passed to \
+                 CORTEX_AUTH_MODE=oauth — `allowed_emails` is parsed but not passed to \
                  lab-auth yet"
             ));
         }
@@ -1139,18 +1112,18 @@ pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow:
         let has_oauth = auth.mode == AuthMode::OAuth;
         if has_oauth && !has_static_token {
             return Err(anyhow::anyhow!(
-                "MCP host `{}` is not a loopback address and SYSLOG_MCP_AUTH_MODE=oauth is \
-                 configured without SYSLOG_MCP_TOKEN. OTLP /v1/logs only supports the static \
+                "MCP host `{}` is not a loopback address and CORTEX_AUTH_MODE=oauth is \
+                 configured without CORTEX_TOKEN. OTLP /v1/logs only supports the static \
                  Bearer token gate today, so this would expose unauthenticated OTLP writes. \
-                 Set SYSLOG_MCP_TOKEN, bind to 127.0.0.1 / ::1, or enable an upstream auth \
-                 gateway with SYSLOG_MCP_NO_AUTH=true and SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true.",
+                 Set CORTEX_TOKEN, bind to 127.0.0.1 / ::1, or enable an upstream auth \
+                 gateway with CORTEX_NO_AUTH=true and CORTEX_TRUSTED_GATEWAY_NO_AUTH=true.",
                 config.mcp.host
             ));
         }
         if !has_static_token && !has_oauth {
             return Err(anyhow::anyhow!(
                 "MCP host `{}` is not a loopback address but no authentication is configured — \
-                 set SYSLOG_MCP_TOKEN, set SYSLOG_MCP_AUTH_MODE=oauth, or bind to 127.0.0.1 / ::1",
+                 set CORTEX_TOKEN, set CORTEX_AUTH_MODE=oauth, or bind to 127.0.0.1 / ::1",
                 config.mcp.host
             ));
         }
@@ -1167,7 +1140,7 @@ pub fn mcp_bind_is_loopback(config: &Config) -> bool {
 
 /// Returns true when the MCP HTTP listener is bound to a non-loopback address
 /// AND the operator-facing public URL is plain http:// (or absent). In that
-/// case `SYSLOG_API_TOKEN` traverses the wire in plaintext. SWAG TLS
+/// case `CORTEX_API_TOKEN` traverses the wire in plaintext. SWAG TLS
 /// termination is the operator's responsibility — this helper just makes the
 /// trade-off observable at startup.
 pub fn api_token_plaintext_exposure(config: &Config) -> bool {
@@ -1230,7 +1203,7 @@ pub(crate) fn validate_docker_ingest_config(config: &DockerIngestConfig) -> anyh
     Ok(())
 }
 
-pub(crate) fn validate_syslog_config(config: &SyslogConfig) -> anyhow::Result<()> {
+pub(crate) fn validate_receiver_config(config: &ReceiverConfig) -> anyhow::Result<()> {
     if config.max_message_size == 0 {
         return Err(anyhow::anyhow!("syslog.max_message_size must be > 0"));
     }
@@ -1255,13 +1228,13 @@ pub(crate) fn validate_syslog_config(config: &SyslogConfig) -> anyhow::Result<()
             let len_ok = len.parse::<u32>().is_ok();
             if !prefix_ok || !len_ok {
                 return Err(anyhow::anyhow!(
-                    "SYSLOG_ALLOWED_SOURCE_CIDRS: invalid CIDR entry '{cidr}' — \
+                    "CORTEX_ALLOWED_SOURCE_CIDRS: invalid CIDR entry '{cidr}' — \
                      expected format is <ip>/<prefix_len> (e.g. 10.0.0.0/8)"
                 ));
             }
         } else {
             return Err(anyhow::anyhow!(
-                "SYSLOG_ALLOWED_SOURCE_CIDRS: invalid entry '{cidr}' — \
+                "CORTEX_ALLOWED_SOURCE_CIDRS: invalid entry '{cidr}' — \
                  missing prefix length (e.g. 10.0.0.0/8)"
             ));
         }

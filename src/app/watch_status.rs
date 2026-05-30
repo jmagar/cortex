@@ -1,7 +1,7 @@
 //! ai watch-status host probing — service-layer implementation.
 //!
 //! All systemctl probes route through `self.os.probe_command()` and are
-//! mockable in tests via `SyslogService::with_os_adapter()`. The D-Bus env
+//! mockable in tests via `CortexService::with_os_adapter()`. The D-Bus env
 //! setup lives in `apply_dbus_env()` in `os_adapter.rs`, called from both
 //! `run_command` and `probe_command`.
 //!
@@ -15,12 +15,12 @@
 use tracing::warn;
 
 use super::models::AiWatchStatusReport;
-use super::service::SyslogService;
+use super::service::CortexService;
 use super::ServiceResult;
 
 const SERVICE: &str = "syslog-ai-watch.service";
 
-impl SyslogService {
+impl CortexService {
     /// Collect the ai watch-status report.
     ///
     /// Always returns `Ok`. All failure modes degrade gracefully:

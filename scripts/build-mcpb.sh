@@ -39,8 +39,8 @@ if [ ! -x "${TARGET_DIR}/release/syslog" ]; then
   exit 1
 fi
 
-STAGE_DIR="dist/mcpb/syslog-mcp"
-OUT_FILE="dist/syslog-mcp-${VERSION}-linux.mcpb"
+STAGE_DIR="dist/mcpb/cortex"
+OUT_FILE="dist/cortex-${VERSION}-linux.mcpb"
 rm -rf "${STAGE_DIR}"
 mkdir -p "${STAGE_DIR}/server"
 

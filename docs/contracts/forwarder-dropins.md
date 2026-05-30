@@ -3,10 +3,10 @@
 ## 1. Purpose & status
 
 This document is the canonical operator runbook for **getting logs into
-`syslog-mcp`**. It is normative for every onboarded host: every host MUST be
+`cortex`**. It is normative for every onboarded host: every host MUST be
 reachable via exactly one of the templates in §6, and the agent enrollment
 flow in §8 is the authoritative UX for the WebSocket agent (Epic A,
-`syslog-mcp-qgnx`).
+`cortex-qgnx`).
 
 The contract is **V1**. Changes to wire protocol behavior (RFC 3164/5424/CEF
 handling), templates, or the agent enrollment commands must update this file
@@ -35,9 +35,9 @@ Pick the **first** option that fits the host:
 | AI transcript hosts (dookie, squirts, steamy-wsl, vivobook-wsl) | rsyslog `imfile` drop-in tailing `~/.claude/projects/*/*.jsonl`, etc. (`deploy/rsyslog/40-ai-transcripts.conf`). |
 | OTel-instrumented apps (Claude Code, Codex)               | **OTLP → `POST /v1/logs`** with Bearer token. See `deploy/otel/`.                                                            |
 | Network gear (UniFi, switches, printers, routers)         | **UDP RFC 3164 → `:1514`** only. No agent option. Source IP gating recommended.                                              |
-| Stateful APIs with no log stream (UniFi controller, AdGuard Home) | **server-side poller** (Epic `syslog-mcp-awvr`). No host config — see `docs/superpowers/specs/2026-05-16-api-pollers-design.md`. |
+| Stateful APIs with no log stream (UniFi controller, AdGuard Home) | **server-side poller** (Epic `cortex-awvr`). No host config — see `docs/superpowers/specs/2026-05-16-api-pollers-design.md`. |
 
-Pollers are **outbound** from `syslog-mcp` and require no host-side drop-in.
+Pollers are **outbound** from `cortex` and require no host-side drop-in.
 They are listed for completeness; nothing in this file applies to them.
 
 ## 3. Minimum versions
@@ -58,7 +58,7 @@ What the listener accepts on `:1514` (UDP and TCP):
 | --------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **RFC 3164** (legacy BSD syslog)        | yes      | No millisecond precision. Network gear and old rsyslog defaults emit this. Severity/facility decoded from the `<pri>` byte.                          |
 | **RFC 5424** (modern, with structured data) | yes  | Preferred. `STRUCTURED-DATA` slot is parsed into the row's `metadata` JSON. Use this from rsyslog with `template(name="..." type="list" option.stdsql="off")` + `RSYSLOG_SyslogProtocol23Format`. |
-| **CEF (Common Event Format)**           | partial  | UniFi gear emits CEF. The CEF header (`CEF:0\|vendor\|product\|...`) is parsed where we can; the extension key/value pairs land in `message`. Treat as best-effort until the UniFi poller (Epic `syslog-mcp-awvr`) lands. |
+| **CEF (Common Event Format)**           | partial  | UniFi gear emits CEF. The CEF header (`CEF:0\|vendor\|product\|...`) is parsed where we can; the extension key/value pairs land in `message`. Treat as best-effort until the UniFi poller (Epic `cortex-awvr`) lands. |
 | **Plaintext / non-RFC**                 | yes      | Stored raw. Severity defaults to `info` (facility `user`). `app_name` is extracted heuristically from a leading `tag:` if present.                  |
 | **TLS-wrapped syslog** (RFC 5425)       | **no**   | V1 syslog listener is TCP/UDP only. Tracked as deferred future work. Use the WSS agent (§8) when transport security matters.                          |
 
@@ -72,22 +72,22 @@ Every rsyslog drop-in that forwards `*.*` MUST start with this filter:
 if ($programname == "syslog" or $programname == "rsyslogd") then stop
 ```
 
-Without it, the rsyslog daemon's own logs are forwarded back to syslog-mcp,
+Without it, the rsyslog daemon's own logs are forwarded back to cortex,
 which re-emits them, which the daemon then forwards — a feedback loop that
 can saturate the listener inside a minute. The `syslog-deploy-dropins` skill
 writes this header automatically.
 
 ## 6. Canonical templates
 
-For each template, `<SERVER>` is the syslog-mcp host (`tootie` LAN IP, the
+For each template, `<SERVER>` is the cortex host (`tootie` LAN IP, the
 Tailscale IP `100.88.16.79`, or `syslog.tootie.tv` if DNS resolves on the
 sender). `<PORT>` is `mcp.syslog_port` (default `1514`).
 
 ### Template A — rsyslog TCP forward (preferred)
 
 ```rsyslog
-# /etc/rsyslog.d/99-syslog-mcp.conf
-# Avoid feeding syslog-mcp/rsyslog internal logs back into syslog-mcp.
+# /etc/rsyslog.d/99-cortex.conf
+# Avoid feeding cortex/rsyslog internal logs back into cortex.
 if ($programname == "syslog" or $programname == "rsyslogd") then stop
 *.* @@<SERVER>:<PORT>
 ```
@@ -99,7 +99,7 @@ for every host that can reach the server over TCP.
 ### Template B — rsyslog UDP forward (fallback)
 
 ```rsyslog
-# /etc/rsyslog.d/99-syslog-mcp.conf
+# /etc/rsyslog.d/99-cortex.conf
 if ($programname == "syslog" or $programname == "rsyslogd") then stop
 *.* @<SERVER>:<PORT>
 ```
@@ -117,7 +117,7 @@ guardrail (`max_db_size_mb`), which is too coarse for protecting other
 hosts' liveness.
 
 ```rsyslog
-# /etc/rsyslog.d/99-syslog-mcp.conf
+# /etc/rsyslog.d/99-cortex.conf
 if ($programname == "syslog" or $programname == "rsyslogd") then stop
 
 # Cap forwards at 5000 messages / second, burst 20000.
@@ -131,7 +131,7 @@ action(type="omfwd"
        queue.size="50000"
        queue.dequeuebatchsize="1000"
        queue.spoolDirectory="/var/spool/rsyslog"
-       queue.filename="syslog_mcp_queue"
+       queue.filename="cortex_queue"
        queue.saveonshutdown="on"
        action.resumeRetryCount="-1")
 ```
@@ -143,8 +143,8 @@ upper bound of 50000 messages in transit.
 ### Template D — syslog-ng equivalent of Template A
 
 ```syslog-ng
-# /etc/syslog-ng/conf.d/99-syslog-mcp.conf
-destination d_syslog_mcp {
+# /etc/syslog-ng/conf.d/99-cortex.conf
+destination d_cortex {
   syslog(
     "<SERVER>"
     transport("tcp")
@@ -158,7 +158,7 @@ filter f_not_self {
   not (program("syslog") or program("syslog-ng"));
 };
 
-log { source(s_src); filter(f_not_self); destination(d_syslog_mcp); };
+log { source(s_src); filter(f_not_self); destination(d_cortex); };
 ```
 
 `flags(syslog-protocol)` forces RFC 5424 framing — preferred over the
@@ -168,14 +168,14 @@ journald+kernel source (usually `s_src`, sometimes `s_local`).
 ### Template E — WSL-specific (Tailscale routing)
 
 WSL2 has its own network namespace and **cannot** reach the Windows host's
-loopback — `127.0.0.1:1514` on WSL is not the syslog-mcp host. Two viable
+loopback — `127.0.0.1:1514` on WSL is not the cortex host. Two viable
 options:
 
 1. **Tailscale (recommended).** Install Tailscale inside WSL, join the
    tailnet, point at the server's Tailscale IP. Example for tootie:
 
    ```rsyslog
-   # /etc/rsyslog.d/99-syslog-mcp.conf
+   # /etc/rsyslog.d/99-cortex.conf
    if ($programname == "syslog" or $programname == "rsyslogd") then stop
    *.* @@100.88.16.79:1514
    ```
@@ -197,14 +197,14 @@ On Ubuntu/Debian hosts with AppArmor in enforcing mode, the default
 `/etc/apparmor.d/usr.sbin.rsyslogd` profile permits `/var/log/**` but not
 the homelab service paths under `/mnt/appdata/**` or user transcript paths
 under `~/.claude`, `~/.codex`, `~/.gemini`. The local override at
-`deploy/apparmor/usr.sbin.rsyslogd.syslog-mcp` extends the profile with
+`deploy/apparmor/usr.sbin.rsyslogd.cortex` extends the profile with
 exactly the paths used by the file-tail drop-ins on squirts.
 
 Install:
 
 ```bash
 sudo install -o root -g root -m 0644 \
-  deploy/apparmor/usr.sbin.rsyslogd.syslog-mcp \
+  deploy/apparmor/usr.sbin.rsyslogd.cortex \
   /etc/apparmor.d/local/usr.sbin.rsyslogd
 sudo apparmor_parser -r /etc/apparmor.d/usr.sbin.rsyslogd
 ```
@@ -250,7 +250,7 @@ sudo syslog agent enroll <enrollment_token> --server=wss://syslog.tootie.tv/ws/a
 ```
 
 The enroll subcommand:
-1. Connects to `/ws/agent` with subprotocol `syslog-mcp.v1`.
+1. Connects to `/ws/agent` with subprotocol `cortex.v1`.
 2. Sends `agent.hello` (see `agent-protocol.md` §4.1) with the
    enrollment token.
 3. On success, the server rotates the token: the enrollment token is
@@ -268,8 +268,8 @@ Drop the following at `/etc/systemd/system/syslog-agent.service`:
 
 ```ini
 [Unit]
-Description=syslog-mcp agent
-Documentation=https://github.com/jmagar/syslog-mcp/blob/main/docs/contracts/forwarder-dropins.md
+Description=cortex agent
+Documentation=https://github.com/jmagar/cortex/blob/main/docs/contracts/forwarder-dropins.md
 After=network-online.target
 Wants=network-online.target
 
@@ -337,7 +337,7 @@ logger -t deploy-test "hello from $(hostname)"
 # replace <target-host> with the actual hostname
 syslog tail --hostname=<target-host> --limit=5
 # OR via MCP:
-mcporter call --config config/mcporter.json syslog-mcp.search query=deploy-test limit=5
+mcporter call --config config/mcporter.json cortex.search query=deploy-test limit=5
 ```
 
 For agent-mode hosts, also check:
@@ -360,7 +360,7 @@ curl -s http://<server>:3100/health | jq '.otlp_logs_received'
 
 ```bash
 ssh <host> '
-  sudo rm -f /etc/rsyslog.d/99-syslog-mcp.conf \
+  sudo rm -f /etc/rsyslog.d/99-cortex.conf \
              /etc/rsyslog.d/40-ai-transcripts.conf  # if present
   sudo rsyslogd -N1
   sudo systemctl restart rsyslog
@@ -397,7 +397,7 @@ revoke message.
 ## 11. Per-host inventory (current)
 
 Tracked in
-`~/.claude/projects/-home-jmagar-workspace-syslog-mcp/memory/MEMORY.md`
+`~/.claude/projects/-home-jmagar-workspace-cortex/memory/MEMORY.md`
 under "Infrastructure & Deployment". Snapshot at time of writing:
 
 | Host          | Forwarding path                                                                                          |
@@ -422,12 +422,12 @@ fallback during the cutover, then is removed via §10.
 |                                          | (c) on the server: `sudo tcpdump -ni any port 1514` — are frames arriving?                              |
 |                                          | (d) `syslog hosts` — does `<host>` appear in the known-hosts list at all?                                |
 |                                          | (e) `syslog silent_hosts` — is it a known host that's gone quiet?                                       |
-| Loop / message storm                     | The self-loop filter from §5 is missing or out of order. Inspect `/etc/rsyslog.d/99-syslog-mcp.conf`.   |
+| Loop / message storm                     | The self-loop filter from §5 is missing or out of order. Inspect `/etc/rsyslog.d/99-cortex.conf`.   |
 | WSL host can't reach `tootie`            | Confirm Tailscale up: `tailscale status` inside WSL. Use Template E with the Tailscale IP.               |
 | AppArmor blocks file tail on squirts     | `sudo aa-status` then `sudo dmesg | grep DENIED` — install the override from §7 and reload.              |
-| OTLP `/v1/logs` returns 401              | `Authorization: Bearer <SYSLOG_MCP_TOKEN>` not set or wrong. Check `curl -s http://<server>:3100/health` works without auth, then add the header. |
+| OTLP `/v1/logs` returns 401              | `Authorization: Bearer <CORTEX_TOKEN>` not set or wrong. Check `curl -s http://<server>:3100/health` works without auth, then add the header. |
 | OTLP `/v1/logs` returns 413              | Payload exceeded 4 MiB. Reduce OTel exporter batch size (`OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` / batch size). Note the `Retry-After: 86400` — exporters will back off for a day. |
-| OTLP `/v1/logs` returns 503              | Server ingest channel saturated. Either the listener is offline (check `syslog db status`) or the writer task crashed (check `syslog-mcp` container logs). |
+| OTLP `/v1/logs` returns 503              | Server ingest channel saturated. Either the listener is offline (check `syslog db status`) or the writer task crashed (check `cortex` container logs). |
 | Agent connects then immediately drops    | Check the WS close code in the agent's logs. `4001` = auth failed, `4002` = revoked, `4000` = handshake timeout, `1009` = oversized frame, `1011` = missed pongs. Each maps to a remediation in `agent-protocol.md` §5. |
 | Agent in `Reconnecting` forever          | Server unreachable, or `protocol_version`/`agent_version` mismatch. Look for `-32003 AgentVersionUnsupported` in the agent log — it carries `data.required_protocol_version`. |
 

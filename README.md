@@ -1,6 +1,6 @@
-# Syslog MCP
+# cortex
 
-[![crates.io](https://img.shields.io/crates/v/syslog-mcp)](https://crates.io/crates/syslog-mcp) [![ghcr.io](https://img.shields.io/badge/ghcr.io-jmagar%2Fsyslog--mcp-blue?logo=docker)](https://github.com/jmagar/syslog-mcp/pkgs/container/syslog-mcp)
+[![crates.io](https://img.shields.io/crates/v/cortex)](https://crates.io/crates/cortex) [![ghcr.io](https://img.shields.io/badge/ghcr.io-jmagar%2Fcortex-blue?logo=docker)](https://github.com/jmagar/cortex/pkgs/container/cortex)
 
 Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog over UDP and TCP, stores it in SQLite with FTS5 full-text indexing, and exposes action-based log search, inventory, correlation, status, and analysis tools through MCP, REST, and CLI adapters backed by the shared service layer.
 
@@ -221,7 +221,7 @@ List AI transcript sessions grouped by project, tool, session, and host.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `project` | string | no | — | Exact project path, e.g. `/home/jmagar/workspace/syslog-mcp` |
+| `project` | string | no | — | Exact project path, e.g. `/home/jmagar/workspace/cortex` |
 | `tool` | string | no | — | AI tool filter: `claude`, `codex`, or `gemini` |
 | `hostname` | string | no | — | Restrict to one host |
 | `from` | string | no | — | Start of time range (ISO 8601) |
@@ -235,7 +235,7 @@ List AI transcript sessions grouped by project, tool, session, and host.
   "count": 1,
   "sessions": [
     {
-      "project": "/home/jmagar/workspace/syslog-mcp",
+      "project": "/home/jmagar/workspace/cortex",
       "tool": "codex",
       "session_id": "019e1506-dc81-7881-9926-4d6d4efda1ac",
       "hostname": "dookie",
@@ -456,7 +456,7 @@ separate table:
 syslog shell index --path ~/.zsh_history --shell zsh
 syslog setup agent-command install
 export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/syslog-agent-command-wrapper"
-syslog agent-command ingest-spool --path ~/.local/state/syslog-mcp/agent-command.jsonl
+syslog agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
 ```
 
 `syslog shell index` imports zsh extended history lines with timestamps and
@@ -467,7 +467,7 @@ skipped because it cannot support time-window correlation.
 Code's `CLAUDE_CODE_SHELL_PREFIX`. Claude Code invokes that prefix for spawned
 shell commands, including Bash tool calls, hook commands, and stdio MCP server
 startup commands. The wrapper preserves stdio and exit code, appends one
-scrubbed JSONL record under `~/.local/state/syslog-mcp/`, and
+scrubbed JSONL record under `~/.local/state/cortex/`, and
 `syslog agent-command ingest-spool` imports those records as
 `source_kind="agent-command"` rows, then truncates the locked spool after a
 successful import so repeated runs only process new commands. The wrapper
@@ -508,27 +508,27 @@ Ordered from most to least severe:
 ### One-line installer
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jmagar/syslog-mcp/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jmagar/cortex/main/install.sh | sh
 ```
 
 The installer puts the host `syslog` binary in `~/.local/bin` and then runs
 `syslog setup`. Setup is idempotent and owns the shared host layout:
 
-- `~/.syslog-mcp/.env` — secrets, ports, Compose interpolation, runtime values
-- `~/.syslog-mcp/compose/docker-compose.yml` — Docker Compose deployment assets
-- `~/.syslog-mcp/data/syslog.db` — SQLite database and WAL/SHM sidecars
+- `~/.cortex/.env` — secrets, ports, Compose interpolation, runtime values
+- `~/.cortex/compose/docker-compose.yml` — Docker Compose deployment assets
+- `~/.cortex/data/cortex.db` — SQLite database and WAL/SHM sidecars
 
 Setup writes `COMPOSE_PROJECT_NAME=syslog-jmagar-lab` so direct
-`docker compose` commands in `~/.syslog-mcp/compose` target the same canonical
+`docker compose` commands in `~/.cortex/compose` target the same canonical
 container as `syslog compose`.
 
 Useful installer controls:
 
 ```bash
-SYSLOG_INSTALL_DRY_RUN=1 ./install.sh
-SYSLOG_INSTALL_PREFIX=/opt/syslog-mcp ./install.sh
-SYSLOG_VERSION=0.25.4 ./install.sh
-SYSLOG_INSTALL_SKIP_SETUP=1 ./install.sh
+CORTEX_INSTALL_DRY_RUN=1 ./install.sh
+CORTEX_INSTALL_PREFIX=/opt/cortex ./install.sh
+CORTEX_VERSION=0.25.4 ./install.sh
+CORTEX_INSTALL_SKIP_SETUP=1 ./install.sh
 ```
 
 Useful setup commands:
@@ -557,7 +557,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 | `api_token` | yes | — | Bearer token used by the plugin MCP client. Server mode: this becomes the token the server enforces unless `no_auth=true`. Client mode: token from the server admin. Stored in the system keychain. |
 | `syslog_host` / `syslog_port` | no | `0.0.0.0` / `1514` | Syslog listener bind (server mode) |
 | `mcp_host` / `mcp_port` | no | `0.0.0.0` / `3100` | MCP HTTP server bind (server mode) |
-| `data_dir` | no | `~/.syslog-mcp/data` | Optional SQLite directory override; default shared setup data persists outside plugin cache |
+| `data_dir` | no | `~/.cortex/data` | Optional SQLite directory override; default shared setup data persists outside plugin cache |
 | `max_db_size_mb` | no | `8192` | DB size cap; oldest logs deleted when exceeded |
 | `retention_days` | no | `90` | `0` = keep forever |
 | `batch_size` | no | `100` | Number of parsed messages per SQLite batch |
@@ -568,9 +568,9 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 **SessionStart hook automation** (in server mode):
 
 - Ensures the host `syslog` binary is on `PATH`; the installer defaults to `~/.local/bin`
-- Exports plugin userConfig as `SYSLOG_*` / `SYSLOG_MCP_*` environment values
+- Exports plugin userConfig as `CORTEX_*` / `CORTEX_*` environment values
 - Runs `syslog setup repair`, the same setup path used by the one-line installer
-- Repairs shared assets under `~/.syslog-mcp` and removes stale user-level `syslog-mcp.service` units/drop-ins left by older plugin versions
+- Repairs shared assets under `~/.cortex` and removes stale user-level `cortex.service` units/drop-ins left by older plugin versions
 - All idempotent — safe to run on every session
 
 **Bundled skills**:
@@ -592,10 +592,10 @@ a command named `setup repair` directly.
 ### Docker
 
 ```bash
-git clone https://github.com/jmagar/syslog-mcp
-cd syslog-mcp
+git clone https://github.com/jmagar/cortex
+cd cortex
 cp .env.example .env
-# Edit .env — set SYSLOG_MCP_TOKEN at minimum
+# Edit .env — set CORTEX_TOKEN at minimum
 docker compose up -d
 ```
 
@@ -616,15 +616,15 @@ cargo build --release
 
 ## Authentication
 
-syslog-mcp supports two auth modes, selectable via `SYSLOG_MCP_AUTH_MODE`.
+cortex supports two auth modes, selectable via `CORTEX_AUTH_MODE`.
 
-**Bearer-only (default)** — set `SYSLOG_MCP_TOKEN` and all `/mcp` requests must present that token as `Authorization: Bearer <token>`. No OAuth routes are mounted.
+**Bearer-only (default)** — set `CORTEX_TOKEN` and all `/mcp` requests must present that token as `Authorization: Bearer <token>`. No OAuth routes are mounted.
 
 **Loopback no-auth** — set `NO_AUTH=true` only for local development on loopback binds.
 
-**Gateway-protected no-auth** — on non-loopback binds, set both `NO_AUTH=true` and `SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true` only when an upstream gateway or reverse proxy enforces auth before traffic reaches syslog-mcp. This intentionally disables service-local MCP auth.
+**Gateway-protected no-auth** — on non-loopback binds, set both `NO_AUTH=true` and `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true` only when an upstream gateway or reverse proxy enforces auth before traffic reaches cortex. This intentionally disables service-local MCP auth.
 
-**OAuth (Google)** — set `SYSLOG_MCP_AUTH_MODE=oauth`, the OAuth provider env vars, and an allowlisted admin email. The server issues RS256 JWTs after users authenticate via Google. Bearer tokens and OAuth JWTs can coexist (OAuth mode disables the static token by default; set `SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in `config.toml` for break-glass access).
+**OAuth (Google)** — set `CORTEX_AUTH_MODE=oauth`, the OAuth provider env vars, and an allowlisted admin email. The server issues RS256 JWTs after users authenticate via Google. Bearer tokens and OAuth JWTs can coexist (OAuth mode disables the static token by default; set `CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in `config.toml` for break-glass access).
 
 Both modes leave `/health` unauthenticated so health probes always work.
 
@@ -646,11 +646,11 @@ Configuration is loaded from three sources in priority order (highest wins):
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYSLOG_MCP_TOKEN` | no | — | Bearer token for `/mcp`. Omit to disable auth. |
-| `SYSLOG_MCP_HOST` | no | `0.0.0.0` | Bind host for the MCP HTTP server |
-| `SYSLOG_MCP_PORT` | no | `3100` | Bind port for the MCP HTTP server |
-| `SYSLOG_MCP_ALLOWED_HOSTS` | no | — | Extra comma-separated Host header values accepted by RMCP Host validation |
-| `SYSLOG_MCP_ALLOWED_ORIGINS` | no | — | Extra comma-separated browser origins accepted by RMCP Origin validation |
+| `CORTEX_TOKEN` | no | — | Bearer token for `/mcp`. Omit to disable auth. |
+| `CORTEX_HOST` | no | `0.0.0.0` | Bind host for the MCP HTTP server |
+| `CORTEX_PORT` | no | `3100` | Bind port for the MCP HTTP server |
+| `CORTEX_ALLOWED_HOSTS` | no | — | Extra comma-separated Host header values accepted by RMCP Host validation |
+| `CORTEX_ALLOWED_ORIGINS` | no | — | Extra comma-separated browser origins accepted by RMCP Origin validation |
 
 #### Non-MCP API
 
@@ -658,34 +658,34 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYSLOG_API_ENABLED` | no | `false` | Enable the non-MCP JSON API |
-| `SYSLOG_API_TOKEN` | yes, when enabled | — | Bearer token for `/api/*` routes |
+| `CORTEX_API_ENABLED` | no | `false` | Enable the non-MCP JSON API |
+| `CORTEX_API_TOKEN` | yes, when enabled | — | Bearer token for `/api/*` routes |
 
 #### Syslog listener
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYSLOG_HOST` | no | `0.0.0.0` | Bind host for UDP + TCP syslog listeners |
-| `SYSLOG_PORT` | no | `1514` | Bind port for UDP + TCP syslog listeners |
-| `SYSLOG_HOST_PORT` | no | `1514` | Docker Compose host port published to container port `1514` |
-| `SYSLOG_MAX_MESSAGE_SIZE` | no | `8192` | Max bytes per UDP datagram or newline-delimited TCP frame. Oversized newline-delimited TCP frames are dropped and the connection stays open; oversized unterminated frames are dropped and the connection is closed. |
-| `SYSLOG_MAX_TCP_CONNECTIONS` | no | `1024` | Maximum simultaneous TCP syslog connections |
-| `SYSLOG_TCP_IDLE_TIMEOUT_SECS` | no | `300` | Idle timeout per TCP read before closing inactive connections |
-| `SYSLOG_BATCH_SIZE` | no | `100` | Number of messages per batch write |
-| `SYSLOG_FLUSH_INTERVAL` | no | `500` | Batch flush interval in milliseconds |
-| `SYSLOG_WRITE_CHANNEL_CAPACITY` | no | `10000` | Internal parsed-message queue capacity |
+| `CORTEX_RECEIVER_HOST` | no | `0.0.0.0` | Bind host for UDP + TCP syslog listeners |
+| `CORTEX_RECEIVER_PORT` | no | `1514` | Bind port for UDP + TCP syslog listeners |
+| `CORTEX_RECEIVER_HOST_PORT` | no | `1514` | Docker Compose host port published to container port `1514` |
+| `CORTEX_MAX_MESSAGE_SIZE` | no | `8192` | Max bytes per UDP datagram or newline-delimited TCP frame. Oversized newline-delimited TCP frames are dropped and the connection stays open; oversized unterminated frames are dropped and the connection is closed. |
+| `CORTEX_MAX_TCP_CONNECTIONS` | no | `1024` | Maximum simultaneous TCP syslog connections |
+| `CORTEX_TCP_IDLE_TIMEOUT_SECS` | no | `300` | Idle timeout per TCP read before closing inactive connections |
+| `CORTEX_BATCH_SIZE` | no | `100` | Number of messages per batch write |
+| `CORTEX_FLUSH_INTERVAL` | no | `500` | Batch flush interval in milliseconds |
+| `CORTEX_WRITE_CHANNEL_CAPACITY` | no | `10000` | Internal parsed-message queue capacity |
 
 #### Docker socket-proxy ingest
 
-Optional pull-based Docker log ingestion keeps each remote host on its normal Docker logging driver and has syslog-mcp read container stdout/stderr through read-only `docker-socket-proxy` endpoints. This avoids configuring Docker's daemon-level syslog driver and does not block container startup when syslog-mcp is down.
+Optional pull-based Docker log ingestion keeps each remote host on its normal Docker logging driver and has cortex read container stdout/stderr through read-only `docker-socket-proxy` endpoints. This avoids configuring Docker's daemon-level syslog driver and does not block container startup when cortex is down.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYSLOG_DOCKER_INGEST_ENABLED` | no | `false` | Enable remote Docker log ingestion |
-| `SYSLOG_DOCKER_HOSTS` | one of the two | — | Comma-separated hostnames; each becomes `http://<name>:2375` with `allow_insecure_http = true`. Takes priority over `SYSLOG_DOCKER_HOSTS_FILE`. |
-| `SYSLOG_DOCKER_HOSTS_FILE` | one of the two | — | Path to a TOML file with a `[[hosts]]` array (use when you need per-host `base_url` or TLS). If the file does not exist, a warning is logged and no hosts are loaded — the container will not crash. Mount the file via `SYSLOG_MCP_CONFIG_VOLUME`. |
-| `SYSLOG_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | Initial reconnect delay after host stream failure |
-| `SYSLOG_DOCKER_RECONNECT_MAX_MS` | no | `30000` | Maximum reconnect delay after repeated failures |
+| `CORTEX_DOCKER_INGEST_ENABLED` | no | `false` | Enable remote Docker log ingestion |
+| `CORTEX_DOCKER_HOSTS` | one of the two | — | Comma-separated hostnames; each becomes `http://<name>:2375` with `allow_insecure_http = true`. Takes priority over `CORTEX_DOCKER_HOSTS_FILE`. |
+| `CORTEX_DOCKER_HOSTS_FILE` | one of the two | — | Path to a TOML file with a `[[hosts]]` array (use when you need per-host `base_url` or TLS). If the file does not exist, a warning is logged and no hosts are loaded — the container will not crash. Mount the file via `CORTEX_CONFIG_VOLUME`. |
+| `CORTEX_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | Initial reconnect delay after host stream failure |
+| `CORTEX_DOCKER_RECONNECT_MAX_MS` | no | `30000` | Maximum reconnect delay after repeated failures |
 
 The hosts file uses this shape:
 
@@ -701,33 +701,33 @@ base_url = "http://app-host-b:2375"
 allow_insecure_http = true
 ```
 
-The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to syslog-mcp, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
+The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to cortex, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
 
-Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run syslog-mcp with `SYSLOG_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. Container stdout/stderr rows use `source_ip=docker://<host>/<container>/<stream>`. Container lifecycle rows for actions such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, `oom`, and `health_status:*` use `source_ip=docker-event://<host>/<container>/<sanitized-action>`, `facility=docker`, and preserve the raw Docker event JSON.
+Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. Container stdout/stderr rows use `source_ip=docker://<host>/<container>/<stream>`. Container lifecycle rows for actions such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, `oom`, and `health_status:*` use `source_ip=docker-event://<host>/<container>/<sanitized-action>`, `facility=docker`, and preserve the raw Docker event JSON.
 
 #### Storage
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYSLOG_MCP_DB_PATH` | no | `/data/syslog.db` | SQLite database path |
-| `SYSLOG_MCP_POOL_SIZE` | no | `4` | SQLite connection pool size |
-| `SYSLOG_MCP_RETENTION_DAYS` | no | `90` | Days to retain logs. `0` = keep forever. |
-| `SYSLOG_MCP_MAX_DB_SIZE_MB` | no | `1024` | Logical DB size trigger for write-blocking. `0` = disabled. |
-| `SYSLOG_MCP_RECOVERY_DB_SIZE_MB` | no | `900` | Cleanup target after DB size trigger. Must be less than max. |
-| `SYSLOG_MCP_MIN_FREE_DISK_MB` | no | `512` | Free disk trigger for write-blocking. `0` = disabled. |
-| `SYSLOG_MCP_RECOVERY_FREE_DISK_MB` | no | `768` | Cleanup target after free disk trigger. Must be greater than min. |
-| `SYSLOG_MCP_CLEANUP_INTERVAL_SECS` | no | `60` | Storage budget enforcement interval. Minimum `5`. |
-| `SYSLOG_MCP_CLEANUP_CHUNK_SIZE` | no | `2000` | Rows deleted per enforcement chunk |
+| `CORTEX_DB_PATH` | no | `/data/cortex.db` | SQLite database path |
+| `CORTEX_POOL_SIZE` | no | `4` | SQLite connection pool size |
+| `CORTEX_RETENTION_DAYS` | no | `90` | Days to retain logs. `0` = keep forever. |
+| `CORTEX_MAX_DB_SIZE_MB` | no | `1024` | Logical DB size trigger for write-blocking. `0` = disabled. |
+| `CORTEX_RECOVERY_DB_SIZE_MB` | no | `900` | Cleanup target after DB size trigger. Must be less than max. |
+| `CORTEX_MIN_FREE_DISK_MB` | no | `512` | Free disk trigger for write-blocking. `0` = disabled. |
+| `CORTEX_RECOVERY_FREE_DISK_MB` | no | `768` | Cleanup target after free disk trigger. Must be greater than min. |
+| `CORTEX_CLEANUP_INTERVAL_SECS` | no | `60` | Storage budget enforcement interval. Minimum `5`. |
+| `CORTEX_CLEANUP_CHUNK_SIZE` | no | `2000` | Rows deleted per enforcement chunk |
 
 #### Container
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYSLOG_UID` | no | `1000` | Container user ID for data volume ownership |
-| `SYSLOG_GID` | no | `1000` | Container group ID for data volume ownership |
-| `SYSLOG_MCP_DATA_VOLUME` | no | `syslog-mcp-data` | Docker volume name or bind-mount path |
-| `SYSLOG_MCP_CONFIG_VOLUME` | no | `./config` | Read-only config mount for optional files such as `docker-hosts.toml` |
-| `DOCKER_NETWORK` | no | `syslog-mcp` | Docker network name (must exist) |
+| `CORTEX_UID` | no | `1000` | Container user ID for data volume ownership |
+| `CORTEX_GID` | no | `1000` | Container group ID for data volume ownership |
+| `CORTEX_DATA_VOLUME` | no | `cortex-data` | Docker volume name or bind-mount path |
+| `CORTEX_CONFIG_VOLUME` | no | `./config` | Read-only config mount for optional files such as `docker-hosts.toml` |
+| `DOCKER_NETWORK` | no | `cortex` | Docker network name (must exist) |
 | `RUST_LOG` | no | `info` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |
 | `TZ` | no | `UTC` | Container timezone |
 
@@ -744,7 +744,7 @@ max_tcp_connections = 512
 tcp_idle_timeout_secs = 300
 
 [storage]
-db_path = "data/syslog.db"
+db_path = "data/cortex.db"
 pool_size = 4
 retention_days = 90   # 0 = keep forever
 wal_mode = true
@@ -757,7 +757,7 @@ cleanup_interval_secs = 60
 [mcp]
 host = "0.0.0.0"
 port = 3100
-server_name = "syslog-mcp"
+server_name = "cortex"
 # api_token = "your-secret-token"
 
 [docker_ingest]
@@ -781,10 +781,10 @@ The UDP and TCP syslog listeners (port 1514) accept log frames from **any reacha
 
 Consequences:
 - **`hostname` in stored records is caller-controlled** for vendor formats (CEF/UniFi). Any host on the network can claim any hostname. Use `source_ip` for trusted origin identification.
-- **Log injection is possible** from any host that can reach port 1514. Do not use syslog-mcp for security-critical audit trails without network-level access controls.
+- **Log injection is possible** from any host that can reach port 1514. Do not use cortex for security-critical audit trails without network-level access controls.
 - **Retention exemption**: `severity=err` and above are excluded from time-based purge. A host flooding with high-severity frames can exhaust disk space.
 
-**Mitigations**: Bind the syslog port to a specific interface, use a firewall rule to restrict sources, or set `SYSLOG_ALLOWED_SOURCE_CIDRS` (comma-separated CIDR list) to allowlist sending hosts.
+**Mitigations**: Bind the syslog port to a specific interface, use a firewall rule to restrict sources, or set `CORTEX_ALLOWED_SOURCE_CIDRS` (comma-separated CIDR list) to allowlist sending hosts.
 
 ### MCP API authentication
 
@@ -792,12 +792,12 @@ The MCP query API (port 3100, default loopback) supports two auth modes:
 
 | Mode | Config | Effect |
 |------|--------|--------|
-| Bearer token | `SYSLOG_MCP_TOKEN=<token>` | Static token grants `syslog:read` by default; set `SYSLOG_MCP_STATIC_TOKEN_ADMIN=true` to also grant `syslog:admin` |
-| Google OAuth | `SYSLOG_MCP_AUTH_MODE=oauth` | OAuth users authenticated via `SYSLOG_MCP_AUTH_ADMIN_EMAIL` |
+| Bearer token | `CORTEX_TOKEN=<token>` | Static token grants `syslog:read` by default; set `CORTEX_STATIC_TOKEN_ADMIN=true` to also grant `syslog:admin` |
+| Google OAuth | `CORTEX_AUTH_MODE=oauth` | OAuth users authenticated via `CORTEX_AUTH_ADMIN_EMAIL` |
 
-**Important**: Admin actions such as `ack_error`, `unack_error`, and `notifications_test` require `syslog:admin`. Static bearer tokens are read-only unless `SYSLOG_MCP_STATIC_TOKEN_ADMIN=true` is explicitly set.
+**Important**: Admin actions such as `ack_error`, `unack_error`, and `notifications_test` require `syslog:admin`. Static bearer tokens are read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true` is explicitly set.
 
-The MCP port defaults to `127.0.0.1:3100` (loopback only). To expose it on a network interface, set `SYSLOG_MCP_HOST=0.0.0.0` and configure a TLS-terminating reverse proxy in front of it.
+The MCP port defaults to `127.0.0.1:3100` (loopback only). To expose it on a network interface, set `CORTEX_HOST=0.0.0.0` and configure a TLS-terminating reverse proxy in front of it.
 
 ---
 
@@ -806,17 +806,17 @@ The MCP port defaults to `127.0.0.1:3100` (loopback only). To expose it on a net
 ```bash
 syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 syslog mcp        # query-only MCP stdio transport
-syslog setup      # install/repair shared ~/.syslog-mcp Docker Compose setup
+syslog setup      # install/repair shared ~/.cortex Docker Compose setup
 syslog deploy preflight  # check deploy prerequisites without mutating Docker
 syslog deploy local      # reconcile local Compose deployment
 syslog stats      # query the SQLite DB directly from the CLI
 syslog db status  # inspect SQLite maintenance state
 syslog db backup  # create a WAL-safe SQLite backup
 syslog compose doctor          # diagnose live Compose/listener ownership
-syslog compose status --json   # inspect canonical syslog-mcp container/project
+syslog compose status --json   # inspect canonical cortex container/project
 ```
 
-Both modes use the same config and environment variable loader. `syslog mcp` is for local child-process MCP clients that can read `SYSLOG_MCP_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs.
+Both modes use the same config and environment variable loader. `syslog mcp` is for local child-process MCP clients that can read `CORTEX_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs.
 
 The direct CLI uses the same shared service layer as the MCP tool, so results and validation match the MCP actions without needing an MCP client:
 
@@ -847,7 +847,7 @@ syslog apps         --hostname dookie --limit 50
 ### REST endpoints (2026-05-22 surface parity)
 
 The 12 new routes mirror existing MCP actions one-for-one. All require the
-`SYSLOG_API_TOKEN` bearer; AI endpoints with `terms[]=` parameters are served
+`CORTEX_API_TOKEN` bearer; AI endpoints with `terms[]=` parameters are served
 via `serde_qs` to handle repeated keys.
 
 ```
@@ -886,10 +886,10 @@ Create `/etc/rsyslog.d/99-remote.conf` on each host:
 
 ```conf
 # TCP (reliable, recommended for persistent connections)
-*.* @@SYSLOG_SERVER:1514
+*.* @@CORTEX_SERVER:1514
 
 # UDP (lower overhead, no delivery guarantee)
-# *.* @SYSLOG_SERVER:1514
+# *.* @CORTEX_SERVER:1514
 ```
 
 Restart: `sudo systemctl restart rsyslog`
@@ -909,14 +909,14 @@ Add to `/etc/syslog-ng/conf.d/remote.conf`:
 
 ```conf
 destination d_remote_tcp {
-    network("SYSLOG_SERVER"
+    network("CORTEX_SERVER"
         port(1514)
         transport("tcp")
     );
 };
 
 destination d_remote_udp {
-    network("SYSLOG_SERVER"
+    network("CORTEX_SERVER"
         port(1514)
         transport("udp")
     );
@@ -939,7 +939,7 @@ Enable systemd in `/etc/wsl.conf`:
 systemd=true
 ```
 
-Install rsyslog and use the rsyslog config above. Use the Tailscale IP of the syslog-mcp host — WSL has its own network namespace and cannot reach the Docker host IP directly.
+Install rsyslog and use the rsyslog config above. Use the Tailscale IP of the cortex host — WSL has its own network namespace and cannot reach the Docker host IP directly.
 
 ### UniFi Cloud Gateway
 
@@ -948,7 +948,7 @@ Option A — via SSH:
 ```bash
 ssh admin@<gateway-ip>
 # Create /etc/rsyslog.d/remote.conf (persists on newer firmware):
-echo "*.* @SYSLOG_SERVER:1514" | sudo tee /etc/rsyslog.d/remote.conf
+echo "*.* @CORTEX_SERVER:1514" | sudo tee /etc/rsyslog.d/remote.conf
 sudo systemctl restart rsyslog
 ```
 
@@ -958,7 +958,7 @@ Settings → System → Advanced → Remote Syslog Server. Set host and port `15
 
 ### Routers and appliances (UDP-only devices)
 
-Set the syslog server address to your `SYSLOG_SERVER` and port to `1514` in the device's syslog settings. Most consumer routers and network appliances expose this under Diagnostics or Logging settings.
+Set the syslog server address to your `CORTEX_SERVER` and port to `1514` in the device's syslog settings. Most consumer routers and network appliances expose this under Diagnostics or Logging settings.
 
 ### Exposing port 514
 
@@ -974,7 +974,7 @@ sudo apt install iptables-persistent
 sudo netfilter-persistent save
 ```
 
-For Docker Compose, set `SYSLOG_HOST_PORT=514` to publish host port `514` while the container keeps binding unprivileged port `1514`. On Unraid, map host port `514` to container port `1514` for both UDP and TCP in the Docker template (`514:1514/udp` and `514:1514/tcp`).
+For Docker Compose, set `CORTEX_RECEIVER_HOST_PORT=514` to publish host port `514` while the container keeps binding unprivileged port `1514`. On Unraid, map host port `514` to container port `1514` for both UDP and TCP in the Docker template (`514:1514/udp` and `514:1514/tcp`).
 
 ### Firewall rules
 
@@ -995,9 +995,9 @@ sudo firewall-cmd --reload
 
 ## Retention Policy
 
-Logs are retained for `SYSLOG_MCP_RETENTION_DAYS` days (default `90`). Set to `0` to keep logs forever.
+Logs are retained for `CORTEX_RETENTION_DAYS` days (default `90`). Set to `0` to keep logs forever.
 
-The retention job runs on `SYSLOG_MCP_CLEANUP_INTERVAL_SECS` (default 60 seconds). It deletes logs in chunks of 10,000 rows, releasing the write lock between chunks so ingest can proceed. Retention cutoff uses `received_at` (the server-side ingestion timestamp), not the `timestamp` in the message. This prevents devices with misconfigured clocks from causing premature or indefinite retention.
+The retention job runs on `CORTEX_CLEANUP_INTERVAL_SECS` (default 60 seconds). It deletes logs in chunks of 10,000 rows, releasing the write lock between chunks so ingest can proceed. Retention cutoff uses `received_at` (the server-side ingestion timestamp), not the `timestamp` in the message. This prevents devices with misconfigured clocks from causing premature or indefinite retention.
 
 After large deletions, an incremental FTS5 merge runs to reclaim index space without long write-lock durations.
 
@@ -1007,17 +1007,17 @@ After large deletions, an incremental FTS5 merge runs to reclaim index space wit
 
 Two independent guards protect against disk exhaustion:
 
-**DB size guard** (`SYSLOG_MCP_MAX_DB_SIZE_MB`, default 1024 MB)
+**DB size guard** (`CORTEX_MAX_DB_SIZE_MB`, default 1024 MB)
 
-When the logical SQLite DB size exceeds `max_db_size_mb`, the oldest logs are deleted in chunks of `SYSLOG_MCP_CLEANUP_CHUNK_SIZE` rows until the size drops below `recovery_db_size_mb`.
+When the logical SQLite DB size exceeds `max_db_size_mb`, the oldest logs are deleted in chunks of `CORTEX_CLEANUP_CHUNK_SIZE` rows until the size drops below `recovery_db_size_mb`.
 
-**Free disk guard** (`SYSLOG_MCP_MIN_FREE_DISK_MB`, default 512 MB)
+**Free disk guard** (`CORTEX_MIN_FREE_DISK_MB`, default 512 MB)
 
 When available disk drops below `min_free_disk_mb`, the oldest logs are deleted until free disk exceeds `recovery_free_disk_mb`.
 
 **Write-blocking behavior**
 
-If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (`SYSLOG_WRITE_CHANNEL_CAPACITY`, default 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `syslog stats` reflects the current state.
+If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (`CORTEX_WRITE_CHANNEL_CAPACITY`, default 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `syslog stats` reflects the current state.
 
 Disable either guard by setting its trigger to `0` (also set the recovery target to `0`).
 
@@ -1027,7 +1027,7 @@ Most schema setup runs automatically during startup. Heavy migrations, such as c
 
 Before upgrading a populated database:
 
-1. Take a WAL-safe backup with `scripts/backup.sh` or `sqlite3 /data/syslog.db ".backup /data/syslog-pre-upgrade.db"`.
+1. Take a WAL-safe backup with `scripts/backup.sh` or `sqlite3 /data/cortex.db ".backup /data/syslog-pre-upgrade.db"`.
 2. Schedule a short ingest maintenance window for large databases.
 3. Start the new version and monitor logs for `Migration N: starting ...` and `Migration N: ... created`.
 4. Keep the previous image or binary available until `/health` returns `ok` and `syslog stats` reports sane counts.
@@ -1042,24 +1042,24 @@ The batch writer improves throughput by collecting parsed syslog messages into b
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SYSLOG_BATCH_SIZE` | `100` | Write when this many messages are queued |
-| `SYSLOG_FLUSH_INTERVAL` | `500` ms | Write every N ms even if batch is not full |
-| `SYSLOG_WRITE_CHANNEL_CAPACITY` | `10000` | Parsed-message queue capacity before listener backpressure |
+| `CORTEX_BATCH_SIZE` | `100` | Write when this many messages are queued |
+| `CORTEX_FLUSH_INTERVAL` | `500` ms | Write every N ms even if batch is not full |
+| `CORTEX_WRITE_CHANNEL_CAPACITY` | `10000` | Parsed-message queue capacity before listener backpressure |
 
 Batches are written in a single SQLite transaction. If the DB is busy (locked), the writer retries up to 3 times with exponential backoff (25 ms, 100 ms, 250 ms). Batches that fail insertion are retained in memory and retried on the next flush cycle. If a retained batch grows beyond 1,000 entries, it is discarded to prevent unbounded memory growth.
 
-The internal write channel holds up to `SYSLOG_WRITE_CHANNEL_CAPACITY` parsed messages. When the channel is full, backpressure is logged and further UDP/TCP receives block until space is available.
+The internal write channel holds up to `CORTEX_WRITE_CHANNEL_CAPACITY` parsed messages. When the channel is full, backpressure is logged and further UDP/TCP receives block until space is available.
 
 ---
 
 ## Multi-Host Deployment
 
-Point multiple hosts at the same syslog-mcp instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `syslog hosts` to see all senders. Filter by `hostname` in `syslog search` and `syslog tail`. Use `syslog correlate` to find related events across hosts within a time window.
+Point multiple hosts at the same cortex instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `syslog hosts` to see all senders. Filter by `hostname` in `syslog search` and `syslog tail`. Use `syslog correlate` to find related events across hosts within a time window.
 
 For large fleets, consider:
-- Increasing `SYSLOG_MCP_POOL_SIZE` (default 4) for higher read concurrency
-- Increasing `SYSLOG_BATCH_SIZE` and `SYSLOG_FLUSH_INTERVAL` to reduce write overhead
-- Setting `SYSLOG_MCP_RETENTION_DAYS` to balance history depth against disk cost
+- Increasing `CORTEX_POOL_SIZE` (default 4) for higher read concurrency
+- Increasing `CORTEX_BATCH_SIZE` and `CORTEX_FLUSH_INTERVAL` to reduce write overhead
+- Setting `CORTEX_RETENTION_DAYS` to balance history depth against disk cost
 
 ---
 
@@ -1074,10 +1074,10 @@ All timestamps are stored in UTC. `syslog correlate` uses the `timestamp` field 
 Add a SWAG proxy conf to expose the MCP API over TLS:
 
 ```nginx
-# /config/nginx/proxy-confs/syslog-mcp.subdomain.conf
+# /config/nginx/proxy-confs/cortex.subdomain.conf
 server {
     listen 443 ssl;
-    server_name syslog-mcp.*;
+    server_name cortex.*;
 
     include /config/nginx/ssl.conf;
 
@@ -1089,7 +1089,7 @@ server {
         # Clients use POST /mcp; GET/DELETE /mcp are not supported.
         proxy_http_version 1.1;
 
-        set $upstream_app syslog-mcp;
+        set $upstream_app cortex;
         set $upstream_port 3100;
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
@@ -1141,7 +1141,7 @@ curl -sf http://localhost:3100/health | jq .
 # → {"status":"ok"}
 
 # Send a test message from any Linux host
-logger -n SYSLOG_SERVER -P 1514 --tcp "test from $(hostname)"
+logger -n CORTEX_SERVER -P 1514 --tcp "test from $(hostname)"
 
 # Tail recent logs via MCP (replace token if auth is enabled)
 curl -s -X POST http://localhost:3100/mcp \
@@ -1202,10 +1202,10 @@ At typical homelab scale (1–20 hosts, thousands of messages per day):
 
 For higher ingest rates (IoT, high-traffic network devices):
 
-- Increase `SYSLOG_BATCH_SIZE` (e.g. `500`) to reduce transaction overhead
-- Increase `SYSLOG_FLUSH_INTERVAL` (e.g. `1000` ms) to widen batch windows
-- Increase `SYSLOG_WRITE_CHANNEL_CAPACITY` (e.g. `100000`) to absorb bursts
-- Increase `SYSLOG_MCP_POOL_SIZE` (e.g. `8`) for more read concurrency
+- Increase `CORTEX_BATCH_SIZE` (e.g. `500`) to reduce transaction overhead
+- Increase `CORTEX_FLUSH_INTERVAL` (e.g. `1000` ms) to widen batch windows
+- Increase `CORTEX_WRITE_CHANNEL_CAPACITY` (e.g. `100000`) to absorb bursts
+- Increase `CORTEX_POOL_SIZE` (e.g. `8`) for more read concurrency
 - Place the database on an SSD or tmpfs-backed volume
 
 ---
@@ -1219,7 +1219,7 @@ The daemon implements MCP through RMCP Streamable HTTP in stateless JSON-respons
 - `GET /health` — unauthenticated health probe
 - `syslog mcp` — local query-only stdio MCP mode for clients that launch MCP servers as child processes
 
-When `SYSLOG_MCP_TOKEN` is set, `/mcp` requires:
+When `CORTEX_TOKEN` is set, `/mcp` requires:
 
 ```
 Authorization: Bearer <token>
@@ -1227,16 +1227,16 @@ Authorization: Bearer <token>
 
 `/health` is always unauthenticated (required for Docker health checks and reverse-proxy probes).
 
-Stdio mode does not use bearer auth because it is local child-process access. It does require `SYSLOG_MCP_DB_PATH` to point at the same SQLite database populated by the daemon:
+Stdio mode does not use bearer auth because it is local child-process access. It does require `CORTEX_DB_PATH` to point at the same SQLite database populated by the daemon:
 
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
+    "cortex": {
       "command": "/path/to/syslog",
       "args": ["mcp"],
       "env": {
-        "SYSLOG_MCP_DB_PATH": "/data/syslog.db",
+        "CORTEX_DB_PATH": "/data/cortex.db",
         "RUST_LOG": "warn"
       }
     }

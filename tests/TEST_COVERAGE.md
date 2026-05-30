@@ -2,9 +2,9 @@
 
 ## 1. Overview
 
-`tests/test_live.sh` is the canonical integration test suite for the **syslog-mcp** MCP server. It exercises the server end-to-end over HTTP using real JSON-RPC requests, not unit stubs or mocks.
+`tests/test_live.sh` is the canonical integration test suite for the **cortex** MCP server. It exercises the server end-to-end over HTTP using real JSON-RPC requests, not unit stubs or mocks.
 
-**Service under test:** syslog-mcp — a read-only MCP server that exposes syslog data from a SQLite backing store via the Model Context Protocol (MCP) over HTTP.
+**Service under test:** cortex — a read-only MCP server that exposes syslog data from a SQLite backing store via the Model Context Protocol (MCP) over HTTP.
 
 **MCP server exercised:** The HTTP transport endpoint at `POST /mcp`, plus the unauthenticated health check at `GET /health`. All MCP calls use JSON-RPC 2.0.
 
@@ -39,7 +39,7 @@ Builds the Docker image from the project root, starts a container with a tmpfs-b
 bash tests/test_live.sh
 
 # With bearer token
-SYSLOG_MCP_TOKEN=ci-integration-token bash tests/test_live.sh
+CORTEX_TOKEN=ci-integration-token bash tests/test_live.sh
 
 # Explicit mode
 bash tests/test_live.sh --mode docker
@@ -50,7 +50,7 @@ bash tests/test_live.sh --mode all
 
 Required env vars: none (token is optional).
 Optional env vars:
-- `SYSLOG_MCP_TOKEN` — bearer token; if set, auth tests execute and the token is passed to the container.
+- `CORTEX_TOKEN` — bearer token; if set, auth tests execute and the token is passed to the container.
 - `PORT` — overrides the default port `3100` used as fallback when port mapping detection fails.
 
 #### `http`
@@ -134,7 +134,7 @@ Timeout: 10 seconds
 
 **Purpose:** Verify that when a bearer token is configured, the `/mcp` endpoint enforces authentication — rejecting requests with no token and requests with an incorrect token, both with HTTP 401.
 
-**Conditional execution:** Both auth tests are **SKIPPED** (not failed) when `SYSLOG_MCP_TOKEN` is not set. The skip reason is `"SYSLOG_MCP_TOKEN not set — auth assumed disabled"`. This reflects that the server supports running in no-auth mode.
+**Conditional execution:** Both auth tests are **SKIPPED** (not failed) when `CORTEX_TOKEN` is not set. The skip reason is `"CORTEX_TOKEN not set — auth assumed disabled"`. This reflects that the server supports running in no-auth mode.
 
 #### Test: `auth: unauthenticated /mcp returns 401`
 
@@ -442,8 +442,8 @@ All seven assertions are unconditional — `syslog correlate` is expected to alw
 
 | Skip label | Condition | Reason |
 |---|---|---|
-| `auth: unauthenticated /mcp returns 401` | `SYSLOG_MCP_TOKEN` not set | Auth assumed disabled; enforcing 401 without a configured token is not the server's job |
-| `auth: bad token returns 401` | `SYSLOG_MCP_TOKEN` not set | Same as above |
+| `auth: unauthenticated /mcp returns 401` | `CORTEX_TOKEN` not set | Auth assumed disabled; enforcing 401 without a configured token is not the server's job |
+| `auth: bad token returns 401` | `CORTEX_TOKEN` not set | Same as above |
 | `syslog hosts — entry field validation` | `hosts` array is empty | No syslog data has been ingested; empty array is valid |
 | `syslog search — log entry field validation` | No logs matching `"error"` | Empty DB is valid; field shape only verified when data exists |
 | `syslog errors — entry field validation` | `summary` array is empty | No error-level logs; empty is valid |
@@ -451,7 +451,7 @@ All seven assertions are unconditional — `syslog correlate` is expected to alw
 
 ### Operations that are entirely absent from the script
 
-No write operations exist in the syslog-mcp tool surface (it is a read-only server), so there is nothing to exclude on data-safety grounds. The script tests every action on the `syslog` tool:
+No write operations exist in the cortex tool surface (it is a read-only server), so there is nothing to exclude on data-safety grounds. The script tests every action on the `syslog` tool:
 
 | Action | Tested? |
 |---|---|
@@ -501,10 +501,10 @@ The `/health` endpoint is tested without any auth header and is expected to retu
 ### Image Build
 
 ```bash
-docker build -t syslog-mcp-test <project_root>
+docker build -t cortex-test <project_root>
 ```
 
-The project root is resolved by navigating one directory up from the script's location (`dirname "$BASH_SOURCE[0]"` + `/..`), then canonicalized with `pwd -P`. The image tag is the hardcoded string `syslog-mcp-test`.
+The project root is resolved by navigating one directory up from the script's location (`dirname "$BASH_SOURCE[0]"` + `/..`), then canonicalized with `pwd -P`. The image tag is the hardcoded string `cortex-test`.
 
 On build failure, the script exits with code `2`.
 
@@ -512,28 +512,28 @@ On build failure, the script exits with code `2`.
 
 ```bash
 docker run \
-  --name syslog-mcp-test-$$ \
+  --name cortex-test-$$ \
   --detach \
   --rm \
   -p 0:3100 \
   --tmpfs /data:rw,noexec,nosuid,size=64m \
-  [-e SYSLOG_MCP_TOKEN=<token>] \
-  -e SYSLOG_MCP_MAX_DB_SIZE_MB=0 \
-  -e SYSLOG_MCP_RECOVERY_DB_SIZE_MB=0 \
-  -e SYSLOG_MCP_MIN_FREE_DISK_MB=0 \
-  -e SYSLOG_MCP_RECOVERY_FREE_DISK_MB=0 \
-  syslog-mcp-test
+  [-e CORTEX_TOKEN=<token>] \
+  -e CORTEX_MAX_DB_SIZE_MB=0 \
+  -e CORTEX_RECOVERY_DB_SIZE_MB=0 \
+  -e CORTEX_MIN_FREE_DISK_MB=0 \
+  -e CORTEX_RECOVERY_FREE_DISK_MB=0 \
+  cortex-test
 ```
 
 Key design decisions:
 
 | Decision | Rationale |
 |---|---|
-| `--name syslog-mcp-test-$$` | Uses the shell PID to avoid container name collisions between parallel test runs |
+| `--name cortex-test-$$` | Uses the shell PID to avoid container name collisions between parallel test runs |
 | `-p 0:3100` | Docker assigns a random host port — avoids conflicts with existing processes on port 3100 |
 | `--tmpfs /data:rw,noexec,nosuid,size=64m` | SQLite database lives entirely in memory — no disk I/O, no volume cleanup, always starts clean |
-| `SYSLOG_MCP_MAX_DB_SIZE_MB=0` etc. | Zeroes out storage budget limits that would conflict with the tmpfs size cap |
-| `SYSLOG_MCP_TOKEN` | Conditionally passed only when `TOKEN` is non-empty |
+| `CORTEX_MAX_DB_SIZE_MB=0` etc. | Zeroes out storage budget limits that would conflict with the tmpfs size cap |
+| `CORTEX_TOKEN` | Conditionally passed only when `TOKEN` is non-empty |
 
 ### Port Discovery
 
@@ -568,11 +568,11 @@ The container was started with `--rm`, so Docker also removes it on exit — the
 The script has **no stdio mode**. There is no `--mode stdio` option and no stdio-related code paths.
 
 This is appropriate because:
-- The syslog-mcp server exposes the MCP HTTP transport, not the stdio transport.
+- The cortex server exposes the MCP HTTP transport, not the stdio transport.
 - Stdio transport would require spawning the server binary as a subprocess and piping JSON-RPC messages over stdin/stdout, which is a different integration surface.
 - All MCP tools are fully exercised via the HTTP transport in Phase 3 and Phase 4.
 
-If a future stdio transport is added to syslog-mcp, a corresponding mode would need to be added to this script.
+If a future stdio transport is added to cortex, a corresponding mode would need to be added to this script.
 
 ---
 

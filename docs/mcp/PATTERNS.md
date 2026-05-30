@@ -1,10 +1,10 @@
-# Common MCP Code Patterns -- syslog-mcp
+# Common MCP Code Patterns -- cortex
 
-Reusable patterns in the syslog-mcp implementation.
+Reusable patterns in the cortex implementation.
 
 ## Action-Based Tool Dispatch
 
-syslog-mcp exposes one public MCP tool, `syslog`, and dispatches on the required
+cortex exposes one public MCP tool, `syslog`, and dispatches on the required
 `action` argument:
 
 ```rust

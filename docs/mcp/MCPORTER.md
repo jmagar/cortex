@@ -1,10 +1,10 @@
-# Live Smoke Testing (mcporter) -- syslog-mcp
+# Live Smoke Testing (mcporter) -- cortex
 
-End-to-end verification against a running syslog-mcp server. Complements unit tests in [TESTS.md](TESTS.md).
+End-to-end verification against a running cortex server. Complements unit tests in [TESTS.md](TESTS.md).
 
 ## Purpose
 
-`scripts/smoke-test.sh` exercises the full MCP server stack: auth, tool dispatch, and response validation against a live syslog-mcp instance.
+`scripts/smoke-test.sh` exercises the full MCP server stack: auth, tool dispatch, and response validation against a live cortex instance.
 
 ## Location
 
@@ -32,7 +32,7 @@ mcporter config is at `config/mcporter.json`:
 ```json
 {
   "servers": {
-    "syslog-mcp": {
+    "cortex": {
       "transport": "http",
       "url": "http://localhost:3100/mcp"
     }

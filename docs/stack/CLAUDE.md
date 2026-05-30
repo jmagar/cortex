@@ -1,4 +1,4 @@
-# Technology Stack Documentation -- syslog-mcp
+# Technology Stack Documentation -- cortex
 
 Reference documentation for the technology choices, architecture, and prerequisites.
 

@@ -1,7 +1,7 @@
 //! Single authoritative table of all MCP actions.
 //!
 //! Previously the action list was spread across three arrays in two files:
-//! `SYSLOG_ACTIONS` in `schemas.rs` (for the JSON schema `enum`),
+//! `CORTEX_ACTIONS` in `schemas.rs` (for the JSON schema `enum`),
 //! `READ_ONLY_ACTIONS` and `ADMIN_ACTIONS` in `rmcp_server.rs` (for scope
 //! gating). Adding a new action required editing all three in lockstep; drift
 //! was a constant source of bugs.

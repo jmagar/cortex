@@ -1,6 +1,6 @@
-# CI/CD Workflows -- syslog-mcp
+# CI/CD Workflows -- cortex
 
-GitHub Actions configuration for syslog-mcp.
+GitHub Actions configuration for cortex.
 
 ## Workflows
 
@@ -50,7 +50,7 @@ jobs:
       - uses: docker/build-push-action@v5
         with:
           push: true
-          tags: ghcr.io/jmagar/syslog-mcp:${{ github.ref_name }}
+          tags: ghcr.io/jmagar/cortex:${{ github.ref_name }}
 ```
 
 ### publish-crates.yml -- crates.io Publishing

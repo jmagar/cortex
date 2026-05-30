@@ -4,7 +4,7 @@
 
 Contract derived from `src/main.rs` (CLI mode dispatch, `serve_mcp`, `shutdown_signal`), `src/runtime.rs` (`RuntimeCore`, `MaintenanceHandles`, `build_auth_policy`), `src/mcp/routes.rs::health`, and `src/observability.rs::RuntimeObservabilitySnapshot`. It pins the operator-visible process contract: which CLI mode does what, which signals are honored, how the server shuts down, the shape of `/health`, and the exit-code matrix.
 
-Anyone wiring `syslog-mcp` into `systemd`, Docker, Kubernetes, or a Compose-managed deployment should be able to write correct probes, restart policies, and graceful-stop timeouts from this document alone.
+Anyone wiring `cortex` into `systemd`, Docker, Kubernetes, or a Compose-managed deployment should be able to write correct probes, restart policies, and graceful-stop timeouts from this document alone.
 
 Companion contracts: `docs/contracts/config-schema.md` (knobs that drive these modes), `docs/contracts/data-layout.md` (filesystem state the process owns).
 
@@ -13,8 +13,8 @@ Companion contracts: `docs/contracts/config-schema.md` (knobs that drive these m
 | Invocation | Mode | Starts | Skips | Use when |
 |---|---|---|---|---|
 | `syslog` (no args) or `syslog serve mcp` | **ServeMcp** | UDP+TCP syslog listeners, batch writer, retention task, storage-budget task, docker-ingest tasks (when enabled), HTTP MCP server on `[mcp].port`, OTLP `/v1/logs` mount, optional non-MCP `/api` mount | — | Production daemon — the one host per fleet that ingests and stores logs. |
-| `syslog mcp` | **StdioMcp** | RMCP stdio transport bound to the same SQLite store (read-mostly query path) | All listeners; no HTTP port is bound; auth policy is forced to `LoopbackDev` (process isolation is the trust boundary) | Wiring `syslog-mcp` into an MCP client (Claude Code plugin, Codex) on a query-only client host. |
-| `syslog setup [check\|repair\|doctor\|ai-index-timer …]` | **Setup** | One-shot setup phases (write `~/.syslog-mcp/.env`, render compose, install systemd timers, etc.) | Never binds listeners; never starts maintenance tasks | First-run install, plugin hook reruns, dev-mode rewires. |
+| `syslog mcp` | **StdioMcp** | RMCP stdio transport bound to the same SQLite store (read-mostly query path) | All listeners; no HTTP port is bound; auth policy is forced to `LoopbackDev` (process isolation is the trust boundary) | Wiring `cortex` into an MCP client (Claude Code plugin, Codex) on a query-only client host. |
+| `syslog setup [check\|repair\|doctor\|ai-index-timer …]` | **Setup** | One-shot setup phases (write `~/.cortex/.env`, render compose, install systemd timers, etc.) | Never binds listeners; never starts maintenance tasks | First-run install, plugin hook reruns, dev-mode rewires. |
 | `syslog doctor [binary] [--json]` | **Doctor** | One-shot health audit (setup, compose, binary, AI transcripts) | Never binds listeners | Diagnostics / smoke checks. |
 | `syslog search\|tail\|errors\|hosts\|sessions\|ai\|correlate\|stats\|db\|compose` | **Cli** | Single query or maintenance operation against the SQLite store via `RuntimeCore::load_query_only` | Never binds the syslog/HTTP listeners; never spawns maintenance tasks | Operator queries on the box; scripting. |
 | `syslog --version` / `--help` | Version/Help | Print and exit | Everything | Banner. |
@@ -169,7 +169,7 @@ healthcheck:
 | Code | Cause | Reachable from |
 |---|---|---|
 | `0`   | Graceful shutdown (SIGINT or SIGTERM) — `tokio::main` returns `Ok(())` after the graceful shutdown sequence. Also emitted by any one-shot CLI/setup/doctor command that completed successfully. Note: Unix convention `128+N` does **not** apply because the signal is caught by `tokio::signal` rather than re-raised. | All modes. |
-| `1`   | Config error: any `validate_*` failure in `src/config.rs`, missing required OAuth fields, blank tokens, parent-of-`SYSLOG_MCP_DB_PATH` missing, unknown CLI flag, unknown setup subcommand. | `anyhow::bail!` from `Config::load` or `Mode::parse`. |
+| `1`   | Config error: any `validate_*` failure in `src/config.rs`, missing required OAuth fields, blank tokens, parent-of-`CORTEX_DB_PATH` missing, unknown CLI flag, unknown setup subcommand. | `anyhow::bail!` from `Config::load` or `Mode::parse`. |
 | `2`   | DB initialization failure: `db::init_pool` cannot open the SQLite file, cannot apply schema migrations, or cannot enable WAL. | `serve_mcp`, `RuntimeCore::load*`. |
 | `3`   | Bind error: `TcpListener::bind(mcp_bind)` failed (port in use, address not configured). Also covers UDP/TCP syslog bind failures via `start_syslog`. | `serve_mcp`. |
 | other (typically `101`) | Uncaught panic. Treat as crash; container/unit should restart. | Any mode. |
@@ -180,18 +180,18 @@ healthcheck:
 
 Operators must satisfy these before launching `syslog serve mcp`. Failing any produces a startup error per §6.
 
-1. **DB path is writable by the runtime UID.** Default `/data/syslog.db` requires `/data` to be a bind-mounted dir owned by `SYSLOG_UID:SYSLOG_GID` (default `1000:1000` per `docker-compose.yml`). See `docs/contracts/data-layout.md` §3.
-2. **Listener ports are free.** Default `1514/udp`, `1514/tcp`, `3100/tcp`. The container may need `cap_add: NET_BIND_SERVICE` only if binding port `< 1024` *inside* the container; the published bundle keeps `SYSLOG_PORT=1514` and remaps via Compose.
+1. **DB path is writable by the runtime UID.** Default `/data/cortex.db` requires `/data` to be a bind-mounted dir owned by `CORTEX_UID:CORTEX_GID` (default `1000:1000` per `docker-compose.yml`). See `docs/contracts/data-layout.md` §3.
+2. **Listener ports are free.** Default `1514/udp`, `1514/tcp`, `3100/tcp`. The container may need `cap_add: NET_BIND_SERVICE` only if binding port `< 1024` *inside* the container; the published bundle keeps `CORTEX_RECEIVER_PORT=1514` and remaps via Compose.
 3. **Non-loopback bind ⇒ auth configured.** Per `src/config.rs::validate_auth_config`: at least one of `mcp.api_token`, `auth.mode = oauth`+token combo (see config-schema §6.1), or `mcp.no_auth = true` plus `mcp.trusted_gateway_no_auth = true` (only when an upstream gateway enforces).
-4. **OAuth env triple and admin email set** when `auth.mode = oauth`: `SYSLOG_MCP_PUBLIC_URL`, `SYSLOG_MCP_GOOGLE_CLIENT_ID`, `SYSLOG_MCP_GOOGLE_CLIENT_SECRET`, plus `SYSLOG_MCP_AUTH_ADMIN_EMAIL` or `mcp.auth.admin_email`. Non-empty `mcp.auth.allowed_emails` is rejected until syslog-mcp can pass or enforce that config list. `mcp.no_auth=true` bypasses this because auth config is ignored under `LoopbackDev` or `TrustedGatewayUnscoped`.
+4. **OAuth env triple and admin email set** when `auth.mode = oauth`: `CORTEX_PUBLIC_URL`, `CORTEX_GOOGLE_CLIENT_ID`, `CORTEX_GOOGLE_CLIENT_SECRET`, plus `CORTEX_AUTH_ADMIN_EMAIL` or `mcp.auth.admin_email`. Non-empty `mcp.auth.allowed_emails` is rejected until cortex can pass or enforce that config list. `mcp.no_auth=true` bypasses this because auth config is ignored under `LoopbackDev` or `TrustedGatewayUnscoped`.
 5. **Auth file paths writable.** `auth.db` and `auth-jwt.pem` are created and chmodded to `0600` at startup; the parent dir (default: parent of `storage.db_path`) must be writable.
-6. **Docker network exists** (Compose deployments only). `docker-compose.yml` references the external network named by `DOCKER_NETWORK` (default `syslog-mcp`) — must be created before `docker compose up`.
+6. **Docker network exists** (Compose deployments only). `docker-compose.yml` references the external network named by `DOCKER_NETWORK` (default `cortex`) — must be created before `docker compose up`.
 
 ## 8. Restart safety
 
 - **WAL mode is mandatory in practice.** `storage.wal_mode` defaults to `true` and there is no documented support for the rollback-journal mode. WAL guarantees that abrupt restart (SIGKILL, host crash, power loss) loses only **uncommitted** writes — anything that landed in a transaction is durable.
 - **Loss window.** On any non-graceful stop, the in-memory batch since the most recent commit may be lost. Upper bound: `[syslog].batch_size` rows or `[syslog].flush_interval` ms of accumulation, whichever comes first (defaults: 100 rows / 500 ms).
-- **WAL/SHM sidecar files** (`syslog.db-wal`, `syslog.db-shm`) are auto-rebuilt on first SQL connection if missing. They are transient — see `docs/contracts/data-layout.md`.
+- **WAL/SHM sidecar files** (`cortex.db-wal`, `cortex.db-shm`) are auto-rebuilt on first SQL connection if missing. They are transient — see `docs/contracts/data-layout.md`.
 - **OAuth state persistence.** Refresh tokens issued before restart remain valid until their TTL (default 8 h) as long as `auth.db` and `auth-jwt.pem` are preserved across the restart. Losing `auth-jwt.pem` invalidates **all** issued tokens; see data-layout §5.
 - **No replay log for syslog ingestion.** If the listener loses a packet during shutdown, there is no resend protocol; senders that need delivery guarantees must use TCP transport with retry on the sender side (rsyslog `omfwd` with `queue.type` is the common pattern).
 

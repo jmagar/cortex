@@ -4,7 +4,7 @@ use super::output_common::print_json;
 use super::sparkline::sparkline;
 
 use anyhow::{bail, Result};
-use syslog_mcp::app::{
+use cortex::app::{
     AckErrorRequest, IngestRateRequest, ListSourceIpsRequest, PatternsRequest, TimelineRequest,
     UnackErrorRequest, UnaddressedErrorsRequest,
 };
@@ -27,7 +27,7 @@ impl SourceIpsArgs {
 
 impl TimelineArgs {
     pub(crate) fn into_request(self) -> TimelineRequest {
-        // Default lookback is centralized in `SyslogService::timeline` (bead dyqw):
+        // Default lookback is centralized in `CortexService::timeline` (bead dyqw):
         // it applies a bucket-sized window only when neither `from` nor `to` is set.
         // Both CLI modes reach that service (local directly, HTTP via the server),
         // so we pass `from`/`to` through verbatim — no per-binary duplication.

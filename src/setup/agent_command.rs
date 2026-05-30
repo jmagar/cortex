@@ -17,19 +17,19 @@ pub async fn run_agent_command_setup(action: AgentCommandAction) -> io::Result<S
     let compose_dir = home.join("compose");
     let data_dir = home.join("data");
     let user_home = super::user_home_dir()?;
-    let state_dir = user_home.join(".local/state/syslog-mcp");
+    let state_dir = user_home.join(".local/state/cortex");
     let spool_path = state_dir.join("agent-command.jsonl");
     let wrapper_path = user_home.join(".local/bin/syslog-agent-command-wrapper");
     let mut phases = Vec::new();
 
     match action {
         AgentCommandAction::Install => {
-            let syslog_bin = resolve_agent_command_syslog_binary()?;
+            let cortex_bin = resolve_agent_command_cortex_binary()?;
             phases.push(install_agent_command_files(
                 &wrapper_path,
                 &spool_path,
                 &state_dir,
-                &syslog_bin,
+                &cortex_bin,
             )?);
             phases.push(agent_command_env_phase(&wrapper_path, &user_home));
         }
@@ -38,16 +38,16 @@ pub async fn run_agent_command_setup(action: AgentCommandAction) -> io::Result<S
             phases.push(agent_command_env_phase(&wrapper_path, &user_home));
         }
         AgentCommandAction::Check => {
-            let syslog_bin = resolve_agent_command_syslog_binary()?;
+            let cortex_bin = resolve_agent_command_cortex_binary()?;
             phases.push(check_file_phase(
                 "agent-command-wrapper",
                 &wrapper_path,
-                "run syslog setup agent-command install",
+                "run cortex setup agent-command install",
             ));
             phases.push(agent_command_content_phase(
                 &wrapper_path,
                 &spool_path,
-                &syslog_bin,
+                &cortex_bin,
             ));
             phases.push(agent_command_state_phase(&state_dir, &spool_path));
             phases.push(agent_command_env_phase(&wrapper_path, &user_home));
@@ -72,7 +72,7 @@ fn install_agent_command_files(
     wrapper_path: &Path,
     spool_path: &Path,
     state_dir: &Path,
-    syslog_bin: &Path,
+    cortex_bin: &Path,
 ) -> io::Result<SetupPhase> {
     let timer = PhaseTimer::start("agent-command-files");
     ensure_private_dir(state_dir)?;
@@ -81,7 +81,7 @@ fn install_agent_command_files(
     }
     write_executable_file(
         wrapper_path,
-        &agent_command_wrapper_script(syslog_bin, spool_path),
+        &agent_command_wrapper_script(cortex_bin, spool_path),
     )?;
     ensure_agent_command_spool_file(spool_path)?;
     Ok(timer.finish(
@@ -136,10 +136,10 @@ fn remove_agent_command_wrapper(wrapper_path: &Path) -> io::Result<SetupPhase> {
 fn agent_command_content_phase(
     wrapper_path: &Path,
     spool_path: &Path,
-    syslog_bin: &Path,
+    cortex_bin: &Path,
 ) -> SetupPhase {
     let timer = PhaseTimer::start("agent-command-content");
-    let expected = agent_command_wrapper_script(syslog_bin, spool_path);
+    let expected = agent_command_wrapper_script(cortex_bin, spool_path);
     match std::fs::read_to_string(wrapper_path) {
         Ok(current) if current == expected => timer.finish(
             SetupStatus::Ok,
@@ -164,7 +164,7 @@ fn agent_command_state_phase(state_dir: &Path, spool_path: &Path) -> SetupPhase 
             return timer.finish(
                 SetupStatus::Warn,
                 format!(
-                    "missing {}; run syslog setup agent-command install",
+                    "missing {}; run cortex setup agent-command install",
                     state_dir.display()
                 ),
             );
@@ -184,7 +184,7 @@ fn agent_command_state_phase(state_dir: &Path, spool_path: &Path) -> SetupPhase 
             return timer.finish(
                 SetupStatus::Warn,
                 format!(
-                    "missing {}; run syslog setup agent-command install",
+                    "missing {}; run cortex setup agent-command install",
                     spool_path.display()
                 ),
             );
@@ -207,7 +207,7 @@ fn agent_command_state_phase(state_dir: &Path, spool_path: &Path) -> SetupPhase 
             return timer.finish(
                 SetupStatus::Error,
                 format!(
-                    "unsafe permissions state={state_mode:o} spool={spool_mode:o}; run syslog setup agent-command install"
+                    "unsafe permissions state={state_mode:o} spool={spool_mode:o}; run cortex setup agent-command install"
                 ),
             );
         }
@@ -254,18 +254,18 @@ fn agent_command_env_phase(wrapper_path: &Path, user_home: &Path) -> SetupPhase 
     }
 }
 
-fn agent_command_wrapper_script(syslog_bin: &Path, spool_path: &Path) -> String {
-    let syslog_bin = setup_path_value(syslog_bin).expect("validated syslog binary path");
+fn agent_command_wrapper_script(cortex_bin: &Path, spool_path: &Path) -> String {
+    let cortex_bin = setup_path_value(cortex_bin).expect("validated syslog binary path");
     let spool_path = setup_path_value(spool_path).expect("validated agent command spool path");
     format!(
         r#"#!/usr/bin/env sh
-exec {syslog_bin} agent-command wrap --spool {spool_path} -- "$@"
+exec {cortex_bin} agent-command wrap --spool {spool_path} -- "$@"
 "#
     )
 }
 
-fn resolve_agent_command_syslog_binary() -> io::Result<std::path::PathBuf> {
-    let path = super::resolve_syslog_binary()?;
+fn resolve_agent_command_cortex_binary() -> io::Result<std::path::PathBuf> {
+    let path = super::resolve_cortex_binary()?;
     validate_agent_command_binary(&path)?;
     Ok(path)
 }
@@ -279,7 +279,7 @@ fn validate_agent_command_binary(path: &Path) -> io::Result<()> {
         ));
     }
     let version_output = String::from_utf8_lossy(&output.stdout);
-    let expected = format!("syslog-mcp {}", env!("CARGO_PKG_VERSION"));
+    let expected = format!("cortex {}", env!("CARGO_PKG_VERSION"));
     let actual = version_output.trim();
     if actual != expected {
         return Err(io::Error::new(

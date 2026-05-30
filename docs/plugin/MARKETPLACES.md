@@ -1,13 +1,13 @@
 <!--
-plugin: syslog-mcp
+plugin: cortex
 surface: marketplace-publishing
 version: 0.25.1
 author: Jacob Magar
 license: MIT
-description: Marketplace publishing and registry package reference for syslog-mcp.
+description: Marketplace publishing and registry package reference for cortex.
 -->
 
-# Marketplace Publishing -- syslog-mcp
+# Marketplace Publishing -- cortex
 
 Registration and publishing patterns for Claude, Codex, and Gemini marketplaces.
 
@@ -26,7 +26,7 @@ Registration and publishing patterns for Claude, Codex, and Gemini marketplaces.
 
 ```bash
 /plugin marketplace add jmagar/claude-homelab
-/plugin install syslog-mcp @jmagar-claude-homelab
+/plugin install cortex @jmagar-claude-homelab
 ```
 
 ### Codex CLI
@@ -40,18 +40,18 @@ No Gemini extension manifest is currently shipped from this repo.
 ## MCP Registry
 
 The repo ships `server.json` for MCP Registry metadata under the
-`tv.tootie/syslog-mcp` namespace, with DNS verification via the `tootie.tv`
+`tv.tootie/cortex` namespace, with DNS verification via the `tootie.tv`
 domain.
 
 Example registry entry:
 
 ```json
 {
-  "name": "tv.tootie/syslog-mcp",
+  "name": "tv.tootie/cortex",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/syslog-mcp:v0.25.1"
+      "identifier": "ghcr.io/jmagar/cortex:v0.25.1"
     }
   ]
 }
@@ -59,12 +59,12 @@ Example registry entry:
 
 ## OCI publishing
 
-syslog-mcp uses OCI (Docker) images as the primary distribution package, not PyPI or npm:
+cortex uses OCI (Docker) images as the primary distribution package, not PyPI or npm:
 
 | Registry | Image |
 | --- | --- |
-| GHCR | `ghcr.io/jmagar/syslog-mcp:latest` |
-| GHCR (versioned) | `ghcr.io/jmagar/syslog-mcp:v0.25.1` |
+| GHCR | `ghcr.io/jmagar/cortex:latest` |
+| GHCR (versioned) | `ghcr.io/jmagar/cortex:v0.25.1` |
 
 Additionally published to crates.io for `cargo install` usage.
 

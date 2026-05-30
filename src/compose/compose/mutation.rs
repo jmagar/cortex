@@ -70,9 +70,9 @@ fn compose_base_args(target: &ResolvedComposeTarget) -> Vec<String> {
         args.push("--project-directory".into());
         args.push(project_dir.display().to_string());
         // Docker Compose only looks for .env in the project directory for YAML
-        // variable substitution. The syslog-mcp setup places .env one level up
-        // (e.g. ~/.syslog-mcp/.env with compose files under ~/.syslog-mcp/compose/).
-        // Pass --env-file explicitly so SYSLOG_MCP_DATA_VOLUME and similar vars
+        // variable substitution. The cortex setup places .env one level up
+        // (e.g. ~/.cortex/.env with compose files under ~/.cortex/compose/).
+        // Pass --env-file explicitly so CORTEX_DATA_VOLUME and similar vars
         // are substituted correctly (bind-mount vs named-volume fallback).
         if let Some(env_path) = project_dir
             .parent()
@@ -170,7 +170,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                 diagnostics: vec![ComposeDiagnostic {
                     severity: DiagnosticSeverity::Unsafe,
                     code: "multiple_compose_candidates".into(),
-                    message: format!("found {} candidate syslog-mcp containers", candidates.len()),
+                    message: format!("found {} candidate cortex containers", candidates.len()),
                 }],
                 compose_files: Vec::new(),
                 compose_working_dir: None,
@@ -204,7 +204,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             });
         }
 
-        Err(anyhow!("could not resolve syslog-mcp compose target"))
+        Err(anyhow!("could not resolve cortex compose target"))
     }
 
     pub fn preflight_mutation(
@@ -256,8 +256,8 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             // name (e.g. from a stale COMPOSE_PROJECT_NAME), refuse Up to prevent
             // silently creating a second orphaned database alongside the old one.
             if matches!(mutation, ComposeMutation::Up) {
-                let expected_volume = std::env::var("SYSLOG_MCP_VOLUME_NAME")
-                    .unwrap_or_else(|_| "syslog-mcp-data".to_string());
+                let expected_volume = std::env::var("CORTEX_VOLUME_NAME")
+                    .unwrap_or_else(|_| "cortex-data".to_string());
                 if let Some(info) = &target_container {
                     if let Some(mount) = info.mounts.iter().find(|m| m.target == "/data") {
                         if mount.kind == "volume" {
@@ -267,8 +267,8 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                                     "refusing up: container /data uses volume '{actual}' but \
                                      expected '{expected_volume}' — stale volume from a previous \
                                      COMPOSE_PROJECT_NAME would be orphaned.\n\
-                                     Fix: `docker stop syslog-mcp && docker rm syslog-mcp` \
-                                     then retry, or set SYSLOG_MCP_VOLUME_NAME={actual} to \
+                                     Fix: `docker stop cortex && docker rm cortex` \
+                                     then retry, or set CORTEX_VOLUME_NAME={actual} to \
                                      keep the existing volume."
                                 ));
                             }
@@ -289,7 +289,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                 .unwrap_or_default();
             let systemd = self
                 .inspector
-                .systemd_status("syslog-mcp.service")
+                .systemd_status("cortex.service")
                 .map_err(|error| {
                     anyhow!("refusing mutation: could not verify systemd ownership: {error}")
                 })?;
@@ -354,7 +354,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                     requested,
                     &self.defaults,
                     unresolved_code(&error),
-                    format!("could not resolve syslog-mcp compose target: {error}"),
+                    format!("could not resolve cortex compose target: {error}"),
                 ));
             }
         };
@@ -372,7 +372,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             }
         };
         let mut systemd_error = None;
-        let systemd = match self.inspector.systemd_status("syslog-mcp.service") {
+        let systemd = match self.inspector.systemd_status("cortex.service") {
             Ok(systemd) => systemd,
             Err(error) => {
                 systemd_error = Some(error.to_string());
@@ -390,8 +390,8 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             .map(|s| !is_stopped_status(s))
             .unwrap_or(false)
         {
-            let expected_volume = std::env::var("SYSLOG_MCP_VOLUME_NAME")
-                .unwrap_or_else(|_| "syslog-mcp-data".to_string());
+            let expected_volume = std::env::var("CORTEX_VOLUME_NAME")
+                .unwrap_or_else(|_| "cortex-data".to_string());
             let data_mount = status.data_mounts.iter().find(|m| m.target == "/data");
             match data_mount {
                 None => {
@@ -410,7 +410,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                             message: format!(
                                 "container /data uses volume '{actual}', expected \
                                  '{expected_volume}' — stale volume from a previous \
-                                 COMPOSE_PROJECT_NAME; run `syslog compose up` to recreate"
+                                 COMPOSE_PROJECT_NAME; run `cortex compose up` to recreate"
                             ),
                         });
                     }
@@ -422,7 +422,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             status.diagnostics.push(ComposeDiagnostic {
                 severity: DiagnosticSeverity::Error,
                 code: DIAG_SYSTEMD_CHECK_FAILED.into(),
-                message: format!("could not verify syslog-mcp.service state: {error}"),
+                message: format!("could not verify cortex.service state: {error}"),
             });
         }
         if status.systemd.as_ref().is_some_and(|s| s.active) {
@@ -434,7 +434,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
             status.diagnostics.push(ComposeDiagnostic {
                 severity: DiagnosticSeverity::Warning,
                 code: code.into(),
-                message: "syslog-mcp.service is active".into(),
+                message: "cortex.service is active".into(),
             });
         }
         Ok(status)

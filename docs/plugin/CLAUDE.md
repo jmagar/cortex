@@ -2,18 +2,18 @@
 SPDX-License-Identifier: MIT
 Author: jmagar
 License: MIT
-Description: Plugin surface documentation index for the syslog-mcp Claude Code plugin.
+Description: Plugin surface documentation index for the cortex Claude Code plugin.
 -->
 
-# Plugin Surface Documentation -- syslog-mcp
+# Plugin Surface Documentation -- cortex
 
-Index for the `plugin/` documentation subdirectory. These docs cover every Claude Code plugin surface area available to syslog-mcp.
+Index for the `plugin/` documentation subdirectory. These docs cover every Claude Code plugin surface area available to cortex.
 
 ## File index
 
 | File | Purpose |
 | --- | --- |
-| `AGENTS.md` | Agent definitions (none -- syslog-mcp has no agents) |
+| `AGENTS.md` | Agent definitions (none -- cortex has no agents) |
 | `CHANNELS.md` | Channel integration (none) |
 | `CONFIG.md` | Plugin settings: userConfig, settings.json |
 | `HOOKS.md` | Lifecycle hooks: SessionStart → `scripts/plugin-setup.sh` → `syslog setup repair` |

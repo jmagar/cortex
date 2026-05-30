@@ -1,4 +1,4 @@
-# Justfile Recipes -- syslog-mcp
+# Justfile Recipes -- cortex
 
 Run `just --list` to see all available recipes.
 
@@ -19,7 +19,7 @@ Run `just --list` to see all available recipes.
 
 | Recipe | Command | Description |
 | --- | --- | --- |
-| `just docker-build` | `docker build -t syslog-mcp .` | Build Docker image |
+| `just docker-build` | `docker build -t cortex .` | Build Docker image |
 | `just up` | `docker compose up -d` | Start containers |
 | `just down` | `docker compose down` | Stop containers |
 | `just restart` | `docker compose restart` | Restart containers |

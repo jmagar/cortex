@@ -248,7 +248,7 @@ pub(crate) fn container_info_from_inspect(value: serde_json::Value) -> Result<Co
     let name = value
         .get("Name")
         .and_then(|v| v.as_str())
-        .unwrap_or("syslog-mcp")
+        .unwrap_or("cortex")
         .trim_start_matches('/')
         .to_string();
     let mounts = value

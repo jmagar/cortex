@@ -1,13 +1,13 @@
 use anyhow::{bail, Result};
-use syslog_mcp::app::{IncidentResponse, ServiceLogsResponse};
-use syslog_mcp::scanner::{
+use cortex::app::{IncidentResponse, ServiceLogsResponse};
+use cortex::scanner::{
     AiDoctorReport, CheckpointEntry, IndexResult, ParseErrorEntry, PruneCheckpointsResult,
 };
 
 use super::ai_watch::AiSmokeWatchReport;
 use super::color::{cyan, error, muted, primary, success, violet, warn};
 use super::output_common::{local_ts, print_json, truncate};
-use syslog_mcp::app::AiWatchStatusReport;
+use cortex::app::AiWatchStatusReport;
 
 pub(crate) fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Result<()> {
     if json {

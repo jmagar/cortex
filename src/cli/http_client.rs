@@ -12,11 +12,11 @@
 //!
 //! ## Discovery precedence (locked)
 //!
-//! - `base_url`: `--server URL` flag > `SYSLOG_MCP_URL` env >
-//!   `http://127.0.0.1:<SYSLOG_MCP_PORT|3100>` default.
-//! - `token`: CLI flag > `SYSLOG_API_TOKEN` env > **fail closed**
-//!   with a message that explicitly mentions `syslog setup repair`, copying
-//!   from another host's `~/.syslog-mcp/.env`, and warns against
+//! - `base_url`: `--server URL` flag > `CORTEX_URL` env >
+//!   `http://127.0.0.1:<CORTEX_PORT|3100>` default.
+//! - `token`: CLI flag > `CORTEX_API_TOKEN` env > **fail closed**
+//!   with a message that explicitly mentions `cortex setup repair`, copying
+//!   from another host's `~/.cortex/.env`, and warns against
 //!   exporting credential values in an interactive shell. NO `.env` file tier — that
 //!   was deliberately dropped (eng-review code-simplicity reviewer).
 //!
@@ -27,14 +27,14 @@
 //! ## Error mapping
 //!
 //! - **Connect timeout** (10s, separate from the 10-min request timeout):
-//!   maps to `"cannot connect to syslog-mcp at {url} — DNS or TCP connection
+//!   maps to `"cannot connect to cortex at {url} — DNS or TCP connection
 //!   failed within 10s"` (eng-review #A30, bead 0p8r.26).
 //! - **401**: `"authentication failed (401): ..."`.
 //! - **403**: `"forbidden (403): ..."`.
 //! - **404 enrichment**: on the FIRST 404 only, call `/api/version` **once**
 //!   (cached via [`tokio::sync::OnceCell`]) to enrich the error with
 //!   `"endpoint {path} not found on server v{version}; CLI may be newer than
-//!   server. Run: syslog compose pull && syslog compose up"`. If
+//!   server. Run: cortex compose pull && cortex compose up"`. If
 //!   `/api/version` ALSO 404s, the server is too old to identify itself; emit
 //!   `"endpoint not available; server too old to identify version..."`. If it
 //!   401s (token rejected), emit `"endpoint not available on this server;
@@ -60,7 +60,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use url::Url;
 
-use syslog_mcp::app::{
+use cortex::app::{
     AbuseSearchRequest, AbuseSearchResponse, AckErrorRequest, AckErrorResponse,
     AiCheckpointsRequest, AiCorrelateRequest, AiCorrelateResponse, AiIncidentRequest,
     AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiParseErrorsRequest,
@@ -80,10 +80,10 @@ use syslog_mcp::app::{
     TimelineResponse, UnackErrorRequest, UnackErrorResponse, UnaddressedErrorsRequest,
     UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
-use syslog_mcp::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
+use cortex::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
 
 /// Connection timeout (eng-review #A30, bead 0p8r.26). 10s covers cold-start
-/// Docker Compose DNS for `syslog-mcp:3100`, which empirically takes 3-5s on
+/// Docker Compose DNS for `cortex:3100`, which empirically takes 3-5s on
 /// first lookup; 5s was tight enough that the first request after `compose up`
 /// regularly tripped a false-positive "cannot connect" error.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -319,7 +319,7 @@ impl HttpClient {
 
         match status {
             StatusCode::UNAUTHORIZED => Err(anyhow!(
-                "authentication failed (401) on {path}: {}. Token may be wrong; run 'syslog setup repair' or check SYSLOG_API_TOKEN",
+                "authentication failed (401) on {path}: {}. Token may be wrong; run 'cortex setup repair' or check CORTEX_API_TOKEN",
                 preview_body(&bytes)
             )),
             StatusCode::FORBIDDEN => Err(anyhow!(
@@ -386,20 +386,20 @@ impl HttpClient {
             Some(sv) => {
                 let git = sv.git_sha.as_deref().unwrap_or("unknown");
                 anyhow!(
-                    "endpoint {path} not found on server v{} (git {}): {}. CLI may be newer than server. Run: syslog compose pull && syslog compose up",
+                    "endpoint {path} not found on server v{} (git {}): {}. CLI may be newer than server. Run: cortex compose pull && cortex compose up",
                     sv.version,
                     git,
                     preview_body(body),
                 )
             }
             None => anyhow!(
-                "endpoint {path} not found (404): {}. endpoint not available on this server; could not check version (server may be too old to identify, or auth failed). Run: syslog compose pull && syslog compose up",
+                "endpoint {path} not found (404): {}. endpoint not available on this server; could not check version (server may be too old to identify, or auth failed). Run: cortex compose pull && cortex compose up",
                 preview_body(body)
             ),
         }
     }
 
-    // ─── REST surface: Wave 0–1 (syslog-mcp-0p8r.1) ─────────────────────────
+    // ─── REST surface: Wave 0–1 (cortex-0p8r.1) ─────────────────────────
 
     pub async fn version(&self) -> Result<ServerVersion> {
         self.get_json::<(), _>("/api/version", None).await
@@ -651,14 +651,14 @@ impl HttpClient {
 
 // ─── Free helpers (also used in tests) ──────────────────────────────────────
 
-/// Resolve `--server` flag > `SYSLOG_MCP_URL` env >
-/// `http://127.0.0.1:<SYSLOG_MCP_PORT|3100>`. The returned URL is normalised
+/// Resolve `--server` flag > `CORTEX_URL` env >
+/// `http://127.0.0.1:<CORTEX_PORT|3100>`. The returned URL is normalised
 /// to end with `/` so `Url::join` appends paths cleanly.
 pub(crate) fn resolve_base_url(server_override: Option<String>) -> Result<Url> {
     let raw = match server_override {
         Some(s) if !s.trim().is_empty() => s,
-        _ => env::var("SYSLOG_MCP_URL").unwrap_or_else(|_| {
-            let port = env::var("SYSLOG_MCP_PORT")
+        _ => env::var("CORTEX_URL").unwrap_or_else(|_| {
+            let port = env::var("CORTEX_PORT")
                 .ok()
                 .and_then(|s| s.parse::<u16>().ok())
                 .unwrap_or(DEFAULT_PORT);
@@ -694,22 +694,22 @@ pub(crate) fn resolve_base_url(server_override: Option<String>) -> Result<Url> {
     Ok(normalised)
 }
 
-/// Resolve CLI token flag > `SYSLOG_API_TOKEN` env. NO `.env` file tier.
+/// Resolve CLI token flag > `CORTEX_API_TOKEN` env. NO `.env` file tier.
 /// Fails closed with a multi-host-friendly error message that warns against
 /// shell-history leaks (security #36 + locked decision).
 pub(crate) fn resolve_token(token_override: Option<String>) -> Result<String> {
     if let Some(t) = token_override.filter(|s| !s.trim().is_empty()) {
         return Ok(t);
     }
-    if let Ok(t) = env::var("SYSLOG_API_TOKEN") {
+    if let Ok(t) = env::var("CORTEX_API_TOKEN") {
         if !t.trim().is_empty() {
             return Ok(t);
         }
     }
     bail!(
-        "SYSLOG_API_TOKEN not set in environment. \
-         Run 'syslog setup repair' on this host, \
-         or copy from another host's ~/.syslog-mcp/.env. \
+        "CORTEX_API_TOKEN not set in environment. \
+         Run 'cortex setup repair' on this host, \
+         or copy from another host's ~/.cortex/.env. \
          Or use the token flag. \
          Do NOT export credential values in an interactive shell (history leak); \
          use a file source instead."
@@ -723,13 +723,13 @@ pub(crate) fn resolve_token(token_override: Option<String>) -> Result<String> {
 fn map_send_error(err: reqwest::Error, base_url: &Url) -> anyhow::Error {
     if err.is_connect() {
         return anyhow!(
-            "cannot connect to syslog-mcp at {base_url} — DNS or TCP connection failed within {}s",
+            "cannot connect to cortex at {base_url} — DNS or TCP connection failed within {}s",
             CONNECT_TIMEOUT.as_secs()
         );
     }
     if err.is_timeout() {
         return anyhow!(
-            "request to syslog-mcp at {base_url} timed out (request deadline {}s exceeded)",
+            "request to cortex at {base_url} timed out (request deadline {}s exceeded)",
             REQUEST_TIMEOUT.as_secs()
         );
     }

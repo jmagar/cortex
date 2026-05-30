@@ -9,7 +9,7 @@ fn truncate_is_utf8_safe_and_preserves_short_strings() {
 
 #[test]
 fn transcript_detection_accepts_source_ip_and_app_suffix() {
-    let mut log = syslog_mcp::app::LogEntry {
+    let mut log = cortex::app::LogEntry {
         id: 1,
         timestamp: "2026-01-01T00:00:00Z".to_string(),
         received_at: "2026-01-01T00:00:00Z".to_string(),

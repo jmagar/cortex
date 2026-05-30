@@ -1,20 +1,20 @@
 {
-  "name": "syslog",
+  "name": "cortex",
   "description": "Syslog management via MCP",
   "author": {
     "name": "jmagar"
   },
-  "repository": "https://github.com/jmagar/syslog-mcp",
+  "repository": "https://github.com/jmagar/cortex",
   "license": "MIT",
   "keywords": [
-    "syslog",
+    "cortex",
     "mcp",
     "logging",
     "homelab"
   ],
-  "mcpServers": "./plugins/syslog/.mcp.json",
-  "hooks": "./plugins/syslog/hooks/hooks.json",
-  "skills": "./plugins/syslog/skills",
+  "mcpServers": "./plugins/cortex/.mcp.json",
+  "hooks": "./plugins/cortex/hooks/hooks.json",
+  "skills": "./plugins/cortex/skills",
   "userConfig": {
     "is_server": {
       "type": "boolean",
@@ -40,7 +40,7 @@
     "no_auth": {
       "type": "boolean",
       "title": "Disable service auth",
-      "description": "Run syslog-mcp without service-local MCP auth. Use this only when an upstream gateway or reverse proxy enforces auth before traffic reaches syslog-mcp. Server mode only.",
+      "description": "Run cortex without service-local MCP auth. Use this only when an upstream gateway or reverse proxy enforces auth before traffic reaches cortex. Server mode only.",
       "required": true,
       "default": false
     },
@@ -122,7 +122,7 @@
     "data_dir": {
       "type": "directory",
       "title": "Data directory",
-      "description": "Directory holding the SQLite database file (syslog.db plus its WAL/SHM sidecars in WAL mode). Defaults to the plugin's persistent data directory ($CLAUDE_PLUGIN_DATA), which survives plugin upgrades. Override only if you need the DB on a different volume \u2014 e.g. a larger or faster disk. The directory must exist and be writable by the user running the service. Server mode only.",
+      "description": "Directory holding the SQLite database file (cortex.db plus its WAL/SHM sidecars in WAL mode). Defaults to the plugin's persistent data directory ($CLAUDE_PLUGIN_DATA), which survives plugin upgrades. Override only if you need the DB on a different volume \u2014 e.g. a larger or faster disk. The directory must exist and be writable by the user running the service. Server mode only.",
       "default": "${CLAUDE_PLUGIN_DATA}"
     },
     "retention_days": {

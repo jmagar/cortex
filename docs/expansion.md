@@ -1,4 +1,4 @@
-# syslog-mcp expansion · session bootstrap
+# cortex expansion · session bootstrap
 
 > Briefing doc to load at session start. Captures fleet topology, current
 > log ingest paths, planned expansion, drop-in configs, and the
@@ -10,7 +10,7 @@
 ## 0 · context
 
 - **owner**: jacob · homelab `tootie.tv` · tailscale-meshed
-- **existing**: `syslog-mcp` (Rust/Axum + SQLite FTS5, custom MCP tools) ingesting
+- **existing**: `cortex` (Rust/Axum + SQLite FTS5, custom MCP tools) ingesting
   - syslog/journald from limited hosts
   - container stdout via `dockersocketproxy` (not the docker syslog log driver — chosen for container-startup resilience and to avoid per-host fluent agents)
 - **goal**: expand ingestion across the full fleet, capture missing log streams (nginx/authelia/fail2ban/adguard/zfs/smartd/ai), add OTLP HTTP receiver to absorb claude code & codex telemetry, host on `shart`
@@ -25,7 +25,7 @@
 | **tootie** | Unraid 7.x | media + VM host | — | 3×2TB raidz1 | 2.5GbE |
 | **dookie** | Ubuntu 25 (VM on tootie) | dev / AI / GPU | RTX 4070 + nvme + 60GB passthrough | ZFS (passthrough nvme) | 2.5GbE (host) |
 | **squirts** | Ubuntu 25 | mission-critical services | i3 NUC, UPS-backed | ZFS, hourly snaps | 2.5GbE |
-| **shart** | Unraid 7.x | backup sink + future syslog-mcp host | — | 2×8TB mirror (spinners) | 2.5GbE |
+| **shart** | Unraid 7.x | backup sink + future cortex host | — | 2×8TB mirror (spinners) | 2.5GbE |
 | **steamy** | Win11 + WSL Ubuntu 25 | primary workstation | i5 11th, 48GB, RTX 3050, 2TB nvme | — | 2.5GbE |
 | **vivobook** | Win11 + WSL Ubuntu 25 | mobile, parsec → steamy | i3 13th, 24GB, 1TB nvme | — | wifi 7 |
 
@@ -45,7 +45,7 @@
 |---|---|---|
 | tootie syslog | Unraid Settings → Syslog Server | ✅ active |
 | shart syslog | Unraid Settings → Syslog Server | ✅ active |
-| Docker container stdout (all hosts) | dockersocketproxy → syslog-mcp | ✅ active |
+| Docker container stdout (all hosts) | dockersocketproxy → cortex | ✅ active |
 | ubuntu/WSL host syslog | rsyslog default | ⚠️ partial (no journald) |
 | nginx access/error (SWAG) | none | ❌ missing |
 | Authelia auth events | none — writing to file | ❌ missing |
@@ -60,7 +60,7 @@
 | claude/codex `.jsonl` transcripts | `syslog ai index` / `syslog ai add` scanner | ✅ implemented; local scanner only |
 | libvirt (dookie) on tootie | none | ❌ TBD (Unraid API vs imfile) |
 
-**Why dockersocketproxy and not the syslog log driver:** if the syslog server is unreachable at container start, the syslog log driver will refuse to start the container. Pulling logs from the docker socket (read-only proxy) decouples container lifecycle from syslog-mcp availability. Trade-off: claude needs the proxy reachable to ingest, but containers run regardless.
+**Why dockersocketproxy and not the syslog log driver:** if the syslog server is unreachable at container start, the syslog log driver will refuse to start the container. Pulling logs from the docker socket (read-only proxy) decouples container lifecycle from cortex availability. Trade-off: claude needs the proxy reachable to ingest, but containers run regardless.
 
 ---
 
@@ -71,7 +71,7 @@
 | host | drop-ins | notes |
 |---|---|---|
 | **tootie** | none (Unraid native covers it) | `imfile` for libvirt only if Unraid API insufficient — needs User Scripts plugin to persist in `/etc/rsyslog.d/` |
-| **shart** | none | future syslog-mcp host |
+| **shart** | none | future cortex host |
 | **squirts** | imjournal · swag · authelia · adguard | the special one — all SWAG/auth/dns lives here |
 | **dookie** | imjournal · ai-transcripts | + claude/codex jsonls |
 | **steamy-wsl** | imjournal · ai-transcripts | + claude/codex jsonls |
@@ -113,15 +113,15 @@ ATT residential gateway has no useful remote syslog. UCG-Max behind it is doing 
 
 | corpus | store | search | source |
 |---|---|---|---|
-| event stream | syslog-mcp (FTS5) | exact / time-window / host filter | rsyslog + dockersocketproxy + OTLP |
+| event stream | cortex (FTS5) | exact / time-window / host filter | rsyslog + dockersocketproxy + OTLP |
 | AI conversation content | axon (Qdrant + TEI) | semantic recall | claude/codex `.jsonl` |
 | reference docs | axon (Qdrant + TEI [+ FTS5 for hybrid/RRF]) | semantic + sparse hybrid | spider.rs crawler |
 
-**Don't ingest crawled documentation into syslog-mcp.** Different data model (reference vs event), different query patterns (topic vs time/host), pollutes log search with stale doc snippets.
+**Don't ingest crawled documentation into cortex.** Different data model (reference vs event), different query patterns (topic vs time/host), pollutes log search with stale doc snippets.
 
 **RRF clarification:** RRF fuses ranked lists from dense + sparse indexes over the **same corpus** (same chunk IDs). For axon hybrid search, FTS5 lives next to Qdrant inside axon, keyed by chunk_id. Or use Qdrant native sparse vectors (BM42/SPLADE) and skip the parallel FTS5 index entirely.
 
-### 4.2 OTel ingestion — build into syslog-mcp, don't deploy a collector
+### 4.2 OTel ingestion — build into cortex, don't deploy a collector
 
 **Rationale:**
 - One less container, one less moving part (stated preference)
@@ -135,22 +135,22 @@ ATT residential gateway has no useful remote syslog. UCG-Max behind it is doing 
 - ❌ metrics (`/v1/metrics`) — return 404/unsupported; metrics belong in Prom/VictoriaMetrics, not FTS5
 - ❌ gRPC — HTTP only unless something specifically needs it
 
-**When to introduce a real collector:** once fanout to multiple backends (Prom + syslog-mcp + Loki) becomes necessary. YAGNI until then.
+**When to introduce a real collector:** once fanout to multiple backends (Prom + cortex + Loki) becomes necessary. YAGNI until then.
 
 ### 4.3 claude/codex transcript routing
 
 ```
 claude/codex JSONLs ──► axon (semantic recall via embeddings)
                   │
-                  └──► imfile ──► syslog-mcp (filter by host/time)
+                  └──► imfile ──► cortex (filter by host/time)
 
-claude/codex OTel events ──► OTLP HTTP ──► syslog-mcp (api_request, tool_result, prompts-by-length)
+claude/codex OTel events ──► OTLP HTTP ──► cortex (api_request, tool_result, prompts-by-length)
 ```
 
 Two destinations, two query modes:
 - **axon**: "the conversation about audit backlog" (semantic)
-- **syslog-mcp**: "every claude session on dookie last Tuesday between 2-4am" (structured filter + time)
-- **cross-corpora**: correlate claude activity with smartd warnings on the same host & time window via syslog-mcp JOIN
+- **cortex**: "every claude session on dookie last Tuesday between 2-4am" (structured filter + time)
+- **cross-corpora**: correlate claude activity with smartd warnings on the same host & time window via cortex JOIN
 
 ### 4.4 Authelia decision
 
@@ -165,12 +165,12 @@ Authelia logs are structured (`time=... level=... msg=...`). Parse `level` serve
 
 Query log gets **loud** — every DNS query from every device. Tens of thousands per day. Worth it for phone-home detection but:
 - Filter at ingest (drop `allowed` queries, keep blocked + filtered)
-- Or partition into a dedicated table/index in syslog-mcp so it doesn't drown signal
+- Or partition into a dedicated table/index in cortex so it doesn't drown signal
 - Decide retention separately from other tags
 
 ### 4.6 hosting
 
-`syslog-mcp` runs on **shart**:
+`cortex` runs on **shart**:
 - Least loaded box in the fleet (backup-only)
 - Mirror pool has 8TB headroom
 - DB lands in the existing zfs send chain → automatic offsite via gdrive
@@ -178,7 +178,7 @@ Query log gets **loud** — every DNS query from every device. Tens of thousands
 
 ---
 
-## 5 · syslog-mcp enhancements
+## 5 · cortex enhancements
 
 ### 5.1 OTLP HTTP receiver
 
@@ -194,7 +194,7 @@ prost = "*"
 - `POST /v1/metrics` — return 404/unsupported; do not false-ack dropped metrics
 
 **LogRecord field mapping:**
-| OTLP field | syslog-mcp column |
+| OTLP field | cortex column |
 |---|---|
 | `time_unix_nano` | timestamp |
 | `severity_number` | severity |
@@ -423,14 +423,14 @@ trace_exporter = { otlp-http = { endpoint = "http://shart.tailnet:4318/v1/traces
 
 Do **not** land this all at once. Each step should run for a day or two before adding the next, so volume/cost/value of each source is observable in isolation.
 
-1. **Stand up syslog-mcp container on shart** — bind mount on mirror pool, expose on tailscale
+1. **Stand up cortex container on shart** — bind mount on mirror pool, expose on tailscale
 2. **Point Unraid Settings → Syslog Server** on tootie + shart at the new endpoint
 3. **Deploy `10-imjournal.conf`** to dookie, squirts, steamy-wsl, vivobook-wsl. Validate volume baseline.
 4. **Verify ZED + smartd already arriving** by tag query
-5. **Build OTLP HTTP receiver** in syslog-mcp (`/v1/logs`, `/v1/traces`; reject `/v1/metrics`)
+5. **Build OTLP HTTP receiver** in cortex (`/v1/logs`, `/v1/traces`; reject `/v1/metrics`)
 6. **Configure claude code OTel** on dookie first, then steamy-wsl, then vivobook-wsl
 7. **Configure codex OTel** same order
-8. **Deploy `40-ai-transcripts.conf`** to capture jsonls (axon already has them; this is for cross-correlation in syslog-mcp)
+8. **Deploy `40-ai-transcripts.conf`** to capture jsonls (axon already has them; this is for cross-correlation in cortex)
 9. **Deploy `35-authelia.conf`** on squirts — first specialty source
 10. **Deploy `30-swag.conf`** on squirts
 11. **Deploy `36-adguard.conf`** on squirts last (highest volume — want everything else stable first)
@@ -450,14 +450,14 @@ Do **not** land this all at once. Each step should run for a day or two before a
 - [Codex advanced config (OTel)](https://developers.openai.com/codex/config-advanced) · [config reference](https://developers.openai.com/codex/config-reference)
 - [opentelemetry-proto crate](https://docs.rs/opentelemetry-proto)
 - [OTLP/HTTP spec](https://opentelemetry.io/docs/specs/otlp/#otlphttp)
-- [Qdrant hybrid search](https://qdrant.tech/articles/hybrid-search/) (relevant to axon, not syslog-mcp)
+- [Qdrant hybrid search](https://qdrant.tech/articles/hybrid-search/) (relevant to axon, not cortex)
 
 ---
 
 ## 10 · ground rules for this work
 
-- Stack: Rust (axum, tokio, sqlx) for syslog-mcp · TypeScript / Python for tooling around it
-- Modular crates if syslog-mcp grows — `syslog-mcp-core`, `syslog-mcp-otlp`, `syslog-mcp-mcp` (mcp tool surface), `syslog-mcp-bin`
+- Stack: Rust (axum, tokio, sqlx) for cortex · TypeScript / Python for tooling around it
+- Modular crates if cortex grows — `cortex-core`, `cortex-otlp`, `cortex-mcp` (mcp tool surface), `cortex-bin`
 - Monorepo-friendly: this likely belongs in the consolidating MCP plugin monorepo (git subtree)
 - No agent-foo: don't introduce abstractions for one consumer. OTLP receiver, FTS5 ingest, MCP tool surface — three concrete things, no plugin trait
 - Self-hosted only — no SaaS observability, no vendored exporters

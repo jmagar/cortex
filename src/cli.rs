@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
-use syslog_mcp::app::ServiceLogsRequest;
-use syslog_mcp::compose::{
+use cortex::app::ServiceLogsRequest;
+use cortex::compose::{
     CliDockerInspect, ComposeDefaults, ComposeMutation, ComposeService, ProcessRunner,
 };
 
@@ -84,7 +84,7 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
             let coordination = coordination::run_coordination_phases();
             output_ops::print_compose_doctor_response(&status, &coordination, args.json)?;
             output_ops::ensure_doctor_coordination_ok(&coordination)?;
-            syslog_mcp::compose::ensure_doctor_ready(&status)
+            cortex::compose::ensure_doctor_ready(&status)
         }
         ComposeCommand::Up(args) => output_ops::print_compose_command_response(
             &service.run_mutation(ComposeMutation::Up, &args.target, &args.options)?,
@@ -124,14 +124,14 @@ pub(crate) async fn run_service_no_db(command: CliCommand) -> Result<()> {
     match command {
         ServiceCommand::Logs(args) => {
             let json = args.json;
-            let report = syslog_mcp::app::run_service_logs(
+            let report = cortex::app::run_service_logs(
                 ServiceLogsRequest {
                     service: args.service,
                     from: args.from,
                     to: args.to,
                     tail: args.tail,
                 },
-                &syslog_mcp::app::SystemOsAdapter,
+                &cortex::app::SystemOsAdapter,
             )
             .await?;
             output_ai::print_service_logs_response(&report, json)
@@ -147,6 +147,8 @@ use coordination::{
     parse_systemctl_env_output, DoctorCache, SystemctlEnv,
 };
 #[cfg(test)]
+use cortex::scanner::AiDoctorReport;
+#[cfg(test)]
 use output_ai::ensure_ai_doctor_success;
 #[cfg(test)]
 use output_common::truncate;
@@ -154,8 +156,6 @@ use output_common::truncate;
 use output_ops::ensure_doctor_coordination_ok;
 #[cfg(test)]
 use setup::{SetupPhase, SetupStatus};
-#[cfg(test)]
-use syslog_mcp::scanner::AiDoctorReport;
 
 mod dispatch;
 mod dispatch_ai;

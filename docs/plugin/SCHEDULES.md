@@ -1,6 +1,6 @@
-# Scheduled Tasks -- syslog-mcp
+# Scheduled Tasks -- cortex
 
-syslog-mcp does not use Claude Code scheduled tasks (triggers). Internal scheduled operations are handled by the Rust binary itself.
+cortex does not use Claude Code scheduled tasks (triggers). Internal scheduled operations are handled by the Rust binary itself.
 
 ## Internal schedules
 

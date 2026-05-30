@@ -24,12 +24,12 @@ pub(super) async fn execute_tool(
     auth: Option<&AuthContext>,
 ) -> anyhow::Result<Value> {
     match name {
-        "syslog" => tool_syslog(state, args, auth).await,
+        "cortex" => tool_cortex(state, args, auth).await,
         _ => Err(anyhow::anyhow!("Unknown tool: {name}")),
     }
 }
 
-async fn tool_syslog(
+async fn tool_cortex(
     state: &AppState,
     args: Value,
     auth: Option<&AuthContext>,
@@ -78,9 +78,9 @@ async fn tool_syslog(
         "similar_incidents" => tool_similar_incidents(state, args).await,
         "ask_history" => tool_ask_history(state, args).await,
         "incident_context" => tool_incident_context(state, args).await,
-        "help" => tool_syslog_help().await,
+        "help" => tool_cortex_help().await,
         _ => Err(anyhow::anyhow!(
-            "unknown syslog action: {action}; expected one of {}",
+            "unknown cortex action: {action}; expected one of {}",
             actions::action_names().join(", ")
         )),
     }
@@ -442,7 +442,7 @@ async fn tool_compose_doctor(args: Value) -> anyhow::Result<Value> {
 }
 
 async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    // Default lookback is centralized in `SyslogService::timeline` (bead dyqw):
+    // Default lookback is centralized in `CortexService::timeline` (bead dyqw):
     // it applies a bucket-sized window only when neither `from` nor `to` is set,
     // preventing full table scans without recreating the logic per transport.
     let response = state
@@ -767,8 +767,8 @@ async fn tool_notifications_test(
     args: Value,
     auth: Option<&AuthContext>,
 ) -> anyhow::Result<Value> {
-    let body = string_arg(&args, "body")
-        .unwrap_or_else(|| "Test notification from syslog-mcp".to_string());
+    let body =
+        string_arg(&args, "body").unwrap_or_else(|| "Test notification from cortex".to_string());
     // Actor is derived from request auth context, not caller-supplied args.
     let actor = extract_actor(state, auth);
     let result = state
@@ -814,7 +814,7 @@ fn admin_action_help() -> String {
     let mut help = String::new();
     for action in ADMIN_ACTION_HELP {
         help.push_str("---\n\n");
-        help.push_str("## syslog ");
+        help.push_str("## cortex ");
         help.push_str(action.action);
         help.push('\n');
         help.push_str(action.description);
@@ -829,7 +829,7 @@ fn admin_action_help() -> String {
     help
 }
 
-async fn tool_syslog_help() -> anyhow::Result<Value> {
+async fn tool_cortex_help() -> anyhow::Result<Value> {
     let mut cheap = Vec::new();
     let mut moderate = Vec::new();
     let mut expensive = Vec::new();
@@ -862,19 +862,19 @@ diagnosis.
         expensive.join(", "),
         write.join(", ")
     );
-    let help = r#"# syslog-mcp Tool Reference
+    let help = r#"# cortex Tool Reference
 
 The MCP server exposes one tool, `syslog`. Set the required `action` argument
 to select the operation.
 
-## syslog search
+## cortex search
 Full-text search across all syslog messages with optional filters.
 Uses SQLite FTS5 with porter stemming. Supports FTS5 query syntax: AND, OR, NOT,
 phrase matching with quotes, prefix matching with *.
 
 **Parameters:**
 - `query` (string) — FTS5 search query, e.g. `'kernel panic'`, `'OOM AND killer'`, `'"connection refused"'`, `'error*'`
-- `hostname` (string, optional) — filter by hostname (exact match); use `syslog hosts` to enumerate
+- `hostname` (string, optional) — filter by hostname (exact match); use `cortex hosts` to enumerate
 - `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
 - `severity` (string, optional) — one of: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`
 - `app_name` (string, optional) — filter by application name, e.g. `sshd`, `dockerd`, `kernel`
@@ -889,7 +889,7 @@ phrase matching with quotes, prefix matching with *.
 
 ---
 
-## syslog filter
+## cortex filter
 Filter log rows by structured fields only. This action never accepts `query`;
 use `search` for message-body FTS5 queries.
 
@@ -909,7 +909,7 @@ use `search` for message-body FTS5 queries.
 
 ---
 
-## syslog tail
+## cortex tail
 Get the N most recent log entries, optionally filtered by host, application, and/or severity floor.
 Equivalent to `tail -f` across all hosts.
 
@@ -922,7 +922,7 @@ Equivalent to `tail -f` across all hosts.
 
 ---
 
-## syslog errors
+## cortex errors
 Get a summary of errors and warnings across all hosts in a time window.
 Groups by hostname and severity level (and optionally app_name), showing counts.
 
@@ -934,14 +934,14 @@ Groups by hostname and severity level (and optionally app_name), showing counts.
 
 ---
 
-## syslog hosts
+## cortex hosts
 List all hosts that have sent syslog messages, with first/last seen timestamps and total log counts.
 
 **Parameters:** none
 
 ---
 
-## syslog host_state
+## cortex host_state
 Return the latest bounded heartbeat state for one host.
 
 **Parameters:**
@@ -952,7 +952,7 @@ Return the latest bounded heartbeat state for one host.
 
 ---
 
-## syslog fleet_state
+## cortex fleet_state
 Return a fleet-wide heartbeat snapshot with pressure flags and summary counts.
 
 **Parameters:**
@@ -961,20 +961,20 @@ Return a fleet-wide heartbeat snapshot with pressure flags and summary counts.
 
 ---
 
-## syslog apps
+## cortex apps
 List distinct application names with log counts, host counts, and first/last seen timestamps.
-Mirror of `syslog hosts` for the `app_name` dimension.
+Mirror of `cortex hosts` for the `app_name` dimension.
 
 **Parameters:**
 - `hostname` (string, optional) — restrict to apps seen on this host
 
 ---
 
-## syslog sessions
+## cortex sessions
 Lists AI transcript sessions grouped by project/tool/session/host.
 
 **Parameters:**
-- `project` (string, optional) — exact project path, e.g. `/home/jmagar/workspace/syslog-mcp`
+- `project` (string, optional) — exact project path, e.g. `/home/jmagar/workspace/cortex`
 - `tool` (string, optional) — AI tool filter: `claude`, `codex`, or `gemini`
 - `hostname` (string, optional) — restrict to one host
 - `from`, `to` (string, optional) — time range (ISO 8601)
@@ -982,7 +982,7 @@ Lists AI transcript sessions grouped by project/tool/session/host.
 
 ---
 
-## syslog search_sessions
+## cortex search_sessions
 Session-ranked full-text search across AI transcript rows. Returns grouped sessions rather than flat log rows.
 
 **Parameters:**
@@ -994,7 +994,7 @@ Session-ranked full-text search across AI transcript rows. Returns grouped sessi
 
 ---
 
-## syslog abuse
+## cortex abuse
 Detects abuse in AI transcript rows and returns each hit with surrounding rows from the same AI session.
 
 **Parameters:**
@@ -1007,7 +1007,7 @@ Detects abuse in AI transcript rows and returns each hit with surrounding rows f
 
 ---
 
-## syslog abuse_incidents
+## cortex abuse_incidents
 Groups AI transcript abuse hits into scored incident candidates. Returns incidents ordered by priority score (abuse_count * 10 + density * 2 + term_variety) with priority labels: low / medium / high / critical. Response includes total_incidents, candidate_rows, and truncated metadata.
 
 **Parameters:**
@@ -1020,7 +1020,7 @@ Groups AI transcript abuse hits into scored incident candidates. Returns inciden
 
 ---
 
-## syslog abuse_investigate
+## cortex abuse_investigate
 Expands top abuse incidents into deterministic evidence bundles. Each bundle includes transcript context before/after the incident, the abuse anchor entries, and nearby non-AI syslog/Docker logs.
 
 **Parameters:**
@@ -1034,7 +1034,7 @@ Expands top abuse incidents into deterministic evidence bundles. Each bundle inc
 
 ---
 
-## syslog ai_correlate
+## cortex ai_correlate
 Cross-reference AI transcript anchor rows against nearby non-AI logs in the same database.
 Related rows explicitly exclude AI transcript rows, so the result surfaces host, Docker, OTLP, and syslog context around the AI session instead of duplicating transcript rows.
 
@@ -1053,7 +1053,7 @@ Related rows explicitly exclude AI transcript rows, so the result surfaces host,
 
 ---
 
-## syslog usage_blocks
+## cortex usage_blocks
 AI activity bucketed into deterministic 5-hour UTC windows.
 
 **Parameters:**
@@ -1063,7 +1063,7 @@ AI activity bucketed into deterministic 5-hour UTC windows.
 
 ---
 
-## syslog project_context
+## cortex project_context
 Summary of one project path including tools, sessions, hosts, counts, and recent representative entries.
 
 **Parameters:**
@@ -1073,7 +1073,7 @@ Summary of one project path including tools, sessions, hosts, counts, and recent
 
 ---
 
-## syslog list_ai_tools
+## cortex list_ai_tools
 Distinct AI tools with counts and first/last seen timestamps.
 
 **Parameters:**
@@ -1082,7 +1082,7 @@ Distinct AI tools with counts and first/last seen timestamps.
 
 ---
 
-## syslog list_ai_projects
+## cortex list_ai_projects
 Distinct AI projects with counts, tools used, and first/last seen timestamps.
 
 **Parameters:**
@@ -1091,7 +1091,7 @@ Distinct AI projects with counts, tools used, and first/last seen timestamps.
 
 ---
 
-## syslog source_ips
+## cortex source_ips
 List distinct source identifiers (network sender IP:port for syslog input,
 peer IP for OTLP input,
 `docker://host/container/stream` for Docker stream ingest, or
@@ -1104,7 +1104,7 @@ on hostname-spoofable formats (e.g. UniFi CEF).
 
 ---
 
-## syslog correlate
+## cortex correlate
 Search for related events across multiple hosts within a time window.
 Useful for debugging cascading failures — finds events on all hosts within ±N minutes
 of a reference timestamp. Results are grouped by host and ordered by time.
@@ -1120,7 +1120,7 @@ of a reference timestamp. Results are grouped by host and ordered by time.
 
 ---
 
-## syslog timeline
+## cortex timeline
 Bucketed log counts over a time range. Use to answer "when did errors start"
 or "is the incident still active". Each point reports `{bucket, group?, count}`.
 
@@ -1135,7 +1135,7 @@ or "is the incident still active". Each point reports `{bucket, group?, count}`.
 
 ---
 
-## syslog patterns
+## cortex patterns
 Cluster near-duplicate messages by template. Variable runs (numbers, IPv4
 addresses, UUIDs, long hex strings) are normalised to placeholders so similar
 messages aggregate. Returns top templates with counts, sample message, and
@@ -1151,7 +1151,7 @@ host distribution.
 
 ---
 
-## syslog context
+## cortex context
 Surrounding logs around a single point of interest, on the same host. Pass
 either `log_id` (preferred — uses (timestamp, id) for stable ordering) or both
 `hostname` + `timestamp` to anchor on a synthetic reference.
@@ -1165,7 +1165,7 @@ either `log_id` (preferred — uses (timestamp, id) for stable ordering) or both
 
 ---
 
-## syslog get
+## cortex get
 Fetch one log entry by `id`, including the unparsed `raw` syslog frame.
 
 **Parameters:**
@@ -1173,7 +1173,7 @@ Fetch one log entry by `id`, including the unparsed `raw` syslog frame.
 
 ---
 
-## syslog ingest_rate
+## cortex ingest_rate
 Recent ingest throughput: counts and per-second rates over the last 1m / 5m /
 15m windows (using `received_at`, not message timestamp). Includes the current
 write-block flag for live ingest health.
@@ -1183,7 +1183,7 @@ write-block flag for live ingest health.
 
 ---
 
-## syslog silent_hosts
+## cortex silent_hosts
 Hosts whose `last_seen` is older than `silent_minutes` ago. Reports their
 typical inter-arrival interval so you can spot devices that should be chatty.
 
@@ -1192,7 +1192,7 @@ typical inter-arrival interval so you can spot devices that should be chatty.
 
 ---
 
-## syslog clock_skew
+## cortex clock_skew
 Per-host distribution of `received_at - timestamp` (seconds), sorted by
 absolute mean. Surfaces devices with a broken or drifting clock.
 
@@ -1202,7 +1202,7 @@ absolute mean. Surfaces devices with a broken or drifting clock.
 
 ---
 
-## syslog anomalies
+## cortex anomalies
 Per-host comparison of recent volume against a baseline window. Reports
 `recent_per_min`, `baseline_per_min`, ratio, and a Poisson-style z-score so an
 agent can rank hosts whose log rate or error count is unusual.
@@ -1213,7 +1213,7 @@ agent can rank hosts whose log rate or error count is unusual.
 
 ---
 
-## syslog compare
+## cortex compare
 Side-by-side summary of two time ranges (volume, error count, severity mix,
 top hosts, top apps) plus deltas. Answers "what changed since yesterday".
 
@@ -1223,7 +1223,7 @@ top hosts, top apps) plus deltas. Answers "what changed since yesterday".
 
 ---
 
-## syslog stats
+## cortex stats
 Get database statistics plus runtime ingest observability: listener counters, queue depth,
 writer flush/failure/drop counters, last activity timestamps, and OTLP receiver counters.
 
@@ -1231,7 +1231,7 @@ writer flush/failure/drop counters, last activity timestamps, and OTLP receiver 
 
 ---
 
-## syslog status
+## cortex status
 Get lightweight runtime status without full DB statistics. Use this for dashboards and
 doctor checks that need queue/backpressure/writer state quickly.
 
@@ -1239,8 +1239,8 @@ doctor checks that need queue/backpressure/writer state quickly.
 
 ---
 
-## syslog compose_status
-Read-only Docker Compose diagnostics for the canonical syslog-mcp deployment.
+## cortex compose_status
+Read-only Docker Compose diagnostics for the canonical cortex deployment.
 The response is MCP-safe: host paths, image ids, mount sources, and raw command
 output are omitted.
 
@@ -1248,8 +1248,8 @@ output are omitted.
 
 ---
 
-## syslog compose_doctor
-Strict deployment-health check for the canonical syslog-mcp Compose deployment.
+## cortex compose_doctor
+Strict deployment-health check for the canonical cortex Compose deployment.
 Returns the same redacted diagnostic shape as `compose_status` when healthy, and
 returns a tool error when Docker/Compose ownership or runtime checks are not
 ready for lifecycle work. Lifecycle mutations remain CLI-only.
@@ -1258,7 +1258,7 @@ ready for lifecycle work. Lifecycle mutations remain CLI-only.
 
 ---
 
-## syslog unaddressed_errors
+## cortex unaddressed_errors
 List the top unacknowledged repeating error signatures — log message patterns
 that have been firing repeatedly without acknowledgement. Motivating case: an
 OTLP exporter POSTing to `/v1/metrics` every 10s, getting 404d, for 7 days
@@ -1273,7 +1273,7 @@ normalized template, sample message, severity, counts, and acknowledgement state
 
 ---
 
-## syslog notifications_recent
+## cortex notifications_recent
 List recent notification firings from the `notification_firings` table.
 
 **Parameters:**
@@ -1283,7 +1283,7 @@ List recent notification firings from the `notification_firings` table.
 
 ---
 
-## syslog similar_incidents
+## cortex similar_incidents
 
 Find historical incidents similar to a query. Groups FTS5-matched system log hits
 into time-windowed clusters by host+app_name. Returns ranked clusters (most
@@ -1303,7 +1303,7 @@ cluster has: `hostname`, `app_name`, `window_start`, `window_end`, `log_count`,
 
 ---
 
-## syslog ask_history
+## cortex ask_history
 
 Search AI session transcripts for past work related to a topic. Returns sessions
 ranked by match count with system log context from the top session's time window.
@@ -1320,7 +1320,7 @@ Response fields: `query`, `total_candidates`, `truncated`,
 
 ---
 
-## syslog incident_context
+## cortex incident_context
 
 Return full context for a known time window: log counts by severity and app,
 error-level log rows, and AI sessions active in that window. Useful for
@@ -1343,7 +1343,7 @@ Response fields: `window_from`, `window_to`, `total_logs`, `by_severity` (array)
         admin_action_help(),
         r#"---
 
-## syslog help
+## cortex help
 Returns this markdown documentation.
 
 **Parameters:** none

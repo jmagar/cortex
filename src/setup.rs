@@ -399,7 +399,7 @@ pub(crate) struct EnvResult {
 }
 
 pub fn syslog_home_dir() -> io::Result<PathBuf> {
-    if let Ok(value) = std::env::var("SYSLOG_MCP_HOME") {
+    if let Ok(value) = std::env::var("CORTEX_HOME") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
             return validate_absolute_home(PathBuf::from(trimmed));
@@ -407,7 +407,7 @@ pub fn syslog_home_dir() -> io::Result<PathBuf> {
     }
     let home =
         std::env::var("HOME").map_err(|_| io::Error::new(ErrorKind::NotFound, "HOME is unset"))?;
-    validate_absolute_home(PathBuf::from(home).join(".syslog-mcp"))
+    validate_absolute_home(PathBuf::from(home).join(".cortex"))
 }
 
 fn user_home_dir() -> io::Result<PathBuf> {
@@ -435,7 +435,7 @@ fn validate_absolute_home(path: PathBuf) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-fn resolve_syslog_binary() -> io::Result<PathBuf> {
+fn resolve_cortex_binary() -> io::Result<PathBuf> {
     let current = std::env::current_exe()?;
     let output = std::process::Command::new("sh")
         .args(["-c", "command -v syslog"])
@@ -446,7 +446,7 @@ fn resolve_syslog_binary() -> io::Result<PathBuf> {
             return validate_executable_path(PathBuf::from(path));
         }
     }
-    if current.file_name().and_then(|name| name.to_str()) == Some("syslog") {
+    if current.file_name().and_then(|name| name.to_str()) == Some("cortex") {
         return validate_executable_path(current);
     }
     Err(io::Error::new(
@@ -462,7 +462,7 @@ fn validate_executable_path(path: PathBuf) -> io::Result<PathBuf> {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             format!(
-                "refusing to install AI watch service with debug/worktree binary {}; put the syslog wrapper on PATH or set SYSLOG_AI_WATCH_ALLOW_DEBUG_BINARY=true",
+                "refusing to install AI watch service with debug/worktree binary {}; put the syslog wrapper on PATH or set CORTEX_AI_WATCH_ALLOW_DEBUG_BINARY=true",
                 canonical.display()
             ),
         ));
@@ -478,7 +478,7 @@ fn validate_executable_path(path: PathBuf) -> io::Result<PathBuf> {
 }
 
 fn allow_debug_binary() -> bool {
-    std::env::var("SYSLOG_AI_WATCH_ALLOW_DEBUG_BINARY")
+    std::env::var("CORTEX_AI_WATCH_ALLOW_DEBUG_BINARY")
         .ok()
         .is_some_and(|value| value.eq_ignore_ascii_case("true"))
 }
@@ -489,7 +489,7 @@ fn looks_like_debug_build_path(path: &Path) -> bool {
 }
 
 fn resolve_ai_watch_db_path(setup_home: &Path, user_home: &Path) -> io::Result<PathBuf> {
-    if let Ok(value) = std::env::var("SYSLOG_MCP_DB_PATH") {
+    if let Ok(value) = std::env::var("CORTEX_DB_PATH") {
         if !value.trim().is_empty() {
             return validate_db_path(PathBuf::from(value));
         }
@@ -497,11 +497,11 @@ fn resolve_ai_watch_db_path(setup_home: &Path, user_home: &Path) -> io::Result<P
     if let Some(path) = db_path_from_setup_env(&setup_home.join(".env"))? {
         return validate_db_path(path);
     }
-    let plugin_db = user_home.join(".claude/plugins/data/syslog-jmagar-lab/syslog.db");
+    let plugin_db = user_home.join(".claude/plugins/data/syslog-jmagar-lab/cortex.db");
     if plugin_db.exists() {
         return validate_db_path(plugin_db);
     }
-    validate_db_path(setup_home.join("data/syslog.db"))
+    validate_db_path(setup_home.join("data/cortex.db"))
 }
 
 fn validate_db_path(path: PathBuf) -> io::Result<PathBuf> {
@@ -535,20 +535,20 @@ fn db_path_from_setup_env(env_path: &Path) -> io::Result<Option<PathBuf>> {
         Err(error) => return Err(error),
     };
     let values = firstrun::parse_env(&raw);
-    if let Some(db_path) = values.get("SYSLOG_MCP_DB_PATH") {
-        if !db_path.trim().is_empty() && db_path != "/data/syslog.db" {
+    if let Some(db_path) = values.get("CORTEX_DB_PATH") {
+        if !db_path.trim().is_empty() && db_path != "/data/cortex.db" {
             return Ok(Some(PathBuf::from(db_path)));
         }
     }
     let uses_container_db_path = values
-        .get("SYSLOG_MCP_DB_PATH")
-        .is_some_and(|db_path| db_path == "/data/syslog.db");
-    let Some(data_volume) = values.get("SYSLOG_MCP_DATA_VOLUME") else {
+        .get("CORTEX_DB_PATH")
+        .is_some_and(|db_path| db_path == "/data/cortex.db");
+    let Some(data_volume) = values.get("CORTEX_DATA_VOLUME") else {
         if uses_container_db_path {
             return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 format!(
-                    "{} uses SYSLOG_MCP_DB_PATH=/data/syslog.db but does not set absolute SYSLOG_MCP_DATA_VOLUME",
+                    "{} uses CORTEX_DB_PATH=/data/cortex.db but does not set absolute CORTEX_DATA_VOLUME",
                     env_path.display()
                 ),
             ));
@@ -557,13 +557,13 @@ fn db_path_from_setup_env(env_path: &Path) -> io::Result<Option<PathBuf>> {
     };
     let volume_path = PathBuf::from(data_volume);
     if volume_path.is_absolute() {
-        return Ok(Some(volume_path.join("syslog.db")));
+        return Ok(Some(volume_path.join("cortex.db")));
     }
     if uses_container_db_path {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             format!(
-                "{} uses SYSLOG_MCP_DB_PATH=/data/syslog.db but SYSLOG_MCP_DATA_VOLUME is not absolute: {}",
+                "{} uses CORTEX_DB_PATH=/data/cortex.db but CORTEX_DATA_VOLUME is not absolute: {}",
                 env_path.display(),
                 data_volume
             ),

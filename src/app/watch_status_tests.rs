@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::app::os_adapter::OsAdapter;
-use crate::app::service::SyslogService;
+use crate::app::service::CortexService;
 use crate::app::{ServiceError, ServiceResult};
 use crate::config::StorageConfig;
 use crate::db::init_pool;
@@ -86,11 +86,11 @@ impl OsAdapter for MockPidOs {
     }
 }
 
-fn make_service(os: MockPidOs) -> SyslogService {
+fn make_service(os: MockPidOs) -> CortexService {
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("pid_test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
-    SyslogService::with_os_adapter(pool, storage, Arc::new(os))
+    CortexService::with_os_adapter(pool, storage, Arc::new(os))
 }
 
 struct FailingJournalOs;
@@ -134,7 +134,7 @@ async fn ai_watch_status_returns_journal_lines_from_os_adapter() {
         probe_stdout: b"active\n".to_vec(),
         probe_success: true,
     });
-    let service = SyslogService::with_os_adapter(pool, storage, os);
+    let service = CortexService::with_os_adapter(pool, storage, os);
 
     let report = service.ai_watch_status().await.unwrap();
 
@@ -151,7 +151,7 @@ async fn ai_watch_status_degrades_gracefully_when_journalctl_fails() {
     let storage = StorageConfig::for_test(dir.path().join("test2.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
     let os = Arc::new(FailingJournalOs);
-    let service = SyslogService::with_os_adapter(pool, storage, os);
+    let service = CortexService::with_os_adapter(pool, storage, os);
 
     let report = service.ai_watch_status().await.unwrap();
 
@@ -185,7 +185,7 @@ async fn ai_watch_status_health_is_some_with_valid_db() {
         probe_stdout: b"active\n".to_vec(),
         probe_success: true,
     });
-    let service = SyslogService::with_os_adapter(pool, storage, os);
+    let service = CortexService::with_os_adapter(pool, storage, os);
 
     let result = service.ai_watch_status().await;
     assert!(result.is_ok(), "ai_watch_status must never return Err");
@@ -217,7 +217,7 @@ async fn ai_watch_status_health_is_none_when_db_schema_broken() {
         probe_stdout: b"active\n".to_vec(),
         probe_success: true,
     });
-    let service = SyslogService::with_os_adapter(pool, storage, os);
+    let service = CortexService::with_os_adapter(pool, storage, os);
 
     let result = service.ai_watch_status().await;
     assert!(result.is_ok(), "ai_watch_status must never return Err");

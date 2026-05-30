@@ -1,20 +1,20 @@
-# Upstream Service Integration -- syslog-mcp
+# Upstream Service Integration -- cortex
 
 ## Self-contained architecture
 
-syslog-mcp has no upstream API dependency. Unlike other MCP servers that wrap an external service (Plex, Overseerr, Gotify), syslog-mcp **is** the service. It receives syslog messages directly via UDP/TCP, stores them in SQLite, and exposes them through MCP tools.
+cortex has no upstream API dependency. Unlike other MCP servers that wrap an external service (Plex, Overseerr, Gotify), cortex **is** the service. It receives syslog messages directly via UDP/TCP, stores them in SQLite, and exposes them through MCP tools.
 
 ```
                 No upstream API
                       ↓
-  Syslog sources ──▶ syslog-mcp ──▶ MCP clients
+  Syslog sources ──▶ cortex ──▶ MCP clients
   (rsyslog, UniFi,    (receiver +     (Claude Code,
    ATT router, etc.)   query server)   Codex, Gemini)
 ```
 
 ## Inbound data sources
 
-Instead of an upstream API, syslog-mcp receives data from syslog sources:
+Instead of an upstream API, cortex receives data from syslog sources:
 
 | Source | Protocol | Configuration |
 | --- | --- | --- |
@@ -46,7 +46,7 @@ All query parameters are SQL-parameterized. FTS5 queries use their own DSL (not 
 
 ## No outbound credentials
 
-syslog-mcp reads no `_URL`, `_API_KEY`, or similar environment variables for upstream connectivity. The only credential is the optional `SYSLOG_MCP_TOKEN` for inbound MCP authentication.
+cortex reads no `_URL`, `_API_KEY`, or similar environment variables for upstream connectivity. The only credential is the optional `CORTEX_TOKEN` for inbound MCP authentication.
 
 ## Cross-references
 

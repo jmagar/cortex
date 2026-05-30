@@ -52,7 +52,7 @@ fn command_args_to_shell_command_quotes_multi_arg_invocations() {
 #[test]
 fn agent_command_ingest_spool_guard_is_argv_scoped() {
     assert!(is_agent_command_ingest_spool_invocation(&[
-        "/usr/local/bin/syslog".to_string(),
+        "/usr/local/bin/cortex".to_string(),
         "agent-command".to_string(),
         "ingest-spool".to_string(),
         "--path".to_string(),
@@ -63,7 +63,7 @@ fn agent_command_ingest_spool_guard_is_argv_scoped() {
         "agent-command ingest-spool".to_string(),
     ]));
     assert!(!is_agent_command_ingest_spool_invocation(&[
-        "syslog".to_string(),
+        "cortex".to_string(),
         "agent-command ingest-spool".to_string(),
     ]));
 }
@@ -91,21 +91,21 @@ fn wrapper_executes_multi_arg_commands_without_shell_reparse() {
     let spool = spool_dir.join("agent-command.jsonl");
     std::fs::write(
         &fake_shell,
-        "#!/bin/sh\nprintf shell-used >\"$SYSLOG_TEST_ARG_OUT\"\nexit 97\n",
+        "#!/bin/sh\nprintf shell-used >\"$CORTEX_TEST_ARG_OUT\"\nexit 97\n",
     )
     .unwrap();
     std::fs::set_permissions(&fake_shell, std::fs::Permissions::from_mode(0o755)).unwrap();
     let previous_shell = std::env::var_os("SHELL");
-    let previous_out = std::env::var_os("SYSLOG_TEST_ARG_OUT");
+    let previous_out = std::env::var_os("CORTEX_TEST_ARG_OUT");
     std::env::set_var("SHELL", &fake_shell);
-    std::env::set_var("SYSLOG_TEST_ARG_OUT", &arg_out);
+    std::env::set_var("CORTEX_TEST_ARG_OUT", &arg_out);
 
     let exit_code = run_agent_command_wrapper(
         &spool,
         &[
             "/bin/sh".to_string(),
             "-c".to_string(),
-            "printf '%s\\n%s\\n%s\\n' \"$#\" \"$1\" \"$2\" >\"$SYSLOG_TEST_ARG_OUT\"".to_string(),
+            "printf '%s\\n%s\\n%s\\n' \"$#\" \"$1\" \"$2\" >\"$CORTEX_TEST_ARG_OUT\"".to_string(),
             "sh".to_string(),
             "two words".to_string(),
             "literal;not-shell".to_string(),
@@ -118,8 +118,8 @@ fn wrapper_executes_multi_arg_commands_without_shell_reparse() {
         None => std::env::remove_var("SHELL"),
     }
     match previous_out {
-        Some(value) => std::env::set_var("SYSLOG_TEST_ARG_OUT", value),
-        None => std::env::remove_var("SYSLOG_TEST_ARG_OUT"),
+        Some(value) => std::env::set_var("CORTEX_TEST_ARG_OUT", value),
+        None => std::env::remove_var("CORTEX_TEST_ARG_OUT"),
     }
     assert_eq!(exit_code, 0);
     assert_eq!(
@@ -131,7 +131,7 @@ fn wrapper_executes_multi_arg_commands_without_shell_reparse() {
 #[test]
 fn imports_zsh_history_as_shell_history_rows() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("syslog.db");
+    let db_path = dir.path().join("cortex.db");
     let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
     let history = dir.path().join(".zsh_history");
     std::fs::write(
@@ -173,7 +173,7 @@ fn imports_zsh_history_as_shell_history_rows() {
 #[test]
 fn imports_zsh_history_from_saved_offset() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("syslog.db");
+    let db_path = dir.path().join("cortex.db");
     let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
     let history = dir.path().join(".zsh_history");
     let state = dir.path().join("shell-state.json");
@@ -210,7 +210,7 @@ fn imports_zsh_history_from_saved_offset() {
 #[test]
 fn imports_atuin_history_as_shell_history_rows() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("syslog.db");
+    let db_path = dir.path().join("cortex.db");
     let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
     let atuin = dir.path().join("history.db");
     let conn = rusqlite::Connection::open(&atuin).unwrap();
@@ -279,7 +279,7 @@ fn imports_atuin_history_as_shell_history_rows() {
 #[test]
 fn imports_atuin_history_from_saved_timestamp_cursor() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("syslog.db");
+    let db_path = dir.path().join("cortex.db");
     let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
     let atuin = dir.path().join("history.db");
     let state = dir.path().join("atuin-state.json");
@@ -328,7 +328,7 @@ fn imports_atuin_history_from_saved_timestamp_cursor() {
 #[test]
 fn imports_agent_spool_as_agent_command_rows() {
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("syslog.db");
+    let db_path = dir.path().join("cortex.db");
     let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
     let spool_dir = dir.path().join("private-state");
     std::fs::create_dir(&spool_dir).unwrap();

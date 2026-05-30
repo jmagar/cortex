@@ -246,7 +246,7 @@ fn build_entries_extracts_ai_metadata_from_attributes() {
                     body: Some(av_string("msg with log-level attributes")),
                     attributes: vec![
                         kv("session.id", av_string("log-session-456")), // overrides resource
-                        kv("project.path", av_string("/work/syslog-mcp")),
+                        kv("project.path", av_string("/work/cortex")),
                         kv("Authorization", av_string("Bearer secret")),
                     ],
                     dropped_attributes_count: 0,
@@ -268,7 +268,7 @@ fn build_entries_extracts_ai_metadata_from_attributes() {
     assert_eq!(e.app_name.as_deref(), Some("claude-code"));
     assert_eq!(e.ai_tool, None);
     assert_eq!(e.ai_session_id.as_deref(), Some("log-session-456"));
-    assert_eq!(e.ai_project.as_deref(), Some("/work/syslog-mcp"));
+    assert_eq!(e.ai_project.as_deref(), Some("/work/cortex"));
 
     let metadata: serde_json::Value =
         serde_json::from_str(e.metadata_json.as_deref().unwrap()).unwrap();

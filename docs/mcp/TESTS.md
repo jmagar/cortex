@@ -1,4 +1,4 @@
-# Testing Guide -- syslog-mcp
+# Testing Guide -- cortex
 
 ## Unit tests
 
@@ -32,7 +32,7 @@ Database tests use `tempfile::TempDir` for isolated SQLite instances. Each test 
 
 ## Live smoke tests
 
-Live tests run against a running syslog-mcp server:
+Live tests run against a running cortex server:
 
 ```bash
 just test-live
@@ -49,7 +49,7 @@ rows, not just empty response envelopes.
 `scripts/smoke-ai-mcp.sh` additionally seeds a temporary transcript and calls
 the HTTP MCP endpoint for `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `usage_blocks`,
 `project_context`, `list_ai_tools`, and `list_ai_projects`.
-The AI smoke scripts resolve `SYSLOG_BIN` first, then `syslog` on `PATH`, then
+The AI smoke scripts resolve `CORTEX_BIN` first, then `syslog` on `PATH`, then
 the repo-local debug binary at `target/debug/syslog`, so repo-local builds do
 not require an installed shell binary.
 
@@ -77,7 +77,7 @@ mcporter call --config config/mcporter.json syslog.syslog action=hosts
 mcporter call --config config/mcporter.json syslog.syslog action=host_state host_id=host-id
 mcporter call --config config/mcporter.json syslog.syslog action=sessions
 mcporter call --config config/mcporter.json syslog.syslog action=abuse terms=ai-smoke-authentication limit=5
-mcporter call --config config/mcporter.json syslog.syslog action=ai_correlate project=/tmp/syslog-mcp-ai-smoke limit=2 events_per_anchor=3
+mcporter call --config config/mcporter.json syslog.syslog action=ai_correlate project=/tmp/cortex-ai-smoke limit=2 events_per_anchor=3
 mcporter call --config config/mcporter.json syslog.syslog action=apps
 mcporter call --config config/mcporter.json syslog.syslog action=source_ips
 mcporter call --config config/mcporter.json syslog.syslog action=timeline

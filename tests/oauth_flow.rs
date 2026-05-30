@@ -8,9 +8,9 @@ use axum::{
     body::to_bytes,
     http::{header, Request, StatusCode},
 };
+use cortex::{mcp::router, testing};
 use lab_auth::jwt::AccessClaims;
 use lab_auth::metadata::canonical_resource_url;
-use syslog_mcp::{mcp::router, testing};
 use tempfile::TempDir;
 use tower::util::ServiceExt;
 
@@ -77,7 +77,7 @@ async fn post_mcp(
 }
 
 fn stats_call() -> serde_json::Value {
-    serde_json::json!({ "name": "syslog", "arguments": { "action": "stats" } })
+    serde_json::json!({ "name": "cortex", "arguments": { "action": "stats" } })
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -193,7 +193,7 @@ async fn jwt_with_empty_scope_is_denied_at_scope_check() {
     );
 }
 
-/// `tools/list` with valid JWT → 200 and syslog tool present.
+/// `tools/list` with valid JWT → 200 and cortex tool present.
 /// Tool discovery does not require any specific scope — only an AuthContext.
 #[tokio::test]
 async fn tools_list_succeeds_with_valid_jwt() {
@@ -212,8 +212,8 @@ async fn tools_list_succeeds_with_valid_jwt() {
     );
     let tools = value["result"]["tools"].as_array();
     assert!(
-        tools.is_some_and(|t| t.iter().any(|tool| tool["name"] == "syslog")),
-        "tools/list must return the syslog tool"
+        tools.is_some_and(|t| t.iter().any(|tool| tool["name"] == "cortex")),
+        "tools/list must return the cortex tool"
     );
 }
 

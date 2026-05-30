@@ -1,4 +1,4 @@
-# cargo-deny configuration for syslog-mcp
+# cargo-deny configuration for cortex
 # Run: cargo deny check
 # Docs: https://embarkstudios.github.io/cargo-deny/
 

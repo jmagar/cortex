@@ -4,32 +4,32 @@
 
 Contract derived from `src/config.rs` (`storage.db_path`, `mcp.auth.sqlite_path`, `mcp.auth.key_path` and their resolution rules), `src/runtime.rs::build_auth_policy` + `enforce_restrictive_permissions` (file-mode enforcement for the auth files), `docker-compose.yml` (UID/GID + bind-mount), `Dockerfile` (container UID), and the agent design spec at `docs/superpowers/specs/2026-05-16-agent-mode-design.md` (agent-side files).
 
-Goal: an operator should be able to back up, restore, move, audit secrets, and reason about filesystem permissions for `syslog-mcp` without surprise. Companion contracts: `docs/contracts/config-schema.md` (the knobs that name these files), `docs/contracts/runtime-lifecycle.md` (when files are opened, closed, and what crash safety guarantees apply).
+Goal: an operator should be able to back up, restore, move, audit secrets, and reason about filesystem permissions for `cortex` without surprise. Companion contracts: `docs/contracts/config-schema.md` (the knobs that name these files), `docs/contracts/runtime-lifecycle.md` (when files are opened, closed, and what crash safety guarantees apply).
 
 ## 2. Logical layout
 
-The "data directory" is the **parent directory of `[storage].db_path`**. With the default `db_path = /data/syslog.db`, the data dir is `/data`. All auth files default to **relative** paths and `src/runtime.rs::resolve_auth_path` joins them to this parent, so a single `/data` bind-mount captures every stateful file the server writes.
+The "data directory" is the **parent directory of `[storage].db_path`**. With the default `db_path = /data/cortex.db`, the data dir is `/data`. All auth files default to **relative** paths and `src/runtime.rs::resolve_auth_path` joins them to this parent, so a single `/data` bind-mount captures every stateful file the server writes.
 
 ```
-<DATA_DIR>/                       # default: /data (container) or ${SYSLOG_MCP_DATA_VOLUME}
-├── syslog.db                     # primary SQLite DB (logs + FTS5)
-├── syslog.db-wal                 # WAL sidecar — transient
-├── syslog.db-shm                 # shared-memory sidecar — transient
+<DATA_DIR>/                       # default: /data (container) or ${CORTEX_DATA_VOLUME}
+├── cortex.db                     # primary SQLite DB (logs + FTS5)
+├── cortex.db-wal                 # WAL sidecar — transient
+├── cortex.db-shm                 # shared-memory sidecar — transient
 ├── auth.db                       # OAuth state (only when auth.mode = oauth)  — SECRET
 ├── auth.db-wal                   # WAL sidecar for auth.db — transient
 ├── auth.db-shm                   # shared-memory sidecar for auth.db — transient
 └── auth-jwt.pem                  # JWT signing private key (PEM)  — SECRET
 ```
 
-**No log files live here.** All ingested log records are stored *inside* `syslog.db`. The data dir contains only the DB and auth state; this is a deliberate property of the design so a single mount is the entire backup surface.
+**No log files live here.** All ingested log records are stored *inside* `cortex.db`. The data dir contains only the DB and auth state; this is a deliberate property of the design so a single mount is the entire backup surface.
 
 ### Agent hosts (Epic A — planned)
 
 On each fleet host running the agent binary (separate from the server), the agent stores its own state under `$XDG_STATE_HOME` / `$XDG_CONFIG_HOME`:
 
 ```
-~/.config/syslog-mcp/agent-token             # long-lived auth token        — SECRET, 0600
-~/.local/state/syslog-mcp/agent-buffer.redb  # local replay buffer (redb)   — bounded; safe to delete
+~/.config/cortex/agent-token             # long-lived auth token        — SECRET, 0600
+~/.local/state/cortex/agent-buffer.redb  # local replay buffer (redb)   — bounded; safe to delete
 ```
 
 These are agent-side files; the server data dir does **not** contain them.
@@ -38,17 +38,17 @@ These are agent-side files; the server data dir does **not** contain them.
 
 | Path | Owner | Required mode | Required UID | Sensitivity | Notes |
 |---|---|---|---|---|---|
-| `<DATA_DIR>/` | server | `0700` (recommended) or `0755` | `${SYSLOG_UID}:${SYSLOG_GID}` (default `1000:1000`) | mixed (contains secrets) | Created by the operator before container start. |
-| `<DATA_DIR>/syslog.db` | SQLite via SQLx | `0600` (recommended); writable by runtime UID | runtime UID | **non-secret** under the V1 threat model — message text and ingest metadata only | No application-level encryption. Treat as confidential if your logs contain credentials (use `[enrichment].scrub_prompts` for AI-source records). |
-| `<DATA_DIR>/syslog.db-wal` | SQLite | inherited from `syslog.db` | runtime UID | transient | Created on first WAL transaction. Auto-rebuilt if deleted while server is stopped. |
-| `<DATA_DIR>/syslog.db-shm` | SQLite | inherited | runtime UID | transient | Memory-mapped; never grows large. |
+| `<DATA_DIR>/` | server | `0700` (recommended) or `0755` | `${CORTEX_UID}:${CORTEX_GID}` (default `1000:1000`) | mixed (contains secrets) | Created by the operator before container start. |
+| `<DATA_DIR>/cortex.db` | SQLite via SQLx | `0600` (recommended); writable by runtime UID | runtime UID | **non-secret** under the V1 threat model — message text and ingest metadata only | No application-level encryption. Treat as confidential if your logs contain credentials (use `[enrichment].scrub_prompts` for AI-source records). |
+| `<DATA_DIR>/cortex.db-wal` | SQLite | inherited from `cortex.db` | runtime UID | transient | Created on first WAL transaction. Auto-rebuilt if deleted while server is stopped. |
+| `<DATA_DIR>/cortex.db-shm` | SQLite | inherited | runtime UID | transient | Memory-mapped; never grows large. |
 | `<DATA_DIR>/auth.db` | lab-auth via SQLx | **`0600` enforced** (`src/runtime.rs::enforce_restrictive_permissions`) | runtime UID | **SECRET** | Contains issued OAuth tokens / sessions. Created only when `auth.mode = oauth`. |
 | `<DATA_DIR>/auth.db-wal`, `auth.db-shm` | lab-auth | inherited | runtime UID | **SECRET (transient)** | Same as syslog WAL/SHM. |
 | `<DATA_DIR>/auth-jwt.pem` | lab-auth | **`0600` enforced** | runtime UID | **SECRET — most sensitive file** | JWT signing private key. Losing this invalidates all issued tokens. Compromising this lets an attacker forge tokens. |
-| `~/.syslog-mcp/.env` (on the operator account, not under DATA_DIR) | `syslog setup` | `0600` written by setup | operator user | **SECRET** (contains tokens, OAuth secret) | Read by `src/config.rs::load_setup_env_file`. Refused if it is a symlink. |
-| `~/.syslog-mcp/config.toml` | operator-edited | `0600` recommended | operator user | mixed | Layered before env per config-schema §2. |
-| Agent host: `~/.config/syslog-mcp/agent-token` | agent binary | **`0600`** | agent UID | **SECRET** | Long-lived bearer-equivalent. Replace immediately after `syslog agent rotate`. |
-| Agent host: `~/.local/state/syslog-mcp/agent-buffer.redb` | agent binary | `0600` recommended | agent UID | **possibly SECRET** (cached log lines) | Bounded local replay buffer; size-capped by agent config. |
+| `~/.cortex/.env` (on the operator account, not under DATA_DIR) | `syslog setup` | `0600` written by setup | operator user | **SECRET** (contains tokens, OAuth secret) | Read by `src/config.rs::load_setup_env_file`. Refused if it is a symlink. |
+| `~/.cortex/config.toml` | operator-edited | `0600` recommended | operator user | mixed | Layered before env per config-schema §2. |
+| Agent host: `~/.config/cortex/agent-token` | agent binary | **`0600`** | agent UID | **SECRET** | Long-lived bearer-equivalent. Replace immediately after `syslog agent rotate`. |
+| Agent host: `~/.local/state/cortex/agent-buffer.redb` | agent binary | `0600` recommended | agent UID | **possibly SECRET** (cached log lines) | Bounded local replay buffer; size-capped by agent config. |
 
 ### Path resolution rules (server side)
 
@@ -62,8 +62,8 @@ Pulled from `docker-compose.yml` and the `Dockerfile`.
 
 | Variable | Default | Where set | Effect |
 |---|---|---|---|
-| `SYSLOG_UID` | `1000` | Compose `user:` line | Numeric UID the process runs as inside the container. |
-| `SYSLOG_GID` | `1000` | Compose `user:` line | Numeric GID. |
+| `CORTEX_UID` | `1000` | Compose `user:` line | Numeric UID the process runs as inside the container. |
+| `CORTEX_GID` | `1000` | Compose `user:` line | Numeric GID. |
 
 - **The data dir MUST be owned by the chosen UID before container start.** The container has no `chown`-on-startup step (and shouldn't — running as root for that purpose defeats the unprivileged-user posture).
 - **WSL gotcha.** Bind-mounted Linux volumes from a Windows host may appear with `uid=0 gid=0` regardless of the host UID. Symptom: SQLite startup fails with `unable to open database file`. Fix on the host before first run:
@@ -71,7 +71,7 @@ Pulled from `docker-compose.yml` and the `Dockerfile`.
   sudo chown -R 1000:1000 ./data
   sudo chmod 0700 ./data
   ```
-- **Bare-metal systemd deployments** (`use_docker = false`): the systemd unit runs as the operator user; `<DATA_DIR>` is typically `$XDG_DATA_HOME/syslog-mcp` and is already owned by that UID, so the WSL gotcha does not apply.
+- **Bare-metal systemd deployments** (`use_docker = false`): the systemd unit runs as the operator user; `<DATA_DIR>` is typically `$XDG_DATA_HOME/cortex` and is already owned by that UID, so the WSL gotcha does not apply.
 
 ## 5. Backup procedure (normative)
 
@@ -79,11 +79,11 @@ The data dir is the entire stateful surface. Backing it up is sufficient and nec
 
 ### Online (server running)
 
-Use SQLite's online backup API. **Do NOT `cp syslog.db` while the server is running** — that captures an inconsistent WAL snapshot that may fail to open or silently drop recent writes.
+Use SQLite's online backup API. **Do NOT `cp cortex.db` while the server is running** — that captures an inconsistent WAL snapshot that may fail to open or silently drop recent writes.
 
 ```bash
 # Logs DB
-sqlite3 /data/syslog.db ".backup /backup/syslog-$(date +%F).db"
+sqlite3 /data/cortex.db ".backup /backup/syslog-$(date +%F).db"
 
 # Auth DB (only when auth.mode = oauth)
 sqlite3 /data/auth.db ".backup /backup/auth-$(date +%F).db"
@@ -92,7 +92,7 @@ sqlite3 /data/auth.db ".backup /backup/auth-$(date +%F).db"
 install -m 0600 /data/auth-jwt.pem /backup/auth-jwt-$(date +%F).pem
 ```
 
-The bundled CLI exposes the same operation: `syslog db backup --output /backup/syslog.db` calls SQLite's backup API under the hood.
+The bundled CLI exposes the same operation: `syslog db backup --output /backup/cortex.db` calls SQLite's backup API under the hood.
 
 ### Offline (server stopped)
 
@@ -100,13 +100,13 @@ After a graceful `syslog compose down` (or `systemctl stop`):
 
 ```bash
 # WAL/SHM sidecars may be absent after a clean shutdown — use cp with fallback
-BACKUP=/backup/syslog-mcp-$(date +%F)
+BACKUP=/backup/cortex-$(date +%F)
 mkdir -p "$BACKUP"
-cp /data/syslog.db "$BACKUP/syslog.db"
+cp /data/cortex.db "$BACKUP/cortex.db"
 cp /data/auth-jwt.pem "$BACKUP/auth-jwt.pem" 2>/dev/null || true
 cp /data/auth.db "$BACKUP/auth.db" 2>/dev/null || true
-(cp /data/syslog.db-wal "$BACKUP/syslog.db-wal" 2>/dev/null || true)
-(cp /data/syslog.db-shm "$BACKUP/syslog.db-shm" 2>/dev/null || true)
+(cp /data/cortex.db-wal "$BACKUP/cortex.db-wal" 2>/dev/null || true)
+(cp /data/cortex.db-shm "$BACKUP/cortex.db-shm" 2>/dev/null || true)
 (cp /data/auth.db-wal   "$BACKUP/auth.db-wal"   2>/dev/null || true)
 (cp /data/auth.db-shm   "$BACKUP/auth.db-shm"   2>/dev/null || true)
 tar -czf "$BACKUP.tar.gz" -C "$(dirname "$BACKUP")" "$(basename "$BACKUP")"
@@ -117,15 +117,15 @@ Include the `-wal` and `-shm` sidecars when offline — together they form one c
 
 ### What to back up if OAuth is configured
 
-`auth.db` + `auth-jwt.pem` **must** be backed up alongside `syslog.db` when `auth.mode = oauth`. Losing the JWT key alone invalidates every issued token; losing the DB alone invalidates every active session. Losing both is recoverable only by re-running OAuth onboarding for every user.
+`auth.db` + `auth-jwt.pem` **must** be backed up alongside `cortex.db` when `auth.mode = oauth`. Losing the JWT key alone invalidates every issued token; losing the DB alone invalidates every active session. Losing both is recoverable only by re-running OAuth onboarding for every user.
 
 ## 6. Restore procedure
 
-1. **Stop the server** (`syslog compose down` or `systemctl stop syslog-mcp`). Restoring under a running process risks corrupting the SQLite WAL handshake.
-2. **Place files** into `<DATA_DIR>` at the same names. For an online-backup restore, only `syslog.db` (and `auth.db` if applicable) need be present — the WAL/SHM sidecars are auto-rebuilt on first connection.
+1. **Stop the server** (`syslog compose down` or `systemctl stop cortex`). Restoring under a running process risks corrupting the SQLite WAL handshake.
+2. **Place files** into `<DATA_DIR>` at the same names. For an online-backup restore, only `cortex.db` (and `auth.db` if applicable) need be present — the WAL/SHM sidecars are auto-rebuilt on first connection.
 3. **Verify ownership and modes**:
    ```bash
-   chown -R ${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000} /data
+   chown -R ${CORTEX_UID:-1000}:${CORTEX_GID:-1000} /data
    chmod 0600 /data/auth.db   /data/auth-jwt.pem  # if OAuth
    ```
 4. **Start the server.** It will replay any WAL present, rebuild SHM, and apply pending schema migrations.
@@ -135,9 +135,9 @@ Include the `-wal` and `-shm` sidecars when offline — together they form one c
 
 | File | Safe to delete while running? | Safe to delete while stopped? | Effect |
 |---|---|---|---|
-| `syslog.db` | **No** | **No (data loss)** | Deletes every ingested log. Schema is recreated on next start; the resulting DB is empty. |
-| `syslog.db-wal` | **No** (active transactions held here) | **Yes** | Stopped: WAL is rebuilt on next start. Running: corrupts in-flight transactions. |
-| `syslog.db-shm` | **No** (memory-mapped) | **Yes** | Same as WAL. |
+| `cortex.db` | **No** | **No (data loss)** | Deletes every ingested log. Schema is recreated on next start; the resulting DB is empty. |
+| `cortex.db-wal` | **No** (active transactions held here) | **Yes** | Stopped: WAL is rebuilt on next start. Running: corrupts in-flight transactions. |
+| `cortex.db-shm` | **No** (memory-mapped) | **Yes** | Same as WAL. |
 | `auth.db` | **No** (active sessions held) | **Yes** | All OAuth sessions invalidated. Users must re-authenticate via Google; refresh tokens stop working. |
 | `auth.db-wal` / `auth.db-shm` | **No** | **Yes** | Same WAL/SHM rules as syslog. |
 | `auth-jwt.pem` | **No** (signing key in active use) | **Yes (regenerates on start)** | Catastrophic: **all** issued OAuth access tokens AND refresh tokens become unverifiable. Forces every user to re-authenticate. lab-auth regenerates a new key on next start. |
@@ -150,12 +150,12 @@ To migrate the data dir to a new disk / host while preserving every byte:
 
 1. **Stop the server** on the source host.
 2. **Copy preserving mode/ownership**: `rsync -aAX /data/ <new-mount>/data/`. Verify `auth.db` and `auth-jwt.pem` retain mode `0600` and owner `1000:1000` post-copy (`stat -c '%a %U:%G %n' …`).
-3. **Update `storage.db_path`** (and any absolute `mcp.auth.*_path` values) if the new mount lives at a different path. For Compose deployments, this is usually unchanged — only `SYSLOG_MCP_DATA_VOLUME` (the host-side bind) moves.
+3. **Update `storage.db_path`** (and any absolute `mcp.auth.*_path` values) if the new mount lives at a different path. For Compose deployments, this is usually unchanged — only `CORTEX_DATA_VOLUME` (the host-side bind) moves.
 4. **Update Compose**: change the `volumes:` source to the new bind path or named volume. Leave the in-container `/data` target alone.
 5. **Start the server.** Confirm `/health` returns 200 and `syslog db integrity` passes.
 6. **Optionally retain the old mount** for one retention period before deleting, in case the new disk is itself faulty.
 
-Cross-host moves additionally require ensuring the new host's UID `1000` (or whatever `SYSLOG_UID` is set to) owns the data. The WSL gotcha (§4) applies to fresh host installs.
+Cross-host moves additionally require ensuring the new host's UID `1000` (or whatever `CORTEX_UID` is set to) owns the data. The WSL gotcha (§4) applies to fresh host installs.
 
 ## 9. Storage budget — what determines max disk usage
 

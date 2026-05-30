@@ -1,12 +1,12 @@
-# MCP Elicitation -- syslog-mcp
+# MCP Elicitation -- cortex
 
 ## Overview
 
-Elicitation is an MCP protocol capability that allows servers to request information from users interactively. syslog-mcp does not use elicitation.
+Elicitation is an MCP protocol capability that allows servers to request information from users interactively. cortex does not use elicitation.
 
 ## Why no elicitation
 
-syslog-mcp is a self-contained syslog receiver with no interactive first-run prompts. There are no upstream credentials to collect via MCP elicitation. All configuration is handled via environment variables, `config.toml`, and plugin `userConfig`.
+cortex is a self-contained syslog receiver with no interactive first-run prompts. There are no upstream credentials to collect via MCP elicitation. All configuration is handled via environment variables, `config.toml`, and plugin `userConfig`.
 
 Most MCP actions are read-only and require `syslog:read` when auth is mounted. A small set of state-changing/admin actions exists:
 
@@ -18,7 +18,7 @@ Those actions require `syslog:admin`; they do not use elicitation confirmation g
 
 ## Configuration entry points
 
-Instead of elicitation, syslog-mcp uses:
+Instead of elicitation, cortex uses:
 
 | Method | Purpose |
 | --- | --- |

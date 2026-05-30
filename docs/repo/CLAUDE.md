@@ -1,4 +1,4 @@
-# Repository Documentation -- syslog-mcp
+# Repository Documentation -- cortex
 
 Reference documentation for the repository structure, conventions, and tooling.
 

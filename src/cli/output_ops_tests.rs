@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn ensure_command_success_accepts_zero_exit_without_timeout() {
-    let output = syslog_mcp::compose::CommandOutput {
+    let output = cortex::compose::CommandOutput {
         exit_status: Some(0),
         stdout: String::new(),
         stderr: String::new(),
@@ -17,7 +17,7 @@ fn ensure_command_success_accepts_zero_exit_without_timeout() {
 
 #[test]
 fn ensure_command_success_reports_failed_status_and_stderr() {
-    let output = syslog_mcp::compose::CommandOutput {
+    let output = cortex::compose::CommandOutput {
         exit_status: Some(1),
         stdout: String::new(),
         stderr: "bad compose".to_string(),

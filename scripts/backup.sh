@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# backup.sh — WAL-safe SQLite backup for syslog-mcp
+# backup.sh — WAL-safe SQLite backup for cortex
 #
 # Usage:
 #   bash scripts/backup.sh [/path/to/backup/dir]
@@ -11,11 +11,11 @@
 #   auth-jwt-YYYY-MM-DD-HHMMSS.pem     — RSA signing key (if present)
 #
 # Schedule via cron:
-#   0 */6 * * * cd /path/to/syslog-mcp && bash scripts/backup.sh
+#   0 */6 * * * cd /path/to/cortex && bash scripts/backup.sh
 
 set -euo pipefail
 
-DB_PATH="${SYSLOG_MCP_DB_PATH:-./data/syslog.db}"
+DB_PATH="${CORTEX_DB_PATH:-./data/cortex.db}"
 BACKUP_DIR="${1:-./backups}"
 TIMESTAMP=$(date -u +%Y-%m-%d-%H%M%S)
 BACKUP_FILE="${BACKUP_DIR}/syslog-${TIMESTAMP}.db"
@@ -46,14 +46,14 @@ echo "Backup complete: ${BACKUP_FILE} (${SIZE})"
 
 # --- Auth state backup --------------------------------------------------------
 # auth.db is a separate SQLite store managed by lab-auth. Use the same
-# `.backup` (online, WAL-safe) approach so a running syslog-mcp doesn't need
+# `.backup` (online, WAL-safe) approach so a running cortex doesn't need
 # to be stopped to capture a consistent OAuth state snapshot.
 if [[ -f "$AUTH_DB_PATH" ]]; then
     AUTH_BACKUP_FILE="${BACKUP_DIR}/auth-${TIMESTAMP}.db"
     ESCAPED_AUTH_BACKUP="${AUTH_BACKUP_FILE//\'/\'\'}"
     # Best-effort checkpoint before backup. The .backup command is already
     # WAL-safe; this just keeps the WAL trimmed. We tolerate failure (e.g.
-    # SQLITE_BUSY while syslog-mcp is writing) because .backup will still
+    # SQLITE_BUSY while cortex is writing) because .backup will still
     # produce a consistent snapshot.
     sqlite3 "$AUTH_DB_PATH" "PRAGMA wal_checkpoint(FULL);" >/dev/null 2>&1 \
         || echo "Auth DB WAL checkpoint skipped (busy); .backup will still be consistent"

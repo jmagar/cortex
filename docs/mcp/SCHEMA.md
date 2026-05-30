@@ -1,4 +1,4 @@
-# Tool Schema Documentation -- syslog-mcp
+# Tool Schema Documentation -- cortex
 
 ## Source Of Truth
 
@@ -19,7 +19,7 @@ wins.
 
 ## Current Actions
 
-syslog-mcp exposes one MCP tool named `syslog`. The required `action` argument
+cortex exposes one MCP tool named `syslog`. The required `action` argument
 selects one of these 42 actions:
 
 | Action | Scope | Cost | Purpose |
@@ -74,7 +74,7 @@ The runtime tool definition is a flat action-dispatched JSON schema:
 ```json
 {
   "name": "syslog",
-  "description": "Query syslog-mcp logs with action-based subcommands...",
+  "description": "Query cortex logs with action-based subcommands...",
   "x-syslog-action-metadata": [
     { "name": "search", "cost": "cheap", "description": "..." }
   ],

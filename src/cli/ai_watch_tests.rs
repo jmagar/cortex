@@ -1,5 +1,5 @@
 use super::*;
-use syslog_mcp::scanner::{AiDoctorReport, TranscriptRootStatus};
+use cortex::scanner::{AiDoctorReport, TranscriptRootStatus};
 
 #[test]
 fn smoke_watch_target_prefers_writable_claude_root() {
@@ -20,7 +20,7 @@ fn smoke_watch_target_prefers_writable_claude_root() {
 
 fn doctor_with_roots(claude_path: String, codex_path: String) -> AiDoctorReport {
     AiDoctorReport {
-        db_path: "syslog.db".to_string(),
+        db_path: "cortex.db".to_string(),
         db_schema_version: 1,
         db_last_migration_at: None,
         known_schema_version: 1,

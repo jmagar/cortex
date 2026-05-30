@@ -1,6 +1,6 @@
-# Output Style Definitions -- syslog-mcp
+# Output Style Definitions -- cortex
 
-syslog-mcp does not define custom output styles. Tool responses are returned as JSON text content blocks, which MCP clients render according to their own formatting preferences.
+cortex does not define custom output styles. Tool responses are returned as JSON text content blocks, which MCP clients render according to their own formatting preferences.
 
 ## Response format
 

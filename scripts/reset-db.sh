@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# reset-db.sh — WAL-safe backup + destructive SQLite reset for syslog-mcp
+# reset-db.sh — WAL-safe backup + destructive SQLite reset for cortex
 #
 # Usage:
 #   bash scripts/reset-db.sh
@@ -8,7 +8,7 @@
 #   bash scripts/reset-db.sh --include-auth   # ALSO wipe auth.db + auth-jwt.pem
 #
 # Default backup dir: ./backups/
-# Default DB path: ${SYSLOG_MCP_DB_PATH:-./data/syslog.db}
+# Default DB path: ${CORTEX_DB_PATH:-./data/cortex.db}
 #
 # By default this script ONLY touches the syslog log database. Auth state
 # (auth.db + auth-jwt.pem) is NEVER deleted unless `--include-auth` is passed.
@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-DB_PATH="${SYSLOG_MCP_DB_PATH:-./data/syslog.db}"
+DB_PATH="${CORTEX_DB_PATH:-./data/cortex.db}"
 BACKUP_DIR="./backups"
 FORCE=0
 INCLUDE_AUTH=0
@@ -42,7 +42,7 @@ Options:
   --help            Show this help text
 
 Environment:
-  SYSLOG_MCP_DB_PATH   SQLite syslog database path (default: ./data/syslog.db)
+  CORTEX_DB_PATH   SQLite syslog database path (default: ./data/cortex.db)
 
 Auth artifact paths (auth.db, auth-jwt.pem) come from [mcp.auth].sqlite_path and
 [mcp.auth].key_path in config.toml (resolved relative to the syslog DB directory).
@@ -50,7 +50,7 @@ Defaults below match the out-of-the-box config.toml values; set AUTH_DB_PATH or
 AUTH_KEY_PATH in your environment to override if you changed them in config.toml.
 
 Important:
-  Stop the syslog-mcp service before running this reset. The backup step is
+  Stop the cortex service before running this reset. The backup step is
   WAL-safe online, but deleting the live DB files while the service is still
   writing is unsafe. Wiping auth state invalidates every issued token.
 EOF
@@ -124,7 +124,7 @@ if [[ "$FORCE" -ne 1 ]]; then
     fi
     echo
     echo "Backup target: $BACKUP_FILE"
-    echo "Expected follow-up: restart syslog-mcp so it recreates a fresh schema."
+    echo "Expected follow-up: restart cortex so it recreates a fresh schema."
     echo
     read -r -p "Type RESET to continue: " CONFIRM
     if [[ "$CONFIRM" != "RESET" ]]; then
@@ -170,4 +170,4 @@ if [[ "$INCLUDE_AUTH" -eq 1 ]]; then
     fi
 fi
 
-echo "Next step: restart syslog-mcp to recreate the database."
+echo "Next step: restart cortex to recreate the database."

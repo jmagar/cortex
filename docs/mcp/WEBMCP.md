@@ -1,11 +1,11 @@
-# Web MCP Integration -- syslog-mcp
+# Web MCP Integration -- cortex
 
 Browser-accessible MCP endpoints and CORS configuration.
 
 ## CORS policy
 
-syslog-mcp allows localhost origins for the configured MCP port, plus any
-origins listed in `SYSLOG_MCP_ALLOWED_ORIGINS`.
+cortex allows localhost origins for the configured MCP port, plus any
+origins listed in `CORTEX_ALLOWED_ORIGINS`.
 
 ## Why restricted CORS
 
@@ -16,7 +16,7 @@ MCP CLI clients (mcporter, curl, Claude Code) are not browser-based and ignore C
 ### Allowed
 
 - Local web dashboards served from `localhost:3100` or `127.0.0.1:3100`
-- Browser clients served from origins listed in `SYSLOG_MCP_ALLOWED_ORIGINS`
+- Browser clients served from origins listed in `CORTEX_ALLOWED_ORIGINS`
 - Direct navigation to `http://localhost:3100/health`
 
 ### Blocked
@@ -34,11 +34,11 @@ MCP CLI clients (mcporter, curl, Claude Code) are not browser-based and ignore C
 Set a comma-separated origin allow-list:
 
 ```bash
-SYSLOG_MCP_ALLOWED_ORIGINS=https://syslog.example.com,https://logs.example.com
+CORTEX_ALLOWED_ORIGINS=https://syslog.example.com,https://logs.example.com
 ```
 
 Each value must be a full browser origin URL. Add matching reverse-proxy Host
-headers to `SYSLOG_MCP_ALLOWED_HOSTS` when serving through public DNS.
+headers to `CORTEX_ALLOWED_HOSTS` when serving through public DNS.
 
 ## See also
 

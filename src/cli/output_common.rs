@@ -1,6 +1,6 @@
 use anyhow::Result;
+use cortex::app::LogEntry;
 use serde::Serialize;
-use syslog_mcp::app::LogEntry;
 
 use super::color::{cyan, muted, primary, severity, violet};
 

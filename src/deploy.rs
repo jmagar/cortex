@@ -10,7 +10,7 @@ use crate::setup::{
     SetupPhase, SetupStatus,
 };
 
-const REMOTE_HOME_SUFFIX: &str = ".syslog-mcp";
+const REMOTE_HOME_SUFFIX: &str = ".cortex";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RemoteDeployReport {
@@ -122,18 +122,15 @@ fn run_remote_deploy_with_runner(
     let remote_home = format!("{}/{}", identity_values.home, REMOTE_HOME_SUFFIX);
     let remote_data_dir = format!("{remote_home}/data");
     let mut env = default_env_for_data_dir(Path::new(&remote_data_dir))?;
-    env.insert(
-        "SYSLOG_MCP_DATA_VOLUME".to_string(),
-        remote_data_dir.clone(),
-    );
-    env.insert("SYSLOG_UID".to_string(), identity_values.uid.clone());
-    env.insert("SYSLOG_GID".to_string(), identity_values.gid.clone());
+    env.insert("CORTEX_DATA_VOLUME".to_string(), remote_data_dir.clone());
+    env.insert("CORTEX_UID".to_string(), identity_values.uid.clone());
+    env.insert("CORTEX_GID".to_string(), identity_values.gid.clone());
     let docker_network = env
         .get("DOCKER_NETWORK")
         .cloned()
-        .unwrap_or_else(|| "syslog-mcp".to_string());
+        .unwrap_or_else(|| "cortex".to_string());
     let mcp_port = env
-        .get("SYSLOG_MCP_PORT")
+        .get("CORTEX_PORT")
         .cloned()
         .unwrap_or_else(|| "3100".to_string());
 
@@ -142,7 +139,7 @@ fn run_remote_deploy_with_runner(
             runner,
             host,
             "remote-filesystem",
-            "test -d ~/.syslog-mcp || test -w \"$HOME\"",
+            "test -d ~/.cortex || test -w \"$HOME\"",
             None,
         )?);
         phases.push(remote_phase(
@@ -185,7 +182,7 @@ fn run_remote_deploy_with_runner(
         runner,
         host,
         "remote-filesystem",
-        "mkdir -p ~/.syslog-mcp/compose/config ~/.syslog-mcp/data && chmod 700 ~/.syslog-mcp ~/.syslog-mcp/data",
+        "mkdir -p ~/.cortex/compose/config ~/.cortex/data && chmod 700 ~/.cortex ~/.cortex/data",
         None,
     )?);
     phases.push(remote_phase(
@@ -271,7 +268,7 @@ fn run_remote_deploy_with_runner(
             runner,
             host,
             "remote-compose-pull",
-            "docker compose --env-file ~/.syslog-mcp/.env -f ~/.syslog-mcp/compose/docker-compose.yml pull --ignore-buildable",
+            "docker compose --env-file ~/.cortex/.env -f ~/.cortex/compose/docker-compose.yml pull --ignore-buildable",
             None,
     )?);
     if phases_have_errors(&phases) {
@@ -291,11 +288,11 @@ fn run_remote_deploy_with_runner(
     }
 
     phases.push(remote_phase(
-            runner,
-            host,
-            "remote-compose-up",
-            "docker compose --env-file ~/.syslog-mcp/.env -f ~/.syslog-mcp/compose/docker-compose.yml up -d",
-            None,
+        runner,
+        host,
+        "remote-compose-up",
+        "docker compose --env-file ~/.cortex/.env -f ~/.cortex/compose/docker-compose.yml up -d",
+        None,
     )?);
     if phases_have_errors(&phases) {
         append_skipped(
@@ -381,7 +378,7 @@ fn write_remote_env_phase(
 ) -> io::Result<SetupPhase> {
     let rendered = render_env(env);
     let script = format!(
-        "umask 077\ncat > ~/.syslog-mcp/.env.tmp <<'__SYSLOG_MCP_ENV__'\n{rendered}__SYSLOG_MCP_ENV__\nchmod 600 ~/.syslog-mcp/.env.tmp\nmv ~/.syslog-mcp/.env.tmp ~/.syslog-mcp/.env"
+        "umask 077\ncat > ~/.cortex/.env.tmp <<'__CORTEX_ENV__'\n{rendered}__CORTEX_ENV__\nchmod 600 ~/.cortex/.env.tmp\nmv ~/.cortex/.env.tmp ~/.cortex/.env"
     );
     remote_phase(runner, host, "remote-env", &script, None)
 }
@@ -415,7 +412,7 @@ fn report(
 
 fn write_remote_assets_phase(runner: &mut dyn RemoteRunner, host: &str) -> io::Result<SetupPhase> {
     let script = format!(
-        "cat > ~/.syslog-mcp/compose/docker-compose.yml.tmp <<'__SYSLOG_MCP_COMPOSE__'\n{}__SYSLOG_MCP_COMPOSE__\ncat > ~/.syslog-mcp/compose/config/Dockerfile.tmp <<'__SYSLOG_MCP_DOCKERFILE__'\n{}__SYSLOG_MCP_DOCKERFILE__\nmv ~/.syslog-mcp/compose/docker-compose.yml.tmp ~/.syslog-mcp/compose/docker-compose.yml\nmv ~/.syslog-mcp/compose/config/Dockerfile.tmp ~/.syslog-mcp/compose/config/Dockerfile",
+        "cat > ~/.cortex/compose/docker-compose.yml.tmp <<'__CORTEX_COMPOSE__'\n{}__CORTEX_COMPOSE__\ncat > ~/.cortex/compose/config/Dockerfile.tmp <<'__CORTEX_DOCKERFILE__'\n{}__CORTEX_DOCKERFILE__\nmv ~/.cortex/compose/docker-compose.yml.tmp ~/.cortex/compose/docker-compose.yml\nmv ~/.cortex/compose/config/Dockerfile.tmp ~/.cortex/compose/config/Dockerfile",
         installed_compose_asset(),
         dockerfile_asset()
     );
@@ -558,7 +555,7 @@ mod tests {
         assert!(!runner
             .commands
             .iter()
-            .any(|cmd| cmd.contains("cat > ~/.syslog-mcp/.env")));
+            .any(|cmd| cmd.contains("cat > ~/.cortex/.env")));
     }
 
     #[test]
@@ -574,9 +571,9 @@ mod tests {
                 .position(|cmd| cmd.contains(needle))
                 .unwrap_or_else(|| panic!("missing command containing {needle}"))
         };
-        let mkdir = index("mkdir -p ~/.syslog-mcp/compose/config ~/.syslog-mcp/data");
+        let mkdir = index("mkdir -p ~/.cortex/compose/config ~/.cortex/data");
         let docker_check = index("docker --version && docker compose version");
-        let env_write = index("cat > ~/.syslog-mcp/.env.tmp");
+        let env_write = index("cat > ~/.cortex/.env.tmp");
         let assets_write = index("docker-compose.yml.tmp");
         let compose_pull = index("pull --ignore-buildable");
         let compose_up = index("up -d");
@@ -595,10 +592,10 @@ mod tests {
         let env_write = runner
             .commands
             .iter()
-            .find(|cmd| cmd.contains("cat > ~/.syslog-mcp/.env.tmp"))
+            .find(|cmd| cmd.contains("cat > ~/.cortex/.env.tmp"))
             .expect("env write command should run");
-        assert!(env_write.contains("SYSLOG_UID=1001"));
-        assert!(env_write.contains("SYSLOG_GID=1002"));
+        assert!(env_write.contains("CORTEX_UID=1001"));
+        assert!(env_write.contains("CORTEX_GID=1002"));
     }
 
     #[test]
@@ -639,6 +636,6 @@ mod tests {
         assert!(!runner
             .commands
             .iter()
-            .any(|cmd| cmd.contains(". ~/.syslog-mcp/.env")));
+            .any(|cmd| cmd.contains(". ~/.cortex/.env")));
     }
 }

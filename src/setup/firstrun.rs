@@ -24,11 +24,11 @@ pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {
         phases.push(write_compose_assets(&compose_dir)?);
         Some(env_result.values)
     } else {
-        phases.push(check_file_phase("env", &env_path, "run syslog setup"));
+        phases.push(check_file_phase("env", &env_path, "run cortex setup"));
         phases.push(check_file_phase(
             "compose-assets",
             &compose_dir.join("docker-compose.yml"),
-            "run syslog setup repair",
+            "run cortex setup repair",
         ));
         None
     };
@@ -73,7 +73,7 @@ pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {
     let elapsed_ms = started.elapsed().as_millis();
     let port = env
         .as_ref()
-        .and_then(|values| values.get("SYSLOG_MCP_PORT"))
+        .and_then(|values| values.get("CORTEX_PORT"))
         .cloned()
         .unwrap_or_else(|| "3100".to_string());
     Ok(setup_report(
@@ -110,7 +110,7 @@ pub(super) fn filesystem_phase(
         Ok(timer.finish(
             SetupStatus::Warn,
             format!(
-                "missing setup dirs under {}; run syslog setup",
+                "missing setup dirs under {}; run cortex setup",
                 home.display()
             ),
         ))
@@ -162,69 +162,65 @@ pub(crate) fn default_env_for_data_dir(data_dir: &Path) -> io::Result<BTreeMap<S
 }
 
 fn populate_env_defaults(env: &mut BTreeMap<String, String>, data_dir: &Path) -> io::Result<()> {
-    insert_process_or_default(env, "SYSLOG_HOST", "0.0.0.0");
-    insert_process_or_default(env, "SYSLOG_PORT", "1514");
-    insert_process_or_default(env, "SYSLOG_HOST_PORT", "1514");
-    insert_process_or_default(env, "SYSLOG_MCP_HOST", "0.0.0.0");
-    insert_process_or_default(env, "SYSLOG_MCP_PORT", "3100");
+    insert_process_or_default(env, "CORTEX_RECEIVER_HOST", "0.0.0.0");
+    insert_process_or_default(env, "CORTEX_RECEIVER_PORT", "1514");
+    insert_process_or_default(env, "CORTEX_RECEIVER_HOST_PORT", "1514");
+    insert_process_or_default(env, "CORTEX_HOST", "0.0.0.0");
+    insert_process_or_default(env, "CORTEX_PORT", "3100");
     insert_process_or_default(env, "NO_AUTH", "false");
-    insert_process_or_default(env, "SYSLOG_MCP_AUTH_MODE", "bearer");
-    insert_process_or_default(env, "SYSLOG_MCP_DB_PATH", "/data/syslog.db");
-    insert_process_or_default(
-        env,
-        "SYSLOG_MCP_DATA_VOLUME",
-        &data_dir.display().to_string(),
-    );
-    insert_process_or_default(env, "SYSLOG_MCP_MAX_DB_SIZE_MB", "8192");
-    insert_process_or_default(env, "SYSLOG_MCP_RETENTION_DAYS", "90");
-    insert_process_or_default(env, "SYSLOG_BATCH_SIZE", "100");
-    insert_process_or_default(env, "SYSLOG_WRITE_CHANNEL_CAPACITY", "10000");
-    insert_process_or_default(env, "SYSLOG_DOCKER_INGEST_ENABLED", "false");
+    insert_process_or_default(env, "CORTEX_AUTH_MODE", "bearer");
+    insert_process_or_default(env, "CORTEX_DB_PATH", "/data/cortex.db");
+    insert_process_or_default(env, "CORTEX_DATA_VOLUME", &data_dir.display().to_string());
+    insert_process_or_default(env, "CORTEX_MAX_DB_SIZE_MB", "8192");
+    insert_process_or_default(env, "CORTEX_RETENTION_DAYS", "90");
+    insert_process_or_default(env, "CORTEX_BATCH_SIZE", "100");
+    insert_process_or_default(env, "CORTEX_WRITE_CHANNEL_CAPACITY", "10000");
+    insert_process_or_default(env, "CORTEX_DOCKER_INGEST_ENABLED", "false");
     insert_process_or_default(env, "RUST_LOG", "info");
     insert_process_or_default(env, "COMPOSE_PROJECT_NAME", "syslog-jmagar-lab");
-    insert_process_or_default(env, "DOCKER_NETWORK", "syslog-mcp");
-    insert_process_optional(env, "SYSLOG_DOCKER_HOSTS");
-    insert_process_optional(env, "SYSLOG_MCP_PUBLIC_URL");
-    insert_process_optional(env, "SYSLOG_MCP_GOOGLE_CLIENT_ID");
-    insert_process_optional(env, "SYSLOG_MCP_GOOGLE_CLIENT_SECRET");
-    insert_process_optional(env, "SYSLOG_MCP_AUTH_ADMIN_EMAIL");
-    insert_process_optional(env, "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS");
-    insert_process_optional(env, "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH");
+    insert_process_or_default(env, "DOCKER_NETWORK", "cortex");
+    insert_process_optional(env, "CORTEX_DOCKER_HOSTS");
+    insert_process_optional(env, "CORTEX_PUBLIC_URL");
+    insert_process_optional(env, "CORTEX_GOOGLE_CLIENT_ID");
+    insert_process_optional(env, "CORTEX_GOOGLE_CLIENT_SECRET");
+    insert_process_optional(env, "CORTEX_AUTH_ADMIN_EMAIL");
+    insert_process_optional(env, "CORTEX_AUTH_ALLOWED_REDIRECT_URIS");
+    insert_process_optional(env, "CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH");
 
     let (uid, gid) = current_uid_gid();
-    env.entry("SYSLOG_UID".to_string()).or_insert(uid);
-    env.entry("SYSLOG_GID".to_string()).or_insert(gid);
+    env.entry("CORTEX_UID".to_string()).or_insert(uid);
+    env.entry("CORTEX_GID".to_string()).or_insert(gid);
 
     if env
         .get("NO_AUTH")
         .is_none_or(|value| !value.eq_ignore_ascii_case("true"))
         && env
-            .get("SYSLOG_MCP_TOKEN")
+            .get("CORTEX_TOKEN")
             .is_none_or(|value| value.trim().is_empty())
     {
-        env.insert("SYSLOG_MCP_TOKEN".to_string(), generate_token()?);
+        env.insert("CORTEX_TOKEN".to_string(), generate_token()?);
     }
 
-    // SYSLOG_API_TOKEN is always required — `/api/*` is unconditionally
+    // CORTEX_API_TOKEN is always required — `/api/*` is unconditionally
     // mounted and the container fails to start without it. Mirror the
-    // SYSLOG_MCP_TOKEN pattern: preserve any existing value byte-for-byte
+    // CORTEX_TOKEN pattern: preserve any existing value byte-for-byte
     // on re-runs, generate a fresh 64-char hex token only when missing or
     // blank. (entry().or_insert_with() is not sufficient here because the
     // key may exist with an empty value from an earlier upgrade.)
     if env
-        .get("SYSLOG_API_TOKEN")
+        .get("CORTEX_API_TOKEN")
         .is_none_or(|value| value.trim().is_empty())
     {
-        env.insert("SYSLOG_API_TOKEN".to_string(), generate_token()?);
+        env.insert("CORTEX_API_TOKEN".to_string(), generate_token()?);
     }
 
-    // SYSLOG_USE_HTTP=true is the v0.26 cutover default — the CLI defaults to
+    // CORTEX_USE_HTTP=true is the v0.26 cutover default — the CLI defaults to
     // routing query/AI/DB commands through the container REST API. Unlike
-    // SYSLOG_API_TOKEN above, this is a behaviour toggle the operator may
+    // CORTEX_API_TOKEN above, this is a behaviour toggle the operator may
     // legitimately set to `false` (or any other value) to opt out. Use
     // `entry().or_insert_with` so any existing value — including an empty
     // string or `false` — survives byte-for-byte. Operator intent wins.
-    env.entry("SYSLOG_USE_HTTP".to_string())
+    env.entry("CORTEX_USE_HTTP".to_string())
         .or_insert_with(|| "true".to_string());
     Ok(())
 }
@@ -275,7 +271,7 @@ pub(crate) fn write_env(path: &Path, env: &BTreeMap<String, String>) -> io::Resu
     // mid-write leaves the temp file orphaned but the live .env is either
     // the old content or the fully written new content — never partial.
     // Crucial because a corrupt .env breaks container startup
-    // (api.rs bails on empty SYSLOG_API_TOKEN).
+    // (api.rs bails on empty CORTEX_API_TOKEN).
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -339,8 +335,8 @@ pub(crate) fn write_env(path: &Path, env: &BTreeMap<String, String>) -> io::Resu
 
 pub(crate) fn render_env(env: &BTreeMap<String, String>) -> String {
     let mut out = String::new();
-    out.push_str("# syslog-mcp runtime environment.\n");
-    out.push_str("# Managed by `syslog setup`; secrets are preserved on repair.\n");
+    out.push_str("# cortex runtime environment.\n");
+    out.push_str("# Managed by `cortex setup`; secrets are preserved on repair.\n");
     for (key, value) in env {
         out.push_str(key);
         out.push('=');
@@ -425,11 +421,7 @@ fn cleanup_legacy_systemd() -> SetupPhase {
         }
     };
     let mut failures = Vec::new();
-    for unit in [
-        "syslog-mcp.service",
-        "mnemo-index.service",
-        "mnemo-index.timer",
-    ] {
+    for unit in ["cortex.service", "mnemo-index.service", "mnemo-index.timer"] {
         match super::systemd::run_systemctl_user(&["disable", "--now", unit]) {
             Ok(output) if output.status.success() => {}
             Ok(output) => failures.push(format!(
@@ -443,11 +435,7 @@ fn cleanup_legacy_systemd() -> SetupPhase {
             Err(error) => failures.push(format!("systemctl disable --now {unit}: {error}")),
         }
     }
-    for name in [
-        "syslog-mcp.service",
-        "mnemo-index.service",
-        "mnemo-index.timer",
-    ] {
+    for name in ["cortex.service", "mnemo-index.service", "mnemo-index.timer"] {
         let unit = home.join(".config/systemd/user").join(name);
         let dropins = home.join(".config/systemd/user").join(format!("{name}.d"));
         if let Err(error) = std::fs::remove_file(&unit) {
@@ -478,7 +466,7 @@ fn cleanup_legacy_systemd() -> SetupPhase {
     }
     timer.finish(
         SetupStatus::Ok,
-        "removed stale syslog-mcp and mnemo-index user units/drop-ins if present",
+        "removed stale cortex and mnemo-index user units/drop-ins if present",
     )
 }
 
@@ -487,7 +475,7 @@ fn ensure_network_phase(phases: &mut Vec<SetupPhase>, env: Option<&BTreeMap<Stri
     let network = env
         .and_then(|env| env.get("DOCKER_NETWORK"))
         .map(String::as_str)
-        .unwrap_or("syslog-mcp");
+        .unwrap_or("cortex");
     let inspect = Command::new("docker")
         .args(["network", "inspect", network])
         .output();
@@ -558,7 +546,7 @@ fn health_phase(env: &Option<BTreeMap<String, String>>) -> SetupPhase {
     let timer = PhaseTimer::start("health");
     let port = env
         .as_ref()
-        .and_then(|env| env.get("SYSLOG_MCP_PORT"))
+        .and_then(|env| env.get("CORTEX_PORT"))
         .map(String::as_str)
         .unwrap_or("3100");
     let url = format!("http://127.0.0.1:{port}/health");

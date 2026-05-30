@@ -1,4 +1,4 @@
-# Publishing Strategy -- syslog-mcp
+# Publishing Strategy -- cortex
 
 Versioning and release workflow.
 
@@ -50,8 +50,8 @@ Steps executed:
 | --- | --- | --- |
 | crates.io | `cargo publish` via GitHub Actions | `v*` tag push |
 | GHCR | Docker image build and push | `v*` tag push |
-| MCP Registry | `server.json` under `tv.tootie/syslog-mcp` namespace | manual update |
-| MCPB | `dist/syslog-mcp-X.Y.Z-linux.mcpb` | `just build-mcpb` |
+| MCP Registry | `server.json` under `tv.tootie/cortex` namespace | manual update |
+| MCPB | `dist/cortex-X.Y.Z-linux.mcpb` | `just build-mcpb` |
 
 ## server.json
 
@@ -59,14 +59,14 @@ MCP Registry metadata at repo root:
 
 ```json
 {
-  "name": "tv.tootie/syslog-mcp",
+  "name": "tv.tootie/cortex",
   "title": "Syslog MCP",
   "description": "Syslog receiver and MCP server for homelab log intelligence.",
   "version": "0.21.7",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/syslog-mcp:0.21.7",
+      "identifier": "ghcr.io/jmagar/cortex:0.21.7",
       "version": "0.21.7"
     }
   ]
@@ -79,7 +79,7 @@ Run before publishing a release:
 
 ```bash
 just build-mcpb
-npx --yes @anthropic-ai/mcpb info dist/syslog-mcp-X.Y.Z-linux.mcpb
+npx --yes @anthropic-ai/mcpb info dist/cortex-X.Y.Z-linux.mcpb
 ```
 
 The unsigned MCPB is a Linux bundle for local stdio clients. Signing is a
@@ -91,10 +91,10 @@ After publishing, verify:
 
 ```bash
 # crates.io
-cargo install syslog-mcp --version X.Y.Z
+cargo install cortex --version X.Y.Z
 
 # Docker
-docker pull ghcr.io/jmagar/syslog-mcp:vX.Y.Z
+docker pull ghcr.io/jmagar/cortex:vX.Y.Z
 
 # GitHub Release
 gh release view vX.Y.Z

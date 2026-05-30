@@ -1,4 +1,4 @@
-# Pre-commit Hook Configuration -- syslog-mcp
+# Pre-commit Hook Configuration -- cortex
 
 Hooks run as Claude Code lifecycle hooks via `hooks/hooks.json`.
 

@@ -23,16 +23,16 @@ pub async fn run_setup_doctor() -> io::Result<SetupReport> {
     let debug_override_path = compose_dir.join("docker-compose.override.yml");
     let mut phases = vec![
         filesystem_phase(super::SetupMode::Check, &home, &data_dir, &compose_dir)?,
-        check_file_phase("env", &env_path, "run syslog setup"),
+        check_file_phase("env", &env_path, "run cortex setup"),
         check_file_phase(
             "compose-assets",
             &compose_dir.join("docker-compose.yml"),
-            "run syslog setup repair",
+            "run cortex setup repair",
         ),
         check_file_phase(
             "debug-wrapper",
             &wrapper_path,
-            "run syslog setup debug-wrapper install",
+            "run cortex setup debug-wrapper install",
         ),
         downgrade_dev_phase(
             check_debug_wrapper_content_phase(&wrapper_path, &repo_path),
@@ -41,7 +41,7 @@ pub async fn run_setup_doctor() -> io::Result<SetupReport> {
         check_file_phase(
             "debug-compose",
             &debug_override_path,
-            "run syslog setup debug-compose install",
+            "run cortex setup debug-compose install",
         ),
         downgrade_dev_phase(
             check_debug_compose_content_phase(&debug_override_path, &repo_path),
@@ -77,7 +77,7 @@ pub async fn run_setup_doctor() -> io::Result<SetupReport> {
 /// Dev-mode checks (debug-wrapper-content, debug-compose-content) always fail
 /// when a production binary/override is installed. In `setup doctor` that's the
 /// expected steady state, so we downgrade Error → Warn with a clearer detail
-/// and rewrite the issue kind accordingly. Other contexts (e.g. `syslog setup
+/// and rewrite the issue kind accordingly. Other contexts (e.g. `cortex setup
 /// debug-wrapper check`) keep the raw Error semantics.
 pub(super) fn downgrade_dev_phase(phase: SetupPhase, detail: &str) -> SetupPhase {
     if matches!(phase.status, SetupStatus::Error) {

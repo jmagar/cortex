@@ -13,7 +13,7 @@ fn db_vacuum_force_false_omits_force_field() {
     assert_eq!(req.force, None);
 }
 
-// ─── Integrity HTTP timeout (bead syslog-mcp-qekb) ──────────────────────────
+// ─── Integrity HTTP timeout (bead cortex-qekb) ──────────────────────────
 
 /// When the server is slower than `http_timeout`, `run_db_integrity_with_timeout`
 /// must bail with an actionable message that includes the docker exec command.

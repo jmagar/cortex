@@ -1,5 +1,5 @@
 # =============================================================================
-# .cargo/config.toml — Cargo workspace configuration for syslog-mcp
+# .cargo/config.toml — Cargo workspace configuration for cortex
 #
 # Most build settings (linker, profile tuning, jobs) live in the developer's
 # ~/.cargo/config.toml. This file only adds workspace-local settings that the

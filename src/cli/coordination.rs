@@ -188,22 +188,22 @@ fn parse_systemctl_env_files(value: &str) -> Vec<PathBuf> {
     paths
 }
 
-/// Look up `SYSLOG_MCP_DB_PATH` from the systemctl-rendered env. Inline
+/// Look up `CORTEX_DB_PATH` from the systemctl-rendered env. Inline
 /// `Environment=` values take precedence; otherwise we walk each
 /// `EnvironmentFiles` entry. Missing files are skipped (not fatal).
 pub(crate) fn lookup_systemd_db_path(env: &SystemctlEnv) -> Option<String> {
-    if let Some((_, value)) = env.inline.iter().find(|(k, _)| k == "SYSLOG_MCP_DB_PATH") {
+    if let Some((_, value)) = env.inline.iter().find(|(k, _)| k == "CORTEX_DB_PATH") {
         return Some(value.clone());
     }
     for path in &env.files {
-        if let Some(value) = read_env_value(path, "SYSLOG_MCP_DB_PATH") {
+        if let Some(value) = read_env_value(path, "CORTEX_DB_PATH") {
             return Some(value);
         }
     }
     None
 }
 
-// data_mount_phase (uncached wrapper) removed by bead syslog-mcp-0p8r.11.
+// data_mount_phase (uncached wrapper) removed by bead cortex-0p8r.11.
 // Sole caller was setup_report (SessionStart hook), which no longer needs it
 // post-cutover. All remaining callers (compose doctor, db status --check-coord)
 // use data_mount_phase_cached so the docker inspect result can be shared with
@@ -217,12 +217,11 @@ pub(crate) fn data_mount_phase_cached(
     cache: &mut DoctorCache,
 ) -> SetupPhase {
     let name = "data-mount";
-    let container =
-        std::env::var("SYSLOG_MCP_CONTAINER_NAME").unwrap_or_else(|_| "syslog-mcp".to_string());
+    let container = std::env::var("CORTEX_CONTAINER_NAME").unwrap_or_else(|_| "cortex".to_string());
 
-    let expected_dir = std::env::var("SYSLOG_MCP_DATA_VOLUME")
+    let expected_dir = std::env::var("CORTEX_DATA_VOLUME")
         .ok()
-        .or_else(|| read_env_value(env_path, "SYSLOG_MCP_DATA_VOLUME"))
+        .or_else(|| read_env_value(env_path, "CORTEX_DATA_VOLUME"))
         .map(PathBuf::from)
         .unwrap_or_else(|| data_dir.to_path_buf());
 
@@ -259,7 +258,7 @@ pub(crate) fn data_mount_phase_cached(
         return SetupPhase {
             name,
             status: SetupStatus::Error,
-            detail: format!("container '{container}' has no /data mount — run `syslog compose up`"),
+            detail: format!("container '{container}' has no /data mount — run `cortex compose up`"),
         };
     };
     let mount_type = info.mount_type.unwrap_or_default();
@@ -270,7 +269,7 @@ pub(crate) fn data_mount_phase_cached(
             detail: format!(
                 "container /data is a {} (expected bind to {}). \
                  CLI and container are writing different DBs. \
-                 Repair: `syslog compose up` (recreates with --env-file)",
+                 Repair: `cortex compose up` (recreates with --env-file)",
                 mount_type,
                 expected_dir.display()
             ),
@@ -302,8 +301,8 @@ pub(crate) fn data_mount_phase_cached(
             name,
             status: SetupStatus::Error,
             detail: format!(
-                "container /data bind source ({}) does not match SYSLOG_MCP_DATA_VOLUME ({}). \
-                 CLI and container are writing different DBs. Repair: `syslog compose up`",
+                "container /data bind source ({}) does not match CORTEX_DATA_VOLUME ({}). \
+                 CLI and container are writing different DBs. Repair: `cortex compose up`",
                 mount_source,
                 expected_dir.display()
             ),
@@ -312,15 +311,12 @@ pub(crate) fn data_mount_phase_cached(
     SetupPhase {
         name,
         status: SetupStatus::Ok,
-        detail: format!(
-            "bind {} -> /data matches SYSLOG_MCP_DATA_VOLUME",
-            mount_source
-        ),
+        detail: format!("bind {} -> /data matches CORTEX_DATA_VOLUME", mount_source),
     }
 }
 
 /// Verify the host systemd `syslog-ai-watch.service`'s effective
-/// `SYSLOG_MCP_DB_PATH` resolves to the same canonical host path as the
+/// `CORTEX_DB_PATH` resolves to the same canonical host path as the
 /// container's `/data` bind source. A mismatch means the host ai-watch
 /// service is writing checkpoints to a DB the container will never read.
 ///
@@ -337,10 +333,9 @@ pub(crate) fn ai_watch_coordination_phase(
     cache: &mut DoctorCache,
 ) -> SetupPhase {
     let name = "ai-watch-coord";
-    let unit = std::env::var("SYSLOG_AI_WATCH_UNIT")
+    let unit = std::env::var("CORTEX_AI_WATCH_UNIT")
         .unwrap_or_else(|_| "syslog-ai-watch.service".to_string());
-    let container =
-        std::env::var("SYSLOG_MCP_CONTAINER_NAME").unwrap_or_else(|_| "syslog-mcp".to_string());
+    let container = std::env::var("CORTEX_CONTAINER_NAME").unwrap_or_else(|_| "cortex".to_string());
 
     let env = match cache.systemctl_env(&unit) {
         Ok(env) => env,
@@ -367,7 +362,7 @@ pub(crate) fn ai_watch_coordination_phase(
             name,
             status: SetupStatus::Warn,
             detail: format!(
-                "could not find SYSLOG_MCP_DB_PATH in {unit} (Environment/EnvironmentFiles)"
+                "could not find CORTEX_DB_PATH in {unit} (Environment/EnvironmentFiles)"
             ),
         };
     };
@@ -428,7 +423,7 @@ pub(crate) fn ai_watch_coordination_phase(
             name,
             status: SetupStatus::Ok,
             detail: format!(
-                "ai-watch SYSLOG_MCP_DB_PATH ({}) and container /data bind ({}) resolve to {}",
+                "ai-watch CORTEX_DB_PATH ({}) and container /data bind ({}) resolve to {}",
                 ai_db_path,
                 mount_source,
                 canonical_ai.display()
@@ -439,7 +434,7 @@ pub(crate) fn ai_watch_coordination_phase(
         name,
         status: SetupStatus::Error,
         detail: format!(
-            "ai-watch SYSLOG_MCP_DB_PATH canonicalizes to {} but container /data bind canonicalizes to {} — \
+            "ai-watch CORTEX_DB_PATH canonicalizes to {} but container /data bind canonicalizes to {} — \
              host service and container are writing different DBs",
             canonical_ai.display(),
             canonical_container.display()

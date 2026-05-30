@@ -2,14 +2,14 @@ use std::process::Command;
 
 #[test]
 fn help_lists_sessions_command() {
-    let output = Command::new(env!("CARGO_BIN_EXE_syslog"))
+    let output = Command::new(env!("CARGO_BIN_EXE_cortex"))
         .arg("--help")
         .output()
-        .expect("run syslog --help");
+        .expect("run cortex --help");
 
     let stderr = String::from_utf8(output.stderr).expect("help output should be valid UTF-8");
     assert!(
-        stderr.contains("syslog sessions"),
+        stderr.contains("cortex sessions"),
         "help output should list the sessions command, got:\n{stderr}"
     );
 }
@@ -141,8 +141,8 @@ fn ai_cli_add_reports_parse_errors_and_exits_nonzero() {
 }
 
 fn run_command(db_path: &std::path::Path, args: &[&str]) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_syslog"));
-    command.env("SYSLOG_MCP_DB_PATH", db_path);
+    let mut command = Command::new(env!("CARGO_BIN_EXE_cortex"));
+    command.env("CORTEX_DB_PATH", db_path);
     command.args(args);
     command.output().expect("run syslog command")
 }

@@ -1,9 +1,9 @@
 use super::dispatch::http_or_cancel;
 
 use anyhow::{bail, Result};
+use cortex::app::{DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest};
 use std::path::PathBuf;
 use std::time::Duration;
-use syslog_mcp::app::{DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest};
 
 use super::coordination::run_coordination_phases;
 use super::output_ops::{
@@ -18,7 +18,7 @@ use super::{CliMode, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusAr
 /// actionable message directing the operator to run the check inside the
 /// container, where the local path has no timeout.
 ///
-/// (bead syslog-mcp-qekb) — 120s is roughly a 10 GB/min I/O estimate, i.e.
+/// (bead cortex-qekb) — 120s is roughly a 10 GB/min I/O estimate, i.e.
 /// it is expected to complete on a DB up to ~20 GB; anything larger gets the
 /// actionable message.
 pub(crate) const INTEGRITY_HTTP_TIMEOUT: Duration = Duration::from_secs(120);
@@ -97,7 +97,7 @@ pub(crate) async fn run_db_integrity_with_timeout(
                         "Integrity check timed out after {}s (DB may be very large).\n\
                          Run the check inside the container where there is no timeout:\n\
                          \n\
-                         \tdocker exec syslog-mcp syslog db integrity --quick\n\
+                         \tdocker exec cortex cortex db integrity --quick\n\
                          \n\
                          This operation may take 10-30 minutes on a 31 GB+ database.",
                         http_timeout.as_secs()
@@ -187,7 +187,7 @@ pub(crate) async fn run_db_backup(mode: &CliMode, args: DbBackupArgs) -> Result<
                             "Backup timed out after {}s (DB may be very large).\n\
                              Run the backup inside the container where there is no timeout:\n\
                              \n\
-                             \tdocker exec syslog-mcp syslog db backup --output /data/backup-$(date +%Y%m%d).db\n\
+                             \tdocker exec cortex cortex db backup --output /data/backup-$(date +%Y%m%d).db\n\
                              \n\
                              This operation may take several minutes on a 31 GB+ database.",
                             BACKUP_HTTP_TIMEOUT.as_secs()
@@ -217,7 +217,7 @@ pub(crate) async fn run_db_backup(mode: &CliMode, args: DbBackupArgs) -> Result<
                              \n\
                              Or backup inside the container directly:\n\
                              \n\
-                             \tdocker exec syslog-mcp syslog db backup --output /data/backup-$(date +%Y%m%d).db"
+                             \tdocker exec cortex cortex db backup --output /data/backup-$(date +%Y%m%d).db"
                         )
                     } else {
                         Err(e.into())

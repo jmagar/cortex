@@ -10,7 +10,7 @@ use anyhow::Result;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 
-use crate::app::SyslogService;
+use crate::app::CortexService;
 use crate::scanner::{self, IndexResult};
 
 const WATCH_EVENT_BUFFER: usize = 1024;
@@ -159,7 +159,7 @@ enum PendingState {
     Terminal,
 }
 
-pub async fn run(service: SyslogService, options: WatchOptions) -> Result<()> {
+pub async fn run(service: CortexService, options: WatchOptions) -> Result<()> {
     let targets = watch_targets(&options)?;
     if targets.is_empty() {
         anyhow::bail!("no AI transcript roots exist to watch");
@@ -413,7 +413,7 @@ fn is_transient_watch_error(error: &std::io::Error) -> bool {
     )
 }
 
-async fn prune_missing_checkpoints(service: &SyslogService, json: bool) -> bool {
+async fn prune_missing_checkpoints(service: &CortexService, json: bool) -> bool {
     const PRUNE_LIMIT: u32 = 500;
     match service
         .prune_ai_checkpoints_checked(crate::app::AiPruneCheckpointsRequest {
@@ -477,7 +477,7 @@ enum RescanStatus {
     Retry,
 }
 
-async fn run_rescan(service: &SyslogService, options: &WatchOptions, stage: &str) -> RescanStatus {
+async fn run_rescan(service: &CortexService, options: &WatchOptions, stage: &str) -> RescanStatus {
     let path = options.path.as_ref().map(|path| path.display().to_string());
     match service.index_ai_roots(path, false, None).await {
         Ok(result) => {
@@ -492,7 +492,7 @@ async fn run_rescan(service: &SyslogService, options: &WatchOptions, stage: &str
 }
 
 async fn process_pending(
-    service: &SyslogService,
+    service: &CortexService,
     options: &WatchOptions,
     pending: &mut PendingFiles,
 ) {
@@ -537,7 +537,7 @@ struct ProcessOutcome {
 }
 
 async fn process_file(
-    service: &SyslogService,
+    service: &CortexService,
     options: &WatchOptions,
     path: &Path,
 ) -> ProcessOutcome {

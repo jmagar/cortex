@@ -1,5 +1,5 @@
 //! Probe trait contract — **source of truth** for the probe-registry interface
-//! (epic `syslog-mcp-fue9`, depends on agent-mode `syslog-mcp-qgnx`).
+//! (epic `cortex-fue9`, depends on agent-mode `cortex-qgnx`).
 //!
 //! This file lives at `docs/contracts/probe-trait.rs` and is **the contract**.
 //! Implementations in the per-host agent binary (`src/agent/probes/*`) and
@@ -17,7 +17,7 @@
 //! tokio = { version = "1", features = ["time"] }
 //! ```
 //!
-//! `thiserror` is not yet in the syslog-mcp `Cargo.toml`; add it before
+//! `thiserror` is not yet in the cortex `Cargo.toml`; add it before
 //! dropping the real implementations. `async_trait` is intentionally NOT
 //! used — the trait below uses the `impl Future` return form available on
 //! the project's MSRV (1.86, Cargo.toml). Implementers may switch to

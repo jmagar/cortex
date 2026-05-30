@@ -7,7 +7,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::app::SyslogService;
+use crate::app::CortexService;
 use crate::config::{mcp_bind_is_loopback, validate_auth_config, AuthMode, Config};
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::heartbeat::HeartbeatState;
@@ -15,14 +15,14 @@ use crate::ingest::IngestTx;
 use crate::mcp::AuthPolicy;
 use crate::observability::RuntimeObservability;
 use crate::otlp::{self, OtlpCounters, OtlpState};
-use crate::syslog::enrichment::EnrichmentConfig;
-use crate::{docker_ingest, mcp, syslog};
+use crate::receiver::enrichment::EnrichmentConfig;
+use crate::{docker_ingest, mcp, receiver};
 
 pub struct RuntimeCore {
     pub config: Config,
     pool: Arc<DbPool>,
     storage_state: Arc<Mutex<Option<StorageBudgetState>>>,
-    service: SyslogService,
+    service: CortexService,
     /// Semaphore for DB-heavy maintenance tasks: retention purge, storage
     /// guardrail enforcement, error scan, notification evaluator.
     maintenance_permit: Arc<Semaphore>,
@@ -132,7 +132,7 @@ pub(crate) fn background_interval(period: tokio::time::Duration) -> tokio::time:
 const ADGUARD_RETENTION_TAGS: &[&str] = &["adguard-allowed", "adguard-query", "adguard-rewrite"];
 const ADGUARD_RETENTION_DAYS: u32 = 7;
 const HEARTBEAT_RETENTION_DAYS: u32 = 14;
-/// Cadence for refreshing the AI session rollup (bead syslog-mcp-2vre). 5 min
+/// Cadence for refreshing the AI session rollup (bead cortex-2vre). 5 min
 /// bounds staleness of unbounded `sessions` results while keeping the periodic
 /// full re-aggregation cost negligible relative to ingest.
 const SESSION_ROLLUP_REFRESH_SECS: u64 = 300;
@@ -189,7 +189,7 @@ impl RuntimeCore {
                 "Initial storage budget check completed"
             );
         }
-        let service = SyslogService::new(Arc::clone(&pool), config.storage.clone());
+        let service = CortexService::new(Arc::clone(&pool), config.storage.clone());
         let enrichment = EnrichmentConfig {
             authelia_source_ip: config.enrichment.authelia_source_ip.clone(),
             adguard_source_ip: config.enrichment.adguard_source_ip.clone(),
@@ -197,8 +197,8 @@ impl RuntimeCore {
             api_token: config.mcp.api_token.clone(),
         };
         let observability = Arc::new(RuntimeObservability::default());
-        let ingest = crate::ingest::start_writer_from_syslog_config(
-            &config.syslog,
+        let ingest = crate::ingest::start_writer_from_receiver_config(
+            &config.receiver,
             config.storage.clone(),
             Arc::clone(&pool),
             Arc::clone(&storage_state),
@@ -222,7 +222,7 @@ impl RuntimeCore {
         })
     }
 
-    pub fn service(&self) -> SyslogService {
+    pub fn service(&self) -> CortexService {
         self.service.clone()
     }
 
@@ -284,7 +284,7 @@ impl RuntimeCore {
     }
 
     pub async fn start_syslog(&self) -> Result<()> {
-        syslog::start_listeners(self.config.syslog.clone(), self.ingest.clone()).await
+        receiver::start_listeners(self.config.receiver.clone(), self.ingest.clone()).await
     }
 
     pub fn spawn_maintenance_tasks(&self) -> MaintenanceHandles {
@@ -316,8 +316,8 @@ impl RuntimeCore {
         }
     }
 
-    /// Periodically refresh the AI session rollup (beads syslog-mcp-2vre,
-    /// syslog-mcp-g33v).
+    /// Periodically refresh the AI session rollup (beads cortex-2vre,
+    /// cortex-g33v).
     ///
     /// `list_ai_sessions` (unbounded) reads from `ai_session_rollup` for an
     /// O(#sessions) indexed scan instead of the O(#AI-rows) live aggregation.
@@ -370,7 +370,7 @@ impl RuntimeCore {
                 match tokio::task::spawn_blocking(move || {
                     let _permit = permit;
                     // Skip the full re-aggregation when the AI-row partition is
-                    // unchanged since the last refresh (bead syslog-mcp-g33v).
+                    // unchanged since the last refresh (bead cortex-g33v).
                     let outcome = db::refresh_ai_session_rollup_if_stale(&pool)?;
                     Ok::<_, anyhow::Error>((outcome, db::ai_session_rollup_status(&pool)?))
                 })
@@ -854,8 +854,8 @@ fn reject_unsafe_otlp_oauth_only_exposure(config: &Config, is_stdio: bool) -> Re
     if config.mcp.no_auth {
         if !mcp_bind_is_loopback(config) && !config.mcp.trusted_gateway_no_auth {
             anyhow::bail!(
-                "refusing non-loopback SYSLOG_MCP_NO_AUTH=true without \
-                 SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true"
+                "refusing non-loopback CORTEX_NO_AUTH=true without \
+                 CORTEX_TRUSTED_GATEWAY_NO_AUTH=true"
             );
         }
         return Ok(());
@@ -864,9 +864,9 @@ fn reject_unsafe_otlp_oauth_only_exposure(config: &Config, is_stdio: bool) -> Re
     if !mcp_bind_is_loopback(config) && !mcp_static_token_active(config) {
         anyhow::bail!(
             "refusing to mount OTLP /v1/logs on non-loopback OAuth-only deployment: \
-             OTLP only supports SYSLOG_MCP_TOKEN Bearer auth today; set SYSLOG_MCP_TOKEN, \
-             bind to loopback, or set SYSLOG_MCP_NO_AUTH=true plus \
-             SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true when an upstream gateway protects all \
+             OTLP only supports CORTEX_TOKEN Bearer auth today; set CORTEX_TOKEN, \
+             bind to loopback, or set CORTEX_NO_AUTH=true plus \
+             CORTEX_TRUSTED_GATEWAY_NO_AUTH=true when an upstream gateway protects all \
              mounted routes"
         );
     }
@@ -905,33 +905,33 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
         if mcp_bind_is_loopback(config) {
             tracing::warn!(
                 mcp_bind = %config.mcp.bind_addr(),
-                "syslog-mcp auth policy: LoopbackDev (NO_AUTH=true on loopback)"
+                "cortex auth policy: LoopbackDev (NO_AUTH=true on loopback)"
             );
             return Ok(AuthPolicy::LoopbackDev);
         }
         if config.mcp.trusted_gateway_no_auth {
             tracing::warn!(
                 mcp_bind = %config.mcp.bind_addr(),
-                "syslog-mcp auth policy: TrustedGatewayUnscoped (NO_AUTH=true; upstream gateway must enforce access)"
+                "cortex auth policy: TrustedGatewayUnscoped (NO_AUTH=true; upstream gateway must enforce access)"
             );
             return Ok(AuthPolicy::TrustedGatewayUnscoped);
         }
         anyhow::bail!(
-            "refusing non-loopback SYSLOG_MCP_NO_AUTH=true without \
-             SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH=true"
+            "refusing non-loopback CORTEX_NO_AUTH=true without \
+             CORTEX_TRUSTED_GATEWAY_NO_AUTH=true"
         );
     }
 
     if is_stdio {
         if config.mcp.auth.mode == AuthMode::OAuth {
             tracing::warn!(
-                "SYSLOG_MCP_AUTH_MODE=oauth is set but syslog-mcp is starting in stdio mode — \
+                "CORTEX_AUTH_MODE=oauth is set but cortex is starting in stdio mode — \
                  OAuth config is ignored; LoopbackDev policy applies (process isolation is the \
                  trust boundary). If auth enforcement is required, use the HTTP server mode instead."
             );
         }
         tracing::info!(
-            "syslog-mcp auth policy: LoopbackDev (stdio mode — process isolation is the trust boundary)"
+            "cortex auth policy: LoopbackDev (stdio mode — process isolation is the trust boundary)"
         );
         return Ok(AuthPolicy::LoopbackDev);
     }
@@ -947,7 +947,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
             // tool dispatcher knows auth is enforced.
             tracing::info!(
                 mcp_bind = %config.mcp.bind_addr(),
-                "syslog-mcp auth policy: Mounted {{ auth_state: None }} (bearer-only; lab-auth OAuth not wired)"
+                "cortex auth policy: Mounted {{ auth_state: None }} (bearer-only; lab-auth OAuth not wired)"
             );
             return Ok(AuthPolicy::Mounted { auth_state: None });
         }
@@ -964,7 +964,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
         }
         tracing::info!(
             mcp_bind = %config.mcp.bind_addr(),
-            "syslog-mcp auth policy: LoopbackDev (no auth wired; loopback bind)"
+            "cortex auth policy: LoopbackDev (no auth wired; loopback bind)"
         );
         return Ok(AuthPolicy::LoopbackDev);
     }
@@ -980,10 +980,10 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
     let resolved_key_path = resolve_auth_path(storage_dir, &auth.key_path);
 
     // Surface the refresh-token TTL override at info level — lab-auth's default
-    // is 30 days; syslog-mcp deliberately ships a tighter (8h) ceiling.
+    // is 30 days; cortex deliberately ships a tighter (8h) ceiling.
     tracing::info!(
         refresh_token_ttl_secs = auth.refresh_token_ttl_secs,
-        "syslog-mcp auth refresh TTL override (lab-auth default is 30d)"
+        "cortex auth refresh TTL override (lab-auth default is 30d)"
     );
 
     // Build the env-var "fake source" that lab-auth's AuthConfigBuilder consumes.
@@ -992,79 +992,79 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
     let mut vars: Vec<(String, String)> = Vec::with_capacity(16);
     push_var(
         &mut vars,
-        "SYSLOG_MCP_AUTH_MODE",
+        "CORTEX_AUTH_MODE",
         if oauth_active { "oauth" } else { "bearer" },
     );
     if let Some(url) = auth.public_url.as_deref() {
-        push_var(&mut vars, "SYSLOG_MCP_PUBLIC_URL", url);
+        push_var(&mut vars, "CORTEX_PUBLIC_URL", url);
     }
     if let Some(id) = auth.google_client_id.as_deref() {
-        push_var(&mut vars, "SYSLOG_MCP_GOOGLE_CLIENT_ID", id);
+        push_var(&mut vars, "CORTEX_GOOGLE_CLIENT_ID", id);
     }
     if let Some(secret) = auth.google_client_secret.as_deref() {
-        push_var(&mut vars, "SYSLOG_MCP_GOOGLE_CLIENT_SECRET", secret);
+        push_var(&mut vars, "CORTEX_GOOGLE_CLIENT_SECRET", secret);
     }
     if !auth.admin_email.is_empty() {
-        push_var(&mut vars, "SYSLOG_MCP_AUTH_ADMIN_EMAIL", &auth.admin_email);
+        push_var(&mut vars, "CORTEX_AUTH_ADMIN_EMAIL", &auth.admin_email);
     }
-    // NOTE: lab-auth does not consume syslog-mcp's TOML `allowed_emails`.
+    // NOTE: lab-auth does not consume cortex's TOML `allowed_emails`.
     // It enforces `admin_email` plus lab-auth-managed allowed users.
-    // syslog-mcp rejects non-empty config-level allowed_emails in OAuth mode
+    // cortex rejects non-empty config-level allowed_emails in OAuth mode
     // until that list is enforceable. Do NOT add a no-op push_var here; the
     // entries would be silently ignored by AuthConfigBuilder.build_from_sources.
     push_var(
         &mut vars,
-        "SYSLOG_MCP_AUTH_SQLITE_PATH",
+        "CORTEX_AUTH_SQLITE_PATH",
         &resolved_db_path.to_string_lossy(),
     );
     push_var(
         &mut vars,
-        "SYSLOG_MCP_AUTH_KEY_PATH",
+        "CORTEX_AUTH_KEY_PATH",
         &resolved_key_path.to_string_lossy(),
     );
     push_var(
         &mut vars,
-        "SYSLOG_MCP_AUTH_ACCESS_TOKEN_TTL_SECS",
+        "CORTEX_AUTH_ACCESS_TOKEN_TTL_SECS",
         &auth.access_token_ttl_secs.to_string(),
     );
     push_var(
         &mut vars,
-        "SYSLOG_MCP_AUTH_REFRESH_TOKEN_TTL_SECS",
+        "CORTEX_AUTH_REFRESH_TOKEN_TTL_SECS",
         &auth.refresh_token_ttl_secs.to_string(),
     );
     push_var(
         &mut vars,
-        "SYSLOG_MCP_AUTH_CODE_TTL_SECS",
+        "CORTEX_AUTH_CODE_TTL_SECS",
         &auth.auth_code_ttl_secs.to_string(),
     );
     push_var(
         &mut vars,
-        "SYSLOG_MCP_AUTH_REGISTER_REQUESTS_PER_MINUTE",
+        "CORTEX_AUTH_REGISTER_REQUESTS_PER_MINUTE",
         &auth.register_rpm.to_string(),
     );
     push_var(
         &mut vars,
-        "SYSLOG_MCP_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE",
+        "CORTEX_AUTH_AUTHORIZE_REQUESTS_PER_MINUTE",
         &auth.authorize_rpm.to_string(),
     );
     if !auth.allowed_client_redirect_uris.is_empty() {
         push_var(
             &mut vars,
-            "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+            "CORTEX_AUTH_ALLOWED_REDIRECT_URIS",
             &auth.allowed_client_redirect_uris.join(","),
         );
     }
 
     let auth_config = lab_auth::config::AuthConfigBuilder::new()
-        .env_prefix("SYSLOG_MCP")
-        .session_cookie_name("syslog_mcp_session")
+        .env_prefix("CORTEX")
+        .session_cookie_name("cortex_session")
         .scopes_supported(vec!["syslog:read".into(), "syslog:admin".into()])
         .default_scope("syslog:read")
         .resource_path("/mcp")
         // Honour `static_token_is_admin` in OAuth+bearer hybrid mode too.
         // The same flag that gates `build_auth_layer` (bearer-only) must also
         // control the scopes injected by lab-auth's AuthConfigBuilder for the
-        // OAuth path. Without this, setting `SYSLOG_MCP_STATIC_TOKEN_ADMIN=false`
+        // OAuth path. Without this, setting `CORTEX_STATIC_TOKEN_ADMIN=false`
         // (the default) would be a no-op in OAuth+bearer hybrid deployments.
         .static_token_scopes(if config.mcp.static_token_is_admin {
             vec!["syslog:read".into(), "syslog:admin".into()]
@@ -1074,7 +1074,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
         .disable_static_token_with_oauth(auth.disable_static_token_with_oauth)
         .enable_dynamic_registration(false)
         .build_from_sources(vars)
-        .context("failed to build lab-auth AuthConfig from syslog-mcp config")?;
+        .context("failed to build lab-auth AuthConfig from cortex config")?;
 
     let auth_state = lab_auth::state::AuthState::new(auth_config)
         .await
@@ -1101,7 +1101,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
         static_token_active,
         auth_db = %resolved_db_path.display(),
         auth_key = %resolved_key_path.display(),
-        "syslog-mcp auth policy: Mounted (lab-auth state initialized)"
+        "cortex auth policy: Mounted (lab-auth state initialized)"
     );
 
     Ok(AuthPolicy::Mounted {

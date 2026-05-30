@@ -10,7 +10,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// Initialize tracing with:
 /// - Console layer: Aurora-colored output to stderr (color auto-detected)
-/// - File layer: JSON to `{data_dir}/logs/syslog-mcp.log` (if writable)
+/// - File layer: JSON to `{data_dir}/logs/cortex.log` (if writable)
 ///
 /// Returns a string describing the active log filter for startup log output.
 pub fn init(default_filter: &str) -> String {

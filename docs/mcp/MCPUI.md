@@ -1,10 +1,10 @@
-# MCP UI Patterns -- syslog-mcp
+# MCP UI Patterns -- cortex
 
 Protocol-level UI hints for MCP servers to improve client-side rendering of tools and results.
 
 ## Current state
 
-syslog-mcp does not currently include MCP UI annotations in its tool schemas. Tool inputs use standard JSON Schema properties without `x-ui-*` extensions.
+cortex does not currently include MCP UI annotations in its tool schemas. Tool inputs use standard JSON Schema properties without `x-ui-*` extensions.
 
 ## Schema annotations available
 

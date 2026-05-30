@@ -557,7 +557,7 @@ fn search_logs_filters_by_source_ip_prefix_without_fts() {
         "info",
         "container stdout line",
     );
-    docker_stdout.source_ip = "docker://dookie/syslog-mcp/stdout".into();
+    docker_stdout.source_ip = "docker://dookie/cortex/stdout".into();
 
     let mut docker_stderr = make_entry(
         "2026-01-01T00:00:01Z",
@@ -565,7 +565,7 @@ fn search_logs_filters_by_source_ip_prefix_without_fts() {
         "warning",
         "container stderr line",
     );
-    docker_stderr.source_ip = "docker://dookie/syslog-mcp/stderr".into();
+    docker_stderr.source_ip = "docker://dookie/cortex/stderr".into();
 
     let mut other = make_entry(
         "2026-01-01T00:00:02Z",
@@ -580,7 +580,7 @@ fn search_logs_filters_by_source_ip_prefix_without_fts() {
     let rows = search_logs(
         &pool,
         &SearchParams {
-            source_ip_prefix: Some("docker://dookie/syslog-mcp/".into()),
+            source_ip_prefix: Some("docker://dookie/cortex/".into()),
             ..Default::default()
         },
     )
@@ -589,14 +589,14 @@ fn search_logs_filters_by_source_ip_prefix_without_fts() {
     assert_eq!(rows.len(), 2);
     assert!(rows
         .iter()
-        .all(|row| row.source_ip.starts_with("docker://dookie/syslog-mcp/")));
+        .all(|row| row.source_ip.starts_with("docker://dookie/cortex/")));
 }
 
 #[test]
 fn search_logs_filters_by_event_action_column() {
     let (pool, _dir) = test_pool();
     let mut die = make_entry("2026-01-01T00:00:00Z", "dookie", "notice", "container died");
-    die.source_ip = "docker-event://dookie/syslog-mcp/die".into();
+    die.source_ip = "docker-event://dookie/cortex/die".into();
     die.event_action = Some("die".into());
 
     let mut start = make_entry(
@@ -605,7 +605,7 @@ fn search_logs_filters_by_event_action_column() {
         "notice",
         "container started",
     );
-    start.source_ip = "docker-event://dookie/syslog-mcp/start".into();
+    start.source_ip = "docker-event://dookie/cortex/start".into();
     start.event_action = Some("start".into());
 
     insert_logs_batch(&pool, &[die, start]).unwrap();
@@ -1302,7 +1302,7 @@ fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
                 source_ip: "10.0.0.1:514".into(),
                 docker_checkpoint: None,
                 ai_tool: Some("codex".into()),
-                ai_project: Some("/home/jmagar/workspace/syslog-mcp".into()),
+                ai_project: Some("/home/jmagar/workspace/cortex".into()),
                 ai_session_id: Some("abc".into()),
                 ai_transcript_path: Some(
                     "/home/jmagar/.codex/sessions/2026/05/11/rollout-abc.jsonl".into(),
@@ -1326,7 +1326,7 @@ fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
                 source_ip: "10.0.0.1:514".into(),
                 docker_checkpoint: None,
                 ai_tool: Some("codex".into()),
-                ai_project: Some("/home/jmagar/workspace/syslog-mcp".into()),
+                ai_project: Some("/home/jmagar/workspace/cortex".into()),
                 ai_session_id: Some("abc".into()),
                 ai_transcript_path: Some(
                     "/home/jmagar/.codex/sessions/2026/05/11/rollout-abc.jsonl".into(),
@@ -1345,7 +1345,7 @@ fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
     let rows = list_ai_sessions(
         &pool,
         &ListAiSessionsParams {
-            ai_project: Some("/home/jmagar/workspace/syslog-mcp".into()),
+            ai_project: Some("/home/jmagar/workspace/cortex".into()),
             limit: Some(10),
             ..Default::default()
         },
@@ -1361,7 +1361,7 @@ fn list_ai_sessions_groups_by_project_tool_session_and_hostname() {
 }
 
 // ---------------------------------------------------------------------------
-// AI session rollup (bead syslog-mcp-2vre) correctness tests
+// AI session rollup (bead cortex-2vre) correctness tests
 // ---------------------------------------------------------------------------
 
 /// Insert a spread of AI sessions across projects/tools/sessions/hosts so the
@@ -1610,7 +1610,7 @@ fn time_windowed_sessions_always_use_live_path() {
 }
 
 // ---------------------------------------------------------------------------
-// Rollup source-watermark dirty-check (bead syslog-mcp-g33v)
+// Rollup source-watermark dirty-check (bead cortex-g33v)
 // ---------------------------------------------------------------------------
 
 /// Helper: insert a single non-AI log row (no ai_* fields). Such rows must NOT
@@ -1996,7 +1996,7 @@ fn ask_history_sessions_returns_session_hits() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Performance benchmark harness (Issue 4 / bead syslog-mcp-2vre).
+// Performance benchmark harness (Issue 4 / bead cortex-2vre).
 //
 // Builds a synthetic on-disk SQLite DB with a realistic row count and times
 // `get_stats` and `list_ai_sessions` before/after the optimization work.
@@ -2004,10 +2004,10 @@ fn ask_history_sessions_returns_session_hits() {
 // IGNORED by default — it builds millions of rows and takes minutes, so it
 // must never run in the normal `cargo nextest` suite. Run explicitly:
 //
-//   SYSLOG_BENCH_ROWS=10000000 cargo test --lib \
+//   CORTEX_BENCH_ROWS=10000000 cargo test --lib \
 //       db::queries::tests::bench_stats_and_sessions -- --ignored --nocapture
 //
-// Row count is controlled by SYSLOG_BENCH_ROWS (default 5_000_000).
+// Row count is controlled by CORTEX_BENCH_ROWS (default 5_000_000).
 // ───────────────────────────────────────────────────────────────────────────
 
 /// Insert `n` synthetic log rows through the live schema (FTS + inventory +
@@ -2106,7 +2106,7 @@ fn bench_median_ms(runs: usize, mut f: impl FnMut()) -> f64 {
 #[test]
 #[ignore = "performance benchmark; builds millions of rows. Run with --ignored."]
 fn bench_stats_and_sessions() {
-    let rows: usize = std::env::var("SYSLOG_BENCH_ROWS")
+    let rows: usize = std::env::var("CORTEX_BENCH_ROWS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(5_000_000);
@@ -2114,7 +2114,7 @@ fn bench_stats_and_sessions() {
     // Optional persistent DB path so a seeded DB can be reused across runs
     // (seeding 10M rows takes ~13 min). When unset, use a throwaway tempdir.
     let _guard_dir;
-    let (pool, cfg) = if let Ok(path) = std::env::var("SYSLOG_BENCH_DB") {
+    let (pool, cfg) = if let Ok(path) = std::env::var("CORTEX_BENCH_DB") {
         let db_path = std::path::PathBuf::from(&path);
         let fresh = !db_path.exists();
         let cfg = test_storage_config(db_path);

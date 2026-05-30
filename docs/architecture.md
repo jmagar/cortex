@@ -1,7 +1,7 @@
-# syslog-mcp architecture (post v0.26)
+# cortex architecture (post v0.26)
 
 This document captures how callers reach the SQLite database after the
-v0.26 CLI-over-HTTP cutover (epic `syslog-mcp-0p8r`). It complements
+v0.26 CLI-over-HTTP cutover (epic `cortex-0p8r`). It complements
 the runtime overview in `CLAUDE.md` and the endpoint matrix in
 [`docs/api.md`](api.md).
 
@@ -11,9 +11,9 @@ the runtime overview in `CLAUDE.md` and the endpoint matrix in
 AI clients ──▶ /mcp (rmcp streamable HTTP)        ─┐
                                                    │
 CLI default ──▶ /api/* (REST)                      ├──▶ container SyslogService ──▶ SQLite (/data)
-   [SYSLOG_USE_HTTP=true since v0.26]              │       (db_permits pool + MAINTENANCE_PERMIT)
+   [CORTEX_USE_HTTP=true since v0.26]              │       (db_permits pool + MAINTENANCE_PERMIT)
                                                    │
-CLI explicit "unset SYSLOG_USE_HTTP"  ─────────────┘
+CLI explicit "unset CORTEX_USE_HTTP"  ─────────────┘
    ──▶ direct SQLite (RuntimeCore::load_query_only, read-only)
 
 syslog ai watch (systemd) ────────────────────────────▶ direct SQLite

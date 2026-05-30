@@ -1,6 +1,6 @@
 # Headless Agent Prompt Evaluation
 
-syslog-mcp already ingests Claude, Codex, and Gemini sessions, so prompt
+cortex already ingests Claude, Codex, and Gemini sessions, so prompt
 evaluation should prefer live agent runs over a synthetic-only harness.
 
 The practical shape is:
@@ -17,7 +17,7 @@ Use `scripts/prompt-headless-eval.sh` for the live path:
 
 ```bash
 scripts/prompt-headless-eval.sh --dry-run --prompt infra.service-outage --arg service=plex
-scripts/prompt-headless-eval.sh --agent codex --report /tmp/syslog-prompt-eval.json --prompt infra.after-deploy-check --arg service=syslog-mcp
+scripts/prompt-headless-eval.sh --agent codex --report /tmp/syslog-prompt-eval.json --prompt infra.after-deploy-check --arg service=cortex
 scripts/prompt-headless-eval.sh --agent claude --mcp-config /path/to/claude-mcp-config.json --report /tmp/syslog-prompt-eval.json --prompt infra.storage-pressure
 ```
 
@@ -31,7 +31,7 @@ The script deliberately has two preflight layers:
   checks stay as raw JSON-RPC.
 - Agent MCP preflight asks the selected headless agent to call `syslog
   action=help` using only its configured MCP tools. This fails fast when the
-  agent runtime cannot see syslog-mcp directly. Use `--skip-agent-preflight`
+  agent runtime cannot see cortex directly. Use `--skip-agent-preflight`
   only when intentionally evaluating fallback behavior.
 
 Cost controls:

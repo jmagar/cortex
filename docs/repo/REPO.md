@@ -1,9 +1,9 @@
-# Repository Structure -- syslog-mcp
+# Repository Structure -- cortex
 
 ## Directory tree
 
 ```
-syslog-mcp/
+cortex/
 ├── .claude-plugin/
 │   └── plugin.json              # Claude Code plugin manifest
 ├── .codex-plugin/

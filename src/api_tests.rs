@@ -55,7 +55,7 @@ fn test_state_full(
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("api-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
-    let service = crate::app::SyslogService::new(Arc::clone(&pool), storage);
+    let service = crate::app::CortexService::new(Arc::clone(&pool), storage);
     // Every test gets a fresh per-state maintenance permit so parallel tests
     // never contend on the process-wide `SHARED_MAINTENANCE_PERMIT` — see
     // `ApiState::with_isolated_maintenance_permit` docs.
@@ -124,11 +124,11 @@ fn router_requires_token() {
     let err = router(state).expect_err("missing token must abort router construction");
     let msg = err.to_string();
     assert!(
-        msg.contains("SYSLOG_API_TOKEN"),
+        msg.contains("CORTEX_API_TOKEN"),
         "error must mention the missing env var: {msg}"
     );
     assert!(
-        msg.contains("syslog setup repair"),
+        msg.contains("cortex setup repair"),
         "error must include recovery hint: {msg}"
     );
 }
@@ -515,7 +515,7 @@ async fn sessions_route_lists_ingested_session() {
             "host-a",
             "info",
             "claude session start",
-            "syslog-mcp",
+            "cortex",
             "claude",
             "sess-1",
         )],
@@ -525,7 +525,7 @@ async fn sessions_route_lists_ingested_session() {
     let (status, value) = get_json(app, "/api/sessions", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(value["count"], 1);
-    assert_eq!(value["sessions"][0]["project"], "syslog-mcp");
+    assert_eq!(value["sessions"][0]["project"], "cortex");
     assert_eq!(value["sessions"][0]["tool"], "claude");
 }
 
@@ -766,7 +766,7 @@ async fn ai_routes_require_bearer() {
     }
 }
 
-// ── CORS plumbing from SYSLOG_MCP_ALLOWED_ORIGINS ───────────────────────────
+// ── CORS plumbing from CORTEX_ALLOWED_ORIGINS ───────────────────────────
 
 #[tokio::test]
 async fn allowed_origins_grants_cors_for_env_supplied_host() {
@@ -793,14 +793,14 @@ async fn allowed_origins_grants_cors_for_env_supplied_host() {
 }
 
 /// Bead 0p8r.21: on a non-loopback bind, the default `localhost:port` /
-/// `127.0.0.1:port` CORS allowlist must NOT fire. Only `SYSLOG_MCP_ALLOWED_ORIGINS`
+/// `127.0.0.1:port` CORS allowlist must NOT fire. Only `CORTEX_ALLOWED_ORIGINS`
 /// is authoritative.
 #[tokio::test]
 async fn cors_localhost_defaults_suppressed_on_external_bind() {
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("api-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
-    let service = crate::app::SyslogService::new(Arc::clone(&pool), storage);
+    let service = crate::app::CortexService::new(Arc::clone(&pool), storage);
     let state = ApiState::new(
         service,
         ApiConfig {
@@ -834,7 +834,7 @@ async fn cors_localhost_defaults_suppressed_on_external_bind() {
     );
 }
 
-/// Grep guard: there must be no `SYSLOG_API_ENABLED` reference left in the
+/// Grep guard: there must be no `CORTEX_API_ENABLED` reference left in the
 /// source tree. The env var was retired when /api/* became always-on, and a
 /// stray reference would be a silent foot-gun (operators expecting it to
 /// control mounting).
@@ -865,7 +865,7 @@ fn no_syslog_api_enabled_references_remain_in_source_tree() {
                 continue;
             };
             for (idx, line) in contents.lines().enumerate() {
-                if line.contains("SYSLOG_API_ENABLED") {
+                if line.contains("CORTEX_API_ENABLED") {
                     hits.push((path.clone(), idx + 1, line.to_string()));
                 }
             }
@@ -879,7 +879,7 @@ fn no_syslog_api_enabled_references_remain_in_source_tree() {
     walk(&src_root, &mut hits);
     assert!(
         hits.is_empty(),
-        "found leftover SYSLOG_API_ENABLED references in src/: {hits:#?}"
+        "found leftover CORTEX_API_ENABLED references in src/: {hits:#?}"
     );
 }
 
@@ -1782,7 +1782,7 @@ async fn db_vacuum_concurrent_requests_no_5xx_at_least_one_success() {
 }
 
 /// Eng-review C2: while the maintenance permit is held, reads (which use
-/// the independent `db_permits` pool inside `SyslogService::run_db`) must
+/// the independent `db_permits` pool inside `CortexService::run_db`) must
 /// continue to succeed.
 #[tokio::test]
 async fn reads_continue_while_maintenance_permit_held() {
@@ -1892,7 +1892,7 @@ fn db_admin_audit_logs_precede_service_calls_in_source() {
         }
     }
 
-    // Bead 0p8r.22 + syslog-mcp-yab3.5: db_checkpoint's audit warn! must also
+    // Bead 0p8r.22 + cortex-yab3.5: db_checkpoint's audit warn! must also
     // precede the checked service operation, because the mode allowlist now
     // lives in the service request model. A rejected `mode=evil` 400 still
     // leaves an audit row.
@@ -2185,7 +2185,7 @@ async fn ai_investigate_rejects_unsupported_indexed_terms_query() {
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
 }
 
-/// Regression for syslog-mcp-fzj7: the CLI HTTP client serializes
+/// Regression for cortex-fzj7: the CLI HTTP client serializes
 /// `AiInvestigateRequest` with `serde_qs::to_string` and sends it as the raw
 /// query string. The investigate CLI path always sets `incident_id: None`, and
 /// the server-side `AiInvestigateQuery` uses `deny_unknown_fields` without an
@@ -2221,7 +2221,7 @@ async fn ai_investigate_cli_query_omits_incident_id_and_server_accepts() {
     );
 }
 
-/// Discriminating test for syslog-mcp-fzj7: a *non-empty* `terms` Vec must
+/// Discriminating test for cortex-fzj7: a *non-empty* `terms` Vec must
 /// also survive the CLI client serializer → server extractor round-trip.
 /// `serde_qs::to_string` emits indexed `terms[0]=..&terms[1]=..`; the server
 /// extractor must accept that exact encoding.
@@ -2264,7 +2264,7 @@ async fn compose_doctor_route_exists() {
 #[tokio::test]
 async fn compose_doctor_unready_returns_structured_projection() {
     let status = crate::compose::ComposeStatus {
-        container_name: "syslog-mcp".into(),
+        container_name: "cortex".into(),
         container_id: None,
         status: None,
         health: None,
@@ -2292,7 +2292,7 @@ async fn compose_doctor_unready_returns_structured_projection() {
 
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(value["container_name"], "syslog-mcp");
+    assert_eq!(value["container_name"], "cortex");
     assert_eq!(value["ownership"], "unknown");
     assert_eq!(value["runtime_state"], "docker_unavailable");
     assert_eq!(value["diagnostics"][0]["code"], "docker_unavailable");

@@ -406,7 +406,7 @@ pub struct ListSessionsResponse {
     /// that rollup's last refresh — i.e. the data's `as_of` staleness bound.
     /// `None` means the result is live (a time-windowed query, or the rollup
     /// had not been refreshed yet so the live aggregation was used). See bead
-    /// syslog-mcp-2vre.
+    /// cortex-2vre.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollup_as_of: Option<String>,
 }
@@ -664,7 +664,7 @@ pub struct AiInvestigateRequest {
     // `deny_unknown_fields`). serde_qs emits `None` options as a bare key
     // (`incident_id&project&...`), which the server rejects as an unknown
     // field. Skipping when `None` keeps the CLI HTTP path (which always sets
-    // `None`) from emitting the param. See syslog-mcp-fzj7.
+    // `None`) from emitting the param. See cortex-fzj7.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incident_id: Option<String>,
     pub project: Option<String>,

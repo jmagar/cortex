@@ -4,9 +4,9 @@ Date: 2026-05-12
 
 ## Goal
 
-Add first-class `syslog compose ...` lifecycle commands for managing the syslog-mcp Docker Compose deployment, with the operational logic living in a shared library layer. CLI and MCP should be thin adapters over that shared layer.
+Add first-class `syslog compose ...` lifecycle commands for managing the cortex Docker Compose deployment, with the operational logic living in a shared library layer. CLI and MCP should be thin adapters over that shared layer.
 
-The immediate problem to solve is deployment ownership ambiguity: a repo checkout can contain `docker-compose.yml`, while the live `syslog-mcp` container may be owned by a plugin data-dir Compose project such as `/home/jmagar/.claude/plugins/data/syslog-jmagar-lab`. The command must detect that state and make the safe target obvious.
+The immediate problem to solve is deployment ownership ambiguity: a repo checkout can contain `docker-compose.yml`, while the live `cortex` container may be owned by a plugin data-dir Compose project such as `/home/jmagar/.claude/plugins/data/syslog-jmagar-lab`. The command must detect that state and make the safe target obvious.
 
 ## Non-Goals
 
@@ -127,7 +127,7 @@ pub struct ComposeCommandResult {
 The shared service should resolve targets in this order for read-only CLI operations:
 
 1. Explicit `--compose-file`, `--project-dir`, or `--project-name`.
-2. Existing container named `syslog-mcp`, inspected through the `DockerInspect` abstraction.
+2. Existing container named `cortex`, inspected through the `DockerInspect` abstraction.
 3. Compose labels on that container:
    - `com.docker.compose.project`
    - `com.docker.compose.project.working_dir`
@@ -150,7 +150,7 @@ If live ownership and the requested/cwd ownership disagree, mutating commands mu
 
 The service must canonicalize compose paths before comparing them, validate that label-referenced compose files still exist, and reject surprising symlink/path mismatches for mutating commands unless explicitly overridden.
 
-When exact container-name lookup fails, `status` and `doctor` should also look for candidate containers by Compose labels such as `com.docker.compose.service=syslog-mcp` and `io.modelcontextprotocol.server.name=tv.tootie/syslog-mcp`. If multiple candidates exist, report ambiguity and do not pick one for mutation without explicit target flags.
+When exact container-name lookup fails, `status` and `doctor` should also look for candidate containers by Compose labels such as `com.docker.compose.service=cortex` and `io.modelcontextprotocol.server.name=tv.tootie/cortex`. If multiple candidates exist, report ambiguity and do not pick one for mutation without explicit target flags.
 
 ## Mutation Safety Rules
 
@@ -160,10 +160,10 @@ Before `up`, `down`, `restart`, or `pull`, the shared service must run a mutatio
 - Refuse ambiguous targets unless explicit target flags are present.
 - Refuse cwd-vs-live-owner mismatches unless an explicit override is present.
 - Validate that the resolved Compose config defines the expected service.
-- Validate that the resolved service image or labels identify syslog-mcp, unless `--allow-foreign-project` is present.
+- Validate that the resolved service image or labels identify cortex, unless `--allow-foreign-project` is present.
 - Refuse stale label paths or missing compose files.
-- First pass checks only `syslog-mcp.service` plus live listeners on `1514` and `3100`.
-- Refuse `up` and `restart` when `syslog-mcp.service` is active or when a non-target process owns `1514` or `3100`, unless explicitly overridden.
+- First pass checks only `cortex.service` plus live listeners on `1514` and `3100`.
+- Refuse `up` and `restart` when `cortex.service` is active or when a non-target process owns `1514` or `3100`, unless explicitly overridden.
 - Warn, but do not refuse, `pull` for systemd/listener conflicts because it does not change the running process.
 - Allow `down` only against a confirmed Compose target; do not let systemd/listener detection redirect `down` toward anything else.
 - For destructive commands such as `down`, require `--yes` in non-interactive mode after printing the target summary.
@@ -184,7 +184,7 @@ Use a `DockerInspect` abstraction for read-only inspection. First-pass implement
 
 Read-only inspection needs:
 
-- Find container by exact name `/syslog-mcp`.
+- Find container by exact name `/cortex`.
 - Read labels, image ID, health, restart policy, mounts, ports, network mode.
 - Optionally inspect image labels and creation metadata after core status/doctor behavior is stable.
 
@@ -255,8 +255,8 @@ Common target flags:
 --compose-file PATH
 --project-dir PATH
 --project-name NAME
---service NAME      # default: syslog-mcp
---container NAME    # default: syslog-mcp
+--service NAME      # default: cortex
+--container NAME    # default: cortex
 --allow-cwd-target
 --allow-foreign-project
 --yes               # required for destructive non-interactive mutations
@@ -296,7 +296,7 @@ Do not add mutating MCP actions in the first pass.
 
 Do not expose raw `docker compose config` over MCP in the first pass. If config inspection is later added, it must be redacted, bounded, and represented structurally rather than as raw rendered YAML.
 
-First-pass MCP compose actions must reject caller-supplied target overrides. MCP must not accept arbitrary `container_name`, `project_dir`, `compose_file`, or `project_name` arguments. It may only inspect the canonical syslog-mcp deployment target selected by server-side defaults.
+First-pass MCP compose actions must reject caller-supplied target overrides. MCP must not accept arbitrary `container_name`, `project_dir`, `compose_file`, or `project_name` arguments. It may only inspect the canonical cortex deployment target selected by server-side defaults.
 
 Compose MCP actions are operational diagnostics, not normal log reads. A dedicated operational read scope is deferred. First pass may use the existing read-scope policy only if the MCP adapter returns a conservative `ComposeMcpStatus` projection.
 
@@ -309,7 +309,7 @@ MCP responses must be built through a dedicated redaction/projection mapper:
 
 If mutating MCP actions are later required, gate them behind all of:
 
-- `SYSLOG_MCP_ADMIN_ACTIONS=true`
+- `CORTEX_ADMIN_ACTIONS=true`
 - mounted OAuth auth, not `LoopbackDev`
 - no bearer-only/static-token admin mode for host lifecycle control
 - caller has admin scope
@@ -344,9 +344,9 @@ This avoids breaking lifecycle management when the database is corrupt, missing,
 Human output should prioritize the operational facts:
 
 ```text
-Container: syslog-mcp
+Container: cortex
 Status: Up 2 minutes (healthy)
-Image: ghcr.io/jmagar/syslog-mcp:latest
+Image: ghcr.io/jmagar/cortex:latest
 Compose project: syslog-jmagar-lab
 Compose file: /home/jmagar/.claude/plugins/data/syslog-jmagar-lab/docker-compose.yml
 Data: /home/jmagar/.claude/plugins/data/syslog-jmagar-lab -> /data
@@ -473,6 +473,6 @@ Do not run non-dry-run lifecycle mutations as part of automated tests.
 
 ## Open Questions
 
-- Should the default container name be configurable through an env var, or remain hard-coded as `syslog-mcp` with only a CLI flag override?
+- Should the default container name be configurable through an env var, or remain hard-coded as `cortex` with only a CLI flag override?
 - Should `compose logs --follow` be deferred entirely, or implemented as CLI-only streaming in the first pass?
 - Should a dedicated MCP operational read scope be introduced after the first pass, and what exact name should it use?

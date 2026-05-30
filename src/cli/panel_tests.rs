@@ -4,11 +4,11 @@ use super::panel_plain;
 fn panel_renders_title_and_rows() {
     let out = panel_plain(
         "DB Status",
-        &[("db_path", "/data/syslog.db"), ("pages", "42")],
+        &[("db_path", "/data/cortex.db"), ("pages", "42")],
     );
     assert!(out.contains("DB Status"));
     assert!(out.contains("db_path"));
-    assert!(out.contains("/data/syslog.db"));
+    assert!(out.contains("/data/cortex.db"));
     assert!(out.contains("pages"));
     assert!(out.contains("42"));
 }

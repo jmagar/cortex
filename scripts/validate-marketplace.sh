@@ -54,23 +54,23 @@ json_value() {
   jq -er "${query}" "${file}" 2>/dev/null
 }
 
-echo "=== Validating syslog-mcp Plugin Layout ==="
+echo "=== Validating cortex Plugin Layout ==="
 echo
 
 check "jq is available" "command -v jq"
 
 PLUGIN_JSON=".claude-plugin/plugin.json"
-MCP_JSON="plugins/syslog/.mcp.json"
-HOOKS_JSON="plugins/syslog/hooks/hooks.json"
-SKILLS_DIR="plugins/syslog/skills"
+MCP_JSON="plugins/cortex/.mcp.json"
+HOOKS_JSON="plugins/cortex/hooks/hooks.json"
+SKILLS_DIR="plugins/cortex/skills"
 
 check "plugin manifest exists" "test -f '${PLUGIN_JSON}'"
 check "plugin manifest is valid JSON" "jq empty '${PLUGIN_JSON}'"
 check "plugin name is syslog" "test \"\$(jq -er '.name' '${PLUGIN_JSON}')\" = 'syslog'"
 check "plugin manifest omits version" "jq -er 'has(\"version\") | not' '${PLUGIN_JSON}'"
-check "plugin points to MCP config" "test \"\$(jq -er '.mcpServers' '${PLUGIN_JSON}')\" = './plugins/syslog/.mcp.json'"
-check "plugin points to hooks config" "test \"\$(jq -er '.hooks' '${PLUGIN_JSON}')\" = './plugins/syslog/hooks/hooks.json'"
-check "plugin points to skills directory" "test \"\$(jq -er '.skills' '${PLUGIN_JSON}')\" = './plugins/syslog/skills'"
+check "plugin points to MCP config" "test \"\$(jq -er '.mcpServers' '${PLUGIN_JSON}')\" = './plugins/cortex/.mcp.json'"
+check "plugin points to hooks config" "test \"\$(jq -er '.hooks' '${PLUGIN_JSON}')\" = './plugins/cortex/hooks/hooks.json'"
+check "plugin points to skills directory" "test \"\$(jq -er '.skills' '${PLUGIN_JSON}')\" = './plugins/cortex/skills'"
 check "plugin declares server_url userConfig" "jq -er '.userConfig.server_url.default == \"http://localhost:3100\"' '${PLUGIN_JSON}'"
 check "plugin declares syslog_port userConfig" "jq -er '.userConfig.syslog_port.default == 1514' '${PLUGIN_JSON}'"
 check "plugin declares syslog_host_port userConfig" "jq -er '.userConfig.syslog_host_port.default == 1514' '${PLUGIN_JSON}'"

@@ -24,21 +24,21 @@ use super::prompts::{get_prompt, prompt_definitions};
 use super::{schemas::tool_definitions, tools::execute_tool, AppState, AuthPolicy};
 
 #[derive(Clone)]
-pub struct SyslogRmcpServer {
+pub struct CortexRmcpServer {
     state: AppState,
 }
 
-impl SyslogRmcpServer {
+impl CortexRmcpServer {
     pub fn new(state: AppState) -> Self {
         Self { state }
     }
 }
 
-pub fn rmcp_server(state: AppState) -> SyslogRmcpServer {
-    SyslogRmcpServer::new(state)
+pub fn rmcp_server(state: AppState) -> CortexRmcpServer {
+    CortexRmcpServer::new(state)
 }
 
-impl ServerHandler for SyslogRmcpServer {
+impl ServerHandler for CortexRmcpServer {
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
@@ -228,9 +228,9 @@ pub fn streamable_http_config(config: &McpConfig) -> StreamableHttpServerConfig 
 pub fn streamable_http_service(
     state: AppState,
     config: StreamableHttpServerConfig,
-) -> StreamableHttpService<SyslogRmcpServer, LocalSessionManager> {
+) -> StreamableHttpService<CortexRmcpServer, LocalSessionManager> {
     StreamableHttpService::new(
-        move || Ok(SyslogRmcpServer::new(state.clone())),
+        move || Ok(CortexRmcpServer::new(state.clone())),
         Default::default(),
         config,
     )
@@ -243,7 +243,7 @@ pub(super) const MCP_APP_HTML_MIME_TYPE: &str = "text/html;profile=mcp-app";
 
 fn schema_resource() -> Resource {
     Resource::new(
-        RawResource::new(SCHEMA_RESOURCE_URI, "syslog tool schema")
+        RawResource::new(SCHEMA_RESOURCE_URI, "cortex tool schema")
             .with_description("JSON schema for the syslog MCP tool and its action-based parameters")
             .with_mime_type("application/json"),
         None,
@@ -268,7 +268,7 @@ fn query_widget_resource() -> Resource {
     Resource::new(
         RawResource::new(QUERY_WIDGET_RESOURCE_URI, "syslog query widget")
             .with_title("Syslog Query")
-            .with_description("Interactive MCP Apps widget for querying syslog-mcp logs")
+            .with_description("Interactive MCP Apps widget for querying cortex logs")
             .with_mime_type(MCP_APP_HTML_MIME_TYPE),
         None,
     )
@@ -278,7 +278,7 @@ fn prompt_output_schema() -> Value {
     serde_json::json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": PROMPT_OUTPUT_SCHEMA_RESOURCE_URI,
-        "title": "SyslogPromptInvestigationResult",
+        "title": "CortexPromptInvestigationResult",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -360,7 +360,7 @@ fn query_widget_contents() -> ResourceContents {
     .with_mime_type(MCP_APP_HTML_MIME_TYPE)
 }
 
-fn syslog_tool_meta() -> Meta {
+fn cortex_tool_meta() -> Meta {
     let mut meta = Map::new();
     meta.insert(
         "ui".to_string(),
@@ -400,8 +400,8 @@ fn rmcp_tool_from_json(value: Value) -> Result<Tool, ErrorData> {
         Arc::new(input_schema),
     );
 
-    Ok(if name == "syslog" {
-        tool.with_meta(syslog_tool_meta())
+    Ok(if name == "cortex" {
+        tool.with_meta(cortex_tool_meta())
     } else {
         tool
     })
@@ -424,7 +424,7 @@ fn is_validation_error(error: &anyhow::Error) -> bool {
         || error.to_string().contains("must be an unsigned integer")
         || error.to_string().contains(" must be <=")
         || error.to_string().contains("target override")
-        || error.to_string().contains("unknown syslog action")
+        || error.to_string().contains("unknown cortex action")
 }
 
 fn safe_result_count(value: &Value) -> Option<usize> {
@@ -510,7 +510,7 @@ fn check_scope(auth: &AuthContext, required_scope: &str, action: &str) -> Result
     ))
 }
 
-/// Map a syslog tool action to the minimum required scope.
+/// Map a cortex tool action to the minimum required scope.
 ///
 /// Map an action name to the MCP scope required to invoke it.
 ///
@@ -534,7 +534,7 @@ pub(super) fn allowed_hosts(config: &McpConfig) -> Vec<String> {
     push_host_variants(&mut hosts, "localhost", config.port);
     push_host_variants(&mut hosts, "127.0.0.1", config.port);
     push_host_variants(&mut hosts, "::1", config.port);
-    // When SYSLOG_MCP_PUBLIC_URL is set (required for OAuth mode), extract the
+    // When CORTEX_PUBLIC_URL is set (required for OAuth mode), extract the
     // host and add it to the allowlist so callbacks from the public hostname are
     // accepted by rmcp's DNS-rebinding guard.
     if let Some(public_url) = config.auth.public_url.as_deref() {
@@ -580,7 +580,7 @@ fn push_public_url_hosts(hosts: &mut Vec<String>, url: &str, listen_port: u16) {
     let Ok(parsed) = url::Url::parse(url) else {
         tracing::warn!(
             public_url = url,
-            "SYSLOG_MCP_PUBLIC_URL is not a valid URL; skipping host allowlist extension"
+            "CORTEX_PUBLIC_URL is not a valid URL; skipping host allowlist extension"
         );
         return;
     };
@@ -590,10 +590,7 @@ fn push_public_url_hosts(hosts: &mut Vec<String>, url: &str, listen_port: u16) {
     // Never add wildcards — rmcp does exact host matching and a wildcard in
     // the allowlist would silently permit any Host header value.
     if host.contains('*') {
-        tracing::warn!(
-            host,
-            "SYSLOG_MCP_PUBLIC_URL host contains wildcard; skipping"
-        );
+        tracing::warn!(host, "CORTEX_PUBLIC_URL host contains wildcard; skipping");
         return;
     }
     // `url::Url::port()` returns None for default ports (443 for https, 80 for
@@ -649,7 +646,7 @@ pub(super) fn allowed_origins(config: &McpConfig) -> Vec<String> {
         format!("http://127.0.0.1:{}", config.port),
     ];
     origins.extend(config.allowed_origins.iter().cloned());
-    // When SYSLOG_MCP_PUBLIC_URL is set, add its origin (scheme + host + port
+    // When CORTEX_PUBLIC_URL is set, add its origin (scheme + host + port
     // if non-default) so browser preflight from the configured public URL is
     // accepted by the CORS layer.
     if let Some(public_url) = config.auth.public_url.as_deref() {
@@ -670,7 +667,7 @@ pub(super) fn allowed_origins(config: &McpConfig) -> Vec<String> {
 fn extract_origin(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url)
         .map_err(|e| {
-            tracing::warn!(public_url = url, error = %e, "SYSLOG_MCP_PUBLIC_URL is not a valid URL; skipping origin allowlist extension");
+            tracing::warn!(public_url = url, error = %e, "CORTEX_PUBLIC_URL is not a valid URL; skipping origin allowlist extension");
         })
         .ok()?;
     let scheme = parsed.scheme();
@@ -679,7 +676,7 @@ fn extract_origin(url: &str) -> Option<String> {
     if host.contains('*') {
         tracing::warn!(
             host,
-            "SYSLOG_MCP_PUBLIC_URL host contains wildcard; skipping origin"
+            "CORTEX_PUBLIC_URL host contains wildcard; skipping origin"
         );
         return None;
     }

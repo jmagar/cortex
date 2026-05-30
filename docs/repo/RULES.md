@@ -1,4 +1,4 @@
-# Coding Rules -- syslog-mcp
+# Coding Rules -- cortex
 
 Standards and conventions enforced across the repository.
 

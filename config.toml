@@ -1,7 +1,7 @@
-# syslog-mcp configuration
+# cortex configuration
 # Env vars override these values. See .env.example for the full list.
 
-[syslog]
+[receiver]
 # Use 1514 to avoid needing root/CAP_NET_BIND_SERVICE for port 514
 # iptables redirect 514 -> 1514 (see docs/SETUP.md)
 host = "0.0.0.0"
@@ -13,7 +13,7 @@ write_channel_capacity = 10000
 
 [storage]
 # Local dev uses the repo's writable data/ directory. Docker uses env/defaults.
-db_path = "data/syslog.db"
+db_path = "data/cortex.db"
 pool_size = 4
 retention_days = 90         # 0 = keep forever
 wal_mode = true
@@ -25,11 +25,11 @@ cleanup_interval_secs = 60  # storage-budget enforcement interval
 
 [mcp]
 # Safety gate: if host is non-loopback (e.g. "0.0.0.0"), startup requires either
-# SYSLOG_MCP_TOKEN (static bearer) or SYSLOG_MCP_AUTH_MODE=oauth to be set.
+# CORTEX_TOKEN (static bearer) or CORTEX_AUTH_MODE=oauth to be set.
 # Binding to a non-loopback address without auth will cause startup to fail.
 host = "0.0.0.0"
 port = 3100
-server_name = "syslog-mcp"
+server_name = "cortex"
 # Optional extra RMCP Host/Origin allow-lists for reverse proxies.
 # allowed_hosts = ["syslog.example.com", "syslog.example.com:443"]
 # allowed_origins = ["https://syslog.example.com"]
@@ -38,20 +38,20 @@ server_name = "syslog-mcp"
 # OAuth / JWT authentication policy.
 #
 # Env vars:
-#   SYSLOG_MCP_AUTH_MODE              bearer (default) | oauth
-#   SYSLOG_MCP_PUBLIC_URL             required when mode=oauth
-#   SYSLOG_MCP_GOOGLE_CLIENT_ID       required when mode=oauth
-#   SYSLOG_MCP_GOOGLE_CLIENT_SECRET   required when mode=oauth
-#   SYSLOG_MCP_TOKEN                  static break-glass bearer (existing)
+#   CORTEX_AUTH_MODE              bearer (default) | oauth
+#   CORTEX_PUBLIC_URL             required when mode=oauth
+#   CORTEX_GOOGLE_CLIENT_ID       required when mode=oauth
+#   CORTEX_GOOGLE_CLIENT_SECRET   required when mode=oauth
+#   CORTEX_TOKEN                  static break-glass bearer (existing)
 #
 # Everything else below is TOML-only by design.
 # ----------------------------------------------------------------------------
 [mcp.auth]
 # Bootstrap admin email permitted to log in via Google OAuth. This is the only
-# config-backed OAuth email gate syslog-mcp passes into lab-auth in V1.
+# config-backed OAuth email gate cortex passes into lab-auth in V1.
 admin_email = ""
 # Reserved for future config-backed multi-user enforcement. Keep empty in OAuth
-# mode today; startup rejects non-empty values because syslog-mcp does not pass
+# mode today; startup rejects non-empty values because cortex does not pass
 # this list into lab-auth.
 allowed_emails = []
 
@@ -69,7 +69,7 @@ auth_code_ttl_secs = 300       # 5m
 # /register is not mounted, so only authorize_rpm applies.
 authorize_rpm = 60
 
-# When OAuth is active, also reject requests carrying SYSLOG_MCP_TOKEN. Set
+# When OAuth is active, also reject requests carrying CORTEX_TOKEN. Set
 # to false to keep the static token as a break-glass path. Defaults to true.
 disable_static_token_with_oauth = true
 

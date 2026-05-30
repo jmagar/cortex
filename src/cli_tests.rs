@@ -438,7 +438,7 @@ fn smoke_watch_target_uses_codex_root_when_claude_is_unavailable() {
     let codex_root = temp.path().join(".codex/sessions");
     std::fs::create_dir_all(&codex_root).unwrap();
     let doctor = AiDoctorReport {
-        db_path: "/tmp/syslog.db".into(),
+        db_path: "/tmp/cortex.db".into(),
         db_schema_version: 15,
         db_last_migration_at: Some("2026-01-01T00:00:00Z".into()),
         known_schema_version: 15,
@@ -473,7 +473,7 @@ fn smoke_watch_target_uses_codex_root_when_claude_is_unavailable() {
 #[test]
 fn strict_ai_doctor_permissions_ignore_missing_roots() {
     let doctor = AiDoctorReport {
-        db_path: "/tmp/syslog.db".into(),
+        db_path: "/tmp/cortex.db".into(),
         db_schema_version: 15,
         db_last_migration_at: Some("2026-01-01T00:00:00Z".into()),
         known_schema_version: 15,
@@ -492,11 +492,8 @@ fn strict_ai_doctor_permissions_ignore_missing_roots() {
     ensure_ai_doctor_success(&doctor, true).expect("missing roots should not fail strict mode");
 }
 
-fn transcript_root_status(
-    path: &str,
-    available: bool,
-) -> syslog_mcp::scanner::TranscriptRootStatus {
-    syslog_mcp::scanner::TranscriptRootStatus {
+fn transcript_root_status(path: &str, available: bool) -> cortex::scanner::TranscriptRootStatus {
+    cortex::scanner::TranscriptRootStatus {
         path: path.to_string(),
         exists: available,
         readable: available,
@@ -593,7 +590,7 @@ fn truncate_is_utf8_safe_for_non_ascii_project_names() {
 fn parse_search_help_points_to_top_level_usage() {
     let err = CliCommand::parse(strings(&["search", "--help"])).unwrap_err();
 
-    assert!(err.to_string().contains("syslog --help"));
+    assert!(err.to_string().contains("cortex --help"));
 }
 
 #[test]
@@ -603,7 +600,7 @@ fn parse_compose_status_collects_target() {
         "status",
         "--compose-file",
         "/tmp/docker-compose.yml",
-        "--project-name=syslog",
+        "--project-name=cortex",
         "--json",
     ]))
     .unwrap();
@@ -613,7 +610,7 @@ fn parse_compose_status_collects_target() {
                 args.target.compose_file.unwrap(),
                 std::path::PathBuf::from("/tmp/docker-compose.yml")
             );
-            assert_eq!(args.target.project_name.as_deref(), Some("syslog"));
+            assert_eq!(args.target.project_name.as_deref(), Some("cortex"));
             assert!(args.json);
         }
         other => panic!("unexpected command: {other:?}"),
@@ -711,13 +708,13 @@ fn systemctl_env_files_strips_ignore_errors_suffix() {
 #[test]
 fn lookup_systemd_db_path_prefers_inline_environment() {
     let env = SystemctlEnv {
-        inline: vec![("SYSLOG_MCP_DB_PATH".into(), "/inline/syslog.db".into())],
+        inline: vec![("CORTEX_DB_PATH".into(), "/inline/cortex.db".into())],
         files: vec![],
         unit_missing: false,
     };
     assert_eq!(
         lookup_systemd_db_path(&env).as_deref(),
-        Some("/inline/syslog.db")
+        Some("/inline/cortex.db")
     );
 }
 
@@ -727,7 +724,7 @@ fn lookup_systemd_db_path_falls_back_to_environment_files() {
     let env_file = temp.path().join("ai-watch.env");
     std::fs::write(
         &env_file,
-        "# leading comment\nSYSLOG_MCP_DB_PATH=/file/syslog.db\nOTHER=ignored\n",
+        "# leading comment\nCORTEX_DB_PATH=/file/cortex.db\nOTHER=ignored\n",
     )
     .unwrap();
     let env = SystemctlEnv {
@@ -737,7 +734,7 @@ fn lookup_systemd_db_path_falls_back_to_environment_files() {
     };
     assert_eq!(
         lookup_systemd_db_path(&env).as_deref(),
-        Some("/file/syslog.db")
+        Some("/file/cortex.db")
     );
 }
 
@@ -801,13 +798,13 @@ fn doctor_cache_dedupes_docker_inspect() {
 
 #[test]
 fn ai_watch_coordination_skipped_when_unit_missing() {
-    // SYSLOG_AI_WATCH_UNIT override forces the phase to query a unit that
+    // CORTEX_AI_WATCH_UNIT override forces the phase to query a unit that
     // cannot exist. On any reasonable test host this returns a LoadState
     // of not-found (Skipped per doctor spec) OR systemctl probe failure
     // (Warn). EnvVarGuard restores process-global state on panic so this
-    // test cannot leak SYSLOG_AI_WATCH_UNIT into peers.
+    // test cannot leak CORTEX_AI_WATCH_UNIT into peers.
     let _g = EnvVarGuard::set(
-        "SYSLOG_AI_WATCH_UNIT",
+        "CORTEX_AI_WATCH_UNIT",
         "syslog-ai-watch-test-missing-9f3e.service",
     );
     let env_path = std::path::PathBuf::from("/nonexistent-env-9f3e");
@@ -866,7 +863,7 @@ fn parse_setup_check_and_repair() {
 // ─── GlobalFlags / CliMode (bead 0p8r.6) ────────────────────────────────────
 //
 // Env-touching tests use `#[serial]` (matching `http_client_tests`) because
-// `SYSLOG_USE_HTTP` and `SYSLOG_API_TOKEN` are process-global and would race
+// `CORTEX_USE_HTTP` and `CORTEX_API_TOKEN` are process-global and would race
 // otherwise.
 
 use serial_test::serial;
@@ -998,11 +995,11 @@ fn http_trigger_default_no_env_no_flags_is_none() {
 #[test]
 #[serial]
 fn http_trigger_token_alone_does_not_imply_http_mode() {
-    // The whole point of the locked decision: SYSLOG_API_TOKEN being set
+    // The whole point of the locked decision: CORTEX_API_TOKEN being set
     // must NOT silently flip operators into HTTP mode just because they had
     // it exported from an earlier deploy.
     let _g1 = EnvVarGuard::unset(ENV_USE_HTTP);
-    let _g2 = EnvVarGuard::set("SYSLOG_API_TOKEN", "leftover-from-old-shell");
+    let _g2 = EnvVarGuard::set("CORTEX_API_TOKEN", "leftover-from-old-shell");
     let flags = GlobalFlags::default();
     assert_eq!(flags.http_trigger(), None);
 }
@@ -1012,7 +1009,7 @@ fn http_trigger_token_alone_does_not_imply_http_mode() {
 fn http_trigger_env_use_http_one_is_some() {
     let _g = EnvVarGuard::set(ENV_USE_HTTP, "1");
     let flags = GlobalFlags::default();
-    assert_eq!(flags.http_trigger(), Some("SYSLOG_USE_HTTP=1"));
+    assert_eq!(flags.http_trigger(), Some("CORTEX_USE_HTTP=1"));
 }
 
 #[test]
@@ -1020,7 +1017,7 @@ fn http_trigger_env_use_http_one_is_some() {
 fn http_trigger_env_use_http_true_is_some() {
     let _g = EnvVarGuard::set(ENV_USE_HTTP, "TRUE");
     let flags = GlobalFlags::default();
-    assert_eq!(flags.http_trigger(), Some("SYSLOG_USE_HTTP=1"));
+    assert_eq!(flags.http_trigger(), Some("CORTEX_USE_HTTP=1"));
 }
 
 #[test]
@@ -1076,9 +1073,9 @@ fn build_http_client_fails_closed_on_missing_token_via_http_flag() {
     // --http set but no token discoverable anywhere → must error with a
     // message naming --http (eng-review #C6).
     let _g1 = EnvVarGuard::unset(ENV_USE_HTTP);
-    let _g2 = EnvVarGuard::unset("SYSLOG_API_TOKEN");
-    let _g3 = EnvVarGuard::unset("SYSLOG_MCP_URL");
-    let _g4 = EnvVarGuard::unset("SYSLOG_MCP_PORT");
+    let _g2 = EnvVarGuard::unset("CORTEX_API_TOKEN");
+    let _g3 = EnvVarGuard::unset("CORTEX_URL");
+    let _g4 = EnvVarGuard::unset("CORTEX_PORT");
     let flags = GlobalFlags {
         force_http: true,
         ..Default::default()
@@ -1100,16 +1097,16 @@ fn build_http_client_fails_closed_on_missing_token_via_http_flag() {
 #[serial]
 fn build_http_client_fails_closed_on_missing_token_via_env() {
     let _g1 = EnvVarGuard::set(ENV_USE_HTTP, "1");
-    let _g2 = EnvVarGuard::unset("SYSLOG_API_TOKEN");
-    let _g3 = EnvVarGuard::unset("SYSLOG_MCP_URL");
-    let _g4 = EnvVarGuard::unset("SYSLOG_MCP_PORT");
+    let _g2 = EnvVarGuard::unset("CORTEX_API_TOKEN");
+    let _g3 = EnvVarGuard::unset("CORTEX_URL");
+    let _g4 = EnvVarGuard::unset("CORTEX_PORT");
     let flags = GlobalFlags::default();
     let trigger = flags.http_trigger().expect("env should trigger");
     let err = flags.build_http_client(trigger).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("HTTP mode requested via SYSLOG_USE_HTTP=1"),
-        "expected 'SYSLOG_USE_HTTP=1' in error, got: {msg}"
+        msg.contains("HTTP mode requested via CORTEX_USE_HTTP=1"),
+        "expected 'CORTEX_USE_HTTP=1' in error, got: {msg}"
     );
 }
 
@@ -1117,7 +1114,7 @@ fn build_http_client_fails_closed_on_missing_token_via_env() {
 #[serial]
 fn build_http_client_fails_closed_on_missing_token_via_server_flag() {
     let _g1 = EnvVarGuard::unset(ENV_USE_HTTP);
-    let _g2 = EnvVarGuard::unset("SYSLOG_API_TOKEN");
+    let _g2 = EnvVarGuard::unset("CORTEX_API_TOKEN");
     let flags = GlobalFlags {
         server: Some("http://otherhost:3100".into()),
         ..Default::default()
@@ -1137,8 +1134,8 @@ fn build_http_client_succeeds_with_token_override() {
     // No env credential, but the flag override is supplied, so discovery succeeds and we get a
     // real HttpClient (we don't actually call it; just confirm it constructs).
     let _g1 = EnvVarGuard::unset(ENV_USE_HTTP);
-    let _g2 = EnvVarGuard::unset("SYSLOG_API_TOKEN");
-    let _g3 = EnvVarGuard::unset("SYSLOG_MCP_URL");
+    let _g2 = EnvVarGuard::unset("CORTEX_API_TOKEN");
+    let _g3 = EnvVarGuard::unset("CORTEX_URL");
     let flags = GlobalFlags {
         token: Some("supplied-value".into()),
         ..Default::default()
@@ -1149,11 +1146,11 @@ fn build_http_client_succeeds_with_token_override() {
 
 #[test]
 fn setup_report_phase_list_does_not_include_data_mount_post_cutover() {
-    // Bead syslog-mcp-0p8r.11: post-cutover (SYSLOG_USE_HTTP=true is the default),
+    // Bead cortex-0p8r.11: post-cutover (CORTEX_USE_HTTP=true is the default),
     // the SessionStart hook no longer needs to docker-inspect the container —
     // CLI no longer opens SQLite directly. Drift detection moved to
     // `compose doctor` (always) and `db status --check-coord` (opt-in) per
-    // bead syslog-mcp-0p8r.13.
+    // bead cortex-0p8r.13.
     //
     // Source-grep guard: ensure setup_report's push-list does not call
     // data_mount_phase. The function itself is intentionally retained because
@@ -1171,12 +1168,12 @@ fn setup_report_phase_list_does_not_include_data_mount_post_cutover() {
     assert!(
         !body.contains("phases.push(data_mount_phase("),
         "setup_report must NOT push data_mount_phase post-cutover \
-         (bead syslog-mcp-0p8r.11). Use compose doctor / db status --check-coord \
+         (bead cortex-0p8r.11). Use compose doctor / db status --check-coord \
          instead. Found a push call within the setup_report window."
     );
 }
 
-// ─── syslog-mcp-kmib: AI abuse incident investigations ───────────────────────
+// ─── cortex-kmib: AI abuse incident investigations ───────────────────────
 
 #[test]
 fn parse_ai_incidents_defaults() {

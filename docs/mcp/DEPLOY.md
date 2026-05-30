@@ -1,6 +1,6 @@
-# Deployment Guide -- syslog-mcp
+# Deployment Guide -- cortex
 
-Deployment patterns for syslog-mcp. Choose the method that fits your environment.
+Deployment patterns for cortex. Choose the method that fits your environment.
 
 ## Local development
 
@@ -19,18 +19,18 @@ The server reads `config.toml` in the working directory. Syslog listens on `0.0.
 ## Cargo install
 
 ```bash
-cargo install syslog-mcp
+cargo install cortex
 syslog serve mcp
 ```
 
 The binary reads `config.toml` from the current directory and accepts env var overrides.
 
-The installed binary is `syslog`. Use `syslog mcp` for local MCP clients that require stdio. That mode is query-only: it reads `SYSLOG_MCP_DB_PATH`, exposes the MCP tools over stdin/stdout, and does not start syslog listeners, HTTP routes, retention purge, or storage-budget cleanup. Keep `syslog serve mcp` running somewhere for ingestion.
+The installed binary is `syslog`. Use `syslog mcp` for local MCP clients that require stdio. That mode is query-only: it reads `CORTEX_DB_PATH`, exposes the MCP tools over stdin/stdout, and does not start syslog listeners, HTTP routes, retention purge, or storage-budget cleanup. Keep `syslog serve mcp` running somewhere for ingestion.
 
 ## One-line installer
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jmagar/syslog-mcp/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jmagar/cortex/main/install.sh | sh
 ```
 
 The installer installs the `syslog` binary to `~/.local/bin/syslog`, then runs
@@ -38,9 +38,9 @@ The installer installs the `syslog` binary to `~/.local/bin/syslog`, then runs
 
 | Path | Purpose |
 | --- | --- |
-| `~/.syslog-mcp/.env` | Runtime environment and generated token |
-| `~/.syslog-mcp/compose/docker-compose.yml` | Installed Compose bundle using the published image |
-| `~/.syslog-mcp/data/` | Default SQLite data bind mount |
+| `~/.cortex/.env` | Runtime environment and generated token |
+| `~/.cortex/compose/docker-compose.yml` | Installed Compose bundle using the published image |
+| `~/.cortex/data/` | Default SQLite data bind mount |
 
 Useful setup commands:
 
@@ -56,12 +56,12 @@ syslog deploy remote host-a           # SSH deploy/reconcile on a remote host
 ```
 
 `syslog setup` also disables and removes stale user-level
-`syslog-mcp.service` units/drop-ins from older releases. The supported
+`cortex.service` units/drop-ins from older releases. The supported
 automated deployment path is Docker Compose only.
 
 ### Remote CLI Deploy
 
-`syslog deploy remote <host>` writes/replaces `~/.syslog-mcp/.env`, the
+`syslog deploy remote <host>` writes/replaces `~/.cortex/.env`, the
 managed Compose YAML, and `config/Dockerfile` on the SSH target, then runs
 Docker Compose there. Use `--dry-run` first to verify SSH and Docker
 prerequisites. Set token/env values in the local environment before running the
@@ -81,27 +81,27 @@ Multi-stage Dockerfile: Rust 1.86 builder compiles the release binary, Debian bo
 
 ```bash
 just docker-build
-# or: docker build -t syslog-mcp .
+# or: docker build -t cortex .
 ```
 
 ### Compose
 
 ```yaml
 services:
-  syslog-mcp:
+  cortex:
     build: .
-    container_name: syslog-mcp
+    container_name: cortex
     restart: unless-stopped
-    user: "${SYSLOG_UID:-1000}:${SYSLOG_GID:-1000}"
+    user: "${CORTEX_UID:-1000}:${CORTEX_GID:-1000}"
     env_file:
       - path: ~/.claude-homelab/.env
         required: false
     ports:
-      - "${SYSLOG_PORT:-1514}:1514/udp"
-      - "${SYSLOG_PORT:-1514}:1514/tcp"
-      - "${SYSLOG_MCP_PORT:-3100}:3100/tcp"
+      - "${CORTEX_RECEIVER_PORT:-1514}:1514/udp"
+      - "${CORTEX_RECEIVER_PORT:-1514}:1514/tcp"
+      - "${CORTEX_PORT:-3100}:3100/tcp"
     volumes:
-      - ${SYSLOG_MCP_DATA_VOLUME:-syslog-mcp-data}:/data
+      - ${CORTEX_DATA_VOLUME:-cortex-data}:/data
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:3100/health || exit 1"]
       interval: 30s
@@ -111,8 +111,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${SYSLOG_MCP_MEMORY_LIMIT:-2G}
-          cpus: '${SYSLOG_MCP_CPU_LIMIT:-1.0}'
+          memory: ${CORTEX_MEMORY_LIMIT:-2G}
+          cpus: '${CORTEX_CPU_LIMIT:-1.0}'
 ```
 
 ```bash
@@ -143,7 +143,7 @@ MCP exposes only redacted read-only Compose diagnostics (`compose_status`, `comp
 | User | Non-root, UID 1000 (`syslog`) |
 | Health check | `curl -sf http://localhost:3100/health` every 30s |
 | Data | Named volume mounted at `/data` |
-| Network | External Docker network (`${DOCKER_NETWORK:-syslog-mcp}`) |
+| Network | External Docker network (`${DOCKER_NETWORK:-cortex}`) |
 | Signals | Graceful shutdown on SIGTERM/SIGINT (tokio signal handler) |
 | Config | No `config.toml` in image -- defaults + env vars only |
 
@@ -163,14 +163,14 @@ All configuration is handled by the Rust binary's config loading (defaults + env
 
 | Service | Default Port | Env Var | Protocol |
 | --- | --- | --- | --- |
-| Syslog receiver | 1514 | `SYSLOG_PORT` | UDP + TCP |
-| MCP HTTP server | 3100 | `SYSLOG_MCP_PORT` | TCP |
+| Syslog receiver | 1514 | `CORTEX_RECEIVER_PORT` | UDP + TCP |
+| MCP HTTP server | 3100 | `CORTEX_PORT` | TCP |
 
 Port 1514 is used instead of the standard syslog port 514 to avoid needing root or `CAP_NET_BIND_SERVICE`. Use iptables PREROUTING to redirect 514 to 1514 for devices that cannot be reconfigured.
 
 ## SWAG reverse proxy
 
-See `docs/syslog.subdomain.conf` for a working nginx config that exposes MCP over HTTPS at `https://syslog-mcp.tootie.tv/mcp`.
+See `docs/syslog.subdomain.conf` for a working nginx config that exposes MCP over HTTPS at `https://cortex.tootie.tv/mcp`.
 
 The MCP endpoint uses RMCP Streamable HTTP in stateless JSON-response mode.
 Clients use `POST /mcp`; `GET` and `DELETE` on `/mcp` are not supported after

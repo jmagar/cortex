@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
-use syslog_mcp::heartbeat_agent::{run_agent, HeartbeatAgentConfig};
+use cortex::heartbeat_agent::{run_agent, HeartbeatAgentConfig};
 
 use super::{HeartbeatAgentArgs, HeartbeatCommand};
 
@@ -37,7 +37,7 @@ impl HeartbeatAgentArgs {
 }
 
 pub(crate) fn default_host_id_path() -> PathBuf {
-    syslog_mcp::setup::syslog_home_dir()
+    cortex::setup::syslog_home_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("heartbeat-host-id")
 }

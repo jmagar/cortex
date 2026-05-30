@@ -27,7 +27,7 @@ impl BinaryDoctorReport {
             .unwrap_or_else(|error| format!("unknown: {error}"));
         let path_syslog = command_stdout("sh", &["-c", "command -v syslog"]);
         let container_version =
-            command_stdout("docker", &["exec", "syslog-mcp", "syslog", "--version"]);
+            command_stdout("docker", &["exec", "cortex", "cortex", "--version"]);
         let (runtime_current, runtime_current_error) = runtime_current_status();
         Self {
             current_exe,
@@ -360,8 +360,8 @@ fn collect_compose_section() -> DoctorSection {
                     status.health.as_deref().unwrap_or("no healthcheck")
                 ),
             ));
-            let expected_volume = std::env::var("SYSLOG_MCP_VOLUME_NAME")
-                .unwrap_or_else(|_| "syslog-mcp-data".to_string());
+            let expected_volume =
+                std::env::var("CORTEX_VOLUME_NAME").unwrap_or_else(|_| "cortex-data".to_string());
             match status.data_mounts.iter().find(|m| m.target == "/data") {
                 Some(m) if m.kind == "bind" => {
                     let src = m
@@ -453,7 +453,7 @@ fn collect_binary_section() -> DoctorSection {
                 reason.to_string()
             } else {
                 format!(
-                    "container {} != repo {} - run: syslog compose up",
+                    "container {} != repo {} - run: cortex compose up",
                     binary.container_version.as_deref().unwrap_or("-"),
                     binary.repo_version
                 )
@@ -741,7 +741,7 @@ fn runtime_current_status() -> (Option<bool>, Option<String>) {
 }
 
 fn runtime_current_script_path() -> Option<std::path::PathBuf> {
-    if let Some(path) = std::env::var_os("SYSLOG_RUNTIME_CHECK_SCRIPT")
+    if let Some(path) = std::env::var_os("CORTEX_RUNTIME_CHECK_SCRIPT")
         .map(std::path::PathBuf::from)
         .filter(|path| path.exists())
     {

@@ -1,6 +1,6 @@
 # RMCP Streamable HTTP Refactor Plan
 
-> **Tracker:** `syslog-mcp-hea` and children `syslog-mcp-hea.1` through `syslog-mcp-hea.6`.
+> **Tracker:** `cortex-hea` and children `cortex-hea.1` through `cortex-hea.6`.
 > **Implementation mode:** Claim one bead at a time with `bd update <id> --claim`, keep commits scoped to that bead, and update/close the bead only after verification passes.
 
 ## Goal
@@ -24,14 +24,14 @@ The first production RMCP migration targets stateless Streamable HTTP JSON-respo
 - Clients send `Accept: application/json, text/event-stream`.
 - Server config uses `with_stateful_mode(false)` and `with_json_response(true)`.
 - Request/response tool calls return `Content-Type: application/json`.
-- Full RMCP stateful sessions are deferred to `syslog-mcp-hea.6`.
+- Full RMCP stateful sessions are deferred to `cortex-hea.6`.
 
 ## Non-Negotiables
 
 - Do not expand the local JSON-RPC implementation.
 - Do not leave duplicate production protocol paths after migration.
 - Do not move syslog ingest, DB maintenance, retention, or storage-budget logic into RMCP types.
-- MCP handlers must be thin adapters over the shared typed app layer from `syslog-mcp-0zo`.
+- MCP handlers must be thin adapters over the shared typed app layer from `cortex-0zo`.
 - Preserve external tool names, parameter names, defaults, caps, and response semantics unless a change is explicitly documented.
 - Preserve bearer auth when configured; `/health` remains unauthenticated.
 - Do not log bearer tokens, session IDs, request headers, search terms, raw log contents, or returned log text at info level.
@@ -39,8 +39,8 @@ The first production RMCP migration targets stateless Streamable HTTP JSON-respo
 
 ## Sources
 
-- Beads epic: `syslog-mcp-hea`
-- Shared app-layer prerequisite: `syslog-mcp-0zo`
+- Beads epic: `cortex-hea`
+- Shared app-layer prerequisite: `cortex-0zo`
 - RMCP Repomix output: `/tmp/repomix/mcp-outputs/uAac1G/repomix-output.xml`, output ID `232b9bd061ad68c8`
 - Official MCP Streamable HTTP spec: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
 - Official RMCP SDK: https://github.com/modelcontextprotocol/rust-sdk
@@ -51,19 +51,19 @@ The first production RMCP migration targets stateless Streamable HTTP JSON-respo
 
 ## Execution Order
 
-1. `syslog-mcp-0zo.1` and `syslog-mcp-0zo.2`: library boundary and typed `LogService`.
-2. `syslog-mcp-hea.1`: add RMCP dependency and compatibility harness.
-3. `syslog-mcp-hea.2`: implement RMCP tool/server adapter over `LogService`.
-4. `syslog-mcp-hea.3`: mount RMCP `StreamableHttpService` at `/mcp`.
-5. `syslog-mcp-hea.4`: remove manual protocol code and migrate tests/smoke coverage.
-6. `syslog-mcp-hea.6`: decide whether stateful RMCP sessions are required.
-7. `syslog-mcp-hea.5`: final docs and packaging manifest cleanup.
+1. `cortex-0zo.1` and `cortex-0zo.2`: library boundary and typed `LogService`.
+2. `cortex-hea.1`: add RMCP dependency and compatibility harness.
+3. `cortex-hea.2`: implement RMCP tool/server adapter over `LogService`.
+4. `cortex-hea.3`: mount RMCP `StreamableHttpService` at `/mcp`.
+5. `cortex-hea.4`: remove manual protocol code and migrate tests/smoke coverage.
+6. `cortex-hea.6`: decide whether stateful RMCP sessions are required.
+7. `cortex-hea.5`: final docs and packaging manifest cleanup.
 
-`hea.1` may be done before the full shared app layer if it remains test-only. Production RMCP handler work should not start before `syslog-mcp-0zo.2`.
+`hea.1` may be done before the full shared app layer if it remains test-only. Production RMCP handler work should not start before `cortex-0zo.2`.
 
 ## Task 1: Add RMCP Dependency And Compatibility Harness
 
-**Bead:** `syslog-mcp-hea.1`
+**Bead:** `cortex-hea.1`
 
 **Files:**
 
@@ -73,7 +73,7 @@ The first production RMCP migration targets stateless Streamable HTTP JSON-respo
 
 **Steps:**
 
-- [ ] Claim `syslog-mcp-hea.1`.
+- [ ] Claim `cortex-hea.1`.
 - [ ] Add `rmcp` with the smallest feature set that supports server handlers, tools/macros, and Streamable HTTP server transport.
 - [ ] Prefer the current crates.io RMCP release if it exposes `StreamableHttpService` and `StreamableHttpServerConfig`; otherwise use the official `modelcontextprotocol/rust-sdk` git dependency.
 - [ ] Add a compatibility test that starts a minimal RMCP service without replacing production `/mcp`.
@@ -101,11 +101,11 @@ cargo test
 - RMCP compiles in this repo.
 - A checked-in test documents the selected RMCP stateless JSON-response config.
 - No production behavior changed.
-- `bd close syslog-mcp-hea.1` has verification evidence.
+- `bd close cortex-hea.1` has verification evidence.
 
 ## Task 2: Extract Or Confirm Shared Log Service Prerequisite
 
-**Beads:** `syslog-mcp-0zo.1`, `syslog-mcp-0zo.2`
+**Beads:** `cortex-0zo.1`, `cortex-0zo.2`
 
 **Files:**
 
@@ -140,7 +140,7 @@ cargo clippy -- -D warnings
 
 ## Task 3: Implement RMCP Syslog Server Handler
 
-**Bead:** `syslog-mcp-hea.2`
+**Bead:** `cortex-hea.2`
 
 **Files:**
 
@@ -152,7 +152,7 @@ cargo clippy -- -D warnings
 
 **Steps:**
 
-- [ ] Claim `syslog-mcp-hea.2`.
+- [ ] Claim `cortex-hea.2`.
 - [ ] Add a cloneable RMCP server type that holds the shared `LogService` or equivalent app state.
 - [ ] Define all seven tools through RMCP handler/tool abstractions.
 - [ ] Preserve tool names and parameter names exactly.
@@ -189,7 +189,7 @@ Add focused RMCP handler tests for:
 
 ## Task 4: Replace Production `/mcp` Route With RMCP Service
 
-**Bead:** `syslog-mcp-hea.3`
+**Bead:** `cortex-hea.3`
 
 **Files:**
 
@@ -202,7 +202,7 @@ Add focused RMCP handler tests for:
 
 **Steps:**
 
-- [ ] Claim `syslog-mcp-hea.3`.
+- [ ] Claim `cortex-hea.3`.
 - [ ] Build `StreamableHttpServerConfig` with `with_stateful_mode(false)` and `with_json_response(true)`.
 - [ ] Configure RMCP `allowed_hosts` for local and deployed hostnames instead of disabling Host validation.
 - [ ] Configure RMCP `allowed_origins` deliberately if browser-origin requests are expected.
@@ -256,7 +256,7 @@ mcp-remote http://localhost:3100/mcp --transport http-only
 
 ## Task 5: Remove Manual Protocol And Migrate Tests
 
-**Bead:** `syslog-mcp-hea.4`
+**Bead:** `cortex-hea.4`
 
 **Files:**
 
@@ -272,7 +272,7 @@ mcp-remote http://localhost:3100/mcp --transport http-only
 
 **Steps:**
 
-- [ ] Claim `syslog-mcp-hea.4`.
+- [ ] Claim `cortex-hea.4`.
 - [ ] Delete or fully quarantine `JsonRpcRequest`, `JsonRpcResponse`, `DispatchResult`, and local protocol dispatch.
 - [ ] Remove protocol tests that call dead internal dispatch paths.
 - [ ] Rewrite route tests to exercise the RMCP production route/service.
@@ -320,7 +320,7 @@ bash tests/mcporter/test-tools.sh --verbose
 
 ## Task 6: Decide Stateful RMCP Sessions
 
-**Bead:** `syslog-mcp-hea.6`
+**Bead:** `cortex-hea.6`
 
 **Files If Implemented:**
 
@@ -336,7 +336,7 @@ bash tests/mcporter/test-tools.sh --verbose
 
 **Decision Work:**
 
-- [ ] Claim `syslog-mcp-hea.6`.
+- [ ] Claim `cortex-hea.6`.
 - [ ] Test target clients against stateless JSON-response mode.
 - [ ] Decide whether full stateful sessions are required for compatibility or conformance goals.
 - [ ] If not required, close the bead with evidence and ensure docs say stateless RMCP is the supported mode.
@@ -376,7 +376,7 @@ mcp-remote http://localhost:3100/mcp --transport http-only
 
 ## Task 7: Update Docs And Packaging Manifests
 
-**Bead:** `syslog-mcp-hea.5`
+**Bead:** `cortex-hea.5`
 
 **Files:**
 
@@ -399,7 +399,7 @@ mcp-remote http://localhost:3100/mcp --transport http-only
 
 **Steps:**
 
-- [ ] Claim `syslog-mcp-hea.5`.
+- [ ] Claim `cortex-hea.5`.
 - [ ] Replace hand-rolled JSON-RPC transport language with RMCP Streamable HTTP language.
 - [ ] Distinguish stateless RMCP JSON-response mode from full stateful sessions.
 - [ ] Remove direct stdio support claims unless a real stdio wrapper exists.
@@ -407,15 +407,15 @@ mcp-remote http://localhost:3100/mcp --transport http-only
 - [ ] Fix `server.json` so it no longer advertises stdio for the long-running daemon.
 - [ ] Fix `gemini-extension.json` so it does not launch the daemon as a command-style MCP server unless a real stdio wrapper exists.
 - [ ] Keep `.mcp.json` in HTTP shape with bearer header injection.
-- [ ] Reconcile token docs with code: `SYSLOG_MCP_TOKEN` is primary, `SYSLOG_MCP_API_TOKEN` is deprecated fallback.
-- [ ] Remove unsupported or misleading `.env.example` knobs such as `SYSLOG_MCP_NO_AUTH` and `SYSLOG_MCP_TRANSPORT` unless code implements them.
+- [ ] Reconcile token docs with code: `CORTEX_TOKEN` is primary, `CORTEX_API_TOKEN` is deprecated fallback.
+- [ ] Remove unsupported or misleading `.env.example` knobs such as `CORTEX_NO_AUTH` and `CORTEX_TRANSPORT` unless code implements them.
 - [ ] Reconcile all six/seven tool references to seven tools.
 - [ ] Follow repo version-bump policy if version-bearing manifests change for a pushed feature branch.
 
 **Verification:**
 
 ```bash
-rg "stdio|Streamable|/sse|JSON-RPC|rmcp|SYSLOG_MCP_API_TOKEN|SYSLOG_MCP_TOKEN|6 MCP|7 MCP" \
+rg "stdio|Streamable|/sse|JSON-RPC|rmcp|CORTEX_API_TOKEN|CORTEX_TOKEN|6 MCP|7 MCP" \
   README.md docs server.json gemini-extension.json .mcp.json .codex-plugin .claude-plugin .env.example
 
 jq empty server.json gemini-extension.json .mcp.json .codex-plugin/plugin.json .claude-plugin/plugin.json

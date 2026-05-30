@@ -47,7 +47,7 @@ fn json_error_count_ignores_expected_production_dev_wrapper_errors() {
         }),
         compose: serde_json::json!({"diagnostics": []}),
         binary: BinaryDoctorReport {
-            current_exe: "syslog".into(),
+            current_exe: "cortex".into(),
             path_syslog: None,
             repo_version: "0.0.0".into(),
             container_version: None,

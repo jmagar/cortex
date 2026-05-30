@@ -2,10 +2,10 @@
 SPDX-License-Identifier: MIT
 Author: jmagar
 License: MIT
-Description: Hook configuration and lifecycle documentation for the syslog-mcp plugin.
+Description: Hook configuration and lifecycle documentation for the cortex plugin.
 -->
 
-# Hook Configuration -- syslog-mcp
+# Hook Configuration -- cortex
 
 Lifecycle hooks that run automatically during Claude Code sessions.
 
@@ -29,11 +29,11 @@ Runs `${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh` at the start of every Claud
 
 Responsibilities:
 - Server mode: exports current Claude Code `userConfig` values as
-  `SYSLOG_*` / `SYSLOG_MCP_*` environment variables.
+  `CORTEX_*` / `CORTEX_*` environment variables.
 - Ensures a `syslog` binary exists on `PATH`; if it is missing, runs the
   one-line installer.
 - Delegates host setup to `syslog setup repair`, which owns
-  `~/.syslog-mcp/.env`, `~/.syslog-mcp/compose/`, and the Docker Compose
+  `~/.cortex/.env`, `~/.cortex/compose/`, and the Docker Compose
   container.
 - Client mode: skips local server setup and only checks the configured
   server's `/health` endpoint.
@@ -65,7 +65,7 @@ bash scripts/plugin-setup.sh
 
 The hook deliberately contains no separate Compose rendering logic. The Claude
 plugin and the one-line installer both converge on the same `syslog setup`
-implementation and the same `~/.syslog-mcp` host layout.
+implementation and the same `~/.cortex` host layout.
 
 ## See also
 

@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn parse_line_extracts_payload_content_items_and_project_from_arguments() {
-    let line = r#"{"type":"response_item","payload":{"id":"item-1","content":[{"type":"output_text","text":"fixed parser"},{"content":"added test"}],"arguments":"{\"workdir\":\"/home/jmagar/workspace/syslog-mcp\"}","timestamp":"2026-05-11T00:00:00Z"}}"#;
+    let line = r#"{"type":"response_item","payload":{"id":"item-1","content":[{"type":"output_text","text":"fixed parser"},{"content":"added test"}],"arguments":"{\"workdir\":\"/home/jmagar/workspace/cortex\"}","timestamp":"2026-05-11T00:00:00Z"}}"#;
 
     let parsed = parse_line(line, Path::new("/tmp/rollout-test.jsonl"), 0)
         .unwrap()
@@ -15,7 +15,7 @@ fn parse_line_extracts_payload_content_items_and_project_from_arguments() {
     assert_eq!(parsed.timestamp.as_deref(), Some("2026-05-11T00:00:00Z"));
     assert_eq!(
         parsed.ai_project.as_deref(),
-        Some("/home/jmagar/workspace/syslog-mcp")
+        Some("/home/jmagar/workspace/cortex")
     );
     assert_eq!(parsed.record_key, "id:item-1");
 }

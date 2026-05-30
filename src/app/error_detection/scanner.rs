@@ -21,7 +21,7 @@ use crate::db::error_signatures::{
     cursor_advance, cursor_get, insert_window, upsert_signature, UpsertSignatureParams,
 };
 use crate::db::DbPool;
-use crate::syslog::enrichment::scrub_ai_message;
+use crate::receiver::enrichment::scrub_ai_message;
 
 /// A minimal log row fetched for scanning.
 #[derive(Debug)]

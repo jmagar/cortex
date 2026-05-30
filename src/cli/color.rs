@@ -26,7 +26,10 @@ pub(crate) static COLOR_OVERRIDE: AtomicU8 = AtomicU8::new(0);
 
 /// Test-only mutex — sibling test modules that mutate COLOR_OVERRIDE must hold
 /// this guard to prevent races under cargo test's parallel executor.
+/// `allow(dead_code)`: the `cx` alias bin compiles this source as a second target whose
+/// test harness does not wire in the sibling test module, so it reads as unused there.
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) static COLOR_TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

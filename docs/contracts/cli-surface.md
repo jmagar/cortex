@@ -16,7 +16,7 @@ Changing it requires updating the spec first.
 - `clap` derive parser (single binary, nested `Subcommand` enums)
 - `--json` flag for machine-readable output; default is a compact human-readable table
 - Exit codes: `0` = success, `1` = invocation/usage error, `2` = remote error (server unreachable or returned `ok: false`), `3` = state error (e.g. attempting to revoke an unknown host)
-- Environment variables (`SYSLOG_MCP_*`) take precedence over flags **only for credentials**; for non-credential flags, CLI args override env (per existing `src/config.rs` convention)
+- Environment variables (`CORTEX_*`) take precedence over flags **only for credentials**; for non-credential flags, CLI args override env (per existing `src/config.rs` convention)
 - Help text wraps at 100 columns and references the underlying MCP action when applicable
 
 ## 2. New Subcommand Groups
@@ -148,7 +148,7 @@ Exit codes: never returns on success. `1` on config error; `2` if token file mis
 syslog agent enroll <token> [--server-url <url>] [--host-id <uuid>]
 ```
 
-Accept a one-time token, perform handshake, store the rotated long-lived token in `~/.config/syslog-mcp/agent-token` (or `/etc/syslog-agent/token` if running as root).
+Accept a one-time token, perform handshake, store the rotated long-lived token in `~/.config/cortex/agent-token` (or `/etc/syslog-agent/token` if running as root).
 
 - `<token>` (positional, required): the one-time string printed by `syslog agent issue`.
 - `--server-url <url>` (optional): defaults to the value in config, or `wss://syslog.tootie.tv/ws/agent`.
@@ -260,7 +260,7 @@ Exit codes: `0`, `2` (apprise unreachable; HTTP error code in JSON output).
 
 - **`--json` flag**: most subcommands listed here accept `--json`; see individual entries. JSON output is a single object per command (never a stream). Errors in JSON mode still set the exit code and emit `{"ok": false, "error": {"code": "...", "message": "..."}}` on stdout.
 - **Exit codes**: `0` = success, `1` = invocation/usage error (bad flag, conflict between flags, file unreadable), `2` = remote/server error (server unreachable, MCP `ok:false`, apprise non-2xx), `3` = state error (unknown host_id, hostname conflict, source unknown).
-- **Env precedence**: `SYSLOG_MCP_*` env vars override config.toml for credentials only; CLI flags override env for everything else. This matches the existing `src/config.rs:load_*` ordering.
+- **Env precedence**: `CORTEX_*` env vars override config.toml for credentials only; CLI flags override env for everything else. This matches the existing `src/config.rs:load_*` ordering.
 - **Confirmation prompts**: destructive commands (`agent revoke`, `digest send-now`) accept `--confirm` to bypass; without it, the command prints a preview and exits 0.
 - **Color**: respects `NO_COLOR` and `--no-color` per the rest of `src/cli.rs`. JSON output is never colorized.
 - **Inherited flags**: `--config <path>`, `--server-url <url>`, `--db-path <path>` from the existing top-level CLI continue to apply to all new subcommands.

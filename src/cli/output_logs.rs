@@ -1,5 +1,5 @@
 use anyhow::Result;
-use syslog_mcp::app::{
+use cortex::app::{
     AbuseSearchResponse, AiCorrelateResponse, CorrelateEventsResponse, DbStats, GetErrorsResponse,
     ListAiProjectsResponse, ListAiToolsResponse, ListHostsResponse, ProjectContextResponse,
     SearchLogsResponse, SearchSessionsResponse, UsageBlocksResponse,
@@ -52,7 +52,7 @@ pub(crate) fn print_hosts_response(response: &ListHostsResponse, json: bool) -> 
 }
 
 pub(crate) fn print_sessions_response(
-    response: &syslog_mcp::app::ListSessionsResponse,
+    response: &cortex::app::ListSessionsResponse,
     json: bool,
 ) -> Result<()> {
     if json {
@@ -61,7 +61,7 @@ pub(crate) fn print_sessions_response(
     println!("{} session(s)", cyan(&response.count.to_string()));
     if let Some(as_of) = &response.rollup_as_of {
         // Unbounded results are served from the periodically-refreshed rollup;
-        // tell the operator how fresh the data is (bead syslog-mcp-2vre).
+        // tell the operator how fresh the data is (bead cortex-2vre).
         println!("{}", muted(&format!("(as of rollup refresh {as_of})")));
     }
     println!(

@@ -48,7 +48,7 @@ Implement stdio as a separate query-only RMCP adapter, not as the default daemon
 
 Recommended shape:
 
-- Add a dedicated binary: `src/bin/syslog-mcp-stdio.rs`.
+- Add a dedicated binary: `src/bin/cortex-stdio.rs`.
 - It initializes tracing to stderr only.
 - It loads `RuntimeCore::load_query_only()`.
 - It constructs the same RMCP server handler used by HTTP.
@@ -57,14 +57,14 @@ Recommended shape:
 - It never starts the HTTP server.
 - It never starts retention/storage maintenance tasks by default.
 
-This keeps `syslog-mcp` as the long-running daemon and gives stdio-only clients a real local MCP process.
+This keeps `cortex` as the long-running daemon and gives stdio-only clients a real local MCP process.
 
 ## Non-Negotiables
 
 - Never log to stdout in stdio mode.
 - Do not start syslog listeners from a stdio child process.
 - Do not start the HTTP server from a stdio child process.
-- Do not require `SYSLOG_MCP_TOKEN` for stdio mode; stdio is local child-process access, not network access.
+- Do not require `CORTEX_TOKEN` for stdio mode; stdio is local child-process access, not network access.
 - Do not duplicate MCP tool implementations between HTTP and stdio.
 - Do not reintroduce hand-rolled JSON-RPC dispatch for stdio.
 - Do not package the daemon binary itself as a stdio MCP server unless its stdio invocation is explicitly query-only.
@@ -74,14 +74,14 @@ This keeps `syslog-mcp` as the long-running daemon and gives stdio-only clients 
 
 This plan should start after these pieces exist:
 
-- `syslog-mcp-hea.1`: RMCP dependency and compatibility harness.
-- `syslog-mcp-hea.2`: RMCP Syslog server handler over shared `LogService`.
+- `cortex-hea.1`: RMCP dependency and compatibility harness.
+- `cortex-hea.2`: RMCP Syslog server handler over shared `LogService`.
 
 It does not need to wait for full HTTP route replacement if the RMCP handler is independently testable.
 
 Docs and packaging changes should coordinate with:
 
-- `syslog-mcp-hea.5`: transport docs and manifests.
+- `cortex-hea.5`: transport docs and manifests.
 
 ## Proposed Beads
 
@@ -92,7 +92,7 @@ Create a follow-up epic, for example:
 Suggested child tasks:
 
 1. Add RMCP stdio transport feature and stdio compatibility test.
-2. Add query-only `syslog-mcp-stdio` binary.
+2. Add query-only `cortex-stdio` binary.
 3. Add child-process integration tests for stdio tools.
 4. Update docs and manifests for dual HTTP + stdio support.
 5. Decide package/distribution model for registry and client manifests.
@@ -130,13 +130,13 @@ cargo test stdio -- --nocapture
 
 **Files:**
 
-- `src/bin/syslog-mcp-stdio.rs`
+- `src/bin/cortex-stdio.rs`
 - `src/mcp/rmcp_server.rs` or equivalent RMCP handler module
 - `src/runtime.rs` only if query-only initialization needs a narrow helper
 
 **Steps:**
 
-- [ ] Add `src/bin/syslog-mcp-stdio.rs`.
+- [ ] Add `src/bin/cortex-stdio.rs`.
 - [ ] Initialize tracing with `.with_writer(std::io::stderr)`.
 - [ ] Avoid `println!`, `print!`, and stdout-based startup banners.
 - [ ] Load `RuntimeCore::load_query_only()`.
@@ -152,7 +152,7 @@ cargo test stdio -- --nocapture
 ```rust
 use anyhow::Result;
 use rmcp::{ServiceExt, transport::stdio};
-use syslog_mcp::{mcp, runtime::RuntimeCore};
+use cortex::{mcp, runtime::RuntimeCore};
 use tracing_subscriber::{fmt, EnvFilter};
 
 #[tokio::main]
@@ -178,19 +178,19 @@ The exact handler constructor should match the RMCP HTTP refactor. Do not create
 **Verification:**
 
 ```bash
-cargo build --bin syslog-mcp-stdio
-cargo test --bin syslog-mcp-stdio
+cargo build --bin cortex-stdio
+cargo test --bin cortex-stdio
 ```
 
 Manual inspector check:
 
 ```bash
-npx @modelcontextprotocol/inspector cargo run --bin syslog-mcp-stdio
+npx @modelcontextprotocol/inspector cargo run --bin cortex-stdio
 ```
 
 **Done When:**
 
-- `syslog-mcp-stdio` runs as a stdio MCP server.
+- `cortex-stdio` runs as a stdio MCP server.
 - It can initialize and list all seven tools.
 - It emits no stdout text outside MCP messages.
 
@@ -206,7 +206,7 @@ npx @modelcontextprotocol/inspector cargo run --bin syslog-mcp-stdio
 
 - [ ] Add an integration test that builds/spawns the stdio binary as a child process.
 - [ ] Use RMCP client-side child-process transport if available.
-- [ ] Set `SYSLOG_MCP_DB_PATH` to a temp DB path.
+- [ ] Set `CORTEX_DB_PATH` to a temp DB path.
 - [ ] Seed data directly through shared DB/app helpers or use a temp runtime fixture.
 - [ ] Call `initialize`.
 - [ ] Call `tools/list` and assert all seven tool names.
@@ -276,13 +276,13 @@ cargo test app -- --nocapture
 
 - [ ] Document HTTP as the default daemon transport.
 - [ ] Document stdio as local query-only transport.
-- [ ] Add Claude/Codex/Gemini stdio examples that point to `syslog-mcp-stdio`, not the daemon mode.
+- [ ] Add Claude/Codex/Gemini stdio examples that point to `cortex-stdio`, not the daemon mode.
 - [ ] Preserve HTTP examples for remote and Docker deployments.
 - [ ] Explain when to use `mcp-remote` instead of direct stdio.
 - [ ] Update `server.json` only after deciding what registry package shape is valid for dual transport.
-- [ ] Update `gemini-extension.json` to call `syslog-mcp-stdio` if Gemini requires command-style stdio.
+- [ ] Update `gemini-extension.json` to call `cortex-stdio` if Gemini requires command-style stdio.
 - [ ] Decide whether plugin manifests should expose both HTTP and stdio variants or keep HTTP-only default.
-- [ ] Include `SYSLOG_MCP_DB_PATH` in stdio setup examples.
+- [ ] Include `CORTEX_DB_PATH` in stdio setup examples.
 - [ ] Do not document bearer token as required for stdio mode.
 
 **Example Stdio Client Config:**
@@ -290,10 +290,10 @@ cargo test app -- --nocapture
 ```json
 {
   "mcpServers": {
-    "syslog-mcp": {
-      "command": "/path/to/syslog-mcp-stdio",
+    "cortex": {
+      "command": "/path/to/cortex-stdio",
       "env": {
-        "SYSLOG_MCP_DB_PATH": "/data/syslog.db",
+        "CORTEX_DB_PATH": "/data/cortex.db",
         "RUST_LOG": "warn"
       }
     }
@@ -304,7 +304,7 @@ cargo test app -- --nocapture
 **Verification:**
 
 ```bash
-rg "not stdio|does not support stdio|stdio|syslog-mcp-stdio|mcp-remote|SYSLOG_MCP_DB_PATH" \
+rg "not stdio|does not support stdio|stdio|cortex-stdio|mcp-remote|CORTEX_DB_PATH" \
   README.md docs server.json gemini-extension.json .mcp.json .claude-plugin .codex-plugin
 
 jq empty server.json gemini-extension.json .mcp.json .claude-plugin/plugin.json .codex-plugin/plugin.json
@@ -328,7 +328,7 @@ bash bin/check-version-sync.sh
 
 **Steps:**
 
-- [ ] Ensure release builds include both `syslog-mcp` and `syslog-mcp-stdio`.
+- [ ] Ensure release builds include both `cortex` and `cortex-stdio`.
 - [ ] Update `just build-plugin` if plugin packaging should include the stdio binary.
 - [ ] Decide whether Docker image needs the stdio binary. It may be useful for local `docker exec`, but stdio MCP hosts usually launch host binaries, not long-running containers.
 - [ ] Update version-bearing files according to repo policy.
@@ -362,14 +362,14 @@ bash bin/check-version-sync.sh
 Verify stdio manually:
 
 ```bash
-cargo build --bin syslog-mcp-stdio
-npx @modelcontextprotocol/inspector cargo run --bin syslog-mcp-stdio
+cargo build --bin cortex-stdio
+npx @modelcontextprotocol/inspector cargo run --bin cortex-stdio
 ```
 
 Verify no stdout contamination:
 
 ```bash
-RUST_LOG=info target/debug/syslog-mcp-stdio > /tmp/syslog-mcp-stdio.stdout 2> /tmp/syslog-mcp-stdio.stderr
+RUST_LOG=info target/debug/cortex-stdio > /tmp/cortex-stdio.stdout 2> /tmp/cortex-stdio.stderr
 ```
 
 Expected: stdout contains only MCP protocol responses after a client sends MCP input. Startup logs and errors go to stderr.
@@ -377,13 +377,13 @@ Expected: stdout contains only MCP protocol responses after a client sends MCP i
 Verify HTTP daemon still works:
 
 ```bash
-cargo build --bin syslog-mcp
+cargo build --bin cortex
 cargo test mcp::routes -- --nocapture
 ```
 
 ## Open Decisions
 
-- Dedicated binary `syslog-mcp-stdio` vs daemon subcommand `syslog-mcp mcp-stdio`.
+- Dedicated binary `cortex-stdio` vs daemon subcommand `cortex mcp-stdio`.
 - Whether stdio should ever run retention/storage-budget cleanup.
 - Whether registry packaging should advertise both HTTP and stdio entries or only one.
 - Whether plugin defaults should remain HTTP-first or offer stdio-first for local installs.

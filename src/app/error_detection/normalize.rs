@@ -416,10 +416,10 @@ mod tests {
     fn otlp_404_rfc3164_format_produces_single_signature() {
         // Same OTLP error but with RFC3164 timestamp prefix.
         let messages = [
-            "Jan 15 08:30:00 syslog-mcp OTLP export failed: POST /v1/metrics HTTP/1.1 404 0",
-            "Jan 15 08:30:10 syslog-mcp OTLP export failed: POST /v1/metrics HTTP/1.1 404 0",
-            "Jan 15 09:00:00 syslog-mcp OTLP export failed: POST /v1/metrics HTTP/1.1 404 0",
-            "Feb  1 12:00:00 syslog-mcp OTLP export failed: POST /v1/metrics HTTP/1.1 404 0",
+            "Jan 15 08:30:00 cortex OTLP export failed: POST /v1/metrics HTTP/1.1 404 0",
+            "Jan 15 08:30:10 cortex OTLP export failed: POST /v1/metrics HTTP/1.1 404 0",
+            "Jan 15 09:00:00 cortex OTLP export failed: POST /v1/metrics HTTP/1.1 404 0",
+            "Feb  1 12:00:00 cortex OTLP export failed: POST /v1/metrics HTTP/1.1 404 0",
         ];
         let hashes: HashSet<String> = messages
             .iter()

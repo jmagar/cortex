@@ -1,4 +1,0 @@
-interface:
-  display_name: "Syslog Version Check"
-  short_description: "Check deployed syslog runtime freshness"
-  default_prompt: "Use $syslog-version-check to check whether the running syslog-mcp runtime is current."

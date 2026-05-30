@@ -18,9 +18,9 @@ async fn background_interval_waits_full_period_before_first_tick() {
 
 /// Build a minimal `Config` rooted at `tmp` with the supplied overrides.
 fn test_config(tmp: &std::path::Path, mcp: McpConfig) -> Config {
-    let storage = StorageConfig::for_test(tmp.join("syslog.db"));
+    let storage = StorageConfig::for_test(tmp.join("cortex.db"));
     Config {
-        syslog: Default::default(),
+        receiver: Default::default(),
         storage,
         mcp,
         api: Default::default(),
@@ -35,7 +35,7 @@ fn loopback_mcp() -> McpConfig {
     McpConfig {
         host: "127.0.0.1".into(),
         port: 3100,
-        server_name: "syslog-mcp".into(),
+        server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
         api_token: None,
@@ -56,9 +56,7 @@ async fn build_auth_policy_rejects_no_auth_non_loopback_without_trusted_gateway(
     let err = build_auth_policy(&config, false)
         .await
         .expect_err("non-loopback no_auth must require trusted gateway flag");
-    assert!(err
-        .to_string()
-        .contains("SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH"));
+    assert!(err.to_string().contains("CORTEX_TRUSTED_GATEWAY_NO_AUTH"));
 }
 
 #[tokio::test]
@@ -173,11 +171,11 @@ async fn runtime_rejects_non_loopback_oauth_without_static_token_before_otlp_mou
     };
     let msg = format!("{err:#}");
     assert!(
-        msg.contains("OTLP /v1/logs") && msg.contains("SYSLOG_MCP_TOKEN"),
+        msg.contains("OTLP /v1/logs") && msg.contains("CORTEX_TOKEN"),
         "wrong error: {msg}"
     );
     assert!(
-        !tmp.path().join("syslog.db").exists(),
+        !tmp.path().join("cortex.db").exists(),
         "rejection must occur before db::init_pool runs"
     );
 }
@@ -196,7 +194,7 @@ async fn runtime_rejects_oauth_allowed_emails_before_db_init() {
     let msg = format!("{err:#}");
     assert!(msg.contains("allowed_emails"), "wrong error: {msg}");
     assert!(
-        !tmp.path().join("syslog.db").exists(),
+        !tmp.path().join("cortex.db").exists(),
         "rejection must occur before db::init_pool runs"
     );
 }

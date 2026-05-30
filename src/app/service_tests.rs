@@ -5,11 +5,11 @@ use crate::db::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
 
 use super::*;
 
-fn test_service() -> (SyslogService, Arc<DbPool>, tempfile::TempDir) {
+fn test_service() -> (CortexService, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("app-test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
-    (SyslogService::new(Arc::clone(&pool), storage), pool, dir)
+    (CortexService::new(Arc::clone(&pool), storage), pool, dir)
 }
 
 fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> LogBatchEntry {
@@ -75,7 +75,7 @@ fn normalize_syslog_owned_service_rejects_arbitrary_units() {
 
 #[test]
 fn parse_journal_json_lines_extracts_service_log_fields() {
-    let raw = r#"{"__REALTIME_TIMESTAMP":"1780000000123456","_SYSTEMD_USER_UNIT":"syslog-ai-watch.service","PRIORITY":"3","SYSLOG_IDENTIFIER":"syslog","_PID":"42","MESSAGE":"AI transcript indexing failed","__CURSOR":"cursor-1"}"#;
+    let raw = r#"{"__REALTIME_TIMESTAMP":"1780000000123456","_SYSTEMD_USER_UNIT":"syslog-ai-watch.service","PRIORITY":"3","CORTEX_IDENTIFIER":"syslog","_PID":"42","MESSAGE":"AI transcript indexing failed","__CURSOR":"cursor-1"}"#;
 
     let (entries, dropped) = parse_journal_json_lines(raw);
     assert_eq!(dropped, 0);
@@ -402,9 +402,9 @@ async fn filter_logs_maps_docker_stream_alias_to_source_prefix() {
         "dookie",
         "info",
         "docker stdout",
-        "docker://dookie/syslog-mcp/stdout",
+        "docker://dookie/cortex/stdout",
     );
-    stdout.app_name = Some("syslog-mcp".into());
+    stdout.app_name = Some("cortex".into());
     let mut other = entry(
         "2026-01-01T00:00:01Z",
         "dookie",
@@ -419,7 +419,7 @@ async fn filter_logs_maps_docker_stream_alias_to_source_prefix() {
         .filter_logs(FilterLogsRequest {
             source_kind: Some("docker-stream".into()),
             docker_host: Some("dookie".into()),
-            container: Some("syslog-mcp".into()),
+            container: Some("cortex".into()),
             ..Default::default()
         })
         .await
@@ -626,7 +626,7 @@ async fn run_db_emits_warn_on_slow_op_with_error() {
 #[tokio::test]
 async fn timeline_applies_default_lookback_only_when_from_and_to_both_absent() {
     // Bead dyqw: the bucket-sized default lookback was centralized into
-    // `SyslogService::timeline`. It must apply ONLY when both `from` and `to`
+    // `CortexService::timeline`. It must apply ONLY when both `from` and `to`
     // are absent (preventing an unbounded full-table scan), and must be SKIPPED
     // whenever `to` is supplied — preserving the zl9y guard against injecting a
     // `from` that would create an impossible range.

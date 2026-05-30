@@ -1,6 +1,6 @@
-# Security Guardrails -- syslog-mcp
+# Security Guardrails -- cortex
 
-Safety and security patterns enforced across syslog-mcp.
+Safety and security patterns enforced across cortex.
 
 ## Credential management
 
@@ -36,28 +36,28 @@ Pre-commit hooks verify security invariants:
 ### Credential rotation
 
 1. Generate new token: `openssl rand -hex 32`
-2. Update `.env` with the new `SYSLOG_MCP_TOKEN` value
+2. Update `.env` with the new `CORTEX_TOKEN` value
 3. Restart the server: `just restart`
 4. Update MCP client configuration with new token
 5. Verify: `just health`
 
 ## Authentication
 
-syslog-mcp has a single authentication boundary: MCP clients authenticating to the MCP HTTP server.
+cortex has a single authentication boundary: MCP clients authenticating to the MCP HTTP server.
 
 ### Bearer token
 
-When `SYSLOG_MCP_TOKEN` is set, all requests to `/mcp` require:
+When `CORTEX_TOKEN` is set, all requests to `/mcp` require:
 
 ```
-Authorization: Bearer {SYSLOG_MCP_TOKEN}
+Authorization: Bearer {CORTEX_TOKEN}
 ```
 
 Token comparison uses `subtle::ConstantTimeEq` to prevent timing attacks.
 
 ### Unauthenticated by default
 
-When `SYSLOG_MCP_TOKEN` is not set, the MCP endpoint is open. This is acceptable for LAN-only deployments but not recommended when exposed via reverse proxy.
+When `CORTEX_TOKEN` is not set, the MCP endpoint is open. This is acceptable for LAN-only deployments but not recommended when exposed via reverse proxy.
 
 ### Health endpoint
 
@@ -75,7 +75,7 @@ RUN groupadd --gid 1000 syslog && \
 USER 1000:1000
 ```
 
-Override with `SYSLOG_UID` and `SYSLOG_GID` in `docker-compose.yml`.
+Override with `CORTEX_UID` and `CORTEX_GID` in `docker-compose.yml`.
 
 ### No baked environment
 
@@ -83,13 +83,13 @@ The Docker image contains only two non-sensitive defaults:
 
 ```dockerfile
 ENV RUST_LOG=info
-ENV SYSLOG_MCP_DB_PATH=/data/syslog.db
+ENV CORTEX_DB_PATH=/data/cortex.db
 ```
 
 No credentials are baked into the image. Verify with:
 
 ```bash
-docker inspect syslog-mcp:latest | jq '.[0].Config.Env'
+docker inspect cortex:latest | jq '.[0].Config.Env'
 ```
 
 ### Resource limits
@@ -100,13 +100,13 @@ The compose file sets memory and CPU limits, both configurable via env vars:
 deploy:
   resources:
     limits:
-      memory: ${SYSLOG_MCP_MEMORY_LIMIT:-2G}
-      cpus: '${SYSLOG_MCP_CPU_LIMIT:-1.0}'
+      memory: ${CORTEX_MEMORY_LIMIT:-2G}
+      cpus: '${CORTEX_CPU_LIMIT:-1.0}'
 ```
 
 The memory default is `2G`. Heavy `stats`/`sessions` aggregations over a large
 database can spike memory; the previous `512M` default triggered OOM restarts.
-Raise `SYSLOG_MCP_MEMORY_LIMIT` (e.g. `4G`) on hosts with very large databases.
+Raise `CORTEX_MEMORY_LIMIT` (e.g. `4G`) on hosts with very large databases.
 
 ## Network security
 
@@ -116,7 +116,7 @@ CORS is restricted to `localhost:3100` and `127.0.0.1:3100`. MCP CLI clients (mc
 
 ### Port 1514 vs 514
 
-syslog-mcp listens on port 1514 (not 514) to avoid needing root or `CAP_NET_BIND_SERVICE`. Use iptables PREROUTING to redirect 514 to 1514 for devices that cannot be reconfigured:
+cortex listens on port 1514 (not 514) to avoid needing root or `CAP_NET_BIND_SERVICE`. Use iptables PREROUTING to redirect 514 to 1514 for devices that cannot be reconfigured:
 
 ```bash
 sudo iptables -t nat -A PREROUTING -p udp --dport 514 -j REDIRECT --to-port 1514
@@ -126,8 +126,8 @@ sudo iptables -t nat -A PREROUTING -p tcp --dport 514 -j REDIRECT --to-port 1514
 ### SWAG reverse proxy
 
 When exposing MCP over HTTPS via SWAG:
-- Add auth at the proxy layer or set `SYSLOG_MCP_TOKEN`
-- Add public reverse-proxy hostnames to `SYSLOG_MCP_ALLOWED_HOSTS` so RMCP Host validation accepts them
+- Add auth at the proxy layer or set `CORTEX_TOKEN`
+- Add public reverse-proxy hostnames to `CORTEX_ALLOWED_HOSTS` so RMCP Host validation accepts them
 - See `docs/syslog.subdomain.conf` for a working nginx config
 
 ## Input handling

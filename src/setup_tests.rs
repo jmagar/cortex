@@ -5,22 +5,22 @@ fn ensure_env_file_preserves_existing_token_and_adds_compose_defaults() {
     let dir = tempfile::tempdir().unwrap();
     let env_path = dir.path().join(".env");
     let data_dir = dir.path().join("data");
-    std::fs::write(&env_path, "SYSLOG_MCP_TOKEN=keep-me\n").unwrap();
+    std::fs::write(&env_path, "CORTEX_TOKEN=keep-me\n").unwrap();
 
     let result = ensure_env_file(&env_path, &data_dir).unwrap();
     let raw = std::fs::read_to_string(&env_path).unwrap();
 
     assert_eq!(
-        result.values.get("SYSLOG_MCP_TOKEN").map(String::as_str),
+        result.values.get("CORTEX_TOKEN").map(String::as_str),
         Some("keep-me")
     );
-    assert!(raw.contains("SYSLOG_MCP_TOKEN=keep-me"));
-    assert!(raw.contains("SYSLOG_MCP_DATA_VOLUME="));
-    assert!(raw.contains("SYSLOG_MCP_DB_PATH=/data/syslog.db"));
+    assert!(raw.contains("CORTEX_TOKEN=keep-me"));
+    assert!(raw.contains("CORTEX_DATA_VOLUME="));
+    assert!(raw.contains("CORTEX_DB_PATH=/data/cortex.db"));
     assert!(raw.contains("COMPOSE_PROJECT_NAME=syslog-jmagar-lab"));
 }
 
-/// `SYSLOG_API_TOKEN` is always provisioned (API is unconditionally mounted).
+/// `CORTEX_API_TOKEN` is always provisioned (API is unconditionally mounted).
 /// First run on a clean .env generates a 64-char hex token (32 bytes hex-encoded).
 #[test]
 fn ensure_env_file_generates_api_token_when_missing() {
@@ -32,28 +32,28 @@ fn ensure_env_file_generates_api_token_when_missing() {
 
     let token = result
         .values
-        .get("SYSLOG_API_TOKEN")
-        .expect("SYSLOG_API_TOKEN must be present after ensure_env_file");
+        .get("CORTEX_API_TOKEN")
+        .expect("CORTEX_API_TOKEN must be present after ensure_env_file");
     // The implementation generates 32 random bytes encoded as hex → exactly
     // 64 ASCII chars. Lock down the precise length so future refactors that
     // shorten the token (and weaken brute-force resistance) fail this test.
     assert_eq!(
         token.len(),
         64,
-        "generated SYSLOG_API_TOKEN must be 64 hex chars (32 random bytes), got {} chars",
+        "generated CORTEX_API_TOKEN must be 64 hex chars (32 random bytes), got {} chars",
         token.len()
     );
     assert!(
         token.chars().all(|c| c.is_ascii_hexdigit()),
-        "generated SYSLOG_API_TOKEN must be hex"
+        "generated CORTEX_API_TOKEN must be hex"
     );
     let raw = std::fs::read_to_string(&env_path).unwrap();
-    assert!(raw.contains(&format!("SYSLOG_API_TOKEN={token}")));
+    assert!(raw.contains(&format!("CORTEX_API_TOKEN={token}")));
 }
 
 /// Re-running `ensure_env_file` against a .env that already has a
-/// SYSLOG_API_TOKEN must preserve it byte-for-byte — mirrors the
-/// SYSLOG_MCP_TOKEN contract that operators depend on for token rotation.
+/// CORTEX_API_TOKEN must preserve it byte-for-byte — mirrors the
+/// CORTEX_TOKEN contract that operators depend on for token rotation.
 #[test]
 fn ensure_env_file_preserves_existing_api_token_byte_for_byte() {
     let dir = tempfile::tempdir().unwrap();
@@ -61,22 +61,22 @@ fn ensure_env_file_preserves_existing_api_token_byte_for_byte() {
     let data_dir = dir.path().join("data");
     std::fs::write(
         &env_path,
-        "SYSLOG_MCP_TOKEN=mcp-keep\nSYSLOG_API_TOKEN=api-keep-me-exactly\n",
+        "CORTEX_TOKEN=mcp-keep\nCORTEX_API_TOKEN=api-keep-me-exactly\n",
     )
     .unwrap();
 
     let result = ensure_env_file(&env_path, &data_dir).unwrap();
 
     assert_eq!(
-        result.values.get("SYSLOG_API_TOKEN").map(String::as_str),
+        result.values.get("CORTEX_API_TOKEN").map(String::as_str),
         Some("api-keep-me-exactly")
     );
     let raw = std::fs::read_to_string(&env_path).unwrap();
-    assert!(raw.contains("SYSLOG_API_TOKEN=api-keep-me-exactly"));
+    assert!(raw.contains("CORTEX_API_TOKEN=api-keep-me-exactly"));
 }
 
 /// Cutover (bead 0p8r.10): on first install, `ensure_env_file` writes
-/// `SYSLOG_USE_HTTP=true` so the CLI defaults to HTTP transport via the
+/// `CORTEX_USE_HTTP=true` so the CLI defaults to HTTP transport via the
 /// container REST API.
 #[test]
 fn ensure_env_file_sets_use_http_true_when_missing() {
@@ -87,64 +87,64 @@ fn ensure_env_file_sets_use_http_true_when_missing() {
     let result = ensure_env_file(&env_path, &data_dir).unwrap();
 
     assert_eq!(
-        result.values.get("SYSLOG_USE_HTTP").map(String::as_str),
+        result.values.get("CORTEX_USE_HTTP").map(String::as_str),
         Some("true"),
-        "first install must default SYSLOG_USE_HTTP=true"
+        "first install must default CORTEX_USE_HTTP=true"
     );
     let raw = std::fs::read_to_string(&env_path).unwrap();
     assert!(
-        raw.contains("SYSLOG_USE_HTTP=true"),
-        "rendered .env must contain SYSLOG_USE_HTTP=true literally"
+        raw.contains("CORTEX_USE_HTTP=true"),
+        "rendered .env must contain CORTEX_USE_HTTP=true literally"
     );
 }
 
-/// Operator opt-out (`SYSLOG_USE_HTTP=false`) must survive `setup repair`
-/// byte-for-byte — unlike SYSLOG_API_TOKEN, this is a behaviour toggle the
+/// Operator opt-out (`CORTEX_USE_HTTP=false`) must survive `setup repair`
+/// byte-for-byte — unlike CORTEX_API_TOKEN, this is a behaviour toggle the
 /// operator may legitimately disable.
 #[test]
 fn ensure_env_file_preserves_use_http_false_byte_for_byte() {
     let dir = tempfile::tempdir().unwrap();
     let env_path = dir.path().join(".env");
     let data_dir = dir.path().join("data");
-    std::fs::write(&env_path, "SYSLOG_USE_HTTP=false\n").unwrap();
+    std::fs::write(&env_path, "CORTEX_USE_HTTP=false\n").unwrap();
 
     let result = ensure_env_file(&env_path, &data_dir).unwrap();
 
     assert_eq!(
-        result.values.get("SYSLOG_USE_HTTP").map(String::as_str),
+        result.values.get("CORTEX_USE_HTTP").map(String::as_str),
         Some("false"),
-        "operator override SYSLOG_USE_HTTP=false must be preserved exactly"
+        "operator override CORTEX_USE_HTTP=false must be preserved exactly"
     );
     let raw = std::fs::read_to_string(&env_path).unwrap();
-    assert!(raw.contains("SYSLOG_USE_HTTP=false"));
-    assert!(!raw.contains("SYSLOG_USE_HTTP=true"));
+    assert!(raw.contains("CORTEX_USE_HTTP=false"));
+    assert!(!raw.contains("CORTEX_USE_HTTP=true"));
 }
 
-/// Idempotent re-run: when `SYSLOG_USE_HTTP=true` already exists, repair
+/// Idempotent re-run: when `CORTEX_USE_HTTP=true` already exists, repair
 /// leaves it untouched (no double-write, no value rewrite).
 #[test]
 fn ensure_env_file_preserves_use_http_true_on_rerun() {
     let dir = tempfile::tempdir().unwrap();
     let env_path = dir.path().join(".env");
     let data_dir = dir.path().join("data");
-    std::fs::write(&env_path, "SYSLOG_USE_HTTP=true\n").unwrap();
+    std::fs::write(&env_path, "CORTEX_USE_HTTP=true\n").unwrap();
 
     let result = ensure_env_file(&env_path, &data_dir).unwrap();
 
     assert_eq!(
-        result.values.get("SYSLOG_USE_HTTP").map(String::as_str),
+        result.values.get("CORTEX_USE_HTTP").map(String::as_str),
         Some("true")
     );
     let raw = std::fs::read_to_string(&env_path).unwrap();
     // Exactly one occurrence — write_env must not duplicate the key.
     assert_eq!(
-        raw.matches("SYSLOG_USE_HTTP=").count(),
+        raw.matches("CORTEX_USE_HTTP=").count(),
         1,
-        "SYSLOG_USE_HTTP must appear exactly once after re-run"
+        "CORTEX_USE_HTTP must appear exactly once after re-run"
     );
 }
 
-/// Empty value (`SYSLOG_USE_HTTP=`) is treated as an explicit operator
+/// Empty value (`CORTEX_USE_HTTP=`) is treated as an explicit operator
 /// choice and preserved. The CLI falls through to its compiled default in
 /// that case; we do NOT silently rewrite to `true` because doing so would
 /// override an operator who wrote the line intentionally blank to "let the
@@ -155,14 +155,14 @@ fn ensure_env_file_preserves_empty_use_http_value() {
     let dir = tempfile::tempdir().unwrap();
     let env_path = dir.path().join(".env");
     let data_dir = dir.path().join("data");
-    std::fs::write(&env_path, "SYSLOG_USE_HTTP=\n").unwrap();
+    std::fs::write(&env_path, "CORTEX_USE_HTTP=\n").unwrap();
 
     let result = ensure_env_file(&env_path, &data_dir).unwrap();
 
     assert_eq!(
-        result.values.get("SYSLOG_USE_HTTP").map(String::as_str),
+        result.values.get("CORTEX_USE_HTTP").map(String::as_str),
         Some(""),
-        "empty SYSLOG_USE_HTTP must be preserved (operator intent wins)"
+        "empty CORTEX_USE_HTTP must be preserved (operator intent wins)"
     );
 }
 
@@ -173,18 +173,18 @@ fn ensure_env_file_replaces_blank_api_token() {
     let dir = tempfile::tempdir().unwrap();
     let env_path = dir.path().join(".env");
     let data_dir = dir.path().join("data");
-    std::fs::write(&env_path, "SYSLOG_API_TOKEN=\n").unwrap();
+    std::fs::write(&env_path, "CORTEX_API_TOKEN=\n").unwrap();
 
     let result = ensure_env_file(&env_path, &data_dir).unwrap();
 
-    let token = result.values.get("SYSLOG_API_TOKEN").unwrap();
+    let token = result.values.get("CORTEX_API_TOKEN").unwrap();
     assert!(!token.trim().is_empty());
     assert!(token.len() >= 32);
 }
 
 /// Atomic `write_env`: the live target file is either fully written or
 /// unchanged. Crucial because a corrupt .env bricks container startup
-/// (api.rs bails on empty SYSLOG_API_TOKEN).
+/// (api.rs bails on empty CORTEX_API_TOKEN).
 #[test]
 fn write_env_replaces_file_atomically() {
     let dir = tempfile::tempdir().unwrap();
@@ -241,13 +241,13 @@ fn parse_env_ignores_comments_and_blank_lines() {
 #[test]
 fn installed_compose_asset_uses_published_image_only() {
     // COMPOSE_ASSET is now docker-compose.prod.yml — the publishable template.
-    assert!(COMPOSE_ASSET.contains("image: ghcr.io/jmagar/syslog-mcp:"));
+    assert!(COMPOSE_ASSET.contains("image: ghcr.io/jmagar/cortex:"));
     assert!(!COMPOSE_ASSET.contains("syslog-setup-build-stanza"));
     assert!(!COMPOSE_ASSET.contains("\n    build:\n"));
 
     let compose = installed_compose_asset();
     assert_ne!(compose, COMPOSE_ASSET);
-    assert!(compose.contains("image: ghcr.io/jmagar/syslog-mcp:"));
+    assert!(compose.contains("image: ghcr.io/jmagar/cortex:"));
     assert!(compose.contains("      - path: ../.env\n"));
     // env_file path is rewritten — source pattern must not survive.
     assert!(!compose.contains("      - path: .env\n"));
@@ -256,10 +256,10 @@ fn installed_compose_asset_uses_published_image_only() {
 #[test]
 fn installed_compose_asset_memory_limit_is_configurable_with_2g_default() {
     // Issue 3: the memory limit must default to 2G (was 512M, which OOM'd on
-    // heavy stats queries) and be overridable via SYSLOG_MCP_MEMORY_LIMIT so a
+    // heavy stats queries) and be overridable via CORTEX_MEMORY_LIMIT so a
     // fresh deploy picks up the safer default and operators can tune it.
     assert!(
-        COMPOSE_ASSET.contains("memory: ${SYSLOG_MCP_MEMORY_LIMIT:-2G}"),
+        COMPOSE_ASSET.contains("memory: ${CORTEX_MEMORY_LIMIT:-2G}"),
         "compose asset must use a configurable 2G memory limit"
     );
     assert!(
@@ -268,58 +268,56 @@ fn installed_compose_asset_memory_limit_is_configurable_with_2g_default() {
     );
     // The installed transform must preserve the configurable limit.
     let compose = installed_compose_asset();
-    assert!(compose.contains("memory: ${SYSLOG_MCP_MEMORY_LIMIT:-2G}"));
+    assert!(compose.contains("memory: ${CORTEX_MEMORY_LIMIT:-2G}"));
 }
 
 #[test]
 fn ai_index_timer_script_uses_host_syslog_and_disables_docker_ingest() {
     let script = ai_index_script();
     assert!(script.contains("command -v syslog"));
-    assert!(script.contains("syslog --version"));
-    assert!(script.contains("syslog ai index --json"));
-    assert!(script.contains("SYSLOG_DOCKER_INGEST_ENABLED"));
-    assert!(script.contains(".claude/plugins/data/syslog-jmagar-lab/syslog.db"));
+    assert!(script.contains("cortex --version"));
+    assert!(script.contains("cortex ai index --json"));
+    assert!(script.contains("CORTEX_DOCKER_INGEST_ENABLED"));
+    assert!(script.contains(".claude/plugins/data/syslog-jmagar-lab/cortex.db"));
 }
 
 #[test]
 fn ai_index_timer_units_are_host_user_units() {
-    let unit = ai_index_service_unit(std::path::Path::new("/home/me/.local/bin/syslog-ai-index"));
+    let unit = ai_index_service_unit(std::path::Path::new("/home/me/.local/bin/cortex-ai-index"));
     let timer = ai_index_timer_unit();
 
-    assert!(unit.contains("Description=syslog-mcp local AI transcript index"));
-    assert!(unit.contains("ExecStart=/home/me/.local/bin/syslog-ai-index"));
+    assert!(unit.contains("Description=cortex local AI transcript index"));
+    assert!(unit.contains("ExecStart=/home/me/.local/bin/cortex-ai-index"));
     assert!(timer.contains("OnUnitActiveSec=30min"));
     assert!(timer.contains("WantedBy=timers.target"));
 }
 
 #[test]
 fn ai_watch_env_file_pins_db_and_disables_docker_ingest() {
-    let env = ai_watch_env_file(std::path::Path::new("/home/me/syslog.db"));
-    assert!(env.contains("SYSLOG_MCP_DB_PATH=/home/me/syslog.db"));
-    assert!(env.contains("SYSLOG_DOCKER_INGEST_ENABLED=false"));
+    let env = ai_watch_env_file(std::path::Path::new("/home/me/cortex.db"));
+    assert!(env.contains("CORTEX_DB_PATH=/home/me/cortex.db"));
+    assert!(env.contains("CORTEX_DOCKER_INGEST_ENABLED=false"));
     assert!(env.contains("RUST_LOG=warn"));
 }
 
 #[test]
 fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     let unit = ai_watch_service_unit(
-        std::path::Path::new("/home/me/.local/bin/syslog"),
-        std::path::Path::new("/home/me/.config/syslog-mcp/ai-watch.env"),
-        std::path::Path::new("/home/me/.syslog-mcp/data/syslog.db"),
-        std::path::Path::new("/home/me/.local/state/syslog-mcp"),
+        std::path::Path::new("/home/me/.local/bin/cortex"),
+        std::path::Path::new("/home/me/.config/cortex/ai-watch.env"),
+        std::path::Path::new("/home/me/.cortex/data/cortex.db"),
+        std::path::Path::new("/home/me/.local/state/cortex"),
         std::path::Path::new("/home/me"),
     );
 
     assert!(unit.contains("Type=simple"));
-    assert!(unit.contains("EnvironmentFile=/home/me/.config/syslog-mcp/ai-watch.env"));
+    assert!(unit.contains("EnvironmentFile=/home/me/.config/cortex/ai-watch.env"));
     assert!(unit.contains(
         "Environment=PATH=/home/me/.local/bin:/home/me/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
     ));
-    assert!(
-        unit.contains("Environment=CARGO_TARGET_DIR=/home/me/.local/state/syslog-mcp/cargo-target")
-    );
+    assert!(unit.contains("Environment=CARGO_TARGET_DIR=/home/me/.local/state/cortex/cargo-target"));
     assert!(unit.contains("WorkingDirectory=/"));
-    assert!(unit.contains("ExecStart=/home/me/.local/bin/syslog ai watch --no-initial-scan --json"));
+    assert!(unit.contains("ExecStart=/home/me/.local/bin/cortex ai watch --no-initial-scan --json"));
     assert!(unit.contains("Restart=on-failure"));
     assert!(unit.contains("StartLimitBurst=5"));
     assert!(unit.contains("UMask=0077"));
@@ -328,18 +326,16 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     assert!(unit.contains("ProtectSystem=strict"));
     assert!(unit.contains("ProtectHome=read-only"));
     assert!(unit.contains("BindReadOnlyPaths=-/home/me/.claude/projects -/home/me/.codex/sessions"));
-    assert!(unit.contains("BindPaths=/home/me/.syslog-mcp/data /home/me/.local/state/syslog-mcp"));
-    assert!(
-        unit.contains("ReadWritePaths=/home/me/.syslog-mcp/data /home/me/.local/state/syslog-mcp")
-    );
+    assert!(unit.contains("BindPaths=/home/me/.cortex/data /home/me/.local/state/cortex"));
+    assert!(unit.contains("ReadWritePaths=/home/me/.cortex/data /home/me/.local/state/cortex"));
     assert!(unit.contains("WantedBy=default.target"));
 }
 
 #[test]
 fn setup_path_value_rejects_unit_breaking_characters() {
-    assert!(setup_path_value(std::path::Path::new("/home/me/syslog.db")).is_ok());
-    assert!(setup_path_value(std::path::Path::new("/home/me/bad path/syslog.db")).is_err());
-    assert!(setup_path_value(std::path::Path::new("/home/me/%n/syslog.db")).is_err());
+    assert!(setup_path_value(std::path::Path::new("/home/me/cortex.db")).is_ok());
+    assert!(setup_path_value(std::path::Path::new("/home/me/bad path/cortex.db")).is_err());
+    assert!(setup_path_value(std::path::Path::new("/home/me/%n/cortex.db")).is_err());
 }
 
 #[test]
@@ -348,13 +344,13 @@ fn db_path_from_setup_env_uses_absolute_compose_data_volume() {
     let env_path = dir.path().join(".env");
     std::fs::write(
         &env_path,
-        "SYSLOG_MCP_DB_PATH=/data/syslog.db\nSYSLOG_MCP_DATA_VOLUME=/srv/syslog-data\n",
+        "CORTEX_DB_PATH=/data/cortex.db\nCORTEX_DATA_VOLUME=/srv/syslog-data\n",
     )
     .unwrap();
 
     assert_eq!(
         db_path_from_setup_env(&env_path).unwrap(),
-        Some(std::path::PathBuf::from("/srv/syslog-data/syslog.db"))
+        Some(std::path::PathBuf::from("/srv/syslog-data/cortex.db"))
     );
 }
 
@@ -364,14 +360,14 @@ fn db_path_from_setup_env_rejects_container_db_without_absolute_data_volume() {
     let env_path = dir.path().join(".env");
     std::fs::write(
         &env_path,
-        "SYSLOG_MCP_DB_PATH=/data/syslog.db\nSYSLOG_MCP_DATA_VOLUME=syslog-data\n",
+        "CORTEX_DB_PATH=/data/cortex.db\nCORTEX_DATA_VOLUME=syslog-data\n",
     )
     .unwrap();
 
     let err = db_path_from_setup_env(&env_path).unwrap_err();
     assert!(err
         .to_string()
-        .contains("SYSLOG_MCP_DATA_VOLUME is not absolute"));
+        .contains("CORTEX_DATA_VOLUME is not absolute"));
 }
 
 #[test]
@@ -394,7 +390,7 @@ fn validate_db_path_rejects_relative_without_creating_parent() {
             .unwrap()
             .as_nanos()
     );
-    let relative = std::path::PathBuf::from(&relative_dir).join("syslog.db");
+    let relative = std::path::PathBuf::from(&relative_dir).join("cortex.db");
     let err = validate_db_path(relative).unwrap_err();
     assert!(err.to_string().contains("must be absolute"));
     assert!(!std::path::Path::new(&relative_dir).exists());
@@ -402,11 +398,11 @@ fn validate_db_path_rejects_relative_without_creating_parent() {
 
 #[test]
 fn validate_db_path_rejects_root_parent_and_unit_breaking_chars() {
-    let root_db = std::path::PathBuf::from("/syslog.db");
+    let root_db = std::path::PathBuf::from("/cortex.db");
     let err = validate_db_path(root_db).unwrap_err();
     assert!(err.to_string().contains("non-root directory"));
 
-    let spaced = std::path::PathBuf::from("/tmp/syslog mcp/syslog.db");
+    let spaced = std::path::PathBuf::from("/tmp/cortex mcp/cortex.db");
     let err = validate_db_path(spaced).unwrap_err();
     assert!(err.to_string().contains("unsupported character"));
 }
@@ -433,7 +429,7 @@ fn ai_watch_service_content_phase_detects_stale_unit() {
     let env_path = dir.path().join("ai-watch.env");
     let service_path = dir.path().join("syslog-ai-watch.service");
     let state_dir = dir.path().join("state");
-    let db_path = dir.path().join("data/syslog.db");
+    let db_path = dir.path().join("data/cortex.db");
     let user_home = dir.path().join("home");
     let bin = dir.path().join("bin/syslog");
     std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
@@ -458,13 +454,13 @@ fn ai_watch_service_content_phase_detects_stale_unit() {
 
 #[test]
 fn debug_wrapper_script_builds_current_repo_debug_binary() {
-    let script = debug_wrapper_script(std::path::Path::new("/home/me/workspace/syslog-mcp"));
+    let script = debug_wrapper_script(std::path::Path::new("/home/me/workspace/cortex"));
 
-    assert!(script.contains(r#"repo="${SYSLOG_MCP_REPO:-/home/me/workspace/syslog-mcp}""#));
-    assert!(script.contains(r#"repo="${HOME}/workspace/syslog-mcp""#));
+    assert!(script.contains(r#"repo="${CORTEX_REPO:-/home/me/workspace/cortex}""#));
+    assert!(script.contains(r#"repo="${HOME}/workspace/cortex""#));
     assert!(script.contains(r#"export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.cache/cargo}""#));
-    assert!(script.contains("SYSLOG_DOCKER_INGEST_ENABLED"));
-    assert!(script.contains("SYSLOG_MCP_AUTH_MODE"));
+    assert!(script.contains("CORTEX_DOCKER_INGEST_ENABLED"));
+    assert!(script.contains("CORTEX_AUTH_MODE"));
     assert!(script.contains("cargo build --quiet --bin syslog"));
     assert!(script.contains(r#"exec "${CARGO_TARGET_DIR}/debug/syslog" "$@""#));
 }
@@ -472,7 +468,7 @@ fn debug_wrapper_script_builds_current_repo_debug_binary() {
 #[test]
 fn debug_wrapper_content_phase_detects_stale_wrapper() {
     let dir = tempfile::tempdir().unwrap();
-    let wrapper = dir.path().join("syslog");
+    let wrapper = dir.path().join("cortex");
     std::fs::write(&wrapper, "#!/bin/sh\nexec old\n").unwrap();
 
     let phase = check_debug_wrapper_content_phase(&wrapper, dir.path());
@@ -485,13 +481,12 @@ fn debug_wrapper_content_phase_detects_stale_wrapper() {
 
 #[test]
 fn debug_compose_override_builds_local_debug_image_from_repo() {
-    let override_yaml =
-        debug_compose_override(std::path::Path::new("/home/me/workspace/syslog-mcp"));
+    let override_yaml = debug_compose_override(std::path::Path::new("/home/me/workspace/cortex"));
 
-    assert!(override_yaml.contains("image: syslog-mcp:local-debug"));
-    assert!(override_yaml.contains("context: /home/me/workspace/syslog-mcp"));
+    assert!(override_yaml.contains("image: cortex:local-debug"));
+    assert!(override_yaml.contains("context: /home/me/workspace/cortex"));
     assert!(override_yaml.contains("dockerfile: config/Dockerfile"));
-    assert!(override_yaml.contains("SYSLOG_BUILD_PROFILE: debug"));
+    assert!(override_yaml.contains("CORTEX_BUILD_PROFILE: debug"));
 }
 
 #[test]
@@ -534,7 +529,7 @@ fn summarize_ai_index_output_reports_key_counts() {
 
     assert_eq!(
         summary,
-        "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 dropped_metadata_fields=0 file_errors=1; inspect with `syslog ai errors --limit 20`, `syslog ai checkpoints --errors`, then rerun `syslog ai index --json` after fixes"
+        "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 dropped_metadata_fields=0 file_errors=1; inspect with `cortex ai errors --limit 20`, `cortex ai checkpoints --errors`, then rerun `cortex ai index --json` after fixes"
     );
 }
 

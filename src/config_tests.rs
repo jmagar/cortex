@@ -3,11 +3,11 @@ use serial_test::serial;
 
 #[test]
 #[serial]
-fn syslog_mcp_token_sets_api_token() {
-    std::env::set_var("SYSLOG_MCP_TOKEN", "test-token");
-    std::env::remove_var("SYSLOG_MCP_API_TOKEN");
+fn cortex_token_sets_api_token() {
+    std::env::set_var("CORTEX_TOKEN", "test-token");
+    std::env::remove_var("CORTEX_API_TOKEN");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_TOKEN");
+    std::env::remove_var("CORTEX_TOKEN");
 
     let cfg = result.expect("Config::load() should succeed");
     assert_eq!(cfg.mcp.api_token, Some("test-token".into()));
@@ -15,37 +15,30 @@ fn syslog_mcp_token_sets_api_token() {
 
 #[test]
 #[serial]
-fn deprecated_api_token_still_works() {
-    std::env::remove_var("SYSLOG_MCP_TOKEN");
-    std::env::set_var("SYSLOG_MCP_API_TOKEN", "legacy-token");
+fn api_token_env_sets_api_token_not_mcp_token() {
+    // cortex v1.0.0: the pre-v1 `SYSLOG_MCP_API_TOKEN` deprecated MCP-token alias was
+    // dropped. Its post-rename name `CORTEX_API_TOKEN` now belongs exclusively to the
+    // API/OTLP token (`config.api.api_token`) and must NOT set the MCP static token.
+    std::env::remove_var("CORTEX_TOKEN");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_API_TOKEN", "api-token");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_API_TOKEN");
-
-    let cfg = result.expect("Config::load() should succeed with deprecated var");
-    assert_eq!(cfg.mcp.api_token, Some("legacy-token".into()));
-}
-
-#[test]
-#[serial]
-fn new_token_takes_precedence_over_deprecated() {
-    std::env::set_var("SYSLOG_MCP_TOKEN", "new-token");
-    std::env::set_var("SYSLOG_MCP_API_TOKEN", "old-token");
-    let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_TOKEN");
-    std::env::remove_var("SYSLOG_MCP_API_TOKEN");
+    std::env::remove_var("CORTEX_API_TOKEN");
+    std::env::remove_var("CORTEX_HOST");
 
     let cfg = result.expect("Config::load() should succeed");
-    assert_eq!(cfg.mcp.api_token, Some("new-token".into()));
+    assert_eq!(cfg.api.api_token, Some("api-token".into()));
+    assert_eq!(cfg.mcp.api_token, None);
 }
 
 #[test]
 #[serial]
 fn env_var_overrides_mcp_port() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_MCP_PORT", "3200");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_PORT", "3200");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_MCP_PORT");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_PORT");
 
     let cfg = result.expect("Config::load() should succeed");
     assert_eq!(cfg.mcp.port, 3200);
@@ -53,16 +46,28 @@ fn env_var_overrides_mcp_port() {
 
 #[test]
 #[serial]
-fn env_var_overrides_syslog_port() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_PORT", "2514");
+fn env_var_overrides_receiver_port() {
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_RECEIVER_PORT", "2514");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_PORT");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_RECEIVER_PORT");
 
     let cfg = result.expect("Config::load() should succeed");
-    assert_eq!(cfg.syslog.port, 2514);
-    assert_eq!(cfg.syslog.bind_addr(), "0.0.0.0:2514");
+    assert_eq!(cfg.receiver.port, 2514);
+    assert_eq!(cfg.receiver.bind_addr(), "0.0.0.0:2514");
+}
+
+#[test]
+fn receiver_toml_section_deserializes_into_receiver_field() {
+    // Guards the field/section coupling: the `[receiver]` TOML section must bind to
+    // `Config.receiver`. A serde mismatch here compiles clean and only fails at runtime,
+    // so this positive round-trip is the explicit guard (no env vars, pure deserialize).
+    let raw = "[receiver]\nhost = \"10.0.0.5\"\nport = 2514\nbatch_size = 250\n";
+    let cfg: Config = toml::from_str(raw).expect("[receiver] section should parse");
+    assert_eq!(cfg.receiver.host, "10.0.0.5");
+    assert_eq!(cfg.receiver.port, 2514);
+    assert_eq!(cfg.receiver.batch_size, 250);
 }
 
 #[test]
@@ -70,56 +75,56 @@ fn env_var_overrides_syslog_port() {
 fn defaults_are_applied_without_env_vars() {
     // Clear any leaked env vars
     for key in [
-        "SYSLOG_HOST",
-        "SYSLOG_PORT",
-        "SYSLOG_MAX_MESSAGE_SIZE",
-        "SYSLOG_MAX_TCP_CONNECTIONS",
-        "SYSLOG_TCP_IDLE_TIMEOUT_SECS",
-        "SYSLOG_BATCH_SIZE",
-        "SYSLOG_FLUSH_INTERVAL",
-        "SYSLOG_MCP_HOST",
-        "SYSLOG_MCP_PORT",
-        "SYSLOG_MCP_ALLOWED_HOSTS",
-        "SYSLOG_MCP_ALLOWED_ORIGINS",
+        "CORTEX_RECEIVER_HOST",
+        "CORTEX_RECEIVER_PORT",
+        "CORTEX_MAX_MESSAGE_SIZE",
+        "CORTEX_MAX_TCP_CONNECTIONS",
+        "CORTEX_TCP_IDLE_TIMEOUT_SECS",
+        "CORTEX_BATCH_SIZE",
+        "CORTEX_FLUSH_INTERVAL",
+        "CORTEX_HOST",
+        "CORTEX_PORT",
+        "CORTEX_ALLOWED_HOSTS",
+        "CORTEX_ALLOWED_ORIGINS",
         "NO_AUTH",
-        "SYSLOG_MCP_NO_AUTH",
-        "SYSLOG_MCP_DB_PATH",
-        "SYSLOG_MCP_POOL_SIZE",
-        "SYSLOG_MCP_RETENTION_DAYS",
-        "SYSLOG_MCP_TOKEN",
-        "SYSLOG_MCP_API_TOKEN",
-        "SYSLOG_MCP_MAX_DB_SIZE_MB",
-        "SYSLOG_MCP_RECOVERY_DB_SIZE_MB",
-        "SYSLOG_MCP_MIN_FREE_DISK_MB",
-        "SYSLOG_MCP_RECOVERY_FREE_DISK_MB",
-        "SYSLOG_MCP_CLEANUP_INTERVAL_SECS",
-        "SYSLOG_MCP_CLEANUP_CHUNK_SIZE",
-        "SYSLOG_API_TOKEN",
-        "SYSLOG_WRITE_CHANNEL_CAPACITY",
-        "SYSLOG_DOCKER_INGEST_ENABLED",
-        "SYSLOG_DOCKER_HOSTS_FILE",
-        "SYSLOG_DOCKER_RECONNECT_INITIAL_MS",
-        "SYSLOG_DOCKER_RECONNECT_MAX_MS",
-        "SYSLOG_MCP_AUTH_MODE",
-        "SYSLOG_MCP_PUBLIC_URL",
-        "SYSLOG_MCP_GOOGLE_CLIENT_ID",
-        "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
-        "SYSLOG_MCP_AUTH_ADMIN_EMAIL",
-        "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
-        "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
+        "CORTEX_NO_AUTH",
+        "CORTEX_DB_PATH",
+        "CORTEX_POOL_SIZE",
+        "CORTEX_RETENTION_DAYS",
+        "CORTEX_TOKEN",
+        "CORTEX_API_TOKEN",
+        "CORTEX_MAX_DB_SIZE_MB",
+        "CORTEX_RECOVERY_DB_SIZE_MB",
+        "CORTEX_MIN_FREE_DISK_MB",
+        "CORTEX_RECOVERY_FREE_DISK_MB",
+        "CORTEX_CLEANUP_INTERVAL_SECS",
+        "CORTEX_CLEANUP_CHUNK_SIZE",
+        "CORTEX_API_TOKEN",
+        "CORTEX_WRITE_CHANNEL_CAPACITY",
+        "CORTEX_DOCKER_INGEST_ENABLED",
+        "CORTEX_DOCKER_HOSTS_FILE",
+        "CORTEX_DOCKER_RECONNECT_INITIAL_MS",
+        "CORTEX_DOCKER_RECONNECT_MAX_MS",
+        "CORTEX_AUTH_MODE",
+        "CORTEX_PUBLIC_URL",
+        "CORTEX_GOOGLE_CLIENT_ID",
+        "CORTEX_GOOGLE_CLIENT_SECRET",
+        "CORTEX_AUTH_ADMIN_EMAIL",
+        "CORTEX_AUTH_ALLOWED_REDIRECT_URIS",
+        "CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
     ] {
         std::env::remove_var(key);
     }
 
-    // Bind syslog-mcp to loopback so the non-loopback safety gate (added in
-    // syslog-mcp-brt0.4) does not reject the unauthenticated default config.
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    // Bind cortex to loopback so the non-loopback safety gate (added in
+    // cortex-brt0.4) does not reject the unauthenticated default config.
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
     let cfg = Config::load().expect("Config::load() should succeed with defaults");
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    assert_eq!(cfg.syslog.host, "0.0.0.0");
-    assert_eq!(cfg.syslog.port, 1514);
-    assert_eq!(cfg.syslog.bind_addr(), "0.0.0.0:1514");
-    assert_eq!(cfg.syslog.write_channel_capacity, 10_000);
+    std::env::remove_var("CORTEX_HOST");
+    assert_eq!(cfg.receiver.host, "0.0.0.0");
+    assert_eq!(cfg.receiver.port, 1514);
+    assert_eq!(cfg.receiver.bind_addr(), "0.0.0.0:1514");
+    assert_eq!(cfg.receiver.write_channel_capacity, 10_000);
     assert_eq!(cfg.mcp.host, "127.0.0.1");
     assert_eq!(cfg.mcp.port, 3100);
     assert!(!cfg.mcp.no_auth);
@@ -147,12 +152,12 @@ fn defaults_are_applied_without_env_vars() {
 #[serial]
 fn rejects_invalid_syslog_ingest_env_settings() {
     for (key, expected) in [
-        ("SYSLOG_MAX_MESSAGE_SIZE", "max_message_size"),
-        ("SYSLOG_MAX_TCP_CONNECTIONS", "max_tcp_connections"),
-        ("SYSLOG_TCP_IDLE_TIMEOUT_SECS", "tcp_idle_timeout_secs"),
-        ("SYSLOG_BATCH_SIZE", "batch_size"),
-        ("SYSLOG_FLUSH_INTERVAL", "flush_interval"),
-        ("SYSLOG_WRITE_CHANNEL_CAPACITY", "write_channel_capacity"),
+        ("CORTEX_MAX_MESSAGE_SIZE", "max_message_size"),
+        ("CORTEX_MAX_TCP_CONNECTIONS", "max_tcp_connections"),
+        ("CORTEX_TCP_IDLE_TIMEOUT_SECS", "tcp_idle_timeout_secs"),
+        ("CORTEX_BATCH_SIZE", "batch_size"),
+        ("CORTEX_FLUSH_INTERVAL", "flush_interval"),
+        ("CORTEX_WRITE_CHANNEL_CAPACITY", "write_channel_capacity"),
     ] {
         std::env::set_var(key, "0");
         let result = Config::load();
@@ -169,61 +174,64 @@ fn rejects_invalid_syslog_ingest_env_settings() {
 #[test]
 fn rejects_invalid_syslog_ingest_toml_settings() {
     for (toml, expected) in [
-        ("[syslog]\nmax_message_size = 0\n", "max_message_size"),
-        ("[syslog]\nmax_tcp_connections = 0\n", "max_tcp_connections"),
+        ("[receiver]\nmax_message_size = 0\n", "max_message_size"),
         (
-            "[syslog]\ntcp_idle_timeout_secs = 0\n",
+            "[receiver]\nmax_tcp_connections = 0\n",
+            "max_tcp_connections",
+        ),
+        (
+            "[receiver]\ntcp_idle_timeout_secs = 0\n",
             "tcp_idle_timeout_secs",
         ),
-        ("[syslog]\nbatch_size = 0\n", "batch_size"),
-        ("[syslog]\nflush_interval = 0\n", "flush_interval"),
+        ("[receiver]\nbatch_size = 0\n", "batch_size"),
+        ("[receiver]\nflush_interval = 0\n", "flush_interval"),
         (
-            "[syslog]\nwrite_channel_capacity = 0\n",
+            "[receiver]\nwrite_channel_capacity = 0\n",
             "write_channel_capacity",
         ),
     ] {
         let mut config: Config = toml::from_str(toml).unwrap();
-        let err = validate_syslog_config(&config.syslog)
-            .expect_err(&format!("validate_syslog_config should reject {toml}"));
+        let err = validate_receiver_config(&config.receiver)
+            .expect_err(&format!("validate_receiver_config should reject {toml}"));
         assert!(
             err.to_string().contains(expected),
             "expected TOML error to mention {expected}, got: {err}"
         );
 
-        config.syslog = SyslogConfig::default();
-        validate_syslog_config(&config.syslog).unwrap();
+        config.receiver = ReceiverConfig::default();
+        validate_receiver_config(&config.receiver).unwrap();
     }
 }
 
 #[test]
 #[serial]
 fn env_var_overrides_write_channel_capacity() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_WRITE_CHANNEL_CAPACITY", "100000");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_WRITE_CHANNEL_CAPACITY", "100000");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_WRITE_CHANNEL_CAPACITY");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_WRITE_CHANNEL_CAPACITY");
 
     let cfg = result.expect("Config::load() should parse write channel capacity");
-    assert_eq!(cfg.syslog.write_channel_capacity, 100_000);
+    assert_eq!(cfg.receiver.write_channel_capacity, 100_000);
 }
 
 #[test]
 #[serial]
 fn env_var_overrides_mcp_allowed_hosts_and_origins() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
     std::env::set_var(
-        "SYSLOG_MCP_ALLOWED_HOSTS",
+        "CORTEX_ALLOWED_HOSTS",
         "syslog.example.com, syslog.example.com:443",
     );
     std::env::set_var(
-        "SYSLOG_MCP_ALLOWED_ORIGINS",
+        "CORTEX_ALLOWED_ORIGINS",
         "https://app.example.com, https://syslog.example.com",
     );
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_MCP_ALLOWED_HOSTS");
-    std::env::remove_var("SYSLOG_MCP_ALLOWED_ORIGINS");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_ALLOWED_HOSTS");
+    std::env::remove_var("CORTEX_ALLOWED_ORIGINS");
 
     let cfg = result.expect("Config::load() should parse comma-separated RMCP allow lists");
     assert_eq!(
@@ -241,14 +249,14 @@ fn env_var_overrides_mcp_allowed_hosts_and_origins() {
 fn env_var_can_clear_mcp_allowed_hosts_and_origins() {
     let mut hosts = vec!["syslog.example.com".to_string()];
     let mut origins = vec!["https://syslog.example.com".to_string()];
-    std::env::set_var("SYSLOG_MCP_ALLOWED_HOSTS", "  , ");
-    std::env::set_var("SYSLOG_MCP_ALLOWED_ORIGINS", "");
+    std::env::set_var("CORTEX_ALLOWED_HOSTS", "  , ");
+    std::env::set_var("CORTEX_ALLOWED_ORIGINS", "");
 
-    env_override_list("SYSLOG_MCP_ALLOWED_HOSTS", &mut hosts);
-    env_override_list("SYSLOG_MCP_ALLOWED_ORIGINS", &mut origins);
+    env_override_list("CORTEX_ALLOWED_HOSTS", &mut hosts);
+    env_override_list("CORTEX_ALLOWED_ORIGINS", &mut origins);
 
-    std::env::remove_var("SYSLOG_MCP_ALLOWED_HOSTS");
-    std::env::remove_var("SYSLOG_MCP_ALLOWED_ORIGINS");
+    std::env::remove_var("CORTEX_ALLOWED_HOSTS");
+    std::env::remove_var("CORTEX_ALLOWED_ORIGINS");
 
     assert!(hosts.is_empty());
     assert!(origins.is_empty());
@@ -257,11 +265,12 @@ fn env_var_can_clear_mcp_allowed_hosts_and_origins() {
 #[test]
 #[serial]
 fn api_token_loads_independently_of_mcp_token() {
-    std::env::set_var("SYSLOG_API_TOKEN", "api-token");
-    std::env::set_var("SYSLOG_MCP_TOKEN", "mcp-token");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_API_TOKEN", "api-token");
+    std::env::set_var("CORTEX_TOKEN", "mcp-token");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_API_TOKEN");
-    std::env::remove_var("SYSLOG_MCP_TOKEN");
+    std::env::remove_var("CORTEX_API_TOKEN");
+    std::env::remove_var("CORTEX_TOKEN");
 
     let cfg = result.expect("Config::load() should accept distinct API + MCP tokens");
     assert_eq!(cfg.api.api_token, Some("api-token".into()));
@@ -289,11 +298,11 @@ fn auth_validation_rejects_blank_api_token() {
 #[test]
 #[serial]
 fn host_with_port_is_rejected() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_HOST", "0.0.0.0:1514");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_RECEIVER_HOST", "0.0.0.0:1514");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_HOST");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_RECEIVER_HOST");
 
     let err = result.expect_err("Host containing ':' should be rejected");
     assert!(
@@ -315,22 +324,22 @@ fn defaults_include_storage_budget_settings() {
 #[test]
 #[serial]
 fn env_var_overrides_storage_budget_settings() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_MCP_MAX_DB_SIZE_MB", "2048");
-    std::env::set_var("SYSLOG_MCP_RECOVERY_DB_SIZE_MB", "1800");
-    std::env::set_var("SYSLOG_MCP_MIN_FREE_DISK_MB", "1024");
-    std::env::set_var("SYSLOG_MCP_RECOVERY_FREE_DISK_MB", "1536");
-    std::env::set_var("SYSLOG_MCP_CLEANUP_INTERVAL_SECS", "120");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_MAX_DB_SIZE_MB", "2048");
+    std::env::set_var("CORTEX_RECOVERY_DB_SIZE_MB", "1800");
+    std::env::set_var("CORTEX_MIN_FREE_DISK_MB", "1024");
+    std::env::set_var("CORTEX_RECOVERY_FREE_DISK_MB", "1536");
+    std::env::set_var("CORTEX_CLEANUP_INTERVAL_SECS", "120");
 
     let result = Config::load();
 
     for key in [
-        "SYSLOG_MCP_HOST",
-        "SYSLOG_MCP_MAX_DB_SIZE_MB",
-        "SYSLOG_MCP_RECOVERY_DB_SIZE_MB",
-        "SYSLOG_MCP_MIN_FREE_DISK_MB",
-        "SYSLOG_MCP_RECOVERY_FREE_DISK_MB",
-        "SYSLOG_MCP_CLEANUP_INTERVAL_SECS",
+        "CORTEX_HOST",
+        "CORTEX_MAX_DB_SIZE_MB",
+        "CORTEX_RECOVERY_DB_SIZE_MB",
+        "CORTEX_MIN_FREE_DISK_MB",
+        "CORTEX_RECOVERY_FREE_DISK_MB",
+        "CORTEX_CLEANUP_INTERVAL_SECS",
     ] {
         std::env::remove_var(key);
     }
@@ -346,13 +355,13 @@ fn env_var_overrides_storage_budget_settings() {
 #[test]
 #[serial]
 fn rejects_invalid_storage_budget_relationships() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_MCP_MAX_DB_SIZE_MB", "100");
-    std::env::set_var("SYSLOG_MCP_RECOVERY_DB_SIZE_MB", "100");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_MAX_DB_SIZE_MB", "100");
+    std::env::set_var("CORTEX_RECOVERY_DB_SIZE_MB", "100");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_MCP_MAX_DB_SIZE_MB");
-    std::env::remove_var("SYSLOG_MCP_RECOVERY_DB_SIZE_MB");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_MAX_DB_SIZE_MB");
+    std::env::remove_var("CORTEX_RECOVERY_DB_SIZE_MB");
 
     let err = result.expect_err("Config::load() should reject invalid recovery_db_size_mb");
     assert!(err.to_string().contains("recovery_db_size_mb"));
@@ -361,11 +370,11 @@ fn rejects_invalid_storage_budget_relationships() {
 #[test]
 #[serial]
 fn rejects_cleanup_chunk_size_zero() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE", "0");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_CLEANUP_CHUNK_SIZE", "0");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_CLEANUP_CHUNK_SIZE");
 
     let err = result.expect_err("Config::load() should reject cleanup_chunk_size == 0");
     assert!(err.to_string().contains("cleanup_chunk_size"));
@@ -374,11 +383,11 @@ fn rejects_cleanup_chunk_size_zero() {
 #[test]
 #[serial]
 fn rejects_cleanup_chunk_size_over_max() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE", "1000001");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_CLEANUP_CHUNK_SIZE", "1000001");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_CLEANUP_CHUNK_SIZE");
 
     let err = result.expect_err("Config::load() should reject cleanup_chunk_size > 1_000_000");
     assert!(
@@ -390,11 +399,11 @@ fn rejects_cleanup_chunk_size_over_max() {
 #[test]
 #[serial]
 fn accepts_cleanup_chunk_size_at_max() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE", "1000000");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_CLEANUP_CHUNK_SIZE", "1000000");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_MCP_CLEANUP_CHUNK_SIZE");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_CLEANUP_CHUNK_SIZE");
 
     let cfg = result.expect("cleanup_chunk_size == 1_000_000 should be accepted");
     assert_eq!(cfg.storage.cleanup_chunk_size, 1_000_000);
@@ -490,15 +499,15 @@ fn docker_ingest_loads_hosts_file_from_env() {
     )
     .unwrap();
 
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "true");
-    std::env::set_var("SYSLOG_DOCKER_HOSTS_FILE", &path);
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_DOCKER_INGEST_ENABLED", "true");
+    std::env::set_var("CORTEX_DOCKER_HOSTS_FILE", &path);
     // Ensure the host list env var doesn't override the file path under test
-    std::env::remove_var("SYSLOG_DOCKER_HOSTS");
+    std::env::remove_var("CORTEX_DOCKER_HOSTS");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_DOCKER_INGEST_ENABLED");
-    std::env::remove_var("SYSLOG_DOCKER_HOSTS_FILE");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_DOCKER_INGEST_ENABLED");
+    std::env::remove_var("CORTEX_DOCKER_HOSTS_FILE");
 
     let config = result.expect("Config::load should parse docker host file");
     assert!(config.docker_ingest.enabled);
@@ -509,20 +518,20 @@ fn docker_ingest_loads_hosts_file_from_env() {
 #[test]
 #[serial]
 fn docker_ingest_loads_excluded_containers_from_env() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "true");
-    std::env::set_var("SYSLOG_DOCKER_HOSTS", "edge-host-a");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_DOCKER_INGEST_ENABLED", "true");
+    std::env::set_var("CORTEX_DOCKER_HOSTS", "edge-host-a");
     std::env::set_var(
-        "SYSLOG_DOCKER_EXCLUDED_CONTAINERS",
+        "CORTEX_DOCKER_EXCLUDED_CONTAINERS",
         "arcane-mcp, axon-qdrant",
     );
 
     let result = Config::load();
 
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_DOCKER_INGEST_ENABLED");
-    std::env::remove_var("SYSLOG_DOCKER_HOSTS");
-    std::env::remove_var("SYSLOG_DOCKER_EXCLUDED_CONTAINERS");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_DOCKER_INGEST_ENABLED");
+    std::env::remove_var("CORTEX_DOCKER_HOSTS");
+    std::env::remove_var("CORTEX_DOCKER_EXCLUDED_CONTAINERS");
 
     let config = result.expect("Config::load should parse excluded container list");
     assert_eq!(
@@ -534,16 +543,16 @@ fn docker_ingest_loads_excluded_containers_from_env() {
 #[test]
 #[serial]
 fn docker_ingest_ignores_hosts_file_when_disabled() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_DOCKER_INGEST_ENABLED", "false");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_DOCKER_INGEST_ENABLED", "false");
     std::env::set_var(
-        "SYSLOG_DOCKER_HOSTS_FILE",
-        "/tmp/syslog-mcp-missing-docker-hosts.toml",
+        "CORTEX_DOCKER_HOSTS_FILE",
+        "/tmp/cortex-missing-docker-hosts.toml",
     );
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_DOCKER_INGEST_ENABLED");
-    std::env::remove_var("SYSLOG_DOCKER_HOSTS_FILE");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_DOCKER_INGEST_ENABLED");
+    std::env::remove_var("CORTEX_DOCKER_HOSTS_FILE");
 
     let config = result.expect("disabled Docker ingest should ignore stale hosts file env");
     assert!(!config.docker_ingest.enabled);
@@ -567,7 +576,7 @@ fn docker_ingest_rejects_insecure_http_without_explicit_opt_in() {
 }
 
 // ---------------------------------------------------------------------------
-// [mcp.auth] config schema (syslog-mcp-brt0.4)
+// [mcp.auth] config schema (cortex-brt0.4)
 // ---------------------------------------------------------------------------
 
 /// Build a baseline loopback-bound config with a static token. Tests start
@@ -606,7 +615,7 @@ fn auth_defaults_are_bearer_with_disable_static_token_enabled() {
     assert_eq!(cfg.authorize_rpm, 60);
     assert!(
         cfg.disable_static_token_with_oauth,
-        "syslog-mcp default flips lab-auth's opt-in to opt-out"
+        "cortex default flips lab-auth's opt-in to opt-out"
     );
     assert!(cfg.allowed_client_redirect_uris.is_empty());
     assert_eq!(cfg.sqlite_path, std::path::PathBuf::from("auth.db"));
@@ -616,10 +625,10 @@ fn auth_defaults_are_bearer_with_disable_static_token_enabled() {
 #[test]
 #[serial]
 fn config_load_defaults_to_bearer_mode() {
-    std::env::remove_var("SYSLOG_MCP_AUTH_MODE");
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
+    std::env::remove_var("CORTEX_AUTH_MODE");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
+    std::env::remove_var("CORTEX_HOST");
 
     let cfg = result.expect("loopback bind, no token, no oauth → permitted");
     assert_eq!(cfg.mcp.auth.mode, AuthMode::Bearer);
@@ -627,21 +636,21 @@ fn config_load_defaults_to_bearer_mode() {
 
 #[test]
 #[serial]
-fn syslog_mcp_auth_mode_env_flips_to_oauth() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_MCP_AUTH_MODE", "oauth");
-    std::env::set_var("SYSLOG_MCP_PUBLIC_URL", "https://syslog.example.com");
-    std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_ID", "client-id");
-    std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_SECRET", "client-secret");
-    std::env::set_var("SYSLOG_MCP_AUTH_ADMIN_EMAIL", "admin@example.com");
+fn cortex_auth_mode_env_flips_to_oauth() {
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_AUTH_MODE", "oauth");
+    std::env::set_var("CORTEX_PUBLIC_URL", "https://syslog.example.com");
+    std::env::set_var("CORTEX_GOOGLE_CLIENT_ID", "client-id");
+    std::env::set_var("CORTEX_GOOGLE_CLIENT_SECRET", "client-secret");
+    std::env::set_var("CORTEX_AUTH_ADMIN_EMAIL", "admin@example.com");
     let result = Config::load();
     for k in [
-        "SYSLOG_MCP_HOST",
-        "SYSLOG_MCP_AUTH_MODE",
-        "SYSLOG_MCP_PUBLIC_URL",
-        "SYSLOG_MCP_GOOGLE_CLIENT_ID",
-        "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
-        "SYSLOG_MCP_AUTH_ADMIN_EMAIL",
+        "CORTEX_HOST",
+        "CORTEX_AUTH_MODE",
+        "CORTEX_PUBLIC_URL",
+        "CORTEX_GOOGLE_CLIENT_ID",
+        "CORTEX_GOOGLE_CLIENT_SECRET",
+        "CORTEX_AUTH_ADMIN_EMAIL",
     ] {
         std::env::remove_var(k);
     }
@@ -653,41 +662,41 @@ fn syslog_mcp_auth_mode_env_flips_to_oauth() {
 
 #[test]
 #[serial]
-fn syslog_mcp_auth_mode_env_rejects_invalid_value() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_MCP_AUTH_MODE", "magic");
+fn cortex_auth_mode_env_rejects_invalid_value() {
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_AUTH_MODE", "magic");
     let result = Config::load();
-    std::env::remove_var("SYSLOG_MCP_HOST");
-    std::env::remove_var("SYSLOG_MCP_AUTH_MODE");
+    std::env::remove_var("CORTEX_HOST");
+    std::env::remove_var("CORTEX_AUTH_MODE");
 
     let err = result.expect_err("bogus AUTH_MODE must be rejected");
-    assert!(err.to_string().contains("SYSLOG_MCP_AUTH_MODE"));
+    assert!(err.to_string().contains("CORTEX_AUTH_MODE"));
 }
 
 #[test]
 #[serial]
 fn auth_env_overrides_propagate_to_config() {
-    std::env::set_var("SYSLOG_MCP_HOST", "127.0.0.1");
-    std::env::set_var("SYSLOG_MCP_PUBLIC_URL", "https://syslog.example.com");
-    std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_ID", "id-from-env");
-    std::env::set_var("SYSLOG_MCP_GOOGLE_CLIENT_SECRET", "secret-from-env");
-    std::env::set_var("SYSLOG_MCP_AUTH_ADMIN_EMAIL", "admin-from-env@example.com");
+    std::env::set_var("CORTEX_HOST", "127.0.0.1");
+    std::env::set_var("CORTEX_PUBLIC_URL", "https://syslog.example.com");
+    std::env::set_var("CORTEX_GOOGLE_CLIENT_ID", "id-from-env");
+    std::env::set_var("CORTEX_GOOGLE_CLIENT_SECRET", "secret-from-env");
+    std::env::set_var("CORTEX_AUTH_ADMIN_EMAIL", "admin-from-env@example.com");
     std::env::set_var(
-        "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
+        "CORTEX_AUTH_ALLOWED_REDIRECT_URIS",
         "https://callback.example.com/callback,https://claude.ai/api/mcp/auth_callback",
     );
-    std::env::set_var("SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH", "false");
+    std::env::set_var("CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH", "false");
     // Stay in bearer mode so validation doesn't require an allowlist.
-    std::env::remove_var("SYSLOG_MCP_AUTH_MODE");
+    std::env::remove_var("CORTEX_AUTH_MODE");
     let result = Config::load();
     for k in [
-        "SYSLOG_MCP_HOST",
-        "SYSLOG_MCP_PUBLIC_URL",
-        "SYSLOG_MCP_GOOGLE_CLIENT_ID",
-        "SYSLOG_MCP_GOOGLE_CLIENT_SECRET",
-        "SYSLOG_MCP_AUTH_ADMIN_EMAIL",
-        "SYSLOG_MCP_AUTH_ALLOWED_REDIRECT_URIS",
-        "SYSLOG_MCP_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
+        "CORTEX_HOST",
+        "CORTEX_PUBLIC_URL",
+        "CORTEX_GOOGLE_CLIENT_ID",
+        "CORTEX_GOOGLE_CLIENT_SECRET",
+        "CORTEX_AUTH_ADMIN_EMAIL",
+        "CORTEX_AUTH_ALLOWED_REDIRECT_URIS",
+        "CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
     ] {
         std::env::remove_var(k);
     }
@@ -725,7 +734,7 @@ fn oauth_mode_rejects_missing_public_url() {
     cfg.mcp.auth.admin_email = "admin@example.com".into();
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
-    assert!(err.to_string().contains("SYSLOG_MCP_PUBLIC_URL"));
+    assert!(err.to_string().contains("CORTEX_PUBLIC_URL"));
 }
 
 #[test]
@@ -737,7 +746,7 @@ fn oauth_mode_rejects_missing_google_client_id() {
     cfg.mcp.auth.admin_email = "admin@example.com".into();
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
-    assert!(err.to_string().contains("SYSLOG_MCP_GOOGLE_CLIENT_ID"));
+    assert!(err.to_string().contains("CORTEX_GOOGLE_CLIENT_ID"));
 }
 
 #[test]
@@ -749,7 +758,7 @@ fn oauth_mode_rejects_missing_google_client_secret() {
     cfg.mcp.auth.admin_email = "admin@example.com".into();
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
-    assert!(err.to_string().contains("SYSLOG_MCP_GOOGLE_CLIENT_SECRET"));
+    assert!(err.to_string().contains("CORTEX_GOOGLE_CLIENT_SECRET"));
 }
 
 #[test]
@@ -846,9 +855,7 @@ fn explicit_no_auth_rejects_non_loopback_bind_without_trusted_gateway() {
     cfg.mcp.no_auth = true;
     let err = validate_auth_config(&cfg, true)
         .expect_err("non-loopback no_auth must require trusted gateway flag");
-    assert!(err
-        .to_string()
-        .contains("SYSLOG_MCP_TRUSTED_GATEWAY_NO_AUTH"));
+    assert!(err.to_string().contains("CORTEX_TRUSTED_GATEWAY_NO_AUTH"));
 }
 
 #[test]
@@ -926,7 +933,7 @@ fn non_loopback_oauth_without_static_token_rejects_otlp_write_exposure() {
     let err = validate_auth_config(&cfg, true).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("OTLP /v1/logs") && msg.contains("SYSLOG_MCP_TOKEN"),
+        msg.contains("OTLP /v1/logs") && msg.contains("CORTEX_TOKEN"),
         "wrong error: {msg}"
     );
 }
@@ -988,7 +995,7 @@ fn repo_local_config_uses_repo_local_db_path() {
         toml::from_str(include_str!("../config.toml")).expect("repo config.toml should parse");
     assert_eq!(
         cfg.storage.db_path,
-        std::path::PathBuf::from("data/syslog.db"),
+        std::path::PathBuf::from("data/cortex.db"),
         "repo config.toml should use a writable repo-local DB path for local dev"
     );
 }

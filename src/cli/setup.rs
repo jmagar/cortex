@@ -105,7 +105,7 @@ fn run_plugin_hook(args: PluginHookArgs) -> Result<()> {
     print_plugin_hook_report(&report, args.json)?;
     if matches!(report.exit_policy, PluginHookExitPolicy::BlockingFailure) {
         bail!(
-            "syslog setup plugin-hook completed with blocking failed phases: {}",
+            "cortex setup plugin-hook completed with blocking failed phases: {}",
             report.blocking_failures.join(", ")
         );
     }
@@ -138,7 +138,7 @@ fn setup_report(mode: SetupMode) -> Result<SetupReport> {
         SetupPhase {
             name: "data-dir",
             status: SetupStatus::Error,
-            detail: format!("missing {}; run syslog setup repair", data_dir.display()),
+            detail: format!("missing {}; run cortex setup repair", data_dir.display()),
         }
     });
     phases.push(if env_path.exists() {
@@ -158,8 +158,8 @@ fn setup_report(mode: SetupMode) -> Result<SetupReport> {
         }
     });
     phases.push(
-        if std::env::var("SYSLOG_MCP_TOKEN").is_ok()
-            || std::env::var("SYSLOG_MCP_API_TOKEN").is_ok()
+        if std::env::var("CORTEX_TOKEN").is_ok()
+            || std::env::var("CORTEX_API_TOKEN").is_ok()
             || std::env::var("NO_AUTH").ok().as_deref() == Some("true")
         {
             SetupPhase {
@@ -171,18 +171,18 @@ fn setup_report(mode: SetupMode) -> Result<SetupReport> {
             SetupPhase {
                 name: "auth",
                 status: SetupStatus::Warn,
-                detail: "no SYSLOG_MCP_TOKEN/SYSLOG_MCP_API_TOKEN in process env".to_string(),
+                detail: "no CORTEX_TOKEN/CORTEX_API_TOKEN in process env".to_string(),
             }
         },
     );
     phases.push(mcp_port_phase());
-    // data_mount_phase intentionally NOT included here (bead syslog-mcp-0p8r.11).
-    // Post-cutover (SYSLOG_USE_HTTP=true is the default), the CLI no longer
+    // data_mount_phase intentionally NOT included here (bead cortex-0p8r.11).
+    // Post-cutover (CORTEX_USE_HTTP=true is the default), the CLI no longer
     // opens SQLite directly, so the SessionStart cost of docker inspect is no
     // longer paying for itself. Drift detection is preserved via:
-    //   - `syslog compose doctor`           (always runs coord phases)
-    //   - `syslog db status --check-coord`  (opt-in)
-    // See bead syslog-mcp-0p8r.13 for the coord-phase wiring.
+    //   - `cortex compose doctor`           (always runs coord phases)
+    //   - `cortex db status --check-coord`  (opt-in)
+    // See bead cortex-0p8r.13 for the coord-phase wiring.
 
     let has_errors = phases
         .iter()
@@ -225,15 +225,15 @@ pub(crate) fn read_env_value(path: &std::path::Path, key: &str) -> Option<String
 }
 
 pub(crate) fn setup_data_dir() -> PathBuf {
-    std::env::var_os("SYSLOG_DATA_DIR")
+    std::env::var_os("CORTEX_DATA_DIR")
         .or_else(|| std::env::var_os("CLAUDE_PLUGIN_DATA"))
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".syslog-mcp")))
-        .unwrap_or_else(|| PathBuf::from(".syslog-mcp"))
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cortex")))
+        .unwrap_or_else(|| PathBuf::from(".cortex"))
 }
 
 fn mcp_port_phase() -> SetupPhase {
-    let port = setup_port("SYSLOG_MCP_PORT", 3100);
+    let port = setup_port("CORTEX_PORT", 3100);
     match TcpListener::bind(("127.0.0.1", port)) {
         Ok(_) => SetupPhase {
             name: "mcp-port",
@@ -275,7 +275,7 @@ fn setup_advisory_failures(report: &SetupReport) -> Vec<String> {
 
 fn ensure_setup_success(report: &SetupReport) -> Result<()> {
     if report.has_errors {
-        bail!("syslog setup completed with failed phases");
+        bail!("cortex setup completed with failed phases");
     }
     Ok(())
 }

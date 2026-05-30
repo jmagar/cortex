@@ -2,12 +2,12 @@
 
 ## 1. Purpose & status
 
-This document is the V1 wire contract derived from the agent-mode design spec at `docs/superpowers/specs/2026-05-16-agent-mode-design.md` ("spec A"). It is normative for any implementation of either side of the agent ↔ server channel. Any change to wire framing, methods, error codes, capability fields, or state-machine transitions in this contract MUST update spec A first; this contract is then re-derived. The contract is pinned by epic A (agent-mode runtime — `syslog-mcp-qgnx`) and epic D (probe registry — `syslog-mcp-fue9`), which both consume these method names and error codes for the RPC bridge that carries probe traffic.
+This document is the V1 wire contract derived from the agent-mode design spec at `docs/superpowers/specs/2026-05-16-agent-mode-design.md` ("spec A"). It is normative for any implementation of either side of the agent ↔ server channel. Any change to wire framing, methods, error codes, capability fields, or state-machine transitions in this contract MUST update spec A first; this contract is then re-derived. The contract is pinned by epic A (agent-mode runtime — `cortex-qgnx`) and epic D (probe registry — `cortex-fue9`), which both consume these method names and error codes for the RPC bridge that carries probe traffic.
 
 ## 2. Wire framing
 
 - **Transport.** RFC 6455 WebSocket. Production deployments use `wss://syslog.tootie.tv/ws/agent` terminated by SWAG; loopback `ws://` is allowed only when `agent.allow_insecure = true`.
-- **Subprotocol.** Client offers `Sec-WebSocket-Protocol: syslog-mcp.v1`. Server confirms the same. Mismatched subprotocol → HTTP `400` and the upgrade is refused.
+- **Subprotocol.** Client offers `Sec-WebSocket-Protocol: cortex.v1`. Server confirms the same. Mismatched subprotocol → HTTP `400` and the upgrade is refused.
 - **Encoding.** WebSocket **text** frames. Payload is UTF-8 JSON. Binary frames are reserved for a future compressed log-batch transport and MUST be rejected with close code `1003` in V1.
 - **Compression.** No frame-level or payload-level compression in V1 (no `permessage-deflate`, no zstd application-layer compression). Agents may advertise `compression: ["zstd"]` in `capabilities` but the V1 server ignores the hint.
 - **Framing rule.** Exactly **one JSON-RPC 2.0 message per WebSocket frame**. Top-level JSON arrays (JSON-RPC array batching) are rejected with `-32600 Invalid Request`. Batching is performed inside `logs.push.params.entries[]`.
@@ -18,7 +18,7 @@ This document is the V1 wire contract derived from the agent-mode design spec at
 
 Byte-level flow for a fresh connection:
 
-1. Client opens a WebSocket connection to `/ws/agent` with subprotocol `syslog-mcp.v1`. There is no HTTP-layer auth beyond what SWAG enforces (TLS termination only).
+1. Client opens a WebSocket connection to `/ws/agent` with subprotocol `cortex.v1`. There is no HTTP-layer auth beyond what SWAG enforces (TLS termination only).
 2. WebSocket upgrade completes. The server records the remote address, opens a connection task, and **starts a 5-second handshake timer**. While the timer is active no row in `agents` is mutated.
 3. Client sends `agent.hello` as the **first** JSON-RPC frame on the connection. The payload includes `token`, `host_id`, `hostname`, `agent_version`, `protocol_version`, `platform`, and `capabilities` (see §4.1).
 4. Server validates:
@@ -411,7 +411,7 @@ Example request:
         "ts": "2026-05-16T19:42:50.501Z",
         "severity": "warning",
         "message": "deprecated option foo",
-        "source": "docker:syslog-mcp"
+        "source": "docker:cortex"
       }
     ]
   }
@@ -727,14 +727,14 @@ The server's `HelloResult.config.log_sources` is the authoritative instruction s
 
 This contract is **V1**. The version is pinned three ways:
 
-1. **Subprotocol token.** The WebSocket subprotocol is `syslog-mcp.v1`. Mismatch refuses the upgrade.
+1. **Subprotocol token.** The WebSocket subprotocol is `cortex.v1`. Mismatch refuses the upgrade.
 2. **`protocol_version` field.** `agent.hello.params.protocol_version` is an integer; V1 fixes it at `1`. Bumping to `2` is a breaking change and requires bumping the subprotocol simultaneously.
 3. **Server-side floor.** Server config carries `required_protocol_version` (read by the hello handler). If the client's `protocol_version < required_protocol_version`, the server replies `-32003 AgentVersionUnsupported` with `data: { required_protocol_version, current: 1 }`.
 
 Policy:
 
 - **Additive changes within V1** (new methods, new optional fields with defaults, new probes) do NOT bump the protocol version. Receivers MUST tolerate unknown optional fields (open-world JSON Schema is intentional only where `additionalProperties: false` is omitted; this contract uses `additionalProperties: false` aggressively to catch typos — additive evolution requires explicit schema relaxation in a follow-up contract revision).
-- **Breaking changes** (renamed/removed fields, changed semantics, new required fields without default, removed methods, error-code renumbering) require bumping `protocol_version` to `2`, bumping the subprotocol to `syslog-mcp.v2`, and producing a new contract file `docs/contracts/agent-protocol-v2.md`. V1 servers MUST continue to accept V1 clients for at least one minor release after V2 is introduced.
+- **Breaking changes** (renamed/removed fields, changed semantics, new required fields without default, removed methods, error-code renumbering) require bumping `protocol_version` to `2`, bumping the subprotocol to `cortex.v2`, and producing a new contract file `docs/contracts/agent-protocol-v2.md`. V1 servers MUST continue to accept V1 clients for at least one minor release after V2 is introduced.
 - **Error codes** are append-only within a major version. Reusing a retired code for a different meaning is a breaking change.
 
 ## 10. Self-check

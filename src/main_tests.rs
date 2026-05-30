@@ -335,7 +335,7 @@ fn mode_parse_accepts_binary_doctor() {
 
 use serial_test::serial;
 
-/// Restores SYSLOG_API_TOKEN / SYSLOG_USE_HTTP on drop. Tests below use this
+/// Restores CORTEX_API_TOKEN / CORTEX_USE_HTTP on drop. Tests below use this
 /// to assert `--help` / `--version` work without any token in the env.
 struct EnvVarGuard {
     name: &'static str,
@@ -363,10 +363,10 @@ impl Drop for EnvVarGuard {
 #[serial]
 fn help_and_version_bypass_mode_resolution_without_token() {
     // Bead .6 contract: --help and --version must NOT touch env / discovery /
-    // services. Without SYSLOG_API_TOKEN and SYSLOG_USE_HTTP set, they should
+    // services. Without CORTEX_API_TOKEN and CORTEX_USE_HTTP set, they should
     // still resolve to Help/Version without erroring.
-    let _g1 = EnvVarGuard::unset("SYSLOG_API_TOKEN");
-    let _g2 = EnvVarGuard::unset("SYSLOG_USE_HTTP");
+    let _g1 = EnvVarGuard::unset("CORTEX_API_TOKEN");
+    let _g2 = EnvVarGuard::unset("CORTEX_USE_HTTP");
 
     assert_eq!(Mode::parse(vec!["--help".into()]).unwrap(), Mode::Help);
     assert_eq!(Mode::parse(vec!["-h".into()]).unwrap(), Mode::Help);
@@ -493,15 +493,15 @@ fn usage_banner_lists_all_query_subcommands() {
     // accepts. These were missing and silently undiscoverable before.
     let usage = super::USAGE;
     for needle in [
-        "syslog source-ips",
-        "syslog timeline",
-        "syslog patterns",
-        "syslog ingest-rate",
-        "syslog sig list",
-        "syslog sig ack",
-        "syslog sig unack",
-        "syslog notify recent",
-        "syslog notify test",
+        "cortex source-ips",
+        "cortex timeline",
+        "cortex patterns",
+        "cortex ingest-rate",
+        "cortex sig list",
+        "cortex sig ack",
+        "cortex sig unack",
+        "cortex notify recent",
+        "cortex notify test",
     ] {
         assert!(usage.contains(needle), "usage banner is missing `{needle}`");
     }
