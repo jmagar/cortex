@@ -860,7 +860,7 @@ impl Config {
 
 #[cfg(not(test))]
 fn load_setup_env_file() {
-    let Ok(home) = crate::setup::syslog_home_dir() else {
+    let Ok(home) = crate::setup::cortex_home_dir() else {
         tracing::trace!("load_setup_env_file: syslog home directory unavailable");
         return;
     };

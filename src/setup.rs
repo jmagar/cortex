@@ -398,7 +398,7 @@ pub(crate) struct EnvResult {
     pub(crate) values: BTreeMap<String, String>,
 }
 
-pub fn syslog_home_dir() -> io::Result<PathBuf> {
+pub fn cortex_home_dir() -> io::Result<PathBuf> {
     if let Ok(value) = std::env::var("CORTEX_HOME") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {

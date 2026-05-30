@@ -17,7 +17,7 @@ const UNIT_NAME: &str = "cortex-heartbeat-agent.service";
 
 pub async fn run_heartbeat_agent_setup(action: HeartbeatAgentAction) -> io::Result<SetupReport> {
     let started = Instant::now();
-    let home = super::syslog_home_dir()?;
+    let home = super::cortex_home_dir()?;
     let env_path = home.join("heartbeat-agent.env");
     let compose_dir = home.join("compose");
     let data_dir = home.join("data");
@@ -211,7 +211,7 @@ fn heartbeat_agent_unit(
 }
 
 fn read_setup_env_value(key: &str) -> Option<String> {
-    let path = super::syslog_home_dir().ok()?.join(".env");
+    let path = super::cortex_home_dir().ok()?.join(".env");
     match std::fs::read_to_string(&path) {
         Ok(raw) => parse_env(&raw).remove(key),
         Err(error) if error.kind() == ErrorKind::NotFound => None,

@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug, Clone, Serialize)]
 pub struct BinaryDoctorReport {
     current_exe: String,
-    path_syslog: Option<String>,
+    path_cortex: Option<String>,
     repo_version: String,
     container_version: Option<String>,
     runtime_current: Option<bool>,
@@ -25,13 +25,13 @@ impl BinaryDoctorReport {
         let current_exe = std::env::current_exe()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|error| format!("unknown: {error}"));
-        let path_syslog = command_stdout("sh", &["-c", "command -v syslog"]);
+        let path_cortex = command_stdout("sh", &["-c", "command -v syslog"]);
         let container_version =
             command_stdout("docker", &["exec", "cortex", "cortex", "--version"]);
         let (runtime_current, runtime_current_error) = runtime_current_status();
         Self {
             current_exe,
-            path_syslog,
+            path_cortex,
             repo_version: env!("CARGO_PKG_VERSION").to_string(),
             container_version,
             runtime_current,
@@ -50,8 +50,8 @@ impl BinaryDoctorReport {
     pub fn render_text(&self) {
         println!("current_exe: {}", self.current_exe);
         println!(
-            "path_syslog: {}",
-            self.path_syslog.as_deref().unwrap_or("-")
+            "path_cortex: {}",
+            self.path_cortex.as_deref().unwrap_or("-")
         );
         println!("repo_version: {}", self.repo_version);
         println!(

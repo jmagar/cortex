@@ -37,7 +37,7 @@ impl HeartbeatAgentArgs {
 }
 
 pub(crate) fn default_host_id_path() -> PathBuf {
-    cortex::setup::syslog_home_dir()
+    cortex::setup::cortex_home_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("heartbeat-host-id")
 }

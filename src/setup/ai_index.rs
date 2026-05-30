@@ -10,7 +10,7 @@ use super::{
 
 pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<SetupReport> {
     let started = Instant::now();
-    let home = super::syslog_home_dir()?;
+    let home = super::cortex_home_dir()?;
     let env_path = home.join(".env");
     let compose_dir = home.join("compose");
     let data_dir = home.join("data");
