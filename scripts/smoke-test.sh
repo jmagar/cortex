@@ -190,9 +190,9 @@ run_syslog_ai_add() {
 
     if [[ -z "$syslog_bin" ]]; then
         if command -v cortex >/dev/null 2>&1; then
-            syslog_bin="$(command -v syslog)"
-        elif [[ -x "target/debug/syslog" ]]; then
-            syslog_bin="target/debug/syslog"
+            syslog_bin="$(command -v cortex)"
+        elif [[ -x "target/debug/cortex" ]]; then
+            syslog_bin="target/debug/cortex"
         else
             echo "cortex binary not found; install cortex on PATH, set CORTEX_BIN, or run cargo build" >&2
             return 127

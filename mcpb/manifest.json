@@ -2,10 +2,10 @@
   "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
   "manifest_version": "0.4",
   "name": "cortex",
-  "display_name": "Syslog MCP",
-  "version": "0.36.1",
+  "display_name": "Cortex",
+  "version": "1.0.0",
   "description": "Query local cortex SQLite logs through a bundled stdio MCP server.",
-  "long_description": "Syslog MCP packages the existing syslog mcp stdio entrypoint as a local MCP Bundle. It is query-only: it reads the configured SQLite database and does not start syslog listeners, HTTP servers, Docker Compose, REST, or deploy flows.",
+  "long_description": "cortex packages the existing cortex stdio entrypoint as a local MCP Bundle. It is query-only: it reads the configured SQLite database and does not start syslog listeners, HTTP servers, Docker Compose, REST, or deploy flows.",
   "author": {
     "name": "jmagar",
     "url": "https://github.com/jmagar"
@@ -17,9 +17,9 @@
   "documentation": "https://github.com/jmagar/cortex/tree/main/docs/mcp",
   "server": {
     "type": "binary",
-    "entry_point": "server/syslog",
+    "entry_point": "server/cortex",
     "mcp_config": {
-      "command": "${__dirname}/server/syslog",
+      "command": "${__dirname}/server/cortex",
       "args": [
         "mcp"
       ],
@@ -36,11 +36,12 @@
   },
   "tools": [
     {
-      "name": "syslog",
+      "name": "cortex",
       "description": "Search, tail, summarize, and inspect logs from the configured local cortex SQLite database."
     }
   ],
   "keywords": [
+    "cortex",
     "syslog",
     "mcp",
     "logging",

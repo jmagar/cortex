@@ -35,7 +35,7 @@ SERVERS = [
     ("rustscale", "scale", "scale arrows over stacked planes", "success"),
     ("synapse2", "synapse", "node synapse over stacked planes", "violet"),
     ("rustarr", "radar", "radar/arr sweep over stacked planes", "cyan_strong"),
-    ("syslog", "logs", "log stream over stacked planes", "success"),
+    ("cortex", "logs", "log stream over stacked planes", "success"),
     ("rustcane", "rune", "command rune over stacked planes", "violet"),
     ("rmcp-template", "brackets", "MCP brackets over stacked planes", "cyan"),
     ("apprise-mcp", "bell", "notification bell over stacked planes", "rose"),

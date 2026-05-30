@@ -27,10 +27,10 @@ resolve_syslog_bin() {
     else
       fail "CORTEX_BIN is not executable or on PATH: $CORTEX_BIN"
     fi
-  elif command -v syslog >/dev/null 2>&1; then
-    command -v syslog
-  elif [[ -x "${PROJECT_DIR}/target/debug/syslog" ]]; then
-    printf '%s\n' "${PROJECT_DIR}/target/debug/syslog"
+  elif command -v cortex >/dev/null 2>&1; then
+    command -v cortex
+  elif [[ -x "${PROJECT_DIR}/target/debug/cortex" ]]; then
+    printf '%s\n' "${PROJECT_DIR}/target/debug/cortex"
   else
     fail "syslog binary not found; install syslog on PATH, set CORTEX_BIN, or run cargo build"
   fi

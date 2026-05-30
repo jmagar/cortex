@@ -31,11 +31,11 @@ if [ "${NO_BUILD}" -eq 0 ]; then
 fi
 
 TARGET_DIR="${CARGO_TARGET_DIR:-target}"
-if [ ! -x "${TARGET_DIR}/release/syslog" ] && [ -x ".cache/cargo/release/syslog" ]; then
+if [ ! -x "${TARGET_DIR}/release/cortex" ] && [ -x ".cache/cargo/release/cortex" ]; then
   TARGET_DIR=".cache/cargo"
 fi
-if [ ! -x "${TARGET_DIR}/release/syslog" ]; then
-  echo "missing release binary: ${TARGET_DIR}/release/syslog" >&2
+if [ ! -x "${TARGET_DIR}/release/cortex" ]; then
+  echo "missing release binary: ${TARGET_DIR}/release/cortex" >&2
   exit 1
 fi
 
@@ -45,7 +45,7 @@ rm -rf "${STAGE_DIR}"
 mkdir -p "${STAGE_DIR}/server"
 
 cp mcpb/manifest.json "${STAGE_DIR}/manifest.json"
-install -m 755 "${TARGET_DIR}/release/syslog" "${STAGE_DIR}/server/syslog"
+install -m 755 "${TARGET_DIR}/release/cortex" "${STAGE_DIR}/server/cortex"
 
 npx --yes @anthropic-ai/mcpb validate "${STAGE_DIR}/manifest.json"
 rm -f "${OUT_FILE}"

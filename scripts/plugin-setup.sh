@@ -4,7 +4,7 @@
 set -euo pipefail
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
-: "${CLAUDE_PLUGIN_DATA:=${HOME}/.claude/plugins/data/syslog-jmagar-lab}"
+: "${CLAUDE_PLUGIN_DATA:=${HOME}/.claude/plugins/data/cortex-jmagar-lab}"
 : "${CORTEX_DATA_DIR:=${CLAUDE_PLUGIN_DATA}}"
 
 reject_unsafe_value() {
@@ -24,18 +24,18 @@ export_if_set() {
 }
 
 ensure_syslog_binary() {
-  if command -v syslog >/dev/null 2>&1; then
+  if command -v cortex >/dev/null 2>&1; then
     return 0
   fi
 
-  local bundled="${CLAUDE_PLUGIN_ROOT}/bin/syslog"
+  local bundled="${CLAUDE_PLUGIN_ROOT}/bin/cortex"
   if [[ -x "${bundled}" ]]; then
     mkdir -p "${HOME}/.local/bin"
-    ln -sf "${bundled}" "${HOME}/.local/bin/syslog"
+    ln -sf "${bundled}" "${HOME}/.local/bin/cortex"
     export PATH="${HOME}/.local/bin:${PATH}"
   fi
 
-  command -v syslog >/dev/null 2>&1 || {
+  command -v cortex >/dev/null 2>&1 || {
     printf 'syslog plugin setup: syslog binary not found on PATH or at %s\n' "${bundled}" >&2
     exit 1
   }

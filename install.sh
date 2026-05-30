@@ -8,7 +8,7 @@ CRATE="${CORTEX_INSTALL_CRATE:-cortex}"
 VERSION="${CORTEX_VERSION:-latest}"
 PREFIX="${CORTEX_INSTALL_PREFIX:-$HOME/.local}"
 BIN_DIR="$PREFIX/bin"
-BIN="$BIN_DIR/syslog"
+BIN="$BIN_DIR/cortex"
 DRY_RUN="${CORTEX_INSTALL_DRY_RUN:-0}"
 SKIP_SETUP="${CORTEX_INSTALL_SKIP_SETUP:-0}"
 
@@ -17,7 +17,7 @@ say() {
 }
 
 fail() {
-  say "syslog install: $*"
+  say "cortex install: $*"
   exit 1
 }
 
