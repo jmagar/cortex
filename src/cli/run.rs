@@ -136,6 +136,10 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::Anomalies(args) => dispatch::run_anomalies(&mode, args).await,
         CliCommand::Compare(args) => dispatch::run_compare(&mode, args).await,
         CliCommand::Apps(args) => dispatch::run_apps(&mode, args).await,
+        // Heartbeat fleet state parity (cxih.4)
+        CliCommand::HostState(args) => dispatch::run_host_state(&mode, args).await,
+        CliCommand::FleetState(args) => dispatch::run_fleet_state(&mode, args).await,
+        CliCommand::CorrelateState(args) => dispatch::run_correlate_state(&mode, args).await,
         CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
             bail!(
                 "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"

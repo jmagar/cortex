@@ -44,6 +44,10 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "anomalies" => commands::anomalies::parse_anomalies(rest),
         "compare" => commands::compare::parse_compare(rest),
         "apps" => commands::apps::parse_apps(rest),
+        // Heartbeat fleet state parity (cxih.4)
+        "host-state" => commands::host_state::parse_host_state(rest),
+        "fleet-state" => commands::fleet_state::parse_fleet_state(rest),
+        "correlate-state" => commands::correlate_state::parse_correlate_state(rest),
         _ => bail!("unknown CLI command: {command}"),
     }
 }

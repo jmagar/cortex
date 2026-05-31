@@ -17,7 +17,8 @@ use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateLimitPolicy,
     AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest, AiLimitPolicy,
     AiParseErrorsRequest, AiPruneCheckpointsRequest, AnomaliesRequest, AskHistoryRequest,
-    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest, CortexService,
+    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest, CorrelateStateRequest,
+    CortexService,
     DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FilterLogsRequest,
     FleetStateRequest, GetErrorsRequest, GetLogRequest, HostStateRequest, IncidentContextRequest,
     IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest,
@@ -228,6 +229,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/host-state", get(host_state))
         .route("/api/context", get(context))
         .route("/api/fleet-state", get(fleet_state))
+        .route("/api/correlate-state", get(correlate_state))
         .route("/api/errors/unaddressed", get(unaddressed_errors))
         .route("/api/errors/ack", post(ack_error))
         .route("/api/errors/unack", post(unack_error))
@@ -599,6 +601,13 @@ async fn fleet_state(
     Query(req): Query<FleetStateRequest>,
 ) -> impl IntoResponse {
     respond(state.service.fleet_state(req).await)
+}
+
+async fn correlate_state(
+    State(state): State<ApiState>,
+    Query(req): Query<CorrelateStateRequest>,
+) -> impl IntoResponse {
+    respond(state.service.correlate_state(req).await)
 }
 
 #[derive(Debug, Deserialize)]

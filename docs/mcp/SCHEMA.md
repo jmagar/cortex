@@ -32,6 +32,7 @@ selects one of these 42 actions:
 | `host_state` | `syslog:read` | moderate | Latest bounded heartbeat state for one host |
 | `fleet_state` | `syslog:read` | expensive | Fleet-wide heartbeat snapshot with pressure flags |
 | `correlate` | `syslog:read` | moderate | Time-window event correlation |
+| `correlate_state` | `syslog:read` | expensive | Correlate logs with heartbeat summaries around a reference time |
 | `stats` | `syslog:read` | expensive | DB statistics and runtime observability |
 | `status` | `syslog:read` | cheap | Lightweight health and runtime status |
 | `apps` | `syslog:read` | cheap | Distinct application names with counts |
@@ -115,6 +116,8 @@ handler and service layers.
 | `query` | `search`, `search_sessions`, `correlate`, `similar_incidents`, `ask_history` |
 | `hostname` | `search`, `filter`, `tail`, `correlate`, `host_state`, `ai_correlate`, `apps`, `sessions`, `timeline`, `patterns`, `context`, `similar_incidents`, `ask_history`, `incident_context` |
 | `host_id` | Authoritative heartbeat identity for `host_state` |
+| `host` | Optional host_id-or-hostname filter for `correlate_state` |
+| `reference_time` | Required window center for `correlate` and `correlate_state` |
 | `source_ip` | `search`, `filter`, `tail`, `correlate`, `ai_correlate` |
 | `source_kind` | `filter` only; aliases Docker, command-history, shell-history, transcript, and AI-tool rows |
 | `project` | `filter`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools` |

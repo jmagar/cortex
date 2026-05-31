@@ -969,6 +969,21 @@ Return a fleet-wide heartbeat snapshot with pressure flags and summary counts.
 
 ---
 
+## cortex correlate_state
+Correlate non-AI logs with per-host heartbeat window summaries around a reference time.
+Bounded by default and never performs a full-history scan.
+
+**Parameters:**
+- `reference_time` (string, required) — center timestamp for the window (ISO 8601)
+- `window_minutes` (integer, optional) — minutes before/after reference_time (default 10, max 120)
+- `host` (string, optional) — host_id or unique hostname; omit for a bounded cross-host plan
+- `severity_min` (string, optional) — minimum log severity (default `info`)
+- `limit` (integer, optional) — max log rows per host (default 100, max 500)
+
+Response includes the resolved `window`, per-host `heartbeat_summary` plus matching `logs`, and a `truncated` flag.
+
+---
+
 ## cortex apps
 List distinct application names with log counts, host counts, and first/last seen timestamps.
 Mirror of `cortex hosts` for the `app_name` dimension.

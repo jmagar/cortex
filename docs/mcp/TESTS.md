@@ -54,7 +54,7 @@ the repo-local debug binary at `target/debug/syslog`, so repo-local builds do
 not require an installed shell binary.
 
 Action registry covered by live/script references: `search`, `filter`, `tail`, `errors`,
-`hosts`, `host_state`, `fleet_state`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`,
+`hosts`, `host_state`, `fleet_state`, `correlate_state`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`,
 `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`,
 `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`,
 `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`,
