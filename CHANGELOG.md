@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-31
+
+### Added
+
+- **`correlate_state` action** — correlate non-AI logs with per-host heartbeat
+  window summaries around a reference time. Exposed across all surfaces: MCP
+  (`action=correlate_state`), REST (`GET /api/correlate-state`), and CLI
+  (`syslog correlate-state`). Bounded by default (window/limit capped); never
+  performs a full-history scan. Returns the resolved window, per-host heartbeat
+  summary plus matching logs, and a `truncated` flag. (cxih.3, cxih.4)
+- **CLI parity for heartbeat fleet state** — new `syslog host-state`,
+  `syslog fleet-state`, and `syslog correlate-state` top-level commands with
+  human and `--json` output, mirroring the existing MCP/REST surfaces. (cxih.4)
+- **Deterministic abuse-incident findings** — `abuse_investigate` bundles now
+  carry a `findings` object with rule-based `likely_failure_modes` (conservative
+  confidence, cited evidence ids), `contributing_factors`, category-tied
+  `prevention_hints`, and `open_questions`. Findings are computed locally with no
+  external LLM call and surface `unknown` + open questions when evidence is weak.
+  Categories: `command_failure`, `tool_timeout`, `auth_or_permission_failure`,
+  `stale_binary_or_version_drift`, `test_failure`,
+  `docker_or_service_runtime_failure`, `db_busy_or_performance_bottleneck`,
+  `unclear_instruction_or_scope_drift`, `unknown`. (kmib.4)
+
+### Fixed
+
+- **Heartbeat window summaries** — fixed a latent `misuse of aggregate: MAX()`
+  SQL error in `heartbeat_window_summaries` (used by `correlate_state`); the
+  latest heartbeat id is now resolved with a scalar subquery instead of an
+  aggregate inside a correlated subquery under `GROUP BY`. (cxih.3)
+
 ## [1.0.0] - 2026-05-28
 
 ### Breaking Changes — Renamed from syslog-mcp to cortex

@@ -82,3 +82,60 @@ fn parse_rejects_unknown_command() {
 
     assert!(err.contains("unknown CLI command: wat"));
 }
+
+// ─── Heartbeat fleet state parity (cxih.4) ──────────────────────────────────
+
+#[test]
+fn parse_routes_host_state() {
+    assert!(matches!(
+        parse_command(vec![
+            "host-state".to_string(),
+            "--hostname".to_string(),
+            "tootie".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap(),
+        CliCommand::HostState(_)
+    ));
+}
+
+#[test]
+fn parse_routes_fleet_state() {
+    assert!(matches!(
+        parse_command(vec!["fleet-state".to_string(), "--exclude-ok".to_string()]).unwrap(),
+        CliCommand::FleetState(_)
+    ));
+}
+
+#[test]
+fn parse_fleet_state_rejects_bad_sort() {
+    let err = parse_command(vec![
+        "fleet-state".to_string(),
+        "--sort".to_string(),
+        "bogus".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("--sort must be"), "got: {err}");
+}
+
+#[test]
+fn parse_routes_correlate_state() {
+    assert!(matches!(
+        parse_command(vec![
+            "correlate-state".to_string(),
+            "--reference-time".to_string(),
+            "2026-05-25T00:00:00Z".to_string(),
+        ])
+        .unwrap(),
+        CliCommand::CorrelateState(_)
+    ));
+}
+
+#[test]
+fn parse_correlate_state_rejects_unknown_flag() {
+    let err = parse_command(vec!["correlate-state".to_string(), "--bogus".to_string()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown correlate-state option"), "got: {err}");
+}

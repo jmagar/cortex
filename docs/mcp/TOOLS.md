@@ -14,6 +14,7 @@ cortex exposes one MCP tool named `syslog`. The required
 | `hosts` | Host registry with first/last seen |
 | `host_state` | Latest bounded heartbeat state for one host |
 | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags and summary counts |
+| `correlate_state` | Correlate logs with heartbeat window summaries around a reference time |
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
 | `abuse` | Abuse hits in AI transcripts with same-session context |
@@ -98,6 +99,21 @@ Required argument: `action = "host_state"` plus either `host_id` or uniquely res
 
 Optional arguments: `since`, `limit` (default 1, max 100).
 
+## syslog correlate_state
+
+Correlate non-AI logs with per-host heartbeat window summaries around a
+reference time. Bounded by default; never performs a full-history scan.
+
+Required argument: `action = "correlate_state"`, `reference_time` (ISO 8601).
+
+Optional arguments: `window_minutes` (default 10, max 120), `host`
+(host_id or unique hostname; omit for a bounded cross-host plan),
+`severity_min` (default `info`), `limit` (max log rows per host, default 100,
+max 500).
+
+Response includes the resolved `window`, a `heartbeat_summary` plus matching
+`logs` per host, and a `truncated` flag.
+
 ## syslog sessions
 
 List AI transcript sessions grouped by project, tool, session, and host.
@@ -137,6 +153,17 @@ Optional arguments: `project`, `tool`, `from`, `to`, `limit` (default 20, max 10
 ## syslog abuse_investigate
 
 Expands the top abuse incidents into deterministic evidence bundles. Each bundle includes transcript context before and after the incident, the abuse anchor entries, and nearby non-AI syslog/Docker logs in the correlation window.
+
+Each bundle also carries a `findings` object — **deterministic, rule-based**
+failure hypotheses derived locally from the evidence (never an external LLM
+analysis). It contains `likely_failure_modes` (each with a stable `category`,
+conservative `confidence`, and citing `evidence_ids`), `contributing_factors`,
+templated `prevention_hints` tied to each category, and `open_questions`.
+Categories include `command_failure`, `tool_timeout`,
+`auth_or_permission_failure`, `stale_binary_or_version_drift`, `test_failure`,
+`docker_or_service_runtime_failure`, `db_busy_or_performance_bottleneck`,
+`unclear_instruction_or_scope_drift`, and `unknown`. When the signal is weak the
+bundle reports `unknown` plus `open_questions` rather than overclaiming a cause.
 
 Response includes `evidence` (array of bundles), `total_incidents`, `truncated`.
 

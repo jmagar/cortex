@@ -36,3 +36,31 @@ pub(crate) struct AppsArgs {
     pub offset: Option<u32>,
     pub json: bool,
 }
+
+// ─── Heartbeat fleet state (cxih.4) ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct HostStateArgs {
+    pub host_id: Option<String>,
+    pub hostname: Option<String>,
+    pub since: Option<String>,
+    pub limit: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct FleetStateArgs {
+    pub include_ok: Option<bool>,
+    pub sort: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct CorrelateStateArgs {
+    pub reference_time: Option<String>,
+    pub window_minutes: Option<u32>,
+    pub host: Option<String>,
+    pub severity_min: Option<String>,
+    pub limit: Option<u32>,
+    pub json: bool,
+}

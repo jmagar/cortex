@@ -288,9 +288,9 @@ pub(crate) use super::dispatch_db::{
     run_db_backup, run_db_checkpoint, run_db_integrity, run_db_status, run_db_vacuum,
 };
 pub(crate) use super::dispatch_surface::{
-    run_anomalies, run_apps, run_clock_skew, run_compare, run_ingest_rate, run_notify_recent,
-    run_notify_test, run_patterns, run_sig_ack, run_sig_list, run_sig_unack, run_silent_hosts,
-    run_source_ips, run_timeline,
+    run_anomalies, run_apps, run_clock_skew, run_compare, run_correlate_state, run_fleet_state,
+    run_host_state, run_ingest_rate, run_notify_recent, run_notify_test, run_patterns, run_sig_ack,
+    run_sig_list, run_sig_unack, run_silent_hosts, run_source_ips, run_timeline,
 };
 
 #[cfg(test)]

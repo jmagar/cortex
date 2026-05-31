@@ -689,20 +689,43 @@ pub struct IncidentEvidence {
     pub nearby_logs: Vec<LogEntry>,
     pub nearby_logs_truncated: bool,
     pub nearby_errors: Vec<LogEntry>,
+    /// Deterministic, rule-based failure hypotheses and prevention hints
+    /// derived from this bundle (bead kmib.4). Never an LLM summary — see
+    /// [`crate::app::incident_findings`].
+    pub findings: super::incident_findings::IncidentFindings,
 }
 
 impl From<db::IncidentEvidence> for IncidentEvidence {
     fn from(v: db::IncidentEvidence) -> Self {
+        let incident: AbuseIncident = v.incident.into();
+        let transcript_before: Vec<LogEntry> =
+            v.transcript_before.into_iter().map(Into::into).collect();
+        let transcript_after: Vec<LogEntry> =
+            v.transcript_after.into_iter().map(Into::into).collect();
+        let anchors: Vec<LogEntry> = v.anchors.into_iter().map(Into::into).collect();
+        let nearby_logs: Vec<LogEntry> = v.nearby_logs.into_iter().map(Into::into).collect();
+        let nearby_errors: Vec<LogEntry> = v.nearby_errors.into_iter().map(Into::into).collect();
+
+        let findings = super::incident_findings::derive_incident_findings(
+            &incident,
+            &anchors,
+            &transcript_before,
+            &transcript_after,
+            &nearby_logs,
+            &nearby_errors,
+        );
+
         Self {
-            incident: v.incident.into(),
-            transcript_before: v.transcript_before.into_iter().map(Into::into).collect(),
+            incident,
+            transcript_before,
             transcript_before_truncated: v.transcript_before_truncated,
-            transcript_after: v.transcript_after.into_iter().map(Into::into).collect(),
+            transcript_after,
             transcript_after_truncated: v.transcript_after_truncated,
-            anchors: v.anchors.into_iter().map(Into::into).collect(),
-            nearby_logs: v.nearby_logs.into_iter().map(Into::into).collect(),
+            anchors,
+            nearby_logs,
             nearby_logs_truncated: v.nearby_logs_truncated,
-            nearby_errors: v.nearby_errors.into_iter().map(Into::into).collect(),
+            nearby_errors,
+            findings,
         }
     }
 }

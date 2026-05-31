@@ -638,6 +638,64 @@ Flags:
 | `--limit N` | Maximum total events |
 | `--json` | Print JSON response |
 
+### `syslog host-state`
+
+Return the latest bounded heartbeat state for one host.
+
+```bash
+syslog host-state --hostname tootie
+syslog host-state --host-id host-a --limit 5 --json
+```
+
+Flags:
+
+| Flag | Description |
+| --- | --- |
+| `--host-id ID` | Authoritative heartbeat host identity |
+| `--hostname HOST` | Self-reported hostname fallback (must resolve to one host) |
+| `--since TIME` | Minimum `sampled_at` timestamp (ISO 8601) |
+| `--limit N` | Number of samples (default 1, max 100) |
+| `--json` | Print JSON response |
+
+### `syslog fleet-state`
+
+Print a fleet-wide heartbeat snapshot with pressure flags and summary counts.
+
+```bash
+syslog fleet-state
+syslog fleet-state --exclude-ok --sort freshness --json
+```
+
+Flags:
+
+| Flag | Description |
+| --- | --- |
+| `--exclude-ok` | Omit hosts whose status is `ok` |
+| `--include-ok` | Include `ok` hosts (default) |
+| `--sort ORDER` | `pressure` (default), `freshness`, or `hostname` |
+| `--json` | Print JSON response |
+
+### `syslog correlate-state`
+
+Correlate non-AI logs with per-host heartbeat window summaries around a
+reference time. Bounded by default; never performs a full-history scan.
+
+```bash
+syslog correlate-state --reference-time 2026-01-01T12:00:00Z --window-minutes 10
+syslog correlate-state --reference-time 2026-01-01T12:00:00Z --host tootie --severity-min warning --json
+```
+
+Flags:
+
+| Flag | Description |
+| --- | --- |
+| `--reference-time TIME` | RFC3339 center timestamp (required) |
+| `--window-minutes N` | Minutes before and after (default 10, max 120) |
+| `--host HOST` | host_id or unique hostname; omit for bounded cross-host plan |
+| `--severity-min LEVEL` | Minimum log severity (default `info`) |
+| `--limit N` | Maximum log rows per host (default 100, max 500) |
+| `--json` | Print JSON response |
+
 ### `syslog stats`
 
 Print database and storage guardrail metrics.
@@ -781,6 +839,9 @@ models.
 | `syslog ai ask-history` | `syslog` with `action="ask_history"` |
 | `syslog ai incident-context` | `syslog` with `action="incident_context"` |
 | `syslog correlate` | `syslog` with `action="correlate"` |
+| `syslog host-state` | `syslog` with `action="host_state"` |
+| `syslog fleet-state` | `syslog` with `action="fleet_state"` |
+| `syslog correlate-state` | `syslog` with `action="correlate_state"` |
 | `syslog apps` | `syslog` with `action="apps"` |
 | `syslog source-ips` | `syslog` with `action="source_ips"` |
 | `syslog timeline` | `syslog` with `action="timeline"` |

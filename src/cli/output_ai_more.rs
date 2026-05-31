@@ -264,6 +264,35 @@ pub(crate) fn print_ai_investigate_response(
                 );
             }
         }
+        let f = &ev.findings;
+        if !f.likely_failure_modes.is_empty() {
+            println!(
+                "  {} (deterministic, rule-based):",
+                muted("likely failure modes")
+            );
+            for m in &f.likely_failure_modes {
+                println!(
+                    "    {} [{}] evidence={:?}",
+                    primary(&m.category),
+                    severity(&m.confidence),
+                    m.evidence_ids
+                );
+            }
+        }
+        for factor in &f.contributing_factors {
+            println!("  {}: {}", muted("contributing"), factor.factor);
+        }
+        for hint in &f.prevention_hints {
+            println!(
+                "  {} [{}] {}",
+                muted("prevention"),
+                violet(&hint.category),
+                hint.hint
+            );
+        }
+        for q in &f.open_questions {
+            println!("  {}: {}", muted("open question"), q);
+        }
     }
     Ok(())
 }

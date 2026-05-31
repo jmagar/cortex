@@ -2,6 +2,7 @@ mod correlate;
 mod error;
 pub(crate) mod error_detection;
 pub(crate) mod heartbeat_flags;
+pub(crate) mod incident_findings;
 mod models;
 mod os_adapter;
 mod service;
@@ -10,6 +11,7 @@ mod watch_status;
 
 pub use correlate::severity_at_or_above;
 pub use error::{ServiceError, ServiceResult};
+pub use incident_findings::{ContributingFactor, FailureMode, IncidentFindings, PreventionHint};
 pub use models::{
     AbuseIncident,
     AbuseMatch,
@@ -50,6 +52,8 @@ pub use models::{
     ContextResponse,
     CorrelateEventsRequest,
     CorrelateEventsResponse,
+    CorrelateStateRequest,
+    CorrelateStateResponse,
     CorrelatedHost,
     CorrelatedSession,
     DbBackupRequest,

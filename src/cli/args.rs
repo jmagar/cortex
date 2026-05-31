@@ -10,7 +10,10 @@ pub(crate) use ai::{
     AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs,
     AiSearchArgs, AiSimilarArgs, AiWatchArgs,
 };
-pub(crate) use surface::{AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, SilentHostsArgs};
+pub(crate) use surface::{
+    AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, FleetStateArgs,
+    HostStateArgs, SilentHostsArgs,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CliCommand {
@@ -43,6 +46,9 @@ pub(crate) enum CliCommand {
     Anomalies(AnomaliesArgs),
     Compare(CompareArgs),
     Apps(AppsArgs),
+    HostState(HostStateArgs),
+    FleetState(FleetStateArgs),
+    CorrelateState(CorrelateStateArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -66,10 +66,11 @@ use cortex::app::{
     AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiParseErrorsRequest,
     AiPruneCheckpointsRequest, AnomaliesRequest, AnomaliesResponse, AskHistoryRequest,
     AskHistoryResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse,
-    CorrelateEventsRequest, CorrelateEventsResponse, DbBackupRequest, DbBackupResult,
-    DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest, DbIntegrityResult,
-    DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult, FilterLogsRequest,
-    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, IncidentContextRequest,
+    CorrelateEventsRequest, CorrelateEventsResponse, CorrelateStateRequest, CorrelateStateResponse,
+    DbBackupRequest, DbBackupResult, DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest,
+    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult,
+    FilterLogsRequest, FleetStateRequest, FleetStateResponse, GetErrorsRequest, GetErrorsResponse,
+    GetLogRequest, GetLogResponse, HostStateRequest, HostStateResponse, IncidentContextRequest,
     IncidentContextResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
     ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
     ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
@@ -628,6 +629,23 @@ impl HttpClient {
 
     pub async fn list_apps(&self, req: &ListAppsRequest) -> Result<ListAppsResponse> {
         self.get_json("/api/apps", Some(req)).await
+    }
+
+    // ─── Heartbeat fleet state (cxih.4) ─────────────────────────────────────
+
+    pub async fn host_state(&self, req: &HostStateRequest) -> Result<HostStateResponse> {
+        self.get_json("/api/host-state", Some(req)).await
+    }
+
+    pub async fn fleet_state(&self, req: &FleetStateRequest) -> Result<FleetStateResponse> {
+        self.get_json("/api/fleet-state", Some(req)).await
+    }
+
+    pub async fn correlate_state(
+        &self,
+        req: &CorrelateStateRequest,
+    ) -> Result<CorrelateStateResponse> {
+        self.get_json("/api/correlate-state", Some(req)).await
     }
 
     pub async fn similar_incidents(

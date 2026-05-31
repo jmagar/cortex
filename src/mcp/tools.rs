@@ -5,12 +5,12 @@ use serde_json::{json, Value};
 use crate::app::{
     AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
-    CorrelateEventsRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest,
-    HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
-    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
-    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
-    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, SimilarIncidentsRequest,
-    TailLogsRequest, TimelineRequest, UsageBlocksRequest,
+    CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
+    GetErrorsRequest, GetLogRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
+    ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
+    RequestActor, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
+    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
 use super::actions;
@@ -45,6 +45,7 @@ async fn tool_cortex(
         "host_state" => tool_host_state(state, args).await,
         "fleet_state" => tool_fleet_state(state, args).await,
         "correlate" => tool_correlate_events(state, args).await,
+        "correlate_state" => tool_correlate_state(state, args).await,
         "stats" => tool_get_stats(state, args).await,
         "status" => tool_get_status(state, args).await,
         "apps" => tool_list_apps(state, args).await,
@@ -183,6 +184,12 @@ async fn tool_host_state(state: &AppState, args: Value) -> anyhow::Result<Value>
 async fn tool_fleet_state(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let req: FleetStateRequest = action_payload(args)?;
     Ok(serde_json::to_value(state.service.fleet_state(req).await?)?)
+}
+async fn tool_correlate_state(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: CorrelateStateRequest = action_payload(args)?;
+    Ok(serde_json::to_value(
+        state.service.correlate_state(req).await?,
+    )?)
 }
 
 async fn tool_list_sessions(state: &AppState, args: Value) -> anyhow::Result<Value> {
@@ -958,6 +965,21 @@ Return a fleet-wide heartbeat snapshot with pressure flags and summary counts.
 **Parameters:**
 - `include_ok` (boolean, optional) — when `false`, exclude hosts with `status == "ok"` (default `true`)
 - `sort` (string, optional) — sort order: `pressure` (default), `freshness`, or `hostname`
+
+---
+
+## cortex correlate_state
+Correlate non-AI logs with per-host heartbeat window summaries around a reference time.
+Bounded by default and never performs a full-history scan.
+
+**Parameters:**
+- `reference_time` (string, required) — center timestamp for the window (ISO 8601)
+- `window_minutes` (integer, optional) — minutes before/after reference_time (default 10, max 120)
+- `host` (string, optional) — host_id or unique hostname; omit for a bounded cross-host plan
+- `severity_min` (string, optional) — minimum log severity (default `info`)
+- `limit` (integer, optional) — max log rows per host (default 100, max 500)
+
+Response includes the resolved `window`, per-host `heartbeat_summary` plus matching `logs`, and a `truncated` flag.
 
 ---
 

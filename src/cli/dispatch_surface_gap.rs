@@ -3,10 +3,14 @@ use super::output_common::print_json;
 
 use anyhow::Result;
 use cortex::app::{
-    AnomaliesRequest, ClockSkewRequest, CompareRequest, ListAppsRequest, SilentHostsRequest,
+    AnomaliesRequest, ClockSkewRequest, CompareRequest, CorrelateStateRequest, FleetStateRequest,
+    HostStateRequest, ListAppsRequest, SilentHostsRequest,
 };
 
-use super::args::{AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, SilentHostsArgs};
+use super::args::{
+    AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, FleetStateArgs,
+    HostStateArgs, SilentHostsArgs,
+};
 use super::CliMode;
 
 impl SilentHostsArgs {
@@ -188,6 +192,148 @@ pub(crate) async fn run_apps(mode: &CliMode, args: AppsArgs) -> Result<()> {
         println!(
             "  {:<24} logs={} hosts={} first_seen={} last_seen={}",
             a.app_name, a.log_count, a.host_count, a.first_seen, a.last_seen
+        );
+    }
+    Ok(())
+}
+
+// ─── Heartbeat fleet state (cxih.4) ─────────────────────────────────────────
+
+impl HostStateArgs {
+    pub(crate) fn into_request(self) -> HostStateRequest {
+        HostStateRequest {
+            host_id: self.host_id,
+            hostname: self.hostname,
+            since: self.since,
+            limit: self.limit,
+        }
+    }
+}
+
+impl FleetStateArgs {
+    pub(crate) fn into_request(self) -> FleetStateRequest {
+        FleetStateRequest {
+            include_ok: self.include_ok,
+            sort: self.sort,
+        }
+    }
+}
+
+impl CorrelateStateArgs {
+    pub(crate) fn into_request(self) -> Result<CorrelateStateRequest> {
+        Ok(CorrelateStateRequest {
+            reference_time: self
+                .reference_time
+                .ok_or_else(|| anyhow::anyhow!("--reference-time is required"))?,
+            window_minutes: self.window_minutes,
+            host: self.host,
+            severity_min: self.severity_min,
+            limit: self.limit,
+        })
+    }
+}
+
+pub(crate) async fn run_host_state(mode: &CliMode, args: HostStateArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.host_state(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.host_state(&req)).await?,
+    };
+    if json {
+        return print_json(&response);
+    }
+    println!(
+        "host_id={} hostname={} samples={}{}",
+        response.host_id,
+        response.hostname,
+        response.total_samples,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        },
+    );
+    let f = &response.flags;
+    println!(
+        "flags: partial={} late={} clock_skew={} cpu={} mem={} swap={} disk={} net_err={} container_unhealthy={}",
+        f.collector_partial,
+        f.heartbeat_late,
+        f.clock_skew,
+        f.cpu_pressure,
+        f.memory_pressure,
+        f.swap_pressure,
+        f.disk_capacity_pressure,
+        f.network_error_pressure,
+        f.container_unhealthy,
+    );
+    if let Some(latest) = &response.latest {
+        println!(
+            "latest: sampled_at={} seq={} uptime_secs={} agent={}",
+            latest.sampled_at, latest.sequence, latest.uptime_secs, latest.agent_version
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn run_fleet_state(mode: &CliMode, args: FleetStateArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.fleet_state(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.fleet_state(&req)).await?,
+    };
+    if json {
+        return print_json(&response);
+    }
+    let s = &response.summary;
+    println!(
+        "{} host(s): ok={} late={} partial={} pressure={}",
+        s.total, s.ok, s.late, s.partial, s.pressure
+    );
+    for h in &response.hosts {
+        let pressure = if h.pressure.is_empty() {
+            "-".to_string()
+        } else {
+            h.pressure.join(",")
+        };
+        println!(
+            "  {:<20} status={:<8} last_heartbeat={} pressure={}",
+            h.hostname, h.status, h.last_heartbeat_at, pressure
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn run_correlate_state(mode: &CliMode, args: CorrelateStateArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request()?;
+    let response = match mode {
+        CliMode::Local(service) => service.correlate_state(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.correlate_state(&req)).await?,
+    };
+    if json {
+        return print_json(&response);
+    }
+    println!(
+        "window {} → {}{}",
+        response.window.from,
+        response.window.to,
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        },
+    );
+    println!("{} host(s):", response.hosts.len());
+    for h in &response.hosts {
+        let summary = &h.heartbeat_summary;
+        println!(
+            "  {:<20} heartbeats={} partial={} logs={}",
+            h.hostname,
+            summary.samples,
+            summary.partial_samples,
+            h.logs.len()
         );
     }
     Ok(())

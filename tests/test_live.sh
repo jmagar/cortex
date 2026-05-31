@@ -18,7 +18,7 @@
 #   PORT                   Override server port (default: 3100)
 #
 # Action inventory reference (not every action is exercised by this live test):
-#   cortex search, cortex filter, cortex tail, cortex errors, cortex hosts, cortex host_state, cortex fleet_state, cortex sessions,
+#   cortex search, cortex filter, cortex tail, cortex errors, cortex hosts, cortex host_state, cortex fleet_state, cortex correlate_state, cortex sessions,
 #   cortex search_sessions, cortex abuse, cortex ai_correlate, cortex usage_blocks, cortex project_context,
 #   cortex list_ai_tools, cortex list_ai_projects, cortex correlate, cortex stats, cortex status, cortex apps,
 #   cortex source_ips, cortex timeline, cortex patterns, cortex context,

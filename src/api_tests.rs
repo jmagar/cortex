@@ -2430,3 +2430,47 @@ async fn unknown_query_param_returns_400_on_fleet_state() {
     let (status, _) = get_json(app, "/api/fleet-state?bogus=1", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
 }
+
+// ─── /api/correlate-state (cxih.4) ──────────────────────────────────────────
+
+#[tokio::test]
+async fn correlate_state_returns_200_with_token_on_empty_db() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let (status, value) = get_json(
+        app,
+        "/api/correlate-state?reference_time=2026-05-25T00:00:00Z",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(value.get("window").is_some(), "missing window: {value}");
+    assert!(value.get("hosts").is_some(), "missing hosts: {value}");
+    assert_eq!(value["truncated"], false, "expected not truncated: {value}");
+}
+
+#[tokio::test]
+async fn correlate_state_route_requires_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(
+        app,
+        "/api/correlate-state?reference_time=2026-05-25T00:00:00Z",
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn unknown_query_param_returns_400_on_correlate_state() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    let (status, _) = get_json(
+        app,
+        "/api/correlate-state?reference_time=2026-05-25T00:00:00Z&bogus=1",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}

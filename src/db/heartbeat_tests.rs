@@ -302,3 +302,62 @@ fn heartbeat_metric_snapshot_returns_aggregates() {
         "container_unhealthy_count"
     );
 }
+
+fn insert_cpu(pool: &DbPool, heartbeat_id: i64, usage_percent: f64) {
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_cpu (heartbeat_id, usage_percent) VALUES (?1, ?2)",
+        params![heartbeat_id, usage_percent],
+    )
+    .unwrap();
+}
+
+fn insert_memory(pool: &DbPool, heartbeat_id: i64, available_bytes: i64) {
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_memory (heartbeat_id, available_bytes) VALUES (?1, ?2)",
+        params![heartbeat_id, available_bytes],
+    )
+    .unwrap();
+}
+
+/// Regression test for the `heartbeat_window_summaries` "misuse of aggregate"
+/// SQL bug: `MAX(h.id)` referenced inside a correlated subquery under GROUP BY
+/// is illegal in SQLite. The query must resolve the latest heartbeat id with a
+/// scalar subquery, and the returned cpu/mem must come from that latest sample.
+#[test]
+fn heartbeat_window_summaries_resolves_latest_sample_metrics() {
+    let (pool, _dir) = test_pool();
+    // Two samples for host-a in the window; the second is the latest.
+    let id1 = insert_heartbeat(&pool, "host-a", "tootie", 1, "2026-05-25T00:01:00Z", false);
+    let id2 = insert_heartbeat(&pool, "host-a", "tootie", 2, "2026-05-25T00:02:00Z", true);
+    insert_cpu(&pool, id1, 10.0);
+    insert_cpu(&pool, id2, 80.0);
+    insert_memory(&pool, id1, 8_000);
+    insert_memory(&pool, id2, 2_000);
+    // A second host to confirm per-group resolution and ordering.
+    let id3 = insert_heartbeat(&pool, "host-b", "dookie", 1, "2026-05-25T00:01:30Z", false);
+    insert_cpu(&pool, id3, 42.0);
+    insert_memory(&pool, id3, 4_000);
+
+    let from = "2026-05-25T00:00:00Z";
+    let to = "2026-05-25T00:05:00Z";
+
+    // All-hosts path (host omitted): bounded cross-host plan.
+    let all = heartbeat_window_summaries(&pool, from, to, None).unwrap();
+    assert_eq!(all.len(), 2, "expected one summary row per host");
+    // Ordered by hostname ASC: dookie, tootie.
+    assert_eq!(all[0].hostname, "dookie");
+    assert_eq!(all[1].hostname, "tootie");
+    // tootie's metrics come from the latest sample (id2), not the first.
+    assert_eq!(all[1].samples, 2);
+    assert_eq!(all[1].partial_samples, 1);
+    assert_eq!(all[1].max_cpu_usage_percent, Some(80.0));
+    assert_eq!(all[1].min_mem_available_bytes, Some(2_000));
+
+    // Single-host path.
+    let one = heartbeat_window_summaries(&pool, from, to, Some("host-a")).unwrap();
+    assert_eq!(one.len(), 1);
+    assert_eq!(one[0].max_cpu_usage_percent, Some(80.0));
+    assert_eq!(one[0].min_mem_available_bytes, Some(2_000));
+}

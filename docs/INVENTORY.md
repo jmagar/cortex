@@ -25,6 +25,7 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `host_state` | Latest bounded heartbeat state for one host | no |
 | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags and summary counts | no |
 | `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |
+| `correlate_state` | Correlate logs with heartbeat window summaries around a reference time | no |
 | `stats` | Database statistics: total logs, hosts, time range, DB size, free disk, write-block status | no |
 | `status` | Lightweight runtime status: DB health, queue/backpressure state, listener/writer counters, OTLP counters | no |
 | `sessions` | AI transcript sessions grouped by project/tool/session/host | no |
@@ -77,6 +78,9 @@ methods as the MCP actions.
 | `syslog hosts` | `hosts` | Known host list |
 | `syslog filter` | `filter` | Structured filter-only log retrieval |
 | `syslog correlate` | `correlate` | Cross-host event correlation |
+| `syslog host-state` | `host_state` | Latest bounded heartbeat state for one host |
+| `syslog fleet-state` | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags |
+| `syslog correlate-state` | `correlate_state` | Logs plus heartbeat summaries around a reference time |
 | `syslog ai correlate` | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs |
 | `syslog ai incidents` | `abuse_incidents` | Grouped abuse incident candidates |
 | `syslog ai investigate` | `abuse_investigate` | Abuse incident evidence bundles |
