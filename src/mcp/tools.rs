@@ -6,12 +6,11 @@ use crate::app::{
     AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
     CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
-    GetErrorsRequest, GetLogRequest,
-    HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
-    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
-    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
-    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, SimilarIncidentsRequest,
-    TailLogsRequest, TimelineRequest, UsageBlocksRequest,
+    GetErrorsRequest, GetLogRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
+    ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
+    RequestActor, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
+    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
 use super::actions;

@@ -248,7 +248,11 @@ pub(crate) async fn run_host_state(mode: &CliMode, args: HostStateArgs) -> Resul
         response.host_id,
         response.hostname,
         response.total_samples,
-        if response.truncated { " (truncated)" } else { "" },
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        },
     );
     let f = &response.flags;
     println!(
@@ -315,7 +319,11 @@ pub(crate) async fn run_correlate_state(mode: &CliMode, args: CorrelateStateArgs
         "window {} → {}{}",
         response.window.from,
         response.window.to,
-        if response.truncated { " (truncated)" } else { "" },
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        },
     );
     println!("{} host(s):", response.hosts.len());
     for h in &response.hosts {

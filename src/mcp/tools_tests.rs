@@ -132,9 +132,14 @@ async fn fleet_state_action_returns_fleet_snapshot() {
 #[tokio::test]
 async fn correlate_state_action_requires_reference_time() {
     let h = TestHarness::new();
-    let err = execute_tool(&h.state, "cortex", json!({"action": "correlate_state"}), None)
-        .await
-        .unwrap_err();
+    let err = execute_tool(
+        &h.state,
+        "cortex",
+        json!({"action": "correlate_state"}),
+        None,
+    )
+    .await
+    .unwrap_err();
     assert!(
         err.to_string().contains("reference_time"),
         "expected reference_time validation error, got: {err}"

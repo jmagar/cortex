@@ -154,6 +154,17 @@ Optional arguments: `project`, `tool`, `from`, `to`, `limit` (default 20, max 10
 
 Expands the top abuse incidents into deterministic evidence bundles. Each bundle includes transcript context before and after the incident, the abuse anchor entries, and nearby non-AI syslog/Docker logs in the correlation window.
 
+Each bundle also carries a `findings` object — **deterministic, rule-based**
+failure hypotheses derived locally from the evidence (never an external LLM
+analysis). It contains `likely_failure_modes` (each with a stable `category`,
+conservative `confidence`, and citing `evidence_ids`), `contributing_factors`,
+templated `prevention_hints` tied to each category, and `open_questions`.
+Categories include `command_failure`, `tool_timeout`,
+`auth_or_permission_failure`, `stale_binary_or_version_drift`, `test_failure`,
+`docker_or_service_runtime_failure`, `db_busy_or_performance_bottleneck`,
+`unclear_instruction_or_scope_drift`, and `unknown`. When the signal is weak the
+bundle reports `unknown` plus `open_questions` rather than overclaiming a cause.
+
 Response includes `evidence` (array of bundles), `total_incidents`, `truncated`.
 
 Optional arguments: `project`, `tool`, `from`, `to`, `limit` (default 3, max 10), `window_minutes`, `correlation_window_minutes` (default 5, max 120), `terms`.
