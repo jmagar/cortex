@@ -77,6 +77,9 @@ mcporter call --config config/mcporter.json syslog.syslog action=hosts
 mcporter call --config config/mcporter.json syslog.syslog action=host_state host_id=host-id
 mcporter call --config config/mcporter.json syslog.syslog action=sessions
 mcporter call --config config/mcporter.json syslog.syslog action=abuse terms=ai-smoke-authentication limit=5
+mcporter call --config config/mcporter.json syslog.syslog action=abuse_incidents limit=3
+mcporter call --config config/mcporter.json syslog.syslog action=abuse_investigate limit=1
+mcporter call --config config/mcporter.json syslog.syslog action=correlate_state reference_time=2026-01-01T00:00:00Z window_minutes=10
 mcporter call --config config/mcporter.json syslog.syslog action=ai_correlate project=/tmp/cortex-ai-smoke limit=2 events_per_anchor=3
 mcporter call --config config/mcporter.json syslog.syslog action=apps
 mcporter call --config config/mcporter.json syslog.syslog action=source_ips
@@ -91,6 +94,25 @@ mcporter call --config config/mcporter.json syslog.syslog action=anomalies
 mcporter call --config config/mcporter.json syslog.syslog action=compare a_from=2026-01-01T00:00:00Z a_to=2026-01-01T01:00:00Z b_from=2026-01-01T01:00:00Z b_to=2026-01-01T02:00:00Z
 mcporter call --config config/mcporter.json syslog.syslog action=compose_status
 mcporter call --config config/mcporter.json syslog.syslog action=compose_doctor
+```
+
+### CLI-based testing (abuse investigation workflow)
+
+The deterministic abuse incident/investigation workflow is also exercisable
+directly through the `syslog` binary. All outputs are bounded; the investigation
+`findings` are rule-based and local-only (never an external LLM analysis).
+
+```bash
+# Group abuse hits into scored incident candidates (bounded; capped result set)
+syslog ai incidents --limit 3 --json
+
+# Expand the top incidents into deterministic evidence bundles + findings
+syslog ai investigate --limit 1 --json
+
+# Heartbeat fleet state parity commands
+syslog host-state --hostname tootie --json
+syslog fleet-state --json
+syslog correlate-state --reference-time 2026-01-01T00:00:00Z --window-minutes 10 --json
 ```
 
 ### curl-based testing
