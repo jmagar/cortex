@@ -744,6 +744,9 @@ impl CortexService {
                             to: Some(to3),
                             severity_in: Some(sev_levels),
                             limit: Some(fetch_limit as u32),
+                            // correlate_state correlates non-AI logs with heartbeat
+                            // state; AI transcript rows must never appear here.
+                            exclude_ai: true,
                             ..Default::default()
                         },
                     )

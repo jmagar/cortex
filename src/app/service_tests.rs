@@ -244,6 +244,88 @@ async fn correlate_ai_logs_cross_references_non_ai_logs_only() {
 }
 
 #[tokio::test]
+async fn correlate_state_excludes_ai_transcript_rows() {
+    let (service, pool, _dir) = test_service();
+
+    // A heartbeat in the window makes host-a appear in the summaries.
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO host_heartbeats (
+                 host_id, hostname, source_ip, sampled_at, received_at, boot_id,
+                 uptime_secs, sequence, collection_ms, partial, agent_version,
+                 os, architecture, metadata_json
+             ) VALUES ('host-a', 'host-a', '10.0.0.1:41000',
+                       '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'boot-a',
+                       60, 1, 5, 0, '0.1.0', 'linux', 'x86_64', '{}')",
+            [],
+        )
+        .unwrap();
+    }
+
+    // A real syslog line and an AI-transcript line, both on host-a, in window.
+    let mut ai_on_host = entry(
+        "2026-01-01T00:01:00Z",
+        "host-a",
+        "info",
+        "ai transcript noise that must not surface",
+        "transcript://codex",
+    );
+    ai_on_host.app_name = Some("codex-transcript".into());
+    ai_on_host.ai_tool = Some("codex".into());
+    ai_on_host.ai_project = Some("/tmp/project".into());
+    ai_on_host.ai_session_id = Some("sess-1".into());
+    ai_on_host.ai_transcript_path = Some("/tmp/project/sess-1.jsonl".into());
+
+    insert_logs_batch(
+        &pool,
+        &[
+            entry(
+                "2026-01-01T00:01:30Z",
+                "host-a",
+                "err",
+                "real syslog line in window",
+                "10.0.0.1:514",
+            ),
+            ai_on_host,
+        ],
+    )
+    .unwrap();
+
+    let response = service
+        .correlate_state(CorrelateStateRequest {
+            reference_time: "2026-01-01T00:00:00Z".into(),
+            window_minutes: None,
+            host: None,
+            severity_min: None,
+            limit: None,
+        })
+        .await
+        .unwrap();
+
+    let host = response
+        .hosts
+        .iter()
+        .find(|h| h.hostname == "host-a")
+        .expect("host-a should be present in correlate_state results");
+
+    assert!(
+        host.logs
+            .iter()
+            .any(|l| l.message == "real syslog line in window"),
+        "non-AI syslog line should be correlated: {:?}",
+        host.logs
+    );
+    assert!(
+        host.logs.iter().all(|l| l.ai_project.is_none()
+            && l.ai_transcript_path.is_none()
+            && l.ai_session_id.is_none()),
+        "correlate_state must never return AI transcript rows: {:?}",
+        host.logs
+    );
+}
+
+#[tokio::test]
 async fn correlate_ai_logs_batches_related_windows_with_per_anchor_caps() {
     let (service, pool, _dir) = test_service();
     insert_logs_batch(
