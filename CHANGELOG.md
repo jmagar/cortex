@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-05-31
+
+### Fixed
+
+- **`correlate_state` no longer leaks AI transcript rows** — the action built
+  its `SearchParams` with `..Default::default()`, leaving `exclude_ai` false, so
+  AI transcript logs could surface in results despite the action being
+  documented as correlating non-AI logs with per-host heartbeat state. It now
+  sets `exclude_ai: true`. Regression test added.
+
 ## [1.1.0] - 2026-05-31
 
 ### Added
