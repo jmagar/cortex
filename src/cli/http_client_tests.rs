@@ -512,6 +512,46 @@ async fn ai_abuse_request_round_trips_through_serde_qs() {
     assert_eq!(decoded.terms, req.terms);
 }
 
+// ─── cxih.4: CorrelateStateRequest CLI→server query serialization ───────────
+
+/// The CLI HTTP client serializes heartbeat-state requests via reqwest's
+/// `.query()`; the server deserializes them with axum `Query<..>` under
+/// `deny_unknown_fields`. This exercises the exact client serializer and guards
+/// the seam `cortex-fzj7` bit on: omitted `Option`s must NOT emit bare keys
+/// (which would 400 against `deny_unknown_fields`), while the required
+/// `reference_time` and any set options must appear. The server-side
+/// deserialization of the same struct is covered by the `/api/correlate-state`
+/// api_tests.
+#[test]
+fn correlate_state_request_query_omits_none_options() {
+    use cortex::app::CorrelateStateRequest;
+
+    let req = CorrelateStateRequest {
+        reference_time: "2026-05-25T00:00:00Z".into(),
+        window_minutes: Some(15),
+        host: Some("tootie".into()),
+        severity_min: None,
+        limit: None,
+    };
+
+    let built = reqwest::Client::new()
+        .get("http://localhost/api/correlate-state")
+        .query(&req)
+        .build()
+        .expect("build request");
+    let qs = built.url().query().unwrap_or_default();
+
+    assert!(
+        qs.contains("reference_time="),
+        "required field missing: {qs}"
+    );
+    assert!(qs.contains("window_minutes=15"), "set option missing: {qs}");
+    assert!(qs.contains("host=tootie"), "set option missing: {qs}");
+    // None options must be dropped entirely, not emitted as bare keys.
+    assert!(!qs.contains("severity_min"), "None option leaked: {qs}");
+    assert!(!qs.contains("limit"), "None option leaked: {qs}");
+}
+
 // ─── Round-trip coverage for RAG v1 wrappers (similar_incidents, ask_history,
 //     incident_context) — bead 0p8r.6. Verifies HttpClient → /api/<path> wires
 //     the bearer header, hits the documented URL, and deserialises a typed
