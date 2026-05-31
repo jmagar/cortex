@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-05-31
+
+### Fixed
+
+- **`host-state` / `fleet-state` / `correlate-state` CLI commands were
+  unreachable** — added in 1.1.0 (cxih.4) and routed in the parser + dispatch,
+  but omitted from the top-level command allowlist in `Mode::parse`, so every
+  invocation printed the usage banner and exited 1. They are now routed, listed
+  in `--help` with correct flags, and covered by a dispatch-level regression
+  test. (syslog-mcp-8fww)
+
 ## [1.1.1] - 2026-05-31
 
 ### Fixed
