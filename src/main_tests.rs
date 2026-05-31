@@ -20,6 +20,31 @@ fn mode_parse_accepts_single_binary_transport_commands() {
 }
 
 #[test]
+fn mode_parse_accepts_heartbeat_state_commands() {
+    // Regression: host-state/fleet-state/correlate-state are routed in
+    // parse.rs + run.rs, but were missing from Mode::parse's top-level command
+    // gate, so they fell through to print_usage()+exit 1 (bd syslog-mcp-8fww).
+    assert!(matches!(
+        Mode::parse(vec!["host-state".into(), "--json".into()]).unwrap(),
+        Mode::Cli(_)
+    ));
+    assert!(matches!(
+        Mode::parse(vec!["fleet-state".into(), "--json".into()]).unwrap(),
+        Mode::Cli(_)
+    ));
+    assert!(matches!(
+        Mode::parse(vec![
+            "correlate-state".into(),
+            "--reference-time".into(),
+            "2026-01-01T00:00:00Z".into(),
+            "--json".into(),
+        ])
+        .unwrap(),
+        Mode::Cli(_)
+    ));
+}
+
+#[test]
 fn mode_parse_rejects_unknown_commands() {
     let err = Mode::parse(vec!["serve".into(), "http".into()]).unwrap_err();
     assert!(err.to_string().contains("unknown command"));
@@ -502,6 +527,9 @@ fn usage_banner_lists_all_query_subcommands() {
         "cortex sig unack",
         "cortex notify recent",
         "cortex notify test",
+        "cortex host-state",
+        "cortex fleet-state",
+        "cortex correlate-state",
     ] {
         assert!(usage.contains(needle), "usage banner is missing `{needle}`");
     }

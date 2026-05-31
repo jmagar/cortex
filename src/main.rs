@@ -503,6 +503,9 @@ impl Mode {
                         | "anomalies"
                         | "compare"
                         | "apps"
+                        | "host-state"
+                        | "fleet-state"
+                        | "correlate-state"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
@@ -794,6 +797,9 @@ const USAGE: &str = "Usage:
   cortex hosts [--json]
   cortex sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]
   cortex incident --around TIME [--minutes N] [--service SERVICE] [--host HOST] [--limit N] [--json]
+  cortex host-state [--host-id ID] [--hostname HOST] [--since TIME] [--limit N] [--json]
+  cortex fleet-state [--include-ok|--exclude-ok] [--sort pressure|freshness|hostname] [--json]
+  cortex correlate-state --reference-time TIME [--window-minutes N] [--host HOST] [--severity-min LEVEL] [--limit N] [--json]
   cortex ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]
   cortex ai abuse [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]
   cortex ai incidents [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]
