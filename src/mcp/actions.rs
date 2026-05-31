@@ -122,6 +122,12 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         cost: Cost::Moderate,
     },
     ActionSpec {
+        name: "correlate_state",
+        scope: Scope::Read,
+        description: "Correlate logs with heartbeat summaries around a reference time",
+        cost: Cost::Expensive,
+    },
+    ActionSpec {
         name: "stats",
         scope: Scope::Read,
         description: "Aggregate log statistics",

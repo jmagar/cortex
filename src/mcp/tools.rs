@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 use crate::app::{
     AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
-    CorrelateEventsRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest,
+    CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
+    GetErrorsRequest, GetLogRequest,
     HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
     ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
     NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
@@ -45,6 +46,7 @@ async fn tool_cortex(
         "host_state" => tool_host_state(state, args).await,
         "fleet_state" => tool_fleet_state(state, args).await,
         "correlate" => tool_correlate_events(state, args).await,
+        "correlate_state" => tool_correlate_state(state, args).await,
         "stats" => tool_get_stats(state, args).await,
         "status" => tool_get_status(state, args).await,
         "apps" => tool_list_apps(state, args).await,
@@ -183,6 +185,12 @@ async fn tool_host_state(state: &AppState, args: Value) -> anyhow::Result<Value>
 async fn tool_fleet_state(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let req: FleetStateRequest = action_payload(args)?;
     Ok(serde_json::to_value(state.service.fleet_state(req).await?)?)
+}
+async fn tool_correlate_state(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: CorrelateStateRequest = action_payload(args)?;
+    Ok(serde_json::to_value(
+        state.service.correlate_state(req).await?,
+    )?)
 }
 
 async fn tool_list_sessions(state: &AppState, args: Value) -> anyhow::Result<Value> {

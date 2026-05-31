@@ -50,6 +50,8 @@ pub use models::{
     ContextResponse,
     CorrelateEventsRequest,
     CorrelateEventsResponse,
+    CorrelateStateRequest,
+    CorrelateStateResponse,
     CorrelatedHost,
     CorrelatedSession,
     DbBackupRequest,

@@ -130,6 +130,50 @@ async fn fleet_state_action_returns_fleet_snapshot() {
 }
 
 #[tokio::test]
+async fn correlate_state_action_requires_reference_time() {
+    let h = TestHarness::new();
+    let err = execute_tool(&h.state, "cortex", json!({"action": "correlate_state"}), None)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("reference_time"),
+        "expected reference_time validation error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn correlate_state_action_returns_bounded_window() {
+    let h = TestHarness::new();
+    // Oversized window_minutes/limit must be clamped, not rejected, and an
+    // empty DB must still return a well-formed bounded envelope (no broad scan).
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "correlate_state",
+            "reference_time": "2026-05-25T00:00:00Z",
+            "window_minutes": 99999,
+            "limit": 99999
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(
+        value.get("window").is_some(),
+        "correlate_state response missing window: {value}"
+    );
+    assert!(
+        value["hosts"].is_array(),
+        "correlate_state response missing hosts array: {value}"
+    );
+    assert_eq!(
+        value["truncated"], false,
+        "empty-DB correlate_state should not be truncated: {value}"
+    );
+}
+
+#[tokio::test]
 async fn host_state_action_reports_ambiguous_hostname() {
     let h = TestHarness::new();
     let conn = h.pool.get().unwrap();

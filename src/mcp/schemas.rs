@@ -56,7 +56,24 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "hostname": {
                     "type": "string",
-                    "description": "For action=search, filter, tail, correlate, ai_correlate, apps, sessions, timeline, patterns, context, similar_incidents, ask_history, or incident_context: exact hostname filter. Use action=hosts to enumerate."
+                    "description": "For action=search, filter, tail, correlate, ai_correlate, apps, sessions, timeline, patterns, context, similar_incidents, ask_history, or incident_context: exact hostname filter. For action=host_state: resolve a host by unique hostname when host_id is omitted. Use action=hosts to enumerate."
+                },
+                "host_id": {
+                    "type": "string",
+                    "description": "For action=host_state: exact heartbeat host_id. Takes precedence over hostname and is authoritative over hostname metadata."
+                },
+                "host": {
+                    "type": "string",
+                    "description": "For action=correlate_state: optional host filter accepting a host_id or a unique hostname. When omitted, a bounded cross-host plan is used over all hosts with heartbeats in the window."
+                },
+                "include_ok": {
+                    "type": "boolean",
+                    "description": "For action=fleet_state: when false, hosts whose status is 'ok' are excluded. Default true."
+                },
+                "sort": {
+                    "type": "string",
+                    "enum": ["pressure", "freshness", "hostname"],
+                    "description": "For action=fleet_state: row ordering. 'pressure' (default) ranks late > partial > pressure > ok; 'freshness' orders by most-recent heartbeat; 'hostname' is alphabetical."
                 },
                 "project": {
                     "type": "string",
@@ -84,7 +101,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 "severity_min": {
                     "type": "string",
                     "enum": SEVERITY_LEVELS,
-                    "description": "For action=tail, correlate, ai_correlate, timeline, patterns, similar_incidents, or incident_context: minimum severity to include. Defaults to 'warning' for incident_context."
+                    "description": "For action=tail, correlate, correlate_state, ai_correlate, timeline, patterns, similar_incidents, or incident_context: minimum severity to include. Defaults to 'warning' for incident_context and 'info' for correlate_state."
                 },
                 "app_name": {
                     "type": "string",
@@ -149,7 +166,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search or filter: max results, default 100, max 1000. For action=errors: max summary rows, max 100. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=patterns: alias for top_n, default 20, max 200. For action=clock_skew: max host rows, max 100. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to paginate; response includes total count of all distinct source IPs. For action=similar_incidents: max incident clusters, default 10, max 50. For action=ask_history: max sessions, default 10, max 50. For action=incident_context: max error log rows, default 50, max 200."
+                    "description": "For action=search or filter: max results, default 100, max 1000. For action=errors: max summary rows, max 100. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=correlate_state: max log rows per host, default 100, max 500. For action=host_state: max heartbeat samples, default 1, max 100. For action=patterns: alias for top_n, default 20, max 200. For action=clock_skew: max host rows, max 100. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to paginate; response includes total count of all distinct source IPs. For action=similar_incidents: max incident clusters, default 10, max 50. For action=ask_history: max sessions, default 10, max 50. For action=incident_context: max error log rows, default 50, max 200."
                 },
                 "offset": {
                     "type": "integer",
@@ -161,11 +178,11 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "reference_time": {
                     "type": "string",
-                    "description": "For action=correlate: required center timestamp for the correlation window as ISO 8601/RFC3339."
+                    "description": "For action=correlate or correlate_state: required center timestamp for the correlation window as ISO 8601/RFC3339."
                 },
                 "window_minutes": {
                     "type": "integer",
-                    "description": "For action=correlate: minutes before and after reference_time to search, default 5, max 60. For action=ai_correlate: minutes before and after each AI anchor, default 5, max 120. For action=abuse_incidents or abuse_investigate: incident grouping window, default 10, max 120. For action=similar_incidents: cluster grouping window in minutes, default 30, clamp 5..=120."
+                    "description": "For action=correlate: minutes before and after reference_time to search, default 5, max 60. For action=correlate_state: minutes before and after reference_time, default 10, max 120. For action=ai_correlate: minutes before and after each AI anchor, default 5, max 120. For action=abuse_incidents or abuse_investigate: incident grouping window, default 10, max 120. For action=similar_incidents: cluster grouping window in minutes, default 30, clamp 5..=120."
                 },
                 "correlation_window_minutes": {
                     "type": "integer",
@@ -230,7 +247,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "since": {
                     "type": "string",
-                    "description": "For action=clock_skew: sample entries with received_at >= since. Use `limit` to cap returned host rows."
+                    "description": "For action=clock_skew: sample entries with received_at >= since. Use `limit` to cap returned host rows. For action=host_state: only include heartbeat samples with sampled_at >= this ISO 8601/RFC3339 timestamp."
                 },
                 "recent_minutes": {
                     "type": "integer",

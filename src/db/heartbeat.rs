@@ -238,15 +238,30 @@ pub fn heartbeat_window_summaries(
         ))
     };
 
+    // `max_cpu`/`min_mem` come from the most-recent heartbeat in the window
+    // for each host. The latest id must be resolved with a scalar subquery
+    // (`SELECT MAX(h2.id) ...`) rather than referencing `MAX(h.id)` inside a
+    // correlated subquery — SQLite rejects the latter as "misuse of aggregate"
+    // under GROUP BY.
     let rows: Vec<WindowRow> = if let Some(hid) = host_id {
         let mut stmt = conn.prepare(
             "SELECT h.host_id, h.hostname,
                     COUNT(*) AS samples,
                     SUM(h.partial) AS partial_samples,
                     (SELECT c.usage_percent FROM heartbeat_cpu c
-                     WHERE c.heartbeat_id = MAX(h.id)) AS max_cpu,
+                     WHERE c.heartbeat_id = (
+                         SELECT MAX(h2.id) FROM host_heartbeats h2
+                         WHERE h2.host_id = h.host_id
+                           AND h2.received_at >= ?2
+                           AND h2.received_at <= ?3
+                     )) AS max_cpu,
                     (SELECT m.available_bytes FROM heartbeat_memory m
-                     WHERE m.heartbeat_id = MAX(h.id)) AS min_mem
+                     WHERE m.heartbeat_id = (
+                         SELECT MAX(h2.id) FROM host_heartbeats h2
+                         WHERE h2.host_id = h.host_id
+                           AND h2.received_at >= ?2
+                           AND h2.received_at <= ?3
+                     )) AS min_mem
              FROM host_heartbeats h
              WHERE h.host_id = ?1
                AND h.received_at >= ?2
@@ -263,9 +278,19 @@ pub fn heartbeat_window_summaries(
                     COUNT(*) AS samples,
                     SUM(h.partial) AS partial_samples,
                     (SELECT c.usage_percent FROM heartbeat_cpu c
-                     WHERE c.heartbeat_id = MAX(h.id)) AS max_cpu,
+                     WHERE c.heartbeat_id = (
+                         SELECT MAX(h2.id) FROM host_heartbeats h2
+                         WHERE h2.host_id = h.host_id
+                           AND h2.received_at >= ?1
+                           AND h2.received_at <= ?2
+                     )) AS max_cpu,
                     (SELECT m.available_bytes FROM heartbeat_memory m
-                     WHERE m.heartbeat_id = MAX(h.id)) AS min_mem
+                     WHERE m.heartbeat_id = (
+                         SELECT MAX(h2.id) FROM host_heartbeats h2
+                         WHERE h2.host_id = h.host_id
+                           AND h2.received_at >= ?1
+                           AND h2.received_at <= ?2
+                     )) AS min_mem
              FROM host_heartbeats h
              WHERE h.received_at >= ?1
                AND h.received_at <= ?2
