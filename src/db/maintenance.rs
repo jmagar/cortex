@@ -13,7 +13,7 @@ pub trait DiskSpaceProbe {
     fn free_bytes(&self, path: &Path) -> Result<u64>;
 }
 
-struct SystemDiskSpaceProbe;
+pub struct SystemDiskSpaceProbe;
 
 impl DiskSpaceProbe for SystemDiskSpaceProbe {
     fn free_bytes(&self, path: &Path) -> Result<u64> {
@@ -139,6 +139,32 @@ pub fn enforce_storage_budget_with_probe(
     config: &StorageConfig,
     probe: &impl DiskSpaceProbe,
 ) -> Result<StorageEnforcementOutcome> {
+    // No prior write-block state — used by the initial enforcement call at
+    // startup, before any tick has run. Hysteresis is a no-op on the first call.
+    enforce_storage_budget_with_state(pool, config, probe, false)
+}
+
+/// Storage-budget enforcement with the previous tick's `write_blocked` state
+/// threaded in for hysteresis on the EXTERNAL disk-pressure path.
+///
+/// Two INDEPENDENT policies (syslog-mcp-w4hh):
+///   - **DB-size (self-trim):** `max_db_size_mb` measures cortex's OWN logical
+///     bytes. Cortex can resolve this by trimming its own oldest data, so it
+///     loops `delete_oldest_*_chunk` down to `recovery_db_size_mb` — UNLESS doing
+///     so would breach the err+ retention floor, in which case it stops and sets
+///     `write_blocked` rather than wiping irreplaceable high-severity history.
+///   - **Free-disk (external pressure):** `min_free_disk_mb` measures the WHOLE
+///     filesystem (statvfs). A neighbour process filling the shared volume is not
+///     something cortex can fix by deleting its own rows, so it NEVER deletes for
+///     this trigger — it sets `write_blocked` and relies on ingest back-pressure
+///     (receiver/writer.rs) until free disk recovers. Hysteresis: block engages at
+///     `min_free_disk_mb`, clears only at `recovery_free_disk_mb`.
+pub fn enforce_storage_budget_with_state(
+    pool: &DbPool,
+    config: &StorageConfig,
+    probe: &impl DiskSpaceProbe,
+    prev_write_blocked: bool,
+) -> Result<StorageEnforcementOutcome> {
     let recovery = recovery_targets(config);
     let mut deleted_rows = 0usize;
     let mut deleted_log_rows = 0usize;
@@ -165,15 +191,31 @@ pub fn enforce_storage_budget_with_probe(
         });
     }
 
-    // Only enter the cleanup loop if we have actually exceeded a trigger.
-    if exceeds_trigger(&metrics, config) {
-        while !within_recovery(&metrics, &recovery, config) {
+    // EXTERNAL disk-pressure decision (no deletion). Evaluated with hysteresis
+    // from the previous tick's state so the block engages at `min_free_disk_mb`
+    // and clears only once free disk has climbed back to `recovery_free_disk_mb`.
+    // The self-trim loop below runs INDEPENDENTLY of this — both can be active in
+    // the same tick (DB over its cap AND the filesystem low on free space).
+    let mut disk_write_blocked = disk_pressure_write_blocked(&metrics, config, prev_write_blocked);
+    if disk_write_blocked {
+        tracing::warn!(
+            free_disk_bytes = ?metrics.free_disk_bytes,
+            min_free_disk_mb = config.min_free_disk_mb,
+            recovery_free_disk_mb = config.recovery_free_disk_mb,
+            "Free-disk pressure detected — blocking writes WITHOUT deleting own data \
+             (external whole-filesystem condition; cortex cannot resolve it by self-trim)"
+        );
+    }
+
+    // SELF-TRIM loop: only the DB-size trigger drives deletion. Its recovery exit
+    // is `logical <= recovery_db_size_mb` (the free-disk arm never gates it).
+    if db_size_exceeds_trigger(&metrics, config) {
+        while !db_size_within_recovery(&metrics, &recovery, config) {
             tracing::warn!(
                 logical_db_size_bytes = metrics.logical_db_size_bytes,
                 physical_db_size_bytes = metrics.physical_db_size_bytes,
-                free_disk_bytes = ?metrics.free_disk_bytes,
                 deleted_rows,
-                "Storage budget exceeded trigger — deleting oldest telemetry chunk"
+                "DB-size budget exceeded — self-trimming oldest telemetry chunk"
             );
 
             let deleted_orphan_children = delete_orphan_heartbeat_children(pool)?;
@@ -198,7 +240,8 @@ pub fn enforce_storage_budget_with_probe(
                     }
                 }
                 Some(TelemetrySource::Logs) => {
-                    let deleted = delete_oldest_logs_chunk(pool, config.cleanup_chunk_size)?;
+                    let deleted =
+                        delete_oldest_logs_chunk(pool, config.cleanup_chunk_size, config)?;
                     DeletedTelemetryChunk {
                         deleted_rows: deleted.deleted_rows,
                         log_hostnames: deleted.hostnames,
@@ -211,21 +254,52 @@ pub fn enforce_storage_budget_with_probe(
                     source: TelemetrySource::Logs,
                 },
             };
+            // Floor-protection fallthrough: if the OLDEST source was logs but the
+            // chunk was fully err+-floor-protected (0 deleted), deletable heartbeats
+            // may still exist (they are simply newer than the protected logs, so
+            // `oldest_telemetry_source` picked logs). Trim a heartbeat chunk before
+            // concluding nothing is deletable — otherwise a DB-size breach would
+            // prematurely block writes while reclaimable heartbeat space remains.
+            let deleted = if deleted.deleted_rows == 0 && deleted.source == TelemetrySource::Logs {
+                let hb = delete_oldest_heartbeats_chunk(pool, config.cleanup_chunk_size)?;
+                if hb > 0 {
+                    tracing::info!(
+                        deleted_rows = hb,
+                        "Oldest logs were floor-protected; trimmed heartbeat chunk instead"
+                    );
+                }
+                DeletedTelemetryChunk {
+                    deleted_rows: hb,
+                    log_hostnames: Vec::new(),
+                    source: TelemetrySource::Heartbeats,
+                }
+            } else {
+                deleted
+            };
+
             if deleted.deleted_rows == 0 {
+                // Could not delete any more deletable rows. This is either an empty
+                // DB or — the case the err+ floor exists for — every remaining row
+                // is floor-protected AND no heartbeats remain to trim. Either way we
+                // stop trimming and BLOCK writes rather than wiping protected err+
+                // history to chase the DB cap.
                 metrics = get_storage_metrics_with_probe(pool, config, probe)?;
-                let write_blocked = exceeds_trigger(&metrics, config);
+                let still_over = db_size_exceeds_trigger(&metrics, config);
                 tracing::warn!(
                     logical_db_size_bytes = metrics.logical_db_size_bytes,
                     free_disk_bytes = ?metrics.free_disk_bytes,
                     deleted_rows,
-                    write_blocked,
-                    "Storage budget enforcement could not delete more rows"
+                    db_size_still_over = still_over,
+                    "Self-trim halted — no further deletable rows (err+ floor reached \
+                     or DB empty); blocking writes instead of deleting protected data"
                 );
                 return Ok(StorageEnforcementOutcome {
                     metrics,
                     recovery,
                     deleted_rows,
-                    write_blocked,
+                    // Block if EITHER the DB is still over cap with nothing left to
+                    // safely trim, OR the external disk pressure was already latched.
+                    write_blocked: still_over || disk_write_blocked,
                 });
             }
 
@@ -238,12 +312,16 @@ pub fn enforce_storage_budget_with_probe(
                 total_deleted_rows = deleted_rows,
                 source = ?deleted.source,
                 affected_hosts = deleted.log_hostnames.len(),
-                "Deleted oldest telemetry chunk for storage recovery"
+                "Self-trimmed oldest telemetry chunk for storage recovery"
             );
             all_hosts.extend(deleted.log_hostnames);
             metrics = get_storage_metrics_with_probe(pool, config, probe)?;
         }
     }
+
+    // Re-evaluate disk pressure against fresh metrics after any self-trim above
+    // (self-trim frees real bytes, which can lift free disk back over recovery).
+    disk_write_blocked = disk_pressure_write_blocked(&metrics, config, prev_write_blocked);
 
     if deleted_rows > 0 {
         // Reconcile hosts once after all chunks — avoids N×3 SQL round-trips
@@ -269,6 +347,7 @@ pub fn enforce_storage_budget_with_probe(
         logical_db_size_bytes = metrics.logical_db_size_bytes,
         physical_db_size_bytes = metrics.physical_db_size_bytes,
         free_disk_bytes = ?metrics.free_disk_bytes,
+        write_blocked = disk_write_blocked,
         "Storage budget enforcement completed"
     );
 
@@ -276,7 +355,9 @@ pub fn enforce_storage_budget_with_probe(
         metrics,
         recovery,
         deleted_rows,
-        write_blocked: false,
+        // The DB-size path resolves by self-trim and never blocks here; the only
+        // reason to block on a clean completion is unresolved EXTERNAL disk pressure.
+        write_blocked: disk_write_blocked,
     })
 }
 
@@ -595,56 +676,149 @@ fn oldest_telemetry_source(pool: &DbPool) -> Result<Option<TelemetrySource>> {
     })
 }
 
-fn delete_oldest_logs_chunk(pool: &DbPool, chunk_size: usize) -> Result<DeletedChunk> {
+/// Delete the oldest chunk of log rows for DB-size self-trim, honouring the
+/// err+ retention FLOOR (syslog-mcp-w4hh).
+///
+/// The floor protects, per source IP, the most-recent `err_floor_per_source_cap`
+/// rows whose `severity IN ('err','crit','alert','emerg')` received within the
+/// last `err_floor_window_hours`. Those rows are EXCLUDED from the deletable set,
+/// so self-trim destroys low-value telemetry first and never wipes recent,
+/// per-source-bounded high-severity history to chase the DB-size cap.
+///
+/// Two security bounds (W1) make this safe against unauthenticated syslog:
+///   - **time window** — only recent err+ is protected, so a hostile source
+///     cannot pin the floor indefinitely with old severity=err spam;
+///   - **per-source cap** — keyed on `source_ip` (the socket peer, which the
+///     sender cannot freely vary per packet), NOT the payload `hostname` (which
+///     is attacker-controlled), so no single source can monopolise the floor.
+///
+/// Returning `deleted_rows == 0` while the DB is still over cap is the signal to
+/// the caller that the floor (or an empty deletable set) has been reached; the
+/// caller converts that to `write_blocked` instead of deleting protected rows.
+fn delete_oldest_logs_chunk(
+    pool: &DbPool,
+    chunk_size: usize,
+    config: &StorageConfig,
+) -> Result<DeletedChunk> {
     let conn = pool.get()?;
 
-    // Collect distinct hostnames from the chunk we're about to delete.
-    // Use a subquery instead of a dynamic IN-list to avoid SQLite expression
-    // depth limit (default 1000) at large chunk sizes.
-    let hostnames: Vec<String> = {
-        let mut stmt = conn.prepare(
-            "SELECT DISTINCT hostname FROM logs \
-             WHERE id IN (SELECT id FROM logs ORDER BY received_at ASC, id ASC LIMIT ?1)",
-        )?;
-        let result = stmt
-            .query_map([chunk_size as i64], |row| row.get(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        result
+    // Build the protected-id CTE + the deletable selection. When the floor is
+    // disabled (window or cap == 0) we fall back to the original unfiltered
+    // oldest-first selection.
+    let floor_enabled = config.err_floor_window_hours > 0 && config.err_floor_per_source_cap > 0;
+
+    // Window start as an RFC3339 string comparable to `received_at`.
+    //
+    // `received_at` is stored with MILLISECOND precision and a `Z` suffix (see
+    // `app::time::rfc3339_z`, the syslog/docker/OTLP ingest paths). We MUST format
+    // `window_start` the same way: a second-precision string like
+    // "...:27Z" sorts AFTER "...:27.680Z" lexicographically (because 'Z'=0x5A >
+    // '.'=0x2E), so a coarser format would silently protect the wrong rows.
+    //
+    // Overflow handling: `err_floor_window_hours` is a u64 and `TimeDelta` is
+    // i64-hours-bounded. A pathological value would overflow the conversion or the
+    // subtraction. The old code mapped that to `None`, which downstream collapsed
+    // to `""` — and `received_at >= ""` is always true, so EVERY err+ row would be
+    // protected, defeating the trim entirely. Fail fast instead.
+    let window_start = if floor_enabled {
+        let hours = i64::try_from(config.err_floor_window_hours).map_err(|_| {
+            anyhow::anyhow!(
+                "err_floor_window_hours ({}) is too large to represent as a time delta",
+                config.err_floor_window_hours
+            )
+        })?;
+        let delta = chrono::TimeDelta::try_hours(hours).ok_or_else(|| {
+            anyhow::anyhow!(
+                "err_floor_window_hours ({hours}) overflows the supported time-delta range"
+            )
+        })?;
+        let start = Utc::now().checked_sub_signed(delta).ok_or_else(|| {
+            anyhow::anyhow!(
+                "err_floor_window_hours ({hours}) underflows the representable timestamp range"
+            )
+        })?;
+        Some(start.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+    } else {
+        None
     };
 
-    // Pre-flight: count high-severity rows in the chunk so we can warn the
-    // operator that disk-pressure cleanup is overriding the time-based
-    // retention exemption for err+ logs.
-    let high_severity_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM logs \
-         WHERE id IN (SELECT id FROM logs ORDER BY received_at ASC, id ASC LIMIT ?1) \
-           AND severity IN ('err', 'crit', 'alert', 'emerg')",
-        [chunk_size as i64],
-        |row| row.get(0),
-    )?;
-    if high_severity_count > 0 {
-        tracing::warn!(
-            high_severity_count,
-            chunk_size,
-            "Storage enforcement deleting high-severity rows — \
-             disk pressure overrides time-based retention exemption"
-        );
-    }
+    // Common deletable-id selection. `source_ip` is stored as `ip:port`; we
+    // PARTITION on the IP portion only (strip the ephemeral port) so all packets
+    // from one peer share a single per-source budget. Window functions require
+    // SQLite >= 3.25 (rusqlite `bundled` ships 3.4x).
+    let deletable_select = if floor_enabled {
+        "SELECT id FROM logs \
+         WHERE id NOT IN ( \
+             SELECT id FROM ( \
+                 SELECT id, ROW_NUMBER() OVER ( \
+                     PARTITION BY substr(source_ip, 1, \
+                         CASE WHEN instr(source_ip, ':') > 0 \
+                              THEN instr(source_ip, ':') - 1 \
+                              ELSE length(source_ip) END) \
+                     ORDER BY received_at DESC, id DESC \
+                 ) AS rn \
+                 FROM logs \
+                 WHERE severity IN ('err','crit','alert','emerg') \
+                   AND received_at >= :window_start \
+             ) WHERE rn <= :cap \
+         ) \
+         ORDER BY received_at ASC, id ASC LIMIT :chunk"
+    } else {
+        "SELECT id FROM logs ORDER BY received_at ASC, id ASC LIMIT :chunk"
+    };
 
-    // Delete the oldest chunk using a subquery — O(1) SQL string size regardless
-    // of chunk_size, no expression depth issues.
+    // Collect distinct hostnames from the chunk we're about to delete.
+    let hostnames: Vec<String> = {
+        let sql = format!("SELECT DISTINCT hostname FROM logs WHERE id IN ({deletable_select})");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = if floor_enabled {
+            stmt.query_map(
+                rusqlite::named_params! {
+                    ":window_start": window_start.as_deref().unwrap_or(""),
+                    ":cap": config.err_floor_per_source_cap as i64,
+                    ":chunk": chunk_size as i64,
+                },
+                |row| row.get(0),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            stmt.query_map(
+                rusqlite::named_params! { ":chunk": chunk_size as i64 },
+                |row| row.get(0),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        rows
+    };
+
+    // Delete the deletable chunk. When the floor is active, protected err+ rows
+    // are never in this set — so this path no longer overrides the err+ exemption.
+    // Serialize the DELETE behind the process-wide write lock (v1.1.3) so it
+    // never races other writers against SQLite's single write lock.
+    let delete_sql = format!("DELETE FROM logs WHERE id IN ({deletable_select})");
     let _write_guard = crate::db::write_lock();
-    let deleted_rows = conn.execute(
-        "DELETE FROM logs \
-         WHERE id IN (SELECT id FROM logs ORDER BY received_at ASC, id ASC LIMIT ?1)",
-        [chunk_size as i64],
-    )?;
+    let deleted_rows = if floor_enabled {
+        conn.execute(
+            &delete_sql,
+            rusqlite::named_params! {
+                ":window_start": window_start.as_deref().unwrap_or(""),
+                ":cap": config.err_floor_per_source_cap as i64,
+                ":chunk": chunk_size as i64,
+            },
+        )?
+    } else {
+        conn.execute(
+            &delete_sql,
+            rusqlite::named_params! { ":chunk": chunk_size as i64 },
+        )?
+    };
 
     tracing::debug!(
         deleted_rows,
         affected_hosts = hostnames.len(),
         chunk_size,
-        "Deleted oldest logs chunk"
+        floor_enabled,
+        "Deleted oldest deletable logs chunk (err+ floor honoured)"
     );
 
     Ok(DeletedChunk {
@@ -827,23 +1001,71 @@ fn recovery_targets(config: &StorageConfig) -> StorageRecovery {
     }
 }
 
+/// Combined trigger: true if EITHER the DB-size cap or the free-disk floor is
+/// breached. Retained for the read-only health/stats surfaces (queries.rs,
+/// service.rs) that report whether writes are currently constrained — they want
+/// the OR of both conditions. Enforcement itself uses the split helpers below so
+/// the two pressures get distinct remediation.
 pub fn exceeds_trigger(metrics: &StorageMetrics, config: &StorageConfig) -> bool {
-    (config.max_db_size_mb > 0
-        && metrics.logical_db_size_bytes > mb_to_bytes(config.max_db_size_mb))
-        || (config.min_free_disk_mb > 0
-            && metrics.free_disk_bytes.unwrap_or(0) < mb_to_bytes(config.min_free_disk_mb))
+    db_size_exceeds_trigger(metrics, config) || disk_free_below_trigger(metrics, config)
 }
 
-fn within_recovery(
+/// DB-size trigger: cortex's OWN logical bytes exceed `max_db_size_mb`.
+/// Resolvable by self-trim.
+fn db_size_exceeds_trigger(metrics: &StorageMetrics, config: &StorageConfig) -> bool {
+    config.max_db_size_mb > 0 && metrics.logical_db_size_bytes > mb_to_bytes(config.max_db_size_mb)
+}
+
+/// Free-disk trigger: whole-filesystem free space is below `min_free_disk_mb`.
+/// EXTERNAL — never resolved by deleting cortex's own data.
+fn disk_free_below_trigger(metrics: &StorageMetrics, config: &StorageConfig) -> bool {
+    // FAIL-CLOSED: when the free-disk guardrail is enabled (`min_free_disk_mb > 0`)
+    // but the statvfs probe failed (`free_disk_bytes == None`), treat free space as
+    // 0 (unknown == worst case) so the guardrail engages conservatively instead of
+    // silently disabling itself. With the guardrail disabled the function short-
+    // circuits on `> 0` and never inspects the probe at all.
+    config.min_free_disk_mb > 0
+        && metrics.free_disk_bytes.unwrap_or(0) < mb_to_bytes(config.min_free_disk_mb)
+}
+
+/// Self-trim recovery exit: the DB-size loop stops once logical size is at or
+/// below `recovery_db_size_mb`. Deliberately ignores the free-disk arm so the
+/// self-trim loop is NOT gated by an external condition it cannot fix.
+fn db_size_within_recovery(
     metrics: &StorageMetrics,
     recovery: &StorageRecovery,
     config: &StorageConfig,
 ) -> bool {
-    let db_ok = config.max_db_size_mb == 0
-        || metrics.logical_db_size_bytes <= recovery.logical_db_size_bytes;
-    let disk_ok = config.min_free_disk_mb == 0
-        || metrics.free_disk_bytes.unwrap_or(0) >= recovery.free_disk_bytes.unwrap_or(0);
-    db_ok && disk_ok
+    config.max_db_size_mb == 0 || metrics.logical_db_size_bytes <= recovery.logical_db_size_bytes
+}
+
+/// Hysteresis decision for the external free-disk write-block.
+///
+/// - Below `min_free_disk_mb` → engage the block.
+/// - At/above `recovery_free_disk_mb` → clear the block.
+/// - In the (min, recovery) hysteresis band → keep whatever the previous tick
+///   decided (`prev`). This needs prior state: the answer in the band is not a
+///   pure function of current metrics, which is exactly why the block latches
+///   instead of flapping at the trigger threshold.
+fn disk_pressure_write_blocked(
+    metrics: &StorageMetrics,
+    config: &StorageConfig,
+    prev: bool,
+) -> bool {
+    if config.min_free_disk_mb == 0 {
+        return false;
+    }
+    // FAIL-CLOSED: the guardrail is enabled here, so a failed statvfs probe
+    // (`None`) is treated as 0 free bytes (worst case) — the block engages rather
+    // than fails open. Mirrors `disk_free_below_trigger`.
+    let free = metrics.free_disk_bytes.unwrap_or(0);
+    if free < mb_to_bytes(config.min_free_disk_mb) {
+        true
+    } else if free >= mb_to_bytes(config.recovery_free_disk_mb) {
+        false
+    } else {
+        prev
+    }
 }
 
 fn mb_to_bytes(mb: u64) -> u64 {

@@ -652,13 +652,28 @@ impl RuntimeCore {
                 };
                 let pool = Arc::clone(&storage_pool);
                 let storage = storage_config.clone();
+                // Carry the previous tick's write_blocked into enforcement so the
+                // external disk-pressure block latches with hysteresis (engage at
+                // min_free_disk_mb, clear only at recovery_free_disk_mb) rather than
+                // flapping at the trigger threshold (syslog-mcp-w4hh).
+                let prev_write_blocked = shared_storage_state
+                    .lock()
+                    .expect("storage state mutex poisoned")
+                    .as_ref()
+                    .map(|s| s.write_blocked)
+                    .unwrap_or(false);
                 tracing::debug!(
                     cleanup_interval_secs = storage_config.cleanup_interval_secs,
                     "Storage budget enforcement tick started"
                 );
                 match tokio::task::spawn_blocking(move || {
                     let _permit = permit;
-                    let outcome = db::enforce_storage_budget(&pool, &storage)?;
+                    let outcome = db::enforce_storage_budget_with_state(
+                        &pool,
+                        &storage,
+                        &db::SystemDiskSpaceProbe,
+                        prev_write_blocked,
+                    )?;
                     match db::db_wal_checkpoint(&pool, "passive") {
                         Ok((busy, log_frames, checkpointed_frames)) => {
                             if log_frames > 0 || busy != 0 {

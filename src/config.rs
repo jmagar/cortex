@@ -230,6 +230,14 @@ pub struct StorageConfig {
     /// Number of rows to delete per chunk during storage enforcement
     #[serde(default = "default_cleanup_chunk_size")]
     pub cleanup_chunk_size: usize,
+    /// Time window (hours) during which high-severity (err/crit/alert/emerg) logs
+    /// are protected from disk-pressure deletion. 0 = disable the err+ floor.
+    #[serde(default = "default_err_floor_window_hours")]
+    pub err_floor_window_hours: u64,
+    /// Maximum err+ rows protected per source IP within the floor window. Bounds
+    /// any single source's share of the protected set. 0 = disable the floor.
+    #[serde(default = "default_err_floor_per_source_cap")]
+    pub err_floor_per_source_cap: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -463,10 +471,29 @@ fn default_recovery_db_size_mb() -> u64 {
     900
 }
 fn default_min_free_disk_mb() -> u64 {
-    512
+    // 0 = disabled. Whole-filesystem free space is an EXTERNAL condition cortex
+    // cannot resolve by deleting its OWN data — see syslog-mcp-w4hh. When this is
+    // non-zero the enforcement path treats low free disk as a write-block signal,
+    // NOT as a trigger to self-trim. Default 0 to stop the self-wipe out of the box.
+    0
 }
 fn default_recovery_free_disk_mb() -> u64 {
-    768
+    // MUST stay paired with default_min_free_disk_mb: validate_storage_config
+    // requires recovery_free_disk_mb == 0 when min_free_disk_mb == 0, so a fresh
+    // StorageConfig::default() would FAIL validation if this were non-zero.
+    0
+}
+fn default_err_floor_window_hours() -> u64 {
+    // err+ rows received within this window are protected from disk-pressure
+    // deletion. Time-windowed (not unbounded) so an unauthenticated source cannot
+    // pin the floor indefinitely with severity=err spam (syslog-mcp-w4hh W1).
+    24
+}
+fn default_err_floor_per_source_cap() -> usize {
+    // Maximum err+ rows protected per source IP within the window. Bounds how much
+    // of the protected set any single (attacker-controlled) source can occupy, so
+    // one hostile sender cannot monopolise the floor (syslog-mcp-w4hh W1).
+    10_000
 }
 fn default_cleanup_interval_secs() -> u64 {
     60
@@ -537,6 +564,8 @@ impl Default for StorageConfig {
             recovery_free_disk_mb: default_recovery_free_disk_mb(),
             cleanup_interval_secs: default_cleanup_interval_secs(),
             cleanup_chunk_size: default_cleanup_chunk_size(),
+            err_floor_window_hours: default_err_floor_window_hours(),
+            err_floor_per_source_cap: default_err_floor_per_source_cap(),
         }
     }
 }
@@ -712,6 +741,14 @@ impl Config {
         env_override_parse(
             "CORTEX_CLEANUP_CHUNK_SIZE",
             &mut config.storage.cleanup_chunk_size,
+        )?;
+        env_override_parse(
+            "CORTEX_ERR_FLOOR_WINDOW_HOURS",
+            &mut config.storage.err_floor_window_hours,
+        )?;
+        env_override_parse(
+            "CORTEX_ERR_FLOOR_PER_SOURCE_CAP",
+            &mut config.storage.err_floor_per_source_cap,
         )?;
 
         // [mcp.auth] env overrides.
@@ -1328,6 +1365,20 @@ fn validate_storage_config(storage: &StorageConfig) -> anyhow::Result<()> {
         ));
     }
 
+    // err+ retention floor (syslog-mcp-w4hh). The floor is dimensioned in
+    // (time window × per-source row count), NOT bytes, so there is no
+    // meaningful "floor < max_db_size_mb" byte comparison. The coherent
+    // invariant is that the floor must not be self-contradictory: if a window
+    // is configured, the per-source cap must be > 0, otherwise the floor would
+    // protect a non-empty time window yet retain zero rows from it — a silent
+    // footgun that re-enables the err+ self-wipe the floor exists to prevent.
+    if storage.err_floor_window_hours > 0 && storage.err_floor_per_source_cap == 0 {
+        return Err(anyhow::anyhow!(
+            "err_floor_per_source_cap must be > 0 when err_floor_window_hours is set \
+             (a window with a zero per-source cap protects no err+ rows)"
+        ));
+    }
+
     Ok(())
 }
 
@@ -1378,6 +1429,8 @@ impl StorageConfig {
             recovery_free_disk_mb: 0,
             cleanup_interval_secs: 60,
             cleanup_chunk_size: 1,
+            err_floor_window_hours: default_err_floor_window_hours(),
+            err_floor_per_source_cap: default_err_floor_per_source_cap(),
         }
     }
 }
