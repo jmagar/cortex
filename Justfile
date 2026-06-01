@@ -162,10 +162,12 @@ build-plugin: release
     #!/bin/sh
     set -eu
     target_dir="${CARGO_TARGET_DIR:-target}"
-    if [ ! -x "$target_dir/release/syslog" ] && [ -x ".cache/cargo/release/syslog" ]; then
+    if [ ! -x "$target_dir/release/cortex" ] && [ -x ".cache/cargo/release/cortex" ]; then
       target_dir=".cache/cargo"
     fi
-    install -m 755 "$target_dir/release/syslog" bin/syslog
+    mkdir -p bin plugins/cortex/bin
+    install -m 755 "$target_dir/release/cortex" bin/cortex
+    install -m 755 "$target_dir/release/cortex" plugins/cortex/bin/cortex
 
 build-mcpb:
     bash scripts/build-mcpb.sh
