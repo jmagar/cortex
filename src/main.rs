@@ -555,6 +555,11 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     let mut mode = cortex::setup::SetupMode::FirstRun;
     let mut json = false;
     let mut iter = args.iter();
+    if matches!(iter.clone().next().map(String::as_str), Some("install")) {
+        let dest = cli::install_self()?;
+        println!("installed -> {}", dest.display());
+        std::process::exit(0);
+    }
     if matches!(iter.clone().next().map(String::as_str), Some("doctor")) {
         let _ = iter.next();
         for arg in iter {

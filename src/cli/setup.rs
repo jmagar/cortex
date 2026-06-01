@@ -84,7 +84,7 @@ struct PluginHookReport {
 /// Copy the running binary into `~/.local/bin/<name>` so it is callable as a
 /// bare command in the user's own terminal, independent of Claude Code. Copy
 /// (not symlink) so it survives `/plugin update`. std + anyhow only.
-fn install_self() -> Result<std::path::PathBuf> {
+pub(crate) fn install_self() -> Result<std::path::PathBuf> {
     let exe = std::env::current_exe()?;
     let name = exe
         .file_name()
