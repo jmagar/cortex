@@ -604,13 +604,17 @@ fn migration_22_converges_from_partial_apply() {
     let pool = init_pool(&config).unwrap();
     {
         let conn = pool.get().unwrap();
-        // Sanity: we are genuinely at version 22 with the columns present.
-        let max_version: i64 = conn
-            .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| {
-                r.get(0)
-            })
+        // Sanity: migration 22 specifically is applied, with the columns present.
+        // Assert on version 22 directly (not MAX(version)) so a future migration 23
+        // cannot break this test even though migration 22 is correctly applied.
+        let m22_applied: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = 22",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(max_version, 22, "fixture must reach migration 22");
+        assert_eq!(m22_applied, 1, "fixture must reach migration 22");
         for column in ["source_row_count", "source_max_id"] {
             assert!(
                 column_exists(&conn, "ai_session_rollup_meta", column).unwrap(),
@@ -628,12 +632,16 @@ fn migration_22_converges_from_partial_apply() {
         init_pool(&config).expect("init_pool must be reentrant after a partial migration 22 apply");
     let conn = pool.get().unwrap();
 
-    let max_version: i64 = conn
-        .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| {
-            r.get(0)
-        })
+    // Assert migration 22 specifically was re-stamped (not MAX(version)) so a
+    // future migration 23 cannot mask a missing 22 marker / break this test.
+    let m22_applied: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 22",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(max_version, 22, "version marker must be re-stamped to 22");
+    assert_eq!(m22_applied, 1, "version marker must be re-stamped to 22");
 
     for column in ["source_row_count", "source_max_id"] {
         assert!(
@@ -659,10 +667,14 @@ fn init_pool_is_idempotent_when_run_twice() {
 
     let pool = init_pool(&config).expect("second init_pool on same file must succeed");
     let conn = pool.get().unwrap();
-    let max_version: i64 = conn
-        .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| {
-            r.get(0)
-        })
+    // Assert migration 22 specifically is applied (not MAX(version)) so a future
+    // migration 23 cannot break this test even though 22 is correctly applied.
+    let m22_applied: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 22",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(max_version, 22);
+    assert_eq!(m22_applied, 1);
 }
