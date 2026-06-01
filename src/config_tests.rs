@@ -316,8 +316,11 @@ fn defaults_include_storage_budget_settings() {
     let cfg = Config::default();
     assert_eq!(cfg.storage.max_db_size_mb, 1024);
     assert_eq!(cfg.storage.recovery_db_size_mb, 900);
-    assert_eq!(cfg.storage.min_free_disk_mb, 512);
-    assert_eq!(cfg.storage.recovery_free_disk_mb, 768);
+    // syslog-mcp-w4hh: free-disk guardrail defaults to 0 (disabled) so cortex
+    // does not self-wipe to chase external whole-filesystem pressure. The two
+    // free-disk fields MUST default to 0 together to pass validate_storage_config.
+    assert_eq!(cfg.storage.min_free_disk_mb, 0);
+    assert_eq!(cfg.storage.recovery_free_disk_mb, 0);
     assert_eq!(cfg.storage.cleanup_interval_secs, 60);
 }
 
@@ -451,9 +454,10 @@ fn docker_ingest_requires_hosts_when_enabled() {
     config.hosts.clear();
 
     let err = validate_docker_ingest_config(&config).unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("docker_ingest.hosts must not be empty"));
+    assert!(
+        err.to_string()
+            .contains("docker_ingest.hosts must not be empty")
+    );
 }
 
 #[test]
@@ -478,9 +482,10 @@ fn docker_ingest_rejects_duplicate_host_names() {
     };
 
     let err = validate_docker_ingest_config(&config).unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("duplicate docker_ingest host name"));
+    assert!(
+        err.to_string()
+            .contains("duplicate docker_ingest host name")
+    );
 }
 
 #[test]
@@ -1014,6 +1019,64 @@ fn repo_local_oauth_config_rejects_allowed_emails_until_enforced() {
     let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(
         err.to_string().contains("allowed_emails"),
+        "wrong error: {err}"
+    );
+}
+
+// ---- syslog-mcp-w4hh: storage budget defaults + validation ----
+
+/// The self-wipe stop-the-bleed: min_free_disk_mb defaults to 0 so cortex does
+/// not treat external whole-FS pressure as a trigger to delete its own data.
+#[test]
+fn min_free_disk_mb_default_is_zero() {
+    let storage = StorageConfig::default();
+    assert_eq!(
+        storage.min_free_disk_mb, 0,
+        "min_free_disk_mb must default to 0 (no external-pressure self-wipe)"
+    );
+}
+
+/// W2 MUST-FIX: StorageConfig::default() must PASS validate_storage_config.
+/// validate_storage_config rejects recovery_free_disk_mb != 0 when
+/// min_free_disk_mb == 0, so default_recovery_free_disk_mb must also be 0 — else
+/// fresh deploys crash at startup. StorageConfig::for_test uses 0/0 and so cannot
+/// catch this; this test asserts the real Default impl.
+#[test]
+fn default_storage_config_passes_validation() {
+    let storage = StorageConfig::default();
+    assert_eq!(
+        storage.recovery_free_disk_mb, 0,
+        "recovery_free_disk_mb must default to 0 to pair with min_free_disk_mb=0"
+    );
+    validate_storage_config(&storage)
+        .expect("StorageConfig::default() must pass validate_storage_config (W2)");
+}
+
+/// A TOML config with no [storage] overrides must also deserialize to defaults
+/// that pass validation — guards the serde-default path, not just Default::default.
+#[test]
+fn default_toml_storage_config_passes_validation() {
+    #[derive(serde::Deserialize)]
+    struct Wrapper {
+        #[serde(default)]
+        storage: StorageConfig,
+    }
+    let parsed: Wrapper = toml::from_str("").expect("empty config must deserialize");
+    validate_storage_config(&parsed.storage)
+        .expect("default-deserialized StorageConfig must pass validation (W2)");
+}
+
+/// The err+ floor invariant: a window with a zero per-source cap is rejected.
+#[test]
+fn err_floor_window_with_zero_cap_is_rejected() {
+    let storage = StorageConfig {
+        err_floor_window_hours: 24,
+        err_floor_per_source_cap: 0,
+        ..StorageConfig::default()
+    };
+    let err = validate_storage_config(&storage).unwrap_err();
+    assert!(
+        err.to_string().contains("err_floor_per_source_cap"),
         "wrong error: {err}"
     );
 }

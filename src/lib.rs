@@ -103,6 +103,8 @@ pub mod testing {
             recovery_free_disk_mb: 0,
             cleanup_interval_secs: 60,
             cleanup_chunk_size: 1,
+            err_floor_window_hours: 24,
+            err_floor_per_source_cap: 10_000,
         }
     }
 
