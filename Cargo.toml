@@ -1,6 +1,6 @@
 [package]
 name = "cortex"
-version = "1.1.2"
+version = "1.1.3"
 edition = "2021"
 rust-version = "1.86"
 description = "Homelab intelligence platform — syslog/OTLP/Docker log aggregation, fleet awareness, and AI agent coordination over MCP, CLI, and HTTP"
@@ -27,6 +27,7 @@ tower-http = { version = "0.6", features = ["cors", "limit", "trace"] }
 
 # SQLite
 rusqlite = { version = "0.39", features = ["bundled", "vtab", "backup"] }
+parking_lot = "0.12"
 r2d2 = "0.8"
 r2d2_sqlite = "0.33"
 scheduled-thread-pool = "0.2"

@@ -52,12 +52,14 @@ pub fn db_wal_checkpoint(pool: &DbPool, mode: &str) -> Result<(i64, i64, i64)> {
 
 pub fn db_incremental_vacuum(pool: &DbPool, pages: u32) -> Result<()> {
     let conn = pool.get()?;
+    let _write_guard = crate::db::write_lock();
     conn.execute_batch(&format!("PRAGMA incremental_vacuum({pages});"))?;
     Ok(())
 }
 
 pub fn db_full_vacuum(pool: &DbPool) -> Result<()> {
     let conn = pool.get()?;
+    let _write_guard = crate::db::write_lock();
     conn.execute_batch("VACUUM;")?;
     Ok(())
 }
@@ -303,6 +305,7 @@ fn fts_incremental_merge(pool: &DbPool, deleted_rows: usize, merge_pages: u32) {
     for i in 0..iterations {
         match pool.get() {
             Ok(conn) => {
+                let _write_guard = crate::db::write_lock();
                 match conn.execute_batch(&merge_stmt) {
                     Ok(()) => {
                         consecutive_failures = 0;
@@ -406,6 +409,7 @@ pub fn purge_old_logs(pool: &DbPool, retention_days: u32, fts_merge_pages: u32) 
     let mut total_deleted: usize = 0;
     loop {
         let conn = pool.get()?;
+        let _write_guard = crate::db::write_lock();
         let chunk = conn.execute(
             "DELETE FROM logs WHERE id IN (
                  SELECT id FROM logs
@@ -522,6 +526,7 @@ pub fn purge_by_tag_window(
     let mut total_deleted: usize = 0;
     loop {
         let conn = pool.get()?;
+        let _write_guard = crate::db::write_lock();
         let chunk = conn.execute(
             "DELETE FROM logs WHERE id IN (
                  SELECT id FROM logs
@@ -628,6 +633,7 @@ fn delete_oldest_logs_chunk(pool: &DbPool, chunk_size: usize) -> Result<DeletedC
 
     // Delete the oldest chunk using a subquery — O(1) SQL string size regardless
     // of chunk_size, no expression depth issues.
+    let _write_guard = crate::db::write_lock();
     let deleted_rows = conn.execute(
         "DELETE FROM logs \
          WHERE id IN (SELECT id FROM logs ORDER BY received_at ASC, id ASC LIMIT ?1)",
@@ -662,6 +668,7 @@ fn delete_heartbeat_chunk_where(
     chunk_size: usize,
 ) -> Result<usize> {
     let mut conn = pool.get()?;
+    let _write_guard = crate::db::write_lock();
     let tx = conn.transaction()?;
     tx.execute_batch(
         "CREATE TEMP TABLE IF NOT EXISTS temp_heartbeat_delete_ids (
@@ -727,6 +734,7 @@ fn delete_orphan_heartbeat_children(pool: &DbPool) -> Result<usize> {
     let conn = pool.get()?;
     let mut total_deleted = 0usize;
     for table in HEARTBEAT_CHILD_TABLES {
+        let _write_guard = crate::db::write_lock();
         let deleted = conn.execute(
             &format!(
                 "DELETE FROM {table}
@@ -757,6 +765,7 @@ fn reconcile_hosts(pool: &DbPool, hostnames: &[String]) -> Result<()> {
     }
 
     let mut conn = pool.get()?;
+    let _write_guard = crate::db::write_lock();
     let tx = conn.transaction()?;
     for hostname in hostnames {
         // One query: count + timestamp bounds in a single pass over the index.
@@ -797,6 +806,7 @@ fn checkpoint_wal_and_incremental_vacuum(pool: &DbPool) -> Result<()> {
     } else {
         tracing::debug!("WAL checkpoint completed");
     }
+    let _write_guard = crate::db::write_lock();
     if let Err(e) = conn.execute_batch("PRAGMA incremental_vacuum(1000);") {
         tracing::warn!(error = %e, "incremental vacuum skipped (non-fatal)");
     } else {

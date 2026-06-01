@@ -56,7 +56,7 @@ fn normalize_syslog_owned_service(service: &str) -> ServiceResult<String> {
         Ok(unit)
     } else {
         Err(ServiceError::InvalidInput(format!(
-            "unsupported syslog-owned service '{service}'; expected one of {}",
+            "unsupported cortex-owned service '{service}'; expected one of {}",
             CORTEX_OWNED_USER_SERVICES.join(", ")
         )))
     }
@@ -165,9 +165,9 @@ fn incident_sort_key(timestamp: &str) -> i64 {
         .unwrap_or(i64::MAX)
 }
 
-/// Read a syslog-owned service's journal via `journalctl`. Free function so
+/// Read a cortex-owned service's journal via `journalctl`. Free function so
 /// callers can invoke it without standing up a [`CortexService`] (and the
-/// SQLite pool that backs it) — `syslog service logs` is a self-debugging
+/// SQLite pool that backs it) — `cortex service logs` is a self-debugging
 /// surface that must work when the DB is corrupted, locked, or full.
 ///
 /// The `os` parameter is the `OsAdapter` to use for the journalctl shell-out.
@@ -254,7 +254,7 @@ pub async fn run_compose_status() -> ServiceResult<crate::compose::ComposeStatus
 /// task boundaries (bead 0p8r.24). The other 5 LOCAL-only command dispatchers
 /// take `&CortexService` because they don't move the service into a spawned
 /// task; both patterns are correct.
-/// Facade for all syslog MCP service operations.
+/// Facade for all cortex MCP service operations.
 ///
 /// # Architecture note (Arch-C2 — partial)
 ///
@@ -2059,6 +2059,7 @@ impl CortexService {
         let hash_clone = hash.clone();
         self.run_db("ack_error.commit", move |pool| {
             let mut conn = pool.get()?;
+            let _write_guard = crate::db::write_lock();
             let tx = conn.transaction()?;
             crate::db::error_signatures::record_ack_event(
                 &tx,
@@ -2127,6 +2128,7 @@ impl CortexService {
         let hash_clone = hash.clone();
         self.run_db("unack_error.commit", move |pool| {
             let mut conn = pool.get()?;
+            let _write_guard = crate::db::write_lock();
             let tx = conn.transaction()?;
             crate::db::error_signatures::record_ack_event(
                 &tx,
