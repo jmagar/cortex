@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 
 use crate::config::StorageConfig;
 
@@ -592,50 +592,118 @@ pub fn refresh_ai_session_rollup_if_stale(pool: &DbPool) -> Result<RollupRefresh
     Ok(RollupRefresh::Refreshed { row_count })
 }
 
-/// Recompute the `ai_session_rollup` materialization from `logs` in a single
-/// transaction, then stamp `refreshed_at` and the source watermark. Returns the
-/// number of session rows. This is the unconditional/force path; the background
-/// task uses [`refresh_ai_session_rollup_if_stale`] to skip no-op refreshes.
+/// Recompute the `ai_session_rollup` materialization from `logs` using a
+/// **staging + atomic swap** strategy, then stamp `refreshed_at` and the source
+/// watermark. Returns the number of session rows. This is the
+/// unconditional/force path; the background task uses
+/// [`refresh_ai_session_rollup_if_stale`] to skip no-op refreshes.
 ///
-/// This runs the same full aggregation as the live path — the win is that it
-/// happens on a background cadence (not per request) so reads stay O(#sessions).
-/// Refresh-based by design: see the Migration 21 note in `pool.rs` for why a
-/// trigger-maintained rollup would corrupt MIN/MAX under DELETE.
+/// This is a FULL recompute (not incremental) and stays correct under retention
+/// DELETEs: AI rows ingest at `info` and get NO severity exemption from the
+/// purge paths (maintenance.rs), so they ARE deleted out from under the rollup.
+/// A watermark-incremental refresh would corrupt `MIN(first_seen)`, leave ghost
+/// rollup rows for fully-purged sessions, and drift `event_count` — MIN/MAX are
+/// non-self-maintainable aggregates. See the Migration 21 note in `pool.rs` and
+/// bead syslog-mcp-rvcz for the full rationale.
+///
+/// ## Staging + swap (writer-starvation fix, bead syslog-mcp-rvcz)
+/// The full `GROUP BY` over the AI partition costs ~4s at scale. Previously it
+/// ran inside the `IMMEDIATE` write transaction, holding the single WAL writer
+/// slot for that whole window and starving the ingest writer (dropped inserts)
+/// and bloating the WAL. We now split it:
+///   1. **Build** the full aggregation into a connection-local TEMP staging
+///      table under a READ snapshot — WAL readers do NOT block the writer, so
+///      this holds ZERO write lock for the entire ~4s.
+///   2. **Swap** under a sub-millisecond `IMMEDIATE` transaction:
+///      `DELETE` + `INSERT ... SELECT * FROM staging` + stamp meta + `COMMIT`.
+///
+/// ### INVARIANT — the build and the swap MUST use the SAME `Connection`.
+/// The staging table is a `TEMP` table, which is **connection-local**: it is
+/// only visible to the rusqlite `Connection` that created it. This function
+/// deliberately holds ONE `conn` (from a single `pool.get()`) across both
+/// phases. A future refactor that splits the build and swap into helpers that
+/// each call `pool.get()` would silently produce an EMPTY staging table and
+/// wipe the rollup (data-loss regression). DO NOT split the connection. The
+/// `assert`/guard before the swap (staging row count == built row count) exists
+/// to catch exactly that mistake at runtime.
 pub fn refresh_ai_session_rollup(pool: &DbPool) -> Result<usize> {
+    // ONE connection for BOTH phases — the TEMP staging table is
+    // connection-local (see the INVARIANT in the doc comment above).
     let mut conn = pool.get()?;
-    // IMMEDIATE (not DEFERRED): take the write lock up front. This function now
-    // reads (the watermark) before it writes (the DELETE); a DEFERRED tx would
-    // take a WAL read snapshot on that first read, then have to UPGRADE to a
-    // writer at the DELETE — and if a concurrent ingest connection committed in
-    // between, the upgrade fails with SQLITE_BUSY_SNAPSHOT, which busy_timeout
-    // does NOT retry. Holding the write lock from the start also makes the
-    // watermark and the GROUP BY observe one consistent state.
+
+    // --- Phase 1: BUILD under a read snapshot (no write lock held) ---------
+    // A DEFERRED transaction takes a WAL read snapshot on its first read and
+    // never upgrades to a writer here (we only CREATE TEMP + SELECT), so it
+    // does not contend for the single WAL writer slot. The watermark and the
+    // GROUP BY both read from this one consistent snapshot, so the stored
+    // fingerprint exactly describes the data we aggregate.
+    let (src_count, src_max_id, staged) = {
+        let build = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
+        let (src_count, src_max_id) = ai_rows_watermark(&build)?;
+        // TEMP table: connection-local, spills to the temp store (/tmp), never
+        // to /data. Rebuilt every refresh, so drop any stale prior copy.
+        build.execute("DROP TABLE IF EXISTS _ai_rollup_staging", [])?;
+        build.execute(
+            "CREATE TEMP TABLE _ai_rollup_staging AS
+             SELECT ai_project, ai_tool, ai_session_id, hostname,
+                    MIN(ai_transcript_path) AS ai_transcript_path,
+                    MIN(timestamp) AS first_seen,
+                    MAX(timestamp) AS last_seen,
+                    COUNT(*) AS event_count
+             FROM logs
+             WHERE ai_project IS NOT NULL AND ai_project != ''
+               AND ai_tool IS NOT NULL AND ai_tool != ''
+               AND ai_session_id IS NOT NULL AND ai_session_id != ''
+             GROUP BY ai_project, ai_tool, ai_session_id, hostname",
+            [],
+        )?;
+        let staged: i64 =
+            build.query_row("SELECT COUNT(*) FROM _ai_rollup_staging", [], |r| r.get(0))?;
+        // Commit the read snapshot (releases the read lock). The TEMP table
+        // survives the commit — it is tied to the connection, not the txn.
+        build.commit()?;
+        (src_count, src_max_id, staged)
+    };
+
+    // R1 guardrail (bead syslog-mcp-rvcz security addendum): the same-connection
+    // requirement is NOT compile-time enforceable. If a refactor ever ran the
+    // build on a different pooled connection, the TEMP table would be invisible
+    // here and the swap would wipe the rollup. The staging table is rebuilt
+    // every call, so a missing/empty staging table when source rows exist is a
+    // bug, not a valid empty rollup. Bail BEFORE the destructive swap.
+    debug_assert!(staged >= 0, "staging row count must be non-negative");
+    if staged == 0 && src_count > 0 {
+        return Err(anyhow::anyhow!(
+            "ai_session_rollup staging table is empty despite {src_count} live AI \
+             rows present — the build and swap MUST share one Connection (TEMP \
+             tables are connection-local); refusing to wipe the rollup"
+        ));
+    }
+
+    // --- Phase 2: SWAP under a sub-millisecond IMMEDIATE write lock ---------
+    // IMMEDIATE (not DEFERRED): take the write lock up front. We read nothing
+    // before the DELETE here, but IMMEDIATE keeps the swap a single short
+    // writer that never risks an SQLITE_BUSY_SNAPSHOT upgrade failure (which
+    // busy_timeout does NOT retry). The GROUP BY is already done, so this lock
+    // is held only for the DELETE + INSERT-from-staging + meta UPDATE.
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    // Capture the source fingerprint FIRST, within the same transaction as the
-    // aggregation. Under the held write lock the watermark and the GROUP BY
-    // observe identical committed state, so the stored fingerprint exactly
-    // describes the data we aggregate. Any rows that land after this commit
-    // advance the live fingerprint, correctly marking the rollup stale.
-    let (src_count, src_max_id) = ai_rows_watermark(&tx)?;
     tx.execute("DELETE FROM ai_session_rollup", [])?;
     tx.execute(
         "INSERT INTO ai_session_rollup
              (ai_project, ai_tool, ai_session_id, hostname,
               ai_transcript_path, first_seen, last_seen, event_count)
          SELECT ai_project, ai_tool, ai_session_id, hostname,
-                MIN(ai_transcript_path) AS ai_transcript_path,
-                MIN(timestamp) AS first_seen,
-                MAX(timestamp) AS last_seen,
-                COUNT(*) AS event_count
-         FROM logs
-         WHERE ai_project IS NOT NULL AND ai_project != ''
-           AND ai_tool IS NOT NULL AND ai_tool != ''
-           AND ai_session_id IS NOT NULL AND ai_session_id != ''
-         GROUP BY ai_project, ai_tool, ai_session_id, hostname",
+                ai_transcript_path, first_seen, last_seen, event_count
+         FROM _ai_rollup_staging",
         [],
     )?;
     let row_count: i64 =
         tx.query_row("SELECT COUNT(*) FROM ai_session_rollup", [], |r| r.get(0))?;
+    // The swap MUST be faithful: the rollup now holds exactly what we staged.
+    debug_assert_eq!(
+        row_count, staged,
+        "swap row count must equal staged row count"
+    );
     tx.execute(
         "UPDATE ai_session_rollup_meta
             SET refreshed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
@@ -646,6 +714,10 @@ pub fn refresh_ai_session_rollup(pool: &DbPool) -> Result<usize> {
         params![row_count, src_count, src_max_id],
     )?;
     tx.commit()?;
+    // Drop the TEMP table so a long-lived pooled connection doesn't carry it
+    // back into the pool. Best-effort: a failure here doesn't affect the
+    // already-committed swap.
+    let _ = conn.execute("DROP TABLE IF EXISTS _ai_rollup_staging", []);
     Ok(row_count as usize)
 }
 
@@ -1880,7 +1952,7 @@ pub fn severity_to_num(s: &str) -> Option<u8> {
             return SEVERITY_LEVELS
                 .iter()
                 .position(|&l| l == other)
-                .map(|i| i as u8)
+                .map(|i| i as u8);
         }
     };
     SEVERITY_LEVELS
