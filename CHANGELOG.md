@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-06-01
+
+### Fixed
+
+- **Serialize SQLite writes to eliminate `database is locked` errors and dropped log batches.**
+  cortex ran an r2d2 pool of 4 write-capable connections while 6 writer subsystems
+  (syslog/docker ingest, heartbeat, notifications, AI index, retention maintenance)
+  raced SQLite's single write lock, exceeding `busy_timeout` (~1000+ lock errors/day and
+  silently discarded log batches). Added a process-wide reentrant write-serialization
+  lock (`db::write_lock()`) acquired by every write transaction and standalone mutating
+  statement (purge DELETEs, VACUUM, incremental_vacuum, merge). Reads stay concurrent on
+  the pool (WAL); PASSIVE checkpoints are left unguarded.
+
+
 ## [1.1.2] - 2026-05-31
 
 ### Fixed

@@ -757,6 +757,7 @@ fn flush_chunk(
     if batch.is_empty() {
         if let Some(file_metadata) = completion_metadata {
             let mut conn = pool.get()?;
+            let _write_guard = crate::db::write_lock();
             let tx = conn.transaction()?;
             checkpoint::update_source_metadata_in_tx(&tx, source_id, file_metadata)?;
             tx.commit()?;
@@ -776,6 +777,7 @@ fn flush_chunk(
     }
 
     let mut conn = pool.get()?;
+    let _write_guard = crate::db::write_lock();
     let tx = conn.transaction()?;
     let claimed = checkpoint::claim_imports_in_tx(&tx, source_id, imports)?;
     let mut claimed_batch = Vec::with_capacity(batch.len());

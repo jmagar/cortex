@@ -137,6 +137,7 @@ impl<'a> CheckpointStore<'a> {
 
     pub fn reset_source(&self, source_id: i64, canonical_path: &str) -> Result<()> {
         let mut conn = self.pool.get()?;
+        let _write_guard = crate::db::write_lock();
         let tx = conn.transaction()?;
         tx.execute(
             "DELETE FROM transcript_import_records WHERE source_id = ?1",
@@ -304,6 +305,7 @@ impl<'a> CheckpointStore<'a> {
         }
 
         let mut conn = self.pool.get()?;
+        let _write_guard = crate::db::write_lock();
         let tx = conn.transaction()?;
         for checkpoint in &checkpoints {
             let source_id: i64 = tx.query_row(

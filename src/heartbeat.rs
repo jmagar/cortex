@@ -149,6 +149,7 @@ fn insert_heartbeat(
 ) -> anyhow::Result<HeartbeatIngestResponse> {
     let received_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
     let mut conn = pool.get()?;
+    let _write_guard = crate::db::write_lock();
     let tx = conn.transaction()?;
     let metadata_json = heartbeat_metadata_json(&request)?;
 

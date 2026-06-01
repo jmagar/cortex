@@ -79,6 +79,7 @@ where
     let exec_start = Instant::now();
     let join_result = tokio::task::spawn_blocking(move || -> Result<()> {
         let mut conn = pool.get()?;
+        let _write_guard = crate::db::write_lock();
         let tx = conn.transaction()?;
         f(&tx)?;
         tx.commit()?;

@@ -9,6 +9,21 @@ use crate::config::StorageConfig;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
+/// Process-wide SQLite **write serialization** lock.
+///
+/// SQLite permits only one writer at a time, but cortex runs an r2d2 pool of several
+/// connections with multiple concurrent writer subsystems (syslog/docker ingest,
+/// heartbeat, notifications, AI index, retention maintenance). Without serialization
+/// these race SQLite's single write lock, exceed `busy_timeout`, and surface as
+/// `database is locked` — dropping log batches. Every write transaction acquires this
+/// guard so writers queue in-process instead of colliding at the SQLite layer; reads
+/// stay concurrent on the pool (WAL allows many readers). Reentrant so a write path that
+/// nests guarded helpers on a single thread cannot deadlock.
+pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
+    static WRITE_LOCK: parking_lot::ReentrantMutex<()> = parking_lot::ReentrantMutex::new(());
+    WRITE_LOCK.lock()
+}
+
 pub const KNOWN_SCHEMA_VERSION: i64 = 20;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

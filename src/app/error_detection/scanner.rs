@@ -183,6 +183,7 @@ pub(crate) fn process_chunk(
     }
 
     // --- Write signatures and windows in a single transaction ---
+    let _write_guard = crate::db::write_lock();
     let tx = conn.transaction()?;
 
     for (hash, group) in &groups {

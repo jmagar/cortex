@@ -33,6 +33,7 @@ pub fn insert_logs_batch(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<usi
 
 fn insert_logs_batch_once(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<usize> {
     let mut conn = pool.get()?;
+    let _write_guard = crate::db::write_lock();
     let tx = conn.transaction()?;
     insert_logs_batch_in_tx(&tx, entries)?;
     tx.commit()?;
