@@ -714,35 +714,8 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     // to 0 so the first post-migration refresh always runs (live watermark > 0
     // whenever AI rows exist, and `refreshed_at` is still NULL regardless).
     if !migration_applied(&conn, 22)? {
-        conn.execute_batch(
-            "ALTER TABLE ai_session_rollup_meta
-                 ADD COLUMN source_row_count INTEGER NOT NULL DEFAULT 0;
-             ALTER TABLE ai_session_rollup_meta
-                 ADD COLUMN source_max_id INTEGER NOT NULL DEFAULT 0;
-             INSERT INTO schema_migrations (version) VALUES (22);",
-        )?;
+        apply_migration_22(&conn)?;
         tracing::info!("Migration 22: added AI session rollup source watermark");
-    }
-
-    // Migration 22: source watermark for the AI session rollup (bead
-    // cortex-g33v). Migration 21 left the background refresh doing an
-    // unconditional DELETE + full GROUP-BY re-aggregation over all of `logs`
-    // every cadence tick, even when no AI rows changed — a recurring ~4s scan
-    // holding the maintenance permit for zero benefit. These columns record the
-    // source-side fingerprint captured at the last refresh: `source_row_count`
-    // and `source_max_id` are `COUNT(*)`/`MAX(id)` over the AI-row partition.
-    // The refresh is skipped when the live fingerprint is unchanged. Both
-    // default to 0, so an existing (refreshed) rollup looks stale once and gets
-    // recomputed on the first post-migration tick, re-stamping the watermark.
-    if !migration_applied(&conn, 22)? {
-        conn.execute_batch(
-            "ALTER TABLE ai_session_rollup_meta
-                 ADD COLUMN source_row_count INTEGER NOT NULL DEFAULT 0;
-             ALTER TABLE ai_session_rollup_meta
-                 ADD COLUMN source_max_id INTEGER NOT NULL DEFAULT 0;
-             INSERT INTO schema_migrations (version) VALUES (22);",
-        )?;
-        tracing::info!("Migration 22: added AI session rollup source watermark columns");
     }
 
     conn.execute_batch(
@@ -1140,6 +1113,48 @@ fn apply_migration_13(conn: &Connection) -> rusqlite::Result<()> {
                  ON logs(event_action, timestamp) WHERE event_action IS NOT NULL;
              INSERT OR IGNORE INTO schema_migrations (version) VALUES (13);",
         )
+    })();
+
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT;"),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
+}
+
+// Migration 22: source watermark for the AI session rollup (bead cortex-g33v).
+// The background refresh recomputed the full GROUP-BY over `logs` every cadence
+// even when no AI rows had changed. These two columns record the source-side
+// `(COUNT(*), MAX(id))` of AI rows captured by the last refresh; the refresh
+// task compares the live watermark against them and skips the recompute when
+// nothing changed. Both default to 0 so the first post-migration refresh always
+// runs (live watermark > 0 whenever AI rows exist, and `refreshed_at` is still
+// NULL regardless).
+//
+// Wrapped in an explicit BEGIN IMMEDIATE / COMMIT-or-ROLLBACK transaction so a
+// crash between the two ALTERs and the version marker rolls back BOTH columns
+// and the marker atomically — the previous bare `execute_batch` auto-committed
+// each statement, leaving a half-applied DB that bricked `init_pool` on restart
+// with "duplicate column name". Each ALTER is guarded with `add_column_if_missing`
+// so a partially-applied DB (columns present, marker absent) converges on retry.
+fn apply_migration_22(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = (|| {
+        add_column_if_missing(
+            conn,
+            "ai_session_rollup_meta",
+            "source_row_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            conn,
+            "ai_session_rollup_meta",
+            "source_max_id",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        conn.execute_batch("INSERT OR IGNORE INTO schema_migrations (version) VALUES (22);")
     })();
 
     match result {

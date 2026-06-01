@@ -581,3 +581,100 @@ fn transcript_import_identity_enforces_uniqueness() {
         .unwrap_err();
     assert!(matches!(err, rusqlite::Error::SqliteFailure(_, _)));
 }
+
+/// Reproduces the post-crash state of Migration 22 (bead syslog-mcp-tfr0): a
+/// crash between the `ALTER TABLE ... ADD COLUMN` statements and the version
+/// marker leaves the watermark columns present but version 22 absent from
+/// `schema_migrations`. We reach that identical on-disk state cheaply by
+/// migrating clean to head, then deleting only the version-22 marker row.
+///
+/// On the pre-fix (bare `execute_batch`) code this FAILS: re-running `init_pool`
+/// re-issues the unguarded ALTERs and aborts with "duplicate column name". The
+/// Style-C rewrite guards each ALTER with `add_column_if_missing` and stamps the
+/// version with `INSERT OR IGNORE`, so `init_pool` converges (reentrant) and the
+/// partial state becomes crash-impossible (a real mid-tx crash now rolls back
+/// both columns and the marker atomically).
+#[test]
+fn migration_22_converges_from_partial_apply() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("partial_m22.db");
+    let config = test_storage_config(db_path.clone());
+
+    // 1. Migrate a clean DB to head (version 22, both columns present).
+    let pool = init_pool(&config).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        // Sanity: migration 22 specifically is applied, with the columns present.
+        // Assert on version 22 directly (not MAX(version)) so a future migration 23
+        // cannot break this test even though migration 22 is correctly applied.
+        let m22_applied: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = 22",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(m22_applied, 1, "fixture must reach migration 22");
+        for column in ["source_row_count", "source_max_id"] {
+            assert!(
+                column_exists(&conn, "ai_session_rollup_meta", column).unwrap(),
+                "fixture must have column {column}"
+            );
+        }
+        // 2. Recreate the post-crash state: columns present, marker absent.
+        conn.execute("DELETE FROM schema_migrations WHERE version = 22", [])
+            .unwrap();
+    }
+    drop(pool); // release the pooled connections / file handles
+
+    // 3. Re-running init_pool must converge, not brick on "duplicate column name".
+    let pool =
+        init_pool(&config).expect("init_pool must be reentrant after a partial migration 22 apply");
+    let conn = pool.get().unwrap();
+
+    // Assert migration 22 specifically was re-stamped (not MAX(version)) so a
+    // future migration 23 cannot mask a missing 22 marker / break this test.
+    let m22_applied: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 22",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(m22_applied, 1, "version marker must be re-stamped to 22");
+
+    for column in ["source_row_count", "source_max_id"] {
+        assert!(
+            column_exists(&conn, "ai_session_rollup_meta", column).unwrap(),
+            "watermark column {column} must remain present after convergence"
+        );
+    }
+}
+
+/// Regression guard (bead syslog-mcp-tfr0): running `init_pool` twice against the
+/// same file must both succeed. This passes on the pre-fix code too — it is NOT
+/// the bug-prover (`migration_22_converges_from_partial_apply` is) — it just pins
+/// the idempotent-on-clean-reopen behaviour so a future migration change can't
+/// silently break it.
+#[test]
+fn init_pool_is_idempotent_when_run_twice() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("idempotent.db");
+    let config = test_storage_config(db_path);
+
+    let pool = init_pool(&config).expect("first init_pool must succeed");
+    drop(pool);
+
+    let pool = init_pool(&config).expect("second init_pool on same file must succeed");
+    let conn = pool.get().unwrap();
+    // Assert migration 22 specifically is applied (not MAX(version)) so a future
+    // migration 23 cannot break this test even though 22 is correctly applied.
+    let m22_applied: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 22",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(m22_applied, 1);
+}
