@@ -218,7 +218,7 @@ This is normative: **the retention task does not backfill historical rows
 when a new column is added.**
 
 - Epic B (enrichment framework) explicitly punts retroactive backfill of
-  the existing 4.9M rows to V1.1 via an opt-in `syslog backfill --since
+  the existing 4.9M rows to V1.1 via an opt-in `cortex backfill --since
   <ts>` CLI subcommand (per Epic B spec §11, lines 372–376). No live
   retention-task backfill in V1.
 - Epic D (probes), Epic E (alerts), Epic F (incidents) introduce new
@@ -293,7 +293,7 @@ guardrails the DB will grow without bound.
 
 ### Trigger a manual prune
 
-There is no `syslog maintain prune` CLI command in V1. Retention runs
+There is no `cortex maintain prune` CLI command in V1. Retention runs
 automatically on its hourly tick. The operator levers are:
 
 - **Reduce `CORTEX_RETENTION_DAYS`** and restart — the next hourly
@@ -327,7 +327,7 @@ operations are not accessible from the MCP tool surface.
 - **Backup-aware retention.** The retention task does not coordinate with
   backups. If backups run mid-prune, they capture a consistent point-in-time
   but possibly mid-prune-cycle snapshot — operators should run
-  `syslog maintain prune` to a stable state before snapshotting if a
+  `cortex maintain prune` to a stable state before snapshotting if a
   bit-for-bit minimum is desired.
 - **Per-tag retention beyond `adguard-*`.** The infrastructure for per-tag
   retention exists (`purge_by_tag_window`) but is hardcoded to AdGuard. We
@@ -345,7 +345,7 @@ These are normative pointers to V1.1+ work, not open commitments for V1.
    `src/runtime.rs:58–59` works but is non-discoverable.
 2. **`alert_state` 30-day GC knob.** Add `CORTEX_ALERT_STATE_GC_DAYS`
    to make Epic E's stale-clear configurable.
-3. **`syslog backfill --since`.** Epic B punted to V1.1. Out of scope for
+3. **`cortex backfill --since`.** Epic B punted to V1.1. Out of scope for
    this contract; cited for completeness.
 
 ---

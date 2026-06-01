@@ -256,7 +256,7 @@ Scope:
 - Host focus: {host}
 - Service focus: {service}
 
-Use the `syslog` MCP tool to gather evidence before drawing conclusions:
+Use the `cortex` MCP tool to gather evidence before drawing conclusions:
 Cheap first pass:
 1. Use `action=status` to confirm the server is answering.
 2. Use `action=errors` with `limit=10` for the requested window, host, and service filters.
@@ -281,7 +281,7 @@ fn host_health_prompt(args: &Map<String, serde_json::Value>) -> String {
     format!(
         r#"Assess health for host `{host}` using cortex.
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Use `action=hosts` to confirm the host exists and inspect first/last seen.
 2. Use `action=tail` with `hostname={host}` and `limit=10` for the latest events.
@@ -312,7 +312,7 @@ Scope:
 - Host: {host}
 - Window: {window}
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Use `action=search` with `app_name={service}`, `hostname` if known, and `limit=5`.
 2. Use `action=errors` with `limit=10` for the service and host scope.
@@ -346,7 +346,7 @@ Scope:
 - Actor/IP focus: {actor}
 - Host focus: {host}
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Search for auth failures, bans, MFA/challenge events, proxy denials, and suspicious source IPs with `action=search` and `limit=5`.
 2. Use structured filters such as `auth_outcome` when available.
@@ -376,7 +376,7 @@ Scope:
 - Host: {host}
 - Service: {service}
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Use `action=errors` with `limit=10` to rank noisy severity groups.
 2. Use `action=timeline` with `bucket=minute` to distinguish bursts from steady background noise.
@@ -409,7 +409,7 @@ Scope:
 - Host: {host}
 - Service: {service}
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Use `action=usage_blocks` and `action=sessions` with `limit=10` to identify relevant AI work.
 2. Use `action=search_sessions` with `limit=5` for deployment, compose, config, migration, auth, or service names.
@@ -440,7 +440,7 @@ Scope:
 - Service: {service}
 - Window: {window}
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Use `action=search` with Docker/container terms and `limit=5`.
 2. Use `action=errors` with `limit=10` for the host/service scope.
@@ -470,7 +470,7 @@ Scope:
 - Service/upstream: {service}
 - Window: {window}
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Use `action=search` with DNS, resolver, proxy, upstream, timeout, refused, and TLS terms plus `limit=5`.
 2. Use `action=errors` with `limit=10` for affected hosts or apps.
@@ -500,7 +500,7 @@ Scope:
 - Service: {service}
 - Window: {window}
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Use `action=status` to check current ingest/write-block state.
 2. Use `action=search` with disk, space, quota, sqlite, wal, write, readonly, and database terms plus `limit=5`.
@@ -532,7 +532,7 @@ Scope:
 - Host: {host}
 - Service: {service}
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Use `action=search` with auth failure, invalid user, banned, MFA, challenge, and denied terms plus `limit=5`.
 2. Use `action=errors` with `limit=10` scoped to auth services and hosts.
@@ -560,7 +560,7 @@ Scope:
 - Host/device: {host}
 - Window: {window}
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Use `action=hosts` to inspect first_seen, last_seen, and total log count.
 2. Use `action=tail` with `hostname={host}` and `limit=10`.
@@ -590,7 +590,7 @@ Scope:
 - Host: {host}
 - Window: {window}
 
-Use the `syslog` MCP tool:
+Use the `cortex` MCP tool:
 Cheap first pass:
 1. Use `action=status` to verify cortex is answering.
 2. Use `action=search` with service, deploy, migration, restart, healthcheck, error, and warning terms plus `limit=5`.
@@ -622,14 +622,14 @@ mod tests {
     }
 
     #[test]
-    fn rendered_prompts_reference_syslog_tool_actions() {
+    fn rendered_prompts_reference_cortex_tool_actions() {
         for spec in PROMPTS {
             let (_description, messages) = get_prompt(spec.name, None).unwrap();
             let text = match &messages[0].content {
                 rmcp::model::PromptMessageContent::Text { text } => text,
                 _ => panic!("expected text prompt"),
             };
-            assert!(text.contains("syslog"));
+            assert!(text.contains("cortex"));
             assert!(text.contains("action="));
         }
     }

@@ -19,7 +19,7 @@ pub async fn run_setup_doctor() -> io::Result<SetupReport> {
     let data_dir = home.join("data");
     let user_home = super::user_home_dir()?;
     let repo_path = std::env::current_dir()?;
-    let wrapper_path = user_home.join(".local/bin/syslog");
+    let wrapper_path = user_home.join(".local/bin/cortex");
     let debug_override_path = compose_dir.join("docker-compose.override.yml");
     let mut phases = vec![
         filesystem_phase(super::SetupMode::Check, &home, &data_dir, &compose_dir)?,

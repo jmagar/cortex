@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render a syslog MCP prompt and run it through a headless agent.
+# Render a cortex MCP prompt and run it through a headless agent.
 #
 # This is intentionally live-first: the prompt comes from the running MCP server
 # and the agent can use the caller's normal MCP configuration to query real
@@ -130,7 +130,7 @@ if [[ "$AGENT" == "codex" && -n "$MCP_CONFIG" ]]; then
     echo "warning: --mcp-config is not passed to codex exec by this script; Codex uses its normal config" >&2
 fi
 
-TMPDIR="$(mktemp -d /tmp/syslog-prompt-eval-XXXXXX)"
+TMPDIR="$(mktemp -d /tmp/cortex-prompt-eval-XXXXXX)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
 AUTH_HEADER=()
@@ -226,7 +226,7 @@ if "error" in tools_response:
     raise SystemExit(f"FAIL: tools/list failed: {tools_response['error']}")
 names = {tool.get("name") for tool in tools_response["result"].get("tools", [])}
 if "cortex" not in names:
-    raise SystemExit(f"FAIL: tools/list does not expose syslog tool: {sorted(names)}")
+    raise SystemExit(f"FAIL: tools/list does not expose cortex tool: {sorted(names)}")
 
 schema = json.load(open(sys.argv[2]))
 required = set(schema.get("required", []))
@@ -238,7 +238,7 @@ evidence_required = set(schema["properties"]["evidence"]["items"].get("required"
 for key in ["source", "summary", "timestamp", "host", "app", "severity", "log_id"]:
     if key not in evidence_required:
         raise SystemExit(f"FAIL: evidence schema missing required key: {key}")
-print("PASS: MCP preflight found syslog tool and prompt output schema")
+print("PASS: MCP preflight found cortex tool and prompt output schema")
 PY
 
 curl_mcp '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"help"}}}' > "$MCP_HELP_RESPONSE"
@@ -248,15 +248,15 @@ import sys
 
 data = json.load(open(sys.argv[1]))
 if "error" in data:
-    raise SystemExit(f"FAIL: syslog help call failed: {data['error']}")
+    raise SystemExit(f"FAIL: cortex help call failed: {data['error']}")
 text = data["result"]["content"][0].get("text", "")
 try:
     text = json.loads(text).get("help", text)
 except json.JSONDecodeError:
     pass
-if "Agent Planning Cost Metadata" not in text or "## syslog help" not in text:
-    raise SystemExit("FAIL: syslog help response lacks action/cost metadata")
-print("PASS: syslog help exposes action and cost metadata")
+if "Agent Planning Cost Metadata" not in text or "## cortex help" not in text:
+    raise SystemExit("FAIL: cortex help response lacks action/cost metadata")
+print("PASS: cortex help exposes action and cost metadata")
 PY
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -332,19 +332,19 @@ if [[ "$SKIP_AGENT_PREFLIGHT" -eq 0 ]]; then
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["can_access_syslog", "evidence", "failure_reason"],
+  "required": ["can_access_cortex", "evidence", "failure_reason"],
   "properties": {
-    "can_access_syslog": { "type": "boolean" },
+    "can_access_cortex": { "type": "boolean" },
     "evidence": { "type": "string" },
     "failure_reason": { "type": ["string", "null"] }
   }
 }
 JSON
     cat > "$PREFLIGHT_PROMPT" <<'EOF'
-Use only the configured syslog MCP server. Do not use shell commands, curl, local syslog binaries, repository files, or other fallbacks.
+Use only the configured cortex MCP server. Do not use shell commands, curl, local cortex binaries, repository files, or other fallbacks.
 
-Call the syslog MCP tool with action=help. Return JSON:
-- can_access_syslog: true only if the MCP tool call succeeded.
+Call the cortex MCP tool with action=help. Return JSON:
+- can_access_cortex: true only if the MCP tool call succeeded.
 - evidence: a short phrase from the tool result proving it was cortex help.
 - failure_reason: null on success, otherwise the concise reason.
 EOF
@@ -375,16 +375,16 @@ if "result" in data and isinstance(data["result"], str):
     data = json.loads(data["result"])
 elif "content" in data and isinstance(data["content"], list):
     data = json.loads("".join(part.get("text", "") for part in data["content"] if isinstance(part, dict)))
-if data.get("can_access_syslog") is not True:
-    raise SystemExit(data.get("failure_reason") or "agent reported no syslog MCP access")
+if data.get("can_access_cortex") is not True:
+    raise SystemExit(data.get("failure_reason") or "agent reported no cortex MCP access")
 print(data.get("evidence", "ok"))
 PY
         then
             AGENT_PREFLIGHT_STATUS="passed"
-            AGENT_PREFLIGHT_DETAIL="syslog MCP visible to headless agent"
+            AGENT_PREFLIGHT_DETAIL="cortex MCP visible to headless agent"
         else
             AGENT_PREFLIGHT_STATUS="failed"
-            AGENT_PREFLIGHT_DETAIL="headless agent did not prove syslog MCP access"
+            AGENT_PREFLIGHT_DETAIL="headless agent did not prove cortex MCP access"
         fi
     fi
     if [[ "$AGENT_PREFLIGHT_STATUS" != "passed" ]]; then
@@ -406,17 +406,17 @@ with open(sys.argv[1], "w", encoding="utf-8") as fh:
     fh.write("\n")
 PY
         fi
-        echo "FAIL: headless agent cannot prove access to the configured syslog MCP server" >&2
-        echo "Hint: pass --mcp-config for Claude, or configure Codex with the syslog MCP server. Use --skip-agent-preflight only when intentionally testing fallback behavior." >&2
+        echo "FAIL: headless agent cannot prove access to the configured cortex MCP server" >&2
+        echo "Hint: pass --mcp-config for Claude, or configure Codex with the cortex MCP server. Use --skip-agent-preflight only when intentionally testing fallback behavior." >&2
         exit 1
     fi
 fi
 
 EVAL_PROMPT="$TMPDIR/eval-prompt.txt"
 cat > "$EVAL_PROMPT" <<EOF
-Use the syslog MCP server and follow this rendered prompt.
+Use the cortex MCP server and follow this rendered prompt.
 
-Use only the configured syslog MCP tools for syslog data. If the syslog MCP server is unavailable in the headless agent runtime, stop and return a low-confidence answer with that telemetry gap; do not use shell commands, curl, local syslog binaries, repository files, or other fallback surfaces as substitutes for syslog evidence.
+Use only the configured cortex MCP tools for syslog data. If the cortex MCP server is unavailable in the headless agent runtime, stop and return a low-confidence answer with that telemetry gap; do not use shell commands, curl, local cortex binaries, repository files, or other fallback surfaces as substitutes for syslog evidence.
 
 Return only JSON that validates against the provided prompt output schema.
 

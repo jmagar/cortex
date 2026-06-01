@@ -272,9 +272,9 @@ fn installed_compose_asset_memory_limit_is_configurable_with_2g_default() {
 }
 
 #[test]
-fn ai_index_timer_script_uses_host_syslog_and_disables_docker_ingest() {
+fn ai_index_timer_script_uses_host_cortex_and_disables_docker_ingest() {
     let script = ai_index_script();
-    assert!(script.contains("command -v syslog"));
+    assert!(script.contains("command -v cortex"));
     assert!(script.contains("cortex --version"));
     assert!(script.contains("cortex ai index --json"));
     assert!(script.contains("CORTEX_DOCKER_INGEST_ENABLED"));
@@ -373,7 +373,7 @@ fn db_path_from_setup_env_rejects_container_db_without_absolute_data_volume() {
 #[test]
 fn validate_executable_path_rejects_debug_build_paths_by_default() {
     let dir = tempfile::tempdir().unwrap();
-    let bin = dir.path().join(".cache/cargo/debug/syslog");
+    let bin = dir.path().join(".cache/cargo/debug/cortex");
     std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
     std::fs::write(&bin, "#!/bin/sh\n").unwrap();
 
@@ -431,7 +431,7 @@ fn ai_watch_service_content_phase_detects_stale_unit() {
     let state_dir = dir.path().join("state");
     let db_path = dir.path().join("data/cortex.db");
     let user_home = dir.path().join("home");
-    let bin = dir.path().join("bin/syslog");
+    let bin = dir.path().join("bin/cortex");
     std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
     std::fs::write(&bin, "#!/bin/sh\n").unwrap();
     std::fs::write(&env_path, ai_watch_env_file(&db_path)).unwrap();
@@ -461,8 +461,8 @@ fn debug_wrapper_script_builds_current_repo_debug_binary() {
     assert!(script.contains(r#"export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.cache/cargo}""#));
     assert!(script.contains("CORTEX_DOCKER_INGEST_ENABLED"));
     assert!(script.contains("CORTEX_AUTH_MODE"));
-    assert!(script.contains("cargo build --quiet --bin syslog"));
-    assert!(script.contains(r#"exec "${CARGO_TARGET_DIR}/debug/syslog" "$@""#));
+    assert!(script.contains("cargo build --quiet --bin cortex"));
+    assert!(script.contains(r#"exec "${CARGO_TARGET_DIR}/debug/cortex" "$@""#));
 }
 
 #[test]

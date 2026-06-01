@@ -6,7 +6,7 @@ evaluation should prefer live agent runs over a synthetic-only harness.
 The practical shape is:
 
 1. Render a prompt from the running MCP server with `prompts/get`.
-2. Let a headless agent run the prompt against the same syslog MCP server it
+2. Let a headless agent run the prompt against the same cortex MCP server it
    normally uses.
 3. Ask the agent to return JSON conforming to `cortex://schema/prompt-output`.
 4. Score the final shape and, when session ingestion is enabled, inspect the
@@ -24,12 +24,12 @@ scripts/prompt-headless-eval.sh --agent claude --mcp-config /path/to/claude-mcp-
 The script deliberately has two preflight layers:
 
 - MCP server preflight always calls `prompts/get`, `resources/read`,
-  `tools/list`, and `syslog action=help` over JSON-RPC. This proves the live
-  server exposes prompts, the prompt output schema resource, the `syslog` tool,
+  `tools/list`, and `cortex action=help` over JSON-RPC. This proves the live
+  server exposes prompts, the prompt output schema resource, the `cortex` tool,
   and action cost metadata. `mcporter` is still useful for tools, but current
   installed mcporter does not expose first-class MCP resource reads, so resource
   checks stay as raw JSON-RPC.
-- Agent MCP preflight asks the selected headless agent to call `syslog
+- Agent MCP preflight asks the selected headless agent to call `cortex
   action=help` using only its configured MCP tools. This fails fast when the
   agent runtime cannot see cortex directly. Use `--skip-agent-preflight`
   only when intentionally evaluating fallback behavior.
@@ -54,7 +54,7 @@ Reports:
 
 If the agent MCP preflight fails, fix the agent's MCP configuration first. In
 the observed Codex environment, the headless run saw `lab`, `codex_apps`,
-`context7`, and `steamy-windows-mcp`, but not `syslog`; the script now stops at
+`context7`, and `steamy-windows-mcp`, but not `cortex`; the script now stops at
 that point instead of spending a large token budget exploring local fallbacks.
 
 ## Claude Code Headless Surface

@@ -30,9 +30,9 @@ Runs `${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh` at the start of every Claud
 Responsibilities:
 - Server mode: exports current Claude Code `userConfig` values as
   `CORTEX_*` / `CORTEX_*` environment variables.
-- Ensures a `syslog` binary exists on `PATH`; if it is missing, runs the
+- Ensures a `cortex` binary exists on `PATH`; if it is missing, runs the
   one-line installer.
-- Delegates host setup to `syslog setup repair`, which owns
+- Delegates host setup to `cortex setup repair`, which owns
   `~/.cortex/.env`, `~/.cortex/compose/`, and the Docker Compose
   container.
 - Client mode: skips local server setup and only checks the configured
@@ -64,7 +64,7 @@ bash scripts/plugin-setup.sh
 ```
 
 The hook deliberately contains no separate Compose rendering logic. The Claude
-plugin and the one-line installer both converge on the same `syslog setup`
+plugin and the one-line installer both converge on the same `cortex setup`
 implementation and the same `~/.cortex` host layout.
 
 ## See also

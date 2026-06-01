@@ -12,12 +12,12 @@ Companion contracts: `docs/contracts/config-schema.md` (knobs that drive these m
 
 | Invocation | Mode | Starts | Skips | Use when |
 |---|---|---|---|---|
-| `syslog` (no args) or `syslog serve mcp` | **ServeMcp** | UDP+TCP syslog listeners, batch writer, retention task, storage-budget task, docker-ingest tasks (when enabled), HTTP MCP server on `[mcp].port`, OTLP `/v1/logs` mount, optional non-MCP `/api` mount | — | Production daemon — the one host per fleet that ingests and stores logs. |
-| `syslog mcp` | **StdioMcp** | RMCP stdio transport bound to the same SQLite store (read-mostly query path) | All listeners; no HTTP port is bound; auth policy is forced to `LoopbackDev` (process isolation is the trust boundary) | Wiring `cortex` into an MCP client (Claude Code plugin, Codex) on a query-only client host. |
-| `syslog setup [check\|repair\|doctor\|ai-index-timer …]` | **Setup** | One-shot setup phases (write `~/.cortex/.env`, render compose, install systemd timers, etc.) | Never binds listeners; never starts maintenance tasks | First-run install, plugin hook reruns, dev-mode rewires. |
-| `syslog doctor [binary] [--json]` | **Doctor** | One-shot health audit (setup, compose, binary, AI transcripts) | Never binds listeners | Diagnostics / smoke checks. |
-| `syslog search\|tail\|errors\|hosts\|sessions\|ai\|correlate\|stats\|db\|compose` | **Cli** | Single query or maintenance operation against the SQLite store via `RuntimeCore::load_query_only` | Never binds the syslog/HTTP listeners; never spawns maintenance tasks | Operator queries on the box; scripting. |
-| `syslog --version` / `--help` | Version/Help | Print and exit | Everything | Banner. |
+| `cortex` (no args) or `cortex serve mcp` | **ServeMcp** | UDP+TCP syslog listeners, batch writer, retention task, storage-budget task, docker-ingest tasks (when enabled), HTTP MCP server on `[mcp].port`, OTLP `/v1/logs` mount, optional non-MCP `/api` mount | — | Production daemon — the one host per fleet that ingests and stores logs. |
+| `cortex mcp` | **StdioMcp** | RMCP stdio transport bound to the same SQLite store (read-mostly query path) | All listeners; no HTTP port is bound; auth policy is forced to `LoopbackDev` (process isolation is the trust boundary) | Wiring `cortex` into an MCP client (Claude Code plugin, Codex) on a query-only client host. |
+| `cortex setup [check\|repair\|doctor\|ai-index-timer …]` | **Setup** | One-shot setup phases (write `~/.cortex/.env`, render compose, install systemd timers, etc.) | Never binds listeners; never starts maintenance tasks | First-run install, plugin hook reruns, dev-mode rewires. |
+| `cortex doctor [binary] [--json]` | **Doctor** | One-shot health audit (setup, compose, binary, AI transcripts) | Never binds listeners | Diagnostics / smoke checks. |
+| `cortex search\|tail\|errors\|hosts\|sessions\|ai\|correlate\|stats\|db\|compose` | **Cli** | Single query or maintenance operation against the SQLite store via `RuntimeCore::load_query_only` | Never binds the syslog/HTTP listeners; never spawns maintenance tasks | Operator queries on the box; scripting. |
+| `cortex --version` / `--help` | Version/Help | Print and exit | Everything | Banner. |
 
 Default tracing filter per mode is set by `Mode::default_log_filter`: `info` for `ServeMcp`, `warn` for stdio/setup/doctor, `error` for one-shot CLI queries. `RUST_LOG` overrides.
 
@@ -178,7 +178,7 @@ healthcheck:
 
 ## 7. Startup invariants (operator preconditions)
 
-Operators must satisfy these before launching `syslog serve mcp`. Failing any produces a startup error per §6.
+Operators must satisfy these before launching `cortex serve mcp`. Failing any produces a startup error per §6.
 
 1. **DB path is writable by the runtime UID.** Default `/data/cortex.db` requires `/data` to be a bind-mounted dir owned by `CORTEX_UID:CORTEX_GID` (default `1000:1000` per `docker-compose.yml`). See `docs/contracts/data-layout.md` §3.
 2. **Listener ports are free.** Default `1514/udp`, `1514/tcp`, `3100/tcp`. The container may need `cap_add: NET_BIND_SERVICE` only if binding port `< 1024` *inside* the container; the published bundle keeps `CORTEX_RECEIVER_PORT=1514` and remaps via Compose.

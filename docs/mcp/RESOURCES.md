@@ -10,9 +10,9 @@ cortex exposes one MCP resource:
 
 | URI | Description | MIME type |
 | --- | --- | --- |
-| `cortex://schema/mcp-tool` | JSON schema for the `syslog` MCP tool and action-based parameters | `application/json` |
+| `cortex://schema/mcp-tool` | JSON schema for the `cortex` MCP tool and action-based parameters | `application/json` |
 
-All log data access is through the single `syslog` MCP tool. Tools are preferred
+All log data access is through the single `cortex` MCP tool. Tools are preferred
 over log resources because queries benefit from parameterized filtering
 (hostname, severity, source identity, time range, FTS5 query, and correlation
 windows) that URI templating cannot express efficiently.

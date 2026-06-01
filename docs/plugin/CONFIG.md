@@ -11,13 +11,13 @@ Plugin configuration and user-facing settings for Claude Code plugin deployment.
 
 ## How it works
 
-cortex ships one `syslog` binary with two MCP modes:
+cortex ships one `cortex` binary with two MCP modes:
 
-- `syslog serve mcp` -- long-lived daemon with syslog listener + MCP HTTP server.
-- `syslog mcp` -- local query-only stdio MCP server.
+- `cortex serve mcp` -- long-lived daemon with syslog listener + MCP HTTP server.
+- `cortex mcp` -- local query-only stdio MCP server.
 
-The binary also includes direct local CLI commands such as `syslog search`,
-`syslog tail`, and `syslog stats`. These are useful for host-local scripts and
+The binary also includes direct local CLI commands such as `cortex search`,
+`cortex tail`, and `cortex stats`. These are useful for host-local scripts and
 manual diagnostics, but they are not plugin connection modes.
 
 The published Claude Code plugin remains HTTP-first because plugin installs commonly target a running Docker Compose or reverse-proxy deployment.
@@ -39,7 +39,7 @@ installer:
 ```text
 plugin userConfig
   --> scripts/plugin-setup.sh exports CORTEX_* / CORTEX_* overrides
-    --> syslog setup repair (same engine as syslog deploy local)
+    --> cortex setup repair (same engine as cortex deploy local)
       --> ~/.cortex/.env + ~/.cortex/compose/docker-compose.yml
         --> Docker Compose cortex container
 ```
@@ -69,8 +69,8 @@ database path locally. For remote/Docker/plugin deployments, HTTP keeps the
 ingestion and query surfaces attached to the same running service.
 
 The plugin does not maintain a separate deployment model. Server mode delegates
-to `syslog setup repair` (the same local reconcile path exposed as
-`syslog deploy local`), and the generated Compose assets live under
+to `cortex setup repair` (the same local reconcile path exposed as
+`cortex deploy local`), and the generated Compose assets live under
 `~/.cortex/compose`. Stale user-level `cortex.service` units/drop-ins
 from older releases are disabled and removed during repair.
 

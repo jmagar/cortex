@@ -25,7 +25,7 @@ fail() {
   exit 1
 }
 
-resolve_syslog_bin() {
+resolve_cortex_bin() {
   if [[ -n "$CORTEX_BIN" ]]; then
     if [[ -x "$CORTEX_BIN" ]]; then
       printf '%s\n' "$CORTEX_BIN"
@@ -39,7 +39,7 @@ resolve_syslog_bin() {
   elif [[ -x "${PROJECT_DIR}/target/debug/cortex" ]]; then
     printf '%s\n' "${PROJECT_DIR}/target/debug/cortex"
   else
-    fail "syslog binary not found; install syslog on PATH, set CORTEX_BIN, or run cargo build"
+    fail "cortex binary not found; install cortex on PATH, set CORTEX_BIN, or run cargo build"
   fi
 }
 
@@ -54,7 +54,7 @@ load_token() {
   fi
 }
 
-run_syslog() {
+run_cortex() {
   CORTEX_DB_PATH="$DB_PATH" \
     CORTEX_DOCKER_INGEST_ENABLED="${CORTEX_DOCKER_INGEST_ENABLED:-false}" \
     RUST_LOG="${RUST_LOG:-error}" \
@@ -70,7 +70,7 @@ mcp_call() {
     headers+=(-H "Authorization: Bearer $token")
   fi
   curl -fsS -X POST "$MCP_URL" "${headers[@]}" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":${id},\"method\":\"tools/call\",\"params\":{\"name\":\"syslog\",\"arguments\":${args_json}}}"
+    -d "{\"jsonrpc\":\"2.0\",\"id\":${id},\"method\":\"tools/call\",\"params\":{\"name\":\"cortex\",\"arguments\":${args_json}}}"
 }
 
 tool_args() {
@@ -104,7 +104,7 @@ PY
 
 cd "$PROJECT_DIR"
 
-CORTEX_BIN="$(resolve_syslog_bin)"
+CORTEX_BIN="$(resolve_cortex_bin)"
 [[ -x "$CORTEX_BIN" ]] || fail "$CORTEX_BIN is not executable"
 TOKEN="$(load_token || true)"
 export TOKEN
@@ -119,11 +119,11 @@ from="$(date -u -d '10 minutes ago' +'%Y-%m-%dT%H:%M:%SZ')"
   printf '{"sessionId":"%s","timestamp":"%s","cwd":"%s","content":[{"type":"text","text":"%s project context MCP smoke content"}]}\n' "$SESSION_ID" "$now" "$PROJECT" "$QUERY"
 } >"$FIXTURE"
 
-printf 'syslog: %s\n' "$("$CORTEX_BIN" --version)"
+printf 'cortex: %s\n' "$("$CORTEX_BIN" --version)"
 printf 'db:     %s\n' "$DB_PATH"
 printf 'mcp:    %s\n' "$MCP_URL"
 
-run_syslog ai add --file "$FIXTURE" --force --json >/dev/null
+run_cortex ai add --file "$FIXTURE" --force --json >/dev/null
 pass "seeded AI transcript fixture"
 
 search_response="$(mcp_call 1 "$(tool_args --arg q "$QUERY" --arg project "$PROJECT" '{"action":"search_sessions","query":$q,"tool":"claude","project":$project,"limit":5}')")"

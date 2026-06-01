@@ -27,9 +27,9 @@ plugins/
 
 | Skill | Purpose |
 | --- | --- |
-| `syslog` | Client-facing documentation for the syslog MCP tool and its action dispatch. |
+| `cortex` | Client-facing documentation for the cortex MCP tool and its action dispatch. |
 | `cortex-troubleshoot` | Narrow troubleshooting decision tree for MCP, ingest, service, and missing-host issues. |
-| `cortex-report` | Generate actionable 24-hour markdown reports from syslog MCP evidence. |
+| `cortex-report` | Generate actionable 24-hour markdown reports from cortex MCP evidence. |
 | `cortex-dr` | Comprehensive deployment health check, including runtime freshness. |
 | `cortex-deploy-dropins` | Deploy rsyslog forwarding drop-ins to fleet hosts over SSH. |
 | `cortex-redeploy` | Re-run the plugin setup hook and verify health plus runtime freshness. |
@@ -39,7 +39,7 @@ plugins/
 ### Contents
 
 `plugins/syslog/skills/cortex/SKILL.md` includes:
-- Tool inventory (1 tool: `syslog`, with the current MCP action set described)
+- Tool inventory (1 tool: `cortex`, with the current MCP action set described)
 - Parameter reference for each tool
 - FTS5 query syntax guide
 - Common workflow patterns (health check, incident investigation, host onboarding)

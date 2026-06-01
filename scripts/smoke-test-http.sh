@@ -13,7 +13,7 @@
 #                        ${CORTEX_ENV_FILE:-${HOME}/.cortex/.env}.
 #
 # Optional environment:
-#   CORTEX_BIN           Path to the `syslog` binary (default: `syslog` on PATH).
+#   CORTEX_BIN           Path to the `cortex` binary (default: `cortex` on PATH).
 #   CORTEX_SERVER        Base URL of the REST API (default: http://localhost:3100).
 #   CORTEX_ENV_FILE      Path to .env containing CORTEX_API_TOKEN
 #                        (default: ${HOME}/.cortex/.env).
@@ -31,7 +31,7 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
-CORTEX_BIN="${CORTEX_BIN:-syslog}"
+CORTEX_BIN="${CORTEX_BIN:-cortex}"
 CORTEX_SERVER="${CORTEX_SERVER:-http://localhost:3100}"
 CORTEX_ENV_FILE="${CORTEX_ENV_FILE:-${HOME}/.cortex/.env}"
 
@@ -47,7 +47,7 @@ need() { printf 'NEED  %s\n' "$1" >&2; exit 2; }
 
 # ─── Prereqs ────────────────────────────────────────────────────────────────
 
-command -v "$CORTEX_BIN" >/dev/null 2>&1 || need "syslog binary not on PATH (set CORTEX_BIN=...)"
+command -v "$CORTEX_BIN" >/dev/null 2>&1 || need "cortex binary not on PATH (set CORTEX_BIN=...)"
 command -v jq >/dev/null 2>&1            || need "jq is required (install jq)"
 
 if [[ -z "${CORTEX_API_TOKEN:-}" ]]; then
@@ -71,7 +71,7 @@ info "server  : $CORTEX_SERVER"
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
 # Run a command and require its stdout to be a parseable JSON value.
-# Usage: assert_json "label" syslog --http --json ...
+# Usage: assert_json "label" cortex --http --json ...
 assert_json() {
   local label="$1"; shift
   local out

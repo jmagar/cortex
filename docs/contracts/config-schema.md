@@ -14,7 +14,7 @@ Highest priority wins. The loader applies layers in this order; later layers ove
 
 1. **Compile-time defaults** — every field has a `default = "default_*"` serde annotation in `src/config.rs` (see §4 default columns).
 2. **`config.toml`** — read from the process working directory. Missing keys keep their defaults (partial configs are supported via `#[serde(default)]`). Missing file is not an error.
-3. **`~/.cortex/.env`** — written by `syslog setup`. Lines of the form `KEY=VALUE` are loaded **only when the matching process env var is not already set**. Loader rules (`load_setup_env_file` in `src/config.rs`):
+3. **`~/.cortex/.env`** — written by `cortex setup`. Lines of the form `KEY=VALUE` are loaded **only when the matching process env var is not already set**. Loader rules (`load_setup_env_file` in `src/config.rs`):
    - Symlinked `.env` files are refused (printed warning, file ignored).
    - Comments (`#`) and blank lines are skipped.
    - Only keys starting with `CORTEX_`, `CORTEX_`, `CORTEX_API_`, `CORTEX_DOCKER_`, plus the bare `NO_AUTH`, are honored. Other keys are silently dropped.
@@ -30,7 +30,7 @@ Highest priority wins. The loader applies layers in this order; later layers ove
 For every row in §4:
 
 - **Sensitivity** — `public` (safe to print/log/check into git), `tuning` (operationally tweakable, no secrecy risk), `secret` (never log; field is marked `sensitive: true` in plugin.json or carries a credential).
-- **Reload** — `restart-only` (must restart `syslog serve mcp` to pick up; nothing in V1 watches `config.toml`), `hot-reload` (changes via a runtime mechanism — **none in V1**), `runtime-configurable` (mutated through an MCP tool action while the server runs — V1 has none for these fields; deferred to V2). **V1 is uniformly `restart-only` for every row below.** The probe registry epic plans `runtime-configurable` for probe schedules only; see §5.
+- **Reload** — `restart-only` (must restart `cortex serve mcp` to pick up; nothing in V1 watches `config.toml`), `hot-reload` (changes via a runtime mechanism — **none in V1**), `runtime-configurable` (mutated through an MCP tool action while the server runs — V1 has none for these fields; deferred to V2). **V1 is uniformly `restart-only` for every row below.** The probe registry epic plans `runtime-configurable` for probe schedules only; see §5.
 
 ## 4. Schema — current loader (`src/config.rs`)
 
@@ -217,17 +217,17 @@ These are checked in `src/config.rs::validate_*` and `src/runtime.rs::reject_uns
 8. **Token fields not blank.** A `mcp.api_token` / `api.api_token` set to an all-whitespace value is rejected even if technically present.
 9. **`cleanup_interval_secs >= 5`** and **`cleanup_chunk_size <= 1_000_000`** — guards against pathological maintenance loops.
 
-The `syslog mcp` (stdio) entrypoint **bypasses** invariant (1) only, via `Config::load_for_stdio`. Stdio binds no TCP port so the gate is irrelevant; setting `mcp.host = 0.0.0.0` in stdio mode is harmless and accepted.
+The `cortex mcp` (stdio) entrypoint **bypasses** invariant (1) only, via `Config::load_for_stdio`. Stdio binds no TCP port so the gate is irrelevant; setting `mcp.host = 0.0.0.0` in stdio mode is harmless and accepted.
 
 ## 7. Hot-reload status (V1)
 
-**Nothing in this contract is hot-reloadable in V1.** All knobs above are `restart-only`. Operators must `syslog compose restart` (or equivalent systemd action) for any change to take effect. The probe-registry epic plans the first `runtime-configurable` surface — probe schedules pushed from `syslog agent probes set …` over the WS RPC — but that lives in agent-side config, not this loader. `SIGHUP` is a no-op in V1 (see `docs/contracts/runtime-lifecycle.md` §3).
+**Nothing in this contract is hot-reloadable in V1.** All knobs above are `restart-only`. Operators must `cortex compose restart` (or equivalent systemd action) for any change to take effect. The probe-registry epic plans the first `runtime-configurable` surface — probe schedules pushed from `cortex agent probes set …` over the WS RPC — but that lives in agent-side config, not this loader. `SIGHUP` is a no-op in V1 (see `docs/contracts/runtime-lifecycle.md` §3).
 
 ## 8. Cross-references
 
 - `src/config.rs::Config::load` — actual schema + validation; source of truth.
 - `src/config.rs::load_setup_env_file` — `.env` loader (called only outside `cfg(test)`).
-- `src/setup/` — code that writes `~/.cortex/.env` and `~/.cortex/config.toml` during `syslog setup`.
+- `src/setup/` — code that writes `~/.cortex/.env` and `~/.cortex/config.toml` during `cortex setup`.
 - `~/.cortex/.env` — operator-editable env file written by setup; loader rules in §2.
 - `~/.cortex/config.toml` — operator-editable TOML file (overlaid before env).
 - `.claude-plugin/plugin.json::userConfig` — plugin-managed subset that maps to env vars at setup time. The `plugin.json` column in §4 names the userConfig field that drives each row.

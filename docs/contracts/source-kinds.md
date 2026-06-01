@@ -25,9 +25,9 @@ Three different spellings of `source_kind` are in flight across the corpus:
 | Surface | Spelling family | Example values |
 |---|---|---|
 | `docs/contracts/log-row-shape.md` §3 (lines 60–69) | **kebab-case** | `syslog-udp`, `syslog-tcp`, `agent`, `docker-stream`, `docker-event`, `otlp`, `unifi-api`, `adguard-api` |
-| `docs/contracts/parser-trait.rs::SourceKind` (lines 51–61, `#[serde(rename_all = "snake_case")]`) | **snake_case** | `syslog`, `docker_stream`, `docker_event`, `otlp`, `adguard_api`, `unifi_api`, `agent` |
+| `docs/contracts/parser-trait.rs::SourceKind` (lines 51–61, `#[serde(rename_all = "snake_case")]`) | **snake_case** | `cortex`, `docker_stream`, `docker_event`, `otlp`, `adguard_api`, `unifi_api`, `agent` |
 | `docs/superpowers/specs/2026-05-16-agent-mode-design.md` §12 (line 587–593) | kebab-case but uses `docker-ingest` instead of `docker-stream` | `syslog-udp`, `syslog-tcp`, `agent`, `docker-ingest`, `otlp` |
-| `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` §3 / §4 (lines 78, 128–134) | snake_case, **no UDP/TCP distinction** | `syslog`, `docker_stream`, `docker_event`, `otlp`, `adguard_api` |
+| `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` §3 / §4 (lines 78, 128–134) | snake_case, **no UDP/TCP distinction** | `cortex`, `docker_stream`, `docker_event`, `otlp`, `adguard_api` |
 | `docs/superpowers/specs/2026-05-16-api-pollers-design.md` §2 / §4 (lines 44, 51, 202) | kebab-case | `adguard-api`, `unifi-api` |
 
 This contract reconciles all five.
@@ -72,7 +72,7 @@ no-match, §7). Renaming an existing value is a major version bump.
 |---|---|---|
 | `syslog-udp` | `src/syslog/listener.rs` UDP path | RFC 3164/5424 over UDP `:1514` |
 | `syslog-tcp` | `src/syslog/listener.rs` TCP path | RFC 3164/5424 over TCP `:1514` |
-| `agent` | `src/mcp/ws_agent/*` (epic A) | JSON-RPC 2.0 over WSS from the `syslog agent` binary on each host |
+| `agent` | `src/mcp/ws_agent/*` (epic A) | JSON-RPC 2.0 over WSS from the `cortex agent` binary on each host |
 | `docker-stream` | `src/docker_ingest/parser.rs::log_output_to_entry` | Container stdout/stderr via Docker socket proxy |
 | `docker-event` | `src/docker_ingest/parser.rs::docker_event_to_entry` | Docker lifecycle events from the `/events` stream |
 | `otlp` | `src/otlp.rs` | OpenTelemetry logs received on `/v1/logs` |
@@ -87,7 +87,7 @@ no-match, §7). Renaming an existing value is a major version bump.
   The two Docker producers split cleanly into `docker-stream` (per-container
   stdout/stderr) and `docker-event` (lifecycle events). Replace any
   `docker-ingest` reference with one of those two.
-- Bare `syslog` (used in parser-trait.rs and enrichment-framework spec) is
+- Bare `cortex` (used in parser-trait.rs and enrichment-framework spec) is
   **not a member**. It always splits into `syslog-udp` and `syslog-tcp`.
   The UDP/TCP distinction is operationally meaningful (TCP is reliable,
   UDP is fire-and-forget) and the listener already knows which one it is
@@ -230,7 +230,7 @@ scheme reconstruction):
 | `docs/contracts/parser-trait.rs` lines 40–60 | Comment lists snake_case forms | ✅ **RESOLVED** (bead `cortex-s6et`) — doc comments updated to kebab-case |
 | `docs/contracts/parser-trait.rs` line 53 | Enum variant `Syslog` (no UDP/TCP distinction) | ✅ **RESOLVED** (bead `cortex-s6et`) — split into `SyslogUdp` and `SyslogTcp` + `is_syslog()` helper + `as_str()` method |
 | `docs/superpowers/specs/2026-05-16-agent-mode-design.md` §12 | Lists `docker-ingest` as a member | ✅ **RESOLVED** (bead `cortex-s6et`) — replaced with `docker-stream` + `docker-event`; `unifi-api` and `adguard-api` added |
-| `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` §3 / §4 | Uses bare `syslog` and `_`-style names | ✅ **RESOLVED** (bead `cortex-s6et`) — dispatch matrix rewritten in kebab-case with UDP/TCP rows merged via `app_name`-only dispatch (transport tag lives in `source_kind`/`source_ip`) |
+| `docs/superpowers/specs/2026-05-16-enrichment-framework-design.md` §3 / §4 | Uses bare `cortex` and `_`-style names | ✅ **RESOLVED** (bead `cortex-s6et`) — dispatch matrix rewritten in kebab-case with UDP/TCP rows merged via `app_name`-only dispatch (transport tag lives in `source_kind`/`source_ip`) |
 | `docs/contracts/log-row-shape.md` §4 line 88 | `unifi://<controller_host>/site/<site_id>` | ✅ **RESOLVED** (bead `cortex-s6et`) — path dropped; v1 single-site |
 | `docs/contracts/log-row-shape.md` §4 line 89 | `adguard://<adguard_host>/<client_ip_or_name>` | ✅ **RESOLVED** (bead `cortex-s6et`) — path dropped; per-client filtering uses `metadata_json.adguard.client` |
 | `docs/contracts/metadata-json-shape.md` §3 line 46 | Used `docker_stream` (snake_case) for ingest envelope | ✅ **RESOLVED** (bead `cortex-s6et`) — rewritten to `docker-stream` / `docker-event` kebab forms |
@@ -273,7 +273,7 @@ Cross-checked against:
 - agent-mode spec §12 source_kind enum (line 587–593): all 5 values
   covered (`syslog-udp`, `syslog-tcp`, `agent`, `docker-ingest` →
   remapped to `docker-stream` + `docker-event`, `otlp`).
-- enrichment-framework spec §3, §4: bare `syslog` rewritten to
+- enrichment-framework spec §3, §4: bare `cortex` rewritten to
   `syslog-udp`/`syslog-tcp` (functionally the same for parser
   dispatch); `docker_stream`, `docker_event`, `otlp`, `adguard_api`
   all map to kebab-case equivalents.

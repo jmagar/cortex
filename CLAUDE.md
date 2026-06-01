@@ -2,7 +2,7 @@
 
 ## Purpose
 
-**Syslog Intelligence for Homelabs** — Receives RFC 3164/5424 syslog from all homelab hosts (UDP/TCP), ingests Docker logs via socket proxy, stores everything in SQLite with FTS5, and exposes a comprehensive `syslog` MCP tool for AI agents.
+**Syslog Intelligence for Homelabs** — Receives RFC 3164/5424 syslog from all homelab hosts (UDP/TCP), ingests Docker logs via socket proxy, stores everything in SQLite with FTS5, and exposes a comprehensive `cortex` MCP tool for AI agents.
 
 **Status**: Active development, Production-ready
 **Version**: 0.29.0
@@ -17,7 +17,7 @@
 | `CLAUDE.md` | Dev environment rules and standard commands |
 | `config.toml` | Local development configuration |
 | `Justfile` | Command runner for dev, build, and test |
-| `src/cli.rs` | Standalone CLI binary (`syslog` command) |
+| `src/cli.rs` | Standalone CLI binary (`cortex` command) |
 | `src/compose.rs` | Docker Compose lifecycle management |
 | `src/scanner.rs` | AI transcript indexer (Claude/Codex sessions) |
 | `src/doctor.rs` | Self-debugging diagnostics — binary, DB, and AI-watch health |
@@ -66,7 +66,7 @@ cortex/
 │   │   ├── error_detection/     # Error detection rules + scoring
 │   │   └── models.rs            # DB model types
 │   ├── mcp/                     # MCP Server Layer
-│   │   ├── tools.rs             # syslog tool action dispatch
+│   │   ├── tools.rs             # cortex tool action dispatch
 │   │   ├── routes.rs            # HTTP route handlers
 │   │   ├── schemas.rs           # JSON Schema definitions
 │   │   └── rmcp_server.rs       # RMCP transport implementation
@@ -84,7 +84,6 @@ cortex/
 │   │   └── checkpoint.rs        # Scan progress checkpointing
 │   ├── doctor.rs                # Self-debugging diagnostics (binary, DB, AI-watch)
 │   └── docker_ingest/           # Docker remote ingestion
-├── bin/                         # Installed binaries (syslog)
 ├── config/                      # Deployment config templates
 ├── deploy/                      # Host-side manifests (rsyslog, otel)
 ├── docs/                        # Deep-dive documentation
@@ -125,14 +124,14 @@ AI Agents (Claude/Codex/Gemini)
 
 ### Key Design Patterns
 
-- **Action Dispatch**: Single `syslog` MCP tool dispatches to handlers via an `action` argument.
+- **Action Dispatch**: Single `cortex` MCP tool dispatches to handlers via an `action` argument.
 - **Sidecar Tests**: `#[cfg(test)] #[path = "..._tests.rs"] mod tests;` pattern for unit tests.
 - **SQLx + SQLite**: Async SQLx for database operations with WAL mode enabled.
 - **FTS5 Search**: Full-text search with BM25-like ranking for log discovery.
 - **RuntimeCore Lifecycle**: Centralized management of background tasks (retention, storage guardrails).
 - **Transaction Pattern**: All batch inserts use explicit SQLx transactions for atomicity.
 - **Storage Guardrails**: Automated cleanup of oldest logs when DB size or disk space limits are breached.
-- **Self-Debugging Surfaces**: `syslog ai doctor` checks binary-vs-container version parity, DB health, and AI-watch coordination in one command. CI-safe and idempotent.
+- **Self-Debugging Surfaces**: `cortex ai doctor` checks binary-vs-container version parity, DB health, and AI-watch coordination in one command. CI-safe and idempotent.
 
 ### Transaction Pattern (Rust/SQLx)
 
@@ -167,8 +166,8 @@ bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of
 
 | Command | Purpose | Example |
 |---------|---------|---------|
-| `syslog serve mcp` | Start full server with ingest | `syslog serve mcp` |
-| `syslog mcp` | Start stdio query-only mode | `syslog mcp` |
+| `cortex serve mcp` | Start full server with ingest | `cortex serve mcp` |
+| `cortex mcp` | Start stdio query-only mode | `cortex mcp` |
 | `just health` | Check server health | `just health` |
 | `just dev` | Run in dev mode | `just dev` |
 | `just lint` | Run clippy (strict) | `just lint` |
@@ -178,27 +177,27 @@ bash scripts/smoke-test.sh  # Lower-level smoke harness (used by CI; superset of
 | `just build` | Cargo release build | `just build` |
 | `just validate-skills` | Validate plugin skill manifests | `just validate-skills` |
 | `just gen-token` | Generate a random API token | `just gen-token` |
-| `just build-plugin` | Copy release binary into bin/ | `just build-plugin` |
+| `just build-plugin` | Copy release binary into plugins/cortex/bin/ | `just build-plugin` |
 | `just publish [bump]` | Version bump + tag + push | `just publish patch` |
 | `just setup` | Initialize .env from .env.example | `just setup` |
-| `syslog ai doctor` | Self-debug: binary vs container version, DB health, AI-watch | `syslog ai doctor` |
-| `syslog db status` | DB size, WAL, page count, drift check | `syslog db status` |
-| `syslog db integrity` | SQLite integrity_check | `syslog db integrity --quick` |
-| `syslog db vacuum` | Reclaim DB space | `syslog db vacuum` |
-| `syslog db backup` | Backup DB to path | `syslog db backup --output /tmp/out.db` |
-| `syslog setup check` | Validate config and env | `syslog setup check` |
-| `syslog setup repair` | Auto-fix missing config | `syslog setup repair` |
-| `syslog compose status` | Container running status | `syslog compose status` |
-| `syslog compose doctor` | Full coordination diagnostics | `syslog compose doctor` |
-| `syslog source-ips` | List unique source IPs with log counts | `syslog source-ips --limit 50` |
-| `syslog timeline` | Log volume over time (bucketed) | `syslog timeline --bucket hour` |
-| `syslog patterns` | Recurring message patterns | `syslog patterns --top-n 25` |
-| `syslog ingest-rate` | Current ingest rate (logs/sec) | `syslog ingest-rate --by-host` |
-| `syslog sig list` | List unaddressed error signatures | `syslog sig list` |
-| `syslog sig ack HASH` | Acknowledge/suppress an error signature | `syslog sig ack ab12cd --notes "fixed"` |
-| `syslog sig unack HASH` | Revoke an acknowledgement | `syslog sig unack ab12cd` |
-| `syslog notify recent` | Recent notification firings | `syslog notify recent --limit 25` |
-| `syslog notify test` | Send a test notification via Apprise (HTTP-only) | `syslog --http notify test --body "ping"` |
+| `cortex ai doctor` | Self-debug: binary vs container version, DB health, AI-watch | `cortex ai doctor` |
+| `cortex db status` | DB size, WAL, page count, drift check | `cortex db status` |
+| `cortex db integrity` | SQLite integrity_check | `cortex db integrity --quick` |
+| `cortex db vacuum` | Reclaim DB space | `cortex db vacuum` |
+| `cortex db backup` | Backup DB to path | `cortex db backup --output /tmp/out.db` |
+| `cortex setup check` | Validate config and env | `cortex setup check` |
+| `cortex setup repair` | Auto-fix missing config | `cortex setup repair` |
+| `cortex compose status` | Container running status | `cortex compose status` |
+| `cortex compose doctor` | Full coordination diagnostics | `cortex compose doctor` |
+| `cortex source-ips` | List unique source IPs with log counts | `cortex source-ips --limit 50` |
+| `cortex timeline` | Log volume over time (bucketed) | `cortex timeline --bucket hour` |
+| `cortex patterns` | Recurring message patterns | `cortex patterns --top-n 25` |
+| `cortex ingest-rate` | Current ingest rate (logs/sec) | `cortex ingest-rate --by-host` |
+| `cortex sig list` | List unaddressed error signatures | `cortex sig list` |
+| `cortex sig ack HASH` | Acknowledge/suppress an error signature | `cortex sig ack ab12cd --notes "fixed"` |
+| `cortex sig unack HASH` | Revoke an acknowledgement | `cortex sig unack ab12cd` |
+| `cortex notify recent` | Recent notification firings | `cortex notify recent --limit 25` |
+| `cortex notify test` | Send a test notification via Apprise (HTTP-only) | `cortex --http notify test --body "ping"` |
 
 ## Diagnostics: host/container drift
 
@@ -213,10 +212,10 @@ to different SQLite files:
 
 Where they run:
 
-- `syslog compose doctor` — always runs both phases. `--json` includes them
+- `cortex compose doctor` — always runs both phases. `--json` includes them
   under a `coordination` array. A canonical mismatch is fatal (exit 1).
-- `syslog db status --check-coord` — opt-in. Adds both phases to the JSON
-  payload under `coordination`. The default `syslog db status` path is
+- `cortex db status --check-coord` — opt-in. Adds both phases to the JSON
+  payload under `coordination`. The default `cortex db status` path is
   unchanged (no shell-outs).
 
 Both phases shell out to `docker inspect` and `systemctl --user show`, which

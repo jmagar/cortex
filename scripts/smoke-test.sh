@@ -92,7 +92,7 @@ skip() { echo "SKIP  $1"; (( SKIP++ )) || true; }
 
 mcp_call() {
     local action="$1"; shift
-    mcporter call --config "$MCPORTER_CONFIG" "syslog.syslog" "action=${action}" "$@" 2>&1
+    mcporter call --config "$MCPORTER_CONFIG" "cortex.cortex" "action=${action}" "$@" 2>&1
 }
 
 mcp_jsonrpc() {
@@ -168,7 +168,7 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null; then
         pass "$label"
-    elif printf '%s\n' "$output" | grep -Eq "^\[mcporter\] MCP error -32602:|requires scope: syslog:__deny__"; then
+    elif printf '%s\n' "$output" | grep -Eq "^\[mcporter\] MCP error -32602:|requires scope: cortex:__deny__"; then
         pass "$label"
     else
         fail "$label (expected tool isError=true or MCP invalid-params error)"
@@ -183,23 +183,23 @@ send_tcp_seed() {
     printf '%s\n' "$message" | nc -w2 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT" >/dev/null
 }
 
-run_syslog_ai_add() {
+run_cortex_ai_add() {
     local db_path="$1"
     local fixture="$2"
-    local syslog_bin="${CORTEX_BIN:-}"
+    local cortex_bin="${CORTEX_BIN:-}"
 
-    if [[ -z "$syslog_bin" ]]; then
+    if [[ -z "$cortex_bin" ]]; then
         if command -v cortex >/dev/null 2>&1; then
-            syslog_bin="$(command -v cortex)"
+            cortex_bin="$(command -v cortex)"
         elif [[ -x "target/debug/cortex" ]]; then
-            syslog_bin="target/debug/cortex"
+            cortex_bin="target/debug/cortex"
         else
             echo "cortex binary not found; install cortex on PATH, set CORTEX_BIN, or run cargo build" >&2
             return 127
         fi
     fi
 
-    CORTEX_DB_PATH="$db_path" "$syslog_bin" ai add --file "$fixture" --json
+    CORTEX_DB_PATH="$db_path" "$cortex_bin" ai add --file "$fixture" --json
 }
 
 seed_ai_fixture() {
@@ -207,7 +207,7 @@ seed_ai_fixture() {
 
     local db_path="${CORTEX_SMOKE_DB_PATH:-${CORTEX_DB_PATH:-data/cortex.db}}"
     local output
-    if output="$(run_syslog_ai_add "$db_path" "$AI_SMOKE_FIXTURE" 2>&1)"; then
+    if output="$(run_cortex_ai_add "$db_path" "$AI_SMOKE_FIXTURE" 2>&1)"; then
         AI_SEEDED=1
         echo "Seeded AI transcript fixture into ${db_path}: ${AI_SMOKE_FIXTURE}"
     else
@@ -231,7 +231,7 @@ assert_eq "Health endpoint responds with ok" "$HEALTH_STATUS" "ok"
 
 TOOL_LIST=$(mcporter list cortex --config "$MCPORTER_CONFIG" 2>&1)
 TOOL_COUNT=$(printf '%s\n' "$TOOL_LIST" | grep -c "^  function " || true)
-assert_eq "mcporter lists exactly 1 tool (syslog)" "$TOOL_COUNT" "1"
+assert_eq "mcporter lists exactly 1 tool (cortex)" "$TOOL_COUNT" "1"
 
 PROMPTS_LIST=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":101,"method":"prompts/list","params":{}}' || true)
 PROMPTS_VALID=$(printf '%s\n' "$PROMPTS_LIST" | python3 -c "
@@ -841,8 +841,8 @@ fi
 # ── help ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "Action: help"
-HELP_FILE=$(mktemp /tmp/syslog-help-XXXXXX.json)
-if mcporter call --config "$MCPORTER_CONFIG" "syslog.syslog" "action=help" >"$HELP_FILE" 2>&1; then
+HELP_FILE=$(mktemp /tmp/cortex-help-XXXXXX.json)
+if mcporter call --config "$MCPORTER_CONFIG" "cortex.cortex" "action=help" >"$HELP_FILE" 2>&1; then
     if python3 -c "
 import sys, json
 try:

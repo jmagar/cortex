@@ -1,6 +1,6 @@
 # CLAUDE.md — cortex
 
-Rust binary: syslog receiver (UDP/TCP) + MCP server for homelab log intelligence. Receives RFC 3164/5424 syslog from all homelab hosts, stores in SQLite with FTS5, exposes a single `syslog` MCP tool (with action dispatch) for AI agents.
+Rust binary: syslog receiver (UDP/TCP) + MCP server for homelab log intelligence. Receives RFC 3164/5424 syslog from all homelab hosts, stores in SQLite with FTS5, exposes a single `cortex` MCP tool (with action dispatch) for AI agents.
 
 ## Commands
 
@@ -15,15 +15,15 @@ docker compose up -d             # production deployment
 docker compose down              # stop
 docker compose logs -f           # follow logs
 docker compose build             # rebuild image
-syslog compose doctor            # diagnose live Compose/listener ownership
-syslog compose status --json     # inspect canonical cortex container/project
-syslog compose pull              # pull image for resolved Compose project
-syslog compose up                # run docker compose up -d for resolved service
-syslog compose restart           # restart resolved service
-syslog compose logs --tail 20    # bounded compose logs
-syslog db status                 # inspect SQLite maintenance state
-syslog db integrity              # run SQLite integrity_check
-syslog db backup                 # create WAL-safe SQLite backup
+cortex compose doctor            # diagnose live Compose/listener ownership
+cortex compose status --json     # inspect canonical cortex container/project
+cortex compose pull              # pull image for resolved Compose project
+cortex compose up                # run docker compose up -d for resolved service
+cortex compose restart           # restart resolved service
+cortex compose logs --tail 20    # bounded compose logs
+cortex db status                 # inspect SQLite maintenance state
+cortex db integrity              # run SQLite integrity_check
+cortex db backup                 # create WAL-safe SQLite backup
 ```
 
 ```bash
@@ -47,7 +47,7 @@ Key modules in `src/` (most are directories with sidecar `*_tests.rs` files):
 | `app/` | Service layer: `SyslogService`, request/response models, business logic |
 | `db/` | SQLite pool, FTS5 queries, maintenance (retention, storage enforcement) |
 | `syslog/` | UDP + TCP listeners, RFC 3164/5424 parsing, mpsc batch writer |
-| `mcp/` | RMCP Streamable HTTP server, single `syslog` tool with action dispatch |
+| `mcp/` | RMCP Streamable HTTP server, single `cortex` tool with action dispatch |
 | `api.rs` | Optional non-MCP REST API (enabled via `CORTEX_API_ENABLED=true`) |
 | `docker_ingest/` | Docker container log ingestion via remote docker-socket-proxy endpoints |
 | `main.rs` | Entrypoint: `serve mcp` (full server with ingest) or `mcp` (stdio query-only) |
@@ -63,7 +63,7 @@ Tests: unit tests live in sidecar files beside their source modules (e.g. `src/d
 
 ## MCP Tools
 
-One MCP tool: **`syslog`** — dispatches by `action` argument.
+One MCP tool: **`cortex`** — dispatches by `action` argument.
 
 | Action | Description |
 |--------|-------------|
@@ -164,14 +164,14 @@ RUST_LOG=info
 | `docker-compose.yml` | Production deployment (ports 1514, 3100) |
 | `docs/SETUP.md` | Per-host syslog forwarding (rsyslog, UniFi, ATT router, WSL) |
 | `src/db/queries.rs` | All SQL queries and FTS5 search implementation |
-| `src/mcp/tools.rs` | Single `syslog` tool with action dispatch |
+| `src/mcp/tools.rs` | Single `cortex` tool with action dispatch |
 | `config/mcporter.json` | mcporter config (HTTP transport to localhost:3100) |
 | `CORTEX_DOCKER_HOSTS` env var | Docker ingest host list — comma-separated hostnames, each becomes `http://<host>:2375` |
 | `scripts/smoke-test.sh` | Live smoke test — all MCP actions via mcporter, strict PASS/FAIL |
 | `scripts/backup.sh` | WAL-safe SQLite backup script (checkpoint + `.backup` method) |
 | `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset helper for local/dev recovery |
 | `scripts/bump-version.sh` | Bump version across all version-bearing files; called by `just publish` |
-| `syslog db status\|integrity\|checkpoint\|vacuum\|backup` | Direct SQLite maintenance commands for the configured DB |
+| `cortex db status\|integrity\|checkpoint\|vacuum\|backup` | Direct SQLite maintenance commands for the configured DB |
 | `scripts/check-version-sync.sh` | Assert all version-bearing files have the same version (used in CI) |
 | `scripts/block-env-commits.sh` | Pre-commit hook that blocks commits containing env credential patterns |
 | `CHANGELOG.md` | Version history; entry required per version bump |
@@ -181,7 +181,7 @@ RUST_LOG=info
 
 - **Port 1514 not 514** — avoids needing root; use iptables PREROUTING to redirect 514→1514 for devices that can't be reconfigured (see docs/SETUP.md)
 - **Cargo.lock is tracked** — binary crates should commit Cargo.lock for reproducible builds (Cargo docs guidance)
-- **FTS5 query syntax** — `syslog action=search` uses SQLite FTS5: `error AND nginx`, `"disk full"`, `kern OR syslog`; invalid FTS5 syntax returns a db error. **Hyphen is the FTS5 NOT operator** — to search for hyphenated terms, use phrase syntax: `"smoke-test"` not `smoke-test`
+- **FTS5 query syntax** — `cortex action=search` uses SQLite FTS5: `error AND nginx`, `"disk full"`, `kern OR syslog`; invalid FTS5 syntax returns a db error. **Hyphen is the FTS5 NOT operator** — to search for hyphenated terms, use phrase syntax: `"smoke-test"` not `smoke-test`
 - **WAL mode** — SQLite runs in WAL mode; copying `.db`, `.db-wal`, and `.db-shm` together without a checkpoint captures potentially inconsistent state. Safe backup options: (1) run `PRAGMA wal_checkpoint(FULL);` first, then copy all three files, or (2) use `sqlite3 source.db '.backup dest.db'` which is WAL-safe and requires no manual checkpoint
 - **MCP transport** — HTTP MCP runs in stateless JSON-response mode on `POST /mcp`; SSE streams (`GET /mcp` or `/sse`) are not enabled in the current server.
 - **Data volume** — DB lives in `./data/` (bind mount); `*.db` is gitignored so the database files won't be committed
@@ -207,9 +207,9 @@ bash scripts/reset-db.sh
 
 # Using mcporter (project config at config/mcporter.json)
 mcporter list cortex --config config/mcporter.json
-mcporter call --config config/mcporter.json cortex.syslog action=stats
-mcporter call --config config/mcporter.json cortex.syslog action=tail n=10
-mcporter call --config config/mcporter.json cortex.syslog action=search query=error limit=5
+mcporter call --config config/mcporter.json cortex.cortex action=stats
+mcporter call --config config/mcporter.json cortex.cortex action=tail n=10
+mcporter call --config config/mcporter.json cortex.cortex action=search query=error limit=5
 
 # Health check
 curl http://localhost:3100/health
@@ -233,7 +233,7 @@ curl -s -X POST http://localhost:3100/mcp \
 cargo run -- mcp
 ```
 
-`syslog compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, listener conflicts, and destructive `down` without `--yes`.
+`cortex compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, listener conflicts, and destructive `down` without `--yes`.
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
@@ -308,6 +308,6 @@ CHANGELOG.md must have an entry for every version bump.
 
 ## Plugin setup hooks
 
-Plugin setup is owned by the binary. Keep `scripts/plugin-setup.sh` as a thin adapter that maps `CLAUDE_PLUGIN_OPTION_*` values to environment variables, prepares appdata, ensures `syslog` is on `PATH`, and then calls `syslog setup plugin-hook "$@"`.
+Plugin setup is owned by the binary. Keep `scripts/plugin-setup.sh` as a thin adapter that maps `CLAUDE_PLUGIN_OPTION_*` values to environment variables, prepares appdata, ensures `cortex` is on `PATH`, and then calls `cortex setup plugin-hook "$@"`.
 
-`syslog setup check` is read-only, `syslog setup repair` is idempotent, and `syslog setup plugin-hook --no-repair` is audit mode. Do not add Docker Compose, systemd, or service bootstrap logic back into the hook script.
+`cortex setup check` is read-only, `cortex setup repair` is idempotent, and `cortex setup plugin-hook --no-repair` is audit mode. Do not add Docker Compose, systemd, or service bootstrap logic back into the hook script.

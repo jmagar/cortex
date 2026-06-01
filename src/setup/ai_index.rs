@@ -124,7 +124,7 @@ fn remove_ai_index_timer_files(
             Err(error) => return Err(error),
         }
     }
-    Ok(timer.finish(SetupStatus::Ok, "removed syslog AI index timer files"))
+    Ok(timer.finish(SetupStatus::Ok, "removed cortex AI index timer files"))
 }
 
 pub(crate) fn ai_index_script() -> String {
@@ -149,7 +149,7 @@ export RUST_LOG="${RUST_LOG:-warn}"
 
 {
   printf '== %s ==\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-  command -v syslog
+  command -v cortex
   cortex --version
   cortex ai index --json
 } >>"$LOG_FILE" 2>&1

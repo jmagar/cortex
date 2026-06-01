@@ -1,4 +1,4 @@
-//! Parse function for `syslog correlate-state`.
+//! Parse function for `cortex correlate-state`.
 //!
 //! Surface parity (cxih.4): exposes the `correlate_state` MCP action and
 //! `GET /api/correlate-state` REST route as a top-level CLI subcommand.

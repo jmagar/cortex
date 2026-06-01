@@ -39,7 +39,7 @@ just test-live
 # or: bash tests/test_live.sh
 ```
 
-The smoke test (`scripts/smoke-test.sh`) exercises all `syslog` actions via mcporter.
+The smoke test (`scripts/smoke-test.sh`) exercises all `cortex` actions via mcporter.
 Compose diagnostics are non-mutating and are validated only for redacted shape,
 so the smoke test can pass on either Docker-backed or non-Docker deployments.
 When seeding is enabled, the smoke scripts import
@@ -49,7 +49,7 @@ rows, not just empty response envelopes.
 `scripts/smoke-ai-mcp.sh` additionally seeds a temporary transcript and calls
 the HTTP MCP endpoint for `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `usage_blocks`,
 `project_context`, `list_ai_tools`, and `list_ai_projects`.
-The AI smoke scripts resolve `CORTEX_BIN` first, then `syslog` on `PATH`, then
+The AI smoke scripts resolve `CORTEX_BIN` first, then `cortex` on `PATH`, then
 the repo-local debug binary at `target/debug/syslog`, so repo-local builds do
 not require an installed shell binary.
 
@@ -68,51 +68,51 @@ Action registry covered by live/script references: `search`, `filter`, `tail`, `
 # List available tools
 mcporter list syslog --config config/mcporter.json
 
-# Call actions through the single syslog tool
-mcporter call --config config/mcporter.json syslog.syslog action=stats
-mcporter call --config config/mcporter.json syslog.syslog action=status
-mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
-mcporter call --config config/mcporter.json syslog.syslog action=search query=error limit=5
-mcporter call --config config/mcporter.json syslog.syslog action=hosts
-mcporter call --config config/mcporter.json syslog.syslog action=host_state host_id=host-id
-mcporter call --config config/mcporter.json syslog.syslog action=sessions
-mcporter call --config config/mcporter.json syslog.syslog action=abuse terms=ai-smoke-authentication limit=5
-mcporter call --config config/mcporter.json syslog.syslog action=abuse_incidents limit=3
-mcporter call --config config/mcporter.json syslog.syslog action=abuse_investigate limit=1
-mcporter call --config config/mcporter.json syslog.syslog action=correlate_state reference_time=2026-01-01T00:00:00Z window_minutes=10
-mcporter call --config config/mcporter.json syslog.syslog action=ai_correlate project=/tmp/cortex-ai-smoke limit=2 events_per_anchor=3
-mcporter call --config config/mcporter.json syslog.syslog action=apps
-mcporter call --config config/mcporter.json syslog.syslog action=source_ips
-mcporter call --config config/mcporter.json syslog.syslog action=timeline
-mcporter call --config config/mcporter.json syslog.syslog action=patterns
-mcporter call --config config/mcporter.json syslog.syslog action=context hostname=host timestamp=2026-01-01T00:00:00Z
-mcporter call --config config/mcporter.json syslog.syslog action=get id=1
-mcporter call --config config/mcporter.json syslog.syslog action=ingest_rate
-mcporter call --config config/mcporter.json syslog.syslog action=silent_hosts
-mcporter call --config config/mcporter.json syslog.syslog action=clock_skew
-mcporter call --config config/mcporter.json syslog.syslog action=anomalies
-mcporter call --config config/mcporter.json syslog.syslog action=compare a_from=2026-01-01T00:00:00Z a_to=2026-01-01T01:00:00Z b_from=2026-01-01T01:00:00Z b_to=2026-01-01T02:00:00Z
-mcporter call --config config/mcporter.json syslog.syslog action=compose_status
-mcporter call --config config/mcporter.json syslog.syslog action=compose_doctor
+# Call actions through the single cortex tool
+mcporter call --config config/mcporter.json syslog.cortex action=stats
+mcporter call --config config/mcporter.json syslog.cortex action=status
+mcporter call --config config/mcporter.json syslog.cortex action=tail n=10
+mcporter call --config config/mcporter.json syslog.cortex action=search query=error limit=5
+mcporter call --config config/mcporter.json syslog.cortex action=hosts
+mcporter call --config config/mcporter.json syslog.cortex action=host_state host_id=host-id
+mcporter call --config config/mcporter.json syslog.cortex action=sessions
+mcporter call --config config/mcporter.json syslog.cortex action=abuse terms=ai-smoke-authentication limit=5
+mcporter call --config config/mcporter.json syslog.cortex action=abuse_incidents limit=3
+mcporter call --config config/mcporter.json syslog.cortex action=abuse_investigate limit=1
+mcporter call --config config/mcporter.json syslog.cortex action=correlate_state reference_time=2026-01-01T00:00:00Z window_minutes=10
+mcporter call --config config/mcporter.json syslog.cortex action=ai_correlate project=/tmp/cortex-ai-smoke limit=2 events_per_anchor=3
+mcporter call --config config/mcporter.json syslog.cortex action=apps
+mcporter call --config config/mcporter.json syslog.cortex action=source_ips
+mcporter call --config config/mcporter.json syslog.cortex action=timeline
+mcporter call --config config/mcporter.json syslog.cortex action=patterns
+mcporter call --config config/mcporter.json syslog.cortex action=context hostname=host timestamp=2026-01-01T00:00:00Z
+mcporter call --config config/mcporter.json syslog.cortex action=get id=1
+mcporter call --config config/mcporter.json syslog.cortex action=ingest_rate
+mcporter call --config config/mcporter.json syslog.cortex action=silent_hosts
+mcporter call --config config/mcporter.json syslog.cortex action=clock_skew
+mcporter call --config config/mcporter.json syslog.cortex action=anomalies
+mcporter call --config config/mcporter.json syslog.cortex action=compare a_from=2026-01-01T00:00:00Z a_to=2026-01-01T01:00:00Z b_from=2026-01-01T01:00:00Z b_to=2026-01-01T02:00:00Z
+mcporter call --config config/mcporter.json syslog.cortex action=compose_status
+mcporter call --config config/mcporter.json syslog.cortex action=compose_doctor
 ```
 
 ### CLI-based testing (abuse investigation workflow)
 
 The deterministic abuse incident/investigation workflow is also exercisable
-directly through the `syslog` binary. All outputs are bounded; the investigation
+directly through the `cortex` binary. All outputs are bounded; the investigation
 `findings` are rule-based and local-only (never an external LLM analysis).
 
 ```bash
 # Group abuse hits into scored incident candidates (bounded; capped result set)
-syslog ai incidents --limit 3 --json
+cortex ai incidents --limit 3 --json
 
 # Expand the top incidents into deterministic evidence bundles + findings
-syslog ai investigate --limit 1 --json
+cortex ai investigate --limit 1 --json
 
 # Heartbeat fleet state parity commands
-syslog host-state --hostname tootie --json
-syslog fleet-state --json
-syslog correlate-state --reference-time 2026-01-01T00:00:00Z --window-minutes 10 --json
+cortex host-state --hostname tootie --json
+cortex fleet-state --json
+cortex correlate-state --reference-time 2026-01-01T00:00:00Z --window-minutes 10 --json
 ```
 
 ### curl-based testing

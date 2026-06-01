@@ -70,7 +70,7 @@ cortex/
 5. **Add sidecar unit tests** -- place tests in the relevant `src/<module>_tests.rs` file and keep the source module limited to the `#[cfg(test)] #[path = "..._tests.rs"] mod tests;` hook.
 6. **Update syslog help** -- add the action to the help text in `tool_syslog_help()`.
 7. **Update public docs** -- refresh `docs/mcp/TOOLS.md`, `docs/mcp/SCHEMA.md`, `docs/mcp/TESTS.md`, and relevant skill docs.
-8. **Update plugin manifests** -- keep the public tool name as `syslog`.
+8. **Update plugin manifests** -- keep the public tool name as `cortex`.
 
 ## Debugging
 
@@ -96,8 +96,8 @@ RUST_LOG=cortex=debug,tower_http=info cargo run
 
 ```bash
 mcporter list syslog --config config/mcporter.json
-mcporter call --config config/mcporter.json syslog.syslog action=stats
-mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
+mcporter call --config config/mcporter.json syslog.cortex action=stats
+mcporter call --config config/mcporter.json syslog.cortex action=tail n=10
 ```
 
 ### MCP Inspector

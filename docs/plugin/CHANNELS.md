@@ -6,7 +6,7 @@ cortex does not use channels. It does not send or receive messages from external
 
 cortex is a passive data store -- it receives syslog messages via UDP/TCP and answers MCP queries. It does not generate outbound notifications or integrate with messaging services.
 
-For alerting on syslog events, use the `gotify-mcp` plugin to send notifications based on `syslog errors` or `syslog search` results.
+For alerting on syslog events, use the `gotify-mcp` plugin to send notifications based on `cortex errors` or `cortex search` results.
 
 ## See also
 

@@ -19,7 +19,7 @@ wins.
 
 ## Current Actions
 
-cortex exposes one MCP tool named `syslog`. The required `action` argument
+cortex exposes one MCP tool named `cortex`. The required `action` argument
 selects one of these 42 actions:
 
 | Action | Scope | Cost | Purpose |
@@ -106,7 +106,7 @@ The runtime tool definition is a flat action-dispatched JSON schema:
 ```
 
 All properties are declared at the top level because MCP clients receive one
-tool schema for the `syslog` super-tool. Per-action validation happens in the
+tool schema for the `cortex` super-tool. Per-action validation happens in the
 handler and service layers.
 
 ## Common Arguments

@@ -10,7 +10,7 @@ than automatically generated.
 
 ## MCP tools
 
-cortex exposes one MCP tool named `syslog`. The required `action`
+cortex exposes one MCP tool named `cortex`. The required `action`
 argument selects the operation. The authoritative action registry lives in
 `src/mcp/actions.rs::ACTION_SPECS`; the runtime schema enum is derived from
 that registry by `src/mcp/schemas.rs::tool_definitions()`.
@@ -67,33 +67,33 @@ or notification state through service-owned actor and safety policy.
 
 ## Direct CLI commands
 
-The `syslog` binary also exposes direct local commands backed by the same service
+The `cortex` binary also exposes direct local commands backed by the same service
 methods as the MCP actions.
 
 | Command | Matches MCP action | Description |
 | --- | --- | --- |
-| `syslog search` | `search` | Full-text search with filters |
-| `syslog tail` | `tail` | Recent log entries |
-| `syslog errors` | `errors` | Error/warning summary |
-| `syslog hosts` | `hosts` | Known host list |
-| `syslog filter` | `filter` | Structured filter-only log retrieval |
-| `syslog correlate` | `correlate` | Cross-host event correlation |
-| `syslog host-state` | `host_state` | Latest bounded heartbeat state for one host |
-| `syslog fleet-state` | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags |
-| `syslog correlate-state` | `correlate_state` | Logs plus heartbeat summaries around a reference time |
-| `syslog ai correlate` | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs |
-| `syslog ai incidents` | `abuse_incidents` | Grouped abuse incident candidates |
-| `syslog ai investigate` | `abuse_investigate` | Abuse incident evidence bundles |
-| `syslog ai similar` | `similar_incidents` | Historical incident clusters |
-| `syslog ai ask-history` | `ask_history` | AI transcript history search |
-| `syslog ai incident-context` | `incident_context` | Full context bundle for a time window |
-| `syslog stats` | `stats` | Database and storage metrics |
+| `cortex search` | `search` | Full-text search with filters |
+| `cortex tail` | `tail` | Recent log entries |
+| `cortex errors` | `errors` | Error/warning summary |
+| `cortex hosts` | `hosts` | Known host list |
+| `cortex filter` | `filter` | Structured filter-only log retrieval |
+| `cortex correlate` | `correlate` | Cross-host event correlation |
+| `cortex host-state` | `host_state` | Latest bounded heartbeat state for one host |
+| `cortex fleet-state` | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags |
+| `cortex correlate-state` | `correlate_state` | Logs plus heartbeat summaries around a reference time |
+| `cortex ai correlate` | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs |
+| `cortex ai incidents` | `abuse_incidents` | Grouped abuse incident candidates |
+| `cortex ai investigate` | `abuse_investigate` | Abuse incident evidence bundles |
+| `cortex ai similar` | `similar_incidents` | Historical incident clusters |
+| `cortex ai ask-history` | `ask_history` | AI transcript history search |
+| `cortex ai incident-context` | `incident_context` | Full context bundle for a time window |
+| `cortex stats` | `stats` | Database and storage metrics |
 
 ## MCP resources
 
 | URI | Description | MIME type |
 | --- | --- | --- |
-| `cortex://schema/mcp-tool` | JSON schema for the `syslog` MCP tool and action-based parameters | `application/json` |
+| `cortex://schema/mcp-tool` | JSON schema for the `cortex` MCP tool and action-based parameters | `application/json` |
 
 ## Environment variables
 
@@ -168,7 +168,7 @@ methods as the MCP actions.
 | MCP port | `3100/tcp` |
 | Health endpoint | `GET /health` (unauthenticated) |
 | Compose file | `docker-compose.yml` |
-| Entrypoint | `syslog` binary |
+| Entrypoint | `cortex` binary |
 | User | `1000:1000` |
 | Data volume | `/data` (SQLite database) |
 

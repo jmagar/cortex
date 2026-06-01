@@ -871,7 +871,7 @@ diagnosis.
     );
     let help = r#"# cortex Tool Reference
 
-The MCP server exposes one tool, `syslog`. Set the required `action` argument
+The MCP server exposes one tool, `cortex`. Set the required `action` argument
 to select the operation.
 
 ## cortex search

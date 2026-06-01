@@ -44,7 +44,7 @@ case "$*" in
   "inspect cid --format {{.Image}}"*) echo sha256:debug ;;
   "image inspect "*" --format {{.Id}}"*) echo sha256:debug ;;
   "image inspect "*" --format {{join .RepoDigests \", \"}}"*) echo "" ;;
-  "exec cid syslog --version"*) awk -F'"' '/^version = / {print "cortex " $2; exit}' "${PWD}/Cargo.toml" ;;
+  "exec cid cortex --version"*) awk -F'"' '/^version = / {print "cortex " $2; exit}' "${PWD}/Cargo.toml" ;;
   *) echo "unexpected docker args: $*" >&2; exit 9 ;;
 esac
 SH
@@ -86,7 +86,7 @@ set -e
 # the CORTEX_VERSION it received in its environment (docker compose loads
 # --env-file into the process env before substitution).
 # Realistic deploy: image TAG is `main` (set via env file), but the binary
-# version reported by `syslog --version` is the semver baked into Cargo.toml.
+# version reported by `cortex --version` is the semver baked into Cargo.toml.
 # So compose tag resolution -> main (matches running image), and the version
 # check -> repo semver (matches container). Both must pass => CURRENT, exit 0.
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -131,7 +131,7 @@ case "$*" in
   "inspect cid --format {{.Image}}"*) echo sha256:running ;;
   "image inspect ghcr.io/jmagar/cortex:main --format {{.Id}}"*) echo sha256:running ;;
   "image inspect ghcr.io/jmagar/cortex:main --format {{join .RepoDigests \", \"}}"*) echo "" ;;
-  "exec cid syslog --version"*) echo "cortex ${REPO_VERSION}" ;;
+  "exec cid cortex --version"*) echo "cortex ${REPO_VERSION}" ;;
   *) echo "unexpected docker args: $*" >&2; exit 9 ;;
 esac
 SH

@@ -2,16 +2,16 @@
 
 > **v0.26 BREAKING**: `CORTEX_API_ENABLED` was removed. The REST API at
 > `/api/*` is now always-on and the container fails to start without a
-> `CORTEX_API_TOKEN`. Run `syslog setup repair` BEFORE upgrading the
+> `CORTEX_API_TOKEN`. Run `cortex setup repair` BEFORE upgrading the
 > container so the token is provisioned and `CORTEX_USE_HTTP=true` is
 > written to `.env`. The CLI defaults to HTTP transport from v0.26
 > onwards; to keep direct-DB behaviour, remove the line or set
-> `CORTEX_USE_HTTP=false` before running `syslog`.
+> `CORTEX_USE_HTTP=false` before running `cortex`.
 
 This document is the manual rollout playbook for upgrading a deployed
 cortex host from a pre-v0.26 release. It assumes a single deploy
 host running Docker Compose plus zero or more remote hosts running the
-`syslog` CLI.
+`cortex` CLI.
 
 ## Pre-deploy checklist
 
@@ -25,44 +25,44 @@ sqlite3 ~/.cortex/data/cortex.db \
   'SELECT COUNT(*), MAX(id), (SELECT MAX(version) FROM schema_migrations) FROM logs'
 
 # 2. Confirm the API token exists in .env. If missing, run
-#    `syslog setup repair` BEFORE step 1 of "Deploy order".
+#    `cortex setup repair` BEFORE step 1 of "Deploy order".
 grep CORTEX_API_TOKEN ~/.cortex/.env
 
 # 3. Parity check: query the same data via local + HTTP and assert
 #    the JSON shapes agree. Empty diff = safe to cut over.
-syslog --json hosts | jq -S . > /tmp/syslog-local.json
+cortex --json hosts | jq -S . > /tmp/syslog-local.json
 CORTEX_USE_HTTP=1 syslog --json hosts | jq -S . > /tmp/syslog-http.json
 diff /tmp/syslog-local.json /tmp/syslog-http.json && echo "parity OK"
 
 # 4. ai-watch daemon must be active + binary SHA recorded so we know
 #    what we're replacing in step 4 of "Deploy order".
 systemctl --user status syslog-ai-watch
-sha256sum ~/.local/bin/syslog
+sha256sum ~/.local/bin/cortex
 
 # 5. Compose diagnostics must be clean (0 issues). If non-zero,
 #    resolve before deploying — `compose doctor` reports drift
 #    between host bind mounts and the container.
-syslog compose doctor --json | jq '.diagnostics | length'
+cortex compose doctor --json | jq '.diagnostics | length'
 ```
 
 ## Deploy order
 
 Order matters. Each step's failure mode is documented inline.
 
-1. **`syslog setup repair`** — idempotent. Provisions
+1. **`cortex setup repair`** — idempotent. Provisions
    `CORTEX_API_TOKEN` if missing and writes `CORTEX_USE_HTTP=true` if
    absent. Preserves any existing operator override (including
    `CORTEX_USE_HTTP=false`). Run BEFORE pulling the new image so the
    container has a token to start with.
 
-2. **`syslog compose pull && syslog compose up`** — pull the v0.26
+2. **`cortex compose pull && syslog compose up`** — pull the v0.26
    image and recreate the container. The container fails fast if
    `CORTEX_API_TOKEN` is missing; step 1 prevents that. Wait until
-   `syslog compose ps` reports `healthy` before proceeding.
+   `cortex compose ps` reports `healthy` before proceeding.
 
 3. **Install new CLI binary on the deploy host** —
-   `cp ~/.cache/cargo/release/syslog ~/.local/bin/syslog` (or whatever
-   path you use). Keep a backup at `~/.local/bin/syslog.backup` for
+   `cp ~/.cache/cargo/release/cortex ~/.local/bin/cortex` (or whatever
+   path you use). Keep a backup at `~/.local/bin/cortex.backup` for
    the rollback section below.
 
 4. **`systemctl --user restart syslog-ai-watch`** — **CRITICAL**. The
@@ -72,7 +72,7 @@ Order matters. Each step's failure mode is documented inline.
    the new server's expectations (schema, write-path semantics).
 
 5. **Multi-host token propagation** — for every remote host that runs
-   the `syslog` CLI, the new `CORTEX_API_TOKEN` must reach
+   the `cortex` CLI, the new `CORTEX_API_TOKEN` must reach
    `~/.cortex/.env` (or wherever the host reads it). **DO NOT**
    run `export CORTEX_API_TOKEN=...` in an interactive shell — it
    leaks into shell history. Use one of:
@@ -97,7 +97,7 @@ Three verification windows. All checks are non-destructive.
 ```bash
 # Container reports healthy, no recent errors in logs.
 docker compose ps
-syslog tail -n 10
+cortex tail -n 10
 docker compose logs cortex --since 5m | grep -E "500|ERROR|panic" | wc -l   # expect: 0
 ```
 
@@ -105,7 +105,7 @@ docker compose logs cortex --since 5m | grep -E "500|ERROR|panic" | wc -l   # ex
 
 ```bash
 # Total log count grew from the +0 baseline captured in pre-deploy step 1.
-syslog stats
+cortex stats
 # CLI-to-API latency on a representative read.
 time syslog tail -n 100 --json > /dev/null   # expect: < 0.2s on a warm cache
 ```
@@ -116,7 +116,7 @@ time syslog tail -n 100 --json > /dev/null   # expect: < 0.2s on a warm cache
 # No migration re-apply lines in container logs.
 docker compose logs cortex --since 24h | grep -i "applying migration" | wc -l   # expect: 0
 # ai-watch is still processing — checkpoint count grew.
-syslog ai checkpoints --json | jq '.checkpoints | length'
+cortex ai checkpoints --json | jq '.checkpoints | length'
 ```
 
 ## Token rotation
@@ -126,17 +126,17 @@ old token must be dropped first.
 
 ```bash
 # 1. Stop the container so the in-memory old token is released.
-syslog compose down
+cortex compose down
 
 # 2. Remove the existing line — keep your editor away from .env, the
 #    sed is safer because it preserves every other key/value.
 sed -i '/^CORTEX_API_TOKEN=/d' ~/.cortex/.env
 
 # 3. Regenerate. setup repair writes a fresh 64-char hex token.
-syslog setup repair
+cortex setup repair
 
 # 4. Restart the container with the new token.
-syslog compose up
+cortex compose up
 
 # 5. Propagate the new token to every remote host that runs the CLI.
 #    Use the file-based pattern from "Multi-host token propagation"
@@ -150,7 +150,7 @@ Rollback consists of reverting the binary + clearing the HTTP default.
 
 ```bash
 # 1. Restore the previous CLI binary.
-cp ~/.local/bin/syslog.backup ~/.local/bin/syslog
+cp ~/.local/bin/cortex.backup ~/.local/bin/cortex
 
 # 2. Revert to direct-DB default. setup repair will NOT re-add the
 #    line unless the key is fully absent, so deletion is sufficient.
@@ -161,7 +161,7 @@ systemctl --user restart syslog-ai-watch
 ```
 
 If you also need to roll back the container image, run
-`syslog compose pull` against the previous tag and `syslog compose up`.
+`cortex compose pull` against the previous tag and `cortex compose up`.
 The schema is backwards-compatible across v0.25 → v0.26; no DB rollback
 is required for a same-day revert.
 

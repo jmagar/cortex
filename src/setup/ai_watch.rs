@@ -204,7 +204,7 @@ fn remove_ai_watch_service_files(env_path: &Path, service_path: &Path) -> io::Re
             Err(error) => return Err(error),
         }
     }
-    Ok(timer.finish(SetupStatus::Ok, "removed syslog AI watch service files"))
+    Ok(timer.finish(SetupStatus::Ok, "removed cortex AI watch service files"))
 }
 
 pub(crate) fn check_ai_watch_service_content_phase(
@@ -264,7 +264,7 @@ pub(crate) fn ai_watch_service_unit(
 ) -> String {
     let db_dir = db_path.parent().unwrap_or_else(|| Path::new("/"));
     let env_path = setup_path_value(env_path).expect("validated AI watch env path");
-    let cortex_bin = setup_path_value(cortex_bin).expect("validated syslog binary path");
+    let cortex_bin = setup_path_value(cortex_bin).expect("validated cortex binary path");
     let claude_root = setup_path_value(&user_home.join(".claude/projects"))
         .expect("validated Claude transcript root");
     let codex_root = setup_path_value(&user_home.join(".codex/sessions"))

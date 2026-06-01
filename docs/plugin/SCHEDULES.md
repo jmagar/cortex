@@ -4,7 +4,7 @@ cortex does not use Claude Code scheduled tasks (triggers). Internal scheduled o
 
 ## Internal schedules
 
-`syslog serve mcp` runs two periodic background tasks:
+`cortex serve mcp` runs two periodic background tasks:
 
 | Task | Interval | Purpose |
 | --- | --- | --- |

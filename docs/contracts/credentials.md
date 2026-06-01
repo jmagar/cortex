@@ -61,8 +61,8 @@ One row per distinct secret. **Sensitivity tiers:**
 | 4 | **JWT signing private key** | RSA/Ed25519 PEM used to sign JWT access + refresh tokens. Verifying party is also us; this is symmetric trust on a per-process basis. | none — file-only | `<data_dir>/auth-jwt.pem` (relative path resolved against `[storage].db_path` dir) | `0600` | Existing (`src/config.rs::AuthConfig::key_path`) | `high` | `rm auth-jwt.pem`, restart (regenerates on first boot). **Side effect:** every issued access + refresh token is invalidated; all OAuth users must re-login. This is the documented "kill all sessions" effect — see §5. | Key material never logged. Path is logged at INFO. |
 | 5 | **Non-MCP API token** | Bearer for the optional `[api]` JSON API (separate from `/mcp`). Required when `CORTEX_API_ENABLED=true`. | `CORTEX_API_TOKEN` | none | n/a | Existing (`src/config.rs::ApiConfig::api_token`) | `high` | Same as MCP token — env edit + restart. Validation rejects empty tokens at startup. | Never logged; same prefix-only redaction discipline as the MCP token. |
 | 6 | **OTLP token (logical alias of MCP token)** | Authenticates `/v1/logs` OTLP HTTP ingestion. **In V1, this is the same token as `CORTEX_TOKEN`.** The OTLP path only honors the static bearer; the OAuth path does not gate OTLP. The non-loopback safety gate in `validate_auth_config` enforces this explicitly. | `CORTEX_TOKEN` (same var) | none | n/a | Existing | `high` | Same as MCP token. If split into a dedicated `CORTEX_OTLP_TOKEN` later, add a new row here and bump this contract. | Never logged. |
-| 7 | **Agent enrollment token (one-time)** | One-shot bearer printed by `syslog agent issue --hostname <h>`. Operator pastes it into the agent host's `/etc/syslog-agent/token`. Server stores only `BLAKE3(token)` in `agents.token_hash` and never the raw value. | none — printed once to stdout by admin CLI | (ephemeral; never persisted server-side in plaintext) | n/a | Epic A — agent mode (`docs/superpowers/specs/2026-05-16-agent-mode-design.md` §6.2) | `medium` | Single use. If the operator loses it before the agent enrolls, revoke (`syslog agent revoke --host-id <uuid>`) and re-issue. | Server: token hash only; raw token never written to disk or logs. Printed once on the admin CLI stdout — operator owns transport (typically scp/paste). |
-| 8 | **Agent long-lived token** | After successful enrollment, the agent's persistent bearer used on every reconnect. Sent in the first JSON-RPC `agent.hello.params.token` message; never in URL params or headers. | none — file-only | `/etc/syslog-agent/token` on the agent host (or `~/.config/cortex/agent-token` for user installs) | `0600` | Epic A — agent mode (§6.2) | `medium` | `syslog agent rotate --host-id <uuid>` issues a new token. Server keeps both `token_hash` (new) and `token_hash_prev` (old) for `rotation_grace_secs = 300` seconds (5 min, from spec §6.2). The agent receives the new token on its next reconnect (delivered via `agent.shutdown` payload); after the grace window the old hash is dropped. | Never logged. `HelloParams` overrides `Display`/`Debug` to redact `token`; test-verified per spec §10. |
+| 7 | **Agent enrollment token (one-time)** | One-shot bearer printed by `cortex agent issue --hostname <h>`. Operator pastes it into the agent host's `/etc/syslog-agent/token`. Server stores only `BLAKE3(token)` in `agents.token_hash` and never the raw value. | none — printed once to stdout by admin CLI | (ephemeral; never persisted server-side in plaintext) | n/a | Epic A — agent mode (`docs/superpowers/specs/2026-05-16-agent-mode-design.md` §6.2) | `medium` | Single use. If the operator loses it before the agent enrolls, revoke (`cortex agent revoke --host-id <uuid>`) and re-issue. | Server: token hash only; raw token never written to disk or logs. Printed once on the admin CLI stdout — operator owns transport (typically scp/paste). |
+| 8 | **Agent long-lived token** | After successful enrollment, the agent's persistent bearer used on every reconnect. Sent in the first JSON-RPC `agent.hello.params.token` message; never in URL params or headers. | none — file-only | `/etc/syslog-agent/token` on the agent host (or `~/.config/cortex/agent-token` for user installs) | `0600` | Epic A — agent mode (§6.2) | `medium` | `cortex agent rotate --host-id <uuid>` issues a new token. Server keeps both `token_hash` (new) and `token_hash_prev` (old) for `rotation_grace_secs = 300` seconds (5 min, from spec §6.2). The agent receives the new token on its next reconnect (delivered via `agent.shutdown` payload); after the grace window the old hash is dropped. | Never logged. `HelloParams` overrides `Display`/`Debug` to redact `token`; test-verified per spec §10. |
 | 9 | **UniFi controller API key** | `X-API-KEY` header for read-only access to `/proxy/network/api/s/<site>/{stat/event,stat/alarm}`. Issued in the UniFi OS console UI. | `CORTEX_POLLERS_UNIFI_API_KEY` | `~/.cortex/.env` line `CORTEX_POLLERS_UNIFI_API_KEY=…` (loaded by `load_setup_env_file` if not already in process env; symlinks rejected) | `0600` on the env file | Epic C — API pollers (`docs/superpowers/specs/2026-05-16-api-pollers-design.md` §4) | `medium` | Revoke in UniFi OS admin → System → Application UI → Admins → API keys; issue replacement; update env; restart (or send `SIGHUP` once dynamic reload lands — currently restart-only). | Never logged. UniFi poller `Debug` impls redact the key. |
 | 10 | **AdGuard Home credentials** | HTTP Basic auth for `/control/querylog`. Token-based auth is not exposed by AdGuard. | `CORTEX_POLLERS_ADGUARD_USERNAME` + `CORTEX_POLLERS_ADGUARD_PASSWORD` (separate vars, not the `user:pass` form the original draft contemplated — verified against `api-pollers-design.md` §5 lines 243–244) | `~/.cortex/.env` | `0600` on the env file | Epic C — API pollers (§5) | `medium` | Change in AdGuard Home admin UI; update env; restart. AdGuard does not support overlapping credentials, so rotation is a hard cutover — operator should expect one missed poll cycle. | Username may be logged at debug; password never logged. |
 | 11 | **Apprise API token** | Optional `X-Apprise-Token` header on outbound POSTs to `apprise-api`'s `/notify/{config_key}` endpoint. Only needed when the operator's apprise-api is auth-protected. | `CORTEX_APPRISE_TOKEN` | none — env-only | n/a | Epic E — digest + notifications (`docs/superpowers/specs/2026-05-16-digest-notifications-design.md` §3) | `low` | Rotate in the apprise-api admin; update env; restart. Loss only affects outbound notification delivery — no read access to logs. | Never logged. |
@@ -202,7 +202,7 @@ two-token blue/green primitive in V1.
 
 ### Agent long-lived token
 
-1. `syslog agent rotate <host_id>` on the server. This sets
+1. `cortex agent rotate <host_id>` on the server. This sets
    `token_hash_prev = token_hash` and writes a new `token_hash`. The new
    raw token is printed once to stdout — the operator delivers it to the
    agent host (e.g. via scp or paste) and writes it to `/etc/syslog-agent/token`.
@@ -215,8 +215,8 @@ two-token blue/green primitive in V1.
 
 ### Agent enrollment token (one-time)
 
-Single use. There is no rotation — only revocation (`syslog agent
-revoke <host_id>`) and re-issuance (`syslog agent issue
+Single use. There is no rotation — only revocation (`cortex agent
+revoke <host_id>`) and re-issuance (`cortex agent issue
 --hostname <h>`). If a token is exposed before the agent enrolls, revoke
 the row and issue a new one.
 
@@ -300,11 +300,11 @@ If a secret leaks, the response depends on tier.
 ### `medium` tier (agent enrollment token, agent long-lived token, UniFi key, AdGuard creds)
 
 1. **Revoke + re-issue** per §5.
-2. For agent long-lived tokens: `syslog agent revoke <host_id>` immediately
+2. For agent long-lived tokens: `cortex agent revoke <host_id>` immediately
    evicts the agent's active session and NULLs both token hashes. The agent
    will need to re-enroll.
    For agent enrollment tokens (one-time, pre-use): revoke the pending row
-   with `syslog agent revoke <host_id>` and re-issue a fresh one-time token.
+   with `cortex agent revoke <host_id>` and re-issue a fresh one-time token.
 3. For poller credentials: rotate at the external service; there is no
    harm beyond loss of polling continuity.
 

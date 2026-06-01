@@ -107,7 +107,7 @@ Per-source dedup discriminator. The ingest path for the listed `source_kind` val
 | `unifi-api` | `(time_ms, _id)` | UniFi event `_id` | Cited from api-pollers spec |
 | `adguard-api` | `(time, client, question)` | AdGuard query record | Spec C pinned this |
 
-**Cross-source dedup is NOT performed.** If an operator runs BOTH rsyslog forwarding AND a `syslog agent` on the same host, the same log line will land twice. Deduplication is an ingest-source-internal property only.
+**Cross-source dedup is NOT performed.** If an operator runs BOTH rsyslog forwarding AND a `cortex agent` on the same host, the same log line will land twice. Deduplication is an ingest-source-internal property only.
 
 ---
 

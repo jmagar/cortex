@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SessionStart / ConfigChange hook for cortex.
-# Keep setup policy in the syslog binary; this script adapts plugin settings to env.
+# Keep setup policy in the cortex binary; this script adapts plugin settings to env.
 set -euo pipefail
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
@@ -10,7 +10,7 @@ set -euo pipefail
 reject_unsafe_value() {
   local name="$1" value="${2:-}"
   if [[ "${value}" == *$'\n'* || "${value}" == *$'\r'* ]]; then
-    printf 'syslog plugin setup: %s must not contain newlines\n' "${name}" >&2
+    printf 'cortex plugin setup: %s must not contain newlines\n' "${name}" >&2
     exit 2
   fi
 }
@@ -23,7 +23,7 @@ export_if_set() {
   export "${env_name}=${value}"
 }
 
-ensure_syslog_binary() {
+ensure_cortex_binary() {
   if command -v cortex >/dev/null 2>&1; then
     return 0
   fi
@@ -36,7 +36,7 @@ ensure_syslog_binary() {
   fi
 
   command -v cortex >/dev/null 2>&1 || {
-    printf 'syslog plugin setup: syslog binary not found on PATH or at %s\n' "${bundled}" >&2
+    printf 'cortex plugin setup: cortex binary not found on PATH or at %s\n' "${bundled}" >&2
     exit 1
   }
 }
@@ -149,7 +149,7 @@ main() {
   chmod 700 "${CORTEX_DATA_DIR}" 2>/dev/null || true
   export CORTEX_DATA_DIR
 
-  ensure_syslog_binary
+  ensure_cortex_binary
   cortex setup plugin-hook "$@"
 }
 

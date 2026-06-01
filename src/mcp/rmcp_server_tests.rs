@@ -867,7 +867,7 @@ async fn mounted_policy_with_read_scope_permits_read_actions() {
 }
 
 #[test]
-fn public_read_actions_require_syslog_read_scope() {
+fn public_read_actions_require_cortex_read_scope() {
     for action in actions::ACTION_SPECS
         .iter()
         .map(|s| s.name)
@@ -896,7 +896,7 @@ fn public_read_actions_require_syslog_read_scope() {
     assert_eq!(required_scope_for("help"), None);
     assert_eq!(
         required_scope_for("not_a_real_action"),
-        Some("syslog:__deny__")
+        Some("cortex:__deny__")
     );
 }
 
@@ -1430,7 +1430,7 @@ async fn scope_check_fires_before_db_execution() {
 
 /// Unknown action → denied by `syslog:__deny__` sentinel, not passed through.
 ///
-/// The catch-all arm of `required_scope_for` returns `Some("syslog:__deny__")`
+/// The catch-all arm of `required_scope_for` returns `Some("cortex:__deny__")`
 /// — a scope that is never granted — so unknown actions are rejected at the
 /// auth layer rather than falling through to `execute_tool`.
 /// This prevents future actions added to dispatch but not to the scope map

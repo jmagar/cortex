@@ -379,7 +379,7 @@ impl<I: DockerInspect, R> ComposeService<I, R> {
                     status.diagnostics.push(ComposeDiagnostic {
                         severity: DiagnosticSeverity::Error,
                         code: "data_volume_missing".into(),
-                        message: "container has no /data mount — syslog DB is inaccessible".into(),
+                        message: "container has no /data mount — cortex DB is inaccessible".into(),
                     });
                 }
                 Some(mount) => {

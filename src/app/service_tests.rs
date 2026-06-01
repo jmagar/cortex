@@ -70,7 +70,7 @@ fn normalize_syslog_owned_service_rejects_arbitrary_units() {
     );
 
     let err = normalize_syslog_owned_service("ssh").unwrap_err();
-    assert!(err.to_string().contains("unsupported syslog-owned service"));
+    assert!(err.to_string().contains("unsupported cortex-owned service"));
 }
 
 #[test]

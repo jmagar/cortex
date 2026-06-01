@@ -1,6 +1,6 @@
 # Log Filter Surface Contract
 
-Status: v1 contract, implemented by `syslog filter`, `GET /api/filter`, and MCP `action=filter`.
+Status: v1 contract, implemented by `cortex filter`, `GET /api/filter`, and MCP `action=filter`.
 
 ## Purpose
 
@@ -46,7 +46,7 @@ AI/session refiners:
 ## Rejections
 
 - `query` is rejected by `filter`.
-- CLI positional terms are rejected by `syslog filter`; use `syslog search`.
+- CLI positional terms are rejected by `cortex filter`; use `cortex search`.
 - `stream` is rejected unless `source_kind=docker-stream`.
 - `source_kind=syslog-udp`, `source_kind=syslog-tcp`, and `source_kind=otlp` are rejected in v1 because transport protocol is not indexed separately.
 - Unknown fields are rejected by REST and MCP.

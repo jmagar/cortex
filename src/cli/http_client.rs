@@ -1,4 +1,4 @@
-//! REST HTTP client used by the standalone `syslog` CLI to route subcommands
+//! REST HTTP client used by the standalone `cortex` CLI to route subcommands
 //! through the container's `/api/*` surface instead of opening SQLite directly
 //! (bead 0p8r.5 — refactor: route CLI through container REST API).
 //!

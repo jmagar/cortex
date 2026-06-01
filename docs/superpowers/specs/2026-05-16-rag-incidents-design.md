@@ -20,7 +20,7 @@ Concrete user-facing capabilities:
 ### Non-Goals
 
 - **Reinventing embedding/retrieval.** axon is already operational on this host (Qdrant + dense + BM42 sparse, hybrid via RRF, LLM synthesis via `ask`). We use it as the substrate.
-- **Replacing FTS5 keyword search.** `syslog search` stays the fast path for known strings. RAG is the *semantic* and *narrative* lane.
+- **Replacing FTS5 keyword search.** `cortex search` stays the fast path for known strings. RAG is the *semantic* and *narrative* lane.
 - **Realtime alerting.** This epic does not page anyone. Retrieval is on-demand from the MCP tool surface.
 - **Multi-tenancy / per-user vector partitioning.** Single-operator homelab; one Qdrant collection.
 - **Embedding raw transcripts a second time.** Mnemo already indexes AI sessions in SQLite with FTS5; we *correlate* with mnemo, we do not duplicate transcripts into Qdrant.
@@ -31,7 +31,7 @@ Concrete user-facing capabilities:
 INGEST PATH (write side, idempotent)
 ────────────────────────────────────
 
-  syslog UDP/TCP/Docker ──► syslog parser ──► enrichment (Epic B fields)
+  cortex UDP/TCP/Docker ──► syslog parser ──► enrichment (Epic B fields)
                                                        │
                                                        ▼
                                               ┌─────────────────┐
@@ -244,7 +244,7 @@ The Qdrant payload includes `incident_id` (UUIDv7 of the syslog-mcp incident). B
 ### Failure handling
 
 - Axon unreachable → leave `embed_status=pending`, retry with exponential backoff (1m, 5m, 30m, capped at 1h).
-- Repeated failure (>5 attempts) → `embed_status=failed`, log warning, surface in `syslog dr` health check, do not block ingest.
+- Repeated failure (>5 attempts) → `embed_status=failed`, log warning, surface in `cortex dr` health check, do not block ingest.
 - Storage budget exceeded (`maintenance.rs` guardrail trips) → pause embedding writes but continue closing incidents in SQLite; resume when budget recovers.
 
 ## 6. Storage
@@ -491,7 +491,7 @@ Three guards, layered:
 
 1. **Reuse `scrub_ai_message`.** The existing scrubber in `src/syslog/enrichment.rs` (regex for `password=`, `api[_-]?key=`, `secret=`, plus user-configured `api_token`) runs over every card before it leaves the host. Today it gates on `app_name` being an AI source; we lift that gate for cards so it runs unconditionally.
 2. **Strict allowlist on structured fields.** Each Epic B source declares which structured keys are safe to emit; we *never* serialize the full structured_fields blob blindly into Qdrant. New sources must be onboarded with an explicit allowlist (`docker_ingest: [event_action, container_name, container_image, exit_code]`).
-3. **Pre-embed secrets scan.** Before the `axon embed` call, run a final `trufflehog`-style regex sweep (private keys, AWS keys, JWT, generic high-entropy strings >40 chars in `key=value` shape) over the card. Any match → quarantine the card to `/data/incidents/_quarantined/`, log a warning with the field name, do not embed. Surfaces in `syslog dr`.
+3. **Pre-embed secrets scan.** Before the `axon embed` call, run a final `trufflehog`-style regex sweep (private keys, AWS keys, JWT, generic high-entropy strings >40 chars in `key=value` shape) over the card. Any match → quarantine the card to `/data/incidents/_quarantined/`, log a warning with the field name, do not embed. Surfaces in `cortex dr`.
 
 The card never embeds `source_ip` for inbound auth attacks (already redacted to `/24` upstream in fail2ban enrichment), and never embeds full user-agent strings (they're high-cardinality and leak browser fingerprints).
 

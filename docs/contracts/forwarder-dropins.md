@@ -225,7 +225,7 @@ long-lived token (BLAKE3-hashed server-side). See
 
 ```bash
 # Single host
-syslog agent issue --hostname=dookie
+cortex agent issue --hostname=dookie
 
 # Output (token is shown ONCE; re-run if lost):
 #   host_id:       2b9a0b3a-7e3c-4d2a-9c0e-9bbf5d3a1f01
@@ -238,8 +238,8 @@ plaintext only exists in the operator's clipboard.
 
 ### Step 2 — Target host: install the agent binary
 
-The agent ships as the same `syslog` binary that runs on the server, but
-invoked in agent mode (`syslog agent ...`). Install via the homelab's
+The agent ships as the same `cortex` binary that runs on the server, but
+invoked in agent mode (`cortex agent ...`). Install via the homelab's
 preferred mechanism (cargo install, deb, or direct binary drop into
 `/usr/local/bin/syslog`).
 
@@ -275,7 +275,7 @@ Wants=network-online.target
 
 [Service]
 Type=notify
-ExecStart=/usr/local/bin/syslog agent run
+ExecStart=/usr/local/bin/cortex agent run
 Restart=on-failure
 RestartSec=5s
 User=syslog-agent
@@ -310,7 +310,7 @@ sudo systemctl enable --now syslog-agent
 ### Step 5 — Server: verify the new host is active
 
 ```bash
-syslog agent list
+cortex agent list
 
 # Expected:
 #   host_id                                hostname        state    last_seen
@@ -335,7 +335,7 @@ logger -t deploy-test "hello from $(hostname)"
 
 ```bash
 # replace <target-host> with the actual hostname
-syslog tail --hostname=<target-host> --limit=5
+cortex tail --hostname=<target-host> --limit=5
 # OR via MCP:
 mcporter call --config config/mcporter.json cortex.search query=deploy-test limit=5
 ```
@@ -343,8 +343,8 @@ mcporter call --config config/mcporter.json cortex.search query=deploy-test limi
 For agent-mode hosts, also check:
 
 ```bash
-syslog agent list                      # Active state, recent last_seen
-syslog tail --hostname=<host> --limit=5  # logs.push entries landing
+cortex agent list                      # Active state, recent last_seen
+cortex tail --hostname=<host> --limit=5  # logs.push entries landing
 ```
 
 For OTLP hosts:
@@ -374,7 +374,7 @@ retention.
 
 ```bash
 # Server-side: revoke first so the agent can't reconnect.
-syslog agent revoke <host_id>
+cortex agent revoke <host_id>
 
 # Host-side: stop the service and remove the token.
 ssh <host> '
@@ -385,7 +385,7 @@ ssh <host> '
 '
 ```
 
-`syslog agent revoke` sets `agents.connection_state = 'Revoked'` and zeros
+`cortex agent revoke` sets `agents.connection_state = 'Revoked'` and zeros
 the `token_hash`. The next `agent.hello` from that host receives
 `-32002 TokenRevoked` and WS close `4002`; the agent's `enroll` step left
 behind the token at `/var/lib/syslog-agent/token`, and per
@@ -420,14 +420,14 @@ fallback during the cutover, then is removed via §10.
 | No logs from `<host>`                    | (a) `ssh <host> systemctl status rsyslog` — is the daemon running?                                       |
 |                                          | (b) `ssh <host> sudo rsyslogd -N1` — does the config parse?                                              |
 |                                          | (c) on the server: `sudo tcpdump -ni any port 1514` — are frames arriving?                              |
-|                                          | (d) `syslog hosts` — does `<host>` appear in the known-hosts list at all?                                |
-|                                          | (e) `syslog silent_hosts` — is it a known host that's gone quiet?                                       |
+|                                          | (d) `cortex hosts` — does `<host>` appear in the known-hosts list at all?                                |
+|                                          | (e) `cortex silent_hosts` — is it a known host that's gone quiet?                                       |
 | Loop / message storm                     | The self-loop filter from §5 is missing or out of order. Inspect `/etc/rsyslog.d/99-cortex.conf`.   |
 | WSL host can't reach `tootie`            | Confirm Tailscale up: `tailscale status` inside WSL. Use Template E with the Tailscale IP.               |
 | AppArmor blocks file tail on squirts     | `sudo aa-status` then `sudo dmesg | grep DENIED` — install the override from §7 and reload.              |
 | OTLP `/v1/logs` returns 401              | `Authorization: Bearer <CORTEX_TOKEN>` not set or wrong. Check `curl -s http://<server>:3100/health` works without auth, then add the header. |
 | OTLP `/v1/logs` returns 413              | Payload exceeded 4 MiB. Reduce OTel exporter batch size (`OTEL_EXPORTER_OTLP_LOGS_TIMEOUT` / batch size). Note the `Retry-After: 86400` — exporters will back off for a day. |
-| OTLP `/v1/logs` returns 503              | Server ingest channel saturated. Either the listener is offline (check `syslog db status`) or the writer task crashed (check `cortex` container logs). |
+| OTLP `/v1/logs` returns 503              | Server ingest channel saturated. Either the listener is offline (check `cortex db status`) or the writer task crashed (check `cortex` container logs). |
 | Agent connects then immediately drops    | Check the WS close code in the agent's logs. `4001` = auth failed, `4002` = revoked, `4000` = handshake timeout, `1009` = oversized frame, `1011` = missed pongs. Each maps to a remediation in `agent-protocol.md` §5. |
 | Agent in `Reconnecting` forever          | Server unreachable, or `protocol_version`/`agent_version` mismatch. Look for `-32003 AgentVersionUnsupported` in the agent log — it carries `data.required_protocol_version`. |
 

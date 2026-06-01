@@ -12,7 +12,7 @@ How to connect to the cortex server from every supported client.
 
 The plugin manifest handles transport and tool registration. Configure the MCP URL and optional API token when prompted.
 
-cortex uses RMCP Streamable HTTP in stateless JSON-response mode for daemon deployments. Local stdio clients can launch `syslog mcp` when they can read the SQLite database directly.
+cortex uses RMCP Streamable HTTP in stateless JSON-response mode for daemon deployments. Local stdio clients can launch `cortex mcp` when they can read the SQLite database directly.
 
 ## Claude Code CLI
 
@@ -74,8 +74,8 @@ claude mcp add --transport http \
 
 ## Direct stdio clients
 
-Use `syslog mcp` for local query-only access. It exposes the same query-oriented
-`syslog` tool actions as HTTP, but it does not receive syslog, start `/mcp`,
+Use `cortex mcp` for local query-only access. It exposes the same query-oriented
+`cortex` tool actions as HTTP, but it does not receive syslog, start `/mcp`,
 run cleanup jobs, or require `CORTEX_TOKEN`.
 
 ```json
@@ -104,7 +104,7 @@ just build-mcpb
 ```
 
 The generated `dist/cortex-<version>-linux.mcpb` bundles the release
-`syslog` binary and launches it as:
+`cortex` binary and launches it as:
 
 ```bash
 server/syslog mcp

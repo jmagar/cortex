@@ -22,7 +22,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
         .collect();
     let action_desc = action_names
         .iter()
-        .map(|n| format!("syslog {n}"))
+        .map(|n| format!("cortex {n}"))
         .collect::<Vec<_>>()
         .join(", ");
     let description = format!("Query cortex logs with action-based subcommands: {action_desc}.");

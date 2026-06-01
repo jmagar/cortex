@@ -2,7 +2,7 @@
 
 cortex exposes reusable MCP prompts for common infrastructure debugging
 workflows. Prompts do not add new data access paths; they guide MCP clients to
-call the existing `syslog` tool actions in a useful order and to report evidence
+call the existing `cortex` tool actions in a useful order and to report evidence
 before conclusions.
 
 ## Execution Rules

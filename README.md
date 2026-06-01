@@ -18,7 +18,7 @@ Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog
                     └─────────────────────────────────┘
 ```
 
-The daemon listens on a single port for both UDP and TCP syslog (default `1514`). All inbound messages are parsed, batched, and written to SQLite with full-text indexing. The MCP HTTP server runs on a separate port (default `3100`) and uses RMCP Streamable HTTP in stateless JSON-response mode. Local stdio-only MCP clients can launch `syslog mcp`, a query-only MCP process that reads the same SQLite database without starting syslog listeners or the HTTP server.
+The daemon listens on a single port for both UDP and TCP syslog (default `1514`). All inbound messages are parsed, batched, and written to SQLite with full-text indexing. The MCP HTTP server runs on a separate port (default `3100`) and uses RMCP Streamable HTTP in stateless JSON-response mode. Local stdio-only MCP clients can launch `cortex mcp`, a query-only MCP process that reads the same SQLite database without starting syslog listeners or the HTTP server.
 
 MCP is an exposure surface, not the owner of log-intelligence business policy. Shared defaults, limits, validation, audit identity, correlation behavior, and safety gates should live in `SyslogService` or service-owned operation models so MCP, REST, and CLI remain consistent.
 
@@ -26,7 +26,7 @@ MCP is an exposure surface, not the owner of log-intelligence business policy. S
 
 ## Tools
 
-One MCP tool, `syslog`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `similar_incidents`, `ask_history`, `incident_context`, or `help`.
+One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `similar_incidents`, `ask_history`, `incident_context`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md). For correlation behavior and AI/non-AI inclusion rules, see [`docs/mcp/CORRELATION.md`](docs/mcp/CORRELATION.md).
 
@@ -83,7 +83,7 @@ workflows: `infra.incident-triage`, `infra.host-health`,
 For the prompt catalog and argument reference, see
 [`docs/mcp/PROMPTS.md`](docs/mcp/PROMPTS.md).
 
-### `syslog search`
+### `cortex search`
 
 Full-text search across all syslog messages with optional filters. Uses SQLite FTS5 with porter stemming.
 
@@ -92,7 +92,7 @@ Full-text search across all syslog messages with optional filters. Uses SQLite F
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `query` | string | no | — | FTS5 search query (see [FTS5 query syntax](#fts5-query-syntax)) |
-| `hostname` | string | no | — | Exact hostname match. Use `syslog` with `action: "hosts"` to enumerate. |
+| `hostname` | string | no | — | Exact hostname match. Use `cortex` with `action: "hosts"` to enumerate. |
 | `source_ip` | string | no | — | Exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `severity` | string | no | — | One of: `emerg alert crit err warning notice info debug` |
 | `app_name` | string | no | — | Application name, e.g. `sshd`, `dockerd`, `kernel` |
@@ -134,7 +134,7 @@ query: "error*"                # prefix wildcard
 query: "restart*"              # matches restart, restarted, restarting
 ```
 
-### `syslog filter`
+### `cortex filter`
 
 Structured filter-only retrieval for correlation workflows. This action rejects `query`; use `search` for FTS5 message-body search.
 
@@ -144,7 +144,7 @@ Correlation aliases include `source_kind` (`docker-stream`, `docker-event`, `age
 
 ---
 
-### `syslog tail`
+### `cortex tail`
 
 Return the N most recent log entries. Equivalent to `tail -f` across all hosts.
 
@@ -159,11 +159,11 @@ Return the N most recent log entries. Equivalent to `tail -f` across all hosts.
 
 **Response**
 
-Same structure as `syslog search`: `{ "count": N, "logs": [...] }`.
+Same structure as `cortex search`: `{ "count": N, "logs": [...] }`.
 
 ---
 
-### `syslog errors`
+### `cortex errors`
 
 Summarize warnings and errors across all hosts in a time window. Groups by hostname and severity, showing counts. Use this for quick health assessments.
 
@@ -190,7 +190,7 @@ Severities included: `emerg`, `alert`, `crit`, `err`, `warning`.
 
 ---
 
-### `syslog hosts`
+### `cortex hosts`
 
 List all hosts that have sent syslog messages, with first/last seen timestamps and total log counts.
 
@@ -213,7 +213,7 @@ List all hosts that have sent syslog messages, with first/last seen timestamps a
 
 ---
 
-### `syslog sessions`
+### `cortex sessions`
 
 List AI transcript sessions grouped by project, tool, session, and host.
 
@@ -249,7 +249,7 @@ List AI transcript sessions grouped by project, tool, session, and host.
 
 ---
 
-### `syslog correlate`
+### `cortex correlate`
 
 Search for related events across multiple hosts within a ±N minute window around a reference timestamp. Useful for debugging cascading failures. Results are grouped by host and ordered by time.
 
@@ -287,11 +287,11 @@ Search for related events across multiple hosts within a ±N minute window aroun
 }
 ```
 
-**Note on clock skew:** `syslog correlate` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. If a device clock is skewed, events may fall outside the correlation window. See [Time synchronization](#time-synchronization).
+**Note on clock skew:** `cortex correlate` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. If a device clock is skewed, events may fall outside the correlation window. See [Time synchronization](#time-synchronization).
 
 ---
 
-### `syslog stats`
+### `cortex stats`
 
 Return database statistics including total logs, total hosts, time range covered, logical and physical DB size, free disk, configured thresholds, current write-block status, and runtime ingest observability.
 
@@ -339,7 +339,7 @@ Return database statistics including total logs, total hosts, time range covered
 
 ---
 
-### `syslog status`
+### `cortex status`
 
 Return lightweight runtime status without the heavier DB statistics query. Use this for dashboards and doctor checks that need current queue depth, backpressure, writer failure/drop state, listener counters, and last activity timestamps.
 
@@ -347,7 +347,7 @@ Return lightweight runtime status without the heavier DB statistics query. Use t
 
 ---
 
-### `syslog help`
+### `cortex help`
 
 Return markdown documentation for all tools in this toolset.
 
@@ -357,7 +357,7 @@ Return markdown documentation for all tools in this toolset.
 
 ## FTS5 Query Syntax
 
-The `syslog search` and `syslog correlate` actions use SQLite FTS5 with porter stemming (`tokenize='porter unicode61'`). Valid query forms:
+The `cortex search` and `cortex correlate` actions use SQLite FTS5 with porter stemming (`tokenize='porter unicode61'`). Valid query forms:
 
 | Syntax | Example | Matches |
 |--------|---------|---------|
@@ -400,40 +400,40 @@ Each stored log entry has these fields:
 
 ### AI transcript indexing
 
-`syslog ai index` scans the default local transcript roots
-`~/.claude/projects` and `~/.codex/sessions`; `syslog ai index --path PATH`
+`cortex ai index` scans the default local transcript roots
+`~/.claude/projects` and `~/.codex/sessions`; `cortex ai index --path PATH`
 can scan a known transcript directory or one explicit `.jsonl` file, and
-`syslog ai add --file FILE` imports one file. Recursive scans are limited to
+`cortex ai add --file FILE` imports one file. Recursive scans are limited to
 `~/.claude/projects`, `~/.codex/sessions`, or their children; broad roots such
 as `/`, `$HOME`, and the current repo root are rejected before walking. The
 scanner skips symlinks, counts unsupported non-`.jsonl` files without parsing
 them, and streams transcript files line-by-line in bounded SQLite chunks. Use
 `--force` to reimport a transcript path from scratch after parser changes,
 `--since RFC3339` to scan only recently modified files, and
-`syslog ai checkpoints --errors` plus `syslog ai errors` to inspect structured
+`cortex ai checkpoints --errors` plus `cortex ai errors` to inspect structured
 scanner failures.
 
 For real-time local Claude/Codex transcript ingestion, install the host-local
 watch service:
 
 ```bash
-syslog setup ai-watch-service install
-syslog setup ai-watch-service check
-syslog setup ai-watch-service remove
+cortex setup ai-watch-service install
+cortex setup ai-watch-service check
+cortex setup ai-watch-service remove
 ```
 
 The watcher runs outside Docker because it needs host access to
 `~/.claude/projects` and `~/.codex/sessions`. It writes to the configured live
 SQLite DB and delegates every stable changed `.jsonl` file to the same scanner
-path used by `syslog ai add --file FILE`. Installing the watcher disables the
+path used by `cortex ai add --file FILE`. Installing the watcher disables the
 older polling timer so both helpers do not scan the same files.
 
 The optional polling fallback is still available:
 
 ```bash
-syslog setup ai-index-timer install
-syslog setup ai-index-timer check
-syslog setup ai-index-timer remove
+cortex setup ai-index-timer install
+cortex setup ai-index-timer check
+cortex setup ai-index-timer remove
 ```
 
 Both helpers are deliberately not inside the Docker container. Docker Compose
@@ -453,22 +453,22 @@ Local command history can be correlated with system logs without introducing a
 separate table:
 
 ```bash
-syslog shell index --path ~/.zsh_history --shell zsh
-syslog setup agent-command install
+cortex shell index --path ~/.zsh_history --shell zsh
+cortex setup agent-command install
 export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/syslog-agent-command-wrapper"
-syslog agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
+cortex agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
 ```
 
-`syslog shell index` imports zsh extended history lines with timestamps and
+`cortex shell index` imports zsh extended history lines with timestamps and
 durations as `source_kind="shell-history"` rows. Plain untimestamped history is
 skipped because it cannot support time-window correlation.
 
-`syslog setup agent-command install` writes a small local wrapper for Claude
+`cortex setup agent-command install` writes a small local wrapper for Claude
 Code's `CLAUDE_CODE_SHELL_PREFIX`. Claude Code invokes that prefix for spawned
 shell commands, including Bash tool calls, hook commands, and stdio MCP server
 startup commands. The wrapper preserves stdio and exit code, appends one
 scrubbed JSONL record under `~/.local/state/cortex/`, and
-`syslog agent-command ingest-spool` imports those records as
+`cortex agent-command ingest-spool` imports those records as
 `source_kind="agent-command"` rows, then truncates the locked spool after a
 successful import so repeated runs only process new commands. The wrapper
 records command text, cwd, duration, exit status, agent name, PID, host/user, and
@@ -499,7 +499,7 @@ Ordered from most to least severe:
 
 ### Facilities
 
-`kern`, `user`, `mail`, `daemon`, `auth`, `syslog`, `lpr`, `news`, `uucp`, `cron`, `authpriv`, `ftp`, `ntp`, `audit`, `alert`, `clock`, `local0`–`local7`.
+`kern`, `user`, `mail`, `daemon`, `auth`, `cortex`, `lpr`, `news`, `uucp`, `cron`, `authpriv`, `ftp`, `ntp`, `audit`, `alert`, `clock`, `local0`–`local7`.
 
 ---
 
@@ -511,8 +511,8 @@ Ordered from most to least severe:
 curl -fsSL https://raw.githubusercontent.com/jmagar/cortex/main/install.sh | sh
 ```
 
-The installer puts the host `syslog` binary in `~/.local/bin` and then runs
-`syslog setup`. Setup is idempotent and owns the shared host layout:
+The installer puts the host `cortex` binary in `~/.local/bin` and then runs
+`cortex setup`. Setup is idempotent and owns the shared host layout:
 
 - `~/.cortex/.env` — secrets, ports, Compose interpolation, runtime values
 - `~/.cortex/compose/docker-compose.yml` — Docker Compose deployment assets
@@ -520,7 +520,7 @@ The installer puts the host `syslog` binary in `~/.local/bin` and then runs
 
 Setup writes `COMPOSE_PROJECT_NAME=syslog-jmagar-lab` so direct
 `docker compose` commands in `~/.cortex/compose` target the same canonical
-container as `syslog compose`.
+container as `cortex compose`.
 
 Useful installer controls:
 
@@ -534,14 +534,14 @@ CORTEX_INSTALL_SKIP_SETUP=1 ./install.sh
 Useful setup commands:
 
 ```bash
-syslog setup          # first-run or normal repair
-syslog setup check    # inspect only; does not mutate files or start services
-syslog setup repair   # repair env/assets and restart the Docker stack
-syslog deploy preflight       # clearer alias for setup check
-syslog deploy local           # clearer local Compose deploy/reconcile command
-syslog deploy local --dry-run # run the deploy preflight without mutating Docker
-syslog setup ai-watch-service install  # host-local real-time transcript watcher
-syslog doctor binary  # check host/container binary freshness
+cortex setup          # first-run or normal repair
+cortex setup check    # inspect only; does not mutate files or start services
+cortex setup repair   # repair env/assets and restart the Docker stack
+cortex deploy preflight       # clearer alias for setup check
+cortex deploy local           # clearer local Compose deploy/reconcile command
+cortex deploy local --dry-run # run the deploy preflight without mutating Docker
+cortex setup ai-watch-service install  # host-local real-time transcript watcher
+cortex doctor binary  # check host/container binary freshness
 ```
 
 ### Claude Code plugin (recommended)
@@ -567,9 +567,9 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 
 **SessionStart hook automation** (in server mode):
 
-- Ensures the host `syslog` binary is on `PATH`; the installer defaults to `~/.local/bin`
+- Ensures the host `cortex` binary is on `PATH`; the installer defaults to `~/.local/bin`
 - Exports plugin userConfig as `CORTEX_*` / `CORTEX_*` environment values
-- Runs `syslog setup repair`, the same setup path used by the one-line installer
+- Runs `cortex setup repair`, the same setup path used by the one-line installer
 - Repairs shared assets under `~/.cortex` and removes stale user-level `cortex.service` units/drop-ins left by older plugin versions
 - All idempotent — safe to run on every session
 
@@ -581,11 +581,11 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 - `syslog-logs` — Docker Compose service log tailing
 - `syslog-version-check` — check whether the running Docker container matches the local Compose image; add `--pull` to pull first, otherwise checks only the local image cache
 
-The plugin deploys the server with Docker Compose through the same `syslog setup`
+The plugin deploys the server with Docker Compose through the same `cortex setup`
 path as the one-line installer. You can still build and run the binary locally
 for development, but automated deployment is Compose-only.
 
-`syslog deploy local` is the operator-facing name for the same local
+`cortex deploy local` is the operator-facing name for the same local
 Compose-backed reconcile path. It exists so deploy workflows do not need to call
 a command named `setup repair` directly.
 
@@ -609,7 +609,7 @@ Requires Rust 1.86+.
 
 ```bash
 cargo build --release
-./target/release/syslog serve mcp
+./target/release/cortex serve mcp
 ```
 
 ---
@@ -703,7 +703,7 @@ allow_insecure_http = true
 
 The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to cortex, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
 
-Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `syslog search` or `mcporter call ... action=search`. Container stdout/stderr rows use `source_ip=docker://<host>/<container>/<stream>`. Container lifecycle rows for actions such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, `oom`, and `health_status:*` use `source_ip=docker-event://<host>/<container>/<sanitized-action>`, `facility=docker`, and preserve the raw Docker event JSON.
+Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `cortex search` or `mcporter call ... action=search`. Container stdout/stderr rows use `source_ip=docker://<host>/<container>/<stream>`. Container lifecycle rows for actions such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, `oom`, and `health_status:*` use `source_ip=docker-event://<host>/<container>/<sanitized-action>`, `facility=docker`, and preserve the raw Docker event JSON.
 
 #### Storage
 
@@ -804,44 +804,44 @@ The MCP port defaults to `127.0.0.1:3100` (loopback only). To expose it on a net
 ## Command modes
 
 ```bash
-syslog serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
-syslog mcp        # query-only MCP stdio transport
-syslog setup      # install/repair shared ~/.cortex Docker Compose setup
-syslog deploy preflight  # check deploy prerequisites without mutating Docker
-syslog deploy local      # reconcile local Compose deployment
-syslog stats      # query the SQLite DB directly from the CLI
-syslog db status  # inspect SQLite maintenance state
-syslog db backup  # create a WAL-safe SQLite backup
-syslog compose doctor          # diagnose live Compose/listener ownership
-syslog compose status --json   # inspect canonical cortex container/project
+cortex serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
+cortex mcp        # query-only MCP stdio transport
+cortex setup      # install/repair shared ~/.cortex Docker Compose setup
+cortex deploy preflight  # check deploy prerequisites without mutating Docker
+cortex deploy local      # reconcile local Compose deployment
+cortex stats      # query the SQLite DB directly from the CLI
+cortex db status  # inspect SQLite maintenance state
+cortex db backup  # create a WAL-safe SQLite backup
+cortex compose doctor          # diagnose live Compose/listener ownership
+cortex compose status --json   # inspect canonical cortex container/project
 ```
 
-Both modes use the same config and environment variable loader. `syslog mcp` is for local child-process MCP clients that can read `CORTEX_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs.
+Both modes use the same config and environment variable loader. `cortex mcp` is for local child-process MCP clients that can read `CORTEX_DB_PATH`; it does not bind network ports or run retention/storage cleanup jobs.
 
 The direct CLI uses the same shared service layer as the MCP tool, so results and validation match the MCP actions without needing an MCP client:
 
 ```bash
-syslog search 'error AND nginx' --hostname proxy --limit 10
-syslog tail -n 20 --app-name kernel
-syslog errors --from 2026-01-01T00:00:00Z
-syslog hosts
-syslog correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
-syslog stats --json
-syslog db integrity            # run PRAGMA integrity_check
-syslog db checkpoint --mode full
-syslog db vacuum --pages 1000
-syslog compose pull            # pull image for resolved Compose project
-syslog compose up              # run docker compose up -d for resolved service
-syslog compose restart         # restart resolved service
-syslog compose logs --tail 20  # bounded compose logs
+cortex search 'error AND nginx' --hostname proxy --limit 10
+cortex tail -n 20 --app-name kernel
+cortex errors --from 2026-01-01T00:00:00Z
+cortex hosts
+cortex correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
+cortex stats --json
+cortex db integrity            # run PRAGMA integrity_check
+cortex db checkpoint --mode full
+cortex db vacuum --pages 1000
+cortex compose pull            # pull image for resolved Compose project
+cortex compose up              # run docker compose up -d for resolved service
+cortex compose restart         # restart resolved service
+cortex compose logs --tail 20  # bounded compose logs
 
 # Surface parity (2026-05-22) — each is also a REST GET on /api/<command>
-syslog silent-hosts --silent-minutes 60
-syslog clock-skew   --since 2026-05-20T00:00:00Z
-syslog anomalies    --recent-minutes 30 --baseline-minutes 720
-syslog compare      --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:59:59Z \
+cortex silent-hosts --silent-minutes 60
+cortex clock-skew   --since 2026-05-20T00:00:00Z
+cortex anomalies    --recent-minutes 30 --baseline-minutes 720
+cortex compare      --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:59:59Z \
                     --b-from 2026-05-21T00:00:00Z --b-to 2026-05-21T23:59:59Z
-syslog apps         --hostname dookie --limit 50
+cortex apps         --hostname dookie --limit 50
 ```
 
 ### REST endpoints (2026-05-22 surface parity)
@@ -870,7 +870,7 @@ GET  /api/compose/doctor
 inside the container. `/api/compose/doctor` is stricter: unready Docker,
 ownership, or runtime states return HTTP 503 with the same structured projection.
 
-`syslog compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, listener conflicts, and destructive `down` without `--yes`.
+`cortex compose` commands resolve the live Compose owner before mutation. They refuse ambiguous cwd fallback, stale Compose labels, listener conflicts, and destructive `down` without `--yes`.
 
 See [docs/CLI.md](docs/CLI.md) for the full direct CLI reference, including flags, JSON output, and how CLI commands map to MCP actions.
 
@@ -1017,7 +1017,7 @@ When available disk drops below `min_free_disk_mb`, the oldest logs are deleted 
 
 **Write-blocking behavior**
 
-If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (`CORTEX_WRITE_CHANNEL_CAPACITY`, default 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `syslog stats` reflects the current state.
+If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (`CORTEX_WRITE_CHANNEL_CAPACITY`, default 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `cortex stats` reflects the current state.
 
 Disable either guard by setting its trigger to `0` (also set the recovery target to `0`).
 
@@ -1030,7 +1030,7 @@ Before upgrading a populated database:
 1. Take a WAL-safe backup with `scripts/backup.sh` or `sqlite3 /data/cortex.db ".backup /data/syslog-pre-upgrade.db"`.
 2. Schedule a short ingest maintenance window for large databases.
 3. Start the new version and monitor logs for `Migration N: starting ...` and `Migration N: ... created`.
-4. Keep the previous image or binary available until `/health` returns `ok` and `syslog stats` reports sane counts.
+4. Keep the previous image or binary available until `/health` returns `ok` and `cortex stats` reports sane counts.
 
 See [docs/runbooks/deploy.md](docs/runbooks/deploy.md) for the deploy checklist.
 
@@ -1054,7 +1054,7 @@ The internal write channel holds up to `CORTEX_WRITE_CHANNEL_CAPACITY` parsed me
 
 ## Multi-Host Deployment
 
-Point multiple hosts at the same cortex instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `syslog hosts` to see all senders. Filter by `hostname` in `syslog search` and `syslog tail`. Use `syslog correlate` to find related events across hosts within a time window.
+Point multiple hosts at the same cortex instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `cortex hosts` to see all senders. Filter by `hostname` in `cortex search` and `cortex tail`. Use `cortex correlate` to find related events across hosts within a time window.
 
 For large fleets, consider:
 - Increasing `CORTEX_POOL_SIZE` (default 4) for higher read concurrency
@@ -1065,7 +1065,7 @@ For large fleets, consider:
 
 ## Time Synchronization
 
-All timestamps are stored in UTC. `syslog correlate` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. Devices with drifted clocks will have their events shifted relative to the correlation window. Run NTP on all senders to minimize skew. `received_at` (the server-side ingestion time) is unaffected by sender clock drift and is used for retention.
+All timestamps are stored in UTC. `cortex correlate` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. Devices with drifted clocks will have their events shifted relative to the correlation window. Run NTP on all senders to minimize skew. `received_at` (the server-side ingestion time) is unaffected by sender clock drift and is used for retention.
 
 ---
 
@@ -1118,9 +1118,9 @@ just up        # docker compose up -d
 just logs      # docker compose logs -f
 just down      # docker compose down
 just restart   # docker compose restart
-syslog compose doctor
-syslog compose status --json
-syslog compose logs --tail 20
+cortex compose doctor
+cortex compose status --json
+cortex compose logs --tail 20
 ```
 
 Generate a bearer token:
@@ -1217,7 +1217,7 @@ The daemon implements MCP through RMCP Streamable HTTP in stateless JSON-respons
 - `POST /mcp` — RMCP Streamable HTTP request/response endpoint
 - `GET /mcp` and `DELETE /mcp` — `405 Method Not Allowed` in stateless mode
 - `GET /health` — unauthenticated health probe
-- `syslog mcp` — local query-only stdio MCP mode for clients that launch MCP servers as child processes
+- `cortex mcp` — local query-only stdio MCP mode for clients that launch MCP servers as child processes
 
 When `CORTEX_TOKEN` is set, `/mcp` requires:
 
@@ -1246,7 +1246,7 @@ Stdio mode does not use bearer auth because it is local child-process access. It
 
 Use `mcp-remote` instead of direct stdio when the database is only reachable through the running HTTP daemon or a reverse proxy.
 
-The Docker image remains daemon-focused and exposes HTTP MCP via `syslog serve mcp`; use `syslog mcp` on a host that can read the SQLite DB for direct local stdio.
+The Docker image remains daemon-focused and exposes HTTP MCP via `cortex serve mcp`; use `cortex mcp` on a host that can read the SQLite DB for direct local stdio.
 
 ---
 
@@ -1262,7 +1262,7 @@ The Docker image remains daemon-focused and exposes HTTP MCP via `syslog serve m
 | `config/Dockerfile` | Container image definition |
 | `docker-compose.yml` | Docker Compose stack |
 | `Justfile` | Development command shortcuts |
-| `src/main.rs` | `syslog` binary entrypoint for HTTP and stdio MCP modes |
+| `src/main.rs` | `cortex` binary entrypoint for HTTP and stdio MCP modes |
 | `src/lib.rs` | Reusable library boundary |
 | `src/app/` | Shared typed log application service |
 | `src/runtime.rs` | Config, DB, syslog, and maintenance orchestration |

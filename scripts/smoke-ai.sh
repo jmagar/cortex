@@ -18,7 +18,7 @@ fail() {
   exit 1
 }
 
-resolve_syslog_bin() {
+resolve_cortex_bin() {
   if [[ -n "$CORTEX_BIN" ]]; then
     if [[ -x "$CORTEX_BIN" ]]; then
       printf '%s\n' "$CORTEX_BIN"
@@ -32,11 +32,11 @@ resolve_syslog_bin() {
   elif [[ -x "${PROJECT_DIR}/target/debug/cortex" ]]; then
     printf '%s\n' "${PROJECT_DIR}/target/debug/cortex"
   else
-    fail "syslog binary not found; install syslog on PATH, set CORTEX_BIN, or run cargo build"
+    fail "cortex binary not found; install cortex on PATH, set CORTEX_BIN, or run cargo build"
   fi
 }
 
-run_syslog() {
+run_cortex() {
   CORTEX_DB_PATH="$DB_PATH" \
     CORTEX_DOCKER_INGEST_ENABLED="${CORTEX_DOCKER_INGEST_ENABLED:-false}" \
     RUST_LOG="${RUST_LOG:-error}" \
@@ -61,7 +61,7 @@ PY
 
 cd "$PROJECT_DIR"
 
-CORTEX_BIN="$(resolve_syslog_bin)"
+CORTEX_BIN="$(resolve_cortex_bin)"
 [[ -x "$CORTEX_BIN" ]] || fail "$CORTEX_BIN is not executable"
 [[ -f "$SOURCE_FIXTURE" ]] || fail "fixture missing: $SOURCE_FIXTURE"
 
@@ -74,35 +74,35 @@ now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   printf '{"sessionId":"ai-smoke-session","timestamp":"%s","cwd":"/tmp/cortex-ai-smoke","content":[{"type":"text","text":"ai-smoke-project-context object array content"}]}\n' "$now"
 } >"$FIXTURE"
 
-printf 'syslog: %s\n' "$("$CORTEX_BIN" --version)"
+printf 'cortex: %s\n' "$("$CORTEX_BIN" --version)"
 printf 'db:     %s\n' "$DB_PATH"
 printf 'query:  %s\n' "$QUERY"
 
-add_json="$(run_syslog ai add --file "$FIXTURE" --force --json)"
+add_json="$(run_cortex ai add --file "$FIXTURE" --force --json)"
 require_json_count "ai add did not report ingested rows" "$add_json" "data.get('ingested', 0) >= 1"
 pass "ai add --file --force"
 
-index_json="$(run_syslog ai index --path "$FIXTURE" --json)"
+index_json="$(run_cortex ai index --path "$FIXTURE" --json)"
 require_json_count "ai index did not discover the fixture" "$index_json" "data.get('discovered_files') == 1"
 pass "ai index --path"
 
-inventory="$(run_syslog ai tools --json)"
+inventory="$(run_cortex ai tools --json)"
 require_json_count "ai tools did not include any tools" "$inventory" "len(data.get('tools', [])) >= 1"
 pass "ai tools"
 
-sessions="$(run_syslog sessions --tool claude --project /tmp/cortex-ai-smoke --limit 5 --json)"
+sessions="$(run_cortex sessions --tool claude --project /tmp/cortex-ai-smoke --limit 5 --json)"
 require_json_count "sessions did not include fixture session" "$sessions" "any(s.get('session_id') == 'ai-smoke-session' for s in data.get('sessions', []))"
 pass "sessions --tool claude"
 
-search="$(run_syslog ai search "$QUERY" --tool claude --project /tmp/cortex-ai-smoke --limit 5 --json)"
+search="$(run_cortex ai search "$QUERY" --tool claude --project /tmp/cortex-ai-smoke --limit 5 --json)"
 require_json_count "ai search did not return the fixture session" "$search" "any(s.get('session_id') == 'ai-smoke-session' for s in data.get('sessions', []))"
 pass "ai search"
 
-checkpoints="$(run_syslog ai checkpoints --limit 20 --json)"
+checkpoints="$(run_cortex ai checkpoints --limit 20 --json)"
 require_json_count "ai checkpoints did not include fixture source" "$checkpoints" "any(item.get('canonical_path', '').endswith('ai-session-smoke.jsonl') for item in data)"
 pass "ai checkpoints"
 
-tail_output="$(run_syslog tail -n 5 --app-name claude-transcript)"
+tail_output="$(run_cortex tail -n 5 --app-name claude-transcript)"
 grep -q 'ai-smoke-session' <<<"$tail_output" || fail "tail output did not include fixture session"
 if grep -qE '\blocalhost\b' <<<"$tail_output"; then
   fail "tail output still shows synthetic localhost transcript row"
@@ -110,19 +110,19 @@ fi
 pass "tail transcript rendering"
 
 if [[ "${CORTEX_AI_SMOKE_CHECK_RUNTIME:-1}" == "1" ]]; then
-  if bash scripts/check-runtime-current.sh >/tmp/syslog-ai-runtime-current.out 2>&1; then
+  if bash scripts/check-runtime-current.sh >/tmp/cortex-ai-runtime-current.out 2>&1; then
     pass "compose runtime current"
   else
     printf 'FAIL  compose runtime current check failed:\n' >&2
-    sed 's/^/      /' /tmp/syslog-ai-runtime-current.out >&2
+    sed 's/^/      /' /tmp/cortex-ai-runtime-current.out >&2
     exit 1
   fi
 elif [[ "${CORTEX_AI_SMOKE_CHECK_RUNTIME:-1}" == "warn" ]]; then
-  if bash scripts/check-runtime-current.sh >/tmp/syslog-ai-runtime-current.out 2>&1; then
+  if bash scripts/check-runtime-current.sh >/tmp/cortex-ai-runtime-current.out 2>&1; then
     pass "compose runtime current"
   else
     printf 'WARN  compose runtime current check failed:\n' >&2
-    sed 's/^/      /' /tmp/syslog-ai-runtime-current.out >&2
+    sed 's/^/      /' /tmp/cortex-ai-runtime-current.out >&2
   fi
 fi
 

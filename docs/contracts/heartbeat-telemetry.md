@@ -105,7 +105,7 @@ child rows a second time.
 The v1 collector is an always-on agent, invoked as:
 
 ```bash
-syslog heartbeat agent
+cortex heartbeat agent
 ```
 
 Default agent behavior:
@@ -550,7 +550,7 @@ declared interval**.
 
 ## 8. MCP Actions
 
-Heartbeat MCP actions dispatch through the existing `syslog` tool using the
+Heartbeat MCP actions dispatch through the existing `cortex` tool using the
 `action` argument.
 
 `host_state` is the first v1 MCP action. `fleet_state` and `correlate_state`
@@ -723,9 +723,9 @@ plan explicitly records the deferral and the reason.
 Expected CLI shape:
 
 ```bash
-syslog host-state --host tootie --json
-syslog fleet-state --json
-syslog correlate-state --reference-time 2026-05-24T14:30:00Z --window-minutes 10 --json
+cortex host-state --host tootie --json
+cortex fleet-state --json
+cortex correlate-state --reference-time 2026-05-24T14:30:00Z --window-minutes 10 --json
 ```
 
 Expected REST shape:

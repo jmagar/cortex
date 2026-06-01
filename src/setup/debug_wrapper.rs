@@ -14,7 +14,7 @@ pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<S
     let compose_dir = home.join("compose");
     let data_dir = home.join("data");
     let user_home = super::user_home_dir()?;
-    let wrapper_path = user_home.join(".local/bin/syslog");
+    let wrapper_path = user_home.join(".local/bin/cortex");
     let repo_path = std::env::current_dir()?;
     let mut phases = Vec::new();
 
@@ -150,8 +150,8 @@ case "${{1:-}}" in
     ;;
 esac
 
-cargo build --quiet --bin syslog
-exec "${{CARGO_TARGET_DIR}}/debug/syslog" "$@"
+cargo build --quiet --bin cortex
+exec "${{CARGO_TARGET_DIR}}/debug/cortex" "$@"
 "#
     )
 }

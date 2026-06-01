@@ -1,4 +1,4 @@
 interface:
-  display_name: "Syslog Redeploy"
+  display_name: "Cortex Redeploy"
   short_description: "Rerun syslog plugin deployment hook"
   default_prompt: "Use $cortex-redeploy to rerun the cortex plugin deployment hook and verify health."

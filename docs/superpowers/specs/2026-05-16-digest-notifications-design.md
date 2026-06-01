@@ -493,7 +493,7 @@ Env equivalents (all `SYSLOG_MCP_` prefixed, flat):
 
 ## 12. MCP Actions
 
-All added to `src/mcp/tools.rs` dispatch under the existing `syslog` tool.
+All added to `src/mcp/tools.rs` dispatch under the existing `cortex` tool.
 
 | Action | Params | Response |
 |---|---|---|

@@ -102,7 +102,7 @@ curl -s "$CLAUDE_PLUGIN_OPTION_SERVER_URL/health"
 curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
   -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"tail","n":20}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"tail","n":20}}}'
 ```
 
 ### Search logs
@@ -111,7 +111,7 @@ curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
 curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
   -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"search","query":"error","limit":20}}}'
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"search","query":"error","limit":20}}}'
 ```
 
 ### Get stats
@@ -120,7 +120,7 @@ curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
 curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
   -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"stats"}}}'
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"stats"}}}'
 ```
 
 ---

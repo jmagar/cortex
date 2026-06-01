@@ -61,8 +61,8 @@ mod table;
 pub(crate) use config_cmd::run_config;
 pub(crate) use heartbeat_agent::run_heartbeat_no_db;
 pub(crate) use parse_common::{parse_i64_flag, parse_u32_flag, FlagCursor};
-pub(crate) use setup::run_setup;
 pub(crate) use setup::install_self;
+pub(crate) use setup::run_setup;
 
 impl CliCommand {
     pub(crate) fn parse(args: Vec<String>) -> Result<Self> {
@@ -116,7 +116,7 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
     }
 }
 
-/// DB-free entry point for `syslog service ...` — avoids opening the SQLite
+/// DB-free entry point for `cortex service ...` — avoids opening the SQLite
 /// pool so this command remains usable when the DB is corrupted/locked/full.
 pub(crate) async fn run_service_no_db(command: CliCommand) -> Result<()> {
     let CliCommand::Service(command) = command else {

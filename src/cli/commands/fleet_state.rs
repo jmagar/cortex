@@ -1,4 +1,4 @@
-//! Parse function for `syslog fleet-state`.
+//! Parse function for `cortex fleet-state`.
 //!
 //! Surface parity (cxih.4): exposes the `fleet_state` MCP action and
 //! `GET /api/fleet-state` REST route as a top-level CLI subcommand.

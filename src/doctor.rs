@@ -25,7 +25,7 @@ impl BinaryDoctorReport {
         let current_exe = std::env::current_exe()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|error| format!("unknown: {error}"));
-        let path_cortex = command_stdout("sh", &["-c", "command -v syslog"]);
+        let path_cortex = command_stdout("sh", &["-c", "command -v cortex"]);
         let container_version =
             command_stdout("docker", &["exec", "cortex", "cortex", "--version"]);
         let (runtime_current, runtime_current_error) = runtime_current_status();

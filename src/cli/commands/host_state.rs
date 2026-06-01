@@ -1,4 +1,4 @@
-//! Parse function for `syslog host-state`.
+//! Parse function for `cortex host-state`.
 //!
 //! Surface parity (cxih.4): exposes the `host_state` MCP action and
 //! `GET /api/host-state` REST route as a top-level CLI subcommand.

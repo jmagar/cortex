@@ -839,7 +839,7 @@ const USAGE: &str = "Usage:
   cortex compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]
   cortex compose down --yes [--dry-run] [--allow-cwd-target] [--json]
   cortex compose logs [--tail N] [--json]
-  syslog service logs SERVICE [--from TIME] [--to TIME] [--tail N] [--json]
+  cortex service logs SERVICE [--from TIME] [--to TIME] [--tail N] [--json]
   cortex setup check|repair [--json]
   cortex setup agent-command install|remove|check [--json]
   cortex setup plugin-hook [--no-repair] [--json]

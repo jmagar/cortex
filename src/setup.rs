@@ -438,7 +438,7 @@ fn validate_absolute_home(path: PathBuf) -> io::Result<PathBuf> {
 fn resolve_cortex_binary() -> io::Result<PathBuf> {
     let current = std::env::current_exe()?;
     let output = std::process::Command::new("sh")
-        .args(["-c", "command -v syslog"])
+        .args(["-c", "command -v cortex"])
         .output()?;
     if output.status.success() {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -451,7 +451,7 @@ fn resolve_cortex_binary() -> io::Result<PathBuf> {
     }
     Err(io::Error::new(
         ErrorKind::NotFound,
-        "syslog binary not found on PATH",
+        "cortex binary not found on PATH",
     ))
 }
 
@@ -462,7 +462,7 @@ fn validate_executable_path(path: PathBuf) -> io::Result<PathBuf> {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             format!(
-                "refusing to install AI watch service with debug/worktree binary {}; put the syslog wrapper on PATH or set CORTEX_AI_WATCH_ALLOW_DEBUG_BINARY=true",
+                "refusing to install AI watch service with debug/worktree binary {}; put the cortex wrapper on PATH or set CORTEX_AI_WATCH_ALLOW_DEBUG_BINARY=true",
                 canonical.display()
             ),
         ));

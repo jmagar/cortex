@@ -4,7 +4,7 @@ Reusable patterns in the cortex implementation.
 
 ## Action-Based Tool Dispatch
 
-cortex exposes one public MCP tool, `syslog`, and dispatches on the required
+cortex exposes one public MCP tool, `cortex`, and dispatches on the required
 `action` argument:
 
 ```rust

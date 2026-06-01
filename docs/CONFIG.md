@@ -11,9 +11,9 @@ Precedence (highest to lowest):
 3. `config.toml` in the working directory (partial configs supported -- missing fields keep defaults)
 4. Compiled defaults in `src/config.rs`
 
-The setup env file is created and repaired by `syslog setup`. It is loaded
-automatically by installed CLI commands so `syslog stats`, `syslog mcp`, and
-`syslog serve mcp` see the same database path and runtime settings as the
+The setup env file is created and repaired by `cortex setup`. It is loaded
+automatically by installed CLI commands so `cortex stats`, `cortex mcp`, and
+`cortex serve mcp` see the same database path and runtime settings as the
 Docker Compose container. Explicit process environment variables still win.
 
 ## config.toml
@@ -136,7 +136,7 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 
 ### Headless Gemini assessment (`CORTEX_HEADLESS_*`, `CORTEX_LLM_*`)
 
-`syslog ai assess` is local-only and starts the Gemini CLI in an isolated
+`cortex ai assess` is local-only and starts the Gemini CLI in an isolated
 temporary HOME. It copies Gemini auth files from the configured source HOME,
 installs the bundled `cortex-frustration-assessment` skill into that isolated
 HOME, disables MCP servers/hooks/context-file loading, and parses Gemini's
@@ -145,7 +145,7 @@ HOME, disables MCP servers/hooks/context-file loading, and parses Gemini's
 | Variable | Required | Default | Sensitive | Description |
 | --- | --- | --- | --- | --- |
 | `CORTEX_HEADLESS_GEMINI_CMD` | no | `gemini` | no | Gemini CLI executable path or command name |
-| `CORTEX_HEADLESS_GEMINI_MODEL` | no | `gemini-3.1-flash-lite-preview` | no | Default model for `syslog ai assess`; `--model` on the CLI overrides this |
+| `CORTEX_HEADLESS_GEMINI_MODEL` | no | `gemini-3.1-flash-lite-preview` | no | Default model for `cortex ai assess`; `--model` on the CLI overrides this |
 | `CORTEX_HEADLESS_GEMINI_HOME` | no | `$HOME` | maybe | Source home containing `.gemini` auth files to copy into the isolated runtime HOME |
 | `CORTEX_LLM_COMPLETION_TIMEOUT_SECS` | no | `120` | no | Hard timeout for the Gemini assessment subprocess |
 
@@ -207,7 +207,7 @@ For populated databases, treat heavy migrations as a planned upgrade step:
 2. Take a WAL-safe backup with `scripts/backup.sh` or `sqlite3 /data/cortex.db ".backup /data/syslog-pre-upgrade.db"`.
 3. Start the upgraded container or binary and watch `docker compose logs -f cortex` or the relevant service log for migration start/completion lines.
 4. Wait for `curl -sf http://localhost:3100/health` to succeed.
-5. Run `syslog stats --json` or `mcporter call ... action=stats` and confirm `total_logs`, storage metrics, and `write_blocked` match expectations.
+5. Run `cortex stats --json` or `mcporter call ... action=stats` and confirm `total_logs`, storage metrics, and `write_blocked` match expectations.
 
 If a migration must be abandoned, stop the new process before changing files, restore the WAL-safe backup, and restart the previous image or binary. See [runbooks/deploy.md](runbooks/deploy.md) for the full deploy checklist.
 
@@ -226,7 +226,7 @@ If a migration must be abandoned, stop the new process before changing files, re
 
 ## Plugin deployment
 
-`syslog serve mcp` runs as a daemon (syslog listener + HTTP MCP server), so the plugin connects via HTTP -- not stdio.
+`cortex serve mcp` runs as a daemon (syslog listener + HTTP MCP server), so the plugin connects via HTTP -- not stdio.
 
 When installed as a Claude Code plugin, users are prompted for:
 

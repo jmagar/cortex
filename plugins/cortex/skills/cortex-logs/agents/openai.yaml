@@ -1,4 +1,4 @@
 interface:
-  display_name: "Syslog Service Logs"
+  display_name: "Cortex Service Logs"
   short_description: "Tail cortex service logs"
   default_prompt: "Use $cortex-logs to tail or follow cortex service logs."

@@ -6,6 +6,9 @@ use std::path::PathBuf;
 use super::output_common::print_json;
 use super::{PluginHookArgs, SetupCommand};
 
+mod plugin_options;
+use plugin_options::{prepare_plugin_hook_env, HookPrep};
+
 pub(crate) fn run_setup(command: SetupCommand) -> Result<()> {
     match command {
         SetupCommand::Check(args) => {
@@ -110,12 +113,24 @@ pub(crate) fn install_self() -> Result<std::path::PathBuf> {
         .map(|p| std::env::split_paths(&p).any(|d| d == bin_dir))
         .unwrap_or(false);
     if !on_path {
-        eprintln!("note: {} is not on your PATH; add:  export PATH=\"$HOME/.local/bin:$PATH\"", bin_dir.display());
+        eprintln!(
+            "note: {} is not on your PATH; add:  export PATH=\"$HOME/.local/bin:$PATH\"",
+            bin_dir.display()
+        );
     }
     Ok(dest)
 }
 
 fn run_plugin_hook(args: PluginHookArgs) -> Result<()> {
+    // Adapt Claude Code plugin options into CORTEX_* env (ported from the former
+    // plugins/cortex/scripts/plugin-setup.sh) BEFORE any check/repair runs, so
+    // the phases below observe the mapped CORTEX_PORT / NO_AUTH / token vars.
+    // For client installs (IS_SERVER != "true"), this validates connectivity and
+    // we return early without running the local server check+repair.
+    if let HookPrep::Client = prepare_plugin_hook_env()? {
+        return Ok(());
+    }
+
     // Keep the user's terminal copy in ~/.local/bin fresh each session.
     if let Err(e) = install_self() {
         eprintln!("cortex setup plugin-hook: self-install skipped: {e}");
@@ -327,7 +342,7 @@ fn print_setup_report(report: &SetupReport, json: bool) -> Result<()> {
     if json {
         return print_json(report);
     }
-    println!("Syslog setup mode: {:?}", report.mode);
+    println!("Cortex setup mode: {:?}", report.mode);
     println!("Data dir: {}", report.data_dir.display());
     println!("Env: {}", report.env_path.display());
     for phase in &report.phases {

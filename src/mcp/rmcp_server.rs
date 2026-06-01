@@ -244,7 +244,7 @@ pub(super) const MCP_APP_HTML_MIME_TYPE: &str = "text/html;profile=mcp-app";
 fn schema_resource() -> Resource {
     Resource::new(
         RawResource::new(SCHEMA_RESOURCE_URI, "cortex tool schema")
-            .with_description("JSON schema for the syslog MCP tool and its action-based parameters")
+            .with_description("JSON schema for the cortex MCP tool and its action-based parameters")
             .with_mime_type("application/json"),
         None,
     )
@@ -254,10 +254,10 @@ fn prompt_output_schema_resource() -> Resource {
     Resource::new(
         RawResource::new(
             PROMPT_OUTPUT_SCHEMA_RESOURCE_URI,
-            "syslog prompt output schema",
+            "cortex prompt output schema",
         )
         .with_description(
-            "JSON schema for structured incident-style outputs from syslog MCP prompts",
+            "JSON schema for structured incident-style outputs from cortex MCP prompts",
         )
         .with_mime_type("application/schema+json"),
         None,
@@ -266,7 +266,7 @@ fn prompt_output_schema_resource() -> Resource {
 
 fn query_widget_resource() -> Resource {
     Resource::new(
-        RawResource::new(QUERY_WIDGET_RESOURCE_URI, "syslog query widget")
+        RawResource::new(QUERY_WIDGET_RESOURCE_URI, "cortex query widget")
             .with_title("Syslog Query")
             .with_description("Interactive MCP Apps widget for querying cortex logs")
             .with_mime_type(MCP_APP_HTML_MIME_TYPE),

@@ -45,9 +45,9 @@ These are agent-side files; the server data dir does **not** contain them.
 | `<DATA_DIR>/auth.db` | lab-auth via SQLx | **`0600` enforced** (`src/runtime.rs::enforce_restrictive_permissions`) | runtime UID | **SECRET** | Contains issued OAuth tokens / sessions. Created only when `auth.mode = oauth`. |
 | `<DATA_DIR>/auth.db-wal`, `auth.db-shm` | lab-auth | inherited | runtime UID | **SECRET (transient)** | Same as syslog WAL/SHM. |
 | `<DATA_DIR>/auth-jwt.pem` | lab-auth | **`0600` enforced** | runtime UID | **SECRET — most sensitive file** | JWT signing private key. Losing this invalidates all issued tokens. Compromising this lets an attacker forge tokens. |
-| `~/.cortex/.env` (on the operator account, not under DATA_DIR) | `syslog setup` | `0600` written by setup | operator user | **SECRET** (contains tokens, OAuth secret) | Read by `src/config.rs::load_setup_env_file`. Refused if it is a symlink. |
+| `~/.cortex/.env` (on the operator account, not under DATA_DIR) | `cortex setup` | `0600` written by setup | operator user | **SECRET** (contains tokens, OAuth secret) | Read by `src/config.rs::load_setup_env_file`. Refused if it is a symlink. |
 | `~/.cortex/config.toml` | operator-edited | `0600` recommended | operator user | mixed | Layered before env per config-schema §2. |
-| Agent host: `~/.config/cortex/agent-token` | agent binary | **`0600`** | agent UID | **SECRET** | Long-lived bearer-equivalent. Replace immediately after `syslog agent rotate`. |
+| Agent host: `~/.config/cortex/agent-token` | agent binary | **`0600`** | agent UID | **SECRET** | Long-lived bearer-equivalent. Replace immediately after `cortex agent rotate`. |
 | Agent host: `~/.local/state/cortex/agent-buffer.redb` | agent binary | `0600` recommended | agent UID | **possibly SECRET** (cached log lines) | Bounded local replay buffer; size-capped by agent config. |
 
 ### Path resolution rules (server side)
@@ -92,11 +92,11 @@ sqlite3 /data/auth.db ".backup /backup/auth-$(date +%F).db"
 install -m 0600 /data/auth-jwt.pem /backup/auth-jwt-$(date +%F).pem
 ```
 
-The bundled CLI exposes the same operation: `syslog db backup --output /backup/cortex.db` calls SQLite's backup API under the hood.
+The bundled CLI exposes the same operation: `cortex db backup --output /backup/cortex.db` calls SQLite's backup API under the hood.
 
 ### Offline (server stopped)
 
-After a graceful `syslog compose down` (or `systemctl stop`):
+After a graceful `cortex compose down` (or `systemctl stop`):
 
 ```bash
 # WAL/SHM sidecars may be absent after a clean shutdown — use cp with fallback
@@ -121,7 +121,7 @@ Include the `-wal` and `-shm` sidecars when offline — together they form one c
 
 ## 6. Restore procedure
 
-1. **Stop the server** (`syslog compose down` or `systemctl stop cortex`). Restoring under a running process risks corrupting the SQLite WAL handshake.
+1. **Stop the server** (`cortex compose down` or `systemctl stop cortex`). Restoring under a running process risks corrupting the SQLite WAL handshake.
 2. **Place files** into `<DATA_DIR>` at the same names. For an online-backup restore, only `cortex.db` (and `auth.db` if applicable) need be present — the WAL/SHM sidecars are auto-rebuilt on first connection.
 3. **Verify ownership and modes**:
    ```bash
@@ -129,7 +129,7 @@ Include the `-wal` and `-shm` sidecars when offline — together they form one c
    chmod 0600 /data/auth.db   /data/auth-jwt.pem  # if OAuth
    ```
 4. **Start the server.** It will replay any WAL present, rebuild SHM, and apply pending schema migrations.
-5. **Verify** with `curl -sf http://localhost:3100/health` (per `docs/contracts/runtime-lifecycle.md` §5) and `syslog db integrity`.
+5. **Verify** with `curl -sf http://localhost:3100/health` (per `docs/contracts/runtime-lifecycle.md` §5) and `cortex db integrity`.
 
 ## 7. Safe-to-delete matrix
 
@@ -141,7 +141,7 @@ Include the `-wal` and `-shm` sidecars when offline — together they form one c
 | `auth.db` | **No** (active sessions held) | **Yes** | All OAuth sessions invalidated. Users must re-authenticate via Google; refresh tokens stop working. |
 | `auth.db-wal` / `auth.db-shm` | **No** | **Yes** | Same WAL/SHM rules as syslog. |
 | `auth-jwt.pem` | **No** (signing key in active use) | **Yes (regenerates on start)** | Catastrophic: **all** issued OAuth access tokens AND refresh tokens become unverifiable. Forces every user to re-authenticate. lab-auth regenerates a new key on next start. |
-| `agent-token` (agent host) | **No** | rotates instead | Forces re-enrollment with `syslog agent enroll <token>`. |
+| `agent-token` (agent host) | **No** | rotates instead | Forces re-enrollment with `cortex agent enroll <token>`. |
 | `agent-buffer.redb` (agent host) | tolerated; agent recreates | safe | Loses any logs buffered locally during a server outage that hadn't yet been replayed. |
 
 ## 8. Snapshot & move procedure
@@ -152,7 +152,7 @@ To migrate the data dir to a new disk / host while preserving every byte:
 2. **Copy preserving mode/ownership**: `rsync -aAX /data/ <new-mount>/data/`. Verify `auth.db` and `auth-jwt.pem` retain mode `0600` and owner `1000:1000` post-copy (`stat -c '%a %U:%G %n' …`).
 3. **Update `storage.db_path`** (and any absolute `mcp.auth.*_path` values) if the new mount lives at a different path. For Compose deployments, this is usually unchanged — only `CORTEX_DATA_VOLUME` (the host-side bind) moves.
 4. **Update Compose**: change the `volumes:` source to the new bind path or named volume. Leave the in-container `/data` target alone.
-5. **Start the server.** Confirm `/health` returns 200 and `syslog db integrity` passes.
+5. **Start the server.** Confirm `/health` returns 200 and `cortex db integrity` passes.
 6. **Optionally retain the old mount** for one retention period before deleting, in case the new disk is itself faulty.
 
 Cross-host moves additionally require ensuring the new host's UID `1000` (or whatever `CORTEX_UID` is set to) owns the data. The WSL gotcha (§4) applies to fresh host installs.
@@ -166,7 +166,7 @@ The data dir's footprint is governed by `[storage]` knobs (see `docs/contracts/c
 - **Age-based purge**: `storage.retention_days` (default `90`). Hourly task deletes rows older than this regardless of size.
 - **AdGuard tag exception**: AdGuard query records (`adguard-allowed`, `adguard-query`, `adguard-rewrite`) are hard-capped at 7 days (`ADGUARD_RETENTION_DAYS` in `src/runtime.rs`) because their volume otherwise dominates the FTS5 index.
 - **Write-block on full**: if eviction cannot free enough space, `writer_storage_blocked` flips to `true` in `/health` and new writes are dropped (counters: `writer_logs_retained`, `writer_logs_discarded`). The DB itself never grows past the configured cap once enforcement is engaged.
-- **WAL growth**: SQLite's WAL grows during long transactions and shrinks on checkpoint. V1 does not pin a WAL size cap; under normal load it stays under a few MB. `syslog db checkpoint --mode truncate` forces a shrink when needed.
+- **WAL growth**: SQLite's WAL grows during long transactions and shrinks on checkpoint. V1 does not pin a WAL size cap; under normal load it stays under a few MB. `cortex db checkpoint --mode truncate` forces a shrink when needed.
 
 There is no explicit cap on `auth.db` size — it stays small (sessions only) and is bounded operationally by user count + refresh-token TTL.
 
@@ -174,4 +174,4 @@ There is no explicit cap on `auth.db` size — it stays small (sessions only) an
 
 - **`auth.db` retention.** lab-auth currently retains expired session rows; the V1 storage budget task does not touch `auth.db`. At homelab scale this never matters; at scale the file may grow unbounded over years. Manual purge via `sqlite3 auth.db "DELETE FROM sessions WHERE expires_at < strftime('%s','now')-86400"` is the workaround until lab-auth adds a retention task.
 - **Encryption-at-rest.** V1 has none. Operators handling logs that contain sensitive data should rely on filesystem-level encryption (LUKS / ZFS native encryption) or the `[enrichment].scrub_prompts` knob for AI-source content.
-- **No checksum/manifest file.** There is no `.manifest` describing expected file modes for `syslog dr` to audit against. Adding one (similar to systemd-tmpfiles) is deferred — for now, `enforce_restrictive_permissions` is the only programmatic mode-tightening step, and it runs on every startup for `auth.db` and `auth-jwt.pem` only.
+- **No checksum/manifest file.** There is no `.manifest` describing expected file modes for `cortex dr` to audit against. Adding one (similar to systemd-tmpfiles) is deferred — for now, `enforce_restrictive_permissions` is the only programmatic mode-tightening step, and it runs on every startup for `auth.db` and `auth-jwt.pem` only.

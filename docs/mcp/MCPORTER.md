@@ -46,29 +46,29 @@ mcporter config is at `config/mcporter.json`:
 # List available tools
 mcporter list syslog --config config/mcporter.json
 
-# Call actions through the single syslog tool
-mcporter call --config config/mcporter.json syslog.syslog action=stats
-mcporter call --config config/mcporter.json syslog.syslog action=tail n=10
-mcporter call --config config/mcporter.json syslog.syslog action=search query=error limit=5
-mcporter call --config config/mcporter.json syslog.syslog action=hosts
-mcporter call --config config/mcporter.json syslog.syslog action=errors
-mcporter call --config config/mcporter.json syslog.syslog action=status
-mcporter call --config config/mcporter.json syslog.syslog action=help
+# Call actions through the single cortex tool
+mcporter call --config config/mcporter.json syslog.cortex action=stats
+mcporter call --config config/mcporter.json syslog.cortex action=tail n=10
+mcporter call --config config/mcporter.json syslog.cortex action=search query=error limit=5
+mcporter call --config config/mcporter.json syslog.cortex action=hosts
+mcporter call --config config/mcporter.json syslog.cortex action=errors
+mcporter call --config config/mcporter.json syslog.cortex action=status
+mcporter call --config config/mcporter.json syslog.cortex action=help
 ```
 
 ## Test assertions
 
 The smoke test validates:
 - Health endpoint returns `{"status": "ok"}`
-- The single `syslog` tool is listed
-- `syslog search` returns expected `count` and `logs` fields
-- `syslog tail` respects the `n` parameter
-- `syslog errors` returns `summary` array
-- `syslog hosts` returns `hosts` array
-- `syslog correlate` returns `hosts` grouped by hostname
-- `syslog stats` returns numeric fields (total_logs, total_hosts, etc.)
-- `syslog status` returns DB health and runtime/OTLP observability fields
-- `syslog help` returns non-empty markdown text
+- The single `cortex` tool is listed
+- `cortex search` returns expected `count` and `logs` fields
+- `cortex tail` respects the `n` parameter
+- `cortex errors` returns `summary` array
+- `cortex hosts` returns `hosts` array
+- `cortex correlate` returns `hosts` grouped by hostname
+- `cortex stats` returns numeric fields (total_logs, total_hosts, etc.)
+- `cortex status` returns DB health and runtime/OTLP observability fields
+- `cortex help` returns non-empty markdown text
 - When `tests/fixtures/ai-session-smoke.jsonl` can be seeded into the same
   SQLite database as the server, AI analytics also prove non-empty
   `sessions`, `search_sessions`, and `project_context` results for the fixture.

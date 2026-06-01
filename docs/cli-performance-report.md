@@ -146,13 +146,13 @@ Or add `set dotenv-load` at the top of the `Justfile` to auto-load `.env`.
 
 ---
 
-## syslog CLI Commands (HTTP Transport)
+## cortex CLI Commands (HTTP Transport)
 
-All commands below used `syslog --server http://localhost:3100 --token <token>` unless noted as local.
+All commands below used `cortex --server http://localhost:3100 --token <token>` unless noted as local.
 
 ---
 
-### `syslog db status`
+### `cortex db status`
 **What it does:** Reports DB file path, page count, freelist count, page size, logical/physical byte sizes, WAL size, journal mode, and auto-vacuum setting.
 
 | Run | Time |
@@ -164,7 +164,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 
 ---
 
-### `syslog db status --check-coord`
+### `cortex db status --check-coord`
 **What it does:** Same as `db status` plus runs two coordination checks: `data-mount` (verifies host bind-mount path) and `ai-watch-coord` (verifies systemd unit path matches container). Shells out to `docker inspect` and `systemctl`.
 
 | Run | Time |
@@ -175,7 +175,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 
 ---
 
-### `syslog db integrity --quick`
+### `cortex db integrity --quick`
 **What it does:** Runs SQLite's `PRAGMA integrity_check` (or `quick_check`) against the production DB to detect corruption.
 
 | Run | Time |
@@ -192,7 +192,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 
 ---
 
-### `syslog db backup`
+### `cortex db backup`
 **What it does:** Runs a local SQLite hot-backup (online backup API) to a specified output path.
 
 | Run | Time |
@@ -208,7 +208,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 
 ---
 
-### `syslog source-ips`
+### `cortex source-ips`
 **What it does:** Lists unique log sources (IP addresses and Docker container paths) ordered by log volume, with last-seen timestamp.
 
 | Run | Time |
@@ -220,7 +220,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 
 ---
 
-### `syslog timeline --bucket minute`
+### `cortex timeline --bucket minute`
 **What it does:** Returns per-minute log counts across the entire log history.
 
 | Run | Time |
@@ -231,7 +231,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 
 ---
 
-### `syslog timeline --bucket hour`
+### `cortex timeline --bucket hour`
 **What it does:** Returns per-hour log counts across the entire log history.
 
 | Run | Time |
@@ -240,7 +240,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 
 ---
 
-### `syslog timeline --bucket day`
+### `cortex timeline --bucket day`
 **What it does:** Returns per-day log counts across the entire log history.
 
 | Run | Time |
@@ -266,7 +266,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 
 ---
 
-### `syslog ingest-rate`
+### `cortex ingest-rate`
 **What it does:** Reports current ingest rate (logs/sec) over 1m/5m/15m windows, optionally broken down by host.
 
 | Run | Time |
@@ -277,7 +277,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 
 ---
 
-### `syslog patterns`
+### `cortex patterns`
 **What it does:** Scans the most recent logs, normalizes message text (replaces numbers/IPs/hashes with placeholders), and ranks the top recurring message templates.
 
 | Run | Time |
@@ -289,7 +289,7 @@ All commands below used `syslog --server http://localhost:3100 --token <token>` 
 
 ---
 
-### `syslog sig list`
+### `cortex sig list`
 **What it does:** Lists the top 50 error signature patterns with occurrence counts, last-seen timestamps, and a 1-hour window count.
 
 | Run | Time |
@@ -326,7 +326,7 @@ This runs one pass over `error_signature_windows` instead of 50, cutting time to
 
 ---
 
-### `syslog notify recent`
+### `cortex notify recent`
 **What it does:** Shows the most recent notification dispatch records (rule ID, hostname, severity, timestamps, delivery status).
 
 | Run | Time |
@@ -337,7 +337,7 @@ This runs one pass over `error_signature_windows` instead of 50, cutting time to
 
 ---
 
-### `syslog ai doctor`
+### `cortex ai doctor`
 **What it does:** Self-diagnoses the AI transcript watcher — checks DB schema version, Claude/Codex session root paths, checkpoint counts, and scan error counts.
 
 | Run | Time |
@@ -348,7 +348,7 @@ This runs one pass over `error_signature_windows` instead of 50, cutting time to
 
 ---
 
-### `syslog setup check`
+### `cortex setup check`
 **What it does:** Validates the cortex installation: home directory, `.env`, compose, data directory, and a liveness check against the running server.
 
 | Run | Time |
@@ -359,7 +359,7 @@ This runs one pass over `error_signature_windows` instead of 50, cutting time to
 
 ---
 
-### `syslog setup repair`
+### `cortex setup repair`
 **What it does:** Auto-fixes the cortex installation — creates missing directories, merges missing `.env` keys, updates compose files from embedded templates, and validates the result.
 
 | Run | Time |
@@ -373,7 +373,7 @@ This runs one pass over `error_signature_windows` instead of 50, cutting time to
 
 ---
 
-### `syslog compose status`
+### `cortex compose status`
 **What it does:** Checks whether the cortex Docker container is running, its health status, image, and compose project details.
 
 | Run | Time |
@@ -385,7 +385,7 @@ This runs one pass over `error_signature_windows` instead of 50, cutting time to
 
 ---
 
-### `syslog compose doctor`
+### `cortex compose doctor`
 **What it does:** Full coordination diagnostics — compose status plus the `data-mount` and `ai-watch-coord` phases that check for host/container SQLite path drift.
 
 | Run | Time |
@@ -411,23 +411,23 @@ This runs one pass over `error_signature_windows` instead of 50, cutting time to
 | `just test` | 36,726ms | ⚠️ | Switch to cargo-nextest |
 | `just test-live` | 172s (no token) / 9s (with token) | ❌ | Inject token in Justfile |
 | `just validate-skills` | 38ms | ❌ | Fix plugin.json manifest |
-| `syslog db status` | 12ms | ✅ | — |
-| `syslog db status --check-coord` | 76ms | ✅ | — |
-| `syslog db integrity --quick` | >600s (timeout) | 🔴 | Async job API |
-| `syslog db backup` | fails (locked) | ❌ | Expose as server-side endpoint |
-| `syslog source-ips --limit 50` | 154ms | ✅ | — |
-| `syslog timeline --bucket minute` | 99,447ms | 🔴 | Default time window + generated column |
-| `syslog timeline --bucket hour` | 93,328ms | 🔴 | Default time window + generated column |
-| `syslog timeline --bucket day` | 71,790ms | 🔴 | Default time window + generated column |
-| `syslog ingest-rate --by-host` | 536ms | ✅ | — |
-| `syslog patterns --top-n 25` | 706ms | ✅ | — |
-| `syslog sig list` | 1,128–2,717ms | ⚠️ | Replace correlated subquery with JOIN |
-| `syslog notify recent --limit 25` | 11ms | ✅ | — |
-| `syslog ai doctor` | 81–127ms | ✅ | — |
-| `syslog setup check` | 49–176ms | ✅ | — |
-| `syslog setup repair` | 1,635ms (steady) | ✅ | Investigate 14s first-run spike |
-| `syslog compose status` | 329ms | ✅ | — |
-| `syslog compose doctor` | 338ms | ✅ | — |
+| `cortex db status` | 12ms | ✅ | — |
+| `cortex db status --check-coord` | 76ms | ✅ | — |
+| `cortex db integrity --quick` | >600s (timeout) | 🔴 | Async job API |
+| `cortex db backup` | fails (locked) | ❌ | Expose as server-side endpoint |
+| `cortex source-ips --limit 50` | 154ms | ✅ | — |
+| `cortex timeline --bucket minute` | 99,447ms | 🔴 | Default time window + generated column |
+| `cortex timeline --bucket hour` | 93,328ms | 🔴 | Default time window + generated column |
+| `cortex timeline --bucket day` | 71,790ms | 🔴 | Default time window + generated column |
+| `cortex ingest-rate --by-host` | 536ms | ✅ | — |
+| `cortex patterns --top-n 25` | 706ms | ✅ | — |
+| `cortex sig list` | 1,128–2,717ms | ⚠️ | Replace correlated subquery with JOIN |
+| `cortex notify recent --limit 25` | 11ms | ✅ | — |
+| `cortex ai doctor` | 81–127ms | ✅ | — |
+| `cortex setup check` | 49–176ms | ✅ | — |
+| `cortex setup repair` | 1,635ms (steady) | ✅ | Investigate 14s first-run spike |
+| `cortex compose status` | 329ms | ✅ | — |
+| `cortex compose doctor` | 338ms | ✅ | — |
 
 ---
 
@@ -446,7 +446,7 @@ All three `timeline` bucket sizes take 72–99 seconds on 4.9M rows. Add a defau
 Replace the 50-query correlated subquery in `sig list` with a single aggregating JOIN. Expected improvement: 1–2s → ~100ms.
 
 ### P2 — Fix `db backup` for concurrent use
-`syslog db backup` fails when the container holds the SQLite lock. Move the backup operation server-side so it uses the pool's existing connection, or document that it must be run from inside the container.
+`cortex db backup` fails when the container holds the SQLite lock. Move the backup operation server-side so it uses the pool's existing connection, or document that it must be run from inside the container.
 
 ### P3 — Add cargo-nextest
 Replace `cargo test` with `cargo nextest run` in `just test` to parallelize test execution and cut the 36s run to ~15–18s.

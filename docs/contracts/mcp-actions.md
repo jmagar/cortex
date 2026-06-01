@@ -18,7 +18,7 @@ Changing it requires updating the spec first.
 
 ## 1. Purpose & Pinning
 
-This contract enumerates every **new** MCP action introduced by the six 2026-05-16 superpowers epics, along with the additive changes to existing actions (`status`, `search`, `correlate`). Every action dispatches through `src/mcp/tools.rs` under the existing `syslog` super-tool via the `action` argument, and every JSON Schema follows the conventions already established in `src/mcp/schemas.rs` (draft 2020-12, additive-only properties, string enums for closed sets).
+This contract enumerates every **new** MCP action introduced by the six 2026-05-16 superpowers epics, along with the additive changes to existing actions (`status`, `search`, `correlate`). Every action dispatches through `src/mcp/tools.rs` under the existing `cortex` super-tool via the `action` argument, and every JSON Schema follows the conventions already established in `src/mcp/schemas.rs` (draft 2020-12, additive-only properties, string enums for closed sets).
 
 All actions return the standard envelope:
 
@@ -436,7 +436,7 @@ Response:
 
 **Source:** epic E §10, §12.
 
-**Purpose:** Render the morning digest markdown **without delivering** it via apprise. Used for template tuning and for `syslog digest preview` CLI.
+**Purpose:** Render the morning digest markdown **without delivering** it via apprise. Used for template tuning and for `cortex digest preview` CLI.
 
 **Params:**
 
@@ -1539,7 +1539,7 @@ No API change. `correlate` transparently benefits from epic B's new structured c
 ## 6. Versioning & Compatibility
 
 - **Additive-only policy.** New optional params and new response fields may be added without bumping any version. Required params and existing enum members are immutable.
-- **No version bump required.** This contract assumes the MCP tool dispatch table grows by 15 entries; the JSON Schema for the `syslog` tool's `action` enum is extended to include all 15. No clients need to opt in — they simply gain new actions they may invoke.
+- **No version bump required.** This contract assumes the MCP tool dispatch table grows by 15 entries; the JSON Schema for the `cortex` tool's `action` enum is extended to include all 15. No clients need to opt in — they simply gain new actions they may invoke.
 - **Breaking changes** (e.g. renaming an action, removing a field) require coordinated updates to: the source spec, this contract, `src/mcp/schemas.rs`, and `docs/mcp/SCHEMA.md`. Such a change is reflected by extending the action's name (`mem_top` → `mem_top_v2`) and keeping the old action live for one release cycle.
 - **Enum extensions** (e.g. adding `locked` to `auth_outcome` per epic B §13.2) are additive but require client tolerance to unknown enum values; clients SHOULD treat unknown enum values as opaque strings rather than erroring.
 - **Capability handshake** (epic D §3) protects probe-backed actions from clients calling probes that aren't compiled into the agent; this is enforced server-side via `agent_unavailable_capability`.

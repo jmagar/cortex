@@ -7,7 +7,7 @@
 >
 > CLI commands route here by default since v0.26 via
 > `CORTEX_USE_HTTP=true` written to `~/.cortex/.env` by
-> `syslog setup repair`. See [`docs/architecture.md`](architecture.md)
+> `cortex setup repair`. See [`docs/architecture.md`](architecture.md)
 > for the caller → DB diagram and [`docs/rollout.md`](rollout.md) for
 > the manual upgrade playbook.
 
@@ -132,11 +132,11 @@ operators can opt out of HTTP transport for the duration of the script:
 ```bash
 ( unset CORTEX_USE_HTTP; \
   for h in $(syslog hosts --json | jq -r '.hosts[].hostname'); do \
-    syslog tail --hostname "$h" --n 50; \
+    cortex tail --hostname "$h" --n 50; \
   done )
 ```
 
-Inside the subshell `CORTEX_USE_HTTP` is unset so each `syslog` call
+Inside the subshell `CORTEX_USE_HTTP` is unset so each `cortex` call
 goes straight to SQLite via `RuntimeCore::load_query_only`. The parent
 shell environment is unaffected.
 
@@ -243,16 +243,16 @@ A handful of CLI subcommands intentionally stay on the direct-SQLite or
 host-shell path even with `CORTEX_USE_HTTP=true`. The per-command
 reasons (no taxonomy):
 
-- `syslog ai watch` — long-running daemon. HTTP would require a
+- `cortex ai watch` — long-running daemon. HTTP would require a
   streaming bidirectional surface; the daemon is the writer for the
   same DB the container reads.
-- `syslog ai watch-status` — wraps `systemctl --user show
+- `cortex ai watch-status` — wraps `systemctl --user show
   syslog-ai-watch.service` on the host. The container has no view of
   the host systemd state.
-- `syslog ai index`, `syslog ai add`, `syslog ai doctor`,
-  `syslog ai smoke-watch` — all touch the host filesystem (transcript
+- `cortex ai index`, `cortex ai add`, `cortex ai doctor`,
+  `cortex ai smoke-watch` — all touch the host filesystem (transcript
   paths, watcher state). The container can't see them.
-- `syslog db backup` — writes a backup file to a host path. Passing
+- `cortex db backup` — writes a backup file to a host path. Passing
   the destination over HTTP would force a container-side filesystem
   the operator never asked for.
 
@@ -274,7 +274,7 @@ Description=cortex drift check
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/syslog compose doctor --json
+ExecStart=/usr/local/bin/cortex compose doctor --json
 StandardOutput=journal
 StandardError=journal
 

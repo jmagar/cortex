@@ -969,7 +969,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
         return Ok(AuthPolicy::LoopbackDev);
     }
 
-    // Resolve auth file paths against the directory containing the syslog DB
+    // Resolve auth file paths against the directory containing the cortex DB
     // so a single `/data` bind-mount captures everything.
     let storage_dir = config
         .storage

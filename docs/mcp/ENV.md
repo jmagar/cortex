@@ -4,18 +4,18 @@ Concise reference. See [CONFIG.md](../CONFIG.md) for full documentation includin
 
 ## Deployment paths
 
-`syslog serve mcp` runs as an HTTP MCP server because it needs persistent syslog UDP/TCP listeners:
+`cortex serve mcp` runs as an HTTP MCP server because it needs persistent syslog UDP/TCP listeners:
 
 | Path | How | Credentials |
 |------|-----|-------------|
-| **Plugin** | Claude Code connects via HTTP; server mode delegates setup to `syslog setup repair` / `syslog deploy local` | `${user_config.*}` in `.mcp.json`; setup writes `~/.cortex/.env` |
-| **One-line installer** | `curl .../install.sh \| sh` then `syslog setup` | `~/.cortex/.env` |
+| **Plugin** | Claude Code connects via HTTP; server mode delegates setup to `cortex setup repair` / `cortex deploy local` | `${user_config.*}` in `.mcp.json`; setup writes `~/.cortex/.env` |
+| **One-line installer** | `curl .../install.sh \| sh` then `cortex setup` | `~/.cortex/.env` |
 | **Docker** | `docker compose up -d` | `.env` file |
-| **Bare metal** | `cargo run --release -- serve mcp` or `syslog serve mcp` | `config.toml` or env vars |
+| **Bare metal** | `cargo run --release -- serve mcp` or `cortex serve mcp` | `config.toml` or env vars |
 
-`syslog mcp` is a query-only local child process mode for stdio MCP clients. It uses `CORTEX_DB_PATH` and logging variables, but does not require `CORTEX_TOKEN` and does not bind network ports.
+`cortex mcp` is a query-only local child process mode for stdio MCP clients. It uses `CORTEX_DB_PATH` and logging variables, but does not require `CORTEX_TOKEN` and does not bind network ports.
 
-Direct CLI commands such as `syslog search`, `syslog tail`, and `syslog stats`
+Direct CLI commands such as `cortex search`, `cortex tail`, and `cortex stats`
 use the same query-only runtime and the same `CORTEX_DB_PATH`. Installed
 CLI commands automatically load `$CORTEX_HOME/.env` or
 `~/.cortex/.env` when present, while explicit process environment variables

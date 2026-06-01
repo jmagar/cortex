@@ -50,10 +50,10 @@ If MCP UI annotations are adopted:
 
 | Action | Possible UI hint |
 | --- | --- |
-| `syslog search` | Multi-line text input for query, datetime pickers for from/to |
-| `syslog tail` | Slider for n parameter |
-| `syslog correlate` | Datetime picker for reference_time, slider for window_minutes |
-| `syslog errors` | Datetime range picker |
+| `cortex search` | Multi-line text input for query, datetime pickers for from/to |
+| `cortex tail` | Slider for n parameter |
+| `cortex correlate` | Datetime picker for reference_time, slider for window_minutes |
+| `cortex errors` | Datetime range picker |
 
 ## See also
 

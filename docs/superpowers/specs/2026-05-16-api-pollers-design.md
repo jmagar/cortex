@@ -29,7 +29,7 @@ dispatch as RFC 3164/5424 syslog. The two sources:
 - **No rustifi dependency.** Reuse UniFi-API knowledge from the `unifi` skill but build a
   focused, embedded poller — rustifi is a query tool, not a watcher.
 - **No new MCP tool actions for poller data** — query the resulting rows via existing
-  `syslog search`/`tail`/`stats`. Only `syslog status` gets per-poller health.
+  `cortex search`/`tail`/`stats`. Only `cortex status` gets per-poller health.
 - **No new auth surface.** Pollers authenticate outbound; nobody authenticates inbound to
   the poller.
 
@@ -164,7 +164,7 @@ Backoff (per source):
 - 429 / 5xx / network: exponential backoff in-tick `1s → 2s → 4s → 8s`, max 3 retries,
   then skip this tick. Cursor is **not** advanced on failure.
 - Persistent failure (>5 consecutive failed ticks): mark poller `unhealthy`, surface
-  in `syslog status`, keep retrying — never abort the spawned task.
+  in `cortex status`, keep retrying — never abort the spawned task.
 
 ### Mapping to `LogBatchEntry`
 
@@ -453,7 +453,7 @@ Validation (added to `validate_config`):
 The poller task **never panics out**. A failed tick logs at `error` with structured
 fields (`poller`, `cursor_before`, `error`, `elapsed_ms`) and waits for the next tick.
 
-## 10. MCP exposure: `syslog status` extensions
+## 10. MCP exposure: `cortex status` extensions
 
 Today `tool_get_status` (`src/mcp/tools.rs:503`) returns a tight JSON with `db_ok`,
 `runtime_observability`, and `otlp` counters. Add a `pollers` object:
@@ -487,7 +487,7 @@ cap — a signal the user should shorten `poll_interval_secs`.
 
 Counters live in `Arc<PollerObservability>`, mirroring the existing
 `Arc<RuntimeObservability>` pattern. No new MCP action is added; this rides under
-`syslog status`.
+`cortex status`.
 
 ## 11. Backfill on first run
 
@@ -548,13 +548,13 @@ Add `reqwest = { version = "0.12", default-features = false, features = ["json",
 3. **DNS rewrite chains.** `original_answer` vs `answer` divergence is the "rewrite happened" signal. Should `adguard_parser` (epic 1wjr) tag those rows specifically (`adguard-rewrite`) — yes, but defining the tag set is `1wjr`'s job, not ours.
 4. ~~**Cursor migration.**~~ **RESOLVED — manual CLI.** If a UniFi controller is replaced (new `_id` ObjectId space) the cursor goes stale and the poller silently fetches nothing. We do NOT auto-detect; we expose a CLI command:
    ```
-   syslog pollers reset --source=unifi   # rewinds the UniFi cursor to "now - 1h"
-   syslog pollers reset --source=adguard
-   syslog pollers reset --all
+   cortex pollers reset --source=unifi   # rewinds the UniFi cursor to "now - 1h"
+   cortex pollers reset --source=adguard
+   cortex pollers reset --all
    ```
    Implementation: deletes the row from `poller_checkpoints` (next tick treats it as cold-start with the configured `backfill_hours`). Also dump current cursor state:
    ```
-   syslog pollers status     # per-source: enabled, last_tick_at, cursor, lag, errors
+   cortex pollers status     # per-source: enabled, last_tick_at, cursor, lag, errors
    ```
    See contract: `docs/contracts/api-pollers.md`.
 5. **`rustifi` symbiosis.** Should we publish the embedded UniFi client as a small

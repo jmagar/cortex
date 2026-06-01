@@ -26,7 +26,7 @@ This is a hard break. No backwards-compatibility shims. Deployers update env var
 | GitHub repo | Rename `jmagar/syslog-mcp` → `jmagar/cortex` |
 | Internal depth | Full: modules, types, config field+section+fns |
 | DB file | Renamed `syslog.db` → `cortex.db` (data-file migration per host) |
-| Plugin / data dir | Plugin `syslog` → `cortex` (`syslog-jmagar-lab/` → `cortex-jmagar-lab/`) |
+| Plugin / data dir | Plugin `cortex` → `cortex` (`syslog-jmagar-lab/` → `cortex-jmagar-lab/`) |
 | Migration | Hard break — no deprecation shims |
 | Execution | Narrow script for `*syslog-mcp*` tokens + compiler-driven type renames + dedicated config task; single PR |
 
@@ -39,8 +39,8 @@ This is a hard break. No backwards-compatibility shims. Deployers update env var
 | Surface | Before | After |
 |---|---|---|
 | Crate name | `syslog-mcp` | `cortex` |
-| Binary | `syslog` | `cortex` + `cx` alias |
-| MCP tool | `syslog` | `cortex` |
+| Binary | `cortex` | `cortex` + `cx` alias |
+| MCP tool | `cortex` | `cortex` |
 | Env prefix | `SYSLOG_MCP_*` | `CORTEX_*` |
 | Docker image | `jmagar/syslog-mcp` | `ghcr.io/jmagar/cortex` |
 | GitHub repo | `jmagar/syslog-mcp` | `jmagar/cortex` |
@@ -74,7 +74,7 @@ mismatches compile clean and only fail at runtime.
 
 `Config` has `pub syslog: SyslogConfig` with `#[serde(default)]` and **no serde alias**.
 The TOML section `[syslog]` deserializes into that field. Renaming the section to
-`[receiver]` therefore **requires** renaming the struct field `syslog` → `receiver` in
+`[receiver]` therefore **requires** renaming the struct field `cortex` → `receiver` in
 lockstep, or config loading silently falls back to defaults. `cargo check` will NOT catch
 this — it is a runtime serde concern. The rename is verified by a parse test in
 `src/config_tests.rs` that loads a `[receiver]` TOML and asserts the values land.
@@ -84,14 +84,14 @@ this — it is a runtime serde concern. The rename is verified by a parse test i
 - SQLite file renamed `syslog.db` → `cortex.db`. This is a **data-file migration**: each
   deployed host must `mv` the existing DB (and checkpoint its WAL) during upgrade. Covered
   in the migration checklist.
-- Plugin name `syslog` → `cortex`, which moves the plugin data dir
+- Plugin name `cortex` → `cortex`, which moves the plugin data dir
   (`…/plugins/data/syslog-jmagar-lab/` → `cortex-jmagar-lab/`). Existing installs must move
   their data dir or re-bootstrap.
 
 ### KEEP list — values that must NOT change
 
 The rename script stays narrow: it only substitutes `syslog-mcp`, `syslog_mcp`, and
-`SYSLOG_MCP_`. It never touches bare-word `syslog`. These must be preserved verbatim:
+`SYSLOG_MCP_`. It never touches bare-word `cortex`. These must be preserved verbatim:
 
 - **Source aliases** `"syslog-udp"` / `"syslog-tcp"` — stored in the DB and matched in code
   (`src/enrich/parser.rs`, `src/enrich/dispatch.rs`, `src/app/service.rs`). The
@@ -122,7 +122,7 @@ The rename script stays narrow: it only substitutes `syslog-mcp`, `syslog_mcp`, 
 
 **Script-assisted single PR**: The rename is ~95% mechanical string substitution. A script makes every substitution auditable and reproducible. The remaining 5% (semantic renames, file moves) is done by hand after running the script.
 
-**MCP action strings unchanged**: These are the stable API surface that agents depend on. The tool name changes (`syslog` → `cortex`) but all action names stay exactly as-is. Agents need one config update (tool name), not a full action remapping.
+**MCP action strings unchanged**: These are the stable API surface that agents depend on. The tool name changes (`cortex` → `cortex`) but all action names stay exactly as-is. Agents need one config update (tool name), not a full action remapping.
 
 ---
 
@@ -138,7 +138,7 @@ syslog-mcp   → cortex   (Cargo.toml, docs, Docker, image names)
 syslog_mcp   → cortex   (Rust lib name in `use` statements)
 ```
 
-The script does NOT substitute bare-word `syslog`, type names, or config identifiers —
+The script does NOT substitute bare-word `cortex`, type names, or config identifiers —
 those are handled by the compiler-driven loop (type renames) and a dedicated config task
 (field/section/fn renames with a parse test). See the KEEP list above for values that must
 survive verbatim.
@@ -174,7 +174,7 @@ path = "src/main.rs"   # same entrypoint — Cargo builds two binaries from one 
 
 ### Phase 4 — MCP tool registration
 
-In `src/mcp/rmcp_server.rs` and `src/mcp/schemas.rs`: rename the tool from `syslog` to `cortex`. Action dispatch table unchanged.
+In `src/mcp/rmcp_server.rs` and `src/mcp/schemas.rs`: rename the tool from `cortex` to `cortex`. Action dispatch table unchanged.
 
 ### Phase 5 — Docker and CI
 
@@ -231,7 +231,7 @@ For each deployed instance after upgrading to v1.0.0 (service stopped first):
    `SYSLOG_PORT`/`SYSLOG_HOST`/`SYSLOG_UID`/`SYSLOG_GID`/`SYSLOG_HOST_PORT` to their
    `CORTEX_*` equivalents. Point `CORTEX_DB_PATH` at the renamed `cortex.db`.
 4. Update `config.toml`: rename the `[syslog]` section to `[receiver]`.
-5. Update agent configs: MCP tool name `syslog` → `cortex`.
+5. Update agent configs: MCP tool name `cortex` → `cortex`.
 6. Update `server.json` on MCP clients.
 7. For plugin installs: move the data dir `…/plugins/data/syslog-jmagar-lab/` →
    `cortex-jmagar-lab/` (or re-run setup to re-bootstrap).

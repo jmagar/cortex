@@ -1,4 +1,4 @@
 interface:
-  display_name: "Syslog Version Check"
+  display_name: "Cortex Version Check"
   short_description: "Check deployed syslog runtime freshness"
   default_prompt: "Use $cortex-version-check to check whether the running cortex runtime is current."

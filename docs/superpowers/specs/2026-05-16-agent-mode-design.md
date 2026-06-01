@@ -316,11 +316,11 @@ The unauthenticated socket window is bounded by `handshake_timeout = 5s` and an 
 
 ### 6.2 Token lifecycle
 
-- **Issuance:** `syslog admin agent issue --hostname dookie` on the server prints a one-time token (32 bytes, base64url). Server stores only its hash (BLAKE3 of the raw token) in `agents.token_hash`. A pending row is inserted with `connection_state = NeverConnected`.
+- **Issuance:** `cortex admin agent issue --hostname dookie` on the server prints a one-time token (32 bytes, base64url). Server stores only its hash (BLAKE3 of the raw token) in `agents.token_hash`. A pending row is inserted with `connection_state = NeverConnected`.
 - **Bootstrap on agent:** an operator pastes the token into `/etc/syslog-agent/token` (mode 0600), or feeds it via `syslog-agent register --token <…>` which writes the same file.
 - **Storage on agent:** plain file on disk, perms 0600, owned by the dedicated `syslog-agent` user. Not encrypted at rest — tailnet trust + filesystem perms are the boundary, matching every other agent in this class (Promtail, Filebeat).
-- **Rotation:** `syslog admin agent rotate --host-id <uuid>` issues a new token; server keeps both old and new `token_hash` for `rotation_grace_secs` (default 300). After grace, old hash is dropped.
-- **Revocation:** `syslog admin agent revoke --host-id <uuid>` zeroes both `token_hash` columns and sets `state = Revoked`. The next handshake (or in-flight session, on next operation) gets `-32002`; in-flight session receives a `agent.shutdown` with `reason: Revoked` immediately.
+- **Rotation:** `cortex admin agent rotate --host-id <uuid>` issues a new token; server keeps both old and new `token_hash` for `rotation_grace_secs` (default 300). After grace, old hash is dropped.
+- **Revocation:** `cortex admin agent revoke --host-id <uuid>` zeroes both `token_hash` columns and sets `state = Revoked`. The next handshake (or in-flight session, on next operation) gets `-32002`; in-flight session receives a `agent.shutdown` with `reason: Revoked` immediately.
 - **Transport assumption:** `wss://` is mandatory in prod. The server refuses to start with `agent.enabled = true` AND non-loopback bind AND `tls.terminated_externally = false` AND `agent.allow_insecure = false`.
 
 ---
@@ -689,19 +689,19 @@ If duplicates do appear, downstream search queries can filter on `source_ip LIKE
 4. ~~**`metrics.push` storage.**~~ **RESOLVED 2026-05-16 (bead `syslog-mcp-swv9`):** Earlier resolution pre-created a `host_metrics` table here so Epic D would avoid a schema bump. On cross-cutting review we found that table redundant with Epic D's `metrics_gauge` (same purpose: scalar samples per `(host_id, metric_name)` over time). Final decision: **no Epic A migration creates a metrics table**. Epic D's `metrics_gauge` is the canonical target for probe gauges AND any future `metrics.push` writes. V1 still drops incoming `metrics.push` payloads on the floor (see §4 of this spec). When a future v2 wants to wire `metrics.push` to storage, it routes the payload into `metrics_gauge` directly — no migration needed because Epic D already creates the table. Contract: `docs/contracts/db-additions.sql` (Epic D section).
 5. **Compression.** `Capabilities.compression: ["zstd"]` declared but unused in v1. Worth wiring through if any agent host produces > 10 MiB/min steady-state — `dookie`'s Plex logs might. **Decision deferred** until we measure.
 6. **Bootstrap UX.** One-time tokens via copy-paste vs. printing a `wireguard-style` invite URL the agent can read. Lean toward QR/URL for the next epic.
-7. ~~**`syslog agent` CLI subcommand surface.**~~ **RESOLVED — IN SCOPE.** Server-side CLI subcommands (run on `tootie`, operate on the central DB):
-   - `syslog agent list` — table of agents: host_id, hostname, connection_state, last_handshake, agent_version
-   - `syslog agent issue --hostname=<h>` — generate and print a one-time enrollment token; record `token_hash` row in `agents` with `connection_state=NeverConnected`
-   - `syslog agent revoke <host_id>` — set `connection_state=Revoked`, server-side kicks any active connection
-   - `syslog agent rotate <host_id>` — issue a new token, mark old `token_hash_prev` for grace window, agent picks up on next reconnect
-   - `syslog agent tail <host_id>` — server-side `tail -f` of recent log rows from that host (convenience wrapper over `search` with `hostname=...`)
+7. ~~**`cortex agent` CLI subcommand surface.**~~ **RESOLVED — IN SCOPE.** Server-side CLI subcommands (run on `tootie`, operate on the central DB):
+   - `cortex agent list` — table of agents: host_id, hostname, connection_state, last_handshake, agent_version
+   - `cortex agent issue --hostname=<h>` — generate and print a one-time enrollment token; record `token_hash` row in `agents` with `connection_state=NeverConnected`
+   - `cortex agent revoke <host_id>` — set `connection_state=Revoked`, server-side kicks any active connection
+   - `cortex agent rotate <host_id>` — issue a new token, mark old `token_hash_prev` for grace window, agent picks up on next reconnect
+   - `cortex agent tail <host_id>` — server-side `tail -f` of recent log rows from that host (convenience wrapper over `search` with `hostname=...`)
 
    Client-side CLI subcommands (run on the host, by the agent binary):
-   - `syslog agent run` — long-lived agent daemon (the existing wire protocol entry point)
-   - `syslog agent enroll <token>` — accept a one-time token, perform handshake, store rotated long-lived token in `~/.config/syslog-mcp/agent-token`
-   - `syslog agent status` — local-only: print connection state, last-success-push, buffer queue depth, recent errors
+   - `cortex agent run` — long-lived agent daemon (the existing wire protocol entry point)
+   - `cortex agent enroll <token>` — accept a one-time token, perform handshake, store rotated long-lived token in `~/.config/syslog-mcp/agent-token`
+   - `cortex agent status` — local-only: print connection state, last-success-push, buffer queue depth, recent errors
 
-   All subcommands go through the same `clap` derive-based parser as the existing `syslog` CLI. See contract: `docs/contracts/agent-cli.md`.
+   All subcommands go through the same `clap` derive-based parser as the existing `cortex` CLI. See contract: `docs/contracts/agent-cli.md`.
 
 ---
 

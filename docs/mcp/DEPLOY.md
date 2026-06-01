@@ -20,12 +20,12 @@ The server reads `config.toml` in the working directory. Syslog listens on `0.0.
 
 ```bash
 cargo install cortex
-syslog serve mcp
+cortex serve mcp
 ```
 
 The binary reads `config.toml` from the current directory and accepts env var overrides.
 
-The installed binary is `syslog`. Use `syslog mcp` for local MCP clients that require stdio. That mode is query-only: it reads `CORTEX_DB_PATH`, exposes the MCP tools over stdin/stdout, and does not start syslog listeners, HTTP routes, retention purge, or storage-budget cleanup. Keep `syslog serve mcp` running somewhere for ingestion.
+The installed binary is `cortex`. Use `cortex mcp` for local MCP clients that require stdio. That mode is query-only: it reads `CORTEX_DB_PATH`, exposes the MCP tools over stdin/stdout, and does not start syslog listeners, HTTP routes, retention purge, or storage-budget cleanup. Keep `cortex serve mcp` running somewhere for ingestion.
 
 ## One-line installer
 
@@ -33,8 +33,8 @@ The installed binary is `syslog`. Use `syslog mcp` for local MCP clients that re
 curl -fsSL https://raw.githubusercontent.com/jmagar/cortex/main/install.sh | sh
 ```
 
-The installer installs the `syslog` binary to `~/.local/bin/syslog`, then runs
-`syslog setup`. Setup owns the shared Docker-only runtime layout:
+The installer installs the `cortex` binary to `~/.local/bin/syslog`, then runs
+`cortex setup`. Setup owns the shared Docker-only runtime layout:
 
 | Path | Purpose |
 | --- | --- |
@@ -45,23 +45,23 @@ The installer installs the `syslog` binary to `~/.local/bin/syslog`, then runs
 Useful setup commands:
 
 ```bash
-syslog setup          # first run or normal repair
-syslog setup check    # inspect prerequisites and files only
-syslog setup repair   # rewrite managed assets and restart Compose
-syslog deploy preflight       # operator-facing preflight alias
-syslog deploy local           # operator-facing local deploy/reconcile alias
-syslog deploy local --dry-run # preflight without Docker mutation
-syslog deploy remote host-a --dry-run # SSH preflight for a remote Compose host
-syslog deploy remote host-a           # SSH deploy/reconcile on a remote host
+cortex setup          # first run or normal repair
+cortex setup check    # inspect prerequisites and files only
+cortex setup repair   # rewrite managed assets and restart Compose
+cortex deploy preflight       # operator-facing preflight alias
+cortex deploy local           # operator-facing local deploy/reconcile alias
+cortex deploy local --dry-run # preflight without Docker mutation
+cortex deploy remote host-a --dry-run # SSH preflight for a remote Compose host
+cortex deploy remote host-a           # SSH deploy/reconcile on a remote host
 ```
 
-`syslog setup` also disables and removes stale user-level
+`cortex setup` also disables and removes stale user-level
 `cortex.service` units/drop-ins from older releases. The supported
 automated deployment path is Docker Compose only.
 
 ### Remote CLI Deploy
 
-`syslog deploy remote <host>` writes/replaces `~/.cortex/.env`, the
+`cortex deploy remote <host>` writes/replaces `~/.cortex/.env`, the
 managed Compose YAML, and `config/Dockerfile` on the SSH target, then runs
 Docker Compose there. Use `--dry-run` first to verify SSH and Docker
 prerequisites. Set token/env values in the local environment before running the
@@ -73,7 +73,7 @@ diagnostics.
 
 ## Docker
 
-The Docker image is daemon-focused: it runs `syslog serve mcp` for syslog ingest and HTTP MCP. Direct stdio is intended for host-installed binaries where the MCP client can launch `syslog mcp` and read the SQLite DB path directly.
+The Docker image is daemon-focused: it runs `cortex serve mcp` for syslog ingest and HTTP MCP. Direct stdio is intended for host-installed binaries where the MCP client can launch `cortex mcp` and read the SQLite DB path directly.
 
 ### Build
 
@@ -122,25 +122,25 @@ just restart    # docker compose restart
 just logs       # docker compose logs -f
 ```
 
-The installed `syslog` binary also provides guarded lifecycle diagnostics and mutations:
+The installed `cortex` binary also provides guarded lifecycle diagnostics and mutations:
 
 ```bash
-syslog compose doctor
-syslog compose status --json
-syslog compose pull
-syslog compose up
-syslog compose restart
-syslog compose logs --tail 50
+cortex compose doctor
+cortex compose status --json
+cortex compose pull
+cortex compose up
+cortex compose restart
+cortex compose logs --tail 50
 ```
 
-MCP exposes only redacted read-only Compose diagnostics (`compose_status`, `compose_doctor`). Lifecycle mutations remain CLI-only: ask the assistant to run `syslog compose ...` locally rather than invoking MCP actions.
+MCP exposes only redacted read-only Compose diagnostics (`compose_status`, `compose_doctor`). Lifecycle mutations remain CLI-only: ask the assistant to run `cortex compose ...` locally rather than invoking MCP actions.
 
 ### Container conventions
 
 | Concern | Pattern |
 | --- | --- |
 | Base image | `rust:1.86-slim-bookworm` (builder) + `debian:bookworm-slim` (runtime) |
-| User | Non-root, UID 1000 (`syslog`) |
+| User | Non-root, UID 1000 (`cortex`) |
 | Health check | `curl -sf http://localhost:3100/health` every 30s |
 | Data | Named volume mounted at `/data` |
 | Network | External Docker network (`${DOCKER_NETWORK:-cortex}`) |

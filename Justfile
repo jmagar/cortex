@@ -107,7 +107,10 @@ validate-plugin:
             for hook in entry.get("hooks", []):
                 command = hook.get("command", "")
                 if command.startswith("${CLAUDE_PLUGIN_ROOT}/"):
-                    command_path = Path(command.removeprefix("${CLAUDE_PLUGIN_ROOT}/"))
+                    # The command may carry arguments (e.g. "bin/cortex setup
+                    # plugin-hook") — validate only the executable path token.
+                    executable = command.split()[0]
+                    command_path = Path(executable.removeprefix("${CLAUDE_PLUGIN_ROOT}/"))
                     if not command_path.exists():
                         raise SystemExit(f"MISSING: hook command {command_path}")
     PY
@@ -165,8 +168,7 @@ build-plugin: release
     if [ ! -x "$target_dir/release/cortex" ] && [ -x ".cache/cargo/release/cortex" ]; then
       target_dir=".cache/cargo"
     fi
-    mkdir -p bin plugins/cortex/bin
-    install -m 755 "$target_dir/release/cortex" bin/cortex
+    mkdir -p plugins/cortex/bin
     install -m 755 "$target_dir/release/cortex" plugins/cortex/bin/cortex
 
 build-mcpb:

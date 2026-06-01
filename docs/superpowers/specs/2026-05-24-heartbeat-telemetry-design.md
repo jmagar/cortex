@@ -27,7 +27,7 @@ The v1 design is intentionally direct. Each host runs an always-on local collect
 
 Use a native heartbeat API and schema.
 
-The collector runs as `syslog heartbeat agent`. It is a long-lived process that keeps prior counters in memory, allowing cheap rate calculation for CPU, disk IO, network IO, and container deltas. It sends each snapshot to a new authenticated endpoint on the existing HTTP listener, likely `POST /v1/heartbeats`.
+The collector runs as `cortex heartbeat agent`. It is a long-lived process that keeps prior counters in memory, allowing cheap rate calculation for CPU, disk IO, network IO, and container deltas. It sends each snapshot to a new authenticated endpoint on the existing HTTP listener, likely `POST /v1/heartbeats`.
 
 The server validates and stores snapshots in dedicated heartbeat tables. Common dimensions use typed columns for query speed. Host-specific or probe-specific details use bounded JSON fields.
 

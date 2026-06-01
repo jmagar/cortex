@@ -16,10 +16,10 @@ CLI default ──▶ /api/* (REST)                      ├──▶ container 
 CLI explicit "unset CORTEX_USE_HTTP"  ─────────────┘
    ──▶ direct SQLite (RuntimeCore::load_query_only, read-only)
 
-syslog ai watch (systemd) ────────────────────────────▶ direct SQLite
+cortex ai watch (systemd) ────────────────────────────▶ direct SQLite
    (service.add_ai_file; long-running daemon on the host)
 
-syslog mcp stdio (spawned by AI clients) ─────────────▶ direct SQLite
+cortex mcp stdio (spawned by AI clients) ─────────────▶ direct SQLite
    (one-shot stdio session bound to the host's DB path)
 ```
 
@@ -32,17 +32,17 @@ SWAG — funnels through one `SyslogService` instance with shared
 remains for two consumers that cannot reasonably go through HTTP — one
 write-path and one read-path:
 
-- `syslog ai watch` (write-path) — a host-side systemd daemon that
+- `cortex ai watch` (write-path) — a host-side systemd daemon that
   streams local AI transcript files into SQLite. Going through HTTP
   would mean uploading every JSONL chunk over loopback for no value, so
   this writer keeps direct `service.add_ai_file` access against the
   same DB file the container reads.
-- `syslog mcp` stdio (read/query-path only) — spawned by AI clients
+- `cortex mcp` stdio (read/query-path only) — spawned by AI clients
   (Claude Desktop, Codex) that don't speak HTTP-MCP. The stdio process
   opens the same DB path read-only via `RuntimeCore::load_query_only`,
   so it never participates in the write path.
 
-Both direct-write consumers are detected by `syslog compose doctor`
-(always-on) and optionally surfaced through `syslog db status --check-coord`.
+Both direct-write consumers are detected by `cortex compose doctor`
+(always-on) and optionally surfaced through `cortex db status --check-coord`.
 See [`docs/api.md`](api.md) "Local-only commands" for the per-command
 breakdown and the operational `systemd` timer recipe.

@@ -12,7 +12,7 @@ markdown file:
 - `src/mcp/tools.rs::tool_syslog()` dispatches handlers.
 - `src/app/models.rs` defines typed request and response payloads.
 
-The MCP server exposes a single tool named `syslog`; every operation is selected
+The MCP server exposes a single tool named `cortex`; every operation is selected
 by the required string parameter `action`.
 
 ## Stability

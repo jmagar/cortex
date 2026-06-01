@@ -274,7 +274,7 @@ SHOULD reject PRs that introduce them.
 5. **Don't expose syslog severities in alert-targeted UIs.** The
    morning digest, the apprise push, the `alerts_active` MCP response
    — all of these speak alert tiers. The forensic search surface
-   (`syslog search`, `syslog errors`) speaks syslog severities. Keep
+   (`cortex search`, `cortex errors`) speaks syslog severities. Keep
    the two surfaces consistent within themselves.
 
 6. **Don't introduce `severity = "warn"` (the abbreviated form) into

@@ -19,7 +19,7 @@ Usage: scripts/check-runtime-current.sh [--mode auto|docker] [--pull] [--compose
 
 Checks:
   docker:  running container image ID == local compose image ID and
-           container `syslog --version` == repo Cargo.toml version
+           container `cortex --version` == repo Cargo.toml version
 
 Options:
   --pull                  Docker only: pull compose image before comparing.
@@ -210,7 +210,7 @@ check_docker() {
     echo "FAIL: could not determine repo version from ${REPO_DIR}/Cargo.toml"
     return 1
   fi
-  container_version="$(docker exec "$cid" syslog --version 2>/dev/null | awk '{print $2}' || true)"
+  container_version="$(docker exec "$cid" cortex --version 2>/dev/null | awk '{print $2}' || true)"
 
   status_line container "$cid"
   status_line image "$image"
@@ -231,7 +231,7 @@ check_docker() {
     return 1
   fi
   if [[ -n "$repo_version" && "$container_version" != "$repo_version" ]]; then
-    echo "STALE: container syslog version does not match repo version"
+    echo "STALE: container cortex version does not match repo version"
     echo "fix: rebuild and restart the Compose service from this repo"
     return 1
   fi

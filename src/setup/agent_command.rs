@@ -255,7 +255,7 @@ fn agent_command_env_phase(wrapper_path: &Path, user_home: &Path) -> SetupPhase 
 }
 
 fn agent_command_wrapper_script(cortex_bin: &Path, spool_path: &Path) -> String {
-    let cortex_bin = setup_path_value(cortex_bin).expect("validated syslog binary path");
+    let cortex_bin = setup_path_value(cortex_bin).expect("validated cortex binary path");
     let spool_path = setup_path_value(spool_path).expect("validated agent command spool path");
     format!(
         r#"#!/usr/bin/env sh
@@ -285,7 +285,7 @@ fn validate_agent_command_binary(path: &Path) -> io::Result<()> {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             format!(
-                "{} is not the current syslog binary: expected version {expected}, got {}",
+                "{} is not the current cortex binary: expected version {expected}, got {}",
                 path.display(),
                 actual
             ),

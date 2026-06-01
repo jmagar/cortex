@@ -347,7 +347,7 @@ pub(super) fn action_names() -> Vec<&'static str> {
 /// - `None` for `InfoOnly` actions (auth context required when Mounted, but no
 ///   scope gate).
 /// - `Some("cortex:read")` / `Some("cortex:admin")` for normal actions.
-/// - `Some("syslog:__deny__")` for unknown actions — a sentinel scope that is
+/// - `Some("cortex:__deny__")` for unknown actions — a sentinel scope that is
 ///   never granted, so unknown actions are denied at the auth layer rather than
 ///   falling through to the dispatcher. Fail-closed.
 pub(super) fn required_scope_for(action: &str) -> Option<&'static str> {
@@ -357,6 +357,6 @@ pub(super) fn required_scope_for(action: &str) -> Option<&'static str> {
             Scope::Read => Some("cortex:read"),
             Scope::Admin => Some("cortex:admin"),
         },
-        None => Some("syslog:__deny__"),
+        None => Some("cortex:__deny__"),
     }
 }

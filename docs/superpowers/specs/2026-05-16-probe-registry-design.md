@@ -520,7 +520,7 @@ pub struct ContainerSnapshot {
 
 ## 9. MCP Actions
 
-All actions dispatch through `src/mcp/tools.rs`, joining the existing `syslog` super-tool. Each accepts standard params `host` (required for some), `max_age_secs`, `force_refresh`, plus action-specific args.
+All actions dispatch through `src/mcp/tools.rs`, joining the existing `cortex` super-tool. Each accepts standard params `host` (required for some), `max_age_secs`, `force_refresh`, plus action-specific args.
 
 ### 9.1 `disk_usage`
 
