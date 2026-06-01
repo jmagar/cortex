@@ -454,10 +454,9 @@ fn docker_ingest_requires_hosts_when_enabled() {
     config.hosts.clear();
 
     let err = validate_docker_ingest_config(&config).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("docker_ingest.hosts must not be empty")
-    );
+    assert!(err
+        .to_string()
+        .contains("docker_ingest.hosts must not be empty"));
 }
 
 #[test]
@@ -482,10 +481,9 @@ fn docker_ingest_rejects_duplicate_host_names() {
     };
 
     let err = validate_docker_ingest_config(&config).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("duplicate docker_ingest host name")
-    );
+    assert!(err
+        .to_string()
+        .contains("duplicate docker_ingest host name"));
 }
 
 #[test]

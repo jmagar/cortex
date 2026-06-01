@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{params, OptionalExtension};
 
 use crate::config::StorageConfig;
 

@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::StorageConfig;
-use crate::db::{DbPool, LogBatchEntry, init_pool, insert_logs_batch, list_hosts, tail_logs};
+use crate::db::{init_pool, insert_logs_batch, list_hosts, tail_logs, DbPool, LogBatchEntry};
 use anyhow::Result;
 use rusqlite::params;
 use std::path::Path;
