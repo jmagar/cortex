@@ -1658,6 +1658,72 @@ fn rollup_stays_correct_under_concurrent_retention() {
     }
 }
 
+/// Regression for the R1 guard (bead syslog-mcp-rvcz): rows that carry
+/// `ai_project` but have NO recognized `ai_tool`/`ai_session_id` (e.g. OTLP
+/// logs with only project.path) are counted by the broad `ai_rows_watermark`
+/// predicate but correctly EXCLUDED by the rollup's full GROUP BY predicate.
+/// The old guard compared `staged` against the broad watermark `src_count`, so
+/// for this data shape `staged == 0` while `src_count > 0` and the refresh
+/// ERRORED forever. A legitimately-empty rollup must SUCCEED (returning 0 and
+/// still stamping the meta/fingerprint), not raise the R1 error.
+#[test]
+fn rollup_empty_when_only_broad_project_rows_present_succeeds() {
+    let (pool, _dir) = test_pool();
+
+    // Insert rows with ai_project set but ai_tool / ai_session_id EMPTY. These
+    // match the broad watermark predicate (ai_project NOT NULL/!='') but fail
+    // the full rollup predicate (which also requires ai_tool and ai_session_id
+    // NOT NULL/!=''), so the staging GROUP BY yields zero groups.
+    let batch = vec![
+        // empty ai_tool
+        make_ai_entry(
+            "2026-05-01T00:00:00Z",
+            "host0",
+            "",
+            "/proj/a",
+            "sess-1",
+            "otlp event, no tool",
+        ),
+        // empty ai_session_id
+        make_ai_entry(
+            "2026-05-01T00:01:00Z",
+            "host0",
+            "claude",
+            "/proj/a",
+            "",
+            "otlp event, no session",
+        ),
+        // both empty
+        make_ai_entry(
+            "2026-05-01T00:02:00Z",
+            "host1",
+            "",
+            "/proj/b",
+            "",
+            "otlp event, project only",
+        ),
+    ];
+    insert_logs_batch(&pool, &batch).unwrap();
+
+    // The watermark sees these rows (broad predicate) so src_count > 0; the
+    // rollup predicate excludes them all so staging is legitimately empty.
+    // Pre-fix this raised the R1 error; post-fix it must SUCCEED with 0 rows.
+    let total = refresh_ai_session_rollup(&pool).unwrap();
+    assert_eq!(
+        total, 0,
+        "rollup must be legitimately empty (no rollup-eligible rows)"
+    );
+
+    // The meta/fingerprint MUST still be stamped on an empty rollup so
+    // refresh_ai_session_rollup_if_stale can skip subsequent no-op refreshes.
+    let status = ai_session_rollup_status(&pool).unwrap();
+    assert_eq!(status.row_count, 0, "rollup row_count must be 0");
+    assert!(
+        status.refreshed_at.is_some(),
+        "meta/fingerprint must be stamped even for an empty rollup"
+    );
+}
+
 #[test]
 fn rollup_read_uses_last_seen_index_no_temp_btree() {
     let (pool, _dir) = test_pool();

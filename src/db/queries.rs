@@ -637,7 +637,7 @@ pub fn refresh_ai_session_rollup(pool: &DbPool) -> Result<usize> {
     // does not contend for the single WAL writer slot. The watermark and the
     // GROUP BY both read from this one consistent snapshot, so the stored
     // fingerprint exactly describes the data we aggregate.
-    let (src_count, src_max_id, staged) = {
+    let (src_count, src_max_id, staged, rollup_eligible) = {
         let build = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
         let (src_count, src_max_id) = ai_rows_watermark(&build)?;
         // TEMP table: connection-local, spills to the temp store (/tmp), never
@@ -659,24 +659,45 @@ pub fn refresh_ai_session_rollup(pool: &DbPool) -> Result<usize> {
         )?;
         let staged: i64 =
             build.query_row("SELECT COUNT(*) FROM _ai_rollup_staging", [], |r| r.get(0))?;
+        // Rollup-eligible row count under the SAME read snapshot, using the
+        // EXACT predicate as the staging INSERT above. Must be computed inside
+        // this transaction (not after commit / on a fresh connection): under
+        // one snapshot, any row matching this predicate yields >=1 GROUP BY
+        // group, so `staged == 0` IMPLIES `rollup_eligible == 0`. The R1 guard
+        // below relies on that mutual consistency; counting under a different
+        // snapshot would let a concurrent INSERT revive a false positive.
+        let rollup_eligible: i64 = build.query_row(
+            "SELECT COUNT(*) FROM logs
+             WHERE ai_project IS NOT NULL AND ai_project != ''
+               AND ai_tool IS NOT NULL AND ai_tool != ''
+               AND ai_session_id IS NOT NULL AND ai_session_id != ''",
+            [],
+            |r| r.get(0),
+        )?;
         // Commit the read snapshot (releases the read lock). The TEMP table
         // survives the commit — it is tied to the connection, not the txn.
         build.commit()?;
-        (src_count, src_max_id, staged)
+        (src_count, src_max_id, staged, rollup_eligible)
     };
 
     // R1 guardrail (bead syslog-mcp-rvcz security addendum): the same-connection
     // requirement is NOT compile-time enforceable. If a refactor ever ran the
     // build on a different pooled connection, the TEMP table would be invisible
-    // here and the swap would wipe the rollup. The staging table is rebuilt
-    // every call, so a missing/empty staging table when source rows exist is a
-    // bug, not a valid empty rollup. Bail BEFORE the destructive swap.
+    // here and the swap would wipe the rollup. We must distinguish that
+    // regression from a LEGITIMATELY empty rollup: rows can have `ai_project`
+    // set but no recognized `ai_tool`/`ai_session_id` (e.g. OTLP logs carrying
+    // only project.path), which the watermark counts (`src_count > 0`) but the
+    // rollup GROUP BY correctly excludes (`staged == 0`). Comparing against
+    // `src_count` would error forever on that data shape. Instead, only bail
+    // when staging is empty AND rows matching the FULL rollup predicate exist —
+    // i.e. the build genuinely produced groups but the TEMP table is invisible.
     debug_assert!(staged >= 0, "staging row count must be non-negative");
-    if staged == 0 && src_count > 0 {
+    if staged == 0 && rollup_eligible > 0 {
         return Err(anyhow::anyhow!(
-            "ai_session_rollup staging table is empty despite {src_count} live AI \
-             rows present — the build and swap MUST share one Connection (TEMP \
-             tables are connection-local); refusing to wipe the rollup"
+            "ai_session_rollup staging table is empty despite {rollup_eligible} \
+             rollup-eligible AI rows present — the build and swap MUST share one \
+             Connection (TEMP tables are connection-local); refusing to wipe the \
+             rollup"
         ));
     }
 
