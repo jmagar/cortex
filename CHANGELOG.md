@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-06-01
+
+### Fixed
+
+- **Migration 22 startup-brick crash-loop (P0, `syslog-mcp-tfr0`).** Two `ALTER TABLE
+  ADD COLUMN` + the version `INSERT` ran in a bare `execute_batch` (auto-commit per
+  statement); a crash between them left the column committed but unmarked, so restart
+  re-ran the ALTER → `duplicate column name` → `init_pool` error → `restart: unless-stopped`
+  crash-loop needing manual SQL. Rewrote Migration 22 as a single transactional unit
+  (`BEGIN IMMEDIATE` + `add_column_if_missing` guards + `INSERT OR IGNORE`), so a crash
+  rolls back atomically and restart converges. Added partial-apply/idempotency tests.
+- **AI rollup refresh starved the single WAL writer (P0, `syslog-mcp-rvcz`).** The 5-minute
+  `refresh_ai_session_rollup` held the write lock across `DELETE` + a full-partition
+  `GROUP BY` (~4s at scale), dropping ingest. Reworked to staging+swap: the full recompute
+  is built into a connection-local TEMP table on a read snapshot (no write lock), then a
+  sub-millisecond `BEGIN IMMEDIATE` swap. Stays correct under retention DELETEs (incremental
+  refresh would corrupt MIN/MAX). Empty-staging guard gates on the full rollup predicate so
+  `ai_project`-only (OTLP) rows no longer error the refresh forever.
+- **Storage-budget enforcement self-wiped under external disk pressure (P0, `syslog-mcp-w4hh`).**
+  `min_free_disk_mb` measured whole-filesystem free space but only deleted cortex's own
+  oldest rows, so a noisy neighbor on the shared volume erased the entire log history
+  (including err+). Split the triggers: `max_db_size_mb` self-trims; `min_free_disk_mb`
+  now sets `write_blocked` + alerts instead of deleting (default 0, paired with
+  `recovery_free_disk_mb=0` to satisfy validation). Added a time-windowed, per-source-IP
+  err+ retention floor on both delete paths; probe failure now fails safe (treated as
+  worst-case) instead of fail-open.
+
+### Changed
+
+- **`syslog` → `cortex` rebrand sweep.** Renamed CLI/MCP/docs references, added CLI
+  plugin-options, refreshed docs/contracts and plugin manifests, removed stale `bin/`
+  wrappers.
+
 ## [1.1.3] - 2026-06-01
 
 ### Fixed
