@@ -18,6 +18,11 @@ pub(crate) fn run_setup(command: SetupCommand) -> Result<()> {
             print_setup_report(&report, args.json)?;
             ensure_setup_success(&report)
         }
+        SetupCommand::Install(_args) => {
+            let dest = install_self()?;
+            println!("installed -> {}", dest.display());
+            Ok(())
+        }
         SetupCommand::PluginHook(args) => run_plugin_hook(args),
     }
 }
@@ -76,7 +81,45 @@ struct PluginHookReport {
     repair: Option<SetupReport>,
 }
 
+/// Copy the running binary into `~/.local/bin/<name>` so it is callable as a
+/// bare command in the user's own terminal, independent of Claude Code. Copy
+/// (not symlink) so it survives `/plugin update`. std + anyhow only.
+fn install_self() -> Result<std::path::PathBuf> {
+    let exe = std::env::current_exe()?;
+    let name = exe
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine binary name from {}", exe.display()))?;
+    let home = std::env::var_os("HOME").ok_or_else(|| anyhow::anyhow!("HOME is not set"))?;
+    let bin_dir = std::path::PathBuf::from(home).join(".local").join("bin");
+    std::fs::create_dir_all(&bin_dir)?;
+    let dest = bin_dir.join(name);
+    if dest == exe {
+        return Ok(dest);
+    }
+    let tmp = bin_dir.join(format!(".{}.tmp", name.to_string_lossy()));
+    std::fs::copy(&exe, &tmp)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::rename(&tmp, &dest).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    let on_path = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|d| d == bin_dir))
+        .unwrap_or(false);
+    if !on_path {
+        eprintln!("note: {} is not on your PATH; add:  export PATH=\"$HOME/.local/bin:$PATH\"", bin_dir.display());
+    }
+    Ok(dest)
+}
+
 fn run_plugin_hook(args: PluginHookArgs) -> Result<()> {
+    // Keep the user's terminal copy in ~/.local/bin fresh each session.
+    if let Err(e) = install_self() {
+        eprintln!("cortex setup plugin-hook: self-install skipped: {e}");
+    }
     let check = setup_report(SetupMode::Check)?;
     let repair = if check.has_errors && !args.no_repair {
         Some(setup_report(SetupMode::Repair)?)

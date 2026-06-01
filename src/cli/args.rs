@@ -140,6 +140,8 @@ pub(crate) enum ServiceCommand {
 pub(crate) enum SetupCommand {
     Check(SetupArgs),
     Repair(SetupArgs),
+    /// Copy this binary into ~/.local/bin for terminal use.
+    Install(SetupArgs),
     PluginHook(PluginHookArgs),
 }
 

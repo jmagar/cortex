@@ -199,6 +199,9 @@ pub(crate) fn parse_setup(args: &[String]) -> Result<CliCommand> {
         "repair" => Ok(CliCommand::Setup(SetupCommand::Repair(parse_setup_args(
             rest,
         )?))),
+        "install" => Ok(CliCommand::Setup(SetupCommand::Install(parse_setup_args(
+            rest,
+        )?))),
         "plugin-hook" | "hook" => Ok(CliCommand::Setup(SetupCommand::PluginHook(
             parse_plugin_hook_args(rest)?,
         ))),
