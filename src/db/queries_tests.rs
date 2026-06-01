@@ -1527,6 +1527,7 @@ fn rollup_is_exact_after_deletes_recompute_min_max() {
 ///   * fully purge ANOTHER session's rows entirely    -> its rollup row must be
 ///     EVICTED (an append-keyed incremental would leave a ghost session);
 ///   * event_count must equal the live COUNT(*)        -> no upward drift.
+///
 /// The post-refresh rollup must be byte-for-byte equal to a from-scratch live
 /// aggregation over the surviving rows.
 #[test]

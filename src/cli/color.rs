@@ -24,11 +24,6 @@ const COLOR_NEVER: u8 = 2;
 /// under that single-writer-before-readers contract.
 pub(crate) static COLOR_OVERRIDE: AtomicU8 = AtomicU8::new(0);
 
-/// Test-only mutex — sibling test modules that mutate COLOR_OVERRIDE must hold
-/// this guard to prevent races under cargo test's parallel executor.
-#[cfg(test)]
-pub(crate) static COLOR_TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) enum ColorChoice {
