@@ -39,6 +39,7 @@ mod coordination;
 mod dispatch_command_log;
 mod format;
 mod heartbeat_agent;
+pub(crate) mod help;
 mod hyperlinks;
 mod output_ai;
 mod output_ai_more;

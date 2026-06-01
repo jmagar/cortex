@@ -512,72 +512,9 @@ fn mode_parse_accepts_new_surface_parity_subcommands() {
     }
 }
 
-#[test]
-fn usage_banner_lists_all_query_subcommands() {
-    // Issue 5: the --help banner must document every command the parser
-    // accepts. These were missing and silently undiscoverable before.
-    let usage = super::USAGE;
-    for needle in [
-        "cortex source-ips",
-        "cortex timeline",
-        "cortex patterns",
-        "cortex ingest-rate",
-        "cortex sig list",
-        "cortex sig ack",
-        "cortex sig unack",
-        "cortex notify recent",
-        "cortex notify test",
-        "cortex host-state",
-        "cortex fleet-state",
-        "cortex correlate-state",
-    ] {
-        assert!(usage.contains(needle), "usage banner is missing `{needle}`");
-    }
-}
-
-/// Strip every `\x1b[…m` SGR sequence from `s`.
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Consume up to and including the terminating 'm'.
-            for n in chars.by_ref() {
-                if n == 'm' {
-                    break;
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-#[test]
-fn usage_colorized_roundtrips_to_plain() {
-    // The colorized banner, with ANSI stripped, must be byte-identical to the
-    // plain const — guarantees no content/whitespace drift and keeps the
-    // `usage_banner_lists_*` drift test valid against the source-of-truth.
-    let colored = super::colorize_usage(super::USAGE);
-    assert_eq!(strip_ansi(&colored), super::USAGE);
-}
-
-#[test]
-fn usage_colorized_emits_aurora_ansi() {
-    let colored = super::colorize_usage(super::USAGE);
-    assert!(colored.contains('\x1b'), "expected ANSI escapes");
-    // Aurora cyan truecolor on the section headers / subcommand verbs.
-    assert!(
-        colored.contains("38;2;41;182;246"),
-        "expected Aurora cyan in colorized banner"
-    );
-    // Violet on the environment variable names.
-    assert!(
-        colored.contains("38;2;167;139;250"),
-        "expected Aurora violet on env names"
-    );
-}
+// Top-level help banner content + per-command drift coverage now live in
+// `src/cli/help_tests.rs` (the `CATALOG` is the source of truth, not a flat
+// USAGE const).
 
 #[test]
 fn install_color_from_args_parses_and_strips() {

@@ -2,15 +2,39 @@ use std::process::Command;
 
 #[test]
 fn help_lists_sessions_command() {
+    // Explicit `--help` prints the grouped top-level banner to stdout (exit 0),
+    // listing each command by name + summary. Per-command flags live behind
+    // `cortex <command> --help`.
     let output = Command::new(env!("CARGO_BIN_EXE_cortex"))
         .arg("--help")
         .output()
         .expect("run cortex --help");
 
-    let stderr = String::from_utf8(output.stderr).expect("help output should be valid UTF-8");
+    assert!(output.status.success(), "--help should exit 0");
+    let stdout = String::from_utf8(output.stdout).expect("help output should be valid UTF-8");
     assert!(
-        stderr.contains("cortex sessions"),
-        "help output should list the sessions command, got:\n{stderr}"
+        stdout.contains("sessions"),
+        "top-level help should list the sessions command, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Commands"),
+        "top-level help should have a Commands section, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn per_command_help_shows_detailed_flags() {
+    // `cortex sessions --help` prints that command's detailed flag reference.
+    let output = Command::new(env!("CARGO_BIN_EXE_cortex"))
+        .args(["sessions", "--help"])
+        .output()
+        .expect("run cortex sessions --help");
+
+    assert!(output.status.success(), "per-command --help should exit 0");
+    let stdout = String::from_utf8(output.stdout).expect("valid UTF-8");
+    assert!(
+        stdout.contains("cortex sessions") && stdout.contains("--project"),
+        "per-command help should show detailed flags, got:\n{stdout}"
     );
 }
 
