@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::StorageConfig;
-use crate::db::{init_pool, insert_logs_batch, AiRelatedWindow, DbPool, LogBatchEntry};
+use crate::db::{AiRelatedWindow, DbPool, LogBatchEntry, init_pool, insert_logs_batch};
 
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {
     StorageConfig::for_test(db_path)
@@ -434,9 +434,10 @@ fn tail_logs_filters_multiple_severities() {
 
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|row| row.hostname == "host-a"));
-    assert!(rows
-        .iter()
-        .all(|row| ["err", "warning"].contains(&row.severity.as_str())));
+    assert!(
+        rows.iter()
+            .all(|row| ["err", "warning"].contains(&row.severity.as_str()))
+    );
 }
 
 #[test]
@@ -587,9 +588,10 @@ fn search_logs_filters_by_source_ip_prefix_without_fts() {
     .unwrap();
 
     assert_eq!(rows.len(), 2);
-    assert!(rows
-        .iter()
-        .all(|row| row.source_ip.starts_with("docker://dookie/cortex/")));
+    assert!(
+        rows.iter()
+            .all(|row| row.source_ip.starts_with("docker://dookie/cortex/"))
+    );
 }
 
 #[test]
@@ -1119,10 +1121,12 @@ fn investigate_ai_incidents_exact_id_can_fetch_beyond_top_ten() {
         },
     )
     .unwrap();
-    assert!(!top_ten
-        .evidence
-        .iter()
-        .any(|bundle| bundle.incident.incident_id == target_id));
+    assert!(
+        !top_ten
+            .evidence
+            .iter()
+            .any(|bundle| bundle.incident.incident_id == target_id)
+    );
 
     let exact = investigate_ai_incidents(
         &pool,
@@ -1448,10 +1452,12 @@ fn rollup_status_reports_refresh_time() {
     seed_ai_sessions(&pool);
 
     // Never refreshed => no staleness timestamp.
-    assert!(ai_session_rollup_status(&pool)
-        .unwrap()
-        .refreshed_at
-        .is_none());
+    assert!(
+        ai_session_rollup_status(&pool)
+            .unwrap()
+            .refreshed_at
+            .is_none()
+    );
 
     refresh_ai_session_rollup(&pool).unwrap();
     let status = ai_session_rollup_status(&pool).unwrap();
@@ -1515,6 +1521,207 @@ fn rollup_is_exact_after_deletes_recompute_min_max() {
             "count not recomputed after delete"
         );
     }
+}
+
+/// The staging+swap refresh (bead syslog-mcp-rvcz) MUST stay a correct FULL
+/// recompute under retention DELETEs — the exact case a watermark-incremental
+/// refresh would silently corrupt. This is the test that distinguishes the
+/// (correct) staging+swap from the (corrupt) incremental trap:
+///   * purge the OLDEST rows of a SURVIVING session  -> first_seen must advance
+///     to the surviving MIN (an append-keyed incremental would keep the stale
+///     deleted minimum);
+///   * fully purge ANOTHER session's rows entirely    -> its rollup row must be
+///     EVICTED (an append-keyed incremental would leave a ghost session);
+///   * event_count must equal the live COUNT(*)        -> no upward drift.
+/// The post-refresh rollup must be byte-for-byte equal to a from-scratch live
+/// aggregation over the surviving rows.
+#[test]
+fn rollup_stays_correct_under_concurrent_retention() {
+    let (pool, _dir) = test_pool();
+    seed_ai_sessions(&pool);
+    // Initial full materialization (all 12 seeded sessions present).
+    refresh_ai_session_rollup(&pool).unwrap();
+    let sessions_before = list_ai_sessions(&pool, &default_session_params())
+        .unwrap()
+        .len();
+    assert!(
+        sessions_before >= 2,
+        "need >=2 sessions to exercise eviction"
+    );
+
+    // Pick a SURVIVING session and capture its current first_seen + the
+    // timestamp of its single oldest row (which we will purge).
+    let (surviving, old_first_seen, oldest_ts): (String, String, String) = {
+        let conn = pool.get().unwrap();
+        conn.query_row(
+            "SELECT ai_session_id, MIN(timestamp) FROM logs
+             WHERE ai_session_id IS NOT NULL GROUP BY ai_session_id
+             ORDER BY COUNT(*) DESC LIMIT 1",
+            [],
+            |r| {
+                let sid: String = r.get(0)?;
+                let min_ts: String = r.get(1)?;
+                Ok((sid.clone(), min_ts.clone(), min_ts))
+            },
+        )
+        .unwrap()
+    };
+
+    // Pick a DIFFERENT session to fully purge.
+    let purged: String = {
+        let conn = pool.get().unwrap();
+        conn.query_row(
+            "SELECT ai_session_id FROM logs
+             WHERE ai_session_id IS NOT NULL AND ai_session_id != ?1
+             LIMIT 1",
+            params![surviving],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_ne!(surviving, purged);
+
+    // Retention purge (mimics maintenance.rs deleting oldest/budget rows with
+    // NO severity exemption): drop the oldest row of the surviving session AND
+    // every row of the purged session.
+    {
+        let conn = pool.get().unwrap();
+        let dropped_old = conn
+            .execute(
+                "DELETE FROM logs
+                 WHERE ai_session_id = ?1 AND timestamp = ?2",
+                params![surviving, oldest_ts],
+            )
+            .unwrap();
+        assert!(
+            dropped_old >= 1,
+            "must purge the surviving session's oldest row"
+        );
+        let dropped_all = conn
+            .execute("DELETE FROM logs WHERE ai_session_id = ?1", params![purged])
+            .unwrap();
+        assert!(dropped_all >= 1, "must fully purge the other session");
+    }
+
+    // Refresh AFTER the purge. A correct full recompute (staging+swap) restores
+    // exactness; the incremental trap would not.
+    refresh_ai_session_rollup(&pool).unwrap();
+
+    let rolled = list_ai_sessions(&pool, &default_session_params()).unwrap();
+    let live = list_ai_sessions_live(&pool, &default_session_params()).unwrap();
+
+    // (1) Ghost eviction: the fully-purged session must NOT remain in the rollup.
+    assert!(
+        rolled.iter().all(|s| s.ai_session_id != purged),
+        "fully-purged session must be evicted from the rollup (no ghost row)"
+    );
+    assert_eq!(
+        rolled.len(),
+        sessions_before - 1,
+        "exactly one session should have been evicted"
+    );
+
+    // (2) first_seen advanced: the surviving session's MIN must move past the
+    // now-deleted oldest row.
+    let surv = rolled
+        .iter()
+        .find(|s| s.ai_session_id == surviving)
+        .expect("surviving session must remain in the rollup");
+    assert_ne!(
+        surv.first_seen, old_first_seen,
+        "first_seen must advance after the oldest row was purged (incremental \
+         would keep the stale minimum)"
+    );
+    let live_surv = live
+        .iter()
+        .find(|s| s.ai_session_id == surviving)
+        .expect("surviving session must be in live aggregation");
+    assert_eq!(
+        surv.first_seen, live_surv.first_seen,
+        "first_seen must equal the surviving MIN(timestamp)"
+    );
+
+    // (3) Byte-for-byte equal to a from-scratch live recompute over survivors.
+    assert_eq!(
+        rolled.len(),
+        live.len(),
+        "row count must match live recompute"
+    );
+    for (r, l) in rolled.iter().zip(live.iter()) {
+        assert_eq!(r.ai_session_id, l.ai_session_id);
+        assert_eq!(r.first_seen, l.first_seen, "first_seen drift vs live");
+        assert_eq!(r.last_seen, l.last_seen, "last_seen drift vs live");
+        assert_eq!(
+            r.event_count, l.event_count,
+            "event_count must equal actual COUNT(*) (no drift)"
+        );
+    }
+}
+
+/// Regression for the R1 guard (bead syslog-mcp-rvcz): rows that carry
+/// `ai_project` but have NO recognized `ai_tool`/`ai_session_id` (e.g. OTLP
+/// logs with only project.path) are counted by the broad `ai_rows_watermark`
+/// predicate but correctly EXCLUDED by the rollup's full GROUP BY predicate.
+/// The old guard compared `staged` against the broad watermark `src_count`, so
+/// for this data shape `staged == 0` while `src_count > 0` and the refresh
+/// ERRORED forever. A legitimately-empty rollup must SUCCEED (returning 0 and
+/// still stamping the meta/fingerprint), not raise the R1 error.
+#[test]
+fn rollup_empty_when_only_broad_project_rows_present_succeeds() {
+    let (pool, _dir) = test_pool();
+
+    // Insert rows with ai_project set but ai_tool / ai_session_id EMPTY. These
+    // match the broad watermark predicate (ai_project NOT NULL/!='') but fail
+    // the full rollup predicate (which also requires ai_tool and ai_session_id
+    // NOT NULL/!=''), so the staging GROUP BY yields zero groups.
+    let batch = vec![
+        // empty ai_tool
+        make_ai_entry(
+            "2026-05-01T00:00:00Z",
+            "host0",
+            "",
+            "/proj/a",
+            "sess-1",
+            "otlp event, no tool",
+        ),
+        // empty ai_session_id
+        make_ai_entry(
+            "2026-05-01T00:01:00Z",
+            "host0",
+            "claude",
+            "/proj/a",
+            "",
+            "otlp event, no session",
+        ),
+        // both empty
+        make_ai_entry(
+            "2026-05-01T00:02:00Z",
+            "host1",
+            "",
+            "/proj/b",
+            "",
+            "otlp event, project only",
+        ),
+    ];
+    insert_logs_batch(&pool, &batch).unwrap();
+
+    // The watermark sees these rows (broad predicate) so src_count > 0; the
+    // rollup predicate excludes them all so staging is legitimately empty.
+    // Pre-fix this raised the R1 error; post-fix it must SUCCEED with 0 rows.
+    let total = refresh_ai_session_rollup(&pool).unwrap();
+    assert_eq!(
+        total, 0,
+        "rollup must be legitimately empty (no rollup-eligible rows)"
+    );
+
+    // The meta/fingerprint MUST still be stamped on an empty rollup so
+    // refresh_ai_session_rollup_if_stale can skip subsequent no-op refreshes.
+    let status = ai_session_rollup_status(&pool).unwrap();
+    assert_eq!(status.row_count, 0, "rollup row_count must be 0");
+    assert!(
+        status.refreshed_at.is_some(),
+        "meta/fingerprint must be stamped even for an empty rollup"
+    );
 }
 
 #[test]
