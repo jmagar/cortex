@@ -145,7 +145,25 @@ impl DoctorSection {
             (_, 0, w) => format!("{passed} passed, {w} warning"),
             (_, e, w) => format!("{passed} passed, {e} error, {w} warning"),
         };
-        println!("{:<18} {}", self.header, counts);
+        // Pad first, then color, so ANSI bytes don't disturb column alignment.
+        let header_cell = format!("{:<18}", self.header);
+        let (header_out, counts_out) = if doctor_color() {
+            use crate::logging::aurora;
+            let counts_color = if errors > 0 {
+                aurora::ERROR
+            } else if warnings > 0 {
+                aurora::WARN
+            } else {
+                aurora::SUCCESS
+            };
+            (
+                aurora::bold(aurora::ACCENT_PRIMARY, &header_cell),
+                aurora::paint(counts_color, &counts),
+            )
+        } else {
+            (header_cell, counts)
+        };
+        println!("{header_out} {counts_out}");
         for phase in &self.phases {
             if matches!(phase.status, SetupStatus::Ok | SetupStatus::Skipped) {
                 continue;
@@ -186,7 +204,15 @@ impl TextDoctorReport {
 
         println!();
         if total_errors == 0 {
-            println!("All checks passed.");
+            let msg = "All checks passed.";
+            if doctor_color() {
+                println!(
+                    "{}",
+                    crate::logging::aurora::bold(crate::logging::aurora::SUCCESS, msg)
+                );
+            } else {
+                println!("{msg}");
+            }
             Ok(())
         } else {
             anyhow::bail!("{total_errors} error(s) found")
@@ -698,12 +724,37 @@ pub(crate) fn parse_systemctl_timestamp_utc(raw: &str) -> Option<String> {
     Some(crate::app::time::rfc3339_z(dt))
 }
 
-fn status_label(s: &SetupStatus) -> &'static str {
+/// Whether doctor's text summary should emit ANSI (stdout, gated by the unified
+/// `--color` policy + NO_COLOR/FORCE_COLOR/TTY).
+fn doctor_color() -> bool {
+    crate::color_policy::enabled_stdout()
+}
+
+/// ANSI-256 Aurora color for a status, matching the tracing console palette.
+fn status_color(s: &SetupStatus) -> u8 {
+    use crate::logging::aurora;
     match s {
+        SetupStatus::Ok => aurora::SUCCESS,
+        SetupStatus::Warn => aurora::WARN,
+        SetupStatus::Error => aurora::ERROR,
+        SetupStatus::Skipped => aurora::TEXT_MUTED,
+    }
+}
+
+/// Fixed-width (5-char) status label, bold-colored in the Aurora palette when
+/// color is enabled. Width is baked into the literal so alignment holds whether
+/// or not ANSI is present.
+fn status_label(s: &SetupStatus) -> String {
+    let text = match s {
         SetupStatus::Ok => "Ok   ",
         SetupStatus::Warn => "Warn ",
         SetupStatus::Error => "Error",
         SetupStatus::Skipped => "Skip ",
+    };
+    if doctor_color() {
+        crate::logging::aurora::bold(status_color(s), text)
+    } else {
+        text.to_string()
     }
 }
 

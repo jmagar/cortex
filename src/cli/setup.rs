@@ -346,7 +346,14 @@ fn print_setup_report(report: &SetupReport, json: bool) -> Result<()> {
     println!("Data dir: {}", report.data_dir.display());
     println!("Env: {}", report.env_path.display());
     for phase in &report.phases {
-        println!("{:?}\t{}\t{}", phase.status, phase.name, phase.detail);
+        let status = format!("{:?}", phase.status);
+        let status = match phase.status {
+            SetupStatus::Ok => super::color::success(&status),
+            SetupStatus::Warn => super::color::warn(&status),
+            SetupStatus::Error => super::color::error(&status),
+            SetupStatus::Skipped => super::color::muted(&status),
+        };
+        println!("{status}\t{}\t{}", phase.name, phase.detail);
     }
     Ok(())
 }

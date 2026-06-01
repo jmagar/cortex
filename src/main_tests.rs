@@ -534,3 +534,107 @@ fn usage_banner_lists_all_query_subcommands() {
         assert!(usage.contains(needle), "usage banner is missing `{needle}`");
     }
 }
+
+/// Strip every `\x1b[…m` SGR sequence from `s`.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Consume up to and including the terminating 'm'.
+            for n in chars.by_ref() {
+                if n == 'm' {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[test]
+fn usage_colorized_roundtrips_to_plain() {
+    // The colorized banner, with ANSI stripped, must be byte-identical to the
+    // plain const — guarantees no content/whitespace drift and keeps the
+    // `usage_banner_lists_*` drift test valid against the source-of-truth.
+    let colored = super::colorize_usage(super::USAGE);
+    assert_eq!(strip_ansi(&colored), super::USAGE);
+}
+
+#[test]
+fn usage_colorized_emits_aurora_ansi() {
+    let colored = super::colorize_usage(super::USAGE);
+    assert!(colored.contains('\x1b'), "expected ANSI escapes");
+    // Aurora cyan truecolor on the section headers / subcommand verbs.
+    assert!(
+        colored.contains("38;2;41;182;246"),
+        "expected Aurora cyan in colorized banner"
+    );
+    // Violet on the environment variable names.
+    assert!(
+        colored.contains("38;2;167;139;250"),
+        "expected Aurora violet on env names"
+    );
+}
+
+#[test]
+fn install_color_from_args_parses_and_strips() {
+    use cli::color::install_color_from_args;
+
+    let mut a = vec!["--no-color".to_string(), "stats".to_string()];
+    install_color_from_args(&mut a).unwrap();
+    assert_eq!(a, vec!["stats".to_string()], "--no-color must be stripped");
+
+    let mut b = vec!["--color=never".to_string(), "tail".to_string()];
+    install_color_from_args(&mut b).unwrap();
+    assert_eq!(
+        b,
+        vec!["tail".to_string()],
+        "--color=VALUE must be stripped"
+    );
+
+    let mut c = vec![
+        "--color".to_string(),
+        "always".to_string(),
+        "tail".to_string(),
+    ];
+    install_color_from_args(&mut c).unwrap();
+    assert_eq!(
+        c,
+        vec!["tail".to_string()],
+        "--color VALUE must be stripped"
+    );
+
+    let mut d = vec!["--color".to_string(), "search".to_string()];
+    install_color_from_args(&mut d).unwrap();
+    assert_eq!(
+        d,
+        vec!["search".to_string()],
+        "bare --color (no value word) must be stripped, treating `search` as the command"
+    );
+
+    // `--` sentinel: nothing past it is touched.
+    let mut e = vec![
+        "wrap".to_string(),
+        "--".to_string(),
+        "--color".to_string(),
+        "never".to_string(),
+    ];
+    install_color_from_args(&mut e).unwrap();
+    assert_eq!(
+        e,
+        vec![
+            "wrap".to_string(),
+            "--".to_string(),
+            "--color".to_string(),
+            "never".to_string()
+        ],
+        "args after `--` must be left untouched"
+    );
+
+    // Bad value errors.
+    let mut f = vec!["--color=technicolor".to_string()];
+    assert!(install_color_from_args(&mut f).is_err());
+}

@@ -7,8 +7,22 @@ use tracing::info;
 mod cli;
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    let mode = Mode::parse(std::env::args().skip(1).collect())?;
+async fn main() {
+    if let Err(e) = run().await {
+        // Aurora rose-red `error:` prefix on stderr (gated by --color / TTY).
+        cli::color::report_error(&format!("{e:#}"));
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
+    // Parse + strip `--color` / `--no-color` before anything prints, so the
+    // help banner, errors, query output, doctor, setup, and tracing all honor
+    // the same switch.
+    let mut raw: Vec<String> = std::env::args().skip(1).collect();
+    cli::color::install_color_from_args(&mut raw)?;
+
+    let mode = Mode::parse(raw)?;
     if mode == Mode::Help {
         print_usage();
         return Ok(());
@@ -235,8 +249,11 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         println!("mcp: {}", report.mcp_url);
         for phase in &report.phases {
             println!(
-                "{:?}\t{}\t{}ms\t{}",
-                phase.status, phase.name, phase.elapsed_ms, phase.detail
+                "{}\t{}\t{}ms\t{}",
+                colorize_setup_status(&phase.status),
+                phase.name,
+                phase.elapsed_ms,
+                phase.detail
             );
         }
     }
@@ -244,6 +261,19 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         anyhow::bail!("cortex setup completed with failed phases");
     }
     Ok(())
+}
+
+/// `{:?}` of a setup phase status, tinted with the Aurora palette (gated by the
+/// unified `--color` policy / stdout TTY).
+fn colorize_setup_status(status: &cortex::setup::SetupStatus) -> String {
+    use cortex::setup::SetupStatus;
+    let text = format!("{status:?}");
+    match status {
+        SetupStatus::Ok => cli::color::success(&text),
+        SetupStatus::Warn => cli::color::warn(&text),
+        SetupStatus::Error => cli::color::error(&text),
+        SetupStatus::Skipped => cli::color::muted(&text),
+    }
 }
 
 fn parse_doctor_full_command(args: &[String]) -> Result<DoctorFullCommand> {
@@ -772,7 +802,148 @@ fn parse_doctor_command(args: &[String]) -> Result<DoctorBinaryCommand> {
 }
 
 fn print_usage() {
-    eprintln!("{USAGE}");
+    if cli::color::color_enabled_stderr() {
+        eprintln!("{}", colorize_usage(USAGE));
+    } else {
+        eprintln!("{USAGE}");
+    }
+}
+
+/// Verb-forward Aurora coloring of the plain [`USAGE`] banner, applied at print
+/// time so the `USAGE` const stays a plain source-of-truth (the
+/// `usage_banner_lists_*` drift tests run against it directly).
+///
+/// Coloring is unconditional here — the caller (`print_usage`) has already
+/// decided color is on. Rules:
+/// - Section headers (no leading space, end with `:`) → bold cyan.
+/// - Command lines (`  cortex …` / `  syslog …`): binary word muted, the
+///   subcommand verb(s) cyan, `[…]` / `--flags` / `PLACEHOLDERS` muted, any
+///   trailing inline description (after a 2-space gap) muted.
+/// - Definition lines under flags/env: leading `--flag` muted-cyan, leading
+///   `ENV_NAME` violet, description muted.
+fn colorize_usage(plain: &str) -> String {
+    use cli::color::{CYAN_ANSI, MUTED_ANSI, VIOLET_ANSI};
+    const RESET: &str = "\x1b[0m";
+    const BOLD: &str = "\x1b[1m";
+
+    let mut out = String::with_capacity(plain.len() * 2);
+    for (idx, line) in plain.lines().enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        // Blank line — emit as-is.
+        if line.trim().is_empty() {
+            out.push_str(line);
+            continue;
+        }
+        // Section header: starts at column 0, ends with ':'.
+        if !line.starts_with(' ') && line.trim_end().ends_with(':') {
+            out.push_str(BOLD);
+            out.push_str(CYAN_ANSI);
+            out.push_str(line);
+            out.push_str(RESET);
+            continue;
+        }
+        // Indented lines: command rows and flag/env definition rows.
+        let indent_len = line.len() - line.trim_start().len();
+        let (indent, body) = line.split_at(indent_len);
+        out.push_str(indent);
+
+        // Split off a trailing inline description (separated by 2+ spaces).
+        // `gap` is the exact separating whitespace, preserved verbatim so the
+        // ANSI-stripped banner is byte-identical to the plain const.
+        let (head, gap, desc) = split_inline_description(body);
+
+        let first = head.split_whitespace().next().unwrap_or("");
+        if first == "cortex" || first == "syslog" {
+            colorize_command_head(&mut out, head, CYAN_ANSI, MUTED_ANSI);
+        } else if head.starts_with("--") {
+            // Flag definition row (e.g. `--http`): the whole head is the flag.
+            wrap(&mut out, CYAN_ANSI, head, RESET);
+        } else if is_env_name(head) {
+            // Environment variable definition row: ENV name violet.
+            wrap(&mut out, VIOLET_ANSI, head, RESET);
+        } else {
+            // Continuation / prose line under a flag or env entry → muted.
+            wrap(&mut out, MUTED_ANSI, head, RESET);
+        }
+
+        if let Some(d) = desc {
+            out.push_str(gap);
+            wrap(&mut out, MUTED_ANSI, d, RESET);
+        }
+    }
+    out
+}
+
+/// Wrap `text` with `code` … reset and append to `out`.
+fn wrap(out: &mut String, code: &str, text: &str, reset: &str) {
+    out.push_str(code);
+    out.push_str(text);
+    out.push_str(reset);
+}
+
+/// For a `cortex …` / `syslog …` command head, color the binary word muted,
+/// the subcommand verb(s) cyan, and the rest (`[…]`, `--flags`, PLACEHOLDERS)
+/// muted. The verb run ends at the first bracketed/flag/UPPERCASE token.
+fn colorize_command_head(out: &mut String, head: &str, cyan: &str, muted: &str) {
+    const RESET: &str = "\x1b[0m";
+    let mut tokens = head.split(' ').peekable();
+    // Binary word — muted (recedes; the verb is what the eye should catch).
+    if let Some(bin) = tokens.next() {
+        wrap(out, muted, bin, RESET);
+    }
+    let mut in_verb = true;
+    for tok in tokens {
+        out.push(' ');
+        if tok.is_empty() {
+            continue;
+        }
+        if in_verb && is_verb_token(tok) {
+            wrap(out, cyan, tok, RESET);
+        } else {
+            in_verb = false;
+            wrap(out, muted, tok, RESET);
+        }
+    }
+}
+
+/// A subcommand verb token: lowercase word, not a bracketed/flag/placeholder
+/// token and not an UPPERCASE argument placeholder (HOST, TIME, KEY, …).
+fn is_verb_token(tok: &str) -> bool {
+    let c = tok.chars().next().unwrap_or(' ');
+    !tok.starts_with('[')
+        && !tok.starts_with('-')
+        && !tok.starts_with('|')
+        && !(c.is_ascii_uppercase())
+}
+
+/// Split a banner body into `(head, gap, Some(description))` at the first run
+/// of 2+ spaces, or `(body, "", None)` when there is none. `gap` is the exact
+/// whitespace run so the colorized banner round-trips to the plain const when
+/// ANSI is stripped.
+fn split_inline_description(body: &str) -> (&str, &str, Option<&str>) {
+    if let Some(pos) = body.find("  ") {
+        let head = &body[..pos];
+        let rest = &body[pos..];
+        let gap_len = rest.len() - rest.trim_start_matches(' ').len();
+        let gap = &rest[..gap_len];
+        let desc = &rest[gap_len..];
+        if !desc.is_empty() {
+            return (head, gap, Some(desc));
+        }
+    }
+    (body, "", None)
+}
+
+/// True for tokens that look like an environment variable name: all uppercase
+/// ASCII letters / digits / underscores, length ≥ 2.
+fn is_env_name(tok: &str) -> bool {
+    tok.len() >= 2
+        && tok
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && tok.chars().any(|c| c.is_ascii_uppercase())
 }
 
 /// Top-level CLI usage banner printed by `cortex --help` (and on parse errors).

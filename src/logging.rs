@@ -35,16 +35,11 @@ pub fn init(default_filter: &str) -> String {
 
 /// Returns whether stderr should emit ANSI escape codes.
 ///
-/// Respects `NO_COLOR` (https://no-color.org) and `FORCE_COLOR`.
+/// Delegates to the unified [`crate::color_policy`] so the `--color` override
+/// (set once at startup) plus `NO_COLOR` / `FORCE_COLOR` / `CLICOLOR_FORCE` and
+/// TTY detection govern the tracing console the same as every other surface.
 pub fn should_colorize() -> bool {
-    if std::env::var_os("NO_COLOR").is_some() {
-        return false;
-    }
-    let force = |var: &str| std::env::var(var).is_ok_and(|v| v != "0" && !v.is_empty());
-    if force("FORCE_COLOR") || force("CLICOLOR_FORCE") {
-        return true;
-    }
-    std::io::stderr().is_terminal()
+    crate::color_policy::resolve(std::io::stderr().is_terminal())
 }
 
 // ── Minimal level-only formatter ─────────────────────────────────────────────

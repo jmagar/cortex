@@ -1,6 +1,5 @@
-use std::env;
-use std::io::IsTerminal;
-use std::sync::atomic::AtomicU8;
+use anyhow::{bail, Result};
+use cortex::color_policy::{self, ColorChoice};
 
 // Aurora design-system CLI tokens (dark-first, operator-grade palette).
 // Keep in sync with aurora-design-system/registry/aurora/styles/aurora.css
@@ -12,81 +11,85 @@ pub(crate) const WARN_ANSI: &str = "\x1b[38;2;198;163;107m"; //   #c6a36b
 pub(crate) const ERROR_ANSI: &str = "\x1b[38;2;199;132;144m"; //  #c78490
 pub(crate) const VIOLET_ANSI: &str = "\x1b[38;2;167;139;250m"; // #a78bfa
 
-#[allow(dead_code)]
-const COLOR_AUTO: u8 = 0;
-const COLOR_ALWAYS: u8 = 1;
-const COLOR_NEVER: u8 = 2;
-
-/// Set once at startup before any output is produced. Values: COLOR_AUTO / ALWAYS / NEVER.
-///
-/// Ordering: install_color_choice is called from the main thread before tokio
-/// worker spawn; readers observe via the happens-before edge. Relaxed is safe
-/// under that single-writer-before-readers contract.
-pub(crate) static COLOR_OVERRIDE: AtomicU8 = AtomicU8::new(0);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub(crate) enum ColorChoice {
-    Auto,
-    Always,
-    Never,
-}
-
-/// Install the runtime color choice (called once at startup).
-#[allow(dead_code)]
-pub(crate) fn install_color_choice(choice: ColorChoice) {
-    let val: u8 = match choice {
-        ColorChoice::Auto => COLOR_AUTO,
-        ColorChoice::Always => COLOR_ALWAYS,
-        ColorChoice::Never => COLOR_NEVER,
-    };
-    COLOR_OVERRIDE.store(val, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Whether color should be emitted to stdout. Reads the runtime override plus
-/// NO_COLOR / FORCE_COLOR / CLICOLOR_FORCE env vars, then TTY detection.
+/// Whether color should be emitted to stdout. Delegates to the unified policy
+/// in [`cortex::color_policy`] (runtime override + NO_COLOR / FORCE_COLOR /
+/// CLICOLOR_FORCE + TTY detection).
 pub(crate) fn color_enabled() -> bool {
-    color_enabled_for_tty(std::io::stdout().is_terminal())
+    color_policy::enabled_stdout()
 }
 
-#[allow(dead_code)]
-pub(crate) fn color_forced_always() -> bool {
-    COLOR_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) == COLOR_ALWAYS
+/// Whether color should be emitted to stderr — used for the help banner and
+/// top-level error reporting, which print to stderr (so `cortex --help | less`
+/// still colors when stderr is a TTY).
+pub(crate) fn color_enabled_stderr() -> bool {
+    color_policy::enabled_stderr()
 }
 
-#[allow(dead_code)]
-pub(crate) fn color_forced_never() -> bool {
-    COLOR_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) == COLOR_NEVER
-}
-
-fn color_env_forced() -> bool {
-    env_flag("FORCE_COLOR") || env_flag("CLICOLOR_FORCE")
-}
-
-fn env_flag(var: &str) -> bool {
-    env::var_os(var)
-        .map(|v| !v.is_empty() && v != "0")
-        .unwrap_or(false)
-}
-
-fn color_enabled_for_tty(is_terminal: bool) -> bool {
-    match COLOR_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
-        COLOR_ALWAYS => true,
-        COLOR_NEVER => false,
-        _ => {
-            if env::var_os("NO_COLOR").is_some() {
-                return false;
-            }
-            if color_env_forced() {
-                return true;
-            }
-            is_terminal
+/// Parse and strip `--color` / `--no-color` from `args`, installing the runtime
+/// color choice. Called once at startup, before `Mode::parse`, so every surface
+/// (help, version, query, doctor, setup, tracing) honors the same switch.
+///
+/// Accepts: `--no-color`, `--color` (bare ⇒ always), `--color=VALUE`,
+/// `--color VALUE` where VALUE ∈ `always|never|auto`. Stops at a `--` sentinel
+/// so wrapped commands (`cortex agent-command wrap -- cmd --color`) are left
+/// untouched, mirroring [`super::run::GlobalFlags::extract`].
+pub(crate) fn install_color_from_args(args: &mut Vec<String>) -> Result<()> {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        if arg == "--" {
+            break;
         }
+        if arg == "--no-color" {
+            color_policy::install_color_choice(ColorChoice::Never);
+            args.remove(i);
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--color=") {
+            color_policy::install_color_choice(parse_color_value(value)?);
+            args.remove(i);
+            continue;
+        }
+        if arg == "--color" {
+            // `--color VALUE` if a recognized value follows, else bare `--color` ⇒ always.
+            if let Some(next) = args.get(i + 1).map(String::as_str) {
+                if matches!(next, "always" | "never" | "auto") {
+                    color_policy::install_color_choice(parse_color_value(next)?);
+                    args.remove(i + 1);
+                    args.remove(i);
+                    continue;
+                }
+            }
+            color_policy::install_color_choice(ColorChoice::Always);
+            args.remove(i);
+            continue;
+        }
+        i += 1;
+    }
+    Ok(())
+}
+
+fn parse_color_value(value: &str) -> Result<ColorChoice> {
+    match value {
+        "always" => Ok(ColorChoice::Always),
+        "never" => Ok(ColorChoice::Never),
+        "auto" => Ok(ColorChoice::Auto),
+        other => bail!("--color expects always|never|auto, got `{other}`"),
     }
 }
 
 pub(crate) fn ansi_colorize(code: &str, text: &str) -> String {
     if color_enabled() {
+        format!("{code}{text}\x1b[0m")
+    } else {
+        text.to_string()
+    }
+}
+
+/// Like [`ansi_colorize`] but gates on stderr's TTY status — for output written
+/// to stderr (the help banner, top-level error reporting).
+pub(crate) fn ansi_colorize_stderr(code: &str, text: &str) -> String {
+    if color_enabled_stderr() {
         format!("{code}{text}\x1b[0m")
     } else {
         text.to_string()
@@ -145,16 +148,15 @@ pub(crate) fn metric(value: impl std::fmt::Display, label: &str) -> String {
     format!("{} {}", cyan(&value.to_string()), cyan(label))
 }
 
-/// `"error: <msg>"` on stderr in Aurora rose-red.
-#[allow(dead_code)]
+/// `"error: <msg>"` on stderr in Aurora rose-red. Gates on stderr's TTY.
 pub(crate) fn report_error(msg: &str) {
-    eprintln!("{} {}", error("error:"), msg);
+    eprintln!("{} {}", ansi_colorize_stderr(ERROR_ANSI, "error:"), msg);
 }
 
 /// `"hint: <msg>"` on stderr in Aurora cyan — companion to report_error.
 #[allow(dead_code)]
 pub(crate) fn report_hint(msg: &str) {
-    eprintln!("{} {}", cyan("hint:"), msg);
+    eprintln!("{} {}", ansi_colorize_stderr(CYAN_ANSI, "hint:"), msg);
 }
 
 #[allow(dead_code)]
