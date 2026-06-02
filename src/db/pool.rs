@@ -718,6 +718,38 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 22: added AI session rollup source watermark");
     }
 
+    // Migration 23: covering indexes for the `errors` summary and `ai projects`
+    // aggregation. Both previously read every matching row from the table to
+    // fetch columns absent from the leading index (hostname for the error
+    // GROUP BY; ai_tool / ai_session_id for the project rollup), making them
+    // O(matching-rows) table-lookup scans (~10s and ~48s on a multi-million-row
+    // DB). These covering indexes make both aggregations index-only — verified
+    // via EXPLAIN QUERY PLAN flipping to `USING COVERING INDEX`.
+    //
+    // First-run cost: building these on a populated DB scans the table and
+    // holds the write lock for the duration (seconds to minutes at multi-
+    // million-row volumes); /health may gap and syslog packets may drop during
+    // that window — the same one-time cost as the earlier index migrations.
+    if !migration_applied(&conn, 23)? {
+        tracing::info!(
+            "Migration 23: building covering indexes (idx_logs_ai_project_cover, \
+             idx_logs_sev_host_time) — may take minutes on large DBs, write lock held"
+        );
+        let started = std::time::Instant::now();
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_cover
+                 ON logs(ai_project, ai_tool, ai_session_id, timestamp)
+                 WHERE ai_project IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_sev_host_time
+                 ON logs(severity, hostname, timestamp);
+             INSERT INTO schema_migrations (version) VALUES (23);",
+        )?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "Migration 23: covering indexes for errors + ai projects created"
+        );
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
