@@ -750,6 +750,59 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         );
     }
 
+    // Migration 24: timestamp-positioned covering indexes for the AI
+    // aggregations, plus baseline ANALYZE stats.
+    //
+    // Migration 23's idx_logs_ai_project_cover (ai_project, ai_tool,
+    // ai_session_id, timestamp) made `ai projects` index-only, but with a
+    // timestamp-range filter (e.g. `ai blocks`'s 30-day default) the planner
+    // can't use its trailing `timestamp` as a seek and instead chose
+    // idx_logs_timestamp — scanning all recent high-volume syslog and filtering
+    // AI rows out one by one (~28s). Putting `timestamp` SECOND
+    // (ai_project, timestamp, ai_tool, ai_session_id) gives both a seekable
+    // range and full coverage, and supersedes the old index for every AI query
+    // (verified: nothing picks idx_logs_ai_project_cover once this exists), so
+    // it is dropped. idx_logs_ai_tool_cover does the same for `ai tools`
+    // (GROUP BY ai_tool needs session_id + timestamp).
+    //
+    // CRITICAL: these indexes are only *chosen* when ANALYZE statistics exist —
+    // without `sqlite_stat1`, the planner's no-stats heuristics still pick
+    // idx_logs_timestamp (verified empirically). So this migration also runs an
+    // initial ANALYZE (bounded by the connection's analysis_limit=400), and the
+    // optimize maintenance task keeps stats fresh as the DB grows. Same first-
+    // run write-lock cost as the other index migrations.
+    if !migration_applied(&conn, 24)? {
+        tracing::info!(
+            "Migration 24: rebuilding AI covering indexes (timestamp-positioned) \
+             + initial ANALYZE — may take minutes on large DBs, write lock held"
+        );
+        let started = std::time::Instant::now();
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_logs_ai_project_cover;
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_project_ts_cover
+                 ON logs(ai_project, timestamp, ai_tool, ai_session_id)
+                 WHERE ai_project IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_tool_cover
+                 ON logs(ai_tool, ai_session_id, timestamp)
+                 WHERE ai_tool IS NOT NULL;",
+        )?;
+        // Only seed stats when the table already has data. ANALYZE on an empty
+        // `logs` (fresh install / tests) records "0 rows", which mis-guides the
+        // planner once rows arrive; an empty DB instead gets its first stats
+        // from the optimize maintenance task (or the next restart) once
+        // populated. The existing populated DB analyzes immediately here.
+        let has_rows: bool =
+            conn.query_row("SELECT EXISTS(SELECT 1 FROM logs)", [], |r| r.get(0))?;
+        if has_rows {
+            conn.execute_batch("ANALYZE;")?;
+        }
+        conn.execute_batch("INSERT INTO schema_migrations (version) VALUES (24);")?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "Migration 24: AI covering indexes rebuilt + baseline ANALYZE done"
+        );
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
@@ -1386,7 +1439,8 @@ fn configure_connection_pragmas(conn: &mut Connection, wal_mode: bool) -> rusqli
     conn.execute_batch(
         "PRAGMA synchronous=NORMAL;
          PRAGMA busy_timeout=5000;
-         PRAGMA cache_size=-64000;",
+         PRAGMA cache_size=-64000;
+         PRAGMA analysis_limit=400;",
     )?;
     Ok(())
 }

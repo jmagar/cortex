@@ -211,7 +211,7 @@ fn init_db_creates_partial_ai_metadata_indexes() {
 }
 
 #[test]
-fn migration_23_creates_covering_indexes_for_errors_and_ai_projects() {
+fn migrations_23_24_yield_final_covering_index_set() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
     let config = crate::config::StorageConfig {
@@ -231,27 +231,51 @@ fn migration_23_creates_covering_indexes_for_errors_and_ai_projects() {
         .ok()
     };
 
-    let ai_cover = index_sql("idx_logs_ai_project_cover").expect("ai project covering index");
-    assert!(ai_cover.contains("ai_project"));
-    assert!(ai_cover.contains("ai_tool"));
-    assert!(ai_cover.contains("ai_session_id"));
-    assert!(ai_cover.contains("timestamp"));
-    assert!(ai_cover.contains("WHERE") && ai_cover.contains("ai_project IS NOT NULL"));
+    // Migration 23's interim AI index is superseded and DROPped by migration 24.
+    assert!(
+        index_sql("idx_logs_ai_project_cover").is_none(),
+        "migration 24 must drop the superseded idx_logs_ai_project_cover"
+    );
 
+    // errors covering index (migration 23) survives.
     let sev_cover = index_sql("idx_logs_sev_host_time").expect("severity/host covering index");
     assert!(sev_cover.contains("severity"));
     assert!(sev_cover.contains("hostname"));
     assert!(sev_cover.contains("timestamp"));
 
-    // Migration recorded so it is not rebuilt on every startup.
-    let applied: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM schema_migrations WHERE version = 23",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(applied, 1, "migration 23 must be recorded");
+    // Timestamp-positioned AI covering index (migration 24) serves ai projects + ai blocks.
+    let ts_cover = index_sql("idx_logs_ai_project_ts_cover").expect("ai project ts-covering index");
+    // Column order matters: ai_project, THEN timestamp (seekable), then the covered cols.
+    let p = ts_cover.find("ai_project").unwrap();
+    let t = ts_cover.find("timestamp").unwrap();
+    let tool = ts_cover.find("ai_tool").unwrap();
+    assert!(
+        p < t && t < tool,
+        "order must be ai_project, timestamp, ai_tool, ..."
+    );
+    assert!(ts_cover.contains("ai_session_id"));
+    assert!(ts_cover.contains("ai_project IS NOT NULL"));
+
+    // ai tools covering index (migration 24).
+    let tool_cover = index_sql("idx_logs_ai_tool_cover").expect("ai tool covering index");
+    assert!(tool_cover.contains("ai_tool"));
+    assert!(tool_cover.contains("ai_session_id"));
+    assert!(tool_cover.contains("timestamp"));
+
+    // Migration 24 only ANALYZEs when `logs` already has rows, so this empty
+    // fresh DB writes no `sqlite_stat1` (by design — empty-table stats mislead
+    // the planner). The populated-DB ANALYZE path is covered by live validation.
+
+    for v in [23, 24] {
+        let applied: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = ?1",
+                [v],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(applied, 1, "migration {v} must be recorded");
+    }
 }
 
 #[test]

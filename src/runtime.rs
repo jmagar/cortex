@@ -52,6 +52,7 @@ pub struct MaintenanceHandles {
     notification_digest: Option<JoinHandle<()>>,
     inventory_backfill: Option<JoinHandle<()>>,
     session_rollup: Option<JoinHandle<()>>,
+    optimize: Option<JoinHandle<()>>,
 }
 
 impl MaintenanceHandles {
@@ -99,6 +100,7 @@ impl MaintenanceHandles {
             self.notification_digest,
             self.inventory_backfill,
             self.session_rollup,
+            self.optimize,
         ]
         .into_iter()
         .flatten()
@@ -136,6 +138,11 @@ const HEARTBEAT_RETENTION_DAYS: u32 = 14;
 /// bounds staleness of unbounded `sessions` results while keeping the periodic
 /// full re-aggregation cost negligible relative to ingest.
 const SESSION_ROLLUP_REFRESH_SECS: u64 = 300;
+
+/// Cadence for `PRAGMA optimize` (keeps planner stats fresh). 6 hours — stats
+/// track row-count *distribution*, which shifts slowly, so frequent runs add
+/// little. `PRAGMA optimize` no-ops on tables that haven't changed enough.
+const OPTIMIZE_INTERVAL_SECS: u64 = 21_600;
 
 impl RuntimeCore {
     pub async fn load() -> Result<Self> {
@@ -302,6 +309,7 @@ impl RuntimeCore {
         let notification_digest = self.spawn_notification_digest(token.clone());
         let inventory_backfill = self.spawn_inventory_backfill_task(token.clone());
         let session_rollup = self.spawn_session_rollup_task(token.clone());
+        let optimize = self.spawn_optimize_task(token.clone());
         MaintenanceHandles {
             token,
             purge,
@@ -313,7 +321,60 @@ impl RuntimeCore {
             notification_digest,
             inventory_backfill,
             session_rollup,
+            optimize,
         }
+    }
+
+    /// Periodically run `PRAGMA optimize` so the query planner keeps fresh
+    /// `sqlite_stat1` statistics as the DB grows.
+    ///
+    /// This is load-bearing, not cosmetic: the AI/error covering indexes
+    /// (migrations 23-24) are only *chosen* by the planner when stats exist —
+    /// without them SQLite falls back to no-stats heuristics that pick
+    /// `idx_logs_timestamp` and scan the whole recent partition (the ~28s
+    /// `ai blocks` / ~16s `ai tools` pathology). Migration 24 lays down a
+    /// baseline ANALYZE; this task prevents it from going stale. `PRAGMA
+    /// optimize` is incremental (re-analyzes only tables that changed enough)
+    /// and bounded by the connection's `analysis_limit=400`, so each run is
+    /// cheap and holds the write lock only briefly.
+    fn spawn_optimize_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
+        let pool = Arc::clone(&self.pool);
+        let limiter = Arc::clone(&self.maintenance_permit);
+        let handle = tokio::spawn(async move {
+            let mut interval =
+                background_interval(tokio::time::Duration::from_secs(OPTIMIZE_INTERVAL_SECS));
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        tracing::debug!("optimize: cooperative shutdown");
+                        break;
+                    }
+                    _ = interval.tick() => {}
+                }
+                let Ok(_permit) = Arc::clone(&limiter).acquire_owned().await else {
+                    tracing::error!("Maintenance limiter closed");
+                    continue;
+                };
+                let pool = Arc::clone(&pool);
+                let started = Instant::now();
+                let result = tokio::task::spawn_blocking(move || {
+                    let conn = pool.get()?;
+                    conn.execute_batch("PRAGMA optimize;")?;
+                    anyhow::Ok(())
+                })
+                .await;
+                match result {
+                    Ok(Ok(())) => tracing::debug!(
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "PRAGMA optimize completed"
+                    ),
+                    Ok(Err(e)) => tracing::warn!(error = %e, "PRAGMA optimize failed"),
+                    Err(e) => tracing::warn!(error = %e, "PRAGMA optimize task join error"),
+                }
+            }
+        });
+        Some(handle)
     }
 
     /// Periodically refresh the AI session rollup (beads cortex-2vre,
