@@ -398,7 +398,13 @@ fn imports_agent_spool_as_agent_command_rows() {
 }
 
 #[test]
+#[serial]
 fn wrapper_preserves_command_exit_when_spool_append_fails() {
+    // `["true"]` is a single token, so the wrapper runs it via `$SHELL -c true`
+    // (see `command_status`). This must be `#[serial]` to exclude
+    // `wrapper_executes_multi_arg_commands_without_shell_reparse`, which mutates
+    // the global `SHELL`/`CORTEX_TEST_ARG_OUT` env — overlapping would exec that
+    // test's fake shell here and corrupt its output buffer (both tests fail).
     let dir = tempfile::tempdir().unwrap();
 
     let exit_code =
