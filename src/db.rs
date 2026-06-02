@@ -52,9 +52,10 @@ pub use pool::{
 pub use queries::{
     ai_session_rollup_status, ask_history_sessions, get_error_summary, get_stats,
     get_stats_with_options, incident_context_summary, investigate_ai_incidents, list_ai_projects,
-    list_ai_sessions, list_ai_sessions_live, list_ai_tools, list_hosts, refresh_ai_session_rollup,
-    refresh_ai_session_rollup_if_stale, search_ai_abuse, search_ai_anchors, search_ai_incidents,
-    search_ai_related_logs, search_ai_sessions, search_logs, severity_to_num,
-    similar_incidents_clusters, tail_logs, validate_fts_query, AiSessionRollupStatus,
-    RollupRefresh, SEVERITY_LEVELS,
+    list_ai_sessions, list_ai_sessions_live, list_ai_tools, list_hosts, prune_timeline_rollup,
+    refresh_ai_session_rollup, refresh_ai_session_rollup_if_stale, refresh_timeline_rollup,
+    search_ai_abuse, search_ai_anchors, search_ai_incidents, search_ai_related_logs,
+    search_ai_sessions, search_logs, severity_to_num, similar_incidents_clusters, tail_logs,
+    timeline_rollup_status, validate_fts_query, AiSessionRollupStatus, RollupRefresh,
+    TimelineRollupStatus, SEVERITY_LEVELS,
 };

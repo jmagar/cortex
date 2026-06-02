@@ -121,6 +121,58 @@ fn init_db_creates_heartbeat_schema_migration_15() {
 }
 
 #[test]
+fn init_db_creates_timeline_and_jobs_schema_migrations_25_26() {
+    // Validate migrations 25 + 26 on a CLEAN temp DB (never touch prod).
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("mig25_26.db"));
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+
+    for version in [25, 26] {
+        let applied: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = ?1",
+                [version],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(applied, 1, "migration {version} not recorded");
+    }
+
+    for table in [
+        "timeline_hourly",
+        "timeline_hourly_meta",
+        "maintenance_jobs",
+    ] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1, "missing table {table}");
+    }
+
+    // Meta row is seeded with watermark 0 / never-refreshed on a fresh DB.
+    let (refreshed, max_id): (Option<String>, i64) = conn
+        .query_row(
+            "SELECT refreshed_at, source_max_id FROM timeline_hourly_meta WHERE id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!(refreshed.is_none());
+    assert_eq!(max_id, 0);
+
+    // Empty DB => backfill skipped => rollup empty.
+    let rollup_rows: i64 = conn
+        .query_row("SELECT COUNT(*) FROM timeline_hourly", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(rollup_rows, 0);
+}
+
+#[test]
 fn heartbeat_schema_enforces_idempotency_key() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("heartbeat-unique.db");

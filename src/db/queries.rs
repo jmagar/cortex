@@ -771,6 +771,141 @@ pub fn refresh_ai_session_rollup(pool: &DbPool) -> Result<usize> {
     Ok(row_count as usize)
 }
 
+// -----------------------------------------------------------------------------
+// timeline_hourly rollup (bead syslog-mcp-kcvq)
+// -----------------------------------------------------------------------------
+
+/// SQLite `strftime` pattern bucketing a `timestamp` into the hour grain stored
+/// in `timeline_hourly.bucket`. Kept in one place so the backfill (pool.rs), the
+/// incremental refresh, and any future caller stay byte-identical.
+pub const TIMELINE_HOUR_FMT: &str = "%Y-%m-%dT%H:00:00Z";
+
+/// Staleness/coverage snapshot for the `timeline_hourly` rollup.
+#[derive(Debug, Clone)]
+pub struct TimelineRollupStatus {
+    /// RFC 3339 timestamp of the last successful incremental refresh, or `None`.
+    pub refreshed_at: Option<String>,
+    /// Highest `logs.id` aggregated into the rollup so far. Reads add the live
+    /// delta `WHERE id > source_max_id` on top of the rollup for fresh totals.
+    /// Exposed for diagnostics/tests; the read paths query the meta row directly.
+    #[allow(dead_code)]
+    pub source_max_id: i64,
+}
+
+/// Read the timeline rollup metadata (cheap single-row lookup).
+pub fn timeline_rollup_status(pool: &DbPool) -> Result<TimelineRollupStatus> {
+    let conn = pool.get()?;
+    let (refreshed_at, source_max_id) = conn
+        .query_row(
+            "SELECT refreshed_at, source_max_id FROM timeline_hourly_meta WHERE id = 1",
+            [],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .optional()?
+        .unwrap_or((None, 0));
+    Ok(TimelineRollupStatus {
+        refreshed_at,
+        source_max_id,
+    })
+}
+
+/// Incrementally fold new `logs` rows into `timeline_hourly`.
+///
+/// Aggregates ONLY `logs WHERE id > source_max_id AND id <= MAX(id)` and
+/// upsert-ADDS into the per-hour buckets, then advances the watermark. This is
+/// self-maintainable for adds because the rollup holds only `COUNT(*)` (no
+/// MIN/MAX): a new high-id row with an old timestamp correctly adds to its old
+/// bucket. The `id <= new_max` upper bound is captured inside the same IMMEDIATE
+/// transaction as the aggregate, so a row inserted mid-refresh is neither
+/// double-counted now nor skipped next tick.
+///
+/// `app_name` is normalized to `COALESCE(app_name,'')` to match the NOT NULL PK
+/// column — without this, null-app rows would never hit the ON CONFLICT path and
+/// would duplicate every tick.
+///
+/// Per cadence this touches only the rows ingested since the last tick
+/// (milliseconds), unlike the AI rollup's full re-aggregation, so a single short
+/// IMMEDIATE write is correct and simpler than the staging+swap dance.
+///
+/// Returns the number of source `logs` rows folded in this tick (0 when the
+/// watermark was already current — the common idle-tick case).
+pub fn refresh_timeline_rollup(pool: &DbPool) -> Result<usize> {
+    let mut conn = pool.get()?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let old_max: i64 = tx.query_row(
+        "SELECT source_max_id FROM timeline_hourly_meta WHERE id = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    let new_max: i64 = tx.query_row("SELECT COALESCE(MAX(id), 0) FROM logs", [], |r| r.get(0))?;
+    if new_max <= old_max {
+        // Watermark already current; nothing new to fold. (Deletes are handled
+        // out-of-band by the retention prune, not here.)
+        tx.commit()?;
+        return Ok(0);
+    }
+    let folded: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM logs WHERE id > ?1 AND id <= ?2",
+        params![old_max, new_max],
+        |r| r.get(0),
+    )?;
+    tx.execute(
+        &format!(
+            "INSERT INTO timeline_hourly (bucket, hostname, app_name, severity, event_count)
+             SELECT strftime('{TIMELINE_HOUR_FMT}', timestamp) AS bucket,
+                    hostname,
+                    COALESCE(app_name, '') AS app_name,
+                    severity,
+                    COUNT(*) AS event_count
+             FROM logs
+             WHERE id > ?1 AND id <= ?2
+             GROUP BY bucket, hostname, app_name, severity
+             ON CONFLICT(bucket, hostname, app_name, severity)
+                 DO UPDATE SET event_count = event_count + excluded.event_count"
+        ),
+        params![old_max, new_max],
+    )?;
+    tx.execute(
+        "UPDATE timeline_hourly_meta
+            SET refreshed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                source_max_id = ?1
+          WHERE id = 1",
+        [new_max],
+    )?;
+    tx.commit()?;
+    Ok(folded as usize)
+}
+
+/// Prune `timeline_hourly` buckets that are entirely older than the oldest
+/// remaining `logs` row, called after a retention purge (which deletes oldest
+/// rows by `received_at`). Removes ghost buckets so `timeline`/`stats` totals do
+/// not drift upward unbounded on hosts whose ingest watermark is idle while
+/// retention keeps purging.
+///
+/// A minor transient overcount can remain in the single boundary hour (the hour
+/// straddling the purge cutoff keeps its full pre-purge count until that hour
+/// itself ages out) — accepted as negligible for a volume chart.
+///
+/// Returns the number of rollup rows deleted.
+pub fn prune_timeline_rollup(pool: &DbPool) -> Result<usize> {
+    let conn = pool.get()?;
+    let oldest_bucket: Option<String> = conn.query_row(
+        &format!("SELECT strftime('{TIMELINE_HOUR_FMT}', MIN(timestamp)) FROM logs"),
+        [],
+        |r| r.get::<_, Option<String>>(0),
+    )?;
+    let Some(oldest_bucket) = oldest_bucket else {
+        // No logs at all — clear the whole rollup so it can't ghost.
+        let n = conn.execute("DELETE FROM timeline_hourly", [])?;
+        return Ok(n);
+    };
+    let n = conn.execute(
+        "DELETE FROM timeline_hourly WHERE bucket < ?1",
+        [oldest_bucket],
+    )?;
+    Ok(n)
+}
+
 pub fn search_ai_sessions(
     pool: &DbPool,
     params: &SearchAiSessionsParams,
@@ -1943,7 +2078,31 @@ pub fn get_stats_with_options(
 
     // Deferred read transaction ensures the log stats form a consistent snapshot
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
-    let total_logs: i64 = tx.query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))?;
+    // total_logs reads the timeline_hourly rollup (O(#buckets)) plus the live
+    // delta of rows ingested since the rollup watermark, instead of the O(#rows)
+    // `COUNT(*) FROM logs` (~7s on multi-million-row DBs). The rollup covers
+    // `logs.id <= source_max_id`; the delta covers `id > source_max_id`, so the
+    // sum is exact at the current snapshot for ADDs. It is NOT perfectly exact
+    // under concurrent retention DELETEs of rows the rollup already counted: the
+    // retention prune (spawn_retention_task) trims whole stale buckets, leaving
+    // at most a transient single-boundary-hour overcount — accepted as a
+    // negligible drift for a stats counter. (bead syslog-mcp-kcvq)
+    let rollup_max_id: i64 = tx.query_row(
+        "SELECT source_max_id FROM timeline_hourly_meta WHERE id = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    let rollup_total: i64 = tx.query_row(
+        "SELECT COALESCE(SUM(event_count), 0) FROM timeline_hourly",
+        [],
+        |r| r.get(0),
+    )?;
+    let live_delta: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM logs WHERE id > ?1",
+        [rollup_max_id],
+        |r| r.get(0),
+    )?;
+    let total_logs: i64 = rollup_total + live_delta;
     let total_hosts: i64 = tx.query_row("SELECT COUNT(*) FROM hosts", [], |r| r.get(0))?;
     let phantom_fts_rows = if include_fts_diagnostics {
         let fts_rows: i64 = tx

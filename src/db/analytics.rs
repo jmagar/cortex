@@ -560,6 +560,17 @@ impl Bucket {
         }
     }
 
+    /// Whether `timeline` can answer this bucket from the `timeline_hourly`
+    /// rollup (bead syslog-mcp-kcvq). The rollup grain is one hour, so every
+    /// bucket coarser-or-equal to an hour is exactly summable from it; only
+    /// `Minute` is finer and must hit the live `logs` table.
+    pub(crate) fn served_by_hourly_rollup(self) -> bool {
+        match self {
+            Self::Minute => false,
+            Self::Hour | Self::Day | Self::Week | Self::Month => true,
+        }
+    }
+
     /// Default lookback window (days) when no explicit `from`/`to` is provided.
     /// Wider buckets scan wider time ranges, so larger defaults are appropriate.
     pub fn default_lookback_days(self) -> i64 {
@@ -620,6 +631,23 @@ pub fn timeline(
     app_name: Option<&str>,
     severity_in: Option<&[String]>,
 ) -> Result<Vec<TimelinePoint>> {
+    // Hour/day/week/month read the precomputed timeline_hourly rollup (bead
+    // syslog-mcp-kcvq) — O(#buckets) instead of an O(#rows) strftime GROUP BY.
+    // Minute is finer than the rollup grain, so it stays on the live table.
+    // Bounded-staleness: the rollup lags ingest by up to the refresh cadence
+    // (TIMELINE_ROLLUP_REFRESH_SECS) plus the current partial hour.
+    if bucket.served_by_hourly_rollup() {
+        return timeline_from_rollup(
+            pool,
+            bucket,
+            group_by,
+            from,
+            to,
+            hostname,
+            app_name,
+            severity_in,
+        );
+    }
     let conn = pool.get()?;
     let mut sql = format!(
         "SELECT strftime('{fmt}', timestamp) AS bucket",
@@ -673,6 +701,115 @@ pub fn timeline(
     let mut stmt = conn.prepare(&sql)?;
     let bind_refs: Vec<&dyn rusqlite::types::ToSql> = bindings.iter().map(|b| b.as_ref()).collect();
     let has_group = group_by.column().is_some();
+    let rows = stmt.query_map(rusqlite::params_from_iter(bind_refs.iter().copied()), |r| {
+        if has_group {
+            Ok(TimelinePoint {
+                bucket: r.get(0)?,
+                group: Some(r.get::<_, String>(1)?),
+                count: r.get(2)?,
+            })
+        } else {
+            Ok(TimelinePoint {
+                bucket: r.get(0)?,
+                group: None,
+                count: r.get(1)?,
+            })
+        }
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Rollup-backed implementation of [`timeline`] for hour/day/week/month buckets.
+///
+/// Reads `timeline_hourly` (grain = one hour) and re-buckets the stored ISO hour
+/// string up to the requested grain via `strftime`. `SUM(event_count)` replaces
+/// `COUNT(*)`. The output is identical to the live query for these buckets,
+/// modulo bounded staleness (the rollup trails ingest by the refresh cadence and
+/// excludes the current partial hour until the next refresh).
+///
+/// `app_name` is stored as `''` for null-app rows (the PK column is NOT NULL);
+/// when grouping by app_name we project `''` back to `'<none>'` so the result
+/// matches the live query's `COALESCE(app_name, '<none>')`.
+#[allow(clippy::too_many_arguments)]
+fn timeline_from_rollup(
+    pool: &DbPool,
+    bucket: Bucket,
+    group_by: TimelineGroupBy,
+    from: Option<&str>,
+    to: Option<&str>,
+    hostname: Option<&str>,
+    app_name: Option<&str>,
+    severity_in: Option<&[String]>,
+) -> Result<Vec<TimelinePoint>> {
+    let conn = pool.get()?;
+    // Re-bucket the stored hour string to the requested grain. For Hour this is
+    // an identity transform; the same strftime format the live path uses.
+    let mut sql = format!(
+        "SELECT strftime('{fmt}', bucket) AS b",
+        fmt = bucket.strftime_format()
+    );
+    let grp_expr = group_by.column().map(|col| {
+        if col == "app_name" {
+            "COALESCE(NULLIF(app_name, ''), '<none>')"
+        } else {
+            col
+        }
+    });
+    if let Some(expr) = grp_expr {
+        sql.push_str(&format!(", {expr} AS grp"));
+    }
+    sql.push_str(", SUM(event_count) FROM timeline_hourly WHERE 1=1");
+
+    let mut bindings: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1usize;
+
+    // from/to filter on the hour bucket. Floor `from` to its hour so the partial
+    // boundary hour is included (matches the live query's behavior of bucketing
+    // any in-window row into its hour). `to` compares directly: a bucket is the
+    // hour floor, so `bucket <= to` keeps every hour at or before `to`.
+    if let Some(f) = from {
+        sql.push_str(&format!(
+            " AND bucket >= strftime('{fmt}', ?{idx})",
+            fmt = Bucket::Hour.strftime_format()
+        ));
+        bindings.push(Box::new(f.to_string()));
+        idx += 1;
+    }
+    if let Some(t) = to {
+        sql.push_str(&format!(" AND bucket <= ?{idx}"));
+        bindings.push(Box::new(t.to_string()));
+        idx += 1;
+    }
+    if let Some(h) = hostname {
+        sql.push_str(&format!(" AND hostname = ?{idx}"));
+        bindings.push(Box::new(h.to_string()));
+        idx += 1;
+    }
+    if let Some(a) = app_name {
+        sql.push_str(&format!(" AND app_name = ?{idx}"));
+        bindings.push(Box::new(a.to_string()));
+        idx += 1;
+    }
+    if let Some(levels) = severity_in {
+        if !levels.is_empty() {
+            let placeholders: Vec<String> =
+                (0..levels.len()).map(|i| format!("?{}", idx + i)).collect();
+            sql.push_str(&format!(" AND severity IN ({})", placeholders.join(", ")));
+            for lvl in levels {
+                bindings.push(Box::new(lvl.clone()));
+            }
+        }
+    }
+
+    if grp_expr.is_some() {
+        sql.push_str(" GROUP BY b, grp ORDER BY b ASC, grp ASC");
+    } else {
+        sql.push_str(" GROUP BY b ORDER BY b ASC");
+    }
+
+    let mut stmt = conn.prepare(&sql)?;
+    let bind_refs: Vec<&dyn rusqlite::types::ToSql> = bindings.iter().map(|b| b.as_ref()).collect();
+    let has_group = grp_expr.is_some();
     let rows = stmt.query_map(rusqlite::params_from_iter(bind_refs.iter().copied()), |r| {
         if has_group {
             Ok(TimelinePoint {

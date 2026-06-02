@@ -275,6 +275,45 @@ fn test_get_stats_empty_db() {
 }
 
 #[test]
+fn test_get_stats_total_logs_matches_across_rollup_states() {
+    // stats.total_logs = SUM(timeline_hourly.event_count) + COUNT(logs WHERE
+    // id > watermark). It must equal the true row count whether the rollup is
+    // empty (all rows in the live delta), fully refreshed (all rows in rollup),
+    // or partially refreshed (some in each). (bead syslog-mcp-kcvq)
+    let (pool, dir) = test_pool();
+    let cfg = test_storage_config(dir.path().join("test.db"));
+
+    let entries = vec![
+        make_entry("2026-01-01T00:00:01Z", "h1", "info", "a"),
+        make_entry("2026-01-01T00:30:00Z", "h1", "info", "b"),
+        make_entry("2026-01-01T01:00:00Z", "h2", "err", "c"),
+    ];
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    // Rollup empty: everything counted via the live delta.
+    assert_eq!(get_stats(&pool, &cfg).unwrap().total_logs, 3);
+
+    // Fully refreshed: everything counted via the rollup, delta empty.
+    crate::db::refresh_timeline_rollup(&pool).unwrap();
+    assert_eq!(get_stats(&pool, &cfg).unwrap().total_logs, 3);
+
+    // Insert more after refresh: partial — rollup holds 3, delta holds 2.
+    insert_logs_batch(
+        &pool,
+        &[
+            make_entry("2026-01-01T02:00:00Z", "h1", "info", "d"),
+            make_entry("2026-01-01T02:05:00Z", "h1", "info", "e"),
+        ],
+    )
+    .unwrap();
+    assert_eq!(get_stats(&pool, &cfg).unwrap().total_logs, 5);
+
+    // Refresh again: all 5 now in the rollup.
+    crate::db::refresh_timeline_rollup(&pool).unwrap();
+    assert_eq!(get_stats(&pool, &cfg).unwrap().total_logs, 5);
+}
+
+#[test]
 fn test_get_stats_skips_fts_diagnostic_by_default() {
     // Issue 4: the default stats path must NOT run COUNT(*) FROM logs_fts
     // (expensive on large DBs), reflected as phantom_fts_rows == None. The

@@ -1,7 +1,10 @@
 use super::*;
 use crate::app::error_detection::normalize::normalize_template;
 use crate::config::StorageConfig;
-use crate::db::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
+use crate::db::{
+    init_pool, insert_logs_batch, prune_timeline_rollup, refresh_timeline_rollup,
+    timeline_rollup_status, DbPool, LogBatchEntry,
+};
 
 fn test_pool() -> (DbPool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -475,6 +478,9 @@ fn timeline_buckets_by_hour() {
         ],
     )
     .unwrap();
+    // hour/day/week/month read the timeline_hourly rollup; populate it first
+    // (the background task does this in prod).
+    refresh_timeline_rollup(&pool).unwrap();
     let pts = timeline(
         &pool,
         Bucket::Hour,
@@ -953,6 +959,7 @@ fn timeline_buckets_by_week() {
         ],
     )
     .unwrap();
+    refresh_timeline_rollup(&pool).unwrap();
     let pts = timeline(
         &pool,
         Bucket::Week,
@@ -987,6 +994,7 @@ fn timeline_buckets_by_month() {
         ],
     )
     .unwrap();
+    refresh_timeline_rollup(&pool).unwrap();
     let pts = timeline(
         &pool,
         Bucket::Month,
@@ -1004,4 +1012,268 @@ fn timeline_buckets_by_month() {
     // Bucket labels should look like "YYYY-MM"
     assert_eq!(pts[0].bucket, "2026-01");
     assert_eq!(pts[1].bucket, "2026-02");
+}
+
+// -----------------------------------------------------------------------------
+// timeline_hourly rollup (bead syslog-mcp-kcvq)
+// -----------------------------------------------------------------------------
+
+/// Hand-compute the live timeline counts directly off `logs`, bypassing the
+/// rollup, so a test can assert rollup == live for the unbounded case.
+fn live_hour_counts(pool: &DbPool) -> Vec<(String, i64)> {
+    let conn = pool.get().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT strftime('%Y-%m-%dT%H:00:00Z', timestamp) AS b, COUNT(*)
+             FROM logs GROUP BY b ORDER BY b ASC",
+        )
+        .unwrap();
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+        .unwrap();
+    rows.collect::<rusqlite::Result<Vec<_>>>().unwrap()
+}
+
+#[test]
+fn timeline_rollup_matches_live_for_hour_unbounded() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-03-01T00:10:00Z", "h1", "info", Some("nginx"), "a"),
+            entry("2026-03-01T00:40:00Z", "h2", "err", Some("sshd"), "b"),
+            entry("2026-03-01T01:05:00Z", "h1", "info", None, "c"),
+            entry("2026-03-01T01:55:00Z", "h1", "warning", Some("nginx"), "d"),
+        ],
+    )
+    .unwrap();
+    refresh_timeline_rollup(&pool).unwrap();
+    // Unbounded range + full refresh => rollup is an EXACT match for live.
+    // (A mid-hour `from`/`to` would legitimately differ in the boundary hour
+    // because the rollup can only filter at hour granularity — that imprecision
+    // is documented and accepted; see timeline_from_rollup.)
+    let rollup = timeline(
+        &pool,
+        Bucket::Hour,
+        TimelineGroupBy::None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let live = live_hour_counts(&pool);
+    assert_eq!(rollup.len(), live.len());
+    for (pt, (b, c)) in rollup.iter().zip(live.iter()) {
+        assert_eq!(&pt.bucket, b);
+        assert_eq!(pt.count, *c);
+    }
+}
+
+#[test]
+fn timeline_rollup_incremental_add_does_not_double_count() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-03-01T00:10:00Z", "h1", "info", None, "a"),
+            entry("2026-03-01T00:20:00Z", "h1", "info", None, "b"),
+        ],
+    )
+    .unwrap();
+    let folded = refresh_timeline_rollup(&pool).unwrap();
+    assert_eq!(folded, 2, "first refresh folds both rows");
+    // A second refresh with nothing new must be a no-op (watermark current).
+    let folded2 = refresh_timeline_rollup(&pool).unwrap();
+    assert_eq!(folded2, 0, "no-op refresh folds nothing");
+    let pts = timeline(
+        &pool,
+        Bucket::Hour,
+        TimelineGroupBy::None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(pts.len(), 1);
+    assert_eq!(pts[0].count, 2, "no double-count after redundant refresh");
+
+    // Insert MORE into the SAME hour; refresh must ADD, not recount.
+    insert_logs_batch(
+        &pool,
+        &[entry("2026-03-01T00:30:00Z", "h1", "info", None, "c")],
+    )
+    .unwrap();
+    let folded3 = refresh_timeline_rollup(&pool).unwrap();
+    assert_eq!(folded3, 1, "only the new row is folded");
+    let pts = timeline(
+        &pool,
+        Bucket::Hour,
+        TimelineGroupBy::None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        pts[0].count, 3,
+        "incremental add yields 3, not double-counted"
+    );
+}
+
+#[test]
+fn timeline_rollup_late_arriving_old_timestamp_lands_in_old_bucket() {
+    let (pool, _d) = test_pool();
+    // Ingest a recent hour first, refresh.
+    insert_logs_batch(
+        &pool,
+        &[entry("2026-03-01T05:00:00Z", "h1", "info", None, "recent")],
+    )
+    .unwrap();
+    refresh_timeline_rollup(&pool).unwrap();
+    // Now a NEW (higher-id) row arrives carrying an OLD timestamp.
+    insert_logs_batch(
+        &pool,
+        &[entry("2026-03-01T02:00:00Z", "h1", "info", None, "late")],
+    )
+    .unwrap();
+    let folded = refresh_timeline_rollup(&pool).unwrap();
+    assert_eq!(folded, 1);
+    let pts = timeline(
+        &pool,
+        Bucket::Hour,
+        TimelineGroupBy::None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    // The late row must land in its OWN old (02:00) bucket, not the recent one.
+    assert_eq!(pts.len(), 2);
+    assert_eq!(pts[0].bucket, "2026-03-01T02:00:00Z");
+    assert_eq!(pts[0].count, 1);
+    assert_eq!(pts[1].bucket, "2026-03-01T05:00:00Z");
+    assert_eq!(pts[1].count, 1);
+}
+
+#[test]
+fn timeline_rollup_null_app_groups_as_none() {
+    // BLOCKER regression guard: app_name is stored COALESCE(app_name,'') NOT NULL
+    // in the rollup; group_by=app_name must project '' back to '<none>' AND the
+    // null-app rows must NOT double-count across refreshes (NULL-distinct PK bug).
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-03-01T00:05:00Z", "h1", "info", None, "no-app-1"),
+            entry("2026-03-01T00:10:00Z", "h1", "info", None, "no-app-2"),
+            entry("2026-03-01T00:15:00Z", "h1", "info", Some("nginx"), "app-1"),
+        ],
+    )
+    .unwrap();
+    refresh_timeline_rollup(&pool).unwrap();
+    // Refresh again to exercise the ON CONFLICT path for the null-app grain —
+    // if NULLs were stored as NULL, this would duplicate rows and inflate counts.
+    insert_logs_batch(
+        &pool,
+        &[entry(
+            "2026-03-01T00:20:00Z",
+            "h1",
+            "info",
+            None,
+            "no-app-3",
+        )],
+    )
+    .unwrap();
+    refresh_timeline_rollup(&pool).unwrap();
+    let pts = timeline(
+        &pool,
+        Bucket::Hour,
+        TimelineGroupBy::AppName,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let none_total: i64 = pts
+        .iter()
+        .filter(|p| p.group.as_deref() == Some("<none>"))
+        .map(|p| p.count)
+        .sum();
+    let nginx_total: i64 = pts
+        .iter()
+        .filter(|p| p.group.as_deref() == Some("nginx"))
+        .map(|p| p.count)
+        .sum();
+    assert_eq!(
+        none_total, 3,
+        "null-app rows group as <none>, no double-count"
+    );
+    assert_eq!(nginx_total, 1);
+}
+
+#[test]
+fn prune_timeline_rollup_drops_buckets_older_than_oldest_log() {
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-03-01T00:00:00Z", "h1", "info", None, "oldest"),
+            entry("2026-03-02T00:00:00Z", "h1", "info", None, "mid"),
+            entry("2026-03-03T00:00:00Z", "h1", "info", None, "newest"),
+        ],
+    )
+    .unwrap();
+    refresh_timeline_rollup(&pool).unwrap();
+    // Simulate a retention purge of the oldest log.
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "DELETE FROM logs WHERE timestamp = '2026-03-01T00:00:00Z'",
+            [],
+        )
+        .unwrap();
+    }
+    // Before prune, the old bucket still ghosts in the rollup.
+    let deleted = prune_timeline_rollup(&pool).unwrap();
+    assert_eq!(deleted, 1, "the single ghost bucket is pruned");
+    let pts = timeline(
+        &pool,
+        Bucket::Day,
+        TimelineGroupBy::None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(pts.len(), 2, "only buckets >= oldest remaining log survive");
+    assert_eq!(pts[0].bucket, "2026-03-02T00:00:00Z");
+}
+
+#[test]
+fn timeline_rollup_status_reports_watermark() {
+    let (pool, _d) = test_pool();
+    let before = timeline_rollup_status(&pool).unwrap();
+    assert_eq!(before.source_max_id, 0);
+    assert!(before.refreshed_at.is_none());
+    insert_logs_batch(
+        &pool,
+        &[entry("2026-03-01T00:00:00Z", "h1", "info", None, "a")],
+    )
+    .unwrap();
+    refresh_timeline_rollup(&pool).unwrap();
+    let after = timeline_rollup_status(&pool).unwrap();
+    assert!(after.source_max_id > 0);
+    assert!(after.refreshed_at.is_some());
 }

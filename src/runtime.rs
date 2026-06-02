@@ -52,6 +52,7 @@ pub struct MaintenanceHandles {
     notification_digest: Option<JoinHandle<()>>,
     inventory_backfill: Option<JoinHandle<()>>,
     session_rollup: Option<JoinHandle<()>>,
+    timeline_rollup: Option<JoinHandle<()>>,
     optimize: Option<JoinHandle<()>>,
 }
 
@@ -100,6 +101,7 @@ impl MaintenanceHandles {
             self.notification_digest,
             self.inventory_backfill,
             self.session_rollup,
+            self.timeline_rollup,
             self.optimize,
         ]
         .into_iter()
@@ -138,6 +140,12 @@ const HEARTBEAT_RETENTION_DAYS: u32 = 14;
 /// bounds staleness of unbounded `sessions` results while keeping the periodic
 /// full re-aggregation cost negligible relative to ingest.
 const SESSION_ROLLUP_REFRESH_SECS: u64 = 300;
+
+/// Cadence for the incremental `timeline_hourly` rollup refresh (bead
+/// syslog-mcp-kcvq). 60s bounds how stale `timeline`/`stats` reads can be. Each
+/// tick folds only the rows ingested since the last watermark (milliseconds), so
+/// a short cadence is cheap.
+const TIMELINE_ROLLUP_REFRESH_SECS: u64 = 60;
 
 /// Cadence for `PRAGMA optimize` (keeps planner stats fresh). 6 hours — stats
 /// track row-count *distribution*, which shifts slowly, so frequent runs add
@@ -309,6 +317,7 @@ impl RuntimeCore {
         let notification_digest = self.spawn_notification_digest(token.clone());
         let inventory_backfill = self.spawn_inventory_backfill_task(token.clone());
         let session_rollup = self.spawn_session_rollup_task(token.clone());
+        let timeline_rollup = self.spawn_timeline_rollup_task(token.clone());
         let optimize = self.spawn_optimize_task(token.clone());
         MaintenanceHandles {
             token,
@@ -321,6 +330,7 @@ impl RuntimeCore {
             notification_digest,
             inventory_backfill,
             session_rollup,
+            timeline_rollup,
             optimize,
         }
     }
@@ -450,6 +460,79 @@ impl RuntimeCore {
                     ),
                     Err(error) => {
                         tracing::error!(%error, "session_rollup: refresh failed")
+                    }
+                }
+            }
+        });
+        Some(handle)
+    }
+
+    /// Periodically fold newly-ingested logs into the `timeline_hourly` rollup
+    /// (bead syslog-mcp-kcvq) so `timeline` (hour/day/week/month) and
+    /// `stats.total_logs` read O(#buckets) instead of scanning the whole table.
+    ///
+    /// Unlike the AI session rollup, this is INCREMENTAL: each tick aggregates
+    /// only `logs WHERE id > watermark` and upsert-adds into the per-hour
+    /// buckets (the rollup holds only COUNT(*), which is self-maintainable for
+    /// adds). A no-op tick (watermark current) is a single cheap `MAX(id)` read.
+    ///
+    /// Retention DELETEs are handled separately by the retention task, which
+    /// prunes stale low buckets after each purge — NOT here, because the
+    /// watermark only advances on inserts and would never notice a delete.
+    fn spawn_timeline_rollup_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
+        let pool = Arc::clone(&self.pool);
+        let limiter = Arc::clone(&self.maintenance_permit);
+        let handle = tokio::spawn(async move {
+            let mut interval = background_interval(tokio::time::Duration::from_secs(
+                TIMELINE_ROLLUP_REFRESH_SECS,
+            ));
+            let mut eager = true;
+            loop {
+                if !eager {
+                    tokio::select! {
+                        biased;
+                        _ = token.cancelled() => {
+                            tracing::debug!("timeline_rollup: cooperative shutdown");
+                            break;
+                        }
+                        _ = interval.tick() => {}
+                    }
+                } else {
+                    tokio::select! {
+                        biased;
+                        _ = token.cancelled() => {
+                            tracing::debug!("timeline_rollup: cancelled before first refresh");
+                            break;
+                        }
+                        _ = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {}
+                    }
+                    eager = false;
+                }
+                let Ok(permit) = Arc::clone(&limiter).acquire_owned().await else {
+                    tracing::error!("timeline_rollup: maintenance limiter closed");
+                    continue;
+                };
+                let pool = Arc::clone(&pool);
+                let started = Instant::now();
+                match tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    db::refresh_timeline_rollup(&pool)
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("spawn_blocking error: {e}"))
+                .and_then(|r| r)
+                {
+                    Ok(0) => tracing::debug!(
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "timeline_rollup: watermark current, nothing folded"
+                    ),
+                    Ok(folded) => tracing::debug!(
+                        folded,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "timeline_rollup: folded new rows"
+                    ),
+                    Err(error) => {
+                        tracing::error!(%error, "timeline_rollup: refresh failed")
                     }
                 }
             }
@@ -648,6 +731,15 @@ impl RuntimeCore {
                     };
                     let global_deleted =
                         db::purge_old_logs(&pool, retention_days, fts_merge_pages)?;
+                    // Retention deletes OLDEST logs; the timeline_hourly rollup's
+                    // ingest watermark only advances on inserts, so it would
+                    // never notice these deletes and old buckets would ghost
+                    // (stats SUM drifting up unbounded on idle hosts). Prune
+                    // rollup buckets older than the oldest remaining log here.
+                    // A failure must not abort the purge accounting.
+                    if let Err(e) = db::prune_timeline_rollup(&pool) {
+                        tracing::error!(error = %e, "timeline rollup prune failed; continuing");
+                    }
                     Ok::<(usize, usize, usize), anyhow::Error>((
                         tag_deleted,
                         heartbeat_deleted,
@@ -735,6 +827,17 @@ impl RuntimeCore {
                         &db::SystemDiskSpaceProbe,
                         prev_write_blocked,
                     )?;
+                    // Storage guardrail also deletes OLDEST logs; prune ghosted
+                    // timeline_hourly buckets so stats/timeline totals don't drift
+                    // (same rationale as the retention task). Best-effort.
+                    if outcome.deleted_rows > 0 {
+                        if let Err(e) = db::prune_timeline_rollup(&pool) {
+                            tracing::error!(
+                                error = %e,
+                                "timeline rollup prune after storage enforcement failed; continuing"
+                            );
+                        }
+                    }
                     match db::db_wal_checkpoint(&pool, "passive") {
                         Ok((busy, log_frames, checkpointed_frames)) => {
                             if log_frames > 0 || busy != 0 {

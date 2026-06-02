@@ -1320,6 +1320,11 @@ pub struct TimelineResponse {
     pub bucket: String,
     pub group_by: Option<String>,
     pub points: Vec<TimelinePoint>,
+    /// For rollup-served buckets (hour/day/week/month), the last refresh time of
+    /// the `timeline_hourly` rollup the points were read from — exposes bounded
+    /// staleness. `None` for the live `minute` bucket (always current).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rollup_as_of: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

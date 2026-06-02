@@ -1683,9 +1683,12 @@ impl CortexService {
             None => None,
         };
         let group_by_label = req.group_by.clone();
-        let points = self
+        // Rollup-served buckets carry the rollup's last-refresh time as their
+        // `as_of` staleness marker; the live `minute` bucket is always current.
+        let served_by_rollup = bucket.served_by_hourly_rollup();
+        let (points, rollup_as_of) = self
             .run_db("timeline", move |pool| {
-                db::timeline(
+                let points = db::timeline(
                     pool,
                     bucket,
                     group_by,
@@ -1694,13 +1697,20 @@ impl CortexService {
                     req.hostname.as_deref(),
                     req.app_name.as_deref(),
                     severity_in.as_deref(),
-                )
+                )?;
+                let as_of = if served_by_rollup {
+                    db::timeline_rollup_status(pool)?.refreshed_at
+                } else {
+                    None
+                };
+                Ok((points, as_of))
             })
             .await?;
         Ok(TimelineResponse {
             bucket: bucket_str,
             group_by: group_by_label,
             points: points.into_iter().map(Into::into).collect(),
+            rollup_as_of,
         })
     }
 

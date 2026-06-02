@@ -75,8 +75,9 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         .thread_pool(shared_scheduled_thread_pool())
         .build(manager)?;
 
-    // Initialize schema
-    let conn = pool.get()?;
+    // Initialize schema. `mut` so migration 25's backfill can open an explicit
+    // transaction (`Connection::transaction_with_behavior` needs `&mut`).
+    let mut conn = pool.get()?;
 
     let auto_vacuum_mode: i64 = conn.query_row("PRAGMA auto_vacuum", [], |r| r.get(0))?;
     if auto_vacuum_mode != 2 {
@@ -802,6 +803,128 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
             "Migration 24: AI covering indexes rebuilt + baseline ANALYZE done"
         );
     }
+
+    // Migration 25: timeline_hourly rollup (bead syslog-mcp-kcvq).
+    //
+    // `timeline` (bucket=hour/day/week/month) and `stats.total_logs` previously
+    // scanned the whole `logs` table (`strftime` GROUP BY ~3s; `COUNT(*)` ~7s on
+    // a multi-million-row DB). This table materializes per-hour event counts at
+    // grain (bucket_hour, hostname, app_name, severity) — ~9.3k rows over 2.65M
+    // raw logs (~280x reduction), so timeline/stats reads become O(#buckets).
+    //
+    // INCREMENTAL, not full-recompute (contrast ai_session_rollup): a full
+    // recompute is the 63s `strftime`-over-2.65M scan. The rollup holds ONLY
+    // COUNT(*) — no MIN/MAX — so it is self-maintainable for ADDs: aggregate only
+    // `logs WHERE id > source_max_id` and upsert-add into existing buckets. A
+    // late-arriving high-id row with an old timestamp correctly lands in its old
+    // bucket. The only incremental hazard is DELETEs (retention purges oldest
+    // rows by received_at); the retention task prunes stale low buckets after
+    // each purge (see spawn_retention_task), accepting a transient overcount only
+    // in the single boundary hour.
+    //
+    // `app_name` is stored NOT NULL via COALESCE(app_name,'') — SQLite treats
+    // NULLs as DISTINCT in UNIQUE/PK indexes, so a nullable column would make
+    // ON CONFLICT never match for null-app grains and double-count every tick.
+    //
+    // First-run backfill is the one-time 63s scan, guarded by a has_rows check so
+    // empty/test DBs skip it. It runs at server STARTUP before ingest begins, so
+    // holding the write lock here is acceptable (same pattern as migration 24).
+    if !migration_applied(&conn, 25)? {
+        tracing::info!(
+            "Migration 25: creating timeline_hourly rollup + backfill — backfill is \
+             a one-time full scan (~60s on large DBs, write lock held)"
+        );
+        let started = std::time::Instant::now();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS timeline_hourly (
+                 bucket      TEXT NOT NULL,
+                 hostname    TEXT NOT NULL,
+                 app_name    TEXT NOT NULL,
+                 severity    TEXT NOT NULL,
+                 event_count INTEGER NOT NULL,
+                 PRIMARY KEY (bucket, hostname, app_name, severity)
+             );
+             CREATE TABLE IF NOT EXISTS timeline_hourly_meta (
+                 id            INTEGER PRIMARY KEY CHECK (id = 1),
+                 refreshed_at  TEXT,
+                 source_max_id INTEGER NOT NULL DEFAULT 0
+             );
+             INSERT OR IGNORE INTO timeline_hourly_meta (id, refreshed_at, source_max_id)
+                 VALUES (1, NULL, 0);",
+        )?;
+        // Backfill only when the table has data (fresh installs / tests skip the
+        // scan and start from an empty rollup at watermark 0).
+        let has_rows: bool =
+            conn.query_row("SELECT EXISTS(SELECT 1 FROM logs)", [], |r| r.get(0))?;
+        if has_rows {
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let max_id: i64 =
+                tx.query_row("SELECT COALESCE(MAX(id), 0) FROM logs", [], |r| r.get(0))?;
+            tx.execute(
+                "INSERT INTO timeline_hourly (bucket, hostname, app_name, severity, event_count)
+                 SELECT strftime('%Y-%m-%dT%H:00:00Z', timestamp) AS bucket,
+                        hostname,
+                        COALESCE(app_name, '') AS app_name,
+                        severity,
+                        COUNT(*) AS event_count
+                 FROM logs
+                 WHERE id <= ?1
+                 GROUP BY bucket, hostname, app_name, severity
+                 ON CONFLICT(bucket, hostname, app_name, severity)
+                     DO UPDATE SET event_count = event_count + excluded.event_count",
+                [max_id],
+            )?;
+            tx.execute(
+                "UPDATE timeline_hourly_meta
+                    SET refreshed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                        source_max_id = ?1
+                  WHERE id = 1",
+                [max_id],
+            )?;
+            tx.commit()?;
+        }
+        conn.execute_batch("INSERT INTO schema_migrations (version) VALUES (25);")?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "Migration 25: timeline_hourly rollup created + backfilled"
+        );
+    }
+
+    // Migration 26: maintenance_jobs table (bead syslog-mcp-a4pd).
+    //
+    // `db integrity` on a 5GB DB is ~147s (PRAGMA quick_check reads every page —
+    // unfixable). This table backs a server-side background job: the HTTP path
+    // inserts a 'running' row, spawns the check on a blocking thread, and updates
+    // the row to 'done'/'failed' + result_json; clients poll by id. quick_check
+    // is read-only so it never blocks ingest writes.
+    if !migration_applied(&conn, 26)? {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS maintenance_jobs (
+                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                 kind        TEXT NOT NULL,
+                 status      TEXT NOT NULL,
+                 started_at  TEXT NOT NULL,
+                 finished_at TEXT,
+                 result_json TEXT
+             );
+             CREATE INDEX IF NOT EXISTS idx_maintenance_jobs_kind_status
+                 ON maintenance_jobs(kind, status);
+             INSERT INTO schema_migrations (version) VALUES (26);",
+        )?;
+        tracing::info!("Migration 26: created maintenance_jobs table");
+    }
+
+    // A server crash/restart mid-check leaves an orphaned 'running' maintenance
+    // job that would never resolve. Mark any such rows 'failed' on every startup
+    // so polls get a terminal answer instead of hanging forever. Idempotent and
+    // a no-op in the common case (no running jobs across a clean restart).
+    conn.execute_batch(
+        "UPDATE maintenance_jobs
+            SET status = 'failed',
+                finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                result_json = json_object('error', 'interrupted by server restart')
+          WHERE status = 'running';",
+    )?;
 
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time

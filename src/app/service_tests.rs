@@ -725,6 +725,10 @@ async fn timeline_applies_default_lookback_only_when_from_and_to_both_absent() {
         ],
     )
     .unwrap();
+    // The day bucket reads the timeline_hourly rollup; populate it (the
+    // background task does this in prod). The default-lookback `from`/`to` are
+    // applied above the rollup read, so this exercises that filtering path.
+    crate::db::refresh_timeline_rollup(&pool).unwrap();
 
     // Both absent → day bucket default (30 days) excludes the 400-day-old log.
     let resp = service
