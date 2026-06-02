@@ -56,7 +56,7 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `similar_incidents` | FTS5 historical incident clusters with overlapping AI sessions | no |
 | `ask_history` | AI transcript history search with nearby non-AI log context | no |
 | `incident_context` | Window bundle of non-AI log aggregates/errors and active AI sessions | no |
-| `graph` | Resolve graph entities and return bounded one-hop neighborhoods with evidence | no |
+| `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations | no |
 | `ack_error` | Acknowledge an error signature | yes |
 | `unack_error` | Revoke an error acknowledgement | yes |
 | `notifications_test` | Send a test Apprise notification | yes |
@@ -84,6 +84,7 @@ methods as the MCP actions.
 | `cortex correlate-state` | `correlate_state` | Logs plus heartbeat summaries around a reference time |
 | `cortex entity` | `graph` | Resolve a graph entity by canonical key or alias |
 | `cortex graph around` | `graph` | One-hop graph neighborhood with typed relationships and evidence |
+| `cortex graph explain` | `graph` | Evidence-backed deterministic incident explanation over graph chains |
 | `cortex ai correlate` | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs |
 | `cortex ai incidents` | `abuse_incidents` | Grouped abuse incident candidates |
 | `cortex ai investigate` | `abuse_investigate` | Abuse incident evidence bundles |

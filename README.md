@@ -80,7 +80,7 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `similar_incidents` | FTS5 cluster search over historical system logs |
 | `ask_history` | Search AI transcript history with nearby log context |
 | `incident_context` | Full context bundle for a known time window |
-| `graph` | Resolve graph entities and return bounded one-hop neighborhoods with evidence |
+| `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations |
 | `help` | Markdown reference for all actions |
 
 ## Prompts
@@ -838,6 +838,7 @@ cortex hosts
 cortex correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
 cortex entity host tootie
 cortex graph around host tootie --limit 25
+cortex graph explain host tootie --depth 2
 cortex stats --json
 cortex db integrity            # run PRAGMA integrity_check
 cortex db checkpoint --mode full
@@ -875,6 +876,7 @@ GET  /api/ai/incidents?terms[]=foo&terms[]=bar
 GET  /api/ai/investigate?correlation_window_minutes=30
 GET  /api/graph/entity?entity_type=host&key=tootie
 GET  /api/graph/around?entity_type=host&key=tootie&depth=1
+GET  /api/graph/explain?entity_type=host&key=tootie&depth=2
 GET  /api/compose/status
 GET  /api/compose/doctor
 ```

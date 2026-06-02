@@ -2129,6 +2129,28 @@ pub struct GraphAroundRequest {
     pub payload_budget: Option<u32>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphExplainRequest {
+    /// Adapter hint for MCP/CLI shared payloads. Service methods ignore it.
+    pub mode: Option<String>,
+    pub entity_id: Option<i64>,
+    pub entity_type: Option<String>,
+    pub key: Option<String>,
+    pub alias_type: Option<String>,
+    pub alias_key: Option<String>,
+    /// Narrative expansion depth. Default 2, hard max 3.
+    pub depth: Option<u32>,
+    /// Relationships fetched per frontier entity. Default 20, clamp 1..=100.
+    pub beam_width: Option<u32>,
+    /// Total candidate chain cap. Default 200, clamp 1..=200.
+    pub max_chains: Option<u32>,
+    /// Evidence samples per relationship. Default 2, clamp 0..=5.
+    pub evidence_sample_limit: Option<u32>,
+    /// Approximate payload budget in bytes. Default 32768, clamp 4096..=65536.
+    pub payload_budget: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GraphEntity {
     pub id: i64,
@@ -2250,6 +2272,41 @@ pub struct GraphAroundResponse {
     pub next_queries: Vec<GraphNextQuery>,
     pub candidates: Vec<GraphEntityCandidate>,
     pub metadata: GraphResponseMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphExplainResponse {
+    pub resolved_entity: Option<GraphEntity>,
+    pub narrative: Option<GraphIncidentNarrative>,
+    pub chains: Vec<GraphNarrativeChain>,
+    pub evidence: Vec<GraphEvidence>,
+    pub open_questions: Vec<String>,
+    pub missing_evidence: Vec<String>,
+    pub next_queries: Vec<GraphNextQuery>,
+    pub candidates: Vec<GraphEntityCandidate>,
+    pub metadata: GraphResponseMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphIncidentNarrative {
+    pub title: String,
+    pub summary: String,
+    pub confidence: String,
+    pub relationship_ids: Vec<i64>,
+    pub evidence_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphNarrativeChain {
+    pub chain_id: String,
+    pub confidence: String,
+    pub score: f64,
+    pub summary: String,
+    pub entities: Vec<GraphEntity>,
+    pub relationships: Vec<GraphRelationship>,
+    pub evidence_ids: Vec<i64>,
+    pub relationship_ids: Vec<i64>,
+    pub open_questions: Vec<String>,
 }
 
 #[cfg(test)]

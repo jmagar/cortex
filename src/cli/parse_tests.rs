@@ -187,6 +187,53 @@ fn parse_routes_graph_around_type_key() {
 }
 
 #[test]
+fn parse_routes_graph_explain_type_key() {
+    let command = parse_command(vec![
+        "graph".to_string(),
+        "explain".to_string(),
+        "host:tootie".to_string(),
+        "--depth".to_string(),
+        "3".to_string(),
+        "--beam-width=12".to_string(),
+        "--max-chains".to_string(),
+        "50".to_string(),
+        "--evidence-sample-limit=2".to_string(),
+        "--payload-budget".to_string(),
+        "8192".to_string(),
+        "--json".to_string(),
+    ])
+    .unwrap();
+    match command {
+        CliCommand::Graph(crate::cli::GraphCommand::Explain(args)) => {
+            assert_eq!(args.entity_type.as_deref(), Some("host"));
+            assert_eq!(args.key.as_deref(), Some("tootie"));
+            assert_eq!(args.depth, Some(3));
+            assert_eq!(args.beam_width, Some(12));
+            assert_eq!(args.max_chains, Some(50));
+            assert_eq!(args.evidence_sample_limit, Some(2));
+            assert_eq!(args.payload_budget, Some(8192));
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_graph_explain_rejects_bad_depth() {
+    let err = parse_command(vec![
+        "graph".to_string(),
+        "explain".to_string(),
+        "host".to_string(),
+        "tootie".to_string(),
+        "--depth".to_string(),
+        "nope".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("--depth must be"), "got: {err}");
+}
+
+#[test]
 fn parse_graph_around_rejects_bad_entity_type() {
     let err = parse_command(vec![
         "graph".to_string(),

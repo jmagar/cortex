@@ -27,9 +27,9 @@ use crate::cli::{
     AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
     AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
     AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs,
-    DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs, GraphAroundArgs, IngestRateArgs,
-    OutputArgs, PatternsArgs, SearchArgs, SessionsArgs, SigAckArgs, SigListArgs, SigUnackArgs,
-    SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs, GraphAroundArgs, GraphExplainArgs,
+    IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs, SessionsArgs, SigAckArgs, SigListArgs,
+    SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 use anyhow::{bail, Result};
 use std::time::Duration;
@@ -166,6 +166,27 @@ fn graph_around_args_into_request_snapshot() {
     assert_eq!(
         format!("{req:?}"),
         "GraphAroundRequest { mode: Some(\"around\"), entity_id: None, entity_type: Some(\"host\"), key: Some(\"tootie\"), alias_type: None, alias_key: None, depth: Some(1), limit: Some(25), evidence_sample_limit: Some(3), payload_budget: Some(16384) }"
+    );
+}
+
+#[test]
+fn graph_explain_args_into_request_snapshot() {
+    let args = GraphExplainArgs {
+        entity_id: None,
+        entity_type: Some("host".into()),
+        key: Some("tootie".into()),
+        alias_type: None,
+        alias_key: None,
+        depth: Some(2),
+        beam_width: Some(20),
+        max_chains: Some(100),
+        evidence_sample_limit: Some(2),
+        payload_budget: Some(16384),
+        json: true,
+    };
+    assert_eq!(
+        format!("{:?}", args.into_request()),
+        "GraphExplainRequest { mode: Some(\"explain\"), entity_id: None, entity_type: Some(\"host\"), key: Some(\"tootie\"), alias_type: None, alias_key: None, depth: Some(2), beam_width: Some(20), max_chains: Some(100), evidence_sample_limit: Some(2), payload_budget: Some(16384) }"
     );
 }
 

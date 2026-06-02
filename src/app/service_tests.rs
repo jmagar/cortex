@@ -240,6 +240,87 @@ async fn graph_around_returns_one_hop_relationships_evidence_and_metadata() {
 }
 
 #[tokio::test]
+async fn graph_explain_returns_conservative_evidence_backed_chain() {
+    let (service, pool, _dir) = test_service();
+    let mut app_log = entry(
+        "2026-01-01T00:00:00.000Z",
+        "host-a",
+        "info",
+        "sshd accepted connection",
+        "10.0.0.1:514",
+    );
+    app_log.app_name = Some("sshd".into());
+    insert_logs_batch(&pool, &[app_log]).unwrap();
+    refresh_graph_projection_for_test(&pool);
+
+    let response = service
+        .graph_explain(GraphExplainRequest {
+            mode: None,
+            entity_type: Some("host".into()),
+            key: Some("host-a".into()),
+            depth: Some(2),
+            beam_width: Some(10),
+            max_chains: Some(20),
+            evidence_sample_limit: Some(2),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.metadata.depth, 2);
+    assert!(response.narrative.is_some());
+    let narrative = response.narrative.as_ref().unwrap();
+    assert!(!narrative.relationship_ids.is_empty());
+    assert!(!narrative.evidence_ids.is_empty());
+    assert!(narrative.summary.contains("not a proven root cause"));
+    assert!(!narrative.summary.contains("caused"));
+    assert!(!response.chains.is_empty());
+    assert!(response
+        .chains
+        .iter()
+        .all(|chain| !chain.relationship_ids.is_empty() && !chain.evidence_ids.is_empty()));
+    assert!(!response.evidence.is_empty());
+    assert!(!response.next_queries.is_empty());
+}
+
+#[tokio::test]
+async fn graph_explain_declines_without_relationship_evidence() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[entry(
+            "2026-01-01T00:00:00.000Z",
+            "",
+            "info",
+            "source only",
+            "10.0.0.1:514",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection_for_test(&pool);
+
+    let source = crate::db::graph::find_graph_entity_by_key(&pool, "source_ip", "10.0.0.1:514")
+        .unwrap()
+        .unwrap();
+    let response = service
+        .graph_explain(GraphExplainRequest {
+            mode: None,
+            entity_id: Some(source.id),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert!(response.narrative.is_none());
+    assert!(response.chains.is_empty());
+    assert!(response
+        .missing_evidence
+        .iter()
+        .any(|item| item.contains("relationship evidence")));
+    assert!(!response.open_questions.is_empty());
+}
+
+#[tokio::test]
 async fn graph_around_rejects_depth_above_one_and_redacts_safe_evidence() {
     let (service, pool, _dir) = test_service();
     insert_logs_batch(

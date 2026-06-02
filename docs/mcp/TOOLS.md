@@ -49,7 +49,7 @@ cortex exposes one MCP tool named `cortex`. The required
 | `similar_incidents` | FTS5 cluster search — find historical incidents similar to a query |
 | `ask_history` | Search AI transcript history for past work related to a topic |
 | `incident_context` | Full context bundle for a known time window — logs + AI sessions |
-| `graph` | Resolve graph entities and return bounded one-hop neighborhoods with evidence |
+| `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations |
 | `help` | Markdown reference for all actions |
 
 ## syslog search

@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -19,7 +20,8 @@ use super::models::{
     DbVacuumRequest, DbVacuumResult, FilterLogsRequest, FleetStateHostRow, FleetStateRequest,
     FleetStateResponse, FleetStateSummary, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
     GetLogResponse, GraphAroundRequest, GraphAroundResponse, GraphEntity, GraphEntityCandidate,
-    GraphEntityLookupRequest, GraphEntityLookupResponse, GraphEvidence, GraphNextQuery,
+    GraphEntityLookupRequest, GraphEntityLookupResponse, GraphEvidence, GraphExplainRequest,
+    GraphExplainResponse, GraphIncidentNarrative, GraphNarrativeChain, GraphNextQuery,
     GraphRelationship, GraphResponseMetadata, IncidentContextRequest, IncidentContextResponse,
     IncidentEvent, IncidentRequest, IncidentResponse, IngestRateRequest, IngestRateResponse,
     ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
@@ -2631,40 +2633,13 @@ impl CortexService {
                 )
             })
             .await?;
-        let evidence: Vec<GraphEvidence> = rows
-            .evidence
-            .into_iter()
-            .map(|row| graph_evidence_safe(row, limits.payload_budget))
-            .collect();
-        let mut evidence_ids_by_relationship: std::collections::HashMap<i64, Vec<i64>> =
-            std::collections::HashMap::new();
-        for item in &evidence {
-            evidence_ids_by_relationship
-                .entry(item.relationship_id)
-                .or_default()
-                .push(item.id);
-        }
-        let relationships = rows
-            .relationships
-            .into_iter()
-            .map(|row| GraphRelationship {
-                id: row.id,
-                relationship_key: row.relationship_key,
-                src_entity_id: row.src_entity_id,
-                dst_entity_id: row.dst_entity_id,
-                relationship_type: row.relationship_type,
-                reason_code: row.reason_code,
-                trust_level: row.trust_level,
-                confidence: row.confidence,
-                evidence_count: row.evidence_count,
-                evidence_ids: evidence_ids_by_relationship
-                    .remove(&row.id)
-                    .unwrap_or_default(),
-                first_seen_at: row.first_seen_at,
-                last_seen_at: row.last_seen_at,
-            })
-            .collect::<Vec<_>>();
-        let entities: Vec<GraphEntity> = rows.entities.into_iter().map(Into::into).collect();
+        let rows_truncated = rows.truncated;
+        let converted = graph_rows_to_models(rows, limits.payload_budget);
+        let GraphRowsModels {
+            relationships,
+            entities,
+            evidence,
+        } = converted;
         let next_queries = entities
             .iter()
             .filter(|related| related.id != entity.id)
@@ -2687,11 +2662,181 @@ impl CortexService {
             metadata: graph_metadata(
                 &status,
                 limits,
-                rows.truncated || payload_truncated,
+                rows_truncated || payload_truncated,
                 if payload_truncated {
                     Some("payload_budget".to_string())
-                } else if rows.truncated {
+                } else if rows_truncated {
                     Some("relationship_limit".to_string())
+                } else {
+                    None
+                },
+            ),
+        })
+    }
+
+    pub async fn graph_explain(
+        &self,
+        req: GraphExplainRequest,
+    ) -> ServiceResult<GraphExplainResponse> {
+        let limits = GraphExplainLimits::from_request(&req);
+        let status = self
+            .run_db("graph.status", db::graph::graph_projection_status)
+            .await?;
+
+        let (resolved_entity, candidates) = if let Some(entity_id) = req.entity_id {
+            let entity = self
+                .run_db("graph.entity_id", move |pool| {
+                    db::graph::find_graph_entity_by_id(pool, entity_id)
+                })
+                .await?
+                .ok_or_else(|| ServiceError::NotFound("graph entity not found".into()))?;
+            (Some(GraphEntity::from(entity)), Vec::new())
+        } else {
+            let lookup = self
+                .graph_entity_lookup(GraphEntityLookupRequest {
+                    mode: None,
+                    entity_type: req.entity_type.clone(),
+                    key: req.key.clone(),
+                    alias_type: req.alias_type.clone(),
+                    alias_key: req.alias_key.clone(),
+                    limit: Some(limits.beam_width),
+                    evidence_sample_limit: Some(limits.evidence_sample_limit),
+                    payload_budget: Some(limits.payload_budget),
+                })
+                .await?;
+            (lookup.resolved_entity, lookup.candidates)
+        };
+
+        let Some(root) = resolved_entity.clone() else {
+            return Ok(GraphExplainResponse {
+                resolved_entity: None,
+                narrative: None,
+                chains: Vec::new(),
+                evidence: Vec::new(),
+                open_questions: vec![
+                    "Resolve the ambiguous entity before generating an incident explanation."
+                        .to_string(),
+                ],
+                missing_evidence: vec!["unique graph entity".to_string()],
+                next_queries: Vec::new(),
+                candidates,
+                metadata: graph_metadata(
+                    &status,
+                    limits.as_graph_limits(),
+                    true,
+                    Some("ambiguous_entity".to_string()),
+                ),
+            });
+        };
+
+        let mut queue = VecDeque::new();
+        queue.push_back(ExplainPath::root(root.id));
+        let mut relationship_map: HashMap<i64, GraphRelationship> = HashMap::new();
+        let mut entity_map: HashMap<i64, GraphEntity> = HashMap::from([(root.id, root.clone())]);
+        let mut evidence_map: HashMap<i64, GraphEvidence> = HashMap::new();
+        let mut completed_paths = Vec::new();
+        let mut truncated = false;
+
+        while let Some(path) = queue.pop_front() {
+            if completed_paths.len() >= limits.max_chains as usize {
+                truncated = true;
+                break;
+            }
+            if path.depth >= limits.depth {
+                if !path.relationship_ids.is_empty() {
+                    completed_paths.push(path);
+                }
+                continue;
+            }
+
+            let entity_id = path.current_entity_id;
+            let rows = self
+                .run_db("graph.explain_around", move |pool| {
+                    db::graph::graph_around_entity(
+                        pool,
+                        entity_id,
+                        limits.beam_width,
+                        limits.evidence_sample_limit,
+                    )
+                })
+                .await?;
+            truncated |= rows.truncated;
+            let converted = graph_rows_to_models(rows, limits.payload_budget);
+            for entity in converted.entities {
+                entity_map.entry(entity.id).or_insert(entity);
+            }
+            for evidence in converted.evidence {
+                evidence_map.entry(evidence.id).or_insert(evidence);
+            }
+            for relationship in converted.relationships {
+                let next_id = if relationship.src_entity_id == entity_id {
+                    relationship.dst_entity_id
+                } else {
+                    relationship.src_entity_id
+                };
+                relationship_map
+                    .entry(relationship.id)
+                    .or_insert_with(|| relationship.clone());
+                if path.seen_entity_ids.contains(&next_id)
+                    || path.relationship_ids.contains(&relationship.id)
+                {
+                    continue;
+                }
+                let mut next = path.clone();
+                next.current_entity_id = next_id;
+                next.depth += 1;
+                next.seen_entity_ids.insert(next_id);
+                next.relationship_ids.push(relationship.id);
+                next.score += relationship_score(&relationship);
+                queue.push_back(next);
+            }
+            if !path.relationship_ids.is_empty() {
+                completed_paths.push(path);
+            }
+        }
+
+        completed_paths.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        completed_paths.truncate(limits.max_chains as usize);
+
+        let chains = completed_paths
+            .into_iter()
+            .enumerate()
+            .map(|(idx, path)| {
+                narrative_chain_from_path(idx + 1, &path, &entity_map, &relationship_map)
+            })
+            .collect::<Vec<_>>();
+        let evidence = evidence_for_chains(&chains, &evidence_map);
+        let narrative = build_graph_narrative(&root, &chains);
+        let mut open_questions = graph_explain_open_questions(&chains);
+        let mut missing_evidence = graph_explain_missing_evidence(&chains);
+        if narrative.is_none() {
+            missing_evidence.push("relationship evidence for a defensible explanation".to_string());
+            open_questions.push("Which related entity should be inspected next?".to_string());
+        }
+        let next_queries = graph_explain_next_queries(&root, &entity_map);
+        let payload_truncated = estimated_graph_explain_payload_bytes(&chains, &evidence)
+            > limits.payload_budget as usize;
+        Ok(GraphExplainResponse {
+            resolved_entity: Some(root),
+            narrative,
+            chains,
+            evidence,
+            open_questions,
+            missing_evidence,
+            next_queries,
+            candidates: Vec::new(),
+            metadata: graph_metadata(
+                &status,
+                limits.as_graph_limits(),
+                truncated || payload_truncated,
+                if payload_truncated {
+                    Some("payload_budget".to_string())
+                } else if truncated {
+                    Some("chain_limit".to_string())
                 } else {
                     None
                 },
@@ -2984,6 +3129,36 @@ struct GraphLimits {
     payload_budget: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct GraphExplainLimits {
+    depth: u32,
+    beam_width: u32,
+    max_chains: u32,
+    evidence_sample_limit: u32,
+    payload_budget: u32,
+}
+
+impl GraphExplainLimits {
+    fn from_request(req: &GraphExplainRequest) -> Self {
+        Self {
+            depth: req.depth.unwrap_or(2).clamp(1, 3),
+            beam_width: req.beam_width.unwrap_or(20).clamp(1, 100),
+            max_chains: req.max_chains.unwrap_or(200).clamp(1, 200),
+            evidence_sample_limit: req.evidence_sample_limit.unwrap_or(2).clamp(0, 5),
+            payload_budget: req.payload_budget.unwrap_or(32_768).clamp(4_096, 65_536),
+        }
+    }
+
+    fn as_graph_limits(self) -> GraphLimits {
+        GraphLimits {
+            limit: self.max_chains,
+            depth: self.depth,
+            evidence_sample_limit: self.evidence_sample_limit,
+            payload_budget: self.payload_budget,
+        }
+    }
+}
+
 impl GraphLimits {
     fn from_entity_request(req: &GraphEntityLookupRequest) -> Self {
         Self {
@@ -3008,6 +3183,298 @@ impl GraphLimits {
             payload_budget: req.payload_budget.unwrap_or(32_768).clamp(4_096, 65_536),
         })
     }
+}
+
+#[derive(Debug, Clone)]
+struct ExplainPath {
+    current_entity_id: i64,
+    depth: u32,
+    seen_entity_ids: HashSet<i64>,
+    relationship_ids: Vec<i64>,
+    score: f64,
+}
+
+impl ExplainPath {
+    fn root(entity_id: i64) -> Self {
+        Self {
+            current_entity_id: entity_id,
+            depth: 0,
+            seen_entity_ids: HashSet::from([entity_id]),
+            relationship_ids: Vec::new(),
+            score: 0.0,
+        }
+    }
+}
+
+struct GraphRowsModels {
+    relationships: Vec<GraphRelationship>,
+    entities: Vec<GraphEntity>,
+    evidence: Vec<GraphEvidence>,
+}
+
+fn graph_rows_to_models(rows: db::graph::GraphAroundRows, payload_budget: u32) -> GraphRowsModels {
+    let evidence: Vec<GraphEvidence> = rows
+        .evidence
+        .into_iter()
+        .map(|row| graph_evidence_safe(row, payload_budget))
+        .collect();
+    let mut evidence_ids_by_relationship: HashMap<i64, Vec<i64>> = HashMap::new();
+    for item in &evidence {
+        evidence_ids_by_relationship
+            .entry(item.relationship_id)
+            .or_default()
+            .push(item.id);
+    }
+    let relationships = rows
+        .relationships
+        .into_iter()
+        .map(|row| GraphRelationship {
+            id: row.id,
+            relationship_key: row.relationship_key,
+            src_entity_id: row.src_entity_id,
+            dst_entity_id: row.dst_entity_id,
+            relationship_type: row.relationship_type,
+            reason_code: row.reason_code,
+            trust_level: row.trust_level,
+            confidence: row.confidence,
+            evidence_count: row.evidence_count,
+            evidence_ids: evidence_ids_by_relationship
+                .remove(&row.id)
+                .unwrap_or_default(),
+            first_seen_at: row.first_seen_at,
+            last_seen_at: row.last_seen_at,
+        })
+        .collect();
+    GraphRowsModels {
+        relationships,
+        entities: rows.entities.into_iter().map(Into::into).collect(),
+        evidence,
+    }
+}
+
+fn relationship_score(relationship: &GraphRelationship) -> f64 {
+    let trust_weight = match relationship.trust_level.as_str() {
+        db::graph::TRUST_VERIFIED => 1.0,
+        db::graph::TRUST_INFERRED => 0.75,
+        db::graph::TRUST_CLAIMED => 0.55,
+        _ => 0.4,
+    };
+    let evidence_weight = (relationship.evidence_count.min(10) as f64 / 10.0).max(0.1);
+    relationship.confidence * trust_weight + evidence_weight
+}
+
+fn narrative_chain_from_path(
+    index: usize,
+    path: &ExplainPath,
+    entity_map: &HashMap<i64, GraphEntity>,
+    relationship_map: &HashMap<i64, GraphRelationship>,
+) -> GraphNarrativeChain {
+    let relationships = path
+        .relationship_ids
+        .iter()
+        .filter_map(|id| relationship_map.get(id).cloned())
+        .collect::<Vec<_>>();
+    let mut entity_ids = relationships
+        .iter()
+        .flat_map(|rel| [rel.src_entity_id, rel.dst_entity_id])
+        .collect::<Vec<_>>();
+    entity_ids.sort_unstable();
+    entity_ids.dedup();
+    let entities = entity_ids
+        .iter()
+        .filter_map(|id| entity_map.get(id).cloned())
+        .collect::<Vec<_>>();
+    let mut evidence_ids = relationships
+        .iter()
+        .flat_map(|rel| rel.evidence_ids.clone())
+        .collect::<Vec<_>>();
+    evidence_ids.sort_unstable();
+    evidence_ids.dedup();
+    let confidence = confidence_from_score(path.score, relationships.len());
+    let summary = chain_summary(&entities, &relationships, &confidence);
+    let open_questions = if relationships
+        .iter()
+        .any(|rel| rel.trust_level != db::graph::TRUST_VERIFIED)
+    {
+        vec!["Confirm claimed or inferred identities before treating this as causal.".to_string()]
+    } else {
+        Vec::new()
+    };
+    GraphNarrativeChain {
+        chain_id: format!("chain-{index}"),
+        confidence,
+        score: path.score,
+        summary,
+        entities,
+        relationship_ids: relationships.iter().map(|rel| rel.id).collect(),
+        relationships,
+        evidence_ids,
+        open_questions,
+    }
+}
+
+fn confidence_from_score(score: f64, relationship_count: usize) -> String {
+    let normalized = if relationship_count == 0 {
+        0.0
+    } else {
+        score / relationship_count as f64
+    };
+    if normalized >= 1.35 {
+        "high".to_string()
+    } else if normalized >= 0.85 {
+        "medium".to_string()
+    } else {
+        "low".to_string()
+    }
+}
+
+fn chain_summary(
+    entities: &[GraphEntity],
+    relationships: &[GraphRelationship],
+    confidence: &str,
+) -> String {
+    let first = entities
+        .first()
+        .map(entity_debug_label)
+        .unwrap_or_else(|| "unknown entity".to_string());
+    let last = entities
+        .last()
+        .map(entity_debug_label)
+        .unwrap_or_else(|| "unknown entity".to_string());
+    let reasons = relationships
+        .iter()
+        .map(|rel| rel.reason_code.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{confidence}-confidence graph evidence links {first} and {last} through {} relationship(s): {reasons}. Treat this as an evidence-backed connection, not a proven root cause.",
+        relationships.len()
+    )
+}
+
+fn entity_debug_label(entity: &GraphEntity) -> String {
+    format!("{}:{}", entity.entity_type, entity.display_label)
+}
+
+fn evidence_for_chains(
+    chains: &[GraphNarrativeChain],
+    evidence_map: &HashMap<i64, GraphEvidence>,
+) -> Vec<GraphEvidence> {
+    let mut ids = chains
+        .iter()
+        .flat_map(|chain| chain.evidence_ids.clone())
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter()
+        .filter_map(|id| evidence_map.get(&id).cloned())
+        .collect()
+}
+
+fn build_graph_narrative(
+    root: &GraphEntity,
+    chains: &[GraphNarrativeChain],
+) -> Option<GraphIncidentNarrative> {
+    let strongest = chains.first()?;
+    if strongest.relationship_ids.is_empty() || strongest.evidence_ids.is_empty() {
+        return None;
+    }
+    let relationship_ids = strongest.relationship_ids.clone();
+    let evidence_ids = strongest.evidence_ids.clone();
+    Some(GraphIncidentNarrative {
+        title: format!("Graph explanation for {}", entity_debug_label(root)),
+        summary: format!(
+            "{} Follow the cited relationship and evidence ids, then inspect the suggested graph queries before making a causal claim.",
+            strongest.summary
+        ),
+        confidence: strongest.confidence.clone(),
+        relationship_ids,
+        evidence_ids,
+    })
+}
+
+fn graph_explain_open_questions(chains: &[GraphNarrativeChain]) -> Vec<String> {
+    if chains.is_empty() {
+        return Vec::new();
+    }
+    let mut questions = Vec::new();
+    if chains.iter().any(|chain| chain.confidence == "low") {
+        questions.push(
+            "Is there corroborating verified evidence for the low-confidence link?".to_string(),
+        );
+    }
+    if chains
+        .iter()
+        .flat_map(|chain| &chain.relationships)
+        .any(|rel| rel.trust_level == db::graph::TRUST_CLAIMED)
+    {
+        questions.push(
+            "Does source_ip or heartbeat evidence corroborate the claimed hostname?".to_string(),
+        );
+    }
+    questions
+}
+
+fn graph_explain_missing_evidence(chains: &[GraphNarrativeChain]) -> Vec<String> {
+    let mut missing = Vec::new();
+    if chains.is_empty() {
+        return missing;
+    }
+    if !chains
+        .iter()
+        .flat_map(|chain| &chain.relationships)
+        .any(|rel| rel.trust_level == db::graph::TRUST_VERIFIED)
+    {
+        missing.push("verified relationship evidence".to_string());
+    }
+    missing
+}
+
+fn graph_explain_next_queries(
+    root: &GraphEntity,
+    entity_map: &HashMap<i64, GraphEntity>,
+) -> Vec<GraphNextQuery> {
+    entity_map
+        .values()
+        .filter(|entity| entity.id != root.id)
+        .take(10)
+        .map(|entity| GraphNextQuery {
+            mode: "around".to_string(),
+            entity_id: entity.id,
+            label: entity.display_label.clone(),
+        })
+        .collect()
+}
+
+fn estimated_graph_explain_payload_bytes(
+    chains: &[GraphNarrativeChain],
+    evidence: &[GraphEvidence],
+) -> usize {
+    let chain_bytes: usize = chains
+        .iter()
+        .map(|chain| {
+            chain.summary.len()
+                + chain
+                    .entities
+                    .iter()
+                    .map(|entity| entity.display_label.len() + entity.canonical_key.len())
+                    .sum::<usize>()
+                + chain
+                    .relationships
+                    .iter()
+                    .map(|rel| rel.relationship_type.len() + rel.reason_code.len())
+                    .sum::<usize>()
+        })
+        .sum();
+    let evidence_bytes: usize = evidence
+        .iter()
+        .map(|item| {
+            item.source_id.len()
+                + item.reason_text.as_deref().unwrap_or("").len()
+                + item.safe_excerpt.as_deref().unwrap_or("").len()
+        })
+        .sum();
+    chain_bytes + evidence_bytes
 }
 
 fn validate_graph_entity_type(entity_type: &str) -> ServiceResult<()> {

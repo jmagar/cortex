@@ -1,6 +1,7 @@
 use anyhow::Result;
 use cortex::app::{
-    GraphAroundResponse, GraphEntity, GraphEntityLookupResponse, GraphEvidence, GraphRelationship,
+    GraphAroundResponse, GraphEntity, GraphEntityLookupResponse, GraphEvidence,
+    GraphExplainResponse, GraphRelationship,
 };
 
 use super::color::{cyan, muted, primary, warn};
@@ -63,6 +64,93 @@ pub(crate) fn print_graph_around_response(
     );
     for relationship in &response.relationships {
         print_relationship(relationship, &response.entities, &response.evidence);
+    }
+    if !response.next_queries.is_empty() {
+        println!("{}", muted("follow-ups:"));
+        for query in &response.next_queries {
+            println!(
+                "  cortex graph around --entity-id {}  # {}",
+                query.entity_id,
+                safe_display(&query.label)
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn print_graph_explain_response(
+    response: &GraphExplainResponse,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    print_graph_metadata(&response.metadata);
+    if let Some(entity) = &response.resolved_entity {
+        println!("{}", entity_line("resolved", entity));
+    }
+    if !response.candidates.is_empty() {
+        println!("{}", muted("ambiguous candidates:"));
+        for candidate in &response.candidates {
+            println!(
+                "  {} match={}",
+                entity_line("-", &candidate.entity),
+                primary(&safe_display(&candidate.match_reason))
+            );
+        }
+        return Ok(());
+    }
+    if let Some(narrative) = &response.narrative {
+        println!(
+            "{} confidence={}",
+            primary(&safe_display(&narrative.title)),
+            cyan(&safe_display(&narrative.confidence))
+        );
+        println!("{}", safe_display(&narrative.summary));
+        println!(
+            "{} relationships={:?} evidence={:?}",
+            muted("cites"),
+            narrative.relationship_ids,
+            narrative.evidence_ids
+        );
+    } else {
+        println!("{}", warn("no evidence-backed narrative generated"));
+    }
+    for chain in &response.chains {
+        println!(
+            "\n{} confidence={} score={:.2}",
+            primary(&safe_display(&chain.chain_id)),
+            cyan(&safe_display(&chain.confidence)),
+            chain.score
+        );
+        println!("  {}", safe_display(&chain.summary));
+        println!(
+            "  {} relationships={:?} evidence={:?}",
+            muted("cites"),
+            chain.relationship_ids,
+            chain.evidence_ids
+        );
+        for relationship in &chain.relationships {
+            println!(
+                "  {} trust={} reason={} evidence={}",
+                safe_display(&relationship.relationship_type),
+                safe_display(&relationship.trust_level),
+                safe_display(&relationship.reason_code),
+                relationship.evidence_count
+            );
+        }
+    }
+    if !response.missing_evidence.is_empty() {
+        println!("{}", muted("missing evidence:"));
+        for item in &response.missing_evidence {
+            println!("  - {}", safe_display(item));
+        }
+    }
+    if !response.open_questions.is_empty() {
+        println!("{}", muted("open questions:"));
+        for item in &response.open_questions {
+            println!("  - {}", safe_display(item));
+        }
     }
     if !response.next_queries.is_empty() {
         println!("{}", muted("follow-ups:"));

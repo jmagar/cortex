@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-02
+
+### Added
+
+- Added evidence-backed graph explanations with service, MCP, REST, HTTP
+  client, and CLI support. `cortex graph explain` and MCP `action=graph
+  mode=explain` expand bounded graph chains, cite relationship/evidence ids,
+  return conservative confidence, missing evidence, open questions, follow-up
+  graph queries, projection/truncation metadata, and decline to emit a
+  narrative when graph evidence is insufficient.
+
 ## [1.5.0] - 2026-06-02
 
 ### Added

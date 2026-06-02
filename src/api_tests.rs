@@ -2412,7 +2412,7 @@ async fn graph_routes_return_shared_service_payloads() {
     assert_eq!(value["metadata"]["projection_status"], "ready");
 
     let (status, value) = get_json(
-        app,
+        app.clone(),
         "/api/graph/around?entity_type=host&key=graph-api-host&depth=1&limit=5",
         Some("secret"),
     )
@@ -2421,6 +2421,17 @@ async fn graph_routes_return_shared_service_payloads() {
     assert_eq!(value["resolved_entity"]["canonical_key"], "graph-api-host");
     assert!(value["relationships"].as_array().unwrap().len() >= 1);
     assert_eq!(value["metadata"]["depth"], 1);
+
+    let (status, value) = get_json(
+        app,
+        "/api/graph/explain?entity_type=host&key=graph-api-host&depth=2&beam_width=5&max_chains=10",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["resolved_entity"]["canonical_key"], "graph-api-host");
+    assert!(value["chains"].as_array().unwrap().len() >= 1);
+    assert_eq!(value["metadata"]["depth"], 2);
 }
 
 // ── bearer enforcement on new RAG-adjacent / heartbeat routes ───────────────
@@ -2456,6 +2467,7 @@ async fn graph_routes_require_bearer() {
     for path in [
         "/api/graph/entity?entity_type=host&key=foo",
         "/api/graph/around?entity_type=host&key=foo",
+        "/api/graph/explain?entity_type=host&key=foo",
     ] {
         let (status, _) = get_json(app.clone(), path, None).await;
         assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
@@ -2495,6 +2507,7 @@ async fn unknown_query_param_returns_400_on_graph_routes() {
     for path in [
         "/api/graph/entity?entity_type=host&key=foo&bogus=1",
         "/api/graph/around?entity_type=host&key=foo&bogus=1",
+        "/api/graph/explain?entity_type=host&key=foo&bogus=1",
     ] {
         let (status, _) = get_json(app.clone(), path, Some("secret")).await;
         assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);

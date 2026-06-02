@@ -4,7 +4,7 @@ use anyhow::{bail, Result};
 
 use crate::cli::parse_common::{value_after_equals, FlagCursor};
 use crate::cli::{parse_i64_flag, parse_u32_flag};
-use crate::cli::{CliCommand, EntityArgs, GraphAroundArgs, GraphCommand};
+use crate::cli::{CliCommand, EntityArgs, GraphAroundArgs, GraphCommand, GraphExplainArgs};
 
 const GRAPH_ENTITY_TYPES: &[&str] = &[
     "host",
@@ -78,6 +78,7 @@ pub(crate) fn parse_graph(args: &[String]) -> Result<CliCommand> {
         .ok_or_else(|| anyhow::anyhow!("graph subcommand is required"))?;
     match subcommand.as_str() {
         "around" => parse_graph_around(rest),
+        "explain" => parse_graph_explain(rest),
         other => bail!("unknown graph subcommand: {other}"),
     }
 }
@@ -163,6 +164,104 @@ fn parse_graph_around(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Graph(GraphCommand::Around(parsed)))
 }
 
+fn parse_graph_explain(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = GraphExplainArgs {
+        depth: Some(2),
+        ..Default::default()
+    };
+    let mut positionals = Vec::new();
+    let mut cursor = FlagCursor::new(args);
+    while let Some(arg) = cursor.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--entity-id" => {
+                parsed.entity_id =
+                    Some(parse_i64_flag("--entity-id", cursor.value("--entity-id")?)?)
+            }
+            "--alias-type" => parsed.alias_type = Some(cursor.value("--alias-type")?),
+            "--alias-key" => parsed.alias_key = Some(cursor.value("--alias-key")?),
+            "--depth" => parsed.depth = Some(parse_u32_flag("--depth", cursor.value("--depth")?)?),
+            "--beam-width" => {
+                parsed.beam_width = Some(parse_u32_flag(
+                    "--beam-width",
+                    cursor.value("--beam-width")?,
+                )?)
+            }
+            "--max-chains" => {
+                parsed.max_chains = Some(parse_u32_flag(
+                    "--max-chains",
+                    cursor.value("--max-chains")?,
+                )?)
+            }
+            "--evidence-sample-limit" => {
+                parsed.evidence_sample_limit = Some(parse_u32_flag(
+                    "--evidence-sample-limit",
+                    cursor.value("--evidence-sample-limit")?,
+                )?)
+            }
+            "--payload-budget" => {
+                parsed.payload_budget = Some(parse_u32_flag(
+                    "--payload-budget",
+                    cursor.value("--payload-budget")?,
+                )?)
+            }
+            _ if arg.starts_with("--entity-id=") => {
+                parsed.entity_id = Some(parse_i64_flag(
+                    "--entity-id",
+                    value_after_equals(arg, "--entity-id")?,
+                )?)
+            }
+            _ if arg.starts_with("--alias-type=") => {
+                parsed.alias_type = Some(value_after_equals(arg, "--alias-type")?)
+            }
+            _ if arg.starts_with("--alias-key=") => {
+                parsed.alias_key = Some(value_after_equals(arg, "--alias-key")?)
+            }
+            _ if arg.starts_with("--depth=") => {
+                parsed.depth = Some(parse_u32_flag(
+                    "--depth",
+                    value_after_equals(arg, "--depth")?,
+                )?)
+            }
+            _ if arg.starts_with("--beam-width=") => {
+                parsed.beam_width = Some(parse_u32_flag(
+                    "--beam-width",
+                    value_after_equals(arg, "--beam-width")?,
+                )?)
+            }
+            _ if arg.starts_with("--max-chains=") => {
+                parsed.max_chains = Some(parse_u32_flag(
+                    "--max-chains",
+                    value_after_equals(arg, "--max-chains")?,
+                )?)
+            }
+            _ if arg.starts_with("--evidence-sample-limit=") => {
+                parsed.evidence_sample_limit = Some(parse_u32_flag(
+                    "--evidence-sample-limit",
+                    value_after_equals(arg, "--evidence-sample-limit")?,
+                )?)
+            }
+            _ if arg.starts_with("--payload-budget=") => {
+                parsed.payload_budget = Some(parse_u32_flag(
+                    "--payload-budget",
+                    value_after_equals(arg, "--payload-budget")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown graph explain option: {arg}"),
+            _ => positionals.push(arg.clone()),
+        }
+    }
+
+    apply_explain_positionals(&mut parsed, &positionals)?;
+    if parsed.entity_id.is_none()
+        && !has_exact_lookup(parsed.entity_type.as_deref(), parsed.key.as_deref())
+        && !has_alias_lookup(parsed.alias_type.as_deref(), parsed.alias_key.as_deref())
+    {
+        bail!("graph explain requires --entity-id, <entity-type> <key>, <entity-type:key>, or --alias-type with --alias-key");
+    }
+    Ok(CliCommand::Graph(GraphCommand::Explain(parsed)))
+}
+
 fn apply_entity_positionals(
     parsed: &mut EntityArgs,
     positionals: &[String],
@@ -205,6 +304,24 @@ fn apply_graph_positionals(parsed: &mut GraphAroundArgs, positionals: &[String])
             parsed.key = Some(key.clone());
         }
         _ => bail!("graph around accepts at most two positional entity arguments"),
+    }
+    Ok(())
+}
+
+fn apply_explain_positionals(parsed: &mut GraphExplainArgs, positionals: &[String]) -> Result<()> {
+    match positionals {
+        [] => {}
+        [combined] => {
+            let (entity_type, key) = split_entity_key(combined)?;
+            parsed.entity_type = Some(entity_type);
+            parsed.key = Some(key);
+        }
+        [entity_type, key] => {
+            validate_entity_type(entity_type)?;
+            parsed.entity_type = Some(entity_type.clone());
+            parsed.key = Some(key.clone());
+        }
+        _ => bail!("graph explain accepts at most two positional entity arguments"),
     }
     Ok(())
 }

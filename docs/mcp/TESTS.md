@@ -96,6 +96,7 @@ mcporter call --config config/mcporter.json syslog.cortex action=compose_status
 mcporter call --config config/mcporter.json syslog.cortex action=compose_doctor
 mcporter call --config config/mcporter.json syslog.cortex action=graph mode=entity entity_type=host key=example-host
 mcporter call --config config/mcporter.json syslog.cortex action=graph mode=around entity_type=host key=example-host depth=1
+mcporter call --config config/mcporter.json syslog.cortex action=graph mode=explain entity_type=host key=example-host depth=2
 ```
 
 ### CLI-based testing (abuse investigation workflow)
@@ -119,6 +120,7 @@ cortex correlate-state --reference-time 2026-01-01T00:00:00Z --window-minutes 10
 # Graph lookup commands
 cortex entity host tootie --json
 cortex graph around host tootie --limit 25 --json
+cortex graph explain host tootie --depth 2 --json
 ```
 
 ### curl-based testing

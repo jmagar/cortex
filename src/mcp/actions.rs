@@ -310,8 +310,8 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
     ActionSpec {
         name: "graph",
         scope: Scope::Read,
-        description: "Resolve graph entities and return one-hop graph neighborhoods",
-        cost: Cost::Moderate,
+        description: "Resolve graph entities, neighborhoods, and evidence-backed explanations",
+        cost: Cost::Expensive,
     },
     // ── Admin / write actions ──────────────────────────────────────────────
     ActionSpec {

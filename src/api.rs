@@ -20,11 +20,11 @@ use crate::app::{
     ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
     CorrelateStateRequest, CortexService, DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest,
     DbVacuumRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest,
-    GraphAroundRequest, GraphEntityLookupRequest, HostStateRequest, IncidentContextRequest,
-    IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest,
-    ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest,
-    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError,
-    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
+    GraphAroundRequest, GraphEntityLookupRequest, GraphExplainRequest, HostStateRequest,
+    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
+    PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
+    ServiceError, SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
     UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
@@ -245,6 +245,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/incident-context", get(incident_context))
         .route("/api/graph/entity", get(graph_entity))
         .route("/api/graph/around", get(graph_around))
+        .route("/api/graph/explain", get(graph_explain))
         .route("/api/ai/ask-history", get(ai_ask_history))
         .route("/api/ai/incidents", get(ai_incidents))
         .route("/api/ai/investigate", get(ai_investigate))
@@ -896,6 +897,13 @@ async fn graph_around(
     Query(q): Query<GraphAroundRequest>,
 ) -> impl IntoResponse {
     respond(state.service.graph_around(q).await)
+}
+
+async fn graph_explain(
+    State(state): State<ApiState>,
+    Query(q): Query<GraphExplainRequest>,
+) -> impl IntoResponse {
+    respond(state.service.graph_explain(q).await)
 }
 
 #[derive(Debug, Deserialize)]

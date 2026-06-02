@@ -5,13 +5,13 @@ use super::output_graph::{print_graph_around_response, print_graph_entity_lookup
 use anyhow::Result;
 use cortex::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, CorrelateStateRequest, FleetStateRequest,
-    GraphAroundRequest, GraphEntityLookupRequest, HostStateRequest, ListAppsRequest,
-    SilentHostsRequest,
+    GraphAroundRequest, GraphEntityLookupRequest, GraphExplainRequest, HostStateRequest,
+    ListAppsRequest, SilentHostsRequest,
 };
 
 use super::args::{
     AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, EntityArgs,
-    FleetStateArgs, GraphAroundArgs, HostStateArgs, SilentHostsArgs,
+    FleetStateArgs, GraphAroundArgs, GraphExplainArgs, HostStateArgs, SilentHostsArgs,
 };
 use super::CliMode;
 
@@ -267,6 +267,24 @@ impl GraphAroundArgs {
     }
 }
 
+impl GraphExplainArgs {
+    pub(crate) fn into_request(self) -> GraphExplainRequest {
+        GraphExplainRequest {
+            mode: Some("explain".into()),
+            entity_id: self.entity_id,
+            entity_type: self.entity_type,
+            key: self.key,
+            alias_type: self.alias_type,
+            alias_key: self.alias_key,
+            depth: self.depth,
+            beam_width: self.beam_width,
+            max_chains: self.max_chains,
+            evidence_sample_limit: self.evidence_sample_limit,
+            payload_budget: self.payload_budget,
+        }
+    }
+}
+
 pub(crate) async fn run_host_state(mode: &CliMode, args: HostStateArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
@@ -391,4 +409,14 @@ pub(crate) async fn run_graph_around(mode: &CliMode, args: GraphAroundArgs) -> R
         CliMode::Http(client) => http_or_cancel(client.graph_around(&req)).await?,
     };
     print_graph_around_response(&response, json)
+}
+
+pub(crate) async fn run_graph_explain(mode: &CliMode, args: GraphExplainArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.graph_explain(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.graph_explain(&req)).await?,
+    };
+    super::output_graph::print_graph_explain_response(&response, json)
 }

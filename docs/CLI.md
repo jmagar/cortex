@@ -747,6 +747,36 @@ Flags:
 | `--payload-budget BYTES` | Approximate response payload budget |
 | `--json` | Print shared structured response |
 
+### `cortex graph explain`
+
+Generate a deterministic evidence-backed explanation over bounded graph
+chains. Human output includes conservative confidence, cited relationship and
+evidence ids, missing evidence, open questions, projection status, truncation
+reason, and follow-up graph commands. Low-confidence output avoids causal
+claims.
+
+```bash
+cortex graph explain host tootie
+cortex graph explain host:tootie --depth 2 --beam-width 20
+cortex graph explain --entity-id 42 --json
+```
+
+Flags:
+
+| Flag | Description |
+| --- | --- |
+| positional `TYPE KEY` | Entity to explain |
+| positional `TYPE:KEY` | Forgiving entity form |
+| `--entity-id ID` | Exact graph entity id to explain |
+| `--alias-type TYPE` | Alias type for resolving the starting entity |
+| `--alias-key KEY` | Alias value for resolving the starting entity |
+| `--depth N` | Explanation expansion depth, default 2, hard max 3 |
+| `--beam-width N` | Relationships fetched per frontier entity |
+| `--max-chains N` | Total candidate chain cap |
+| `--evidence-sample-limit N` | Safe evidence samples per relationship |
+| `--payload-budget BYTES` | Approximate response payload budget |
+| `--json` | Print shared structured response |
+
 ### `cortex stats`
 
 Print database and storage guardrail metrics.
