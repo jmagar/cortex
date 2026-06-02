@@ -1,6 +1,10 @@
 use super::*;
 use crate::config::StorageConfig;
-use crate::db::{insert_logs_batch, LogBatchEntry};
+use crate::db::{
+    insert_logs_batch, is_known_entity_type, is_known_evidence_source_kind, is_known_reason_code,
+    is_known_relationship_type, is_known_trust_level, LogBatchEntry, ENTITY_TYPES,
+    EVIDENCE_SOURCE_KINDS, REASON_CODES, RELATIONSHIP_TYPES, TRUST_LEVELS,
+};
 
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {
     StorageConfig::for_test(db_path)
@@ -170,6 +174,418 @@ fn init_db_creates_timeline_and_jobs_schema_migrations_25_26() {
         .query_row("SELECT COUNT(*) FROM timeline_hourly", [], |r| r.get(0))
         .unwrap();
     assert_eq!(rollup_rows, 0);
+}
+
+#[test]
+fn init_db_creates_graph_schema_migration_27() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("graph.db"));
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+
+    let applied: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 27",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(applied, 1, "migration 27 not recorded");
+
+    for table in [
+        "graph_entities",
+        "graph_entity_aliases",
+        "graph_relationships",
+        "graph_relationship_evidence",
+        "graph_projection_meta",
+    ] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1, "missing graph table {table}");
+    }
+
+    let (status, degraded): (String, i64) = conn
+        .query_row(
+            "SELECT projection_status, is_degraded FROM graph_projection_meta WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "never_built");
+    assert_eq!(degraded, 0);
+}
+
+#[test]
+fn graph_migration_is_idempotent_and_preserves_raw_logs() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("graph-idempotent.db");
+    let config = test_storage_config(db_path);
+    let pool = init_pool(&config).unwrap();
+
+    let inserted = insert_logs_batch(
+        &pool,
+        &[LogBatchEntry {
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            hostname: "claimed-host".to_string(),
+            facility: None,
+            severity: "info".to_string(),
+            app_name: Some("sshd".to_string()),
+            process_id: None,
+            message: "accepted publickey".to_string(),
+            raw: "accepted publickey".to_string(),
+            source_ip: "10.0.0.1:514".to_string(),
+            docker_checkpoint: None,
+            ai_tool: None,
+            ai_project: None,
+            ai_session_id: None,
+            ai_transcript_path: None,
+            metadata_json: None,
+            http_status: None,
+            auth_outcome: None,
+            dns_blocked: None,
+            event_action: None,
+            parse_error: None,
+        }],
+    )
+    .unwrap();
+    assert_eq!(inserted, 1);
+    drop(pool);
+
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+    let log_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(log_count, 1, "graph migration must not mutate raw logs");
+
+    let migration_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 27",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        migration_count, 1,
+        "graph migration marker must remain idempotent"
+    );
+}
+
+#[test]
+fn graph_migration_converges_after_schema_exists_without_marker() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("graph-partial.db"));
+    let pool = init_pool(&config).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute("DELETE FROM schema_migrations WHERE version = 27", [])
+            .unwrap();
+    }
+    drop(pool);
+
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+    let migration_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 27",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        migration_count, 1,
+        "migration 27 must converge when DDL already exists"
+    );
+}
+
+#[test]
+fn known_schema_version_matches_migration_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("schema-head.db"));
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+
+    let max_version: i64 = conn
+        .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(max_version, KNOWN_SCHEMA_VERSION);
+    drop(conn);
+
+    let info = read_schema_version_info(&pool).unwrap();
+    assert_eq!(info.version, KNOWN_SCHEMA_VERSION);
+    assert_eq!(info.known_version, KNOWN_SCHEMA_VERSION);
+}
+
+#[test]
+fn graph_schema_enforces_vocabulary_and_dedup_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("graph-dedup.db"));
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, trust_level)
+         VALUES ('source_ip', '10.0.0.1:514', '10.0.0.1:514', 'verified')",
+        [],
+    )
+    .unwrap();
+    let duplicate = conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, trust_level)
+         VALUES ('source_ip', '10.0.0.1:514', 'duplicate', 'verified')",
+        [],
+    );
+    assert!(duplicate.is_err(), "canonical entity identity must dedupe");
+
+    let bad_type = conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, trust_level)
+         VALUES ('same_window', 'bad', 'bad', 'verified')",
+        [],
+    );
+    assert!(bad_type.is_err(), "unknown entity types must be rejected");
+
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, trust_level)
+         VALUES ('host', 'claimed-host', 'claimed-host', 'claimed')",
+        [],
+    )
+    .unwrap();
+    let source_id: i64 = conn
+        .query_row(
+            "SELECT id FROM graph_entities WHERE entity_type = 'source_ip'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let host_id: i64 = conn
+        .query_row(
+            "SELECT id FROM graph_entities WHERE entity_type = 'host'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    conn.execute(
+        "INSERT INTO graph_entity_aliases
+            (entity_id, alias_type, alias_key, alias_value, source_kind, trust_level)
+         VALUES (?1, 'hostname', 'claimed-host', 'claimed-host', 'log', 'claimed')",
+        [host_id],
+    )
+    .unwrap();
+    let duplicate_alias = conn.execute(
+        "INSERT INTO graph_entity_aliases
+            (entity_id, alias_type, alias_key, alias_value, source_kind, trust_level)
+         VALUES (?1, 'hostname', 'claimed-host', 'claimed-host', 'log', 'claimed')",
+        [host_id],
+    );
+    assert!(duplicate_alias.is_err(), "alias identity must dedupe");
+
+    conn.execute(
+        "INSERT INTO graph_relationships
+            (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+             reason_code, trust_level, confidence, evidence_count)
+         VALUES ('source_ip:10.0.0.1:514->host:claimed-host', ?1, ?2,
+             'observed_as', 'syslog_claimed_hostname', 'claimed', 0.60, 1)",
+        rusqlite::params![source_id, host_id],
+    )
+    .unwrap();
+    let duplicate_rel = conn.execute(
+        "INSERT INTO graph_relationships
+            (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+             reason_code, trust_level, confidence, evidence_count)
+         VALUES ('source_ip:10.0.0.1:514->host:claimed-host', ?1, ?2,
+             'observed_as', 'syslog_claimed_hostname', 'claimed', 0.60, 1)",
+        rusqlite::params![source_id, host_id],
+    );
+    assert!(duplicate_rel.is_err(), "relationship key must dedupe");
+
+    let rel_id: i64 = conn
+        .query_row("SELECT id FROM graph_relationships", [], |row| row.get(0))
+        .unwrap();
+    conn.execute(
+        "INSERT INTO graph_relationship_evidence
+            (relationship_id, evidence_key, source_kind, source_id, observed_at,
+             reason_code, trust_level, safe_excerpt, evidence_count)
+         VALUES (?1, 'log:1:hostname:2026-01-01T00', 'log', '1',
+             '2026-01-01T00:00:00Z', 'syslog_claimed_hostname',
+             'claimed', 'claimed-host', 3)",
+        [rel_id],
+    )
+    .unwrap();
+    let duplicate_evidence = conn.execute(
+        "INSERT INTO graph_relationship_evidence
+            (relationship_id, evidence_key, source_kind, source_id, observed_at,
+             reason_code, trust_level, safe_excerpt, evidence_count)
+         VALUES (?1, 'log:1:hostname:2026-01-01T00', 'log', '1',
+             '2026-01-01T00:00:00Z', 'syslog_claimed_hostname',
+             'claimed', 'claimed-host', 3)",
+        [rel_id],
+    );
+    assert!(
+        duplicate_evidence.is_err(),
+        "evidence key must dedupe repeated samples"
+    );
+
+    let bad_same_window = conn.execute(
+        "INSERT INTO graph_relationships
+            (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+             reason_code, trust_level)
+         VALUES ('bad-same-window', ?1, ?2, 'same_window',
+             'syslog_claimed_hostname', 'correlated')",
+        rusqlite::params![source_id, host_id],
+    );
+    assert!(
+        bad_same_window.is_err(),
+        "same_window must not be a persisted v1 relationship type"
+    );
+}
+
+#[test]
+fn graph_vocabulary_helpers_cover_schema_values() {
+    for value in ENTITY_TYPES {
+        assert!(is_known_entity_type(value), "missing entity type {value}");
+    }
+    for value in RELATIONSHIP_TYPES {
+        assert!(
+            is_known_relationship_type(value),
+            "missing relationship type {value}"
+        );
+    }
+    for value in REASON_CODES {
+        assert!(is_known_reason_code(value), "missing reason code {value}");
+    }
+    for value in TRUST_LEVELS {
+        assert!(is_known_trust_level(value), "missing trust level {value}");
+    }
+    for value in EVIDENCE_SOURCE_KINDS {
+        assert!(
+            is_known_evidence_source_kind(value),
+            "missing evidence source kind {value}"
+        );
+    }
+
+    assert!(!is_known_relationship_type("same_window"));
+    assert!(!is_known_entity_type("unknown"));
+    assert!(!is_known_evidence_source_kind("source_table"));
+}
+
+#[test]
+fn graph_lookup_indexes_support_expected_query_plans() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("graph-query-plan.db"));
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+
+    let plan_details = |sql: &str| -> Vec<String> {
+        let mut stmt = conn.prepare(sql).unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+
+    let entity_plan = plan_details(
+        "EXPLAIN QUERY PLAN
+         SELECT id FROM graph_entities
+         WHERE entity_type = 'host' AND canonical_key = 'dookie'",
+    );
+    assert!(
+        entity_plan
+            .iter()
+            .any(|p| p.contains("SEARCH graph_entities")),
+        "entity lookup must use an indexed search: {entity_plan:?}"
+    );
+
+    let alias_plan = plan_details(
+        "EXPLAIN QUERY PLAN
+         SELECT entity_id FROM graph_entity_aliases
+         WHERE alias_type = 'hostname' AND alias_key = 'dookie'",
+    );
+    assert!(
+        alias_plan
+            .iter()
+            .any(|p| p.contains("SEARCH graph_entity_aliases")),
+        "alias lookup must use an indexed search: {alias_plan:?}"
+    );
+
+    let outgoing_plan = plan_details(
+        "EXPLAIN QUERY PLAN
+         SELECT id FROM graph_relationships
+         WHERE src_entity_id = 1 AND relationship_type = 'observed_as'
+         ORDER BY last_seen_at DESC LIMIT 50",
+    );
+    assert!(
+        outgoing_plan
+            .iter()
+            .any(|p| p.contains("SEARCH graph_relationships")),
+        "outgoing relationship lookup must use an indexed search: {outgoing_plan:?}"
+    );
+    assert!(
+        !outgoing_plan
+            .iter()
+            .any(|p| p == "SCAN graph_relationships"),
+        "outgoing relationship lookup must not full-scan relationship table: {outgoing_plan:?}"
+    );
+
+    let incoming_plan = plan_details(
+        "EXPLAIN QUERY PLAN
+         SELECT id FROM graph_relationships
+         WHERE dst_entity_id = 2 AND relationship_type = 'observed_as'
+         ORDER BY last_seen_at DESC LIMIT 50",
+    );
+    assert!(
+        incoming_plan
+            .iter()
+            .any(|p| p.contains("SEARCH graph_relationships")),
+        "incoming relationship lookup must use an indexed search: {incoming_plan:?}"
+    );
+    assert!(
+        !incoming_plan
+            .iter()
+            .any(|p| p == "SCAN graph_relationships"),
+        "incoming relationship lookup must not full-scan relationship table: {incoming_plan:?}"
+    );
+
+    let evidence_plan = plan_details(
+        "EXPLAIN QUERY PLAN
+         SELECT id FROM graph_relationship_evidence
+         WHERE relationship_id = 1
+         ORDER BY observed_at DESC LIMIT 3",
+    );
+    assert!(
+        evidence_plan
+            .iter()
+            .any(|p| p.contains("SEARCH graph_relationship_evidence")),
+        "evidence lookup must use an indexed search: {evidence_plan:?}"
+    );
+    assert!(
+        !evidence_plan
+            .iter()
+            .any(|p| p == "SCAN graph_relationship_evidence"),
+        "evidence lookup must not full-scan evidence table: {evidence_plan:?}"
+    );
+
+    let source_cleanup_plan = plan_details(
+        "EXPLAIN QUERY PLAN
+         SELECT id FROM graph_relationship_evidence
+         WHERE source_kind = 'log' AND source_id = '1'",
+    );
+    assert!(
+        source_cleanup_plan
+            .iter()
+            .any(|p| p.contains("SEARCH graph_relationship_evidence")),
+        "source cleanup lookup must use an indexed search: {source_cleanup_plan:?}"
+    );
 }
 
 #[test]

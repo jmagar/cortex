@@ -15,6 +15,14 @@
 --   non-breaking for readers but IS breaking for the `LogEntry` /
 --   `LogEntryWithRaw` MCP response shapes — bump the minor version.
 --
+-- Graph projection addendum
+--   Migration 27 adds graph_* projection tables for entity/relationship
+--   lookup. These tables are rebuildable derived state over authoritative
+--   sources (`logs`, heartbeats, inventory, error signatures, AI session
+--   rollups). They intentionally do not mutate `logs` and do not use ingest
+--   triggers. Source references are soft references because this process does
+--   not enable PRAGMA foreign_keys on pooled SQLite connections.
+--
 -- FTS5 trigger invariant (load-bearing — DO NOT regress)
 --   `logs_fts` has an INSERT-only trigger by design. DELETE / UPDATE on
 --   `logs` do NOT propagate to the FTS index. This is intentional: bulk
@@ -74,6 +82,149 @@ PRAGMA auto_vacuum = INCREMENTAL;     -- one-shot at init; VACUUM run if pages >
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+
+-- ---------------------------------------------------------------------------
+-- 2.1.1 `graph_*` — derived investigation graph projection (migration 27)
+-- Source: init_pool() migration 27.
+--
+-- Invariants:
+--   - Rebuildable projection only; raw source tables remain authoritative.
+--   - No `logs` mutation and no graph-maintenance triggers on ingest.
+--   - `same_window` is deliberately absent from persisted v1 relationships.
+--   - Source refs are allowlisted soft references, never free-form dynamic SQL
+--     table names.
+--   - Evidence is deduplicated/capped by `evidence_key`; relationship rows hold
+--     aggregate counts and first/last seen fields.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS graph_entities (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type   TEXT NOT NULL CHECK (entity_type IN (
+        'host', 'container', 'service', 'app', 'source_ip',
+        'ai_project', 'ai_session', 'error_signature'
+    )),
+    canonical_key TEXT NOT NULL,
+    display_label TEXT NOT NULL,
+    source_kind   TEXT NOT NULL DEFAULT '',
+    source_id     TEXT NOT NULL DEFAULT '',
+    trust_level   TEXT NOT NULL CHECK (trust_level IN (
+        'verified', 'claimed', 'inferred', 'correlated'
+    )),
+    first_seen_at TEXT,
+    last_seen_at  TEXT,
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(entity_type, canonical_key)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_entities_type_key
+    ON graph_entities(entity_type, canonical_key);
+
+CREATE TABLE IF NOT EXISTS graph_entity_aliases (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_id     INTEGER NOT NULL,
+    alias_type    TEXT NOT NULL,
+    alias_key     TEXT NOT NULL,
+    alias_value   TEXT NOT NULL,
+    source_kind   TEXT NOT NULL DEFAULT '',
+    trust_level   TEXT NOT NULL CHECK (trust_level IN (
+        'verified', 'claimed', 'inferred', 'correlated'
+    )),
+    first_seen_at TEXT,
+    last_seen_at  TEXT,
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(entity_id, alias_type, alias_key, source_kind)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_aliases_lookup
+    ON graph_entity_aliases(alias_type, alias_key);
+CREATE INDEX IF NOT EXISTS idx_graph_aliases_entity
+    ON graph_entity_aliases(entity_id);
+
+CREATE TABLE IF NOT EXISTS graph_relationships (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    relationship_key  TEXT NOT NULL UNIQUE,
+    src_entity_id     INTEGER NOT NULL,
+    dst_entity_id     INTEGER NOT NULL,
+    relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+        'observed_as', 'runs_on', 'emitted_by', 'worked_on', 'matches_signature'
+    )),
+    reason_code       TEXT NOT NULL CHECK (reason_code IN (
+        'syslog_claimed_hostname', 'log_app_name', 'docker_container_id',
+        'docker_service_label', 'ai_session_project', 'heartbeat_host_state',
+        'error_signature_match'
+    )),
+    trust_level       TEXT NOT NULL CHECK (trust_level IN (
+        'verified', 'claimed', 'inferred', 'correlated'
+    )),
+    confidence        REAL NOT NULL DEFAULT 0.0 CHECK (confidence >= 0.0 AND confidence <= 1.0),
+    evidence_count    INTEGER NOT NULL DEFAULT 0 CHECK (evidence_count >= 0),
+    first_seen_at     TEXT,
+    last_seen_at      TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(src_entity_id, dst_entity_id, relationship_type, relationship_key)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_relationships_src_type_seen
+    ON graph_relationships(src_entity_id, relationship_type, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_graph_relationships_dst_type_seen
+    ON graph_relationships(dst_entity_id, relationship_type, last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS graph_relationship_evidence (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    relationship_id       INTEGER NOT NULL,
+    evidence_key          TEXT NOT NULL,
+    source_kind           TEXT NOT NULL CHECK (source_kind IN (
+        'log', 'heartbeat', 'ai_session_rollup', 'source_inventory',
+        'app_inventory', 'error_signature'
+    )),
+    source_id             TEXT NOT NULL DEFAULT '',
+    source_log_id         INTEGER,
+    source_heartbeat_id   INTEGER,
+    source_signature_hash TEXT,
+    observed_at           TEXT NOT NULL,
+    reason_code           TEXT NOT NULL CHECK (reason_code IN (
+        'syslog_claimed_hostname', 'log_app_name', 'docker_container_id',
+        'docker_service_label', 'ai_session_project', 'heartbeat_host_state',
+        'error_signature_match'
+    )),
+    reason_text           TEXT,
+    confidence_delta      REAL NOT NULL DEFAULT 0.0 CHECK (confidence_delta >= -1.0 AND confidence_delta <= 1.0),
+    trust_level           TEXT NOT NULL CHECK (trust_level IN (
+        'verified', 'claimed', 'inferred', 'correlated'
+    )),
+    safe_excerpt          TEXT CHECK (safe_excerpt IS NULL OR length(safe_excerpt) <= 512),
+    metadata_path         TEXT,
+    evidence_count        INTEGER NOT NULL DEFAULT 1 CHECK (evidence_count >= 1),
+    created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(relationship_id, evidence_key)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_evidence_relationship_seen
+    ON graph_relationship_evidence(relationship_id, observed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_graph_evidence_source_ref
+    ON graph_relationship_evidence(source_kind, source_id);
+CREATE INDEX IF NOT EXISTS idx_graph_evidence_log_id
+    ON graph_relationship_evidence(source_log_id)
+    WHERE source_log_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_graph_evidence_heartbeat_id
+    ON graph_relationship_evidence(source_heartbeat_id)
+    WHERE source_heartbeat_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS graph_projection_meta (
+    id                 INTEGER PRIMARY KEY CHECK (id = 1),
+    projection_status  TEXT NOT NULL CHECK (projection_status IN (
+        'never_built', 'building', 'ready', 'stale', 'failed'
+    )),
+    last_started_at    TEXT,
+    last_completed_at  TEXT,
+    source_watermark   TEXT NOT NULL DEFAULT '',
+    source_row_count   INTEGER NOT NULL DEFAULT 0 CHECK (source_row_count >= 0),
+    entity_count       INTEGER NOT NULL DEFAULT 0 CHECK (entity_count >= 0),
+    relationship_count INTEGER NOT NULL DEFAULT 0 CHECK (relationship_count >= 0),
+    evidence_count     INTEGER NOT NULL DEFAULT 0 CHECK (evidence_count >= 0),
+    is_degraded        INTEGER NOT NULL DEFAULT 0 CHECK (is_degraded IN (0, 1)),
+    last_error         TEXT CHECK (last_error IS NULL OR length(last_error) <= 2048),
+    updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 

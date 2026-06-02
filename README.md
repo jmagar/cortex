@@ -4,6 +4,13 @@
 
 Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog over UDP and TCP, stores it in SQLite with FTS5 full-text indexing, and exposes action-based log search, inventory, correlation, status, and analysis tools through MCP, REST, and CLI adapters backed by the shared service layer.
 
+cortex also maintains derived projection tables for future investigation graph
+features. Those graph tables connect source IPs, claimed hosts, apps, services,
+containers, AI projects/sessions, and error signatures with evidence, but raw
+logs, heartbeats, inventory, signatures, and session rows remain the source of
+truth. The graph projection is rebuildable and intentionally has no ingest
+triggers.
+
 ## Overview
 
 ```

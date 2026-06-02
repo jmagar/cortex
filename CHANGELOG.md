@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-02
+
+### Added
+
+- Added Graph v1 schema tables for derived investigation entities, aliases,
+  relationships, evidence, and projection metadata. The schema keeps raw logs,
+  heartbeats, inventory, signatures, and sessions as the source of truth while
+  preparing rebuildable graph projections for future entity lookup and incident
+  narrative features.
+
 ## [1.1.5] - 2026-06-02
 
 ### Fixed

@@ -2,6 +2,7 @@
 
 mod analytics;
 pub(crate) mod error_signatures;
+pub mod graph;
 mod heartbeat;
 mod ingest;
 mod maintenance;
@@ -17,6 +18,11 @@ pub use analytics::{
     ContextRef, IngestRateBuckets, IngestRatePerHost, ListAppsParams, ListAppsResult,
     ListSourceIpsParams, ListSourceIpsResult, LogEntryWithRaw, PatternEntry, RangeSummary,
     SilentHostEntry, SourceIpEntry, SourceIpHostBreakdown, TimelineGroupBy, TimelinePoint,
+};
+pub use graph::{
+    is_known_entity_type, is_known_evidence_source_kind, is_known_reason_code,
+    is_known_relationship_type, is_known_trust_level, ENTITY_TYPES, EVIDENCE_SOURCE_KINDS,
+    PROJECTION_STATUSES, REASON_CODES, RELATIONSHIP_TYPES, TRUST_LEVELS,
 };
 pub use heartbeat::{
     heartbeat_host_state, heartbeat_latest_all, heartbeat_metric_snapshot,
