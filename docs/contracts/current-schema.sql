@@ -224,6 +224,8 @@ CREATE TABLE IF NOT EXISTS graph_projection_meta (
     evidence_count     INTEGER NOT NULL DEFAULT 0 CHECK (evidence_count >= 0),
     is_degraded        INTEGER NOT NULL DEFAULT 0 CHECK (is_degraded IN (0, 1)),
     last_error         TEXT CHECK (last_error IS NULL OR length(last_error) <= 2048),
+    last_runtime_ms    INTEGER NOT NULL DEFAULT 0 CHECK (last_runtime_ms >= 0),
+    last_chunk_count   INTEGER NOT NULL DEFAULT 0 CHECK (last_chunk_count >= 0),
     updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 

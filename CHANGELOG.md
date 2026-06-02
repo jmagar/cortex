@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-02
+
+### Added
+
+- Added the Graph v1 rebuild extractor for existing logs, Docker source
+  metadata, AI session metadata, heartbeat latest rows, and error signatures.
+  The rebuild uses connection-local staging tables plus a short serialized swap,
+  exposes projection status/failure metrics, deduplicates evidence buckets, and
+  prunes stale graph evidence on rebuild after source rows are deleted.
+
 ## [1.2.0] - 2026-06-02
 
 ### Added

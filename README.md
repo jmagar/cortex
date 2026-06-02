@@ -9,7 +9,9 @@ features. Those graph tables connect source IPs, claimed hosts, apps, services,
 containers, AI projects/sessions, and error signatures with evidence, but raw
 logs, heartbeats, inventory, signatures, and session rows remain the source of
 truth. The graph projection is rebuildable and intentionally has no ingest
-triggers.
+triggers. Graph rebuilds use staging tables plus a short serialized swap and
+record explicit projection status, source watermarks, row counts, runtime
+metrics, and degraded failure state.
 
 ## Overview
 

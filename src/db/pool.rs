@@ -24,7 +24,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 27;
+pub const KNOWN_SCHEMA_VERSION: i64 = 28;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -1065,6 +1065,29 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              COMMIT;",
         )?;
         tracing::info!("Migration 27: created graph projection schema");
+    }
+
+    // Migration 28: add graph rebuild runtime metrics.
+    if !migration_applied(&conn, 28)? {
+        let tx = conn.transaction()?;
+        add_column_if_missing(
+            &tx,
+            "graph_projection_meta",
+            "last_runtime_ms",
+            "INTEGER NOT NULL DEFAULT 0 CHECK (last_runtime_ms >= 0)",
+        )?;
+        add_column_if_missing(
+            &tx,
+            "graph_projection_meta",
+            "last_chunk_count",
+            "INTEGER NOT NULL DEFAULT 0 CHECK (last_chunk_count >= 0)",
+        )?;
+        tx.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version) VALUES (28)",
+            [],
+        )?;
+        tx.commit()?;
+        tracing::info!("Migration 28: added graph projection runtime metrics");
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance
