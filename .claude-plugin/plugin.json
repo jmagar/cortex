@@ -1,5 +1,6 @@
 {
   "name": "cortex",
+  "version": "1.2.0",
   "description": "Syslog management via MCP",
   "author": {
     "name": "jmagar"

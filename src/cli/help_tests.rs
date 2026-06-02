@@ -123,6 +123,40 @@ fn nested_help_shows_subcommand_specific_usage() {
 }
 
 #[test]
+fn setup_doctor_has_nested_help() {
+    // `cortex setup doctor --help` must show doctor-specific help, not fall back
+    // to the generic setup help (it is advertised in the setup CATALOG entry).
+    let out = render_command("setup doctor", false).expect("setup doctor is known");
+    assert!(out.contains("cortex setup doctor"), "got: {out}");
+    let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        classify_help(&v(&["setup", "doctor", "--help"])),
+        HelpRequest::Command("setup doctor".to_string())
+    );
+}
+
+#[test]
+fn classify_help_skips_global_option_values() {
+    // A value-bearing global option's value must not be mistaken for the command
+    // path: `cortex --server URL db status --help` resolves to `db status`.
+    let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        classify_help(&v(&[
+            "--server",
+            "http://127.0.0.1:3100",
+            "db",
+            "status",
+            "--help"
+        ])),
+        HelpRequest::Command("db status".to_string())
+    );
+    assert_eq!(
+        classify_help(&v(&["--token", "secret", "search", "--help"])),
+        HelpRequest::Command("search".to_string())
+    );
+}
+
+#[test]
 fn classify_help_distinguishes_top_level_command_and_none() {
     let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
 

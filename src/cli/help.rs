@@ -558,6 +558,11 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         usage: &["cortex setup plugin-hook [--no-repair] [--json]"],
     },
     NestedCommandDoc {
+        path: "setup doctor",
+        summary: "Run setup diagnostics across all phases",
+        usage: &["cortex setup doctor [--json]"],
+    },
+    NestedCommandDoc {
         path: "sig list",
         summary: "List error signatures",
         usage: &["cortex sig list [--include-acknowledged] [--limit N] [--json]"],
@@ -848,11 +853,28 @@ pub(crate) fn classify_help(args: &[String]) -> HelpRequest {
     if !has_help {
         return HelpRequest::None;
     }
-    let positionals = scan
-        .iter()
-        .filter(|a| !a.starts_with('-') && **a != "help")
-        .copied()
-        .collect::<Vec<_>>();
+    // Build the command path, skipping the value consumed by a value-bearing
+    // global option (`--server URL`, `--token TOK`). Otherwise
+    // `cortex --server http://127.0.0.1:3100 db status --help` would treat the
+    // URL as the command and fall back to the top-level banner instead of
+    // resolving `db status`. (The `--flag=value` form is one `-`-prefixed token
+    // and is already excluded.)
+    const VALUE_FLAGS: [&str; 2] = ["--server", "--token"];
+    let mut positionals = Vec::new();
+    let mut skip_value = false;
+    for &a in &scan {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if VALUE_FLAGS.contains(&a) {
+            skip_value = true;
+            continue;
+        }
+        if !a.starts_with('-') && a != "help" {
+            positionals.push(a);
+        }
+    }
     if positionals.len() >= 2 {
         let nested = format!("{} {}", positionals[0], positionals[1]);
         if nested_lookup(&nested).is_some() {
