@@ -12,7 +12,10 @@ pub(crate) fn parse_shell(args: &[String]) -> Result<CliCommand> {
     match command.as_str() {
         "index" => parse_shell_index(rest),
         "atuin-index" => parse_shell_atuin_index(rest),
-        _ => bail!("unknown shell subcommand: {command}"),
+        _ => bail!(
+            "{}",
+            super::suggest::unknown_command("shell subcommand", command, &["index", "atuin-index"])
+        ),
     }
 }
 
@@ -23,7 +26,14 @@ pub(crate) fn parse_agent_command(args: &[String]) -> Result<CliCommand> {
     match command.as_str() {
         "ingest-spool" => parse_agent_command_ingest_spool(rest),
         "wrap" => parse_agent_command_wrap(rest),
-        _ => bail!("unknown agent-command subcommand: {command}"),
+        _ => bail!(
+            "{}",
+            super::suggest::unknown_command(
+                "agent-command subcommand",
+                command,
+                &["ingest-spool", "wrap"],
+            )
+        ),
     }
 }
 

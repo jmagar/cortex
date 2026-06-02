@@ -17,7 +17,10 @@ pub(crate) fn parse_service(args: &[String]) -> Result<CliCommand> {
         .ok_or_else(|| anyhow!("service requires a subcommand"))?;
     match subcommand.as_str() {
         "logs" => parse_service_logs(rest),
-        _ => bail!("unknown service subcommand: {subcommand}"),
+        _ => bail!(
+            "{}",
+            super::suggest::unknown_command("service subcommand", subcommand, &["logs"])
+        ),
     }
 }
 
@@ -69,7 +72,14 @@ pub(crate) fn parse_db(args: &[String]) -> Result<CliCommand> {
         "checkpoint" => parse_db_checkpoint(rest),
         "vacuum" => parse_db_vacuum(rest),
         "backup" => parse_db_backup(rest),
-        _ => bail!("unknown db subcommand: {subcommand}"),
+        _ => bail!(
+            "{}",
+            super::suggest::unknown_command(
+                "db subcommand",
+                subcommand,
+                &["status", "integrity", "checkpoint", "vacuum", "backup"],
+            )
+        ),
     }
 }
 
@@ -213,7 +223,17 @@ pub(crate) fn parse_compose(args: &[String]) -> Result<CliCommand> {
         "upgrade" => bail!(
             "cortex compose upgrade is deferred; run `cortex compose pull` then `cortex compose up`"
         ),
-        other => bail!("unknown compose subcommand: {other}"),
+        other => bail!(
+            "{}",
+            super::suggest::unknown_command(
+                "compose subcommand",
+                other,
+                &[
+                    "status", "doctor", "up", "down", "restart", "pull", "logs", "config",
+                    "upgrade",
+                ],
+            )
+        ),
     }
 }
 
@@ -234,7 +254,14 @@ pub(crate) fn parse_setup(args: &[String]) -> Result<CliCommand> {
         "plugin-hook" | "hook" => Ok(CliCommand::Setup(SetupCommand::PluginHook(
             parse_plugin_hook_args(rest)?,
         ))),
-        other => bail!("unknown setup subcommand: {other}"),
+        other => bail!(
+            "{}",
+            super::suggest::unknown_command(
+                "setup subcommand",
+                other,
+                &["check", "repair", "install", "plugin-hook"],
+            )
+        ),
     }
 }
 

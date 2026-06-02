@@ -1,4 +1,4 @@
-//! Parse function for `syslog apps`.
+//! Parse function for `cortex apps`.
 //!
 //! Surface parity (2026-05-22): exposes the `apps` MCP action and
 //! `GET /api/apps` REST route as a top-level CLI subcommand.

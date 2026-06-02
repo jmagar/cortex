@@ -567,10 +567,10 @@ impl Mode {
                     args.join(" ")
                 );
             }
-            _ => {
-                print_usage();
-                anyhow::bail!("unknown command: {}", args.join(" "));
-            }
+            _ => match cli::CliCommand::parse(args.clone()) {
+                Ok(_) => unreachable!("known CLI commands are handled above"),
+                Err(err) => anyhow::bail!("{err}"),
+            },
         }
     }
 

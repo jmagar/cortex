@@ -15,7 +15,14 @@ pub(crate) fn parse_notify(args: &[String]) -> Result<CliCommand> {
     match subcommand.as_str() {
         "recent" => parse_notify_recent(rest),
         "test" => parse_notify_test(rest),
-        _ => bail!("unknown notify subcommand: {subcommand}"),
+        _ => bail!(
+            "{}",
+            super::super::suggest::unknown_command(
+                "notify subcommand",
+                subcommand,
+                &["recent", "test"],
+            )
+        ),
     }
 }
 

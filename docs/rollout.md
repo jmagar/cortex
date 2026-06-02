@@ -31,7 +31,7 @@ grep CORTEX_API_TOKEN ~/.cortex/.env
 # 3. Parity check: query the same data via local + HTTP and assert
 #    the JSON shapes agree. Empty diff = safe to cut over.
 cortex --json hosts | jq -S . > /tmp/syslog-local.json
-CORTEX_USE_HTTP=1 syslog --json hosts | jq -S . > /tmp/syslog-http.json
+CORTEX_USE_HTTP=1 cortex --json hosts | jq -S . > /tmp/syslog-http.json
 diff /tmp/syslog-local.json /tmp/syslog-http.json && echo "parity OK"
 
 # 4. ai-watch daemon must be active + binary SHA recorded so we know
@@ -55,7 +55,7 @@ Order matters. Each step's failure mode is documented inline.
    `CORTEX_USE_HTTP=false`). Run BEFORE pulling the new image so the
    container has a token to start with.
 
-2. **`cortex compose pull && syslog compose up`** — pull the v0.26
+2. **`cortex compose pull && cortex compose up`** — pull the v0.26
    image and recreate the container. The container fails fast if
    `CORTEX_API_TOKEN` is missing; step 1 prevents that. Wait until
    `cortex compose ps` reports `healthy` before proceeding.
@@ -107,7 +107,7 @@ docker compose logs cortex --since 5m | grep -E "500|ERROR|panic" | wc -l   # ex
 # Total log count grew from the +0 baseline captured in pre-deploy step 1.
 cortex stats
 # CLI-to-API latency on a representative read.
-time syslog tail -n 100 --json > /dev/null   # expect: < 0.2s on a warm cache
+time cortex tail -n 100 --json > /dev/null   # expect: < 0.2s on a warm cache
 ```
 
 ### +24 hours
@@ -169,7 +169,7 @@ is required for a same-day revert.
 
 - **VACUUM on large databases**: `db vacuum --full` on a database
   larger than ~10 GB may exceed the 10-minute HTTP request timeout.
-  Workaround: `CORTEX_USE_HTTP=false syslog db vacuum --full --force`
+  Workaround: `CORTEX_USE_HTTP=false cortex db vacuum --full --force`
   to bypass the API and run VACUUM directly against the SQLite file.
   This is a known limitation tracked for the v0.27 successor.
 

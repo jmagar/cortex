@@ -23,8 +23,20 @@ pub(crate) fn parse_host_state(args: &[String]) -> Result<CliCommand> {
         } else if let Some(v) = flags.match_value(&arg, "--limit")? {
             parsed.limit = Some(parse_u32_flag("--limit", v)?);
         } else {
-            bail!("unknown host-state option: {arg}");
+            bail!(
+                "{}",
+                super::super::suggest::unknown_option(
+                    "host-state",
+                    &arg,
+                    &["--json", "--host-id", "--hostname", "--since", "--limit"],
+                )
+            );
         }
+    }
+    if parsed.host_id.is_none() && parsed.hostname.is_none() {
+        bail!(
+            "host-state requires --host-id ID or --hostname HOST\n\nUsage: cortex host-state [--host-id ID] [--hostname HOST] [--since TIME] [--limit N] [--json]"
+        );
     }
     Ok(CliCommand::HostState(parsed))
 }

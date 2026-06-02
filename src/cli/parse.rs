@@ -7,7 +7,42 @@ use super::parse_logs::{
     parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_ingest_rate,
     parse_patterns, parse_search, parse_sessions, parse_source_ips, parse_tail, parse_timeline,
 };
-use super::{commands, parse_config, CliCommand};
+use super::{commands, parse_config, suggest, CliCommand};
+
+const TOP_LEVEL_COMMANDS: &[&str] = &[
+    "search",
+    "filter",
+    "tail",
+    "errors",
+    "hosts",
+    "sessions",
+    "incident",
+    "ai",
+    "shell",
+    "agent-command",
+    "heartbeat",
+    "correlate",
+    "stats",
+    "compose",
+    "service",
+    "setup",
+    "db",
+    "config",
+    "source-ips",
+    "timeline",
+    "patterns",
+    "ingest-rate",
+    "sig",
+    "notify",
+    "silent-hosts",
+    "clock-skew",
+    "anomalies",
+    "compare",
+    "apps",
+    "host-state",
+    "fleet-state",
+    "correlate-state",
+];
 
 pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
     let (command, rest) = args
@@ -50,7 +85,10 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "host-state" => commands::host_state::parse_host_state(rest),
         "fleet-state" => commands::fleet_state::parse_fleet_state(rest),
         "correlate-state" => commands::correlate_state::parse_correlate_state(rest),
-        _ => bail!("unknown CLI command: {command}"),
+        _ => bail!(
+            "{}",
+            suggest::unknown_command("CLI command", command, TOP_LEVEL_COMMANDS)
+        ),
     }
 }
 
@@ -60,7 +98,10 @@ fn parse_heartbeat(args: &[String]) -> Result<CliCommand> {
         .ok_or_else(|| anyhow!("heartbeat subcommand is required"))?;
     match command.as_str() {
         "agent" => parse_heartbeat_agent(rest),
-        _ => bail!("unknown heartbeat subcommand: {command}"),
+        _ => bail!(
+            "{}",
+            suggest::unknown_command("heartbeat subcommand", command, &["agent"])
+        ),
     }
 }
 
@@ -111,7 +152,25 @@ fn parse_heartbeat_agent(args: &[String]) -> Result<CliCommand> {
             "--once" => out.once = true,
             "--emit" => out.emit = true,
             "--json" => out.json = true,
-            other => bail!("unknown heartbeat agent argument: {other}"),
+            other => bail!(
+                "{}",
+                suggest::unknown_option(
+                    "heartbeat agent",
+                    other,
+                    &[
+                        "--target",
+                        "--token",
+                        "--interval-secs",
+                        "--probe-deadline-ms",
+                        "--collection-deadline-ms",
+                        "--retry-buffer",
+                        "--host-id-path",
+                        "--once",
+                        "--emit",
+                        "--json",
+                    ],
+                )
+            ),
         }
         i += 1;
     }

@@ -79,7 +79,30 @@ pub(crate) struct AiBlocksArgs {
     pub tool: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
+    pub limit: Option<usize>,
+    pub detail: AiOutputDetail,
     pub json: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum AiOutputDetail {
+    #[default]
+    Compact,
+    Full,
+}
+
+impl AiOutputDetail {
+    pub(crate) fn parse(value: &str, flag: &str) -> anyhow::Result<Self> {
+        match value {
+            "compact" => Ok(Self::Compact),
+            "full" => Ok(Self::Full),
+            _ => anyhow::bail!("{flag} must be compact or full"),
+        }
+    }
+
+    pub(crate) fn is_compact(self) -> bool {
+        matches!(self, Self::Compact)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -217,6 +240,9 @@ pub(crate) struct AiInvestigateArgs {
     pub window_minutes: Option<u32>,
     pub correlation_window_minutes: Option<u32>,
     pub terms: Vec<String>,
+    pub detail: AiOutputDetail,
+    pub include_transcript: bool,
+    pub max_bytes: Option<usize>,
     pub json: bool,
 }
 

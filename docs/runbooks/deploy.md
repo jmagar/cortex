@@ -37,7 +37,7 @@ cortex compose up
 # Option 2: Revert to previous commit
 git log --oneline -5   # find the good commit
 git revert HEAD         # or git reset --hard <sha>
-cortex compose pull && syslog compose up
+cortex compose pull && cortex compose up
 ```
 
 ## Health Check

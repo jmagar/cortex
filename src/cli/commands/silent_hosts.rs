@@ -1,4 +1,4 @@
-//! Parse function for `syslog silent-hosts`.
+//! Parse function for `cortex silent-hosts`.
 //!
 //! Surface parity (2026-05-22): exposes the `silent_hosts` MCP action and
 //! `GET /api/silent-hosts` REST route as a top-level CLI subcommand.

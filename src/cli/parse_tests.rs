@@ -83,6 +83,15 @@ fn parse_rejects_unknown_command() {
     assert!(err.contains("unknown CLI command: wat"));
 }
 
+#[test]
+fn parse_unknown_command_suggests_close_match() {
+    let err = parse_command(vec!["serach".to_string()])
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("Did you mean `search`?"), "got: {err}");
+}
+
 // ─── Heartbeat fleet state parity (cxih.4) ──────────────────────────────────
 
 #[test]
@@ -97,6 +106,19 @@ fn parse_routes_host_state() {
         .unwrap(),
         CliCommand::HostState(_)
     ));
+}
+
+#[test]
+fn parse_host_state_requires_host_selector_with_usage() {
+    let err = parse_command(vec!["host-state".to_string()])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        err.contains("requires --host-id ID or --hostname HOST"),
+        "got: {err}"
+    );
+    assert!(err.contains("Usage: cortex host-state"), "got: {err}");
 }
 
 #[test]

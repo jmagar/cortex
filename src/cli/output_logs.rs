@@ -7,6 +7,7 @@ use cortex::app::{
 
 use super::color::{cyan, muted, primary, severity, violet};
 use super::output_common::{local_ts, print_json, print_log, truncate};
+use super::AiOutputDetail;
 
 pub(crate) fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()> {
     if json {
@@ -218,24 +219,50 @@ pub(crate) fn print_ai_correlate_response(
     Ok(())
 }
 
-pub(crate) fn print_usage_blocks_response(
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UsageBlocksPrintOptions {
+    pub detail: AiOutputDetail,
+    pub limit: Option<usize>,
+}
+
+impl Default for UsageBlocksPrintOptions {
+    fn default() -> Self {
+        Self {
+            detail: AiOutputDetail::Full,
+            limit: None,
+        }
+    }
+}
+
+pub(crate) fn print_usage_blocks_response_with_options(
     response: &UsageBlocksResponse,
     json: bool,
+    options: UsageBlocksPrintOptions,
 ) -> Result<()> {
+    let mut projected = response.clone();
+    if let Some(limit) = options.limit {
+        if projected.blocks.len() > limit {
+            projected.blocks.truncate(limit);
+            projected.truncated = true;
+        }
+    } else if options.detail.is_compact() && projected.blocks.len() > 25 {
+        projected.blocks.truncate(25);
+        projected.truncated = true;
+    }
     if json {
-        return print_json(response);
+        return print_json(&projected);
     }
     println!(
         "{} usage block(s) shown of {}{}",
-        cyan(&response.blocks.len().to_string()),
-        cyan(&response.total_blocks.to_string()),
-        if response.truncated {
+        cyan(&projected.blocks.len().to_string()),
+        cyan(&projected.total_blocks.to_string()),
+        if projected.truncated {
             " (truncated)"
         } else {
             ""
         }
     );
-    for block in &response.blocks {
+    for block in &projected.blocks {
         println!(
             "{} {} {} {} events={} sessions={}",
             muted(&block.bucket_start),
