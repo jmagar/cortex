@@ -211,6 +211,50 @@ fn init_db_creates_partial_ai_metadata_indexes() {
 }
 
 #[test]
+fn migration_23_creates_covering_indexes_for_errors_and_ai_projects() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = crate::config::StorageConfig {
+        db_path,
+        ..Default::default()
+    };
+
+    let _pool = init_pool(&config).unwrap();
+    let conn = rusqlite::Connection::open(&config.db_path).unwrap();
+
+    let index_sql = |name: &str| -> Option<String> {
+        conn.query_row(
+            "SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = ?1",
+            [name],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+    };
+
+    let ai_cover = index_sql("idx_logs_ai_project_cover").expect("ai project covering index");
+    assert!(ai_cover.contains("ai_project"));
+    assert!(ai_cover.contains("ai_tool"));
+    assert!(ai_cover.contains("ai_session_id"));
+    assert!(ai_cover.contains("timestamp"));
+    assert!(ai_cover.contains("WHERE") && ai_cover.contains("ai_project IS NOT NULL"));
+
+    let sev_cover = index_sql("idx_logs_sev_host_time").expect("severity/host covering index");
+    assert!(sev_cover.contains("severity"));
+    assert!(sev_cover.contains("hostname"));
+    assert!(sev_cover.contains("timestamp"));
+
+    // Migration recorded so it is not rebuilt on every startup.
+    let applied: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 23",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(applied, 1, "migration 23 must be recorded");
+}
+
+#[test]
 fn init_db_creates_inventory_stats_tables_and_triggers() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
