@@ -1,15 +1,17 @@
 use super::dispatch::http_or_cancel;
 use super::output_common::print_json;
+use super::output_graph::{print_graph_around_response, print_graph_entity_lookup_response};
 
 use anyhow::Result;
 use cortex::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, CorrelateStateRequest, FleetStateRequest,
-    HostStateRequest, ListAppsRequest, SilentHostsRequest,
+    GraphAroundRequest, GraphEntityLookupRequest, HostStateRequest, ListAppsRequest,
+    SilentHostsRequest,
 };
 
 use super::args::{
-    AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, FleetStateArgs,
-    HostStateArgs, SilentHostsArgs,
+    AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, EntityArgs,
+    FleetStateArgs, GraphAroundArgs, HostStateArgs, SilentHostsArgs,
 };
 use super::CliMode;
 
@@ -233,6 +235,38 @@ impl CorrelateStateArgs {
     }
 }
 
+impl EntityArgs {
+    pub(crate) fn into_request(self) -> GraphEntityLookupRequest {
+        GraphEntityLookupRequest {
+            mode: Some("entity".into()),
+            entity_type: self.entity_type,
+            key: self.key,
+            alias_type: self.alias_type,
+            alias_key: self.alias_key,
+            limit: self.limit,
+            evidence_sample_limit: self.evidence_sample_limit,
+            payload_budget: self.payload_budget,
+        }
+    }
+}
+
+impl GraphAroundArgs {
+    pub(crate) fn into_request(self) -> GraphAroundRequest {
+        GraphAroundRequest {
+            mode: Some("around".into()),
+            entity_id: self.entity_id,
+            entity_type: self.entity_type,
+            key: self.key,
+            alias_type: self.alias_type,
+            alias_key: self.alias_key,
+            depth: self.depth,
+            limit: self.limit,
+            evidence_sample_limit: self.evidence_sample_limit,
+            payload_budget: self.payload_budget,
+        }
+    }
+}
+
 pub(crate) async fn run_host_state(mode: &CliMode, args: HostStateArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
@@ -337,4 +371,24 @@ pub(crate) async fn run_correlate_state(mode: &CliMode, args: CorrelateStateArgs
         );
     }
     Ok(())
+}
+
+pub(crate) async fn run_entity_lookup(mode: &CliMode, args: EntityArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.graph_entity_lookup(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.graph_entity(&req)).await?,
+    };
+    print_graph_entity_lookup_response(&response, json)
+}
+
+pub(crate) async fn run_graph_around(mode: &CliMode, args: GraphAroundArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.graph_around(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.graph_around(&req)).await?,
+    };
+    print_graph_around_response(&response, json)
 }

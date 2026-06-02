@@ -517,6 +517,8 @@ impl Mode {
                         | "hosts"
                         | "sessions"
                         | "incident"
+                        | "entity"
+                        | "graph"
                         | "ai"
                         | "shell"
                         | "agent-command"
@@ -559,7 +561,7 @@ impl Mode {
                 // ignored for `serve mcp`, `setup`, etc.
                 anyhow::bail!(
                     "--http / --server / --token only apply to CLI query commands \
-                     (search, tail, errors, hosts, sessions, ai, shell, agent-command, heartbeat, correlate, stats, incident, db); \
+                     (search, tail, errors, hosts, sessions, incident, entity, graph, ai, shell, agent-command, heartbeat, correlate, stats, db); \
                      compose, service, setup, and deploy are local-only and reject HTTP flags; \
                      got: {}",
                     args.join(" ")

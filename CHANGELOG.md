@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-02
+
+### Added
+
+- Added direct CLI graph commands: `cortex entity` resolves graph entities by
+  canonical type/key or alias, and `cortex graph around` renders one-hop
+  neighborhoods with relationship type, related entities, confidence/trust,
+  reason codes, safe evidence samples, projection status, truncation reasons,
+  follow-up commands, and shared JSON output for agents.
+
 ## [1.4.0] - 2026-06-02
 
 ### Added

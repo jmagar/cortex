@@ -836,6 +836,8 @@ cortex tail -n 20 --app-name kernel
 cortex errors --from 2026-01-01T00:00:00Z
 cortex hosts
 cortex correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
+cortex entity host tootie
+cortex graph around host tootie --limit 25
 cortex stats --json
 cortex db integrity            # run PRAGMA integrity_check
 cortex db checkpoint --mode full
@@ -871,6 +873,8 @@ GET  /api/incident-context?from=...&to=...
 GET  /api/ai/ask-history?query=...
 GET  /api/ai/incidents?terms[]=foo&terms[]=bar
 GET  /api/ai/investigate?correlation_window_minutes=30
+GET  /api/graph/entity?entity_type=host&key=tootie
+GET  /api/graph/around?entity_type=host&key=tootie&depth=1
 GET  /api/compose/status
 GET  /api/compose/doctor
 ```

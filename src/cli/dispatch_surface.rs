@@ -383,8 +383,8 @@ pub(crate) async fn run_notify_test(mode: &CliMode, args: NotifyTestArgs) -> Res
 }
 
 pub(crate) use super::dispatch_surface_gap::{
-    run_anomalies, run_apps, run_clock_skew, run_compare, run_correlate_state, run_fleet_state,
-    run_host_state, run_silent_hosts,
+    run_anomalies, run_apps, run_clock_skew, run_compare, run_correlate_state, run_entity_lookup,
+    run_fleet_state, run_graph_around, run_host_state, run_silent_hosts,
 };
 
 #[cfg(test)]

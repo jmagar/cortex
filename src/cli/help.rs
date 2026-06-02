@@ -42,6 +42,8 @@ const SECTIONS: &[(&str, &[&str])] = &[
             "sessions",
             "incident",
             "source-ips",
+            "entity",
+            "graph",
         ],
     ),
     (
@@ -114,6 +116,24 @@ const CATALOG: &[CommandDoc] = &[
         name: "source-ips",
         summary: "List unique source IPs with log counts",
         usage: &["cortex source-ips [--limit N] [--offset N] [--json]"],
+    },
+    CommandDoc {
+        name: "entity",
+        summary: "Resolve a graph entity by type/key or alias",
+        usage: &[
+            "cortex entity <entity-type> <key> [--limit N] [--json]",
+            "cortex entity <entity-type:key> [--json]",
+            "cortex entity --alias-type TYPE --alias-key KEY [--limit N] [--json]",
+        ],
+    },
+    CommandDoc {
+        name: "graph",
+        summary: "Explore one-hop graph neighborhoods with evidence",
+        usage: &[
+            "cortex graph around <entity-type> <key> [--limit N] [--depth 1] [--evidence-sample-limit N] [--payload-budget BYTES] [--json]",
+            "cortex graph around <entity-type:key> [--json]",
+            "cortex graph around --entity-id ID [--limit N] [--json]",
+        ],
     },
     // ── Analytics & Correlation ────────────────────────────────────────────
     CommandDoc {

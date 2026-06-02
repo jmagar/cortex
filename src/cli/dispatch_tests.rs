@@ -27,9 +27,9 @@ use crate::cli::{
     AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
     AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
     AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs,
-    DbStatusArgs, DbVacuumArgs, FilterArgs, IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs,
-    SessionsArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs,
-    TimelineArgs,
+    DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs, GraphAroundArgs, IngestRateArgs,
+    OutputArgs, PatternsArgs, SearchArgs, SessionsArgs, SigAckArgs, SigListArgs, SigUnackArgs,
+    SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 use anyhow::{bail, Result};
 use std::time::Duration;
@@ -129,6 +129,43 @@ fn tail_args_into_request_snapshot() {
     assert_eq!(
         format!("{req:?}"),
         "TailLogsRequest { hostname: Some(\"h1\"), source_ip: None, app_name: Some(\"docker\"), severity_min: None, n: Some(100) }"
+    );
+}
+
+#[test]
+fn entity_args_into_graph_lookup_request_snapshot() {
+    let args = EntityArgs {
+        entity_type: Some("host".into()),
+        key: Some("tootie".into()),
+        limit: Some(5),
+        evidence_sample_limit: Some(2),
+        payload_budget: Some(8192),
+        json: true,
+        ..Default::default()
+    };
+    let req = args.into_request();
+    assert_eq!(
+        format!("{req:?}"),
+        "GraphEntityLookupRequest { mode: Some(\"entity\"), entity_type: Some(\"host\"), key: Some(\"tootie\"), alias_type: None, alias_key: None, limit: Some(5), evidence_sample_limit: Some(2), payload_budget: Some(8192) }"
+    );
+}
+
+#[test]
+fn graph_around_args_into_request_snapshot() {
+    let args = GraphAroundArgs {
+        entity_type: Some("host".into()),
+        key: Some("tootie".into()),
+        depth: Some(1),
+        limit: Some(25),
+        evidence_sample_limit: Some(3),
+        payload_budget: Some(16_384),
+        json: true,
+        ..Default::default()
+    };
+    let req = args.into_request();
+    assert_eq!(
+        format!("{req:?}"),
+        "GraphAroundRequest { mode: Some(\"around\"), entity_id: None, entity_type: Some(\"host\"), key: Some(\"tootie\"), alias_type: None, alias_key: None, depth: Some(1), limit: Some(25), evidence_sample_limit: Some(3), payload_budget: Some(16384) }"
     );
 }
 

@@ -696,6 +696,57 @@ Flags:
 | `--limit N` | Maximum log rows per host (default 100, max 500) |
 | `--json` | Print JSON response |
 
+### `cortex entity`
+
+Resolve a derived graph entity by canonical type/key or by alias. Ambiguous
+aliases return candidates instead of silently choosing one.
+
+```bash
+cortex entity host tootie
+cortex entity host:tootie --json
+cortex entity --alias-type hostname --alias-key tootie
+```
+
+Flags:
+
+| Flag | Description |
+| --- | --- |
+| positional `TYPE KEY` | Exact graph entity type and key |
+| positional `TYPE:KEY` | Forgiving exact lookup form |
+| `--alias-type TYPE` | Alias type such as `hostname` or `heartbeat_host_id` |
+| `--alias-key KEY` | Alias value to resolve |
+| `--limit N` | Alias candidate cap |
+| `--evidence-sample-limit N` | Accepted for response metadata symmetry |
+| `--payload-budget BYTES` | Approximate response payload budget |
+| `--json` | Print shared structured response |
+
+### `cortex graph around`
+
+Return a bounded one-hop neighborhood for a graph entity. Human output includes
+relationship type, related entities, confidence/trust, reason, evidence counts,
+safe samples, projection status, truncation reason, and follow-up commands.
+
+```bash
+cortex graph around host tootie
+cortex graph around host:tootie --limit 25
+cortex graph around --entity-id 42 --json
+```
+
+Flags:
+
+| Flag | Description |
+| --- | --- |
+| positional `TYPE KEY` | Entity to expand |
+| positional `TYPE:KEY` | Forgiving entity form |
+| `--entity-id ID` | Exact graph entity id to expand |
+| `--alias-type TYPE` | Alias type for resolving the starting entity |
+| `--alias-key KEY` | Alias value for resolving the starting entity |
+| `--depth 1` | V1 supports one-hop only |
+| `--limit N` | Relationship cap |
+| `--evidence-sample-limit N` | Safe evidence samples per relationship |
+| `--payload-budget BYTES` | Approximate response payload budget |
+| `--json` | Print shared structured response |
+
 ### `cortex stats`
 
 Print database and storage guardrail metrics.

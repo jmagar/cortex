@@ -115,6 +115,10 @@ cortex ai investigate --limit 1 --json
 cortex host-state --hostname tootie --json
 cortex fleet-state --json
 cortex correlate-state --reference-time 2026-01-01T00:00:00Z --window-minutes 10 --json
+
+# Graph lookup commands
+cortex entity host tootie --json
+cortex graph around host tootie --limit 25 --json
 ```
 
 ### curl-based testing

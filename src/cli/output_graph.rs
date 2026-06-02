@@ -1,0 +1,186 @@
+use anyhow::Result;
+use cortex::app::{
+    GraphAroundResponse, GraphEntity, GraphEntityLookupResponse, GraphEvidence, GraphRelationship,
+};
+
+use super::color::{cyan, muted, primary, warn};
+use super::output_common::{print_json, truncate};
+
+pub(crate) fn print_graph_entity_lookup_response(
+    response: &GraphEntityLookupResponse,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    print_graph_metadata(&response.metadata);
+    if let Some(entity) = &response.resolved_entity {
+        println!("{}", entity_line("resolved", entity));
+    }
+    if !response.candidates.is_empty() {
+        println!("{}", muted("candidates:"));
+        for candidate in &response.candidates {
+            println!(
+                "  {} match={} alias={}:{}",
+                entity_line("-", &candidate.entity),
+                primary(&safe_display(&candidate.match_reason)),
+                muted(candidate.alias_type.as_deref().unwrap_or("-")),
+                muted(candidate.alias_key.as_deref().unwrap_or("-"))
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn print_graph_around_response(
+    response: &GraphAroundResponse,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    print_graph_metadata(&response.metadata);
+    if let Some(entity) = &response.resolved_entity {
+        println!("{}", entity_line("resolved", entity));
+    }
+    if !response.candidates.is_empty() {
+        println!("{}", muted("ambiguous candidates:"));
+        for candidate in &response.candidates {
+            println!(
+                "  {} match={}",
+                entity_line("-", &candidate.entity),
+                primary(&safe_display(&candidate.match_reason))
+            );
+        }
+        return Ok(());
+    }
+
+    println!(
+        "{} relationship(s), {} related entity record(s), {} evidence sample(s)",
+        cyan(&response.relationships.len().to_string()),
+        cyan(&response.entities.len().to_string()),
+        cyan(&response.evidence.len().to_string())
+    );
+    for relationship in &response.relationships {
+        print_relationship(relationship, &response.entities, &response.evidence);
+    }
+    if !response.next_queries.is_empty() {
+        println!("{}", muted("follow-ups:"));
+        for query in &response.next_queries {
+            println!(
+                "  cortex graph around --entity-id {}  # {}",
+                query.entity_id,
+                safe_display(&query.label)
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn safe_display(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|ch| {
+            if ch.is_control() {
+                ch.escape_default().collect::<Vec<_>>()
+            } else {
+                vec![ch]
+            }
+        })
+        .collect()
+}
+
+fn print_graph_metadata(metadata: &cortex::app::GraphResponseMetadata) {
+    let degraded = if metadata.is_degraded {
+        format!(" {}", warn("degraded"))
+    } else {
+        String::new()
+    };
+    println!(
+        "{}={}{} completed={} watermark={}",
+        muted("projection"),
+        primary(&safe_display(&metadata.projection_status)),
+        degraded,
+        muted(metadata.last_completed_at.as_deref().unwrap_or("-")),
+        muted(&safe_display(&metadata.source_watermark)),
+    );
+    if metadata.truncated {
+        println!(
+            "{}: {}",
+            warn("truncated"),
+            safe_display(metadata.truncated_reason.as_deref().unwrap_or("limit"))
+        );
+    }
+    if let Some(err) = &metadata.last_error {
+        println!("{}: {}", warn("projection_error"), safe_display(err));
+    }
+}
+
+fn entity_line(prefix: &str, entity: &GraphEntity) -> String {
+    format!(
+        "{} {}:{} id={} label={} trust={} source={}/{}",
+        muted(prefix),
+        cyan(&safe_display(&entity.entity_type)),
+        primary(&safe_display(&entity.canonical_key)),
+        entity.id,
+        safe_display(&truncate(&entity.display_label, 48)),
+        safe_display(&entity.trust_level),
+        safe_display(&entity.source_kind),
+        safe_display(&truncate(&entity.source_id, 48))
+    )
+}
+
+fn print_relationship(
+    relationship: &GraphRelationship,
+    entities: &[GraphEntity],
+    evidence: &[GraphEvidence],
+) {
+    let src = entities
+        .iter()
+        .find(|entity| entity.id == relationship.src_entity_id)
+        .map(entity_label)
+        .unwrap_or_else(|| format!("#{}", relationship.src_entity_id));
+    let dst = entities
+        .iter()
+        .find(|entity| entity.id == relationship.dst_entity_id)
+        .map(entity_label)
+        .unwrap_or_else(|| format!("#{}", relationship.dst_entity_id));
+    println!(
+        "\n{} {} -> {} confidence={:.2} trust={} reason={} evidence={}",
+        primary(&safe_display(&relationship.relationship_type)),
+        src,
+        dst,
+        relationship.confidence,
+        safe_display(&relationship.trust_level),
+        safe_display(&relationship.reason_code),
+        relationship.evidence_count
+    );
+    for sample in evidence
+        .iter()
+        .filter(|item| item.relationship_id == relationship.id)
+        .take(3)
+    {
+        let reason = sample.reason_text.as_deref().unwrap_or(&sample.reason_code);
+        let excerpt = sample.safe_excerpt.as_deref().unwrap_or("-");
+        println!(
+            "  evidence #{} {} {} source={} excerpt={}",
+            sample.id,
+            muted(&safe_display(&sample.observed_at)),
+            safe_display(reason),
+            safe_display(&truncate(&sample.source_id, 48)),
+            safe_display(&truncate(excerpt, 96)),
+        );
+    }
+}
+
+fn entity_label(entity: &GraphEntity) -> String {
+    format!(
+        "{}:{}",
+        cyan(&safe_display(&entity.entity_type)),
+        primary(&safe_display(&truncate(&entity.display_label, 40)))
+    )
+}
+
+#[cfg(test)]
+#[path = "output_graph_tests.rs"]
+mod tests;

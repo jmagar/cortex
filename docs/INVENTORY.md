@@ -82,6 +82,8 @@ methods as the MCP actions.
 | `cortex host-state` | `host_state` | Latest bounded heartbeat state for one host |
 | `cortex fleet-state` | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags |
 | `cortex correlate-state` | `correlate_state` | Logs plus heartbeat summaries around a reference time |
+| `cortex entity` | `graph` | Resolve a graph entity by canonical key or alias |
+| `cortex graph around` | `graph` | One-hop graph neighborhood with typed relationships and evidence |
 | `cortex ai correlate` | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs |
 | `cortex ai incidents` | `abuse_incidents` | Grouped abuse incident candidates |
 | `cortex ai investigate` | `abuse_investigate` | Abuse incident evidence bundles |

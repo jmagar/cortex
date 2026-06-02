@@ -2,7 +2,8 @@ use anyhow::{anyhow, bail, Result};
 use cortex::app::CortexService;
 
 use super::args::{
-    AgentCommandCommand, AiCommand, CliCommand, DbCommand, NotifyCommand, ShellCommand, SigCommand,
+    AgentCommandCommand, AiCommand, CliCommand, DbCommand, GraphCommand, NotifyCommand,
+    ShellCommand, SigCommand,
 };
 use super::dispatch;
 
@@ -143,6 +144,10 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::HostState(args) => dispatch::run_host_state(&mode, args).await,
         CliCommand::FleetState(args) => dispatch::run_fleet_state(&mode, args).await,
         CliCommand::CorrelateState(args) => dispatch::run_correlate_state(&mode, args).await,
+        CliCommand::Entity(args) => dispatch::run_entity_lookup(&mode, args).await,
+        CliCommand::Graph(graph) => match graph {
+            GraphCommand::Around(args) => dispatch::run_graph_around(&mode, args).await,
+        },
         CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
             bail!(
                 "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"

@@ -120,6 +120,101 @@ fn parse_fleet_state_rejects_bad_sort() {
 }
 
 #[test]
+fn parse_routes_entity_lookup() {
+    let command = parse_command(vec![
+        "entity".to_string(),
+        "host".to_string(),
+        "tootie".to_string(),
+        "--limit=5".to_string(),
+        "--json".to_string(),
+    ])
+    .unwrap();
+    match command {
+        CliCommand::Entity(args) => {
+            assert_eq!(args.entity_type.as_deref(), Some("host"));
+            assert_eq!(args.key.as_deref(), Some("tootie"));
+            assert_eq!(args.limit, Some(5));
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_routes_entity_alias_lookup() {
+    let command = parse_command(vec![
+        "entity".to_string(),
+        "--alias-type".to_string(),
+        "hostname".to_string(),
+        "--alias-key".to_string(),
+        "tootie".to_string(),
+    ])
+    .unwrap();
+    match command {
+        CliCommand::Entity(args) => {
+            assert_eq!(args.alias_type.as_deref(), Some("hostname"));
+            assert_eq!(args.alias_key.as_deref(), Some("tootie"));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_routes_graph_around_type_key() {
+    let command = parse_command(vec![
+        "graph".to_string(),
+        "around".to_string(),
+        "host:tootie".to_string(),
+        "--depth".to_string(),
+        "1".to_string(),
+        "--evidence-sample-limit=2".to_string(),
+        "--payload-budget".to_string(),
+        "8192".to_string(),
+        "--json".to_string(),
+    ])
+    .unwrap();
+    match command {
+        CliCommand::Graph(crate::cli::GraphCommand::Around(args)) => {
+            assert_eq!(args.entity_type.as_deref(), Some("host"));
+            assert_eq!(args.key.as_deref(), Some("tootie"));
+            assert_eq!(args.depth, Some(1));
+            assert_eq!(args.evidence_sample_limit, Some(2));
+            assert_eq!(args.payload_budget, Some(8192));
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_graph_around_rejects_bad_entity_type() {
+    let err = parse_command(vec![
+        "graph".to_string(),
+        "around".to_string(),
+        "bogus".to_string(),
+        "tootie".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("unsupported graph entity type"), "got: {err}");
+}
+
+#[test]
+fn parse_graph_around_rejects_bad_depth() {
+    let err = parse_command(vec![
+        "graph".to_string(),
+        "around".to_string(),
+        "host".to_string(),
+        "tootie".to_string(),
+        "--depth".to_string(),
+        "nope".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("--depth must be"), "got: {err}");
+}
+
+#[test]
 fn parse_routes_correlate_state() {
     assert!(matches!(
         parse_command(vec![

@@ -24,6 +24,8 @@ const PARSER_TOKENS: &[&str] = &[
     "db",
     "config",
     "source-ips",
+    "entity",
+    "graph",
     "timeline",
     "patterns",
     "ingest-rate",

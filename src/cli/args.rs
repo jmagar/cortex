@@ -49,6 +49,13 @@ pub(crate) enum CliCommand {
     HostState(HostStateArgs),
     FleetState(FleetStateArgs),
     CorrelateState(CorrelateStateArgs),
+    Entity(EntityArgs),
+    Graph(GraphCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GraphCommand {
+    Around(GraphAroundArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -399,6 +406,32 @@ pub(crate) struct PatternsArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct IngestRateArgs {
     pub by_host: bool,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct EntityArgs {
+    pub entity_type: Option<String>,
+    pub key: Option<String>,
+    pub alias_type: Option<String>,
+    pub alias_key: Option<String>,
+    pub limit: Option<u32>,
+    pub evidence_sample_limit: Option<u32>,
+    pub payload_budget: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct GraphAroundArgs {
+    pub entity_id: Option<i64>,
+    pub entity_type: Option<String>,
+    pub key: Option<String>,
+    pub alias_type: Option<String>,
+    pub alias_key: Option<String>,
+    pub depth: Option<u32>,
+    pub limit: Option<u32>,
+    pub evidence_sample_limit: Option<u32>,
+    pub payload_budget: Option<u32>,
     pub json: bool,
 }
 

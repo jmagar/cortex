@@ -65,6 +65,32 @@ fn mode_parse_accepts_ai_namespace() {
 }
 
 #[test]
+fn mode_parse_accepts_graph_cli_commands() {
+    assert!(matches!(
+        Mode::parse(vec![
+            "entity".into(),
+            "host".into(),
+            "tootie".into(),
+            "--json".into(),
+        ])
+        .unwrap(),
+        Mode::Cli(_)
+    ));
+    assert!(matches!(
+        Mode::parse(vec![
+            "graph".into(),
+            "around".into(),
+            "host:tootie".into(),
+            "--limit".into(),
+            "1".into(),
+            "--json".into(),
+        ])
+        .unwrap(),
+        Mode::Cli(_)
+    ));
+}
+
+#[test]
 fn mode_parse_accepts_compose_namespace() {
     assert!(matches!(
         Mode::parse(vec!["compose".into(), "status".into(), "--json".into()]).unwrap(),

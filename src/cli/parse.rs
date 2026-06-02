@@ -36,6 +36,8 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "timeline" => parse_timeline(rest),
         "patterns" => parse_patterns(rest),
         "ingest-rate" => parse_ingest_rate(rest),
+        "entity" => commands::graph::parse_entity(rest),
+        "graph" => commands::graph::parse_graph(rest),
         "sig" => commands::sig::parse_sig(rest),
         "notify" => commands::notify::parse_notify(rest),
         // Surface parity gap closure (2026-05-22)
