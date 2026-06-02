@@ -4,7 +4,10 @@ use anyhow::{bail, Result};
 
 use crate::cli::parse_common::{value_after_equals, FlagCursor};
 use crate::cli::{parse_i64_flag, parse_u32_flag};
-use crate::cli::{CliCommand, EntityArgs, GraphAroundArgs, GraphCommand, GraphExplainArgs};
+use crate::cli::{
+    CliCommand, EntityArgs, GraphAroundArgs, GraphCommand, GraphExplainArgs, GraphRebuildArgs,
+    GraphStatusArgs,
+};
 
 const GRAPH_ENTITY_TYPES: &[&str] = &[
     "host",
@@ -79,8 +82,35 @@ pub(crate) fn parse_graph(args: &[String]) -> Result<CliCommand> {
     match subcommand.as_str() {
         "around" => parse_graph_around(rest),
         "explain" => parse_graph_explain(rest),
+        "status" => parse_graph_status(rest),
+        "rebuild" => parse_graph_rebuild(rest),
         other => bail!("unknown graph subcommand: {other}"),
     }
+}
+
+fn parse_graph_status(args: &[String]) -> Result<CliCommand> {
+    let json = parse_json_only_args(args, "graph status")?;
+    Ok(CliCommand::Graph(GraphCommand::Status(GraphStatusArgs {
+        json,
+    })))
+}
+
+fn parse_graph_rebuild(args: &[String]) -> Result<CliCommand> {
+    let json = parse_json_only_args(args, "graph rebuild")?;
+    Ok(CliCommand::Graph(GraphCommand::Rebuild(GraphRebuildArgs {
+        json,
+    })))
+}
+
+fn parse_json_only_args(args: &[String], command: &str) -> Result<bool> {
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            _ => bail!("unknown {command} option: {arg}"),
+        }
+    }
+    Ok(json)
 }
 
 fn parse_graph_around(args: &[String]) -> Result<CliCommand> {

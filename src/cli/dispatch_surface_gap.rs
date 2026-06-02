@@ -1,6 +1,9 @@
 use super::dispatch::http_or_cancel;
 use super::output_common::print_json;
-use super::output_graph::{print_graph_around_response, print_graph_entity_lookup_response};
+use super::output_graph::{
+    print_graph_around_response, print_graph_entity_lookup_response, print_graph_rebuild_response,
+    print_graph_status_response,
+};
 
 use anyhow::Result;
 use cortex::app::{
@@ -11,7 +14,8 @@ use cortex::app::{
 
 use super::args::{
     AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, EntityArgs,
-    FleetStateArgs, GraphAroundArgs, GraphExplainArgs, HostStateArgs, SilentHostsArgs,
+    FleetStateArgs, GraphAroundArgs, GraphExplainArgs, GraphRebuildArgs, GraphStatusArgs,
+    HostStateArgs, SilentHostsArgs,
 };
 use super::CliMode;
 
@@ -419,4 +423,24 @@ pub(crate) async fn run_graph_explain(mode: &CliMode, args: GraphExplainArgs) ->
         CliMode::Http(client) => http_or_cancel(client.graph_explain(&req)).await?,
     };
     super::output_graph::print_graph_explain_response(&response, json)
+}
+
+pub(crate) async fn run_graph_status(mode: &CliMode, args: GraphStatusArgs) -> Result<()> {
+    let response = match mode {
+        CliMode::Local(service) => service.graph_projection_status().await?,
+        CliMode::Http(_) => {
+            anyhow::bail!("graph status is local-only; run it on the host with DB access")
+        }
+    };
+    print_graph_status_response(&response, args.json)
+}
+
+pub(crate) async fn run_graph_rebuild(mode: &CliMode, args: GraphRebuildArgs) -> Result<()> {
+    let response = match mode {
+        CliMode::Local(service) => service.graph_rebuild().await?,
+        CliMode::Http(_) => {
+            anyhow::bail!("graph rebuild is local-only; run it on the host with DB access")
+        }
+    };
+    print_graph_rebuild_response(&response, args.json)
 }

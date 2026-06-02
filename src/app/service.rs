@@ -22,6 +22,7 @@ use super::models::{
     GetLogResponse, GraphAroundRequest, GraphAroundResponse, GraphEntity, GraphEntityCandidate,
     GraphEntityLookupRequest, GraphEntityLookupResponse, GraphEvidence, GraphExplainRequest,
     GraphExplainResponse, GraphIncidentNarrative, GraphNarrativeChain, GraphNextQuery,
+    GraphProjectionStatusResponse, GraphRebuildResponse, GraphRebuildStatsResponse,
     GraphRelationship, GraphResponseMetadata, IncidentContextRequest, IncidentContextResponse,
     IncidentEvent, IncidentRequest, IncidentResponse, IngestRateRequest, IngestRateResponse,
     ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
@@ -2844,6 +2845,32 @@ impl CortexService {
         })
     }
 
+    pub async fn graph_projection_status(&self) -> ServiceResult<GraphProjectionStatusResponse> {
+        let status = self
+            .run_db("graph.status", db::graph::graph_projection_status)
+            .await?;
+        Ok(graph_projection_status_response(status))
+    }
+
+    pub async fn graph_rebuild(&self) -> ServiceResult<GraphRebuildResponse> {
+        let outcome = self
+            .run_db("graph.rebuild", db::graph::refresh_graph_projection)
+            .await?;
+        let status = self.graph_projection_status().await?;
+        let (outcome, stats) = match outcome {
+            db::graph::GraphRebuildOutcome::Rebuilt(stats) => (
+                "rebuilt".to_string(),
+                Some(graph_rebuild_stats_response(stats)),
+            ),
+            db::graph::GraphRebuildOutcome::AlreadyRunning => ("already_running".to_string(), None),
+        };
+        Ok(GraphRebuildResponse {
+            outcome,
+            stats,
+            status,
+        })
+    }
+
     pub async fn run_gemini_assess(&self, req: AiAssessRequest) -> ServiceResult<AiAssessResponse> {
         self.run_gemini_assess_with_delta(req, |_| Ok(())).await
     }
@@ -3475,6 +3502,37 @@ fn estimated_graph_explain_payload_bytes(
         })
         .sum();
     chain_bytes + evidence_bytes
+}
+
+fn graph_projection_status_response(
+    status: db::graph::GraphProjectionStatus,
+) -> GraphProjectionStatusResponse {
+    GraphProjectionStatusResponse {
+        projection_status: status.projection_status,
+        last_started_at: status.last_started_at,
+        last_completed_at: status.last_completed_at,
+        source_watermark: status.source_watermark,
+        source_row_count: status.source_row_count,
+        entity_count: status.entity_count,
+        relationship_count: status.relationship_count,
+        evidence_count: status.evidence_count,
+        is_degraded: status.is_degraded,
+        last_error: status.last_error.map(redact_graph_text),
+        last_runtime_ms: status.last_runtime_ms,
+        last_chunk_count: status.last_chunk_count,
+    }
+}
+
+fn graph_rebuild_stats_response(stats: db::graph::GraphRebuildStats) -> GraphRebuildStatsResponse {
+    GraphRebuildStatsResponse {
+        source_row_count: stats.source_row_count,
+        entity_count: stats.entity_count,
+        relationship_count: stats.relationship_count,
+        evidence_count: stats.evidence_count,
+        source_watermark: stats.source_watermark,
+        runtime_ms: stats.runtime_ms,
+        chunk_count: stats.chunk_count,
+    }
 }
 
 fn validate_graph_entity_type(entity_type: &str) -> ServiceResult<()> {

@@ -2151,6 +2151,40 @@ pub struct GraphExplainRequest {
     pub payload_budget: Option<u32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GraphProjectionStatusResponse {
+    pub projection_status: String,
+    pub last_started_at: Option<String>,
+    pub last_completed_at: Option<String>,
+    pub source_watermark: String,
+    pub source_row_count: i64,
+    pub entity_count: i64,
+    pub relationship_count: i64,
+    pub evidence_count: i64,
+    pub is_degraded: bool,
+    pub last_error: Option<String>,
+    pub last_runtime_ms: i64,
+    pub last_chunk_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GraphRebuildStatsResponse {
+    pub source_row_count: i64,
+    pub entity_count: i64,
+    pub relationship_count: i64,
+    pub evidence_count: i64,
+    pub source_watermark: String,
+    pub runtime_ms: i64,
+    pub chunk_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GraphRebuildResponse {
+    pub outcome: String,
+    pub stats: Option<GraphRebuildStatsResponse>,
+    pub status: GraphProjectionStatusResponse,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GraphEntity {
     pub id: i64,

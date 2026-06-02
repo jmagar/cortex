@@ -219,6 +219,23 @@ fn parse_routes_graph_explain_type_key() {
 }
 
 #[test]
+fn parse_routes_graph_status_and_rebuild() {
+    assert!(matches!(
+        parse_command(vec!["graph".to_string(), "status".to_string()]).unwrap(),
+        CliCommand::Graph(crate::cli::GraphCommand::Status(_))
+    ));
+    assert!(matches!(
+        parse_command(vec![
+            "graph".to_string(),
+            "rebuild".to_string(),
+            "--json".to_string()
+        ])
+        .unwrap(),
+        CliCommand::Graph(crate::cli::GraphCommand::Rebuild(_))
+    ));
+}
+
+#[test]
 fn parse_graph_explain_rejects_bad_depth() {
     let err = parse_command(vec![
         "graph".to_string(),

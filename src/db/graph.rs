@@ -549,11 +549,16 @@ fn refresh_graph_projection_inner(pool: &DbPool, started: Instant) -> Result<Gra
             break;
         }
         chunk_count += 1;
-        for row in &rows {
-            after_id = after_id.max(row.id);
-            source_row_count += 1;
-            extract_log_row(&conn, row)?;
+        {
+            let tx = conn.transaction()?;
+            for row in &rows {
+                after_id = after_id.max(row.id);
+                source_row_count += 1;
+                extract_log_row(&tx, row)?;
+            }
+            tx.commit()?;
         }
+        mark_graph_projection_progress(&conn, source_row_count, chunk_count)?;
     }
 
     source_row_count += extract_heartbeat_latest(&conn)?;
@@ -582,11 +587,34 @@ fn mark_graph_projection_building(pool: &DbPool) -> Result<()> {
         "UPDATE graph_projection_meta
          SET projection_status = 'building',
              last_started_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+             source_watermark = '',
+             source_row_count = 0,
+             entity_count = 0,
+             relationship_count = 0,
+             evidence_count = 0,
              is_degraded = 0,
              last_error = NULL,
+             last_runtime_ms = 0,
+             last_chunk_count = 0,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE id = 1",
         [],
+    )?;
+    Ok(())
+}
+
+fn mark_graph_projection_progress(
+    conn: &rusqlite::Connection,
+    source_row_count: i64,
+    chunk_count: i64,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE graph_projection_meta
+         SET source_row_count = ?1,
+             last_chunk_count = ?2,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = 1 AND projection_status = 'building'",
+        params![source_row_count, chunk_count],
     )?;
     Ok(())
 }

@@ -148,6 +148,8 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::Graph(graph) => match graph {
             GraphCommand::Around(args) => dispatch::run_graph_around(&mode, args).await,
             GraphCommand::Explain(args) => dispatch::run_graph_explain(&mode, args).await,
+            GraphCommand::Status(args) => dispatch::run_graph_status(&mode, args).await,
+            GraphCommand::Rebuild(args) => dispatch::run_graph_rebuild(&mode, args).await,
         },
         CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
             bail!(

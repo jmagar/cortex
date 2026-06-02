@@ -136,6 +136,8 @@ const CATALOG: &[CommandDoc] = &[
             "cortex graph explain <entity-type> <key> [--depth 2] [--beam-width N] [--max-chains N] [--json]",
             "cortex graph explain <entity-type:key> [--json]",
             "cortex graph explain --entity-id ID [--depth 2] [--json]",
+            "cortex graph status [--json]",
+            "cortex graph rebuild [--json]",
         ],
     },
     // ── Analytics & Correlation ────────────────────────────────────────────

@@ -14,11 +14,11 @@ pub(crate) use args::{
     AiSimilarArgs, AiWatchArgs, CliCommand, ComposeArgs, ComposeCommand, ComposeLogsArgs,
     ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand, DbIntegrityArgs,
     DbIntegrityStatusArgs, DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs, GraphAroundArgs,
-    GraphCommand, GraphExplainArgs, HeartbeatAgentArgs, HeartbeatCommand, IncidentArgs,
-    IngestRateArgs, NotifyRecentArgs, NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs,
-    SearchArgs, ServiceCommand, ServiceLogsArgs, SessionsArgs, SetupArgs, SetupCommand,
-    ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs, SigUnackArgs,
-    SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    GraphCommand, GraphExplainArgs, GraphRebuildArgs, GraphStatusArgs, HeartbeatAgentArgs,
+    HeartbeatCommand, IncidentArgs, IngestRateArgs, NotifyRecentArgs, NotifyTestArgs, OutputArgs,
+    PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand, ServiceLogsArgs, SessionsArgs,
+    SetupArgs, SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, SigAckArgs,
+    SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,

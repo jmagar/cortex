@@ -1,11 +1,63 @@
 use anyhow::Result;
 use cortex::app::{
     GraphAroundResponse, GraphEntity, GraphEntityLookupResponse, GraphEvidence,
-    GraphExplainResponse, GraphRelationship,
+    GraphExplainResponse, GraphProjectionStatusResponse, GraphRebuildResponse, GraphRelationship,
 };
 
 use super::color::{cyan, muted, primary, warn};
 use super::output_common::{print_json, truncate};
+
+pub(crate) fn print_graph_status_response(
+    response: &GraphProjectionStatusResponse,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "{}={} degraded={} completed={} watermark={}",
+        muted("projection"),
+        primary(&safe_display(&response.projection_status)),
+        response.is_degraded,
+        muted(response.last_completed_at.as_deref().unwrap_or("-")),
+        muted(&safe_display(&response.source_watermark)),
+    );
+    println!(
+        "source_rows={} entities={} relationships={} evidence={} chunks={} runtime_ms={}",
+        cyan(&response.source_row_count.to_string()),
+        cyan(&response.entity_count.to_string()),
+        cyan(&response.relationship_count.to_string()),
+        cyan(&response.evidence_count.to_string()),
+        cyan(&response.last_chunk_count.to_string()),
+        cyan(&response.last_runtime_ms.to_string()),
+    );
+    if let Some(err) = &response.last_error {
+        println!("{}: {}", warn("projection_error"), safe_display(err));
+    }
+    Ok(())
+}
+
+pub(crate) fn print_graph_rebuild_response(
+    response: &GraphRebuildResponse,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!("{}={}", muted("rebuild"), primary(&response.outcome));
+    if let Some(stats) = &response.stats {
+        println!(
+            "source_rows={} entities={} relationships={} evidence={} chunks={} runtime_ms={}",
+            cyan(&stats.source_row_count.to_string()),
+            cyan(&stats.entity_count.to_string()),
+            cyan(&stats.relationship_count.to_string()),
+            cyan(&stats.evidence_count.to_string()),
+            cyan(&stats.chunk_count.to_string()),
+            cyan(&stats.runtime_ms.to_string()),
+        );
+    }
+    print_graph_status_response(&response.status, false)
+}
 
 pub(crate) fn print_graph_entity_lookup_response(
     response: &GraphEntityLookupResponse,

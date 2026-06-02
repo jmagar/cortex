@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-06-02
+
+### Added
+
+- Added operator-facing `cortex graph status` and `cortex graph rebuild`
+  commands so graph projections can be seeded and inspected from the CLI.
+  Rebuild now publishes chunk/source-row progress while processing large
+  databases and batches extraction work in chunk transactions before the final
+  graph-table swap.
+
 ## [1.6.0] - 2026-06-02
 
 ### Added
