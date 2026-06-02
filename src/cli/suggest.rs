@@ -1,7 +1,10 @@
 //! Small suggestion helpers for the hand-rolled CLI parser.
 
 pub(crate) fn did_you_mean<'a>(input: &str, candidates: &'a [&'a str]) -> Option<&'a str> {
-    let normalized = input.trim_start_matches('-');
+    // Match on the flag/command name only — drop any `=value` so equals-style
+    // options (`--projct=foo`) still suggest the right flag (`--project`).
+    let name = input.split('=').next().unwrap_or(input);
+    let normalized = name.trim_start_matches('-');
     let mut best: Option<(&str, usize)> = None;
     for &candidate in candidates {
         let candidate_cmp = candidate.trim_start_matches('-');

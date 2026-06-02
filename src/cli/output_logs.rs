@@ -227,8 +227,11 @@ pub(crate) struct UsageBlocksPrintOptions {
 
 impl Default for UsageBlocksPrintOptions {
     fn default() -> Self {
+        // Compact matches the CLI default for `ai blocks` (AiBlocksArgs). Leaving
+        // this `Full` was a footgun: any call site using `..Default::default()`
+        // would silently disable the intended capping/truncation.
         Self {
-            detail: AiOutputDetail::Full,
+            detail: AiOutputDetail::Compact,
             limit: None,
         }
     }

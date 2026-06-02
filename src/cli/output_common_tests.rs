@@ -8,6 +8,21 @@ fn truncate_is_utf8_safe_and_preserves_short_strings() {
 }
 
 #[test]
+fn truncate_bytes_respects_byte_budget_on_char_boundaries() {
+    // Short input untouched.
+    assert_eq!(truncate_bytes("short", 10), "short");
+    // Multibyte: each "é" is 2 bytes. The result (prefix + 3-byte ellipsis) must
+    // never exceed the byte budget, and must cut on a char boundary.
+    let s = "ééééééé"; // 7 × 2 = 14 bytes
+    let out = truncate_bytes(s, 10);
+    assert!(out.len() <= 10, "byte budget exceeded: {} bytes", out.len());
+    assert!(out.ends_with('…'));
+    assert!(out.is_char_boundary(out.len() - '…'.len_utf8()));
+    // A char-based truncate(s, 10) would keep 9 chars = 18 bytes — far over budget.
+    assert!(truncate_bytes(s, 14).len() <= 14);
+}
+
+#[test]
 fn transcript_detection_accepts_source_ip_and_app_suffix() {
     let mut log = cortex::app::LogEntry {
         id: 1,

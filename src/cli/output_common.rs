@@ -83,6 +83,28 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// Truncate `s` to at most `max_bytes` UTF-8 bytes (cutting on a char boundary),
+/// appending `…` when truncated. Use this for `--max-bytes`-style budgets where
+/// the limit is bytes, not characters — [`truncate`] counts characters and can
+/// blow a byte budget on multibyte input.
+pub(crate) fn truncate_bytes(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    const ELLIPSIS: &str = "…"; // 3 bytes
+                                // Reserve room for the ellipsis so the result stays within `max_bytes`.
+    let budget = max_bytes.saturating_sub(ELLIPSIS.len());
+    let mut cut = budget.min(s.len());
+    while cut > 0 && !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    if max_bytes < ELLIPSIS.len() {
+        // Too small to fit the marker — return a bare byte-bounded prefix.
+        return s[..cut].to_string();
+    }
+    format!("{}{ELLIPSIS}", &s[..cut])
+}
+
 #[cfg(test)]
 #[path = "output_common_tests.rs"]
 mod tests;

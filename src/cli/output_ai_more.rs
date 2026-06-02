@@ -6,7 +6,7 @@ use cortex::app::{
 use serde_json::{json, Value};
 
 use super::color::{cyan, muted, primary, severity, violet, warn};
-use super::output_common::{local_ts, print_json, truncate};
+use super::output_common::{local_ts, print_json, truncate, truncate_bytes};
 use super::AiOutputDetail;
 
 pub(crate) fn print_similar_incidents_response(
@@ -277,8 +277,44 @@ pub(crate) fn print_ai_investigate_response_with_options(
             println!(
                 "    [{}] {}",
                 muted(&local_ts(&a.timestamp)),
-                truncate(&a.message, options.max_bytes)
+                truncate_bytes(&a.message, options.max_bytes)
             );
+        }
+        // Honor --detail full / --include-transcript in terminal output too (not
+        // just JSON): surface the transcript window and non-error nearby logs so
+        // full evidence is available without --json.
+        let show_transcript =
+            options.include_transcript || matches!(options.detail, AiOutputDetail::Full);
+        if show_transcript && !ev.transcript_before.is_empty() {
+            println!("  {}:", muted("transcript before"));
+            for l in &ev.transcript_before {
+                println!(
+                    "    [{}] {}",
+                    muted(&local_ts(&l.timestamp)),
+                    truncate_bytes(&l.message, options.max_bytes)
+                );
+            }
+        }
+        if show_transcript && !ev.transcript_after.is_empty() {
+            println!("  {}:", muted("transcript after"));
+            for l in &ev.transcript_after {
+                println!(
+                    "    [{}] {}",
+                    muted(&local_ts(&l.timestamp)),
+                    truncate_bytes(&l.message, options.max_bytes)
+                );
+            }
+        }
+        if matches!(options.detail, AiOutputDetail::Full) && !ev.nearby_logs.is_empty() {
+            println!("  {}:", muted("nearby logs"));
+            for l in &ev.nearby_logs {
+                println!(
+                    "    [{}] ({}) {}",
+                    muted(&local_ts(&l.timestamp)),
+                    severity(&l.severity),
+                    truncate_bytes(&l.message, options.max_bytes)
+                );
+            }
         }
         if !ev.nearby_errors.is_empty() {
             println!("  {}:", muted("nearby errors"));
@@ -287,7 +323,7 @@ pub(crate) fn print_ai_investigate_response_with_options(
                     "    [{}] ({}) {}",
                     muted(&local_ts(&e.timestamp)),
                     severity(&e.severity),
-                    truncate(&e.message, options.max_bytes)
+                    truncate_bytes(&e.message, options.max_bytes)
                 );
             }
         }
@@ -378,7 +414,7 @@ fn compact_logs(logs: &[LogEntry], max_bytes: usize) -> Vec<Value> {
                 "hostname": log.hostname,
                 "severity": log.severity,
                 "app_name": log.app_name,
-                "message": truncate(&log.message, max_bytes),
+                "message": truncate_bytes(&log.message, max_bytes),
             })
         })
         .collect()
