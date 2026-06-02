@@ -412,6 +412,25 @@ pub struct SearchParams {
     pub exclude_ai: bool,
 }
 
+impl SearchParams {
+    /// True when a filter is set on a column backed by a `(col, timestamp)`
+    /// index (hostname, source_ip, severity, app_name, event_action,
+    /// ai_project). The FTS search uses this to choose the index-led intersect
+    /// plan — which leads with the filter's composite index and intersects the
+    /// FTS match set — instead of scanning the entire match set and filtering
+    /// post-hoc (the pathology that made `search <q> --hostname <h>` ~200s).
+    pub(crate) fn has_indexed_equality_filter(&self) -> bool {
+        self.hostname.is_some()
+            || self.source_ip.is_some()
+            || self.source_ip_prefix.is_some()
+            || self.severity.is_some()
+            || self.severity_in.as_ref().is_some_and(|v| !v.is_empty())
+            || self.app_name.is_some()
+            || self.event_action.is_some()
+            || self.ai_project.is_some()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Abuse incident grouping
 // ---------------------------------------------------------------------------

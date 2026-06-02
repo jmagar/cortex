@@ -38,11 +38,46 @@ pub fn validate_fts_query(query: &str) -> Result<()> {
     Ok(())
 }
 
+/// Column list for the FTS result projection (must match `map_row`'s order).
+const FTS_SELECT_COLS: &str = "l.id, l.timestamp, l.hostname, l.facility, l.severity, \
+     l.app_name, l.process_id, l.message, l.received_at, l.source_ip, \
+     l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json";
+
 fn search_logs_fts_sql(
     query: &str,
     params: &SearchParams,
     limit: u32,
 ) -> (String, Vec<rusqlite::types::Value>) {
+    let mut bindings: Vec<rusqlite::types::Value> =
+        vec![rusqlite::types::Value::Text(query.to_string())];
+    let mut idx = 2;
+
+    if params.has_indexed_equality_filter() {
+        // Fast path: an indexed equality filter (hostname / severity / source_ip
+        // / app_name) is present. Lead with that filter's composite
+        // `(<col>, timestamp)` index and intersect against the FTS match set via
+        // a bloom-filtered `id IN (...)` subquery. SQLite walks the filtered
+        // partition newest-first and stops at LIMIT, so a host-scoped search of
+        // a common term drops from ~200s (full FTS scan) to sub-second.
+        //
+        // This is also fully complete — no candidate cap — unlike the
+        // unfiltered plan below, because the leading index bounds the work to
+        // the (smaller) filtered partition rather than the entire match set.
+        let mut sql = format!(
+            "SELECT {FTS_SELECT_COLS}
+             FROM logs l
+             WHERE l.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?1)"
+        );
+        append_filters(&mut sql, &mut bindings, &mut idx, params);
+        sql.push_str(&format!(
+            " ORDER BY l.timestamp DESC, l.id DESC LIMIT {limit}"
+        ));
+        return (sql, bindings);
+    }
+
+    // Default path (no indexed equality filter): materialize the most-recent
+    // FTS candidates by rowid, capped, then project. Fast when unfiltered
+    // because it never sorts the full match set; the cap bounds the work.
     let mut sql = String::from(
         "WITH fts_candidates(id, ts) AS MATERIALIZED (
             SELECT l.id, l.timestamp
@@ -50,18 +85,12 @@ fn search_logs_fts_sql(
             JOIN logs l ON l.id = logs_fts.rowid
             WHERE logs_fts MATCH ?1",
     );
-    let mut bindings: Vec<rusqlite::types::Value> =
-        vec![rusqlite::types::Value::Text(query.to_string())];
-    let mut idx = 2;
-
     append_filters(&mut sql, &mut bindings, &mut idx, params);
     sql.push_str(&format!(
         " ORDER BY logs_fts.rowid DESC
           LIMIT {SEARCH_FTS_CANDIDATE_CAP}
          )
-         SELECT l.id, l.timestamp, l.hostname, l.facility, l.severity,
-                l.app_name, l.process_id, l.message, l.received_at, l.source_ip,
-                l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json
+         SELECT {FTS_SELECT_COLS}
          FROM fts_candidates c
          JOIN logs l ON l.id = c.id
          ORDER BY c.ts DESC, l.id DESC

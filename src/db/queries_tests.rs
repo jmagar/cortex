@@ -136,6 +136,78 @@ fn test_search_fts() {
 }
 
 #[test]
+fn search_fts_hostname_filter_returns_only_that_host() {
+    // Both hosts emit a matching message; the hostname filter must scope to one.
+    // Exercises the index-led intersect plan (the fix for the ~200s host-scoped
+    // search) and verifies it stays correct/complete.
+    let (pool, _dir) = test_pool();
+    let mut entries = Vec::new();
+    for i in 0..50 {
+        entries.push(make_entry(
+            &format!("2026-01-01T00:{:02}:00Z", i % 60),
+            "host-a",
+            "err",
+            "kernel panic detected",
+        ));
+        entries.push(make_entry(
+            &format!("2026-01-01T01:{:02}:00Z", i % 60),
+            "host-b",
+            "err",
+            "kernel panic detected",
+        ));
+    }
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let params = SearchParams {
+        query: Some("panic".to_string()),
+        hostname: Some("host-a".to_string()),
+        limit: Some(1000),
+        ..Default::default()
+    };
+    let results = search_logs(&pool, &params).unwrap();
+    assert_eq!(results.len(), 50, "should return all 50 host-a matches");
+    assert!(
+        results.iter().all(|r| r.hostname == "host-a"),
+        "hostname filter must exclude host-b rows"
+    );
+    // Newest-first ordering preserved.
+    assert!(results.windows(2).all(|w| w[0].timestamp >= w[1].timestamp));
+}
+
+#[test]
+fn search_fts_plan_selection_branches_on_indexed_filter() {
+    // No indexed equality filter → capped materialized-candidate plan.
+    let plain = SearchParams {
+        query: Some("disk".to_string()),
+        ..Default::default()
+    };
+    assert!(!plain.has_indexed_equality_filter());
+    let (sql, _) = search_logs_fts_sql("disk", &plain, 50);
+    assert!(sql.contains("fts_candidates"), "unfiltered uses CTE plan");
+    assert!(!sql.contains("l.id IN (SELECT rowid"));
+
+    // Indexed equality filter → index-led intersect plan (no candidate cap).
+    let filtered = SearchParams {
+        hostname: Some("host-a".to_string()),
+        ..plain.clone()
+    };
+    assert!(filtered.has_indexed_equality_filter());
+    let (sql, _) = search_logs_fts_sql("disk", &filtered, 50);
+    assert!(
+        sql.contains("l.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?1)"),
+        "filtered search must use the intersect plan, got:\n{sql}"
+    );
+    assert!(
+        !sql.contains("fts_candidates"),
+        "intersect plan has no CTE cap"
+    );
+    assert!(
+        sql.contains("l.hostname = ?2"),
+        "filter applied via append_filters"
+    );
+}
+
+#[test]
 fn test_search_invalid_fts_returns_error() {
     let (pool, _dir) = test_pool();
     // FTS5 treats bare parentheses as a syntax error
