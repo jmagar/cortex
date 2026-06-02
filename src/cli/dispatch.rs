@@ -285,7 +285,8 @@ pub(crate) use super::dispatch_ai::{
     run_ai_watch_status,
 };
 pub(crate) use super::dispatch_db::{
-    run_db_backup, run_db_checkpoint, run_db_integrity, run_db_status, run_db_vacuum,
+    run_db_backup, run_db_checkpoint, run_db_integrity, run_db_integrity_status, run_db_status,
+    run_db_vacuum,
 };
 pub(crate) use super::dispatch_surface::{
     run_anomalies, run_apps, run_clock_skew, run_compare, run_correlate_state, run_fleet_state,

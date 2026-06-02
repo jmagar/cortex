@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use cortex::app::{
-    DbBackupResult, DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbVacuumResult,
+    DbBackupResult, DbCheckpointResult, DbIntegrityJobStarted, DbIntegrityResult,
+    DbMaintenanceStatus, DbVacuumResult, MaintenanceJobStatus,
 };
 use cortex::compose::{CommandOutput, ComposeCommandResult, ComposeStatus};
 use serde::Serialize;
@@ -127,6 +128,66 @@ pub(crate) fn print_db_integrity_response(response: &DbIntegrityResult, json: bo
     println!("{}: {}", muted("ok"), ok_colored);
     for message in &response.messages {
         println!("{message}");
+    }
+    Ok(())
+}
+
+pub(crate) fn print_db_integrity_job_started(
+    response: &DbIntegrityJobStarted,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    println!(
+        "{}: {} ({})",
+        muted("integrity job"),
+        cyan(&response.job_id.to_string()),
+        response.status
+    );
+    println!(
+        "{}",
+        muted(&format!(
+            "poll with: cortex db integrity status {}",
+            response.job_id
+        ))
+    );
+    Ok(())
+}
+
+pub(crate) fn print_db_integrity_job_status(
+    response: &MaintenanceJobStatus,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    let status_colored = match response.status.as_str() {
+        "done" => success(&response.status),
+        "failed" => error(&response.status),
+        _ => warn(&response.status),
+    };
+    println!("{}: {}", muted("job"), cyan(&response.job_id.to_string()));
+    println!("{}: {}", muted("kind"), response.kind);
+    println!("{}: {}", muted("status"), status_colored);
+    println!("{}: {}", muted("started"), response.started_at);
+    if let Some(finished) = &response.finished_at {
+        println!("{}: {}", muted("finished"), finished);
+    }
+    if let Some(integrity) = &response.integrity {
+        let ok_str = integrity.ok.to_string();
+        let ok_colored = if integrity.ok {
+            success(&ok_str)
+        } else {
+            error(&ok_str)
+        };
+        println!("{}: {}", muted("integrity_ok"), ok_colored);
+        for message in &integrity.messages {
+            println!("{message}");
+        }
+    }
+    if let Some(err) = &response.error {
+        println!("{}: {}", error("error"), err);
     }
     Ok(())
 }

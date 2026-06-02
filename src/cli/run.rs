@@ -110,6 +110,9 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::Db(db) => match db {
             DbCommand::Status(args) => dispatch::run_db_status(&mode, args).await,
             DbCommand::Integrity(args) => dispatch::run_db_integrity(&mode, args).await,
+            DbCommand::IntegrityStatus(args) => {
+                dispatch::run_db_integrity_status(&mode, args).await
+            }
             DbCommand::Checkpoint(args) => dispatch::run_db_checkpoint(&mode, args).await,
             DbCommand::Vacuum(args) => dispatch::run_db_vacuum(&mode, args).await,
             DbCommand::Backup(args) => dispatch::run_db_backup(&mode, args).await,

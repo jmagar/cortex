@@ -160,6 +160,7 @@ pub(crate) struct PluginHookArgs {
 pub(crate) enum DbCommand {
     Status(DbStatusArgs),
     Integrity(DbIntegrityArgs),
+    IntegrityStatus(DbIntegrityStatusArgs),
     Checkpoint(DbCheckpointArgs),
     Vacuum(DbVacuumArgs),
     Backup(DbBackupArgs),
@@ -168,6 +169,15 @@ pub(crate) enum DbCommand {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct DbIntegrityArgs {
     pub quick: bool,
+    pub json: bool,
+    /// Run the check as a non-blocking server-side job (HTTP mode only). Returns
+    /// a job id immediately; poll with `db integrity status <id>`.
+    pub background: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct DbIntegrityStatusArgs {
+    pub job_id: i64,
     pub json: bool,
 }
 

@@ -4,8 +4,8 @@ use cortex::compose::ComposeTarget;
 use super::parse_common::{parse_output_args, parse_u32_flag, value_after_equals, FlagCursor};
 use super::{
     CliCommand, ComposeArgs, ComposeCommand, ComposeLogsArgs, ComposeMutationArgs, DbBackupArgs,
-    DbCheckpointArgs, DbCommand, DbIntegrityArgs, DbStatusArgs, DbVacuumArgs, PluginHookArgs,
-    ServiceCommand, ServiceLogsArgs, SetupArgs, SetupCommand,
+    DbCheckpointArgs, DbCommand, DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs,
+    DbVacuumArgs, PluginHookArgs, ServiceCommand, ServiceLogsArgs, SetupArgs, SetupCommand,
 };
 pub(crate) fn parse_stats(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Stats(parse_output_args("stats", args)?))
@@ -87,16 +87,45 @@ pub(crate) fn parse_db_status(args: &[String]) -> Result<CliCommand> {
 }
 
 pub(crate) fn parse_db_integrity(args: &[String]) -> Result<CliCommand> {
+    // `db integrity status <id>` polls a background job; everything else runs
+    // (or starts) a check.
+    if let Some((first, rest)) = args.split_first() {
+        if first == "status" {
+            return parse_db_integrity_status(rest);
+        }
+    }
     let mut parsed = DbIntegrityArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--quick" => parsed.quick = true,
+            "--background" => parsed.background = true,
             _ => bail!("unknown db integrity option: {arg}"),
         }
     }
     Ok(CliCommand::Db(DbCommand::Integrity(parsed)))
+}
+
+pub(crate) fn parse_db_integrity_status(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = DbIntegrityStatusArgs::default();
+    let mut job_id: Option<i64> = None;
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            other if !other.starts_with("--") => {
+                job_id = Some(
+                    other
+                        .parse::<i64>()
+                        .map_err(|_| anyhow!("db integrity status: invalid job id '{other}'"))?,
+                );
+            }
+            _ => bail!("unknown db integrity status option: {arg}"),
+        }
+    }
+    parsed.job_id = job_id.ok_or_else(|| anyhow!("db integrity status requires a job id"))?;
+    Ok(CliCommand::Db(DbCommand::IntegrityStatus(parsed)))
 }
 
 pub(crate) fn parse_db_checkpoint(args: &[String]) -> Result<CliCommand> {

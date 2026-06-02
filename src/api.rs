@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 
 use axum::{
-    extract::{ConnectInfo, Query, State},
+    extract::{ConnectInfo, Path, Query, State},
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
@@ -264,6 +264,11 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         // --- db ops (bead 0p8r.4) ---
         .route("/api/db/status", get(db_status))
         .route("/api/db/integrity", get(db_integrity))
+        .route(
+            "/api/db/integrity/background",
+            post(db_integrity_background),
+        )
+        .route("/api/db/integrity/jobs/{id}", get(db_integrity_job))
         .route("/api/db/checkpoint", post(db_checkpoint))
         .route("/api/db/vacuum", post(db_vacuum))
         .route("/api/db/backup", post(db_backup));
@@ -1349,6 +1354,24 @@ async fn db_integrity(
     Query(req): Query<DbIntegrityRequest>,
 ) -> impl IntoResponse {
     respond(state.service.db_integrity(req.quick).await)
+}
+
+/// `POST /api/db/integrity/background` — start a non-blocking integrity check.
+///
+/// The full check is ~147s on a multi-GB DB (it reads every page — unfixable),
+/// so this records a `running` job, spawns the check server-side, and returns
+/// the job id immediately. Poll `GET /api/db/integrity/jobs/{id}` for the
+/// outcome. Reuses the `quick` query param of the sync endpoint.
+async fn db_integrity_background(
+    State(state): State<ApiState>,
+    Query(req): Query<DbIntegrityRequest>,
+) -> impl IntoResponse {
+    respond(state.service.db_integrity_start_background(req.quick).await)
+}
+
+/// `GET /api/db/integrity/jobs/{id}` — poll a background integrity job.
+async fn db_integrity_job(State(state): State<ApiState>, Path(id): Path<i64>) -> impl IntoResponse {
+    respond(state.service.db_integrity_job_status(id).await)
 }
 
 /// `POST /api/db/checkpoint` — admin: `PRAGMA wal_checkpoint(<mode>)`.

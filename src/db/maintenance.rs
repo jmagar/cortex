@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::config::StorageConfig;
 
@@ -77,6 +77,74 @@ pub fn db_integrity_check(pool: &DbPool, quick: bool) -> Result<Vec<String>> {
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     let messages = rows.collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(messages)
+}
+
+/// A row from the `maintenance_jobs` table (bead syslog-mcp-a4pd).
+#[derive(Debug, Clone)]
+pub struct MaintenanceJob {
+    pub id: i64,
+    pub kind: String,
+    /// One of `running`, `done`, `failed`.
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    /// JSON-encoded result payload (present once terminal), e.g.
+    /// `{"ok":true,"messages":["ok"]}` or `{"error":"..."}`.
+    pub result_json: Option<String>,
+}
+
+/// Insert a new `running` maintenance job and return its id. Used by the
+/// background `db integrity` path to record a job before spawning the check.
+pub fn insert_maintenance_job(pool: &DbPool, kind: &str) -> Result<i64> {
+    let conn = pool.get()?;
+    conn.execute(
+        "INSERT INTO maintenance_jobs (kind, status, started_at)
+         VALUES (?1, 'running', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        [kind],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Mark a maintenance job terminal (`done`/`failed`) with its JSON result.
+pub fn finish_maintenance_job(
+    pool: &DbPool,
+    id: i64,
+    status: &str,
+    result_json: &str,
+) -> Result<()> {
+    let conn = pool.get()?;
+    conn.execute(
+        "UPDATE maintenance_jobs
+            SET status = ?2,
+                finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                result_json = ?3
+          WHERE id = ?1",
+        rusqlite::params![id, status, result_json],
+    )?;
+    Ok(())
+}
+
+/// Fetch a maintenance job by id, or `None` if no such job exists.
+pub fn get_maintenance_job(pool: &DbPool, id: i64) -> Result<Option<MaintenanceJob>> {
+    let conn = pool.get()?;
+    let job = conn
+        .query_row(
+            "SELECT id, kind, status, started_at, finished_at, result_json
+             FROM maintenance_jobs WHERE id = ?1",
+            [id],
+            |r| {
+                Ok(MaintenanceJob {
+                    id: r.get(0)?,
+                    kind: r.get(1)?,
+                    status: r.get(2)?,
+                    started_at: r.get(3)?,
+                    finished_at: r.get(4)?,
+                    result_json: r.get(5)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(job)
 }
 
 /// Type-safe PRAGMA identifier. The `pub(crate)` field prevents external crates

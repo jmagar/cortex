@@ -1079,6 +1079,7 @@ async fn run_db_integrity_http_sends_exactly_one_request() {
         DbIntegrityArgs {
             quick: true,
             json: true,
+            background: false,
         },
     )
     .await
@@ -1155,6 +1156,7 @@ async fn run_db_integrity_bails_when_response_not_ok() {
         DbIntegrityArgs {
             quick: false,
             json: true,
+            background: false,
         },
     )
     .await
@@ -1323,6 +1325,7 @@ async fn db_integrity_http_request_completes_within_integrity_timeout_budget() {
         DbIntegrityArgs {
             quick: false,
             json: true,
+            background: false,
         },
     )
     .await

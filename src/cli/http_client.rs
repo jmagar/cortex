@@ -67,19 +67,19 @@ use cortex::app::{
     AiPruneCheckpointsRequest, AnomaliesRequest, AnomaliesResponse, AskHistoryRequest,
     AskHistoryResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse,
     CorrelateEventsRequest, CorrelateEventsResponse, CorrelateStateRequest, CorrelateStateResponse,
-    DbBackupRequest, DbBackupResult, DbCheckpointRequest, DbCheckpointResult, DbIntegrityRequest,
-    DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult,
-    FilterLogsRequest, FleetStateRequest, FleetStateResponse, GetErrorsRequest, GetErrorsResponse,
-    GetLogRequest, GetLogResponse, HostStateRequest, HostStateResponse, IncidentContextRequest,
-    IncidentContextResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
-    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
-    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSourceIpsRequest, ListSourceIpsResponse, PatternsRequest, PatternsResponse,
-    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
-    SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
-    TimelineResponse, UnackErrorRequest, UnackErrorResponse, UnaddressedErrorsRequest,
-    UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
+    DbBackupRequest, DbBackupResult, DbCheckpointRequest, DbCheckpointResult,
+    DbIntegrityJobStarted, DbIntegrityRequest, DbIntegrityResult, DbMaintenanceStatus, DbStats,
+    DbVacuumRequest, DbVacuumResult, FilterLogsRequest, FleetStateRequest, FleetStateResponse,
+    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, HostStateRequest,
+    HostStateResponse, IncidentContextRequest, IncidentContextResponse, IngestRateRequest,
+    IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
+    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, MaintenanceJobStatus,
+    PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse,
+    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
+    SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse,
+    TailLogsRequest, TimelineRequest, TimelineResponse, UnackErrorRequest, UnackErrorResponse,
+    UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use cortex::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
 
@@ -520,6 +520,21 @@ impl HttpClient {
 
     pub async fn db_integrity(&self, req: &DbIntegrityRequest) -> Result<DbIntegrityResult> {
         self.get_json("/api/db/integrity", Some(req)).await
+    }
+
+    /// Start a background integrity job; returns the job id immediately.
+    pub async fn db_integrity_background(
+        &self,
+        req: &DbIntegrityRequest,
+    ) -> Result<DbIntegrityJobStarted> {
+        let path = format!("/api/db/integrity/background?quick={}", req.quick);
+        self.post_json::<(), _>(&path, &()).await
+    }
+
+    /// Poll a background integrity job by id.
+    pub async fn db_integrity_job(&self, id: i64) -> Result<MaintenanceJobStatus> {
+        let path = format!("/api/db/integrity/jobs/{id}");
+        self.get_json::<(), _>(&path, None).await
     }
 
     pub async fn db_checkpoint(&self, req: &DbCheckpointRequest) -> Result<DbCheckpointResult> {

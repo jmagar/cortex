@@ -15,19 +15,20 @@ use super::models::{
     CompareResponse, ContextRequest, ContextResponse, CorrelateEventsRequest,
     CorrelateEventsResponse, CorrelateStateHostEntry, CorrelateStateRequest,
     CorrelateStateResponse, CorrelateStateWindow, DbBackupResult, DbCheckpointRequest,
-    DbCheckpointResult, DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest,
-    DbVacuumResult, FilterLogsRequest, FleetStateHostRow, FleetStateRequest, FleetStateResponse,
-    FleetStateSummary, GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse,
-    IncidentContextRequest, IncidentContextResponse, IncidentEvent, IncidentRequest,
-    IncidentResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
-    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
-    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, NotificationsRecentRequest,
-    PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse, RequestActor,
-    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
-    ServiceJournalEntry, ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest,
-    SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest,
-    TimelineRequest, TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
+    DbCheckpointResult, DbIntegrityJobStarted, DbIntegrityResult, DbMaintenanceStatus, DbStats,
+    DbVacuumRequest, DbVacuumResult, FilterLogsRequest, FleetStateHostRow, FleetStateRequest,
+    FleetStateResponse, FleetStateSummary, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
+    GetLogResponse, IncidentContextRequest, IncidentContextResponse, IncidentEvent,
+    IncidentRequest, IncidentResponse, IngestRateRequest, IngestRateResponse,
+    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
+    ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LogEntry,
+    MaintenanceJobStatus, NotificationsRecentRequest, PatternsRequest, PatternsResponse,
+    ProjectContextRequest, ProjectContextResponse, RequestActor, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry,
+    ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse,
+    SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
+    TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
@@ -1362,6 +1363,99 @@ impl CortexService {
             })
         })
         .await
+    }
+
+    /// Start a background `db integrity` job (bead syslog-mcp-a4pd). Inserts a
+    /// `running` job row, spawns the (~147s) check on a detached task, and
+    /// returns the job id IMMEDIATELY. The caller polls
+    /// [`db_integrity_job_status`](Self::db_integrity_job_status).
+    ///
+    /// The check runs on its OWN pooled connection in a detached
+    /// `tokio::spawn(spawn_blocking(...))` — deliberately NOT via `run_db` (which
+    /// would hold a `db_permits` slot for the whole 147s and starve other reads)
+    /// and NOT via the maintenance permit (which would serialize behind retention
+    /// / optimize). `quick_check` is read-only, so it never blocks the ingest
+    /// writer. The outer `tokio::spawn` is what lets this method return now and
+    /// update the job row when the check finishes.
+    pub async fn db_integrity_start_background(
+        &self,
+        quick: bool,
+    ) -> ServiceResult<DbIntegrityJobStarted> {
+        let job_id = self
+            .run_db("db_integrity_start", move |pool| {
+                db::insert_maintenance_job(pool, "db_integrity")
+            })
+            .await?;
+
+        let pool = Arc::clone(&self.pool);
+        tokio::spawn(async move {
+            let check_pool = Arc::clone(&pool);
+            let outcome =
+                tokio::task::spawn_blocking(move || db::db_integrity_check(&check_pool, quick))
+                    .await;
+            let (status, result_json) = match outcome {
+                Ok(Ok(messages)) => {
+                    let ok =
+                        messages.len() == 1 && messages.first().is_some_and(|value| value == "ok");
+                    let payload = serde_json::json!({ "ok": ok, "messages": messages });
+                    ("done", payload.to_string())
+                }
+                Ok(Err(e)) => (
+                    "failed",
+                    serde_json::json!({ "error": e.to_string() }).to_string(),
+                ),
+                Err(e) => (
+                    "failed",
+                    serde_json::json!({ "error": format!("integrity task join error: {e}") })
+                        .to_string(),
+                ),
+            };
+            if let Err(e) = db::finish_maintenance_job(&pool, job_id, status, &result_json) {
+                tracing::error!(job_id, error = %e, "failed to record integrity job result");
+            }
+        });
+
+        Ok(DbIntegrityJobStarted {
+            job_id,
+            status: "running".to_string(),
+        })
+    }
+
+    /// Poll a background maintenance job by id.
+    pub async fn db_integrity_job_status(&self, id: i64) -> ServiceResult<MaintenanceJobStatus> {
+        let job = self
+            .run_db("db_integrity_job_status", move |pool| {
+                db::get_maintenance_job(pool, id)
+            })
+            .await?
+            .ok_or_else(|| ServiceError::NotFound(format!("maintenance job {id} not found")))?;
+
+        // Parse the terminal result payload into typed fields.
+        let mut integrity = None;
+        let mut error = None;
+        if let Some(raw) = &job.result_json {
+            match job.status.as_str() {
+                "done" => {
+                    integrity = serde_json::from_str::<DbIntegrityResult>(raw).ok();
+                }
+                "failed" => {
+                    error = serde_json::from_str::<serde_json::Value>(raw)
+                        .ok()
+                        .and_then(|v| v.get("error").and_then(|e| e.as_str().map(String::from)));
+                }
+                _ => {}
+            }
+        }
+
+        Ok(MaintenanceJobStatus {
+            job_id: job.id,
+            kind: job.kind,
+            status: job.status,
+            started_at: job.started_at,
+            finished_at: job.finished_at,
+            integrity,
+            error,
+        })
     }
 
     async fn db_checkpoint(&self, mode: String) -> ServiceResult<DbCheckpointResult> {

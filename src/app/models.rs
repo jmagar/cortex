@@ -141,6 +141,36 @@ pub struct DbIntegrityResult {
     pub messages: Vec<String>,
 }
 
+/// Response from starting a background `db integrity` job (bead syslog-mcp-a4pd).
+/// The full check (~147s on a multi-GB DB) runs server-side; the caller polls
+/// `GET /api/db/integrity/jobs/:id` for the outcome.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbIntegrityJobStarted {
+    pub job_id: i64,
+    /// Always `"running"` at start.
+    pub status: String,
+}
+
+/// Status of a background maintenance job (poll response).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaintenanceJobStatus {
+    pub job_id: i64,
+    pub kind: String,
+    /// `running`, `done`, or `failed`.
+    pub status: String,
+    pub started_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<String>,
+    /// Parsed integrity result, present once the job is terminal and was an
+    /// integrity check. `None` while running or on a `failed` job (whose error
+    /// is in `error`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integrity: Option<DbIntegrityResult>,
+    /// Error message for a `failed` job.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// Request body for `POST /api/db/backup`.
 ///
 /// `output_path` is **server-side** — it must be a path the server process can

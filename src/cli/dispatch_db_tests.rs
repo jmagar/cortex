@@ -46,6 +46,7 @@ async fn run_db_integrity_http_timeout_emits_actionable_message() {
         DbIntegrityArgs {
             quick: true,
             json: false,
+            background: false,
         },
         Duration::from_millis(10),
     )

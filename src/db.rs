@@ -28,8 +28,9 @@ pub(crate) use ingest::insert_logs_batch_in_tx;
 pub use maintenance::{
     db_full_vacuum, db_incremental_vacuum, db_integrity_check, db_wal_checkpoint,
     enforce_storage_budget, enforce_storage_budget_with_state, exceeds_trigger,
-    get_storage_metrics, physical_size_bytes, purge_by_tag_window, purge_old_heartbeats,
-    purge_old_logs, DiskSpaceProbe, SystemDiskSpaceProbe,
+    finish_maintenance_job, get_maintenance_job, get_storage_metrics, insert_maintenance_job,
+    physical_size_bytes, purge_by_tag_window, purge_old_heartbeats, purge_old_logs, DiskSpaceProbe,
+    MaintenanceJob, SystemDiskSpaceProbe,
 };
 pub(crate) use maintenance::{db_pragma_i64, db_pragma_string, PragmaName};
 pub use models::{

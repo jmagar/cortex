@@ -2,6 +2,9 @@ use super::dispatch::http_or_cancel;
 
 use anyhow::{bail, Result};
 use cortex::app::{DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest};
+
+use super::output_ops::{print_db_integrity_job_started, print_db_integrity_job_status};
+use super::DbIntegrityStatusArgs;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -83,8 +86,27 @@ pub(crate) async fn run_db_integrity_with_timeout(
     args: DbIntegrityArgs,
     http_timeout: Duration,
 ) -> Result<()> {
-    let DbIntegrityArgs { quick, json } = args;
+    let DbIntegrityArgs {
+        quick,
+        json,
+        background,
+    } = args;
     let req = DbIntegrityRequest { quick };
+
+    // Background mode is server-hosted (the CLI process can't outlive the
+    // request to hold the detached job), so it requires HTTP transport.
+    if background {
+        let CliMode::Http(client) = mode else {
+            bail!(
+                "db integrity --background requires --http (the job runs server-side).\n\
+                 Without --http the check runs synchronously in this process."
+            );
+        };
+        let started = http_or_cancel(client.db_integrity_background(&req)).await?;
+        print_db_integrity_job_started(&started, json)?;
+        return Ok(());
+    }
+
     let response = match mode {
         CliMode::Local(service) => service.db_integrity(quick).await?,
         CliMode::Http(client) => {
@@ -108,6 +130,29 @@ pub(crate) async fn run_db_integrity_with_timeout(
     };
     print_db_integrity_response(&response, json)?;
     if !response.ok {
+        bail!("database integrity check failed");
+    }
+    Ok(())
+}
+
+/// Poll a background integrity job (`db integrity status <id>`). HTTP-only — the
+/// job lives in the server's DB, which a local CLI process can also read, but
+/// the start path is HTTP-only so the status path matches it.
+pub(crate) async fn run_db_integrity_status(
+    mode: &CliMode,
+    args: DbIntegrityStatusArgs,
+) -> Result<()> {
+    let DbIntegrityStatusArgs { job_id, json } = args;
+    let status = match mode {
+        CliMode::Local(service) => service.db_integrity_job_status(job_id).await?,
+        CliMode::Http(client) => http_or_cancel(client.db_integrity_job(job_id)).await?,
+    };
+    print_db_integrity_job_status(&status, json)?;
+    // A terminal failed/not-ok job exits non-zero so scripts can branch on it.
+    if status.status == "failed" {
+        bail!("integrity job {job_id} failed");
+    }
+    if status.status == "done" && status.integrity.as_ref().is_some_and(|r| !r.ok) {
         bail!("database integrity check failed");
     }
     Ok(())
