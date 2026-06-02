@@ -298,10 +298,14 @@ fn mcp_port_phase() -> SetupPhase {
             status: SetupStatus::Ok,
             detail: format!("port {port} available"),
         },
-        Err(error) => SetupPhase {
+        // Port in use is the healthy state for an already-running cortex — the
+        // SessionStart hook does not (re)deploy, so flagging it as a problem is
+        // misleading noise. Report it as Ok with a clarifying detail; genuine
+        // port-conflict diagnosis belongs in `cortex doctor`, not session start.
+        Err(_) => SetupPhase {
             name: "mcp-port",
-            status: SetupStatus::Warn,
-            detail: format!("port {port} is already in use: {error}"),
+            status: SetupStatus::Ok,
+            detail: format!("port {port} in use (cortex already running)"),
         },
     }
 }

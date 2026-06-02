@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-06-02
+
+### Fixed
+
+- **SessionStart hook no longer flags the running server's own port as a problem.** The `mcp-port` setup phase bound-tested `127.0.0.1:<CORTEX_PORT>` and reported `Warn: port already in use` — but for an already-running cortex, the port being bound is the *healthy* state, so every session start emitted a misleading warning. The hook does not (re)deploy, so a port-in-use is now reported as `Ok` (`port <n> in use (cortex already running)`). Genuine port-conflict diagnosis remains in `cortex doctor`.
+
 ## [1.1.4] - 2026-06-01
 
 ### Fixed
