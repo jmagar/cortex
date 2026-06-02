@@ -1,10 +1,14 @@
 //! Tests for color policy resolution.
 //!
 //! These mutate process-global state (the `COLOR_OVERRIDE` atomic and env
-//! vars). They are safe under `cargo nextest`, which runs each test in its own
-//! process. Each test sets exactly the state it asserts on.
+//! vars). nextest isolates each test in its own process, but under
+//! `cargo test --lib` (one process, parallel threads — the pre-push path) they
+//! would race each other and any other env-reading test, so they are
+//! `#[serial]`. Each test installs its own override and clears env up front, so
+//! serialized execution is deterministic.
 
 use super::*;
+use serial_test::serial;
 
 /// Clear the env vars that influence `resolve` so a test starts from a known
 /// baseline regardless of the ambient shell.
@@ -15,6 +19,7 @@ fn clear_color_env() {
 }
 
 #[test]
+#[serial]
 fn override_always_wins_over_non_tty() {
     clear_color_env();
     install_color_choice(ColorChoice::Always);
@@ -22,6 +27,7 @@ fn override_always_wins_over_non_tty() {
 }
 
 #[test]
+#[serial]
 fn override_never_wins_over_tty_and_force() {
     install_color_choice(ColorChoice::Never);
     unsafe { env::set_var("FORCE_COLOR", "1") };
@@ -32,6 +38,7 @@ fn override_never_wins_over_tty_and_force() {
 }
 
 #[test]
+#[serial]
 fn auto_follows_tty_when_no_env() {
     clear_color_env();
     install_color_choice(ColorChoice::Auto);
@@ -40,6 +47,7 @@ fn auto_follows_tty_when_no_env() {
 }
 
 #[test]
+#[serial]
 fn auto_no_color_env_suppresses_even_on_tty() {
     clear_color_env();
     install_color_choice(ColorChoice::Auto);
@@ -48,6 +56,7 @@ fn auto_no_color_env_suppresses_even_on_tty() {
 }
 
 #[test]
+#[serial]
 fn auto_force_color_enables_on_non_tty() {
     clear_color_env();
     install_color_choice(ColorChoice::Auto);
@@ -56,6 +65,7 @@ fn auto_force_color_enables_on_non_tty() {
 }
 
 #[test]
+#[serial]
 fn no_color_beats_force_color() {
     clear_color_env();
     install_color_choice(ColorChoice::Auto);
