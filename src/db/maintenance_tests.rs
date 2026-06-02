@@ -940,87 +940,93 @@ fn probe_failure_with_guardrail_disabled_does_not_block() {
 /// protected by the floor (deleted_rows comes only from the deletable info row).
 #[test]
 fn err_floor_window_matches_fractional_second_received_at() {
-    let (pool, dir) = test_pool();
+    let window_hours = 1i64;
     let big_info = "info-junk-".repeat(120_000);
     let big_err = "err-keep-".repeat(120_000);
-    insert_logs_batch(
-        &pool,
-        &[
-            make_entry("2026-01-01T00:00:01Z", "host-a", "info", &big_info),
-            make_entry("2026-01-01T00:00:02Z", "host-a", "err", &big_err),
-        ],
-    )
-    .unwrap();
-
-    // Oldest, deletable info row.
-    update_received_at(&pool, &big_info, "2026-01-01T00:00:00Z");
 
     // Place the protected err row's received_at in the SAME WHOLE SECOND as the
-    // floor cutoff, with a `.999` fractional part. The cutoff is computed inside the
-    // function as `Utc::now() - window_hours`; we mirror that here. This is the only
-    // arrangement that exercises bug #2: a row a few seconds inside the window never
-    // reaches the fractional position (the date/second fields differ), so it passes
-    // under BOTH formats and proves nothing.
+    // floor cutoff, with a `.999` fractional part. The cutoff is computed inside
+    // the function as `Utc::now() - window_hours`; we mirror that here. This is
+    // the only arrangement that exercises bug #2: a row a few seconds inside the
+    // window never reaches the fractional position (the date/second fields
+    // differ), so it passes under BOTH formats and proves nothing.
     //
     // Discrimination at the boundary second "HH:MM:SS":
     //   - Correct (Millis) cutoff "HH:MM:SS.mmmZ" with mmm < 999 → row ".999Z" >=
     //     cutoff → PROTECTED (this is the fix).
     //   - Buggy (second) cutoff "HH:MM:SSZ" → comparing "...SS.999Z" vs "...SSZ",
     //     the char after "SS" is '.'(0x2E) < 'Z'(0x5A), so row < cutoff → NOT
-    //     protected → deleted. The old code would wipe a row that is genuinely
-    //     inside the window.
+    //     protected → deleted.
     //
-    // Race guard: the function's internal `now` is microseconds after ours. If our
-    // captured `now` is within the last ~50ms of a second, `now - window` could land
-    // in a LATER whole second than ours, making the boundary second mismatch and
-    // the test flake even WITH the fix. The function captures its own `Utc::now()`
-    // only after several DB ops (this UPDATE, metrics PRAGMAs + statvfs, orphan
-    // sweep, two MIN() queries) — tens of ms later. So require OUR `now` to be
-    // EARLY in the second (sub_ms < 500); that 500ms headroom dwarfs the elapsed
-    // time before the function computes `window_start`, guaranteeing both `now`s
-    // share the same whole second.
-    let window_hours = 1i64;
-    let boundary_second = loop {
-        let now = chrono::Utc::now();
-        let sub_ms = now.timestamp_subsec_millis();
-        if sub_ms < 500 {
-            // The cutoff second is floor(now - window_hours) to the whole second.
-            let cutoff = now - chrono::TimeDelta::hours(window_hours);
-            break cutoff.format("%Y-%m-%dT%H:%M:%S").to_string();
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
+    // Determinism: the function captures its OWN `Utc::now()` between our two
+    // bracket reads (`now_before` … `enforce_storage_budget` … `now_after`).
+    // We only assert when BOTH brackets floor `(now − window)` to the SAME whole
+    // second — which, since the function's `now` lies between them and floor is
+    // monotonic, proves the function shared that boundary second. If a
+    // whole-second boundary was crossed mid-op (possible under heavy parallel
+    // load), the arrangement is invalid, so we retry with fresh data instead of
+    // flaking — no wall-clock-headroom guessing.
+    let floor_minus_window = |t: chrono::DateTime<chrono::Utc>| {
+        (t - chrono::TimeDelta::hours(window_hours))
+            .format("%Y-%m-%dT%H:%M:%S")
+            .to_string()
     };
-    let recent_ts = format!("{boundary_second}.999Z");
-    assert!(
-        recent_ts.contains(".999Z"),
-        "test fixture must sit at the boundary second with a .999 fractional, got {recent_ts}"
-    );
-    update_received_at(&pool, &big_err, &recent_ts);
 
-    let mut config = test_storage_config(dir.path().join("test.db"));
-    config.max_db_size_mb = 2;
-    config.recovery_db_size_mb = 1;
-    config.min_free_disk_mb = 0;
-    config.recovery_free_disk_mb = 0;
-    config.cleanup_chunk_size = 1;
-    config.err_floor_window_hours = window_hours as u64;
-    config.err_floor_per_source_cap = 10_000;
+    for _ in 0..200 {
+        let (pool, dir) = test_pool();
+        insert_logs_batch(
+            &pool,
+            &[
+                make_entry("2026-01-01T00:00:01Z", "host-a", "info", &big_info),
+                make_entry("2026-01-01T00:00:02Z", "host-a", "err", &big_err),
+            ],
+        )
+        .unwrap();
+        // Oldest, deletable info row.
+        update_received_at(&pool, &big_info, "2026-01-01T00:00:00Z");
 
-    let outcome = enforce_storage_budget(&pool, &config).unwrap();
+        let now_before = chrono::Utc::now();
+        let boundary_second = floor_minus_window(now_before);
+        let recent_ts = format!("{boundary_second}.999Z");
+        update_received_at(&pool, &big_err, &recent_ts);
 
-    let rows = tail_logs(&pool, None, None, None, None, 10).unwrap();
-    let messages: Vec<&str> = rows.iter().map(|r| r.message.as_str()).collect();
-    assert!(
-        messages.contains(&big_err.as_str()),
-        "recent err+ with fractional-second received_at must be protected by the floor"
-    );
-    assert!(
-        !messages.contains(&big_info.as_str()),
-        "the deletable info row should have been trimmed"
-    );
-    assert!(
-        outcome.write_blocked,
-        "still over cap after floor protected the err row → writes blocked"
+        let mut config = test_storage_config(dir.path().join("test.db"));
+        config.max_db_size_mb = 2;
+        config.recovery_db_size_mb = 1;
+        config.min_free_disk_mb = 0;
+        config.recovery_free_disk_mb = 0;
+        config.cleanup_chunk_size = 1;
+        config.err_floor_window_hours = window_hours as u64;
+        config.err_floor_per_source_cap = 10_000;
+
+        let outcome = enforce_storage_budget(&pool, &config).unwrap();
+        let now_after = chrono::Utc::now();
+
+        // Boundary crossed during the op → the function's cutoff second may not
+        // match our fixture. Discard this attempt and rebuild.
+        if floor_minus_window(now_after) != boundary_second {
+            continue;
+        }
+
+        let rows = tail_logs(&pool, None, None, None, None, 10).unwrap();
+        let messages: Vec<&str> = rows.iter().map(|r| r.message.as_str()).collect();
+        assert!(
+            messages.contains(&big_err.as_str()),
+            "recent err+ with fractional-second received_at must be protected by the floor"
+        );
+        assert!(
+            !messages.contains(&big_info.as_str()),
+            "the deletable info row should have been trimmed"
+        );
+        assert!(
+            outcome.write_blocked,
+            "still over cap after floor protected the err row → writes blocked"
+        );
+        return;
+    }
+
+    panic!(
+        "could not align the cutoff whole-second within 200 attempts (excessive scheduling jitter)"
     );
 }
 
