@@ -333,8 +333,9 @@ pub fn enforce_storage_budget_with_state(
         // (DELETE trigger is intentionally absent).
         // drop the connection before checkpoint_wal_and_incremental_vacuum to
         // avoid pool exhaustion when pool_size = 1.
-        // Hardcoded M=0 here — storage enforcement is rare, force unconditional
-        // merge. Tunable M only matters for the regular retention path.
+        // Pass 0 here so the merge uses DEFAULT_FTS_MERGE_PAGES — storage
+        // enforcement is rare and the tunable page budget only matters for the
+        // regular retention path.
         if deleted_log_rows > 0 {
             fts_incremental_merge(pool, deleted_log_rows, 0);
         }
@@ -363,104 +364,90 @@ pub fn enforce_storage_budget_with_state(
 
 /// Run an incremental FTS5 merge to clean up phantom rows left by bulk DELETEs.
 ///
-/// A single `merge=500,250` call processes at most ~500 FTS index pages, which
-/// covers <1% of phantoms after a 500k-row delete. This function scales the
-/// number of merge iterations proportionally to `deleted_rows` (one iteration
-/// per 5 000 rows, capped at 20) and falls back to a forced `rebuild` after
-/// 3 consecutive failures — a last-resort recovery for a corrupt or severely
-/// fragmented FTS index.
+/// Uses the only valid FTS5 incremental-merge API — the two-column form
+/// `INSERT INTO logs_fts(logs_fts, rank) VALUES('merge', N)` — where `N` is a
+/// page budget: the merge processes at most ~N pages of the index and then
+/// returns, holding the write lock for milliseconds rather than rewriting the
+/// whole index. (The older `'merge=B,M'` STRING syntax this code used does not
+/// exist in modern FTS5 and errors on every call.)
 ///
-/// Best-effort: errors are logged but never propagated.
+/// This function scales the number of merge iterations proportionally to
+/// `deleted_rows` (one iteration per 5 000 rows, capped at 20) so a large bulk
+/// delete reclaims more phantom space without any single call running long.
+///
+/// `merge_pages` is the per-call page budget (from `CORTEX_FTS_MERGE_PAGES`). A
+/// value of 0 is treated as the default `DEFAULT_FTS_MERGE_PAGES` because 0
+/// pages is a no-op in the two-arg API.
+///
+/// Best-effort: errors are logged but never propagated. A merge that finds
+/// nothing to do returns OK (not an error), so ordinary "no phantoms" cycles do
+/// not trigger any fallback. On a genuine error (e.g. a busy/locked DB, or real
+/// index corruption) we log and stop — we deliberately do NOT auto-escalate to
+/// `optimize` or `rebuild`, both of which are O(index-size) under the write lock
+/// and were the source of the hourly OOM. Heavy repair is left to an
+/// operator-initiated path (see `db_integrity_check`).
 fn fts_incremental_merge(pool: &DbPool, deleted_rows: usize, merge_pages: u32) {
-    // Budget one merge=500,M call per 5 000 deleted rows (rough heuristic),
-    // with a floor of 1 and a ceiling of 20 to bound wall-clock time.
+    // Budget one merge call per 5 000 deleted rows (rough heuristic), with a
+    // floor of 1 and a ceiling of 20 to bound wall-clock time.
     let iterations = deleted_rows.div_ceil(5000).clamp(1, 20);
-    let mut consecutive_failures: u32 = 0;
-    // M=0 forces unconditional merge regardless of segment count, which is
-    // the right choice after bulk DELETEs (level-0 segments may be too few
-    // to satisfy the default M=250 threshold). Operators can raise M via
-    // CORTEX_FTS_MERGE_PAGES if M=0 holds the write lock too long on a
-    // very large index — config rollback rather than binary rollback.
-    let merge_stmt = format!("INSERT INTO logs_fts(logs_fts) VALUES('merge=500,{merge_pages}');");
+    // 0 pages is a no-op in the two-arg API, so map the "unconditional" sentinel
+    // to a sane bounded budget. 500 matches the old block-size default.
+    let pages: i64 = if merge_pages == 0 {
+        DEFAULT_FTS_MERGE_PAGES
+    } else {
+        merge_pages as i64
+    };
 
     for i in 0..iterations {
         match pool.get() {
             Ok(conn) => {
                 let _write_guard = crate::db::write_lock();
-                match conn.execute_batch(&merge_stmt) {
-                    Ok(()) => {
-                        consecutive_failures = 0;
+                match conn.execute(
+                    "INSERT INTO logs_fts(logs_fts, rank) VALUES('merge', ?1)",
+                    [pages],
+                ) {
+                    Ok(_) => {
                         tracing::trace!(
                             iteration = i + 1,
                             total_iterations = iterations,
+                            pages,
                             "FTS incremental merge iteration"
                         );
                     }
                     Err(e) => {
-                        consecutive_failures += 1;
+                        // A correctly-formed merge only errors on a genuine
+                        // operational problem (busy/locked) or real corruption.
+                        // Log and stop — never auto-escalate to optimize/rebuild,
+                        // which rewrite the entire index under the write lock.
                         tracing::warn!(
                             error = %e,
                             iteration = i + 1,
-                            consecutive_failures,
-                            "FTS incremental merge failed; attempting optimize as fallback"
+                            "FTS incremental merge failed; stopping (no auto optimize/rebuild)"
                         );
-
-                        // Best-effort fallback to optimize if merge is rejected by SQLite
-                        if let Ok(optimize_conn) = pool.get() {
-                            let _ = optimize_conn.execute_batch(
-                                "INSERT INTO logs_fts(logs_fts) VALUES('optimize');",
-                            );
-                        }
-
-                        if consecutive_failures >= 3 {
-                            // Escalate to full rebuild — last-resort recovery for a
-                            // corrupt or severely fragmented FTS index.
-                            match pool.get() {
-                                Ok(rebuild_conn) => {
-                                    if let Err(e) = rebuild_conn.execute_batch(
-                                        "INSERT INTO logs_fts(logs_fts) VALUES('rebuild');",
-                                    ) {
-                                        tracing::error!(error = %e, "FTS forced rebuild failed");
-                                    } else {
-                                        tracing::error!(
-                                            "FTS incremental merge failed 3 times; forced rebuild completed"
-                                        );
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        error = %e,
-                                        "FTS forced rebuild: failed to get connection"
-                                    );
-                                }
-                            }
-                            return;
-                        }
+                        return;
                     }
                 }
             }
             Err(e) => {
                 tracing::warn!(error = %e, "FTS incremental merge: failed to get connection");
-                consecutive_failures += 1;
-                if consecutive_failures >= 3 {
-                    tracing::error!(
-                        "FTS incremental merge: 3 consecutive connection failures, giving up"
-                    );
-                    return;
-                }
+                return;
             }
         }
     }
 }
+
+/// Default per-call FTS5 merge page budget when `CORTEX_FTS_MERGE_PAGES` is 0.
+/// 500 mirrors the historical block-size default and keeps each merge bounded.
+const DEFAULT_FTS_MERGE_PAGES: i64 = 500;
 
 /// Purge logs older than N days.
 ///
 /// Uses chunked DELETEs (10 000 rows per iteration) so the WAL write lock is
 /// released between chunks, letting the batch writer proceed without timing out
 /// or overflowing its 1 000-entry cap.  After all chunks complete, an
-/// incremental FTS5 merge is issued instead of a full rebuild — `merge=500,M`
-/// processes at most a bounded number of index pages per call and holds the
-/// write lock for milliseconds rather than seconds.
+/// incremental FTS5 merge is issued instead of a full rebuild — a bounded
+/// `VALUES('merge', N)` call processes at most N index pages per call and holds
+/// the write lock for milliseconds rather than seconds.
 ///
 /// **High-severity exemption:** rows with `severity IN ('err','crit','alert','emerg')`
 /// are excluded from time-based purge — they are never aged out by retention.

@@ -137,10 +137,12 @@ pub struct EnrichmentConfigToml {
     /// Set to false only if downstream consumers need raw prompt text and
     /// you trust every tailnet node.
     pub scrub_prompts: bool,
-    /// FTS5 incremental merge segment threshold. M=0 forces unconditional
-    /// merge after every purge cycle (recommended for the AdGuard delete
-    /// workload). Increase if M=0 holds the write lock too long on a large
-    /// index. Range: 0..=10000.
+    /// FTS5 incremental-merge page budget per call. Each merge processes at most
+    /// this many index pages and then returns, keeping the write lock held only
+    /// briefly. 0 maps to the built-in default (`DEFAULT_FTS_MERGE_PAGES`, 500)
+    /// because a 0-page merge is a no-op in FTS5's `VALUES('merge', N)` API.
+    /// Raise it to reclaim phantom space faster after large deletes; lower it if
+    /// merges hold the write lock too long on a very large index. Range: 0..=10000.
     pub fts_merge_pages: u32,
 }
 
