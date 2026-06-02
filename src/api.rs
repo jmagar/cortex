@@ -20,12 +20,12 @@ use crate::app::{
     ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
     CorrelateStateRequest, CortexService, DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest,
     DbVacuumRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest,
-    HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
-    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
-    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
-    SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
-    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UnackErrorRequest,
-    UnaddressedErrorsRequest, UsageBlocksRequest,
+    GraphAroundRequest, GraphEntityLookupRequest, HostStateRequest, IncidentContextRequest,
+    IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest,
+    ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest,
+    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError,
+    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
+    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::db::DbPool;
@@ -243,6 +243,8 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/apps", get(apps))
         .route("/api/similar-incidents", get(similar_incidents))
         .route("/api/incident-context", get(incident_context))
+        .route("/api/graph/entity", get(graph_entity))
+        .route("/api/graph/around", get(graph_around))
         .route("/api/ai/ask-history", get(ai_ask_history))
         .route("/api/ai/incidents", get(ai_incidents))
         .route("/api/ai/investigate", get(ai_investigate))
@@ -880,6 +882,20 @@ async fn incident_context(
             })
             .await,
     )
+}
+
+async fn graph_entity(
+    State(state): State<ApiState>,
+    Query(q): Query<GraphEntityLookupRequest>,
+) -> impl IntoResponse {
+    respond(state.service.graph_entity_lookup(q).await)
+}
+
+async fn graph_around(
+    State(state): State<ApiState>,
+    Query(q): Query<GraphAroundRequest>,
+) -> impl IntoResponse {
+    respond(state.service.graph_around(q).await)
 }
 
 #[derive(Debug, Deserialize)]

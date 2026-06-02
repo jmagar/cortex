@@ -20,7 +20,7 @@ wins.
 ## Current Actions
 
 cortex exposes one MCP tool named `cortex`. The required `action` argument
-selects one of these 42 actions:
+selects one of these 43 actions:
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
@@ -63,6 +63,7 @@ selects one of these 42 actions:
 | `similar_incidents` | `syslog:read` | moderate | FTS5 historical incident clusters |
 | `ask_history` | `syslog:read` | moderate | AI transcript history with nearby log context |
 | `incident_context` | `syslog:read` | moderate | Window bundle: log aggregates, errors, AI sessions |
+| `graph` | `syslog:read` | moderate | Entity lookup and one-hop graph neighborhoods |
 | `ack_error` | `syslog:admin` | write | Acknowledge an error signature |
 | `unack_error` | `syslog:admin` | write | Revoke an error acknowledgement |
 | `notifications_test` | `syslog:admin` | write | Send a test Apprise notification |
@@ -130,6 +131,7 @@ handler and service layers.
 | `app_name` | `search`, `filter`, `tail`, `ai_correlate`, `timeline`, `patterns`, `similar_incidents`, `ask_history`, `incident_context` |
 | `from`, `to` | Time range for search/session/AI/analytics actions; required for `incident_context` |
 | `limit`, `offset` | Action-specific bounds; `offset` is for `apps` and `source_ips` pagination |
+| `mode`, `entity_id`, `entity_type`, `key`, `alias_type`, `alias_key`, `depth`, `evidence_sample_limit`, `payload_budget` | Graph lookup and one-hop neighborhood controls for `graph` |
 
 ## Correlation Arguments
 
@@ -143,6 +145,7 @@ See [CORRELATION.md](CORRELATION.md) for the full behavior matrix.
 | `similar_incidents` | `query`, `hostname`, `app_name`, `severity_min`, `from`, `to`, `window_minutes`, `limit` |
 | `ask_history` | `query`, `hostname`, `app_name`, `from`, `to`, `limit` |
 | `incident_context` | `from`, `to`, `hostname`, `app_name`, `severity_min`, `limit`; `query` is accepted by the request shape but intentionally ignored in v1 |
+| `graph` | `mode=entity|around`; exact lookup with `entity_type` + `key`, alias lookup with `alias_type` + `alias_key`, or one-hop `around` by `entity_id`; optional `limit`, `depth=1`, `evidence_sample_limit`, `payload_budget` |
 
 ## Validation
 

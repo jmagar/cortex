@@ -20,7 +20,7 @@
 #   mcp_call compose_status, mcp_call compose_doctor,
 #   mcp_call unaddressed_errors, mcp_call ack_error, mcp_call unack_error,
 #   mcp_call notifications_recent, mcp_call notifications_test,
-#   mcp_call similar_incidents, mcp_call ask_history, mcp_call incident_context,
+#   mcp_call similar_incidents, mcp_call ask_history, mcp_call incident_context, mcp_call graph,
 #   mcp_call help
 
 set -euo pipefail

@@ -2089,6 +2089,169 @@ impl From<db::IncidentContextResult> for IncidentContextResponse {
     }
 }
 
+// ── graph v1 ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphEntityLookupRequest {
+    /// Adapter hint for MCP/CLI shared payloads. Service methods ignore it.
+    pub mode: Option<String>,
+    pub entity_type: Option<String>,
+    pub key: Option<String>,
+    pub alias_type: Option<String>,
+    pub alias_key: Option<String>,
+    /// Candidate cap for alias lookups. Default 20, clamp 1..=100.
+    pub limit: Option<u32>,
+    /// Accepted for response metadata symmetry; entity lookup does not hydrate
+    /// relationship evidence. Default 3, clamp 0..=5.
+    pub evidence_sample_limit: Option<u32>,
+    /// Approximate payload budget in bytes. Default 32768, clamp 4096..=65536.
+    pub payload_budget: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphAroundRequest {
+    /// Adapter hint for MCP/CLI shared payloads. Service methods ignore it.
+    pub mode: Option<String>,
+    pub entity_id: Option<i64>,
+    pub entity_type: Option<String>,
+    pub key: Option<String>,
+    pub alias_type: Option<String>,
+    pub alias_key: Option<String>,
+    /// V1 supports one-hop neighborhoods only.
+    pub depth: Option<u32>,
+    /// Relationship cap. Default 100, clamp 1..=500.
+    pub limit: Option<u32>,
+    /// Evidence samples per relationship. Default 3, clamp 0..=5.
+    pub evidence_sample_limit: Option<u32>,
+    /// Approximate payload budget in bytes. Default 32768, clamp 4096..=65536.
+    pub payload_budget: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEntity {
+    pub id: i64,
+    pub entity_type: String,
+    pub canonical_key: String,
+    pub display_label: String,
+    pub source_kind: String,
+    pub source_id: String,
+    pub trust_level: String,
+    pub first_seen_at: Option<String>,
+    pub last_seen_at: Option<String>,
+}
+
+impl From<db::graph::GraphEntityRow> for GraphEntity {
+    fn from(value: db::graph::GraphEntityRow) -> Self {
+        Self {
+            id: value.id,
+            entity_type: value.entity_type,
+            canonical_key: value.canonical_key,
+            display_label: value.display_label,
+            source_kind: value.source_kind,
+            source_id: value.source_id,
+            trust_level: value.trust_level,
+            first_seen_at: value.first_seen_at,
+            last_seen_at: value.last_seen_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEntityCandidate {
+    pub entity: GraphEntity,
+    pub match_reason: String,
+    pub alias_type: Option<String>,
+    pub alias_key: Option<String>,
+}
+
+impl From<db::graph::GraphEntityCandidateRow> for GraphEntityCandidate {
+    fn from(value: db::graph::GraphEntityCandidateRow) -> Self {
+        Self {
+            entity: value.entity.into(),
+            match_reason: value.match_reason,
+            alias_type: value.alias_type,
+            alias_key: value.alias_key,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphRelationship {
+    pub id: i64,
+    pub relationship_key: String,
+    pub src_entity_id: i64,
+    pub dst_entity_id: i64,
+    pub relationship_type: String,
+    pub reason_code: String,
+    pub trust_level: String,
+    pub confidence: f64,
+    pub evidence_count: i64,
+    pub evidence_ids: Vec<i64>,
+    pub first_seen_at: Option<String>,
+    pub last_seen_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEvidence {
+    pub id: i64,
+    pub relationship_id: i64,
+    pub source_kind: String,
+    pub source_id: String,
+    pub source_log_id: Option<i64>,
+    pub source_heartbeat_id: Option<i64>,
+    pub source_signature_hash: Option<String>,
+    pub observed_at: String,
+    pub reason_code: String,
+    pub reason_text: Option<String>,
+    pub confidence_delta: f64,
+    pub trust_level: String,
+    pub safe_excerpt: Option<String>,
+    pub metadata_path: Option<String>,
+    pub evidence_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphNextQuery {
+    pub mode: String,
+    pub entity_id: i64,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphResponseMetadata {
+    pub truncated: bool,
+    pub truncated_reason: Option<String>,
+    pub limit: u32,
+    pub depth: u32,
+    pub evidence_sample_limit: u32,
+    pub payload_budget: u32,
+    pub projection_status: String,
+    pub last_completed_at: Option<String>,
+    pub source_watermark: String,
+    pub last_error: Option<String>,
+    pub is_degraded: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEntityLookupResponse {
+    pub resolved_entity: Option<GraphEntity>,
+    pub candidates: Vec<GraphEntityCandidate>,
+    pub metadata: GraphResponseMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphAroundResponse {
+    pub resolved_entity: Option<GraphEntity>,
+    pub entities: Vec<GraphEntity>,
+    pub relationships: Vec<GraphRelationship>,
+    pub evidence: Vec<GraphEvidence>,
+    pub next_queries: Vec<GraphNextQuery>,
+    pub candidates: Vec<GraphEntityCandidate>,
+    pub metadata: GraphResponseMetadata,
+}
+
 #[cfg(test)]
 #[path = "models_tests.rs"]
 mod tests;

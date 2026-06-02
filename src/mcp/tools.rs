@@ -6,11 +6,12 @@ use crate::app::{
     AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
     CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
-    GetErrorsRequest, GetLogRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
-    RequestActor, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
-    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UsageBlocksRequest,
+    GetErrorsRequest, GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest,
+    HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
+    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
+    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
+    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, SimilarIncidentsRequest,
+    TailLogsRequest, TimelineRequest, UsageBlocksRequest,
 };
 
 use super::actions;
@@ -79,6 +80,7 @@ async fn tool_cortex(
         "similar_incidents" => tool_similar_incidents(state, args).await,
         "ask_history" => tool_ask_history(state, args).await,
         "incident_context" => tool_incident_context(state, args).await,
+        "graph" => tool_graph(state, args).await,
         "help" => tool_cortex_help().await,
         _ => Err(anyhow::anyhow!(
             "unknown cortex action: {action}; expected one of {}",
@@ -1359,6 +1361,30 @@ Example: `{"action":"incident_context","from":"2024-01-15T10:00:00Z","to":"2024-
 Response fields: `window_from`, `window_to`, `total_logs`, `by_severity` (array),
 `by_app` (array, top 20), `error_logs` (array), `error_logs_truncated`, `ai_sessions`.
 
+---
+
+## cortex graph
+
+Resolve graph entities and return bounded one-hop graph neighborhoods with
+typed relationships and allowlisted evidence. The graph projection is
+rebuildable state; this read action never triggers a rebuild implicitly and
+returns projection/degraded status in `metadata`.
+
+**Required:** exact entity lookup uses `entity_type` + `key`; alias lookup uses
+              `alias_type` + `alias_key`; neighborhood lookup uses either
+              `entity_id` or the same entity lookup fields.
+**Optional:** `mode` (`entity` or `around`, default `around`), `limit`,
+             `depth` (v1 supports only 1), `evidence_sample_limit`,
+             `payload_budget`
+
+Examples:
+`{"action":"graph","mode":"entity","entity_type":"host","key":"tootie"}`
+`{"action":"graph","mode":"around","entity_type":"host","key":"tootie","depth":1}`
+
+Response fields: `resolved_entity`, `entities`, `relationships`, `evidence`,
+`next_queries`, `candidates`, and `metadata`. Evidence excludes raw frames and
+raw metadata by default; excerpts are truncated and redacted.
+
 "#;
     let help = format!(
         "{help}\n{cost_guide}{}{}",
@@ -1443,6 +1469,27 @@ async fn tool_incident_context(state: &AppState, args: Value) -> anyhow::Result<
         "incident_context completed"
     );
     Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_graph(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let mode = string_arg(&args, "mode").unwrap_or_else(|| "around".to_string());
+    match mode.as_str() {
+        "entity" => {
+            let req: GraphEntityLookupRequest = action_payload(args)?;
+            Ok(serde_json::to_value(
+                state.service.graph_entity_lookup(req).await?,
+            )?)
+        }
+        "around" => {
+            let req: GraphAroundRequest = action_payload(args)?;
+            Ok(serde_json::to_value(
+                state.service.graph_around(req).await?,
+            )?)
+        }
+        other => Err(anyhow::anyhow!(
+            "unsupported graph mode '{other}'; expected entity or around"
+        )),
+    }
 }
 
 /// Parse an optional RFC3339 timestamp string and normalize it to UTC.

@@ -286,8 +286,15 @@ async fn schema_actions_are_dispatchable() {
         )
         .unwrap();
     }
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        db::graph::refresh_graph_projection(&h.pool).unwrap();
+    }
     for action in &super::actions::action_names() {
         let args = match *action {
+            "graph" => {
+                json!({"action": action, "mode": "entity", "entity_type": "host", "key": "schema-test-host"})
+            }
             "host_state" => json!({"action": action, "host_id": "schema-heartbeat"}),
             "correlate" => {
                 json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"})

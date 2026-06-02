@@ -55,6 +55,7 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `similar_incidents` | FTS5 cluster search over historical system logs matching a query |
 | `ask_history` | Search AI transcript history for sessions related to a topic |
 | `incident_context` | Full log context bundle for a known time window |
+| `graph` | Resolve graph entities and return bounded one-hop neighborhoods with evidence |
 | `help` | Canonical in-tree action reference (use as ground truth if this doc drifts) |
 
 **Always prefer the MCP tool**. Fall back to HTTP only when MCP is unavailable.

@@ -92,6 +92,36 @@ fn schema_apps_exposes_pagination_and_total() {
 }
 
 #[test]
+fn schema_graph_exposes_lookup_and_neighborhood_arguments() {
+    let tools = tool_definitions();
+    let props = &tools[0]["inputSchema"]["properties"];
+    for name in [
+        "mode",
+        "entity_id",
+        "entity_type",
+        "key",
+        "alias_type",
+        "alias_key",
+        "depth",
+        "evidence_sample_limit",
+        "payload_budget",
+    ] {
+        let desc = props[name]["description"].as_str().unwrap_or("");
+        assert!(
+            desc.contains("action=graph"),
+            "{name} description must document graph usage: {desc}"
+        );
+    }
+    assert!(
+        props["limit"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("action=graph"),
+        "limit description must document graph caps"
+    );
+}
+
+#[test]
 fn schema_timeline_and_patterns_warn_on_full_history_scan() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];

@@ -70,7 +70,8 @@ use cortex::app::{
     DbBackupRequest, DbBackupResult, DbCheckpointRequest, DbCheckpointResult,
     DbIntegrityJobStarted, DbIntegrityRequest, DbIntegrityResult, DbMaintenanceStatus, DbStats,
     DbVacuumRequest, DbVacuumResult, FilterLogsRequest, FleetStateRequest, FleetStateResponse,
-    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, HostStateRequest,
+    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, GraphAroundRequest,
+    GraphAroundResponse, GraphEntityLookupRequest, GraphEntityLookupResponse, HostStateRequest,
     HostStateResponse, IncidentContextRequest, IncidentContextResponse, IngestRateRequest,
     IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
     ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
@@ -679,6 +680,17 @@ impl HttpClient {
         req: &IncidentContextRequest,
     ) -> Result<IncidentContextResponse> {
         self.get_json("/api/incident-context", Some(req)).await
+    }
+
+    pub async fn graph_entity(
+        &self,
+        req: &GraphEntityLookupRequest,
+    ) -> Result<GraphEntityLookupResponse> {
+        self.get_json("/api/graph/entity", Some(req)).await
+    }
+
+    pub async fn graph_around(&self, req: &GraphAroundRequest) -> Result<GraphAroundResponse> {
+        self.get_json("/api/graph/around", Some(req)).await
     }
 }
 

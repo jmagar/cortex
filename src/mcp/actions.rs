@@ -307,6 +307,12 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         description: "Full context for an incident",
         cost: Cost::Moderate,
     },
+    ActionSpec {
+        name: "graph",
+        scope: Scope::Read,
+        description: "Resolve graph entities and return one-hop graph neighborhoods",
+        cost: Cost::Moderate,
+    },
     // ── Admin / write actions ──────────────────────────────────────────────
     ActionSpec {
         name: "ack_error",

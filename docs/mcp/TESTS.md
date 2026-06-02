@@ -60,7 +60,7 @@ Action registry covered by live/script references: `search`, `filter`, `tail`, `
 `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`,
 `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`,
 `notifications_recent`, `notifications_test`,
-`similar_incidents`, `ask_history`, `incident_context`, `help`.
+`similar_incidents`, `ask_history`, `incident_context`, `graph`, `help`.
 
 ### mcporter-based testing
 
@@ -94,6 +94,8 @@ mcporter call --config config/mcporter.json syslog.cortex action=anomalies
 mcporter call --config config/mcporter.json syslog.cortex action=compare a_from=2026-01-01T00:00:00Z a_to=2026-01-01T01:00:00Z b_from=2026-01-01T01:00:00Z b_to=2026-01-01T02:00:00Z
 mcporter call --config config/mcporter.json syslog.cortex action=compose_status
 mcporter call --config config/mcporter.json syslog.cortex action=compose_doctor
+mcporter call --config config/mcporter.json syslog.cortex action=graph mode=entity entity_type=host key=example-host
+mcporter call --config config/mcporter.json syslog.cortex action=graph mode=around entity_type=host key=example-host depth=1
 ```
 
 ### CLI-based testing (abuse investigation workflow)

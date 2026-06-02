@@ -18,8 +18,10 @@ use super::models::{
     DbCheckpointResult, DbIntegrityJobStarted, DbIntegrityResult, DbMaintenanceStatus, DbStats,
     DbVacuumRequest, DbVacuumResult, FilterLogsRequest, FleetStateHostRow, FleetStateRequest,
     FleetStateResponse, FleetStateSummary, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
-    GetLogResponse, IncidentContextRequest, IncidentContextResponse, IncidentEvent,
-    IncidentRequest, IncidentResponse, IngestRateRequest, IngestRateResponse,
+    GetLogResponse, GraphAroundRequest, GraphAroundResponse, GraphEntity, GraphEntityCandidate,
+    GraphEntityLookupRequest, GraphEntityLookupResponse, GraphEvidence, GraphNextQuery,
+    GraphRelationship, GraphResponseMetadata, IncidentContextRequest, IncidentContextResponse,
+    IncidentEvent, IncidentRequest, IncidentResponse, IngestRateRequest, IngestRateResponse,
     ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
     ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
     ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LogEntry,
@@ -2507,6 +2509,196 @@ impl CortexService {
         Ok(result.into())
     }
 
+    pub async fn graph_entity_lookup(
+        &self,
+        req: GraphEntityLookupRequest,
+    ) -> ServiceResult<GraphEntityLookupResponse> {
+        let limits = GraphLimits::from_entity_request(&req);
+        let status = self
+            .run_db("graph.status", db::graph::graph_projection_status)
+            .await?;
+
+        if let (Some(entity_type), Some(key)) = (req.entity_type.clone(), req.key.clone()) {
+            validate_graph_entity_type(&entity_type)?;
+            let entity = self
+                .run_db("graph.entity_key", move |pool| {
+                    db::graph::find_graph_entity_by_key(pool, &entity_type, &key)
+                })
+                .await?
+                .ok_or_else(|| ServiceError::NotFound("graph entity not found".into()))?;
+            return Ok(GraphEntityLookupResponse {
+                resolved_entity: Some(entity.into()),
+                candidates: Vec::new(),
+                metadata: graph_metadata(&status, limits, false, None),
+            });
+        }
+
+        let alias_type = req
+            .alias_type
+            .clone()
+            .ok_or_else(|| ServiceError::InvalidInput("alias_type is required".into()))?;
+        let alias_key = req
+            .alias_key
+            .clone()
+            .ok_or_else(|| ServiceError::InvalidInput("alias_key is required".into()))?;
+        if alias_type.trim().is_empty() || alias_key.trim().is_empty() {
+            return Err(ServiceError::InvalidInput(
+                "alias_type and alias_key must be non-empty".into(),
+            ));
+        }
+        let candidates = self
+            .run_db("graph.entity_alias", move |pool| {
+                db::graph::find_graph_entities_by_alias(pool, &alias_type, &alias_key, limits.limit)
+            })
+            .await?;
+        if candidates.is_empty() {
+            return Err(ServiceError::NotFound(
+                "graph entity alias not found".into(),
+            ));
+        }
+        let candidates: Vec<GraphEntityCandidate> =
+            candidates.into_iter().map(Into::into).collect();
+        let resolved_entity = if candidates.len() == 1 {
+            candidates.first().map(|candidate| candidate.entity.clone())
+        } else {
+            None
+        };
+        Ok(GraphEntityLookupResponse {
+            resolved_entity,
+            candidates,
+            metadata: graph_metadata(&status, limits, false, None),
+        })
+    }
+
+    pub async fn graph_around(
+        &self,
+        req: GraphAroundRequest,
+    ) -> ServiceResult<GraphAroundResponse> {
+        let limits = GraphLimits::from_around_request(&req)?;
+        let status = self
+            .run_db("graph.status", db::graph::graph_projection_status)
+            .await?;
+
+        let (resolved_entity, candidates) = if let Some(entity_id) = req.entity_id {
+            let entity = self
+                .run_db("graph.entity_id", move |pool| {
+                    db::graph::find_graph_entity_by_id(pool, entity_id)
+                })
+                .await?
+                .ok_or_else(|| ServiceError::NotFound("graph entity not found".into()))?;
+            (Some(GraphEntity::from(entity)), Vec::new())
+        } else {
+            let lookup = self
+                .graph_entity_lookup(GraphEntityLookupRequest {
+                    mode: None,
+                    entity_type: req.entity_type.clone(),
+                    key: req.key.clone(),
+                    alias_type: req.alias_type.clone(),
+                    alias_key: req.alias_key.clone(),
+                    limit: Some(limits.limit),
+                    evidence_sample_limit: Some(limits.evidence_sample_limit),
+                    payload_budget: Some(limits.payload_budget),
+                })
+                .await?;
+            (lookup.resolved_entity, lookup.candidates)
+        };
+
+        let Some(entity) = resolved_entity.clone() else {
+            return Ok(GraphAroundResponse {
+                resolved_entity: None,
+                entities: Vec::new(),
+                relationships: Vec::new(),
+                evidence: Vec::new(),
+                next_queries: Vec::new(),
+                candidates,
+                metadata: graph_metadata(
+                    &status,
+                    limits,
+                    true,
+                    Some("ambiguous_entity".to_string()),
+                ),
+            });
+        };
+
+        let entity_id = entity.id;
+        let rows = self
+            .run_db("graph.around", move |pool| {
+                db::graph::graph_around_entity(
+                    pool,
+                    entity_id,
+                    limits.limit,
+                    limits.evidence_sample_limit,
+                )
+            })
+            .await?;
+        let evidence: Vec<GraphEvidence> = rows
+            .evidence
+            .into_iter()
+            .map(|row| graph_evidence_safe(row, limits.payload_budget))
+            .collect();
+        let mut evidence_ids_by_relationship: std::collections::HashMap<i64, Vec<i64>> =
+            std::collections::HashMap::new();
+        for item in &evidence {
+            evidence_ids_by_relationship
+                .entry(item.relationship_id)
+                .or_default()
+                .push(item.id);
+        }
+        let relationships = rows
+            .relationships
+            .into_iter()
+            .map(|row| GraphRelationship {
+                id: row.id,
+                relationship_key: row.relationship_key,
+                src_entity_id: row.src_entity_id,
+                dst_entity_id: row.dst_entity_id,
+                relationship_type: row.relationship_type,
+                reason_code: row.reason_code,
+                trust_level: row.trust_level,
+                confidence: row.confidence,
+                evidence_count: row.evidence_count,
+                evidence_ids: evidence_ids_by_relationship
+                    .remove(&row.id)
+                    .unwrap_or_default(),
+                first_seen_at: row.first_seen_at,
+                last_seen_at: row.last_seen_at,
+            })
+            .collect::<Vec<_>>();
+        let entities: Vec<GraphEntity> = rows.entities.into_iter().map(Into::into).collect();
+        let next_queries = entities
+            .iter()
+            .filter(|related| related.id != entity.id)
+            .take(10)
+            .map(|related| GraphNextQuery {
+                mode: "around".to_string(),
+                entity_id: related.id,
+                label: related.display_label.clone(),
+            })
+            .collect();
+        let payload_truncated = estimated_graph_payload_bytes(&entities, &relationships, &evidence)
+            > limits.payload_budget as usize;
+        Ok(GraphAroundResponse {
+            resolved_entity: Some(entity),
+            entities,
+            relationships,
+            evidence,
+            next_queries,
+            candidates: Vec::new(),
+            metadata: graph_metadata(
+                &status,
+                limits,
+                rows.truncated || payload_truncated,
+                if payload_truncated {
+                    Some("payload_budget".to_string())
+                } else if rows.truncated {
+                    Some("relationship_limit".to_string())
+                } else {
+                    None
+                },
+            ),
+        })
+    }
+
     pub async fn run_gemini_assess(&self, req: AiAssessRequest) -> ServiceResult<AiAssessResponse> {
         self.run_gemini_assess_with_delta(req, |_| Ok(())).await
     }
@@ -2782,6 +2974,153 @@ fn validate_optional_severity(severity: Option<String>) -> ServiceResult<Option<
         severity,
         db::SEVERITY_LEVELS.join(", ")
     )))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GraphLimits {
+    limit: u32,
+    depth: u32,
+    evidence_sample_limit: u32,
+    payload_budget: u32,
+}
+
+impl GraphLimits {
+    fn from_entity_request(req: &GraphEntityLookupRequest) -> Self {
+        Self {
+            limit: req.limit.unwrap_or(20).clamp(1, 100),
+            depth: 0,
+            evidence_sample_limit: req.evidence_sample_limit.unwrap_or(3).clamp(0, 5),
+            payload_budget: req.payload_budget.unwrap_or(32_768).clamp(4_096, 65_536),
+        }
+    }
+
+    fn from_around_request(req: &GraphAroundRequest) -> ServiceResult<Self> {
+        let depth = req.depth.unwrap_or(1);
+        if depth > 1 {
+            return Err(ServiceError::InvalidInput(
+                "graph around supports depth=1 only in v1".into(),
+            ));
+        }
+        Ok(Self {
+            limit: req.limit.unwrap_or(100).clamp(1, 500),
+            depth,
+            evidence_sample_limit: req.evidence_sample_limit.unwrap_or(3).clamp(0, 5),
+            payload_budget: req.payload_budget.unwrap_or(32_768).clamp(4_096, 65_536),
+        })
+    }
+}
+
+fn validate_graph_entity_type(entity_type: &str) -> ServiceResult<()> {
+    if db::graph::is_known_entity_type(entity_type) {
+        Ok(())
+    } else {
+        Err(ServiceError::InvalidInput(format!(
+            "unsupported graph entity_type '{entity_type}'"
+        )))
+    }
+}
+
+fn graph_metadata(
+    status: &db::graph::GraphProjectionStatus,
+    limits: GraphLimits,
+    truncated: bool,
+    truncated_reason: Option<String>,
+) -> GraphResponseMetadata {
+    GraphResponseMetadata {
+        truncated,
+        truncated_reason,
+        limit: limits.limit,
+        depth: limits.depth,
+        evidence_sample_limit: limits.evidence_sample_limit,
+        payload_budget: limits.payload_budget,
+        projection_status: status.projection_status.clone(),
+        last_completed_at: status.last_completed_at.clone(),
+        source_watermark: status.source_watermark.clone(),
+        last_error: status.last_error.clone().map(redact_graph_text),
+        is_degraded: status.is_degraded,
+    }
+}
+
+fn graph_evidence_safe(row: db::graph::GraphEvidenceRow, payload_budget: u32) -> GraphEvidence {
+    let excerpt_limit = (payload_budget / 16).clamp(128, 512) as usize;
+    GraphEvidence {
+        id: row.id,
+        relationship_id: row.relationship_id,
+        source_kind: row.source_kind,
+        source_id: row.source_id,
+        source_log_id: row.source_log_id,
+        source_heartbeat_id: row.source_heartbeat_id,
+        source_signature_hash: row.source_signature_hash,
+        observed_at: row.observed_at,
+        reason_code: row.reason_code,
+        reason_text: row.reason_text.map(redact_graph_text),
+        confidence_delta: row.confidence_delta,
+        trust_level: row.trust_level,
+        safe_excerpt: row
+            .safe_excerpt
+            .map(redact_graph_text)
+            .map(|value| truncate_chars(&value, excerpt_limit)),
+        metadata_path: row.metadata_path.map(redact_graph_text),
+        evidence_count: row.evidence_count,
+    }
+}
+
+fn redact_graph_text(value: String) -> String {
+    let control_stripped: String = value.chars().filter(|ch| !ch.is_control()).collect();
+    let mut out = String::with_capacity(control_stripped.len().min(512));
+    for token in control_stripped.split_whitespace() {
+        let lower = token.to_ascii_lowercase();
+        let redacted = lower.contains("token=")
+            || lower.contains("password")
+            || lower.contains("secret")
+            || lower.contains("api_key")
+            || lower.contains("apikey")
+            || lower.contains("/home/")
+            || lower.contains("/users/");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        if redacted {
+            out.push_str("[redacted]");
+        } else {
+            out.push_str(token);
+        }
+    }
+    truncate_chars(&out, 512)
+}
+
+fn truncate_chars(value: &str, limit: usize) -> String {
+    value.chars().take(limit).collect()
+}
+
+fn estimated_graph_payload_bytes(
+    entities: &[GraphEntity],
+    relationships: &[GraphRelationship],
+    evidence: &[GraphEvidence],
+) -> usize {
+    let entity_bytes: usize = entities
+        .iter()
+        .map(|entity| {
+            entity.display_label.len()
+                + entity.canonical_key.len()
+                + entity.entity_type.len()
+                + entity.trust_level.len()
+        })
+        .sum();
+    let relationship_bytes: usize = relationships
+        .iter()
+        .map(|rel| rel.relationship_key.len() + rel.relationship_type.len() + rel.reason_code.len())
+        .sum();
+    let evidence_bytes: usize = evidence
+        .iter()
+        .map(|item| {
+            item.reason_text.as_ref().map_or(0, String::len)
+                + item.safe_excerpt.as_ref().map_or(0, String::len)
+                + item.source_id.len()
+                + item.reason_code.len()
+        })
+        .sum();
+    entity_bytes + relationship_bytes + evidence_bytes
 }
 
 #[cfg(test)]

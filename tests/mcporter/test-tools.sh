@@ -12,7 +12,7 @@
 #   cortex anomalies, cortex compare, cortex compose_status,
 #   cortex compose_doctor, cortex unaddressed_errors, cortex ack_error,
 #   cortex unack_error, cortex notifications_recent, cortex notifications_test,
-#   cortex similar_incidents, cortex ask_history, cortex incident_context,
+#   cortex similar_incidents, cortex ask_history, cortex incident_context, cortex graph,
 #   cortex help
 #
 # The server runs as a Docker container over HTTP. No stdio launch needed.

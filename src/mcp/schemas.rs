@@ -54,6 +54,32 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "type": "string",
                     "description": "FTS5 query string. Required for action=similar_incidents (FTS5 match over system logs) and action=ask_history (FTS5 match over AI transcripts). Also used for action=search, search_sessions, and correlate. Examples: 'kernel panic', 'OOM AND killer', '\"connection refused\"', 'error*'. Hyphen is the FTS5 NOT operator; search hyphenated terms as phrases, e.g. '\"smoke-test\"'. Use ai_query/log_query for action=ai_correlate."
                 },
+                "mode": {
+                    "type": "string",
+                    "enum": ["entity", "around"],
+                    "description": "For action=graph: entity resolves an entity by key or alias; around returns a bounded one-hop neighborhood. Defaults to around."
+                },
+                "entity_id": {
+                    "type": "integer",
+                    "description": "For action=graph mode=around: exact graph entity id to expand."
+                },
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["host", "container", "service", "app", "source_ip", "ai_project", "ai_session", "error_signature"],
+                    "description": "For action=graph: entity type for exact canonical-key lookup."
+                },
+                "key": {
+                    "type": "string",
+                    "description": "For action=graph with entity_type: canonical key/display value to resolve. Values are normalized server-side."
+                },
+                "alias_type": {
+                    "type": "string",
+                    "description": "For action=graph: alias kind for alias lookup, e.g. hostname or heartbeat_host_id."
+                },
+                "alias_key": {
+                    "type": "string",
+                    "description": "For action=graph: alias value to resolve. Ambiguous aliases return candidates instead of guessing."
+                },
                 "hostname": {
                     "type": "string",
                     "description": "For action=search, filter, tail, correlate, ai_correlate, apps, sessions, timeline, patterns, context, similar_incidents, ask_history, or incident_context: exact hostname filter. For action=host_state: resolve a host by unique hostname when host_id is omitted. Use action=hosts to enumerate."
@@ -166,7 +192,19 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search or filter: max results, default 100, max 1000. For action=errors: max summary rows, max 100. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=correlate_state: max log rows per host, default 100, max 500. For action=host_state: max heartbeat samples, default 1, max 100. For action=patterns: alias for top_n, default 20, max 200. For action=clock_skew: max host rows, max 100. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to paginate; response includes total count of all distinct source IPs. For action=similar_incidents: max incident clusters, default 10, max 50. For action=ask_history: max sessions, default 10, max 50. For action=incident_context: max error log rows, default 50, max 200."
+                    "description": "For action=search or filter: max results, default 100, max 1000. For action=errors: max summary rows, max 100. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=correlate_state: max log rows per host, default 100, max 500. For action=host_state: max heartbeat samples, default 1, max 100. For action=patterns: alias for top_n, default 20, max 200. For action=clock_skew: max host rows, max 100. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to paginate; response includes total count of all distinct source IPs. For action=similar_incidents: max incident clusters, default 10, max 50. For action=ask_history: max sessions, default 10, max 50. For action=incident_context: max error log rows, default 50, max 200. For action=graph: alias candidate or relationship cap; entity lookup default 20 max 100, around default 100 max 500."
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": "For action=graph mode=around: traversal depth. V1 supports depth=1 only."
+                },
+                "evidence_sample_limit": {
+                    "type": "integer",
+                    "description": "For action=graph mode=around: safe evidence samples per relationship, default 3, max 5."
+                },
+                "payload_budget": {
+                    "type": "integer",
+                    "description": "For action=graph: approximate response payload budget in bytes, default 32768, clamped 4096..65536."
                 },
                 "offset": {
                     "type": "integer",

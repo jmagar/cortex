@@ -19,6 +19,8 @@ use super::pool::{write_lock, DbPool};
 
 const GRAPH_REBUILD_CHUNK_SIZE: i64 = 10_000;
 static GRAPH_REBUILD_LOCK: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+pub(crate) static GRAPH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 pub const ENTITY_TYPE_HOST: &str = "host";
 pub const ENTITY_TYPE_CONTAINER: &str = "container";
@@ -134,6 +136,10 @@ pub fn is_known_evidence_source_kind(value: &str) -> bool {
     EVIDENCE_SOURCE_KINDS.contains(&value)
 }
 
+pub fn canonical_graph_key(value: &str) -> Option<String> {
+    normalized(value)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GraphProjectionStatus {
     pub projection_status: String,
@@ -165,6 +171,70 @@ pub struct GraphRebuildStats {
 pub enum GraphRebuildOutcome {
     Rebuilt(GraphRebuildStats),
     AlreadyRunning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEntityRow {
+    pub id: i64,
+    pub entity_type: String,
+    pub canonical_key: String,
+    pub display_label: String,
+    pub source_kind: String,
+    pub source_id: String,
+    pub trust_level: String,
+    pub first_seen_at: Option<String>,
+    pub last_seen_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEntityCandidateRow {
+    pub entity: GraphEntityRow,
+    pub match_reason: String,
+    pub alias_type: Option<String>,
+    pub alias_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphRelationshipRow {
+    pub id: i64,
+    pub relationship_key: String,
+    pub src_entity_id: i64,
+    pub dst_entity_id: i64,
+    pub relationship_type: String,
+    pub reason_code: String,
+    pub trust_level: String,
+    pub confidence: f64,
+    pub evidence_count: i64,
+    pub first_seen_at: Option<String>,
+    pub last_seen_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEvidenceRow {
+    pub id: i64,
+    pub relationship_id: i64,
+    pub evidence_key: String,
+    pub source_kind: String,
+    pub source_id: String,
+    pub source_log_id: Option<i64>,
+    pub source_heartbeat_id: Option<i64>,
+    pub source_signature_hash: Option<String>,
+    pub observed_at: String,
+    pub reason_code: String,
+    pub reason_text: Option<String>,
+    pub confidence_delta: f64,
+    pub trust_level: String,
+    pub safe_excerpt: Option<String>,
+    pub metadata_path: Option<String>,
+    pub evidence_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphAroundRows {
+    pub relationships: Vec<GraphRelationshipRow>,
+    pub entities: Vec<GraphEntityRow>,
+    pub evidence: Vec<GraphEvidenceRow>,
+    pub truncated: bool,
 }
 
 #[derive(Debug)]
@@ -207,6 +277,245 @@ pub fn graph_projection_status(pool: &DbPool) -> Result<GraphProjectionStatus> {
         },
     )
     .context("read graph projection status")
+}
+
+pub fn find_graph_entity_by_key(
+    pool: &DbPool,
+    entity_type: &str,
+    canonical_key: &str,
+) -> Result<Option<GraphEntityRow>> {
+    let conn = pool.get()?;
+    let key = canonical_graph_key(canonical_key).unwrap_or_else(|| canonical_key.to_string());
+    conn.query_row(
+        "SELECT id, entity_type, canonical_key, display_label, source_kind,
+                source_id, trust_level, first_seen_at, last_seen_at
+         FROM graph_entities
+         WHERE entity_type = ?1 AND canonical_key = ?2",
+        params![entity_type, key],
+        graph_entity_from_row,
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+pub fn find_graph_entity_by_id(pool: &DbPool, entity_id: i64) -> Result<Option<GraphEntityRow>> {
+    let conn = pool.get()?;
+    conn.query_row(
+        "SELECT id, entity_type, canonical_key, display_label, source_kind,
+                source_id, trust_level, first_seen_at, last_seen_at
+         FROM graph_entities
+         WHERE id = ?1",
+        [entity_id],
+        graph_entity_from_row,
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+pub fn find_graph_entities_by_alias(
+    pool: &DbPool,
+    alias_type: &str,
+    alias_key: &str,
+    limit: u32,
+) -> Result<Vec<GraphEntityCandidateRow>> {
+    let conn = pool.get()?;
+    let key = canonical_graph_key(alias_key).unwrap_or_else(|| alias_key.to_string());
+    let limit = limit.clamp(1, 500);
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.entity_type, e.canonical_key, e.display_label, e.source_kind,
+                e.source_id, e.trust_level, e.first_seen_at, e.last_seen_at,
+                a.alias_type, a.alias_key
+         FROM graph_entity_aliases a
+         JOIN graph_entities e ON e.id = a.entity_id
+         WHERE a.alias_type = ?1 AND a.alias_key = ?2
+         ORDER BY e.last_seen_at DESC, e.id ASC
+         LIMIT ?3",
+    )?;
+    let rows = stmt
+        .query_map(params![alias_type, key, limit], |row| {
+            Ok(GraphEntityCandidateRow {
+                entity: GraphEntityRow {
+                    id: row.get(0)?,
+                    entity_type: row.get(1)?,
+                    canonical_key: row.get(2)?,
+                    display_label: row.get(3)?,
+                    source_kind: row.get(4)?,
+                    source_id: row.get(5)?,
+                    trust_level: row.get(6)?,
+                    first_seen_at: row.get(7)?,
+                    last_seen_at: row.get(8)?,
+                },
+                match_reason: "alias".to_string(),
+                alias_type: row.get(9)?,
+                alias_key: row.get(10)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+pub fn graph_around_entity(
+    pool: &DbPool,
+    entity_id: i64,
+    limit: u32,
+    evidence_sample_limit: u32,
+) -> Result<GraphAroundRows> {
+    let conn = pool.get()?;
+    let limit = limit.clamp(1, 500);
+    let evidence_sample_limit = evidence_sample_limit.clamp(0, 10);
+    let fetch_limit = limit.saturating_add(1);
+
+    let mut stmt = conn.prepare(
+        "SELECT id, relationship_key, src_entity_id, dst_entity_id, relationship_type,
+                reason_code, trust_level, confidence, evidence_count,
+                first_seen_at, last_seen_at
+         FROM graph_relationships
+         WHERE src_entity_id = ?1 OR dst_entity_id = ?1
+         ORDER BY last_seen_at DESC, id DESC
+         LIMIT ?2",
+    )?;
+    let mut relationships = stmt
+        .query_map(params![entity_id, fetch_limit], graph_relationship_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let truncated = relationships.len() > limit as usize;
+    relationships.truncate(limit as usize);
+
+    let mut entity_ids = Vec::with_capacity(relationships.len() * 2 + 1);
+    entity_ids.push(entity_id);
+    for rel in &relationships {
+        entity_ids.push(rel.src_entity_id);
+        entity_ids.push(rel.dst_entity_id);
+    }
+    entity_ids.sort_unstable();
+    entity_ids.dedup();
+    let entities = graph_entities_by_ids(&conn, &entity_ids)?;
+
+    let relationship_ids: Vec<i64> = relationships.iter().map(|rel| rel.id).collect();
+    let evidence =
+        graph_evidence_for_relationships(&conn, &relationship_ids, evidence_sample_limit)?;
+
+    Ok(GraphAroundRows {
+        relationships,
+        entities,
+        evidence,
+        truncated,
+    })
+}
+
+fn graph_entities_by_ids(conn: &rusqlite::Connection, ids: &[i64]) -> Result<Vec<GraphEntityRow>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT id, entity_type, canonical_key, display_label, source_kind,
+                source_id, trust_level, first_seen_at, last_seen_at
+         FROM graph_entities
+         WHERE id IN ({placeholders})
+         ORDER BY entity_type ASC, display_label ASC"
+    );
+    let params = ids.iter().copied().map(rusqlite::types::Value::Integer);
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(params), graph_entity_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+fn graph_evidence_for_relationships(
+    conn: &rusqlite::Connection,
+    relationship_ids: &[i64],
+    evidence_sample_limit: u32,
+) -> Result<Vec<GraphEvidenceRow>> {
+    if relationship_ids.is_empty() || evidence_sample_limit == 0 {
+        return Ok(Vec::new());
+    }
+    let placeholders = std::iter::repeat_n("?", relationship_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT id, relationship_id, evidence_key, source_kind, source_id,
+                source_log_id, source_heartbeat_id, source_signature_hash,
+                observed_at, reason_code, reason_text, confidence_delta,
+                trust_level, safe_excerpt, metadata_path, evidence_count
+         FROM (
+             SELECT e.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY relationship_id
+                        ORDER BY observed_at DESC, id DESC
+                    ) AS rn
+             FROM graph_relationship_evidence e
+             WHERE relationship_id IN ({placeholders})
+         )
+         WHERE rn <= ?
+         ORDER BY relationship_id ASC, observed_at DESC"
+    );
+    let mut values: Vec<rusqlite::types::Value> = relationship_ids
+        .iter()
+        .copied()
+        .map(rusqlite::types::Value::Integer)
+        .collect();
+    values.push(rusqlite::types::Value::Integer(
+        evidence_sample_limit as i64,
+    ));
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(values), graph_evidence_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+fn graph_entity_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GraphEntityRow> {
+    Ok(GraphEntityRow {
+        id: row.get(0)?,
+        entity_type: row.get(1)?,
+        canonical_key: row.get(2)?,
+        display_label: row.get(3)?,
+        source_kind: row.get(4)?,
+        source_id: row.get(5)?,
+        trust_level: row.get(6)?,
+        first_seen_at: row.get(7)?,
+        last_seen_at: row.get(8)?,
+    })
+}
+
+fn graph_relationship_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GraphRelationshipRow> {
+    Ok(GraphRelationshipRow {
+        id: row.get(0)?,
+        relationship_key: row.get(1)?,
+        src_entity_id: row.get(2)?,
+        dst_entity_id: row.get(3)?,
+        relationship_type: row.get(4)?,
+        reason_code: row.get(5)?,
+        trust_level: row.get(6)?,
+        confidence: row.get(7)?,
+        evidence_count: row.get(8)?,
+        first_seen_at: row.get(9)?,
+        last_seen_at: row.get(10)?,
+    })
+}
+
+fn graph_evidence_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GraphEvidenceRow> {
+    Ok(GraphEvidenceRow {
+        id: row.get(0)?,
+        relationship_id: row.get(1)?,
+        evidence_key: row.get(2)?,
+        source_kind: row.get(3)?,
+        source_id: row.get(4)?,
+        source_log_id: row.get(5)?,
+        source_heartbeat_id: row.get(6)?,
+        source_signature_hash: row.get(7)?,
+        observed_at: row.get(8)?,
+        reason_code: row.get(9)?,
+        reason_text: row.get(10)?,
+        confidence_delta: row.get(11)?,
+        trust_level: row.get(12)?,
+        safe_excerpt: row.get(13)?,
+        metadata_path: row.get(14)?,
+        evidence_count: row.get(15)?,
+    })
 }
 
 pub fn refresh_graph_projection(pool: &DbPool) -> Result<GraphRebuildOutcome> {

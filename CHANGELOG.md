@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-02
+
+### Added
+
+- Added the Graph v1 entity lookup and one-hop neighborhood read surface across
+  the service layer, MCP `graph` action, REST `/api/graph/entity` and
+  `/api/graph/around` routes, and the shared CLI HTTP client. Responses include
+  normalized entities, relationships, allowlisted/redacted evidence,
+  ambiguity candidates, next-query hints, hard traversal/payload limits, and
+  projection/degraded status metadata without triggering implicit rebuilds.
+
 ## [1.3.0] - 2026-06-02
 
 ### Added

@@ -2379,6 +2379,50 @@ async fn fleet_state_accepts_include_ok_and_sort_params() {
     assert_eq!(status, axum::http::StatusCode::OK);
 }
 
+// ─── /api/graph ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn graph_routes_return_shared_service_payloads() {
+    let (state, pool, _dir) = test_state(Some("secret".into()));
+    db::insert_logs_batch(
+        &pool,
+        &[entry(
+            "2026-01-01T00:00:00.000Z",
+            "graph-api-host",
+            "info",
+            "graph api seed",
+            "10.0.0.8:514",
+        )],
+    )
+    .unwrap();
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        db::graph::refresh_graph_projection(&pool).unwrap();
+    }
+    let app = test_router(state);
+
+    let (status, value) = get_json(
+        app.clone(),
+        "/api/graph/entity?entity_type=host&key=graph-api-host",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["resolved_entity"]["canonical_key"], "graph-api-host");
+    assert_eq!(value["metadata"]["projection_status"], "ready");
+
+    let (status, value) = get_json(
+        app,
+        "/api/graph/around?entity_type=host&key=graph-api-host&depth=1&limit=5",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["resolved_entity"]["canonical_key"], "graph-api-host");
+    assert!(value["relationships"].as_array().unwrap().len() >= 1);
+    assert_eq!(value["metadata"]["depth"], 1);
+}
+
 // ── bearer enforcement on new RAG-adjacent / heartbeat routes ───────────────
 
 #[tokio::test]
@@ -2405,6 +2449,19 @@ async fn fleet_state_route_requires_bearer() {
     assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
 }
 
+#[tokio::test]
+async fn graph_routes_require_bearer() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    for path in [
+        "/api/graph/entity?entity_type=host&key=foo",
+        "/api/graph/around?entity_type=host&key=foo",
+    ] {
+        let (status, _) = get_json(app.clone(), path, None).await;
+        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+    }
+}
+
 // ── deny_unknown_fields enforcement on new routes ───────────────────────────
 
 #[tokio::test]
@@ -2429,6 +2486,19 @@ async fn unknown_query_param_returns_400_on_fleet_state() {
     let app = router(state).unwrap();
     let (status, _) = get_json(app, "/api/fleet-state?bogus=1", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unknown_query_param_returns_400_on_graph_routes() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+    for path in [
+        "/api/graph/entity?entity_type=host&key=foo&bogus=1",
+        "/api/graph/around?entity_type=host&key=foo&bogus=1",
+    ] {
+        let (status, _) = get_json(app.clone(), path, Some("secret")).await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    }
 }
 
 // ─── /api/correlate-state (cxih.4) ──────────────────────────────────────────

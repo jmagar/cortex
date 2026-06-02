@@ -2,8 +2,6 @@ use super::*;
 use crate::config::StorageConfig;
 use crate::db::{init_pool, insert_logs_batch, LogBatchEntry};
 
-static GRAPH_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {
     StorageConfig::for_test(db_path)
 }
@@ -39,7 +37,7 @@ fn count(conn: &rusqlite::Connection, sql: &str) -> i64 {
 
 #[test]
 fn refresh_graph_projection_builds_syslog_app_edges_and_is_idempotent() {
-    let _guard = GRAPH_TEST_LOCK.lock().unwrap();
+    let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();
     let config = test_storage_config(dir.path().join("graph-rebuild.db"));
     let pool = init_pool(&config).unwrap();
@@ -122,7 +120,7 @@ fn refresh_graph_projection_builds_syslog_app_edges_and_is_idempotent() {
 
 #[test]
 fn refresh_graph_projection_extracts_docker_from_metadata_and_source() {
-    let _guard = GRAPH_TEST_LOCK.lock().unwrap();
+    let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();
     let config = test_storage_config(dir.path().join("graph-docker.db"));
     let pool = init_pool(&config).unwrap();
@@ -182,7 +180,7 @@ fn refresh_graph_projection_extracts_docker_from_metadata_and_source() {
 
 #[test]
 fn refresh_graph_projection_extracts_ai_heartbeat_and_signature_sources() {
-    let _guard = GRAPH_TEST_LOCK.lock().unwrap();
+    let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();
     let config = test_storage_config(dir.path().join("graph-sources.db"));
     let pool = init_pool(&config).unwrap();
@@ -270,7 +268,7 @@ fn refresh_graph_projection_extracts_ai_heartbeat_and_signature_sources() {
 
 #[test]
 fn refresh_graph_projection_removes_deleted_source_log_evidence() {
-    let _guard = GRAPH_TEST_LOCK.lock().unwrap();
+    let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();
     let config = test_storage_config(dir.path().join("graph-ghost.db"));
     let pool = init_pool(&config).unwrap();
@@ -304,7 +302,7 @@ fn refresh_graph_projection_removes_deleted_source_log_evidence() {
 
 #[test]
 fn refresh_graph_projection_reports_status_failures_and_single_flight() {
-    let _guard = GRAPH_TEST_LOCK.lock().unwrap();
+    let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();
     let config = test_storage_config(dir.path().join("graph-status.db"));
     let pool = init_pool(&config).unwrap();

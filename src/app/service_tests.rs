@@ -12,6 +12,11 @@ fn test_service() -> (CortexService, Arc<DbPool>, tempfile::TempDir) {
     (CortexService::new(Arc::clone(&pool), storage), pool, dir)
 }
 
+fn refresh_graph_projection_for_test(pool: &DbPool) {
+    let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
+    crate::db::graph::refresh_graph_projection(pool).unwrap();
+}
+
 fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> LogBatchEntry {
     LogBatchEntry {
         timestamp: ts.to_string(),
@@ -60,6 +65,270 @@ fn ai_entry(ts: &str, msg: &str) -> LogBatchEntry {
         event_action: None,
         parse_error: None,
     }
+}
+
+#[tokio::test]
+async fn graph_entity_lookup_resolves_exact_key_and_alias() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[entry(
+            "2026-01-01T00:00:00.000Z",
+            "host-a",
+            "info",
+            "boot complete",
+            "10.0.0.1:514",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection_for_test(&pool);
+
+    let exact = service
+        .graph_entity_lookup(GraphEntityLookupRequest {
+            mode: None,
+            entity_type: Some("host".into()),
+            key: Some("host-a".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let resolved = exact.resolved_entity.unwrap();
+    assert_eq!(resolved.entity_type, "host");
+    assert_eq!(resolved.canonical_key, "host-a");
+    assert_eq!(resolved.trust_level, "claimed");
+    assert_eq!(exact.metadata.projection_status, "ready");
+    assert_eq!(exact.metadata.depth, 0);
+
+    let alias = service
+        .graph_entity_lookup(GraphEntityLookupRequest {
+            mode: None,
+            alias_type: Some("hostname".into()),
+            alias_key: Some("HOST-A".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(alias.resolved_entity.unwrap().id, resolved.id);
+    assert_eq!(alias.candidates.len(), 1);
+    assert_eq!(alias.candidates[0].match_reason, "alias");
+}
+
+#[tokio::test]
+async fn graph_entity_lookup_returns_candidates_for_ambiguous_alias() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry(
+                "2026-01-01T00:00:00.000Z",
+                "host-a",
+                "info",
+                "ready",
+                "10.0.0.1:514",
+            ),
+            entry(
+                "2026-01-01T00:01:00.000Z",
+                "host-b",
+                "info",
+                "ready",
+                "10.0.0.2:514",
+            ),
+        ],
+    )
+    .unwrap();
+    refresh_graph_projection_for_test(&pool);
+
+    let host_a = crate::db::graph::find_graph_entity_by_key(&pool, "host", "host-a")
+        .unwrap()
+        .unwrap();
+    let host_b = crate::db::graph::find_graph_entity_by_key(&pool, "host", "host-b")
+        .unwrap()
+        .unwrap();
+    {
+        let conn = pool.get().unwrap();
+        for entity_id in [host_a.id, host_b.id] {
+            conn.execute(
+                "INSERT INTO graph_entity_aliases (
+                    entity_id, alias_type, alias_key, alias_value, source_kind,
+                    trust_level, first_seen_at, last_seen_at
+                 ) VALUES (
+                    ?1, 'hostname', 'shared-host', 'shared-host', 'log',
+                    'claimed', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+                 )",
+                [entity_id],
+            )
+            .unwrap();
+        }
+    }
+
+    let response = service
+        .graph_entity_lookup(GraphEntityLookupRequest {
+            mode: None,
+            alias_type: Some("hostname".into()),
+            alias_key: Some("shared-host".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(response.resolved_entity.is_none());
+    assert_eq!(response.candidates.len(), 2);
+    assert!(response
+        .candidates
+        .iter()
+        .all(|candidate| candidate.match_reason == "alias"));
+}
+
+#[tokio::test]
+async fn graph_around_returns_one_hop_relationships_evidence_and_metadata() {
+    let (service, pool, _dir) = test_service();
+    let mut app_log = entry(
+        "2026-01-01T00:00:00.000Z",
+        "host-a",
+        "info",
+        "sshd accepted connection",
+        "10.0.0.1:514",
+    );
+    app_log.app_name = Some("sshd".into());
+    insert_logs_batch(&pool, &[app_log]).unwrap();
+    refresh_graph_projection_for_test(&pool);
+
+    let response = service
+        .graph_around(GraphAroundRequest {
+            mode: None,
+            entity_type: Some("host".into()),
+            key: Some("host-a".into()),
+            depth: Some(1),
+            limit: Some(10),
+            evidence_sample_limit: Some(2),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let resolved = response.resolved_entity.as_ref().unwrap();
+    assert_eq!(resolved.canonical_key, "host-a");
+    assert_eq!(response.metadata.projection_status, "ready");
+    assert_eq!(response.metadata.depth, 1);
+    assert_eq!(response.metadata.limit, 10);
+    assert_eq!(response.metadata.evidence_sample_limit, 2);
+    assert!(!response.metadata.truncated);
+    assert!(!response.metadata.source_watermark.is_empty());
+    assert!(!response.entities.is_empty());
+    assert!(!response.relationships.is_empty());
+    assert!(!response.evidence.is_empty());
+    assert!(response
+        .relationships
+        .iter()
+        .any(|rel| rel.relationship_type == "observed_as"));
+    assert!(response
+        .relationships
+        .iter()
+        .any(|rel| rel.relationship_type == "emitted_by"));
+    assert!(response
+        .relationships
+        .iter()
+        .all(|rel| !rel.evidence_ids.is_empty()));
+    assert!(response.evidence.iter().all(|evidence| {
+        evidence.source_log_id.is_some()
+            && evidence.safe_excerpt.is_some()
+            && evidence.source_kind == "log"
+    }));
+    assert!(response
+        .next_queries
+        .iter()
+        .all(|query| query.mode == "around"));
+}
+
+#[tokio::test]
+async fn graph_around_rejects_depth_above_one_and_redacts_safe_evidence() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[entry(
+            "2026-01-01T00:00:00.000Z",
+            "host-a",
+            "info",
+            "password=secret token=abc /home/jmagar/private",
+            "10.0.0.1:514",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection_for_test(&pool);
+
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE graph_relationship_evidence
+             SET safe_excerpt = 'password=secret token=abc /home/jmagar/private',
+                 reason_text = 'secret token=abc'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let depth_err = service
+        .graph_around(GraphAroundRequest {
+            mode: None,
+            entity_type: Some("host".into()),
+            key: Some("host-a".into()),
+            depth: Some(2),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        depth_err.to_string().contains("depth=1"),
+        "unexpected depth error: {depth_err}"
+    );
+
+    let response = service
+        .graph_around(GraphAroundRequest {
+            mode: None,
+            entity_type: Some("host".into()),
+            key: Some("host-a".into()),
+            evidence_sample_limit: Some(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let joined = response
+        .evidence
+        .iter()
+        .filter_map(|evidence| evidence.safe_excerpt.as_deref())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(joined.contains("[redacted]"));
+    assert!(!joined.contains("password=secret"));
+    assert!(!joined.contains("token=abc"));
+    assert!(!joined.contains("/home/jmagar"));
+    let reason_text = response
+        .evidence
+        .iter()
+        .filter_map(|evidence| evidence.reason_text.as_deref())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(!reason_text.contains("secret"));
+    assert!(!reason_text.contains("token=abc"));
+}
+
+#[tokio::test]
+async fn graph_entity_lookup_missing_entity_returns_not_found() {
+    let (service, pool, _dir) = test_service();
+    refresh_graph_projection_for_test(&pool);
+
+    let err = service
+        .graph_entity_lookup(GraphEntityLookupRequest {
+            mode: None,
+            entity_type: Some("host".into()),
+            key: Some("missing-host".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("not found"),
+        "unexpected missing entity error: {err}"
+    );
 }
 
 #[test]
