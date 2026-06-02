@@ -23,6 +23,18 @@ fn truncate_bytes_respects_byte_budget_on_char_boundaries() {
 }
 
 #[test]
+fn truncate_bytes_tiny_budget_returns_prefix_not_empty() {
+    // Budgets smaller than the 3-byte ellipsis must still yield a byte-bounded
+    // prefix, never an empty string (regression: budget was zeroed first).
+    assert_eq!(truncate_bytes("hello", 2), "he");
+    assert_eq!(truncate_bytes("hello", 1), "h");
+    // Multibyte: a 1-byte budget can't fit a 2-byte 'é', so empty is correct;
+    // a 2-byte budget yields exactly one 'é'.
+    assert_eq!(truncate_bytes("ééé", 1), "");
+    assert_eq!(truncate_bytes("ééé", 2), "é");
+}
+
+#[test]
 fn transcript_detection_accepts_source_ip_and_app_suffix() {
     let mut log = cortex::app::LogEntry {
         id: 1,

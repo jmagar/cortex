@@ -92,15 +92,22 @@ pub(crate) fn truncate_bytes(s: &str, max_bytes: usize) -> String {
         return s.to_string();
     }
     const ELLIPSIS: &str = "…"; // 3 bytes
-                                // Reserve room for the ellipsis so the result stays within `max_bytes`.
-    let budget = max_bytes.saturating_sub(ELLIPSIS.len());
+
+    // Budgets too small to fit the marker return a bare byte-bounded prefix.
+    // Compute the cut from `max_bytes` directly (not the ellipsis-reserved
+    // budget), so a 1–2 byte budget still yields its prefix, not an empty string.
+    if max_bytes < ELLIPSIS.len() {
+        let mut cut = max_bytes.min(s.len());
+        while cut > 0 && !s.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        return s[..cut].to_string();
+    }
+    // Reserve room for the ellipsis so the result stays within `max_bytes`.
+    let budget = max_bytes - ELLIPSIS.len();
     let mut cut = budget.min(s.len());
     while cut > 0 && !s.is_char_boundary(cut) {
         cut -= 1;
-    }
-    if max_bytes < ELLIPSIS.len() {
-        // Too small to fit the marker — return a bare byte-bounded prefix.
-        return s[..cut].to_string();
     }
     format!("{}{ELLIPSIS}", &s[..cut])
 }
