@@ -241,6 +241,56 @@ fn parse_routes_graph_explain_type_key() {
 }
 
 #[test]
+fn parse_routes_graph_evidence() {
+    let command = parse_command(vec![
+        "graph".to_string(),
+        "evidence".to_string(),
+        "123".to_string(),
+        "--payload-budget=8192".to_string(),
+        "--json".to_string(),
+    ])
+    .unwrap();
+    match command {
+        CliCommand::Graph(crate::cli::GraphCommand::Evidence(args)) => {
+            assert_eq!(args.evidence_id, 123);
+            assert_eq!(args.payload_budget, Some(8192));
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_graph_evidence_rejects_missing_non_integer_and_extra_args() {
+    let missing = parse_command(vec!["graph".to_string(), "evidence".to_string()])
+        .unwrap_err()
+        .to_string();
+    assert!(missing.contains("requires <evidence-id>"), "got: {missing}");
+
+    let non_integer = parse_command(vec![
+        "graph".to_string(),
+        "evidence".to_string(),
+        "nope".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(
+        non_integer.contains("must be an integer"),
+        "got: {non_integer}"
+    );
+
+    let extra = parse_command(vec![
+        "graph".to_string(),
+        "evidence".to_string(),
+        "123".to_string(),
+        "extra".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(extra.contains("exactly one"), "got: {extra}");
+}
+
+#[test]
 fn parse_routes_graph_status_and_rebuild() {
     assert!(matches!(
         parse_command(vec!["graph".to_string(), "status".to_string()]).unwrap(),

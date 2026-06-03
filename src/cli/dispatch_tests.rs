@@ -27,9 +27,9 @@ use crate::cli::{
     AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
     AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
     AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs,
-    DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs, GraphAroundArgs, GraphExplainArgs,
-    IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs, SessionsArgs, SigAckArgs, SigListArgs,
-    SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs, GraphAroundArgs, GraphEvidenceArgs,
+    GraphExplainArgs, IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs, SessionsArgs,
+    SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 use anyhow::{bail, Result};
 use std::time::Duration;
@@ -187,6 +187,19 @@ fn graph_explain_args_into_request_snapshot() {
     assert_eq!(
         format!("{:?}", args.into_request()),
         "GraphExplainRequest { mode: Some(\"explain\"), entity_id: None, entity_type: Some(\"host\"), key: Some(\"tootie\"), alias_type: None, alias_key: None, depth: Some(2), beam_width: Some(20), max_chains: Some(100), evidence_sample_limit: Some(2), payload_budget: Some(16384) }"
+    );
+}
+
+#[test]
+fn graph_evidence_args_into_request_snapshot() {
+    let args = GraphEvidenceArgs {
+        evidence_id: 42,
+        payload_budget: Some(8192),
+        json: true,
+    };
+    assert_eq!(
+        format!("{:?}", args.into_request()),
+        "GraphEvidenceLookupRequest { mode: Some(\"evidence\"), evidence_id: 42, payload_budget: Some(8192) }"
     );
 }
 

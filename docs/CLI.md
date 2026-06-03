@@ -723,8 +723,9 @@ Flags:
 ### `cortex graph around`
 
 Return a bounded one-hop neighborhood for a graph entity. Human output includes
-relationship type, related entities, confidence/trust, reason, evidence counts,
-safe samples, projection status, truncation reason, and follow-up commands.
+relationship type, source/destination entity summaries, confidence/trust,
+reason, evidence counts, safe samples, projection status, truncation reason,
+and follow-up commands.
 
 ```bash
 cortex graph around host tootie
@@ -776,6 +777,31 @@ Flags:
 | `--evidence-sample-limit N` | Safe evidence samples per relationship |
 | `--payload-budget BYTES` | Approximate response payload budget |
 | `--json` | Print shared structured response |
+
+### `cortex graph evidence`
+
+Inspect the proof row behind one graph evidence id. Human output includes the
+evidence id, owning relationship id, readable source/destination endpoints,
+reason, trust, confidence, source ids, bounded source-log summary when present,
+safe excerpt, metadata path, and follow-up graph/log commands.
+
+```bash
+cortex graph evidence 12345
+cortex graph evidence 12345 --json
+```
+
+Flags:
+
+| Flag | Description |
+| --- | --- |
+| positional `EVIDENCE_ID` | `graph_relationship_evidence.id` to inspect |
+| `--payload-budget BYTES` | Approximate response payload budget |
+| `--json` | Print shared structured response |
+
+`source_log_summary` never includes the raw syslog frame or full
+`metadata_json`. When a source log id points at a retained-out/deleted row,
+the response keeps the evidence, relationship, and endpoint summaries while
+returning `source_log_summary: null` and `missing_source_reason`.
 
 ### `cortex stats`
 

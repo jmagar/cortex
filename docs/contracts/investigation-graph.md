@@ -403,6 +403,38 @@ Public graph responses MUST expose safe evidence only. Raw frames,
 unbounded metadata JSON, secrets, and terminal control characters MUST NOT be
 emitted through graph evidence fields.
 
+Relationship response fields:
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `src_entity_id` | integer | Preserved compatibility id for the source endpoint. |
+| `dst_entity_id` | integer | Preserved compatibility id for the destination endpoint. |
+| `src_entity` | object/null | Optional compact endpoint summary when available. |
+| `dst_entity` | object/null | Optional compact endpoint summary when available. |
+
+Endpoint summaries are additive and compact. They include `id`, `entity_type`,
+`canonical_key`, `display_label`, and `trust_level`; they do not embed full
+entity source ids or aliases.
+
+Evidence lookup response fields:
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `evidence` | object | Safe evidence row from `graph_relationship_evidence`. |
+| `relationship` | object | Owning relationship, including compatibility ids and endpoint summaries. |
+| `src_entity` | object | Source endpoint summary. |
+| `dst_entity` | object | Destination endpoint summary. |
+| `source_log_summary` | object/null | Bounded scalar log summary for log-derived evidence when the source row still exists. |
+| `missing_source_reason` | string/null | `evidence_source_is_not_a_log` or `source_log_missing_or_retained_out` when no summary is returned. |
+| `metadata` | object | Projection status, caps, and truncation metadata. |
+
+`source_log_summary` MUST be structurally incapable of containing raw frames or
+full `metadata_json`. It contains only `id`, `timestamp`, `received_at`,
+`hostname`, `severity`, `app_name`, `process_id`, `source_ip`, `message`, and
+`message_truncated`. Message and text-like fields MUST be bounded, redacted for
+auth/header/credential/private-key/home-path/URL-userinfo markers, and stripped
+of terminal control characters.
+
 ## 9. Public Query Contract
 
 ### 9.1 Entity Lookup
@@ -432,6 +464,7 @@ Neighborhood lookup MUST:
 
 - be bounded,
 - include relationships and safe evidence samples,
+- include source/destination endpoint summaries on relationships when available,
 - include projection metadata,
 - include truncation metadata when caps are hit,
 - avoid implicit rebuilds.
@@ -449,10 +482,34 @@ Explanation MUST:
 
 - be deterministic,
 - cite relationship/evidence ids,
+- include readable endpoint summaries on returned relationships when available,
 - use conservative language,
 - report missing evidence,
 - avoid claiming root cause from correlation alone,
 - include projection and truncation metadata.
+
+### 9.4 Evidence Lookup
+
+```bash
+cortex graph evidence <evidence-id> [--json]
+```
+
+MCP uses `action=graph mode=evidence evidence_id=<id>`. REST uses
+`GET /api/graph/evidence?evidence_id=<id>`.
+
+Evidence lookup MUST:
+
+- anchor on `graph_relationship_evidence.id`,
+- be read-only and never trigger rebuild,
+- return the safe evidence row, owning relationship, endpoint summaries, and
+  projection metadata,
+- return bounded `source_log_summary` for existing log-derived evidence,
+- return `source_log_summary: null` with `missing_source_reason` when the source
+  is non-log evidence or the referenced log row is missing,
+- preserve source identifiers such as `source_log_id`, `source_heartbeat_id`,
+  and `source_signature_hash`,
+- reject unknown REST query fields,
+- avoid exposing raw frames, full `metadata_json`, secrets, or terminal controls.
 
 ## 10. Compatibility Requirements
 

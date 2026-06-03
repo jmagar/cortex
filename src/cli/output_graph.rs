@@ -1,7 +1,8 @@
 use anyhow::Result;
 use cortex::app::{
-    GraphAroundResponse, GraphEntity, GraphEntityLookupResponse, GraphEvidence,
-    GraphExplainResponse, GraphProjectionStatusResponse, GraphRebuildResponse, GraphRelationship,
+    GraphAroundResponse, GraphEntity, GraphEntityLookupResponse, GraphEntitySummary, GraphEvidence,
+    GraphEvidenceLookupResponse, GraphExplainResponse, GraphProjectionStatusResponse,
+    GraphRebuildResponse, GraphRelationship,
 };
 
 use super::color::{cyan, muted, primary, warn};
@@ -77,8 +78,10 @@ pub(crate) fn print_graph_entity_lookup_response(
                 "  {} match={} alias={}:{}",
                 entity_line("-", &candidate.entity),
                 primary(&safe_display(&candidate.match_reason)),
-                muted(candidate.alias_type.as_deref().unwrap_or("-")),
-                muted(candidate.alias_key.as_deref().unwrap_or("-"))
+                muted(&safe_display(
+                    candidate.alias_type.as_deref().unwrap_or("-")
+                )),
+                muted(&safe_display(candidate.alias_key.as_deref().unwrap_or("-")))
             );
         }
     }
@@ -183,9 +186,21 @@ pub(crate) fn print_graph_explain_response(
             chain.evidence_ids
         );
         for relationship in &chain.relationships {
+            let src = relationship
+                .src_entity
+                .as_ref()
+                .map(entity_summary_label)
+                .unwrap_or_else(|| format!("#{}", relationship.src_entity_id));
+            let dst = relationship
+                .dst_entity
+                .as_ref()
+                .map(entity_summary_label)
+                .unwrap_or_else(|| format!("#{}", relationship.dst_entity_id));
             println!(
-                "  {} trust={} reason={} evidence={}",
+                "  {} {} -> {} trust={} reason={} evidence={}",
                 safe_display(&relationship.relationship_type),
+                src,
+                dst,
                 safe_display(&relationship.trust_level),
                 safe_display(&relationship.reason_code),
                 relationship.evidence_count
@@ -214,6 +229,102 @@ pub(crate) fn print_graph_explain_response(
             );
         }
     }
+    Ok(())
+}
+
+pub(crate) fn print_graph_evidence_lookup_response(
+    response: &GraphEvidenceLookupResponse,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    print_graph_metadata(&response.metadata);
+    let rel = &response.relationship;
+    let src = rel
+        .src_entity
+        .as_ref()
+        .map(entity_summary_label)
+        .unwrap_or_else(|| entity_summary_label(&response.src_entity));
+    let dst = rel
+        .dst_entity
+        .as_ref()
+        .map(entity_summary_label)
+        .unwrap_or_else(|| entity_summary_label(&response.dst_entity));
+    println!(
+        "{} #{} relationship #{}",
+        primary("evidence"),
+        response.evidence.id,
+        rel.id
+    );
+    println!(
+        "{} {} {}",
+        src,
+        primary(&safe_display(&rel.relationship_type)),
+        dst
+    );
+    println!(
+        "reason={} trust={} confidence={:.2} evidence_count={}",
+        safe_display(&response.evidence.reason_code),
+        safe_display(&response.evidence.trust_level),
+        rel.confidence,
+        response.evidence.evidence_count
+    );
+    if let Some(reason) = &response.evidence.reason_text {
+        println!("reason_text={}", safe_display(&truncate(reason, 160)));
+    }
+    println!(
+        "source kind={} id={} log_id={} heartbeat_id={} signature={}",
+        safe_display(&response.evidence.source_kind),
+        safe_display(&truncate(&response.evidence.source_id, 80)),
+        response
+            .evidence
+            .source_log_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".into()),
+        response
+            .evidence
+            .source_heartbeat_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".into()),
+        safe_display(
+            response
+                .evidence
+                .source_signature_hash
+                .as_deref()
+                .unwrap_or("-")
+        )
+    );
+    if let Some(path) = &response.evidence.metadata_path {
+        println!("metadata_path={}", safe_display(&truncate(path, 120)));
+    }
+    if let Some(excerpt) = &response.evidence.safe_excerpt {
+        println!("excerpt={}", safe_display(&truncate(excerpt, 160)));
+    }
+    if let Some(summary) = &response.source_log_summary {
+        println!(
+            "source_log #{} {} host={} severity={} app={} source_ip={}",
+            summary.id,
+            muted(&safe_display(&summary.timestamp)),
+            safe_display(&summary.hostname),
+            safe_display(&summary.severity),
+            safe_display(summary.app_name.as_deref().unwrap_or("-")),
+            safe_display(&summary.source_ip)
+        );
+        println!("  {}", safe_display(&truncate(&summary.message, 200)));
+        if summary.message_truncated {
+            println!("  {}", muted("message_truncated=true"));
+        }
+    } else if let Some(reason) = &response.missing_source_reason {
+        println!("source_log_summary=null reason={}", safe_display(reason));
+    }
+    println!("{}", muted("follow-ups:"));
+    if let Some(source_log_id) = response.evidence.source_log_id {
+        println!("  cortex get {source_log_id}");
+    }
+    println!("  cortex graph around --entity-id {}", rel.src_entity_id);
+    println!("  cortex graph around --entity-id {}", rel.dst_entity_id);
+    println!("  cortex graph explain --entity-id {}", rel.src_entity_id);
     Ok(())
 }
 
@@ -275,15 +386,27 @@ fn print_relationship(
     entities: &[GraphEntity],
     evidence: &[GraphEvidence],
 ) {
-    let src = entities
-        .iter()
-        .find(|entity| entity.id == relationship.src_entity_id)
-        .map(entity_label)
+    let src = relationship
+        .src_entity
+        .as_ref()
+        .map(entity_summary_label)
+        .or_else(|| {
+            entities
+                .iter()
+                .find(|entity| entity.id == relationship.src_entity_id)
+                .map(entity_label)
+        })
         .unwrap_or_else(|| format!("#{}", relationship.src_entity_id));
-    let dst = entities
-        .iter()
-        .find(|entity| entity.id == relationship.dst_entity_id)
-        .map(entity_label)
+    let dst = relationship
+        .dst_entity
+        .as_ref()
+        .map(entity_summary_label)
+        .or_else(|| {
+            entities
+                .iter()
+                .find(|entity| entity.id == relationship.dst_entity_id)
+                .map(entity_label)
+        })
         .unwrap_or_else(|| format!("#{}", relationship.dst_entity_id));
     println!(
         "\n{} {} -> {} confidence={:.2} trust={} reason={} evidence={}",
@@ -311,6 +434,14 @@ fn print_relationship(
             safe_display(&truncate(excerpt, 96)),
         );
     }
+}
+
+fn entity_summary_label(entity: &GraphEntitySummary) -> String {
+    format!(
+        "{}:{}",
+        cyan(&safe_display(&entity.entity_type)),
+        primary(&safe_display(&truncate(&entity.display_label, 40)))
+    )
 }
 
 fn entity_label(entity: &GraphEntity) -> String {

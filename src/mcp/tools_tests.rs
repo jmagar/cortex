@@ -451,6 +451,76 @@ async fn schema_actions_are_dispatchable() {
 }
 
 #[tokio::test]
+async fn graph_evidence_mode_dispatches_and_schema_lists_modes() {
+    let h = TestHarness::new();
+    db::insert_logs_batch(
+        &h.pool,
+        &[db::LogBatchEntry {
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            hostname: "mcp-proof-host".to_string(),
+            facility: Some("auth".to_string()),
+            severity: "info".to_string(),
+            app_name: Some("sshd".to_string()),
+            process_id: Some("42".to_string()),
+            message: "mcp graph proof".to_string(),
+            raw: "<14>mcp graph proof".to_string(),
+            source_ip: "127.0.0.1:514".to_string(),
+            docker_checkpoint: None,
+            ai_tool: None,
+            ai_project: None,
+            ai_session_id: None,
+            ai_transcript_path: None,
+            metadata_json: None,
+            http_status: None,
+            auth_outcome: None,
+            dns_blocked: None,
+            event_action: None,
+            parse_error: None,
+        }],
+    )
+    .unwrap();
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        db::graph::refresh_graph_projection(&h.pool).unwrap();
+    }
+    let evidence_id: i64 = {
+        let conn = h.pool.get().unwrap();
+        conn.query_row(
+            "SELECT id FROM graph_relationship_evidence
+             WHERE source_log_id IS NOT NULL
+             ORDER BY id LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({"action": "graph", "mode": "evidence", "evidence_id": evidence_id}),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(value["evidence"]["id"], evidence_id);
+    assert!(value["relationship"]["src_entity"].is_object());
+    assert!(value["relationship"]["dst_entity"].is_object());
+    assert!(value["source_log_summary"].is_object());
+
+    let defs = crate::mcp::schemas::tool_definitions();
+    let mode_enum = defs[0]["inputSchema"]["properties"]["mode"]["enum"]
+        .as_array()
+        .unwrap();
+    for expected in ["entity", "around", "explain", "evidence"] {
+        assert!(mode_enum.iter().any(|value| value == expected));
+    }
+    assert!(defs[0]["inputSchema"]["properties"]
+        .as_object()
+        .unwrap()
+        .contains_key("evidence_id"));
+}
+
+#[tokio::test]
 async fn public_action_references_cover_schema_registry() {
     let help = tool_cortex_help().await.unwrap();
     let help = help["help"].as_str().unwrap().to_ascii_lowercase();

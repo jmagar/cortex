@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-06-03
+
+### Added
+
+- Added graph evidence lookup across service, REST `/api/graph/evidence`, MCP
+  `action=graph mode=evidence`, HTTP client, and direct CLI
+  `cortex graph evidence <evidence-id>`.
+- Added compact relationship endpoint summaries to graph relationship payloads
+  and proof-oriented CLI output for evidence, around, and explain graph flows.
+- Added graph proof UX docs and optional smoke coverage for bounded output,
+  compatibility ids, endpoint summaries, source-log summaries, and privacy
+  invariants.
+
+### Fixed
+
+- Fixed MCP graph schema drift by documenting the existing `explain` mode while
+  adding `evidence` and `evidence_id`.
+- Hardened graph evidence/source-summary redaction for auth headers, bearer
+  tokens, cookies, credential/client-secret/access-token markers, URL userinfo,
+  private-key markers, home paths, and terminal controls.
+
 ## [1.8.0] - 2026-06-03
 
 ### Added

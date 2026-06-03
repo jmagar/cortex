@@ -57,6 +57,7 @@ pub(crate) enum CliCommand {
 pub(crate) enum GraphCommand {
     Around(GraphAroundArgs),
     Explain(GraphExplainArgs),
+    Evidence(GraphEvidenceArgs),
     Status(GraphStatusArgs),
     Rebuild(GraphRebuildArgs),
 }
@@ -449,6 +450,13 @@ pub(crate) struct GraphExplainArgs {
     pub beam_width: Option<u32>,
     pub max_chains: Option<u32>,
     pub evidence_sample_limit: Option<u32>,
+    pub payload_budget: Option<u32>,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct GraphEvidenceArgs {
+    pub evidence_id: i64,
     pub payload_budget: Option<u32>,
     pub json: bool,
 }

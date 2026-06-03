@@ -7,10 +7,10 @@ use crate::app::{
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
     CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
     GetErrorsRequest, GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest,
-    GraphExplainRequest, HomelabMapRequest, HostStateRequest, IncidentContextRequest,
-    IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest,
-    ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest,
-    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
+    GraphEvidenceLookupRequest, GraphExplainRequest, HomelabMapRequest, HostStateRequest,
+    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
+    PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
     SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
     UsageBlocksRequest,
 };
@@ -1519,8 +1519,14 @@ async fn tool_graph(state: &AppState, args: Value) -> anyhow::Result<Value> {
                 state.service.graph_explain(req).await?,
             )?)
         }
+        "evidence" => {
+            let req: GraphEvidenceLookupRequest = action_payload(args)?;
+            Ok(serde_json::to_value(
+                state.service.graph_evidence_lookup(req).await?,
+            )?)
+        }
         other => Err(anyhow::anyhow!(
-            "unsupported graph mode '{other}'; expected entity, around, or explain"
+            "unsupported graph mode '{other}'; expected entity, around, explain, or evidence"
         )),
     }
 }
