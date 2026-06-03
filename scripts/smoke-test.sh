@@ -911,15 +911,19 @@ assert isinstance(d.get('src_entity'), dict), 'src_entity summary missing'
 assert isinstance(d.get('dst_entity'), dict), 'dst_entity summary missing'
 assert 'raw' not in blob, 'raw field leaked'
 assert 'metadata_json' not in blob, 'metadata_json leaked'
-privacy_blob = json.dumps({
-    'evidence_safe_excerpt': d.get('evidence', {}).get('safe_excerpt'),
-    'evidence_reason_text': d.get('evidence', {}).get('reason_text'),
-    'evidence_metadata_path': d.get('evidence', {}).get('metadata_path'),
-    'source_log_summary': d.get('source_log_summary'),
-})
+def string_values(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from string_values(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from string_values(item)
+privacy_blob = '\\n'.join(string_values(d))
 for marker in ('Authorization', 'Bearer ', 'Cookie', 'Set-Cookie', 'client_secret', 'access_token', '/home/', 'PRIVATE KEY'):
     assert marker not in privacy_blob, f'sensitive marker leaked: {marker}'
-assert re.search(r'://[^\\s/:]+:[^\\s/@]+@', privacy_blob) is None, 'url userinfo leaked'
+assert re.search(r'://[^\s/:]+:[^\s/@]+@', privacy_blob) is None, 'url userinfo leaked'
 summary = d.get('source_log_summary')
 if summary is None:
     assert d.get('missing_source_reason'), 'missing source reason absent'

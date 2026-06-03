@@ -285,8 +285,14 @@ async fn graph_evidence_lookup_returns_safe_source_summary_and_relationship_cont
     assert_eq!(response.relationship.id, response.evidence.relationship_id);
     assert_eq!(response.relationship.src_entity_id, response.src_entity.id);
     assert_eq!(response.relationship.dst_entity_id, response.dst_entity.id);
-    assert!(response.relationship.src_entity.is_none());
-    assert!(response.relationship.dst_entity.is_none());
+    assert_eq!(
+        response.relationship.src_entity.as_ref().unwrap().id,
+        response.src_entity.id
+    );
+    assert_eq!(
+        response.relationship.dst_entity.as_ref().unwrap().id,
+        response.dst_entity.id
+    );
     let summary = response.source_log_summary.as_ref().unwrap();
     assert_eq!(summary.id, response.evidence.source_log_id.unwrap());
     assert!(!summary.message.contains("Authorization"));
@@ -354,8 +360,14 @@ async fn graph_evidence_lookup_reports_deleted_source_log_without_losing_evidenc
     );
     assert_eq!(response.relationship.src_entity_id, response.src_entity.id);
     assert_eq!(response.relationship.dst_entity_id, response.dst_entity.id);
-    assert!(response.relationship.src_entity.is_none());
-    assert!(response.relationship.dst_entity.is_none());
+    assert_eq!(
+        response.relationship.src_entity.as_ref().unwrap().id,
+        response.src_entity.id
+    );
+    assert_eq!(
+        response.relationship.dst_entity.as_ref().unwrap().id,
+        response.dst_entity.id
+    );
 }
 
 #[tokio::test]

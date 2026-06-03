@@ -15,7 +15,7 @@
 
 ## Endpoint matrix
 
-28 routes total. Scope is `read` (mounted via `axum::routing::get`,
+56 routes total. Scope is `read` (mounted via `axum::routing::get`,
 hits read-side `db_permits`) or `admin` (POST + `MAINTENANCE_PERMIT`
 single-flight, audited via `tracing::warn!` before the service call).
 All responses are JSON; error bodies are `{"error": "<message>"}`
@@ -84,7 +84,8 @@ to them by default.
 | GET | `/api/graph/explain` | read | query: entity selector, `depth?` (clamped to 3), `beam_width?`, `max_chains?`, `evidence_sample_limit?`, `payload_budget?` | `GraphExplainResponse { resolved_entity, chains, narrative, open_questions, missing_evidence, next_queries, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Deterministic evidence-backed explanation; weak evidence becomes open questions, not causal claims. |
 | GET | `/api/graph/evidence` | read | query: `evidence_id` (REQUIRED, minimum 1), `payload_budget?` | `GraphEvidenceLookupResponse { evidence, relationship, src_entity, dst_entity, source_log_summary?, missing_source_reason?, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Proof lookup for one evidence row. Source summaries are redacted/truncated and exclude raw frames and raw metadata. |
 
-**Total: 28 routes** (1 added in bead `.1` + 6 pre-existing + 8 in `.2` + 3 in `.3` + 4 in `.4` + 2 compose diagnostics + 4 graph queries).
+**Total: 56 routes** (current `src/api.rs` router surface, including syslog,
+surface-parity, AI, graph, compose, notification, error-ack, and DB routes).
 
 ---
 

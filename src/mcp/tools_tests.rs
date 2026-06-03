@@ -505,8 +505,8 @@ async fn graph_evidence_mode_dispatches_and_schema_lists_modes() {
     assert_eq!(value["evidence"]["id"], evidence_id);
     assert!(value["src_entity"].is_object());
     assert!(value["dst_entity"].is_object());
-    assert!(value["relationship"]["src_entity"].is_null());
-    assert!(value["relationship"]["dst_entity"].is_null());
+    assert!(value["relationship"]["src_entity"].is_object());
+    assert!(value["relationship"]["dst_entity"].is_object());
     assert!(value["source_log_summary"].is_object());
 
     let defs = crate::mcp::schemas::tool_definitions();
