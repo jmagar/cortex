@@ -71,7 +71,8 @@ use cortex::app::{
     DbIntegrityJobStarted, DbIntegrityRequest, DbIntegrityResult, DbMaintenanceStatus, DbStats,
     DbVacuumRequest, DbVacuumResult, FilterLogsRequest, FleetStateRequest, FleetStateResponse,
     GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, GraphAroundRequest,
-    GraphAroundResponse, GraphEntityLookupRequest, GraphEntityLookupResponse, GraphExplainRequest,
+    GraphAroundResponse, GraphEntityLookupRequest, GraphEntityLookupResponse,
+    GraphEvidenceLookupRequest, GraphEvidenceLookupResponse, GraphExplainRequest,
     GraphExplainResponse, HostStateRequest, HostStateResponse, IncidentContextRequest,
     IncidentContextResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
     ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
@@ -696,6 +697,13 @@ impl HttpClient {
 
     pub async fn graph_explain(&self, req: &GraphExplainRequest) -> Result<GraphExplainResponse> {
         self.get_json("/api/graph/explain", Some(req)).await
+    }
+
+    pub async fn graph_evidence(
+        &self,
+        req: &GraphEvidenceLookupRequest,
+    ) -> Result<GraphEvidenceLookupResponse> {
+        self.get_json("/api/graph/evidence", Some(req)).await
     }
 }
 

@@ -97,7 +97,19 @@ mcporter call --config config/mcporter.json syslog.cortex action=compose_doctor
 mcporter call --config config/mcporter.json syslog.cortex action=graph mode=entity entity_type=host key=example-host
 mcporter call --config config/mcporter.json syslog.cortex action=graph mode=around entity_type=host key=example-host depth=1
 mcporter call --config config/mcporter.json syslog.cortex action=graph mode=explain entity_type=host key=example-host depth=2
+mcporter call --config config/mcporter.json syslog.cortex action=graph mode=evidence evidence_id=12345
 ```
+
+For graph proof UX smoke, use a real bounded evidence id from
+`graph around --limit 5`, then assert:
+
+- `relationship.src_entity_id` and `relationship.dst_entity_id` are preserved,
+- `relationship.src_entity` and `relationship.dst_entity` are present,
+- `source_log_summary` is either compact and bounded or null with
+  `missing_source_reason`,
+- response JSON contains no `raw` field and no `metadata_json`,
+- auth-like strings, URL userinfo, home paths, private-key markers, and
+  terminal controls are redacted/escaped.
 
 ### CLI-based testing (abuse investigation workflow)
 

@@ -237,6 +237,28 @@ pub struct GraphAroundRows {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphSourceLogSummaryRow {
+    pub id: i64,
+    pub timestamp: String,
+    pub received_at: String,
+    pub hostname: String,
+    pub severity: String,
+    pub app_name: Option<String>,
+    pub process_id: Option<String>,
+    pub source_ip: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEvidenceLookupRows {
+    pub evidence: GraphEvidenceRow,
+    pub relationship: GraphRelationshipRow,
+    pub src_entity: GraphEntityRow,
+    pub dst_entity: GraphEntityRow,
+    pub source_log_summary: Option<GraphSourceLogSummaryRow>,
+}
+
 #[derive(Debug)]
 struct LogGraphRow {
     id: i64,
@@ -400,6 +422,100 @@ pub fn graph_around_entity(
         evidence,
         truncated,
     })
+}
+
+pub fn graph_evidence_by_id(
+    pool: &DbPool,
+    evidence_id: i64,
+) -> Result<Option<GraphEvidenceLookupRows>> {
+    let conn = pool.get()?;
+    let Some((evidence, relationship)) = conn
+        .query_row(
+            "SELECT
+                e.id, e.relationship_id, e.evidence_key, e.source_kind, e.source_id,
+                e.source_log_id, e.source_heartbeat_id, e.source_signature_hash,
+                e.observed_at, e.reason_code, e.reason_text, e.confidence_delta,
+                e.trust_level, e.safe_excerpt, e.metadata_path, e.evidence_count,
+                r.id, r.relationship_key, r.src_entity_id, r.dst_entity_id,
+                r.relationship_type, r.reason_code, r.trust_level, r.confidence,
+                r.evidence_count, r.first_seen_at, r.last_seen_at
+             FROM graph_relationship_evidence e
+             JOIN graph_relationships r ON r.id = e.relationship_id
+             WHERE e.id = ?1",
+            [evidence_id],
+            |row| {
+                Ok((
+                    graph_evidence_from_row(row)?,
+                    GraphRelationshipRow {
+                        id: row.get(16)?,
+                        relationship_key: row.get(17)?,
+                        src_entity_id: row.get(18)?,
+                        dst_entity_id: row.get(19)?,
+                        relationship_type: row.get(20)?,
+                        reason_code: row.get(21)?,
+                        trust_level: row.get(22)?,
+                        confidence: row.get(23)?,
+                        evidence_count: row.get(24)?,
+                        first_seen_at: row.get(25)?,
+                        last_seen_at: row.get(26)?,
+                    },
+                ))
+            },
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+
+    let src_entity = conn.query_row(
+        "SELECT id, entity_type, canonical_key, display_label, source_kind,
+                source_id, trust_level, first_seen_at, last_seen_at
+         FROM graph_entities
+         WHERE id = ?1",
+        [relationship.src_entity_id],
+        graph_entity_from_row,
+    )?;
+    let dst_entity = conn.query_row(
+        "SELECT id, entity_type, canonical_key, display_label, source_kind,
+                source_id, trust_level, first_seen_at, last_seen_at
+         FROM graph_entities
+         WHERE id = ?1",
+        [relationship.dst_entity_id],
+        graph_entity_from_row,
+    )?;
+    let source_log_summary = match evidence.source_log_id {
+        Some(source_log_id) => conn
+            .query_row(
+                "SELECT id, timestamp, received_at, hostname, severity, app_name,
+                        process_id, source_ip, message
+                 FROM logs
+                 WHERE id = ?1",
+                [source_log_id],
+                |row| {
+                    Ok(GraphSourceLogSummaryRow {
+                        id: row.get(0)?,
+                        timestamp: row.get(1)?,
+                        received_at: row.get(2)?,
+                        hostname: row.get(3)?,
+                        severity: row.get(4)?,
+                        app_name: row.get(5)?,
+                        process_id: row.get(6)?,
+                        source_ip: row.get(7)?,
+                        message: row.get(8)?,
+                    })
+                },
+            )
+            .optional()?,
+        None => None,
+    };
+
+    Ok(Some(GraphEvidenceLookupRows {
+        evidence,
+        relationship,
+        src_entity,
+        dst_entity,
+        source_log_summary,
+    }))
 }
 
 fn graph_entities_by_ids(conn: &rusqlite::Connection, ids: &[i64]) -> Result<Vec<GraphEntityRow>> {

@@ -5,8 +5,8 @@ use anyhow::{bail, Result};
 use crate::cli::parse_common::{value_after_equals, FlagCursor};
 use crate::cli::{parse_i64_flag, parse_u32_flag};
 use crate::cli::{
-    CliCommand, EntityArgs, GraphAroundArgs, GraphCommand, GraphExplainArgs, GraphRebuildArgs,
-    GraphStatusArgs,
+    CliCommand, EntityArgs, GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs,
+    GraphRebuildArgs, GraphStatusArgs,
 };
 
 const GRAPH_ENTITY_TYPES: &[&str] = &[
@@ -82,6 +82,7 @@ pub(crate) fn parse_graph(args: &[String]) -> Result<CliCommand> {
     match subcommand.as_str() {
         "around" => parse_graph_around(rest),
         "explain" => parse_graph_explain(rest),
+        "evidence" => parse_graph_evidence(rest),
         "status" => parse_graph_status(rest),
         "rebuild" => parse_graph_rebuild(rest),
         other => bail!("unknown graph subcommand: {other}"),
@@ -111,6 +112,44 @@ fn parse_json_only_args(args: &[String], command: &str) -> Result<bool> {
         }
     }
     Ok(json)
+}
+
+fn parse_graph_evidence(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = GraphEvidenceArgs::default();
+    let mut positionals = Vec::new();
+    let mut cursor = FlagCursor::new(args);
+    while let Some(arg) = cursor.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--payload-budget" => {
+                parsed.payload_budget = Some(parse_u32_flag(
+                    "--payload-budget",
+                    cursor.value("--payload-budget")?,
+                )?)
+            }
+            _ if arg.starts_with("--payload-budget=") => {
+                parsed.payload_budget = Some(parse_u32_flag(
+                    "--payload-budget",
+                    value_after_equals(arg, "--payload-budget")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown graph evidence option: {arg}"),
+            _ => positionals.push(arg.clone()),
+        }
+    }
+    match positionals.as_slice() {
+        [id] => {
+            parsed.evidence_id = id
+                .parse::<i64>()
+                .map_err(|_| anyhow::anyhow!("graph evidence id must be an integer"))?;
+            if parsed.evidence_id <= 0 {
+                bail!("graph evidence id must be a positive integer");
+            }
+        }
+        [] => bail!("graph evidence requires <evidence-id>"),
+        _ => bail!("graph evidence accepts exactly one evidence id"),
+    }
+    Ok(CliCommand::Graph(GraphCommand::Evidence(parsed)))
 }
 
 fn parse_graph_around(args: &[String]) -> Result<CliCommand> {

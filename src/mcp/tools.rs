@@ -7,10 +7,10 @@ use crate::app::{
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
     CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
     GetErrorsRequest, GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest,
-    GraphExplainRequest, HomelabMapRequest, HostStateRequest, IncidentContextRequest,
-    IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest,
-    ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest,
-    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
+    GraphEvidenceLookupRequest, GraphExplainRequest, HomelabMapRequest, HostStateRequest,
+    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
+    PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
     SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
     UsageBlocksRequest,
 };
@@ -1386,16 +1386,17 @@ Response fields: `window_from`, `window_to`, `total_logs`, `by_severity` (array)
 
 ## cortex graph
 
-Resolve graph entities, return bounded one-hop graph neighborhoods, or produce
-deterministic evidence-backed explanations with typed relationships and
-allowlisted evidence. The graph projection is rebuildable state; this read
+Resolve graph entities, return bounded one-hop graph neighborhoods, produce
+deterministic evidence-backed explanations, or inspect one evidence row with a
+safe source-log summary. The graph projection is rebuildable state; this read
 action never triggers a rebuild implicitly and returns projection/degraded
 status in `metadata`.
 
 **Required:** exact entity lookup uses `entity_type` + `key`; alias lookup uses
               `alias_type` + `alias_key`; neighborhood lookup uses either
-              `entity_id` or the same entity lookup fields.
-**Optional:** `mode` (`entity`, `around`, or `explain`, default `around`),
+              `entity_id` or the same entity lookup fields; evidence lookup uses
+              `mode="evidence"` + `evidence_id`.
+**Optional:** `mode` (`entity`, `around`, `explain`, or `evidence`, default `around`),
              `limit`, `depth` (`around` supports only 1; `explain` defaults
              2 and clamps to 3), `beam_width`, `max_chains`,
              `evidence_sample_limit`, `payload_budget`
@@ -1404,13 +1405,15 @@ Examples:
 `{"action":"graph","mode":"entity","entity_type":"host","key":"tootie"}`
 `{"action":"graph","mode":"around","entity_type":"host","key":"tootie","depth":1}`
 `{"action":"graph","mode":"explain","entity_type":"host","key":"tootie","depth":2}`
+`{"action":"graph","mode":"evidence","evidence_id":123}`
 
 Response fields: `resolved_entity`, `entities`, `relationships`, `evidence`,
+`src_entity`, `dst_entity`, `source_log_summary`, `missing_source_reason`,
 `chains`, `narrative`, `open_questions`, `missing_evidence`, `next_queries`,
 `candidates`, and `metadata`. Narrative mode is deterministic and cites
 relationship/evidence ids; weak evidence returns open questions instead of
-causal claims. Evidence excludes raw frames and raw metadata by default;
-excerpts are truncated and redacted.
+causal claims. Evidence/source-log summaries exclude raw frames and raw metadata
+by default; excerpts are truncated and redacted.
 
 "#;
     let help = format!(
@@ -1519,8 +1522,14 @@ async fn tool_graph(state: &AppState, args: Value) -> anyhow::Result<Value> {
                 state.service.graph_explain(req).await?,
             )?)
         }
+        "evidence" => {
+            let req: GraphEvidenceLookupRequest = action_payload(args)?;
+            Ok(serde_json::to_value(
+                state.service.graph_evidence_lookup(req).await?,
+            )?)
+        }
         other => Err(anyhow::anyhow!(
-            "unsupported graph mode '{other}'; expected entity, around, or explain"
+            "unsupported graph mode '{other}'; expected entity, around, explain, or evidence"
         )),
     }
 }

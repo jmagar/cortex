@@ -163,15 +163,21 @@ cortex graph around <entity-type> <key> [--limit N] [--json]
 cortex graph around <entity-type:key> [--limit N] [--json]
 cortex graph explain <entity-type> <key> [--depth N] [--beam-width N] [--max-chains N] [--json]
 cortex graph explain <entity-type:key> [--json]
+cortex graph evidence <evidence-id> [--payload-budget BYTES] [--json]
 ```
 
 Shared service responses are also used by MCP and REST graph surfaces.
 
+Relationship JSON includes the compatibility ids (`src_entity_id`,
+`dst_entity_id`) plus optional compact `src_entity` and `dst_entity` summaries
+when the endpoints are available. Evidence lookup returns the safe evidence row,
+owning relationship, endpoint summaries, projection metadata, and a bounded
+`source_log_summary` for log-derived evidence. `source_log_summary` contains
+only scalar display fields and a redacted message preview; it never contains the
+raw syslog frame or full `metadata_json`.
+
 ## Current Limitations
 
-- Human CLI output does not yet make evidence source rows obvious enough.
-- Relationship rows currently expose entity ids; callers may need follow-up
-  lookup or richer response shaping for labels.
 - Heartbeats currently verify host identity/aliases but do not yet create state
   edges for pressure, reboot, disk, memory, or network signals.
 - Error signature links are summary-level connections, not per-log causal
@@ -181,13 +187,10 @@ Shared service responses are also used by MCP and REST graph surfaces.
 
 ## Future Work
 
-- Add `cortex graph evidence <evidence-id>` to display source row context.
 - Add first-class graph nodes for incidents, commands, ports, HTTP routes, and
   operational findings.
 - Add heartbeat state edges such as `host has_pressure memory_pressure`.
 - Add bounded time-window correlation as query-time context, not persisted
   causal edges.
-- Improve graph response ergonomics so each relationship includes source and
-  destination entity summaries.
 - Add incremental rebuild or targeted refresh once full projection semantics are
   stable.

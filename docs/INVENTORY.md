@@ -88,6 +88,7 @@ methods as the MCP actions.
 | `cortex graph rebuild` | `graph` | Explicitly rebuild the derived graph projection from current source tables |
 | `cortex graph around` | `graph` | One-hop graph neighborhood with typed relationships and evidence |
 | `cortex graph explain` | `graph` | Evidence-backed deterministic incident explanation over graph chains |
+| `cortex graph evidence` | `graph` | Inspect one evidence id with relationship endpoints and bounded source proof |
 | `cortex ai correlate` | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs |
 | `cortex ai incidents` | `abuse_incidents` | Grouped abuse incident candidates |
 | `cortex ai investigate` | `abuse_investigate` | Abuse incident evidence bundles |

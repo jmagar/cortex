@@ -20,22 +20,23 @@ use super::models::{
     DbVacuumRequest, DbVacuumResult, FilterLogsRequest, FleetStateHostRow, FleetStateRequest,
     FleetStateResponse, FleetStateSummary, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
     GetLogResponse, GraphAroundRequest, GraphAroundResponse, GraphEntity, GraphEntityCandidate,
-    GraphEntityLookupRequest, GraphEntityLookupResponse, GraphEvidence, GraphExplainRequest,
+    GraphEntityLookupRequest, GraphEntityLookupResponse, GraphEntitySummary, GraphEvidence,
+    GraphEvidenceLookupRequest, GraphEvidenceLookupResponse, GraphExplainRequest,
     GraphExplainResponse, GraphIncidentNarrative, GraphNarrativeChain, GraphNextQuery,
     GraphProjectionStatusResponse, GraphRebuildResponse, GraphRebuildStatsResponse,
-    GraphRelationship, GraphResponseMetadata, HomelabMapApp, HomelabMapInventorySource,
-    HomelabMapNode, HomelabMapRequest, HomelabMapResponse, HomelabMapSourceIp, HomelabMapSummary,
-    IncidentContextRequest, IncidentContextResponse, IncidentEvent, IncidentRequest,
-    IncidentResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
-    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
-    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, MaintenanceJobStatus,
-    NotificationsRecentRequest, PatternsRequest, PatternsResponse, ProjectContextRequest,
-    ProjectContextResponse, RequestActor, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry, ServiceLogsRequest,
-    ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest,
-    SimilarIncidentsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
-    UsageBlocksRequest, UsageBlocksResponse,
+    GraphRelationship, GraphResponseMetadata, GraphSourceLogSummary, HomelabMapApp,
+    HomelabMapInventorySource, HomelabMapNode, HomelabMapRequest, HomelabMapResponse,
+    HomelabMapSourceIp, HomelabMapSummary, IncidentContextRequest, IncidentContextResponse,
+    IncidentEvent, IncidentRequest, IncidentResponse, IngestRateRequest, IngestRateResponse,
+    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
+    ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LogEntry,
+    MaintenanceJobStatus, NotificationsRecentRequest, PatternsRequest, PatternsResponse,
+    ProjectContextRequest, ProjectContextResponse, RequestActor, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry,
+    ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse,
+    SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
+    TimelineResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
@@ -3137,6 +3138,70 @@ impl CortexService {
         })
     }
 
+    pub async fn graph_evidence_lookup(
+        &self,
+        req: GraphEvidenceLookupRequest,
+    ) -> ServiceResult<GraphEvidenceLookupResponse> {
+        if req.evidence_id <= 0 {
+            return Err(ServiceError::InvalidInput(
+                "evidence_id must be a positive integer".into(),
+            ));
+        }
+        let limits = GraphLimits::for_evidence_lookup(req.payload_budget);
+        let status = self
+            .run_db("graph.status", db::graph::graph_projection_status)
+            .await?;
+        let evidence_id = req.evidence_id;
+        let rows = self
+            .run_db("graph.evidence_lookup", move |pool| {
+                db::graph::graph_evidence_by_id(pool, evidence_id)
+            })
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("graph evidence not found".into()))?;
+        let src_entity = GraphEntity::from(rows.src_entity);
+        let dst_entity = GraphEntity::from(rows.dst_entity);
+        let src_summary = GraphEntitySummary::from(&src_entity);
+        let dst_summary = GraphEntitySummary::from(&dst_entity);
+        let evidence = graph_evidence_safe(rows.evidence, limits.payload_budget);
+        let relationship = graph_relationship_to_model(
+            rows.relationship,
+            Some(src_summary.clone()),
+            Some(dst_summary.clone()),
+            vec![evidence.id],
+        );
+        let source_log_summary = rows
+            .source_log_summary
+            .map(|row| graph_source_log_summary_safe(row, limits.payload_budget));
+        let missing_source_reason = if evidence.source_log_id.is_none() {
+            Some("evidence_source_is_not_a_log".to_string())
+        } else if source_log_summary.is_none() {
+            Some("source_log_missing_or_retained_out".to_string())
+        } else {
+            None
+        };
+        let payload_truncated = estimated_graph_evidence_lookup_payload_bytes(
+            &relationship,
+            &evidence,
+            &src_summary,
+            &dst_summary,
+            source_log_summary.as_ref(),
+        ) > limits.payload_budget as usize;
+        Ok(GraphEvidenceLookupResponse {
+            evidence,
+            relationship,
+            src_entity: src_summary,
+            dst_entity: dst_summary,
+            source_log_summary,
+            missing_source_reason,
+            metadata: graph_metadata(
+                &status,
+                limits,
+                payload_truncated,
+                payload_truncated.then(|| "payload_budget".to_string()),
+            ),
+        })
+    }
+
     pub async fn graph_projection_status(&self) -> ServiceResult<GraphProjectionStatusResponse> {
         let status = self
             .run_db("graph.status", db::graph::graph_projection_status)
@@ -3479,6 +3544,15 @@ impl GraphExplainLimits {
 }
 
 impl GraphLimits {
+    fn for_evidence_lookup(payload_budget: Option<u32>) -> Self {
+        Self {
+            limit: 1,
+            depth: 0,
+            evidence_sample_limit: 1,
+            payload_budget: payload_budget.unwrap_or(32_768).clamp(4_096, 65_536),
+        }
+    }
+
     fn from_entity_request(req: &GraphEntityLookupRequest) -> Self {
         Self {
             limit: req.limit.unwrap_or(20).clamp(1, 100),
@@ -3544,30 +3618,51 @@ fn graph_rows_to_models(rows: db::graph::GraphAroundRows, payload_budget: u32) -
             .or_default()
             .push(item.id);
     }
+    let entities: Vec<GraphEntity> = rows.entities.into_iter().map(Into::into).collect();
+    let entity_summaries: HashMap<i64, GraphEntitySummary> = entities
+        .iter()
+        .map(|entity| (entity.id, GraphEntitySummary::from(entity)))
+        .collect();
     let relationships = rows
         .relationships
         .into_iter()
-        .map(|row| GraphRelationship {
-            id: row.id,
-            relationship_key: row.relationship_key,
-            src_entity_id: row.src_entity_id,
-            dst_entity_id: row.dst_entity_id,
-            relationship_type: row.relationship_type,
-            reason_code: row.reason_code,
-            trust_level: row.trust_level,
-            confidence: row.confidence,
-            evidence_count: row.evidence_count,
-            evidence_ids: evidence_ids_by_relationship
+        .map(|row| {
+            let src_entity = entity_summaries.get(&row.src_entity_id).cloned();
+            let dst_entity = entity_summaries.get(&row.dst_entity_id).cloned();
+            let evidence_ids = evidence_ids_by_relationship
                 .remove(&row.id)
-                .unwrap_or_default(),
-            first_seen_at: row.first_seen_at,
-            last_seen_at: row.last_seen_at,
+                .unwrap_or_default();
+            graph_relationship_to_model(row, src_entity, dst_entity, evidence_ids)
         })
         .collect();
     GraphRowsModels {
         relationships,
-        entities: rows.entities.into_iter().map(Into::into).collect(),
+        entities,
         evidence,
+    }
+}
+
+fn graph_relationship_to_model(
+    row: db::graph::GraphRelationshipRow,
+    src_entity: Option<GraphEntitySummary>,
+    dst_entity: Option<GraphEntitySummary>,
+    evidence_ids: Vec<i64>,
+) -> GraphRelationship {
+    GraphRelationship {
+        id: row.id,
+        relationship_key: row.relationship_key,
+        src_entity_id: row.src_entity_id,
+        dst_entity_id: row.dst_entity_id,
+        src_entity,
+        dst_entity,
+        relationship_type: row.relationship_type,
+        reason_code: row.reason_code,
+        trust_level: row.trust_level,
+        confidence: row.confidence,
+        evidence_count: row.evidence_count,
+        evidence_ids,
+        first_seen_at: row.first_seen_at,
+        last_seen_at: row.last_seen_at,
     }
 }
 
@@ -3781,7 +3876,18 @@ fn estimated_graph_explain_payload_bytes(
                 + chain
                     .relationships
                     .iter()
-                    .map(|rel| rel.relationship_type.len() + rel.reason_code.len())
+                    .map(|rel| {
+                        rel.relationship_type.len()
+                            + rel.reason_code.len()
+                            + rel
+                                .src_entity
+                                .as_ref()
+                                .map_or(0, estimated_entity_summary_bytes)
+                            + rel
+                                .dst_entity
+                                .as_ref()
+                                .map_or(0, estimated_entity_summary_bytes)
+                    })
                     .sum::<usize>()
         })
         .sum();
@@ -3882,16 +3988,64 @@ fn graph_evidence_safe(row: db::graph::GraphEvidenceRow, payload_budget: u32) ->
     }
 }
 
+fn graph_source_log_summary_safe(
+    row: db::graph::GraphSourceLogSummaryRow,
+    payload_budget: u32,
+) -> GraphSourceLogSummary {
+    let message_limit = (payload_budget / 8).clamp(128, 1024) as usize;
+    let redacted_message = redact_graph_text_unbounded(row.message);
+    let message = truncate_chars(&redacted_message, message_limit);
+    GraphSourceLogSummary {
+        id: row.id,
+        timestamp: redact_graph_text(row.timestamp),
+        received_at: redact_graph_text(row.received_at),
+        hostname: redact_graph_text(row.hostname),
+        severity: redact_graph_text(row.severity),
+        app_name: row.app_name.map(redact_graph_text),
+        process_id: row.process_id.map(redact_graph_text),
+        source_ip: redact_graph_text(row.source_ip),
+        message_truncated: redacted_message.chars().count() > message_limit,
+        message,
+    }
+}
+
 fn redact_graph_text(value: String) -> String {
+    truncate_chars(&redact_graph_text_unbounded(value), 512)
+}
+
+fn redact_graph_text_unbounded(value: String) -> String {
     let control_stripped: String = value.chars().filter(|ch| !ch.is_control()).collect();
     let mut out = String::with_capacity(control_stripped.len().min(512));
+    let mut redact_next_value = false;
     for token in control_stripped.split_whitespace() {
         let lower = token.to_ascii_lowercase();
-        let redacted = lower.contains("token=")
+        let value_marker = lower.contains("authorization")
+            || lower.contains("bearer")
+            || lower == "cookie"
+            || lower.starts_with("cookie:")
+            || lower.contains("set-cookie")
+            || lower == "credential"
+            || lower == "credentials"
+            || lower.starts_with("credential:")
+            || lower.starts_with("credentials:");
+        let redacted = redact_next_value
+            || value_marker
+            || lower.starts_with("cookie=")
+            || lower.starts_with("credential=")
+            || lower.starts_with("credentials=")
+            || lower.contains("client_secret")
+            || lower.contains("access_token")
+            || lower.contains("token=")
             || lower.contains("password")
             || lower.contains("secret")
             || lower.contains("api_key")
             || lower.contains("apikey")
+            || lower.contains("private-key")
+            || lower.contains("private_key")
+            || lower == "begin"
+            || lower.contains("-----begin")
+            || lower.contains("userinfo")
+            || lower.contains("://") && lower.contains('@')
             || lower.contains("/home/")
             || lower.contains("/users/");
         if !out.is_empty() {
@@ -3902,8 +4056,9 @@ fn redact_graph_text(value: String) -> String {
         } else {
             out.push_str(token);
         }
+        redact_next_value = value_marker;
     }
-    truncate_chars(&out, 512)
+    out
 }
 
 fn truncate_chars(value: &str, limit: usize) -> String {
@@ -3926,7 +4081,19 @@ fn estimated_graph_payload_bytes(
         .sum();
     let relationship_bytes: usize = relationships
         .iter()
-        .map(|rel| rel.relationship_key.len() + rel.relationship_type.len() + rel.reason_code.len())
+        .map(|rel| {
+            rel.relationship_key.len()
+                + rel.relationship_type.len()
+                + rel.reason_code.len()
+                + rel
+                    .src_entity
+                    .as_ref()
+                    .map_or(0, estimated_entity_summary_bytes)
+                + rel
+                    .dst_entity
+                    .as_ref()
+                    .map_or(0, estimated_entity_summary_bytes)
+        })
         .sum();
     let evidence_bytes: usize = evidence
         .iter()
@@ -3938,6 +4105,51 @@ fn estimated_graph_payload_bytes(
         })
         .sum();
     entity_bytes + relationship_bytes + evidence_bytes
+}
+
+fn estimated_graph_evidence_lookup_payload_bytes(
+    relationship: &GraphRelationship,
+    evidence: &GraphEvidence,
+    src_entity: &GraphEntitySummary,
+    dst_entity: &GraphEntitySummary,
+    source_log_summary: Option<&GraphSourceLogSummary>,
+) -> usize {
+    let relationship_bytes = relationship.relationship_key.len()
+        + relationship.relationship_type.len()
+        + relationship.reason_code.len()
+        + relationship
+            .src_entity
+            .as_ref()
+            .map_or(0, estimated_entity_summary_bytes)
+        + relationship
+            .dst_entity
+            .as_ref()
+            .map_or(0, estimated_entity_summary_bytes);
+    let evidence_bytes = evidence.source_id.len()
+        + evidence.reason_code.len()
+        + evidence.reason_text.as_ref().map_or(0, String::len)
+        + evidence.safe_excerpt.as_ref().map_or(0, String::len)
+        + evidence.metadata_path.as_ref().map_or(0, String::len);
+    let source_bytes = source_log_summary.map_or(0, |summary| {
+        summary.timestamp.len()
+            + summary.received_at.len()
+            + summary.hostname.len()
+            + summary.severity.len()
+            + summary.app_name.as_ref().map_or(0, String::len)
+            + summary.process_id.as_ref().map_or(0, String::len)
+            + summary.source_ip.len()
+            + summary.message.len()
+    });
+    let top_level_entity_bytes =
+        estimated_entity_summary_bytes(src_entity) + estimated_entity_summary_bytes(dst_entity);
+    relationship_bytes + evidence_bytes + top_level_entity_bytes + source_bytes
+}
+
+fn estimated_entity_summary_bytes(summary: &GraphEntitySummary) -> usize {
+    summary.entity_type.len()
+        + summary.canonical_key.len()
+        + summary.display_label.len()
+        + summary.trust_level.len()
 }
 
 #[cfg(test)]

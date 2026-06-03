@@ -889,6 +889,62 @@ print('ok')
 rm -f "$HELP_FILE"
 assert_eq "help: contains all action sections" "$HELP_VALID" "ok"
 
+# ── graph proof UX (optional: requires known seeded graph evidence id) ───────
+echo ""
+echo "Graph proof UX"
+if [[ -n "${CORTEX_SMOKE_GRAPH_EVIDENCE_ID:-}" ]]; then
+    GRAPH_PROOF_START=$(python3 -c "import time; print(int(time.time() * 1000))")
+    GRAPH_EVIDENCE=$(mcp_call graph "mode=evidence" "evidence_id=${CORTEX_SMOKE_GRAPH_EVIDENCE_ID}" "payload_budget=8192" 2>&1)
+    GRAPH_PROOF_END=$(python3 -c "import time; print(int(time.time() * 1000))")
+    assert_no_error "graph evidence: no error" "$GRAPH_EVIDENCE"
+    GRAPH_EVIDENCE_BYTES=$(printf '%s' "$GRAPH_EVIDENCE" | wc -c | tr -d ' ')
+	    GRAPH_EVIDENCE_LATENCY_MS=$((GRAPH_PROOF_END - GRAPH_PROOF_START))
+    GRAPH_EVIDENCE_VALID=$(printf '%s\n' "$GRAPH_EVIDENCE" | python3 -c "
+import json, re, sys
+d = json.load(sys.stdin)
+blob = json.dumps(d)
+assert d['evidence']['id'] == int('${CORTEX_SMOKE_GRAPH_EVIDENCE_ID}'), 'evidence id mismatch'
+rel = d['relationship']
+assert isinstance(rel.get('src_entity_id'), int), 'src_entity_id missing'
+assert isinstance(rel.get('dst_entity_id'), int), 'dst_entity_id missing'
+assert isinstance(d.get('src_entity'), dict), 'src_entity summary missing'
+assert isinstance(d.get('dst_entity'), dict), 'dst_entity summary missing'
+assert 'raw' not in blob, 'raw field leaked'
+assert 'metadata_json' not in blob, 'metadata_json leaked'
+privacy_blob = blob
+for marker in ('Authorization', 'Bearer ', 'Cookie', 'Set-Cookie', 'client_secret', 'access_token', '/home/', 'PRIVATE KEY'):
+    assert marker not in privacy_blob, f'sensitive marker leaked: {marker}'
+assert re.search(r'://[^\s/:]+:[^\s/@]+@', privacy_blob) is None, 'url userinfo leaked'
+summary = d.get('source_log_summary')
+if summary is None:
+    assert d.get('missing_source_reason'), 'missing source reason absent'
+else:
+    assert len(summary.get('message', '')) <= 1024, 'source summary message too large'
+    assert not any(ord(ch) < 32 for ch in summary.get('message', '')), 'control character leaked'
+print('ok')
+" 2>/dev/null || echo "error")
+    assert_eq "graph evidence: proof/privacy contract valid" "$GRAPH_EVIDENCE_VALID" "ok"
+    if [[ "$GRAPH_EVIDENCE_BYTES" -le 8192 ]]; then
+        echo "PASS: graph evidence: bounded response bytes ($GRAPH_EVIDENCE_BYTES <= 8192)"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL: graph evidence: response too large ($GRAPH_EVIDENCE_BYTES > 8192)"
+        FAIL=$((FAIL + 1))
+        ERRORS+=("graph evidence response too large")
+    fi
+    if [[ "$GRAPH_EVIDENCE_LATENCY_MS" -le 5000 ]]; then
+        echo "PASS: graph evidence: latency bounded (${GRAPH_EVIDENCE_LATENCY_MS}ms <= 5000ms)"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL: graph evidence: latency too high (${GRAPH_EVIDENCE_LATENCY_MS}ms > 5000ms)"
+        FAIL=$((FAIL + 1))
+        ERRORS+=("graph evidence latency too high")
+    fi
+else
+    echo "SKIP: graph proof UX — set CORTEX_SMOKE_GRAPH_EVIDENCE_ID to a real graph_relationship_evidence id"
+    SKIP=$((SKIP + 1))
+fi
+
 # ── invalid action (negative test) ───────────────────────────────────────────
 echo ""
 echo "Negative tests"

@@ -20,12 +20,13 @@ use crate::app::{
     ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
     CorrelateStateRequest, CortexService, DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest,
     DbVacuumRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest,
-    GraphAroundRequest, GraphEntityLookupRequest, GraphExplainRequest, HostStateRequest,
-    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
-    PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
-    ServiceError, SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
-    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
+    GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest, GraphExplainRequest,
+    HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
+    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
+    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
+    SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
+    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UnackErrorRequest,
+    UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::db::DbPool;
@@ -246,6 +247,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/graph/entity", get(graph_entity))
         .route("/api/graph/around", get(graph_around))
         .route("/api/graph/explain", get(graph_explain))
+        .route("/api/graph/evidence", get(graph_evidence))
         .route("/api/ai/ask-history", get(ai_ask_history))
         .route("/api/ai/incidents", get(ai_incidents))
         .route("/api/ai/investigate", get(ai_investigate))
@@ -904,6 +906,13 @@ async fn graph_explain(
     Query(q): Query<GraphExplainRequest>,
 ) -> impl IntoResponse {
     respond(state.service.graph_explain(q).await)
+}
+
+async fn graph_evidence(
+    State(state): State<ApiState>,
+    Query(q): Query<GraphEvidenceLookupRequest>,
+) -> impl IntoResponse {
+    respond(state.service.graph_evidence_lookup(q).await)
 }
 
 #[derive(Debug, Deserialize)]

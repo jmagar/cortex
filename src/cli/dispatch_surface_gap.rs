@@ -1,21 +1,22 @@
 use super::dispatch::http_or_cancel;
 use super::output_common::print_json;
 use super::output_graph::{
-    print_graph_around_response, print_graph_entity_lookup_response, print_graph_rebuild_response,
+    print_graph_around_response, print_graph_entity_lookup_response,
+    print_graph_evidence_lookup_response, print_graph_rebuild_response,
     print_graph_status_response,
 };
 
 use anyhow::Result;
 use cortex::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, CorrelateStateRequest, FleetStateRequest,
-    GraphAroundRequest, GraphEntityLookupRequest, GraphExplainRequest, HostStateRequest,
-    ListAppsRequest, SilentHostsRequest,
+    GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest, GraphExplainRequest,
+    HostStateRequest, ListAppsRequest, SilentHostsRequest,
 };
 
 use super::args::{
     AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, EntityArgs,
-    FleetStateArgs, GraphAroundArgs, GraphExplainArgs, GraphRebuildArgs, GraphStatusArgs,
-    HostStateArgs, SilentHostsArgs,
+    FleetStateArgs, GraphAroundArgs, GraphEvidenceArgs, GraphExplainArgs, GraphRebuildArgs,
+    GraphStatusArgs, HostStateArgs, SilentHostsArgs,
 };
 use super::CliMode;
 
@@ -289,6 +290,16 @@ impl GraphExplainArgs {
     }
 }
 
+impl GraphEvidenceArgs {
+    pub(crate) fn into_request(self) -> GraphEvidenceLookupRequest {
+        GraphEvidenceLookupRequest {
+            mode: Some("evidence".into()),
+            evidence_id: self.evidence_id,
+            payload_budget: self.payload_budget,
+        }
+    }
+}
+
 pub(crate) async fn run_host_state(mode: &CliMode, args: HostStateArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
@@ -423,6 +434,16 @@ pub(crate) async fn run_graph_explain(mode: &CliMode, args: GraphExplainArgs) ->
         CliMode::Http(client) => http_or_cancel(client.graph_explain(&req)).await?,
     };
     super::output_graph::print_graph_explain_response(&response, json)
+}
+
+pub(crate) async fn run_graph_evidence(mode: &CliMode, args: GraphEvidenceArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.graph_evidence_lookup(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.graph_evidence(&req)).await?,
+    };
+    print_graph_evidence_lookup_response(&response, json)
 }
 
 pub(crate) async fn run_graph_status(mode: &CliMode, args: GraphStatusArgs) -> Result<()> {

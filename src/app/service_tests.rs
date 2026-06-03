@@ -228,6 +228,12 @@ async fn graph_around_returns_one_hop_relationships_evidence_and_metadata() {
         .relationships
         .iter()
         .all(|rel| !rel.evidence_ids.is_empty()));
+    assert!(response.relationships.iter().all(|rel| {
+        rel.src_entity.is_some()
+            && rel.dst_entity.is_some()
+            && rel.src_entity_id == rel.src_entity.as_ref().unwrap().id
+            && rel.dst_entity_id == rel.dst_entity.as_ref().unwrap().id
+    }));
     assert!(response.evidence.iter().all(|evidence| {
         evidence.source_log_id.is_some()
             && evidence.safe_excerpt.is_some()
@@ -237,6 +243,203 @@ async fn graph_around_returns_one_hop_relationships_evidence_and_metadata() {
         .next_queries
         .iter()
         .all(|query| query.mode == "around"));
+}
+
+#[tokio::test]
+async fn graph_evidence_lookup_returns_safe_source_summary_and_relationship_context() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[entry(
+            "2026-01-01T00:00:00.000Z",
+            "proof-host",
+            "info",
+            "Autho\u{1b}rization: Bea\u{7}rer supersecret Cookie: sid=abc beginning client_secret=abc access_token=tok https://user:pass@example.test /home/jmagar/key \u{1b}[31m",
+            "10.0.0.1:514",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection_for_test(&pool);
+    let evidence_id = {
+        let conn = pool.get().unwrap();
+        conn.query_row(
+            "SELECT id FROM graph_relationship_evidence
+             WHERE source_log_id IS NOT NULL
+             ORDER BY id LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+
+    let response = service
+        .graph_evidence_lookup(GraphEvidenceLookupRequest {
+            evidence_id,
+            payload_budget: Some(4096),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.evidence.id, evidence_id);
+    assert_eq!(response.relationship.id, response.evidence.relationship_id);
+    assert_eq!(response.relationship.src_entity_id, response.src_entity.id);
+    assert_eq!(response.relationship.dst_entity_id, response.dst_entity.id);
+    assert_eq!(
+        response.relationship.src_entity.as_ref().unwrap().id,
+        response.src_entity.id
+    );
+    assert_eq!(
+        response.relationship.dst_entity.as_ref().unwrap().id,
+        response.dst_entity.id
+    );
+    let summary = response.source_log_summary.as_ref().unwrap();
+    assert_eq!(summary.id, response.evidence.source_log_id.unwrap());
+    assert!(!summary.message.contains("Authorization"));
+    assert!(!summary.message.contains("Bearer"));
+    assert!(!summary.message.contains("supersecret"));
+    assert!(!summary.message.contains("Cookie"));
+    assert!(!summary.message.contains("sid=abc"));
+    assert!(!summary.message.contains("client_secret"));
+    assert!(!summary.message.contains("access_token"));
+    assert!(!summary.message.contains("tok"));
+    assert!(!summary.message.contains("user:pass"));
+    assert!(!summary.message.contains("/home/jmagar"));
+    assert!(summary.message.contains("beginning"));
+    assert!(!summary.message.chars().any(char::is_control));
+    let json = serde_json::to_string(&response).unwrap();
+    assert!(!json.contains("raw"));
+    assert!(!json.contains("metadata_json"));
+}
+
+#[tokio::test]
+async fn graph_evidence_lookup_reports_deleted_source_log_without_losing_evidence() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[entry(
+            "2026-01-01T00:00:00.000Z",
+            "retained-out-host",
+            "info",
+            "short lived row",
+            "10.0.0.1:514",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection_for_test(&pool);
+    let (evidence_id, source_log_id): (i64, i64) = {
+        let conn = pool.get().unwrap();
+        conn.query_row(
+            "SELECT id, source_log_id FROM graph_relationship_evidence
+             WHERE source_log_id IS NOT NULL
+             ORDER BY id LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    };
+    {
+        let conn = pool.get().unwrap();
+        conn.execute("DELETE FROM logs WHERE id = ?1", [source_log_id])
+            .unwrap();
+    }
+
+    let response = service
+        .graph_evidence_lookup(GraphEvidenceLookupRequest {
+            evidence_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(response.evidence.id, evidence_id);
+    assert_eq!(response.evidence.source_log_id, Some(source_log_id));
+    assert!(response.source_log_summary.is_none());
+    assert_eq!(
+        response.missing_source_reason.as_deref(),
+        Some("source_log_missing_or_retained_out")
+    );
+    assert_eq!(response.relationship.src_entity_id, response.src_entity.id);
+    assert_eq!(response.relationship.dst_entity_id, response.dst_entity.id);
+    assert_eq!(
+        response.relationship.src_entity.as_ref().unwrap().id,
+        response.src_entity.id
+    );
+    assert_eq!(
+        response.relationship.dst_entity.as_ref().unwrap().id,
+        response.dst_entity.id
+    );
+}
+
+#[tokio::test]
+async fn graph_evidence_lookup_keeps_signature_source_without_log_summary() {
+    let (service, pool, _dir) = test_service();
+    let mut log = entry(
+        "2026-01-01T00:00:00.000Z",
+        "sig-host",
+        "err",
+        "error 1",
+        "10.0.0.1:514",
+    );
+    log.app_name = Some("cortex".into());
+    insert_logs_batch(&pool, &[log]).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO error_signatures
+                (signature_hash, normalizer_version, template, sample_message,
+                 sample_hostname, sample_app_name, severity, first_seen_at,
+                 last_seen_at, total_count)
+             VALUES ('abc123', 1, 'error <id>', 'error 1', 'sig-host',
+                     'cortex', 'err', '2026-01-01T00:00:00Z',
+                     '2026-01-01T00:05:00Z', 3)",
+            [],
+        )
+        .unwrap();
+    }
+    refresh_graph_projection_for_test(&pool);
+    let evidence_id = {
+        let conn = pool.get().unwrap();
+        conn.query_row(
+            "SELECT id FROM graph_relationship_evidence
+             WHERE source_signature_hash IS NOT NULL
+             ORDER BY id LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+
+    let response = service
+        .graph_evidence_lookup(GraphEvidenceLookupRequest {
+            evidence_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        response.evidence.source_signature_hash.as_deref(),
+        Some("abc123")
+    );
+    assert!(response.evidence.source_log_id.is_none());
+    assert!(response.source_log_summary.is_none());
+    assert_eq!(
+        response.missing_source_reason.as_deref(),
+        Some("evidence_source_is_not_a_log")
+    );
+}
+
+#[tokio::test]
+async fn graph_evidence_lookup_missing_id_returns_not_found() {
+    let (service, pool, _dir) = test_service();
+    refresh_graph_projection_for_test(&pool);
+    let err = service
+        .graph_evidence_lookup(GraphEvidenceLookupRequest {
+            evidence_id: 999_999,
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("not found"));
 }
 
 #[tokio::test]
@@ -279,6 +482,12 @@ async fn graph_explain_returns_conservative_evidence_backed_chain() {
         .chains
         .iter()
         .all(|chain| !chain.relationship_ids.is_empty() && !chain.evidence_ids.is_empty()));
+    assert!(response.chains.iter().all(|chain| {
+        chain
+            .relationships
+            .iter()
+            .all(|rel| rel.src_entity.is_some() && rel.dst_entity.is_some())
+    }));
     assert!(!response.evidence.is_empty());
     assert!(!response.next_queries.is_empty());
 }

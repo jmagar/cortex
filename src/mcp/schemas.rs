@@ -56,12 +56,17 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["entity", "around"],
-                    "description": "For action=graph: entity resolves an entity by key or alias; around returns a bounded one-hop neighborhood. Defaults to around."
+                    "enum": ["entity", "around", "explain", "evidence"],
+                    "description": "For action=graph: entity resolves an entity by key or alias; around returns a bounded one-hop neighborhood; explain returns conservative evidence-backed chains; evidence resolves one evidence row by evidence_id. Defaults to around."
+                },
+                "evidence_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "For action=graph mode=evidence: graph_relationship_evidence id to inspect."
                 },
                 "entity_id": {
                     "type": "integer",
-                    "description": "For action=graph mode=around: exact graph entity id to expand."
+                    "description": "For action=graph mode=around or explain: exact graph entity id to expand."
                 },
                 "entity_type": {
                     "type": "string",
@@ -196,11 +201,11 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "depth": {
                     "type": "integer",
-                    "description": "For action=graph mode=around: traversal depth. V1 supports depth=1 only."
+                    "description": "For action=graph mode=around or explain: traversal depth. Around supports depth=1 only; explain clamps to 1..3."
                 },
                 "evidence_sample_limit": {
                     "type": "integer",
-                    "description": "For action=graph mode=around: safe evidence samples per relationship, default 3, max 5."
+                    "description": "For action=graph mode=around or explain: safe evidence samples per relationship, default 3 for around and 2 for explain, max 5."
                 },
                 "payload_budget": {
                     "type": "integer",

@@ -119,6 +119,50 @@ fn refresh_graph_projection_builds_syslog_app_edges_and_is_idempotent() {
 }
 
 #[test]
+fn graph_evidence_by_id_returns_relationship_entities_and_source_log_summary() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("graph-evidence-lookup.db"));
+    let pool = init_pool(&config).unwrap();
+
+    insert_logs_batch(
+        &pool,
+        &[make_entry(
+            "2026-01-01T00:00:00Z",
+            "proof-host",
+            Some("sshd"),
+            "proof row",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    let evidence_id: i64 = conn
+        .query_row(
+            "SELECT id FROM graph_relationship_evidence
+             WHERE source_log_id IS NOT NULL
+             ORDER BY id LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    drop(conn);
+
+    let rows = graph_evidence_by_id(&pool, evidence_id).unwrap().unwrap();
+    assert_eq!(rows.evidence.id, evidence_id);
+    assert_eq!(rows.evidence.relationship_id, rows.relationship.id);
+    assert!(rows.evidence.source_log_id.is_some());
+    assert!(rows.source_log_summary.is_some());
+    assert_eq!(
+        rows.source_log_summary.as_ref().unwrap().message,
+        "proof row"
+    );
+    assert_eq!(rows.src_entity.id, rows.relationship.src_entity_id);
+    assert_eq!(rows.dst_entity.id, rows.relationship.dst_entity_id);
+}
+
+#[test]
 fn refresh_graph_projection_extracts_docker_from_metadata_and_source() {
     let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();

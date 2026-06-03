@@ -2303,6 +2303,10 @@ pub struct GraphRelationship {
     pub relationship_key: String,
     pub src_entity_id: i64,
     pub dst_entity_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub src_entity: Option<GraphEntitySummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dst_entity: Option<GraphEntitySummary>,
     pub relationship_type: String,
     pub reason_code: String,
     pub trust_level: String,
@@ -2311,6 +2315,27 @@ pub struct GraphRelationship {
     pub evidence_ids: Vec<i64>,
     pub first_seen_at: Option<String>,
     pub last_seen_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEntitySummary {
+    pub id: i64,
+    pub entity_type: String,
+    pub canonical_key: String,
+    pub display_label: String,
+    pub trust_level: String,
+}
+
+impl From<&GraphEntity> for GraphEntitySummary {
+    fn from(value: &GraphEntity) -> Self {
+        Self {
+            id: value.id,
+            entity_type: value.entity_type.clone(),
+            canonical_key: value.canonical_key.clone(),
+            display_label: value.display_label.clone(),
+            trust_level: value.trust_level.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -2330,6 +2355,41 @@ pub struct GraphEvidence {
     pub safe_excerpt: Option<String>,
     pub metadata_path: Option<String>,
     pub evidence_count: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphEvidenceLookupRequest {
+    /// Adapter hint for MCP/CLI shared payloads. Service methods ignore it.
+    pub mode: Option<String>,
+    pub evidence_id: i64,
+    /// Approximate payload budget in bytes. Default 32768, clamp 4096..=65536.
+    pub payload_budget: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphSourceLogSummary {
+    pub id: i64,
+    pub timestamp: String,
+    pub received_at: String,
+    pub hostname: String,
+    pub severity: String,
+    pub app_name: Option<String>,
+    pub process_id: Option<String>,
+    pub source_ip: String,
+    pub message: String,
+    pub message_truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GraphEvidenceLookupResponse {
+    pub evidence: GraphEvidence,
+    pub relationship: GraphRelationship,
+    pub src_entity: GraphEntitySummary,
+    pub dst_entity: GraphEntitySummary,
+    pub source_log_summary: Option<GraphSourceLogSummary>,
+    pub missing_source_reason: Option<String>,
+    pub metadata: GraphResponseMetadata,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
