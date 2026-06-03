@@ -1,6 +1,6 @@
 [package]
 name = "cortex"
-version = "1.9.0"
+version = "1.9.1"
 edition = "2021"
 rust-version = "1.86"
 description = "Homelab intelligence platform — syslog/OTLP/Docker log aggregation, fleet awareness, and AI agent coordination over MCP, CLI, and HTTP"

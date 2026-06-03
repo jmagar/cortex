@@ -15,7 +15,7 @@
 use tracing::warn;
 
 use super::models::AiWatchStatusReport;
-use super::service::CortexService;
+use super::services::CortexService;
 use super::ServiceResult;
 
 const SERVICE: &str = "cortex-ai-watch.service";

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-06-03
+
+### Changed
+
+- Integrated the split app service/model layout on top of the graph proof UX
+  release, replacing the monolithic app service with focused `src/app/services/`
+  modules while preserving graph evidence, endpoint summaries, redaction, and
+  payload-budget behavior.
+
 ## [1.9.0] - 2026-06-03
 
 ### Added
