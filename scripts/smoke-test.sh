@@ -911,16 +911,7 @@ assert isinstance(d.get('src_entity'), dict), 'src_entity summary missing'
 assert isinstance(d.get('dst_entity'), dict), 'dst_entity summary missing'
 assert 'raw' not in blob, 'raw field leaked'
 assert 'metadata_json' not in blob, 'metadata_json leaked'
-def string_values(value):
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, list):
-        for item in value:
-            yield from string_values(item)
-    elif isinstance(value, dict):
-        for item in value.values():
-            yield from string_values(item)
-privacy_blob = '\\n'.join(string_values(d))
+privacy_blob = blob
 for marker in ('Authorization', 'Bearer ', 'Cookie', 'Set-Cookie', 'client_secret', 'access_token', '/home/', 'PRIVATE KEY'):
     assert marker not in privacy_blob, f'sensitive marker leaked: {marker}'
 assert re.search(r'://[^\s/:]+:[^\s/@]+@', privacy_blob) is None, 'url userinfo leaked'
