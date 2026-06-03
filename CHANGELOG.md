@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-06-03
+
+### Changed
+
+- Split the app service monolith into a `services.rs` coordinator shim and
+  focused `src/app/services/` modules, keeping service-layer source files below
+  500 LOC.
+- Split app model definitions and error normalizer tests into smaller sidecar
+  modules so `src/app` production files stay below the 500 LOC ceiling.
+
 ## [1.8.0] - 2026-06-03
 
 ### Added

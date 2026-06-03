@@ -5,7 +5,7 @@ pub(crate) mod heartbeat_flags;
 pub(crate) mod incident_findings;
 mod models;
 mod os_adapter;
-mod service;
+mod services;
 pub(crate) mod time;
 mod watch_status;
 
@@ -151,7 +151,7 @@ pub use models::{
     UsageBlocksResponse,
 };
 pub use os_adapter::SystemOsAdapter;
-pub use service::{run_compose_status, run_service_logs, CortexService};
+pub use services::{run_compose_status, run_service_logs, CortexService};
 pub use time::parse_optional_timestamp;
 
 #[cfg(test)]

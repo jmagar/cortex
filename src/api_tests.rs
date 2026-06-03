@@ -2419,7 +2419,7 @@ async fn graph_routes_return_shared_service_payloads() {
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(value["resolved_entity"]["canonical_key"], "graph-api-host");
-    assert!(value["relationships"].as_array().unwrap().len() >= 1);
+    assert!(!value["relationships"].as_array().unwrap().is_empty());
     assert_eq!(value["metadata"]["depth"], 1);
 
     let (status, value) = get_json(
@@ -2430,7 +2430,7 @@ async fn graph_routes_return_shared_service_payloads() {
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(value["resolved_entity"]["canonical_key"], "graph-api-host");
-    assert!(value["chains"].as_array().unwrap().len() >= 1);
+    assert!(!value["chains"].as_array().unwrap().is_empty());
     assert_eq!(value["metadata"]["depth"], 2);
 }
 
