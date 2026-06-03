@@ -73,7 +73,10 @@ const SECTIONS: &[(&str, &[&str])] = &[
     ),
     ("AI Transcripts", &["ai"]),
     ("Signals & Alerts", &["sig", "notify"]),
-    ("Ingestion", &["shell", "agent-command", "heartbeat"]),
+    (
+        "Ingestion",
+        &["shell", "agent-command", "heartbeat", "inventory"],
+    ),
     (
         "Runtime & Setup",
         &[
@@ -282,6 +285,14 @@ const CATALOG: &[CommandDoc] = &[
         summary: "Run the host heartbeat agent",
         usage: &["cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]"],
     },
+    CommandDoc {
+        name: "inventory",
+        summary: "Refresh and inspect the private homelab inventory cache",
+        usage: &[
+            "cortex inventory refresh [--json]",
+            "cortex inventory status [--json]",
+        ],
+    },
     // ── Runtime & Setup ────────────────────────────────────────────────────
     CommandDoc {
         name: "serve",
@@ -362,6 +373,16 @@ const CATALOG: &[CommandDoc] = &[
 ];
 
 const NESTED_CATALOG: &[NestedCommandDoc] = &[
+    NestedCommandDoc {
+        path: "inventory refresh",
+        summary: "Collect native homelab inventory into the private filesystem cache",
+        usage: &["cortex inventory refresh [--json]"],
+    },
+    NestedCommandDoc {
+        path: "inventory status",
+        summary: "Inspect cache freshness, warnings, and artifact paths without refreshing",
+        usage: &["cortex inventory status [--json]"],
+    },
     NestedCommandDoc {
         path: "ai search",
         summary: "Full-text search over indexed AI transcript sessions",

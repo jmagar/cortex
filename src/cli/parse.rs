@@ -28,6 +28,7 @@ const TOP_LEVEL_COMMANDS: &[&str] = &[
     "setup",
     "db",
     "config",
+    "inventory",
     "source-ips",
     "timeline",
     "patterns",
@@ -67,6 +68,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "setup" => parse_setup(rest),
         "db" => parse_db(rest),
         "config" => parse_config::parse_config(rest),
+        "inventory" => parse_inventory(rest),
         "source-ips" => parse_source_ips(rest),
         "timeline" => parse_timeline(rest),
         "patterns" => parse_patterns(rest),
@@ -90,6 +92,42 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
             suggest::unknown_command("CLI command", command, TOP_LEVEL_COMMANDS)
         ),
     }
+}
+
+fn parse_inventory(args: &[String]) -> Result<CliCommand> {
+    let (command, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("inventory subcommand is required: refresh or status"))?;
+    if matches!(command.as_str(), "--help" | "-h" | "help") {
+        bail!("{}", inventory_usage());
+    }
+    let mut json = false;
+    for arg in rest {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--help" | "-h" => bail!("{}", inventory_usage()),
+            other => bail!(
+                "{}",
+                suggest::unknown_option("inventory", other, &["--json"])
+            ),
+        }
+    }
+    match command.as_str() {
+        "refresh" => Ok(CliCommand::Inventory(super::InventoryCommand::Refresh(
+            super::InventoryArgs { json },
+        ))),
+        "status" => Ok(CliCommand::Inventory(super::InventoryCommand::Status(
+            super::InventoryArgs { json },
+        ))),
+        _ => bail!(
+            "{}",
+            suggest::unknown_command("inventory subcommand", command, &["refresh", "status"])
+        ),
+    }
+}
+
+fn inventory_usage() -> &'static str {
+    "Usage: cortex inventory refresh [--json]\n       cortex inventory status [--json]"
 }
 
 fn parse_heartbeat(args: &[String]) -> Result<CliCommand> {

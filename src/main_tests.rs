@@ -529,7 +529,7 @@ fn mode_parse_rejects_http_flag_on_deploy() {
     let err = Mode::parse(vec!["--http".into(), "deploy".into(), "local".into()]).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("compose, service, setup, and deploy are local-only"),
+        msg.contains("compose, service, setup, inventory, and deploy are local-only"),
         "expected local-only guard message, got: {msg}"
     );
 }

@@ -1,0 +1,287 @@
+use anyhow::Result;
+use chrono::Utc;
+use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+use crate::inventory::collectors::CollectorOutput;
+use crate::inventory::limits::MAX_RAW_ARTIFACT_BYTES;
+use crate::inventory::redaction::{redact_text, RedactedArtifact};
+use crate::inventory::schema::{
+    ArtifactRef, ComposeProject, PortMapping, Provenance, ReverseProxyRoute,
+};
+use crate::inventory::storage::{write_artifact, InventoryPaths};
+
+pub async fn collect(
+    compose_paths: &[PathBuf],
+    proxy_paths: &[PathBuf],
+    paths: &InventoryPaths,
+    run_id: &str,
+) -> CollectorOutput {
+    let compose_paths = compose_paths.to_vec();
+    let proxy_paths = proxy_paths.to_vec();
+    let paths = paths.clone();
+    let run_id = run_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        collect_blocking(&compose_paths, &proxy_paths, &paths, &run_id)
+    })
+    .await
+    .unwrap_or_else(|error| {
+        let mut out = CollectorOutput::new("raw_configs");
+        out.warn(
+            "task",
+            format!("raw config collection task failed: {error}"),
+        );
+        out
+    })
+}
+
+fn collect_blocking(
+    compose_paths: &[PathBuf],
+    proxy_paths: &[PathBuf],
+    paths: &InventoryPaths,
+    run_id: &str,
+) -> CollectorOutput {
+    let mut out = CollectorOutput::new("raw_configs");
+    for path in expand_files(compose_paths, &["yml", "yaml"]) {
+        match collect_compose_file(&path, paths, run_id) {
+            Ok((artifact, project)) => {
+                out.artifacts.push(artifact);
+                out.compose_projects.push(project);
+            }
+            Err(error) => out.warn("compose", error.to_string()),
+        }
+    }
+    for path in expand_files(proxy_paths, &["conf"]) {
+        match collect_proxy_file(&path, paths, run_id) {
+            Ok((artifact, routes)) => {
+                out.artifacts.push(artifact);
+                out.reverse_proxies.extend(routes);
+            }
+            Err(error) => out.warn("reverse_proxy", error.to_string()),
+        }
+    }
+    out
+}
+
+fn collect_compose_file(
+    path: &Path,
+    paths: &InventoryPaths,
+    run_id: &str,
+) -> Result<(ArtifactRef, ComposeProject)> {
+    let body = read_bounded_text(path)?;
+    let artifact_id = artifact_id("compose", path);
+    let artifact = RedactedArtifact::from_text(&body, MAX_RAW_ARTIFACT_BYTES);
+    let reference = write_artifact(
+        paths,
+        run_id,
+        &artifact_id,
+        &artifact,
+        ArtifactRef {
+            id: artifact_id.clone(),
+            kind: "compose_yaml".to_string(),
+            collector: "raw_configs".to_string(),
+            source_host: None,
+            source_path: Some(path.display().to_string()),
+            cache_path: String::new(),
+            redaction: artifact.status(),
+            byte_len: 0,
+            truncated: artifact.truncated(),
+        },
+    )?;
+    Ok((reference, parse_compose_project(path, &redact_text(&body))))
+}
+
+fn collect_proxy_file(
+    path: &Path,
+    paths: &InventoryPaths,
+    run_id: &str,
+) -> Result<(ArtifactRef, Vec<ReverseProxyRoute>)> {
+    let body = read_bounded_text(path)?;
+    let artifact_id = artifact_id("proxy", path);
+    let artifact = RedactedArtifact::from_text(&body, MAX_RAW_ARTIFACT_BYTES);
+    let reference = write_artifact(
+        paths,
+        run_id,
+        &artifact_id,
+        &artifact,
+        ArtifactRef {
+            id: artifact_id.clone(),
+            kind: "reverse_proxy_conf".to_string(),
+            collector: "raw_configs".to_string(),
+            source_host: None,
+            source_path: Some(path.display().to_string()),
+            cache_path: String::new(),
+            redaction: artifact.status(),
+            byte_len: 0,
+            truncated: artifact.truncated(),
+        },
+    )?;
+    Ok((reference, parse_proxy_routes(path, &redact_text(&body))))
+}
+
+fn read_bounded_text(path: &Path) -> Result<String> {
+    let file = File::open(path)?;
+    let mut body = String::new();
+    file.take((MAX_RAW_ARTIFACT_BYTES + 1) as u64)
+        .read_to_string(&mut body)?;
+    Ok(body)
+}
+
+// Best-effort Compose discovery for redacted inventory summaries. This is not a
+// full YAML parser: it treats `services:` as a top-level marker, service names as
+// two-space-indented keys directly under that section, and extracts only
+// single-line domains plus list-item port mappings under a `ports:` key through
+// `extract_domainish` and `parse_port_line`. Anchors, flow style, interpolation,
+// multi-line values, profiles, includes, and nested semantic merges are
+// intentionally left to the preserved redacted raw artifact; use a real YAML
+// parser if Cortex needs broader Compose correctness.
+fn parse_compose_project(path: &Path, body: &str) -> ComposeProject {
+    let mut services = Vec::new();
+    let mut domains = Vec::new();
+    let mut ports = Vec::new();
+    let mut in_services = false;
+    let mut ports_indent = None;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        let indent = line.chars().take_while(|ch| ch.is_whitespace()).count();
+        if trimmed == "services:" {
+            in_services = true;
+            continue;
+        }
+        if trimmed == "ports:" {
+            ports_indent = Some(indent);
+            continue;
+        }
+        if in_services && !line.starts_with(' ') && !trimmed.is_empty() {
+            in_services = false;
+        }
+        if let Some(port_indent) = ports_indent {
+            if !trimmed.is_empty() && indent <= port_indent {
+                ports_indent = None;
+            }
+        }
+        if in_services
+            && line.starts_with("  ")
+            && !line.starts_with("    ")
+            && trimmed.ends_with(':')
+        {
+            services.push(trimmed.trim_end_matches(':').to_string());
+        }
+        if trimmed.contains("server_name")
+            || trimmed.contains("Host(")
+            || trimmed.contains("domain")
+        {
+            domains.extend(extract_domainish(trimmed));
+        }
+        if ports_indent.is_some() && trimmed.starts_with('-') {
+            if let Some(port) = parse_port_line(trimmed) {
+                ports.push(port);
+            }
+        }
+    }
+    ComposeProject {
+        name: path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .unwrap_or("compose")
+            .to_string(),
+        provenance: Provenance::new(
+            path.display().to_string(),
+            "source_inventory",
+            Utc::now().to_rfc3339(),
+        ),
+        services,
+        compose_files: vec![path.display().to_string()],
+        domains,
+        ports,
+    }
+}
+
+fn parse_proxy_routes(path: &Path, body: &str) -> Vec<ReverseProxyRoute> {
+    let mut server_names = Vec::new();
+    let mut upstreams = Vec::new();
+    for directive in body.split(';').map(str::trim) {
+        if let Some(rest) = directive.strip_prefix("server_name ") {
+            server_names.extend(rest.split_whitespace().map(ToString::to_string));
+        }
+        if let Some(rest) = directive.strip_prefix("proxy_pass ") {
+            upstreams.push(rest.to_string());
+        }
+    }
+    if server_names.is_empty() && upstreams.is_empty() {
+        return Vec::new();
+    }
+    vec![ReverseProxyRoute {
+        id: artifact_id("route", path),
+        server_names,
+        upstreams,
+        provenance: Provenance::new(
+            path.display().to_string(),
+            "source_inventory",
+            Utc::now().to_rfc3339(),
+        ),
+    }]
+}
+
+fn parse_port_line(line: &str) -> Option<PortMapping> {
+    let quoted = line
+        .trim_start_matches('-')
+        .trim()
+        .trim_matches(&['"', '\''][..]);
+    let parts = quoted.split(':').collect::<Vec<_>>();
+    let (host_ip, host, container) = match parts.as_slice() {
+        [host, container] => (None, *host, *container),
+        [ip, host, container] => (Some((*ip).to_string()), *host, *container),
+        _ => return None,
+    };
+    let host_port = host.parse().ok();
+    let container_port = container.split('/').next().and_then(|p| p.parse().ok());
+    if host_port.is_none() && container_port.is_none() {
+        return None;
+    }
+    Some(PortMapping {
+        host_ip,
+        host_port,
+        container_port,
+        protocol: container.split('/').nth(1).unwrap_or("tcp").to_string(),
+    })
+}
+
+fn extract_domainish(line: &str) -> Vec<String> {
+    line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'))
+        .filter(|part| part.contains('.') && part.len() > 3)
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn expand_files(paths: &[PathBuf], extensions: &[&str]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for path in paths {
+        if path.is_file() {
+            out.push(path.clone());
+        } else if path.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(path) {
+                out.extend(entries.flatten().map(|entry| entry.path()).filter(|path| {
+                    path.extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| extensions.contains(&ext))
+                }));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+fn artifact_id(prefix: &str, path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(path.display().to_string().as_bytes());
+    let digest_hex = format!("{digest:x}");
+    format!("{prefix}:{}", &digest_hex[..32])
+}
+
+#[cfg(test)]
+#[path = "raw_configs_tests.rs"]
+mod tests;

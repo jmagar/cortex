@@ -22,7 +22,7 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `tail` | Get N most recent log entries, optionally filtered by host, source_ip, and/or application | no |
 | `errors` | Error/warning summary grouped by hostname and severity level with counts | no |
 | `hosts` | List all hosts with first/last seen timestamps and total log counts | no |
-| `map` | Homelab infrastructure snapshot from known hosts, source identities, apps, and heartbeat status | no |
+| `map` | Cached homelab inventory plus bounded live Cortex host/heartbeat overlay | no |
 | `host_state` | Latest bounded heartbeat state for one host | no |
 | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags and summary counts | no |
 | `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |
@@ -78,6 +78,8 @@ methods as the MCP actions.
 | `cortex tail` | `tail` | Recent log entries |
 | `cortex errors` | `errors` | Error/warning summary |
 | `cortex hosts` | `hosts` | Known host list |
+| `cortex inventory refresh` | -- | Native refresh into `~/.cortex/inventory` |
+| `cortex inventory status` | -- | Cache freshness, collector status, warnings, and artifact paths |
 | `cortex filter` | `filter` | Structured filter-only log retrieval |
 | `cortex correlate` | `correlate` | Cross-host event correlation |
 | `cortex host-state` | `host_state` | Latest bounded heartbeat state for one host |
@@ -129,6 +131,14 @@ methods as the MCP actions.
 | `CORTEX_CLEANUP_INTERVAL_SECS` | no | `60` | no |
 | `CORTEX_CLEANUP_CHUNK_SIZE` | no | `2000` | no |
 | `RUST_LOG` | no | `info` | no |
+| `CORTEX_INVENTORY_DIR` | no | `~/.cortex/inventory` | no |
+| `CORTEX_INVENTORY_COMPOSE_PATHS` | no | `~/.cortex/compose/docker-compose.yml` | no |
+| `CORTEX_INVENTORY_PROXY_PATHS` | no | (none) | no |
+| `CORTEX_INVENTORY_PROJECT_ROOTS` | no | `~/workspace` | no |
+| `CORTEX_UNRAID_URL` | no | (none) | no |
+| `CORTEX_UNRAID_API_KEY` | no | (none) | yes |
+| `CORTEX_UNIFI_URL` | no | (none) | no |
+| `CORTEX_UNIFI_API_KEY` | no | (none) | yes |
 
 ## Plugin surfaces
 

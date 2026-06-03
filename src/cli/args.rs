@@ -32,6 +32,7 @@ pub(crate) enum CliCommand {
     Setup(SetupCommand),
     Db(DbCommand),
     Config(ConfigCommand),
+    Inventory(InventoryCommand),
     SourceIps(SourceIpsArgs),
     Timeline(TimelineArgs),
     Patterns(PatternsArgs),
@@ -60,6 +61,17 @@ pub(crate) enum GraphCommand {
     Evidence(GraphEvidenceArgs),
     Status(GraphStatusArgs),
     Rebuild(GraphRebuildArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InventoryCommand {
+    Refresh(InventoryArgs),
+    Status(InventoryArgs),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct InventoryArgs {
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

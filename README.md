@@ -35,7 +35,7 @@ MCP is an exposure surface, not the owner of log-intelligence business policy. S
 
 ## Tools
 
-One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, or `help`.
+One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md). For correlation behavior and AI/non-AI inclusion rules, see [`docs/mcp/CORRELATION.md`](docs/mcp/CORRELATION.md).
 
@@ -46,6 +46,7 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `tail` | Recent log entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
+| `map` | Cached homelab inventory plus live host/heartbeat overlay |
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
 | `abuse` | Abuse hits in AI transcripts with same-session context |
@@ -82,6 +83,25 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `incident_context` | Full context bundle for a known time window |
 | `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations |
 | `help` | Markdown reference for all actions |
+
+## Homelab Inventory
+
+`cortex inventory refresh --json` collects native Rust inventory into
+`~/.cortex/inventory` and writes:
+
+- `normalized/homelab.json` — typed `cortex.homelab_inventory.v1` cache
+- `collection-state.json` — per-collector status, warnings, timings, and artifact refs
+- `raw/<run_id>/*.txt` — raw-but-redacted Compose and reverse proxy artifacts
+
+`cortex inventory status --json` reports cache freshness and warnings without
+opening SQLite. The MCP `map` action is read-only: it reads the normalized cache
+and overlays bounded live Cortex host/heartbeat data, but never triggers refresh
+or returns raw artifact bodies.
+
+On first run, before `normalized/homelab.json` exists, `map` and
+`cortex inventory status --json` report `cache_status: "missing"`. Run
+`cortex inventory refresh --json` to seed `~/.cortex/inventory` and clear that
+missing-cache state.
 
 ## Prompts
 
@@ -1169,7 +1189,7 @@ curl -s -X POST http://localhost:3100/mcp \
     "id": 1,
       "method": "tools/call",
       "params": {
-      "name": "syslog",
+      "name": "cortex",
       "arguments": {"action": "tail", "n": 10}
     }
   }' | jq .
@@ -1183,7 +1203,7 @@ curl -s -X POST http://localhost:3100/mcp \
     "jsonrpc": "2.0",
     "id": 2,
     "method": "tools/call",
-    "params": {"name": "syslog", "arguments": {"action": "stats"}}
+    "params": {"name": "cortex", "arguments": {"action": "stats"}}
   }' | jq .result.content[0].text | jq -r . | jq .
 ```
 

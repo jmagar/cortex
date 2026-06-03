@@ -404,11 +404,13 @@ assert_no_error "map: no error" "$MAP"
 MAP_VALID=$(printf '%s\n' "$MAP" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-assert d.get('schema') == 'cortex.homelab_map.v1', 'schema mismatch'
+assert d.get('schema') == 'cortex.homelab_map.v2', 'schema mismatch'
 assert isinstance(d.get('summary'), dict), 'summary missing'
 assert isinstance(d.get('nodes'), list), 'nodes not a list'
-assert isinstance(d.get('inventory_sources'), list), 'inventory_sources not a list'
-assert any(s.get('name') == 'cortex_db' for s in d['inventory_sources']), 'cortex_db source missing'
+assert isinstance(d.get('cache_status'), str), 'cache_status missing'
+assert isinstance(d.get('artifact_refs'), list), 'artifact_refs not a list'
+assert isinstance(d.get('collection_errors'), list), 'collection_errors not a list'
+assert isinstance(d.get('cortex_overlay'), dict), 'cortex_overlay missing'
 print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "map: response structure valid" "$MAP_VALID" "ok"

@@ -23,6 +23,7 @@ const PARSER_TOKENS: &[&str] = &[
     "setup",
     "db",
     "config",
+    "inventory",
     "source-ips",
     "entity",
     "graph",
@@ -120,6 +121,19 @@ fn nested_help_shows_subcommand_specific_usage() {
     let out = render_command("ai investigate", false).expect("ai investigate is known");
     assert!(out.contains("--detail compact|full"), "got: {out}");
     assert!(out.contains("--include-transcript"), "got: {out}");
+
+    let out = render_command("inventory refresh", false).expect("inventory refresh is known");
+    assert!(
+        out.contains("cortex inventory refresh [--json]"),
+        "got: {out}"
+    );
+    assert!(!out.contains("cortex inventory status"), "got: {out}");
+
+    let out = render_command("inventory status", false).expect("inventory status is known");
+    assert!(
+        out.contains("cortex inventory status [--json]"),
+        "got: {out}"
+    );
 }
 
 #[test]

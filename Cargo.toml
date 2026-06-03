@@ -1,6 +1,6 @@
 [package]
 name = "cortex"
-version = "1.9.1"
+version = "1.10.0"
 edition = "2021"
 rust-version = "1.86"
 description = "Homelab intelligence platform — syslog/OTLP/Docker log aggregation, fleet awareness, and AI agent coordination over MCP, CLI, and HTTP"
@@ -93,7 +93,7 @@ futures-util = "0.3"
 # NOTE: default-features=false omits gzip/brotli/deflate decompression — fine
 # for loopback `/api/*` calls. If the CLI ever points at a reverse proxy that
 # gzips responses, parsing will silently break; re-enable the relevant feature.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 
 # CLI HTTP client: surfaces field path + preview when responses don't match
 # Response struct shape (bead 0p8r.5).
@@ -121,3 +121,4 @@ rmcp = { version = "1.6.0", default-features = false, features = [
 # Mock HTTP server for CLI HTTP client tests (bead 0p8r.5).
 wiremock = "0.6"
 tracing-test = "0.2"
+filetime = "0.2"
