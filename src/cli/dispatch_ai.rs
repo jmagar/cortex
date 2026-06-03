@@ -16,13 +16,14 @@ use super::output_ai::{
     print_checkpoints_response, print_index_response, print_prune_checkpoints_response,
 };
 use super::output_ai_more::{
-    print_ai_incidents_response, print_ai_investigate_response, print_ask_history_response,
-    print_incident_context_response, print_similar_incidents_response,
+    print_ai_incidents_response, print_ai_investigate_response_with_options,
+    print_ask_history_response, print_incident_context_response, print_similar_incidents_response,
+    AiInvestigatePrintOptions,
 };
 use super::output_logs::{
     print_abuse_search_response, print_ai_correlate_response, print_ai_projects_response,
     print_ai_tools_response, print_project_context_response, print_search_sessions_response,
-    print_usage_blocks_response,
+    print_usage_blocks_response_with_options, UsageBlocksPrintOptions,
 };
 use super::{
     AiAbuseArgs, AiAddArgs, AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs,
@@ -229,12 +230,18 @@ pub(crate) async fn run_ai_correlate(mode: &CliMode, args: AiCorrelateArgs) -> R
 
 pub(crate) async fn run_ai_blocks(mode: &CliMode, args: AiBlocksArgs) -> Result<()> {
     let json = args.json;
+    let detail = args.detail;
+    let limit = args.limit;
     let req = args.into_request();
     let response = match mode {
         CliMode::Local(service) => service.usage_blocks(req).await?,
         CliMode::Http(client) => http_or_cancel(client.ai_blocks(&req)).await?,
     };
-    print_usage_blocks_response(&response, json)
+    print_usage_blocks_response_with_options(
+        &response,
+        json,
+        UsageBlocksPrintOptions { detail, limit },
+    )
 }
 
 pub(crate) async fn run_ai_context(mode: &CliMode, args: AiContextArgs) -> Result<()> {
@@ -461,12 +468,17 @@ pub(crate) async fn run_ai_incidents(mode: &CliMode, args: AiIncidentsArgs) -> R
 
 pub(crate) async fn run_ai_investigate(mode: &CliMode, args: AiInvestigateArgs) -> Result<()> {
     let json = args.json;
+    let print_options = AiInvestigatePrintOptions {
+        detail: args.detail,
+        include_transcript: args.include_transcript,
+        max_bytes: args.max_bytes.unwrap_or(240),
+    };
     let req = args.into_request();
     let response = match mode {
         CliMode::Local(service) => service.investigate_ai_incidents(req).await?,
         CliMode::Http(client) => http_or_cancel(client.ai_investigate(&req)).await?,
     };
-    print_ai_investigate_response(&response, json)
+    print_ai_investigate_response_with_options(&response, json, print_options)
 }
 
 pub(crate) async fn run_ai_assess(mode: &CliMode, args: AiAssessArgs) -> Result<()> {

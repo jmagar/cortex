@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-06-02
+
+### Added
+
+- **CLI help now supports nested subcommand help.** `cortex ai search --help`, `cortex db status --help`, `cortex compose logs --help`, and other nested command paths now render focused usage instead of the whole namespace. The top-level `cortex --help` is regrouped into an axon-style sectioned layout with cyan headers.
+- **CLI parser recovery now suggests close command and subcommand matches.** Mistyped top-level and nested commands now include `Did you mean ...` hints while preserving strict parsing.
+- **AI investigation output now has compact/default controls.** `cortex ai investigate` and `cortex ai blocks` support `--detail compact|full`, with `--include-transcript`, `--max-bytes`, and `--limit` controls for bounded agent-friendly output.
+
+### Fixed
+
+- **Cortex CLI diagnostics no longer point operators at stale `syslog` binary invocations.** Backup guidance, help text, rollout notes, and parser comments now use the `cortex` binary where they refer to CLI commands.
+- **`host-state` now fails with actionable usage when no host selector is supplied.** The parser now reports the required `--host-id` or `--hostname` selector before dispatching.
+- **`--max-bytes` truncation is now byte-accurate on multibyte input** and yields a leading prefix for budgets smaller than the ellipsis instead of an empty string.
+
 ## [1.6.1] - 2026-06-02
 
 ### Added

@@ -3,7 +3,7 @@ use anyhow::{anyhow, bail, Result};
 use super::parse_common::{parse_u32_flag, value_after_equals, FlagCursor};
 use super::{
     AiAskHistoryArgs, AiAssessArgs, AiCommand, AiIncidentContextArgs, AiIncidentsArgs,
-    AiInvestigateArgs, AiSimilarArgs, CliCommand,
+    AiInvestigateArgs, AiOutputDetail, AiSimilarArgs, CliCommand,
 };
 pub(crate) fn parse_ai_similar(args: &[String]) -> Result<CliCommand> {
     let mut parsed = AiSimilarArgs::default();
@@ -219,6 +219,14 @@ pub(crate) fn parse_ai_investigate(args: &[String]) -> Result<CliCommand> {
                 )?)
             }
             "--term" => parsed.terms.push(flags.value("--term")?),
+            "--detail" => {
+                parsed.detail = AiOutputDetail::parse(&flags.value("--detail")?, "--detail")?
+            }
+            "--include-transcript" => parsed.include_transcript = true,
+            "--max-bytes" => {
+                parsed.max_bytes =
+                    Some(parse_u32_flag("--max-bytes", flags.value("--max-bytes")?)? as usize)
+            }
             _ if arg.starts_with("--project=") => {
                 parsed.project = Some(value_after_equals(arg, "--project")?)
             }
@@ -250,7 +258,37 @@ pub(crate) fn parse_ai_investigate(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--term=") => {
                 parsed.terms.push(value_after_equals(arg, "--term")?)
             }
-            _ if arg.starts_with('-') => bail!("unknown ai investigate option: {arg}"),
+            _ if arg.starts_with("--detail=") => {
+                parsed.detail =
+                    AiOutputDetail::parse(&value_after_equals(arg, "--detail")?, "--detail")?
+            }
+            _ if arg.starts_with("--max-bytes=") => {
+                parsed.max_bytes = Some(parse_u32_flag(
+                    "--max-bytes",
+                    value_after_equals(arg, "--max-bytes")?,
+                )? as usize)
+            }
+            _ if arg.starts_with('-') => bail!(
+                "{}",
+                super::suggest::unknown_option(
+                    "ai investigate",
+                    &arg,
+                    &[
+                        "--json",
+                        "--project",
+                        "--tool",
+                        "--from",
+                        "--to",
+                        "--limit",
+                        "--window-minutes",
+                        "--correlation-window-minutes",
+                        "--term",
+                        "--detail",
+                        "--include-transcript",
+                        "--max-bytes",
+                    ],
+                )
+            ),
             _ => bail!("unexpected ai investigate argument: {arg}"),
         }
     }

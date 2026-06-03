@@ -10,15 +10,16 @@ pub(crate) use args::{
     AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, AiAbuseArgs, AiAddArgs,
     AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs, AiCommand, AiContextArgs,
     AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs, AiIncidentsArgs,
-    AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
-    AiSimilarArgs, AiWatchArgs, CliCommand, ComposeArgs, ComposeCommand, ComposeLogsArgs,
-    ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand, DbIntegrityArgs,
-    DbIntegrityStatusArgs, DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs, GraphAroundArgs,
-    GraphCommand, GraphExplainArgs, GraphRebuildArgs, GraphStatusArgs, HeartbeatAgentArgs,
-    HeartbeatCommand, IncidentArgs, IngestRateArgs, NotifyRecentArgs, NotifyTestArgs, OutputArgs,
-    PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand, ServiceLogsArgs, SessionsArgs,
-    SetupArgs, SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, SigAckArgs,
-    SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    AiIndexArgs, AiInvestigateArgs, AiListArgs, AiOutputDetail, AiPruneCheckpointsArgs,
+    AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliCommand, ComposeArgs, ComposeCommand,
+    ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand,
+    DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs,
+    GraphAroundArgs, GraphCommand, GraphExplainArgs, GraphRebuildArgs, GraphStatusArgs,
+    HeartbeatAgentArgs, HeartbeatCommand, IncidentArgs, IngestRateArgs, NotifyRecentArgs,
+    NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand,
+    ServiceLogsArgs, SessionsArgs, SetupArgs, SetupCommand, ShellAtuinIndexArgs, ShellCommand,
+    ShellIndexArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs,
+    TimelineArgs,
 };
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
@@ -59,6 +60,7 @@ mod parse_config;
 mod parse_logs;
 mod setup;
 mod sparkline;
+mod suggest;
 mod table;
 
 pub(crate) use config_cmd::run_config;

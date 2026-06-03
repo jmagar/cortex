@@ -590,6 +590,7 @@ fn ai_blocks_args_into_request_snapshot() {
         from: None,
         to: None,
         json: false,
+        ..Default::default()
     };
     let req = args.into_request();
     assert_eq!(

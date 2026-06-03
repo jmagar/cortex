@@ -1,4 +1,4 @@
-//! Parse function for `syslog compare`.
+//! Parse function for `cortex compare`.
 //!
 //! Surface parity (2026-05-22): exposes the `compare` MCP action and
 //! `GET /api/compare` REST route as a top-level CLI subcommand. All four

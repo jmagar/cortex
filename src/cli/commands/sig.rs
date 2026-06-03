@@ -16,7 +16,14 @@ pub(crate) fn parse_sig(args: &[String]) -> Result<CliCommand> {
         "list" => parse_sig_list(rest),
         "ack" => parse_sig_ack(rest),
         "unack" => parse_sig_unack(rest),
-        _ => bail!("unknown sig subcommand: {subcommand}"),
+        _ => bail!(
+            "{}",
+            super::super::suggest::unknown_command(
+                "sig subcommand",
+                subcommand,
+                &["list", "ack", "unack"],
+            )
+        ),
     }
 }
 

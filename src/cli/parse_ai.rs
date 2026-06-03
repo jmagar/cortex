@@ -9,9 +9,35 @@ use super::parse_common::{
 };
 use super::{
     AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiCommand, AiContextArgs,
-    AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs,
-    AiSearchArgs, AiWatchArgs, CliCommand,
+    AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiOutputDetail,
+    AiPruneCheckpointsArgs, AiSearchArgs, AiWatchArgs, CliCommand,
 };
+
+const AI_SUBCOMMANDS: &[&str] = &[
+    "search",
+    "abuse",
+    "correlate",
+    "blocks",
+    "context",
+    "tools",
+    "projects",
+    "index",
+    "add",
+    "watch",
+    "checkpoints",
+    "errors",
+    "prune-checkpoints",
+    "doctor",
+    "watch-status",
+    "smoke-watch",
+    "similar",
+    "ask-history",
+    "incident-context",
+    "incidents",
+    "investigate",
+    "assess",
+];
+
 pub(crate) fn parse_ai(args: &[String]) -> Result<CliCommand> {
     let (subcommand, rest) = args
         .split_first()
@@ -45,7 +71,10 @@ pub(crate) fn parse_ai(args: &[String]) -> Result<CliCommand> {
         "incidents" => parse_ai_incidents(rest),
         "investigate" => parse_ai_investigate(rest),
         "assess" => parse_ai_assess(rest),
-        _ => bail!("unknown ai subcommand: {subcommand}"),
+        _ => bail!(
+            "{}",
+            super::suggest::unknown_command("ai subcommand", subcommand, AI_SUBCOMMANDS)
+        ),
     }
 }
 
@@ -238,6 +267,12 @@ pub(crate) fn parse_ai_blocks(args: &[String]) -> Result<CliCommand> {
             "--tool" => parsed.tool = Some(flags.value("--tool")?),
             "--from" => parsed.from = Some(flags.value("--from")?),
             "--to" => parsed.to = Some(flags.value("--to")?),
+            "--limit" => {
+                parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)? as usize)
+            }
+            "--detail" => {
+                parsed.detail = AiOutputDetail::parse(&flags.value("--detail")?, "--detail")?
+            }
             _ if arg.starts_with("--project=") => {
                 parsed.project = Some(value_after_equals(arg, "--project")?)
             }
@@ -248,7 +283,31 @@ pub(crate) fn parse_ai_blocks(args: &[String]) -> Result<CliCommand> {
                 parsed.from = Some(value_after_equals(arg, "--from")?)
             }
             _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
-            _ => bail!("unknown ai blocks option: {arg}"),
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit =
+                    Some(parse_u32_flag("--limit", value_after_equals(arg, "--limit")?)? as usize)
+            }
+            _ if arg.starts_with("--detail=") => {
+                parsed.detail =
+                    AiOutputDetail::parse(&value_after_equals(arg, "--detail")?, "--detail")?
+            }
+            _ if arg.starts_with('-') => bail!(
+                "{}",
+                super::suggest::unknown_option(
+                    "ai blocks",
+                    &arg,
+                    &[
+                        "--json",
+                        "--project",
+                        "--tool",
+                        "--from",
+                        "--to",
+                        "--limit",
+                        "--detail",
+                    ],
+                )
+            ),
+            _ => bail!("unexpected ai blocks argument: {arg}"),
         }
     }
     Ok(CliCommand::Ai(AiCommand::Blocks(parsed)))

@@ -1,4 +1,4 @@
-//! Parse function for `syslog clock-skew`.
+//! Parse function for `cortex clock-skew`.
 //!
 //! Surface parity (2026-05-22): exposes the `clock_skew` MCP action and
 //! `GET /api/clock-skew` REST route as a top-level CLI subcommand.

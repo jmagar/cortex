@@ -1,4 +1,4 @@
-//! Parse function for `syslog anomalies`.
+//! Parse function for `cortex anomalies`.
 //!
 //! Surface parity (2026-05-22): exposes the `anomalies` MCP action and
 //! `GET /api/anomalies` REST route as a top-level CLI subcommand.

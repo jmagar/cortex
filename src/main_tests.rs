@@ -25,7 +25,13 @@ fn mode_parse_accepts_heartbeat_state_commands() {
     // parse.rs + run.rs, but were missing from Mode::parse's top-level command
     // gate, so they fell through to print_usage()+exit 1 (bd syslog-mcp-8fww).
     assert!(matches!(
-        Mode::parse(vec!["host-state".into(), "--json".into()]).unwrap(),
+        Mode::parse(vec![
+            "host-state".into(),
+            "--hostname".into(),
+            "tootie".into(),
+            "--json".into()
+        ])
+        .unwrap(),
         Mode::Cli(_)
     ));
     assert!(matches!(
@@ -47,13 +53,16 @@ fn mode_parse_accepts_heartbeat_state_commands() {
 #[test]
 fn mode_parse_rejects_unknown_commands() {
     let err = Mode::parse(vec!["serve".into(), "http".into()]).unwrap_err();
-    assert!(err.to_string().contains("unknown command"));
+    assert!(err.to_string().contains("unknown CLI command"));
+
+    let err = Mode::parse(vec!["serach".into()]).unwrap_err();
+    assert!(err.to_string().contains("Did you mean `search`?"));
 }
 
 #[test]
 fn mode_parse_keeps_runtime_status_mcp_only() {
     let err = Mode::parse(vec!["status".into()]).unwrap_err();
-    assert!(err.to_string().contains("unknown command"));
+    assert!(err.to_string().contains("unknown CLI command"));
 }
 
 #[test]

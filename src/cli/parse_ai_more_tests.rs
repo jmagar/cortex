@@ -26,6 +26,29 @@ fn parse_ai_incident_context_requires_from_and_to() {
     assert!(err.contains("requires --to"));
 }
 
+#[test]
+fn parse_ai_investigate_accepts_compact_output_controls() {
+    let args = strings(&[
+        "--detail=full",
+        "--include-transcript",
+        "--max-bytes",
+        "80",
+        "--json",
+    ]);
+
+    let command = parse_ai_investigate(&args).unwrap();
+
+    match command {
+        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Investigate(args)) => {
+            assert_eq!(args.detail, crate::cli::AiOutputDetail::Full);
+            assert!(args.include_transcript);
+            assert_eq!(args.max_bytes, Some(80));
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
 }

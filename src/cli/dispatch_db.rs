@@ -258,7 +258,7 @@ pub(crate) async fn run_db_backup(mode: &CliMode, args: DbBackupArgs) -> Result<
                              The container is likely running and holds the SQLite write lock.\n\
                              To backup through the running server (recommended):\n\
                              \n\
-                             \tsyslog --http db backup --output /data/backup-$(date +%Y%m%d).db\n\
+                             \tcortex --http db backup --output /data/backup-$(date +%Y%m%d).db\n\
                              \n\
                              Or backup inside the container directly:\n\
                              \n\

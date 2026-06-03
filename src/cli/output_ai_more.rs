@@ -1,11 +1,13 @@
 use anyhow::Result;
 use cortex::app::{
     AiIncidentResponse, AiInvestigateResponse, AskHistoryResponse, IncidentContextResponse,
-    SimilarIncidentsResponse,
+    LogEntry, SimilarIncidentsResponse,
 };
+use serde_json::{json, Value};
 
 use super::color::{cyan, muted, primary, severity, violet, warn};
-use super::output_common::{local_ts, print_json, truncate};
+use super::output_common::{local_ts, print_json, truncate, truncate_bytes};
+use super::AiOutputDetail;
 
 pub(crate) fn print_similar_incidents_response(
     response: &SimilarIncidentsResponse,
@@ -211,12 +213,33 @@ pub(crate) fn print_ai_incidents_response(response: &AiIncidentResponse, json: b
     Ok(())
 }
 
-pub(crate) fn print_ai_investigate_response(
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AiInvestigatePrintOptions {
+    pub detail: AiOutputDetail,
+    pub include_transcript: bool,
+    pub max_bytes: usize,
+}
+
+impl Default for AiInvestigatePrintOptions {
+    fn default() -> Self {
+        Self {
+            detail: AiOutputDetail::Compact,
+            include_transcript: false,
+            max_bytes: 240,
+        }
+    }
+}
+
+pub(crate) fn print_ai_investigate_response_with_options(
     response: &AiInvestigateResponse,
     json: bool,
+    options: AiInvestigatePrintOptions,
 ) -> Result<()> {
-    if json {
+    if json && matches!(options.detail, AiOutputDetail::Full) {
         return print_json(response);
+    }
+    if json {
+        return print_json(&compact_ai_investigate_json(response, options));
     }
     println!(
         "{} evidence bundle(s) of {} total incident(s){}",
@@ -251,7 +274,47 @@ pub(crate) fn print_ai_investigate_response(
         );
         println!("  {}:", muted("anchor messages"));
         for a in &ev.anchors {
-            println!("    [{}] {}", muted(&local_ts(&a.timestamp)), a.message);
+            println!(
+                "    [{}] {}",
+                muted(&local_ts(&a.timestamp)),
+                truncate_bytes(&a.message, options.max_bytes)
+            );
+        }
+        // Honor --detail full / --include-transcript in terminal output too (not
+        // just JSON): surface the transcript window and non-error nearby logs so
+        // full evidence is available without --json.
+        let show_transcript =
+            options.include_transcript || matches!(options.detail, AiOutputDetail::Full);
+        if show_transcript && !ev.transcript_before.is_empty() {
+            println!("  {}:", muted("transcript before"));
+            for l in &ev.transcript_before {
+                println!(
+                    "    [{}] {}",
+                    muted(&local_ts(&l.timestamp)),
+                    truncate_bytes(&l.message, options.max_bytes)
+                );
+            }
+        }
+        if show_transcript && !ev.transcript_after.is_empty() {
+            println!("  {}:", muted("transcript after"));
+            for l in &ev.transcript_after {
+                println!(
+                    "    [{}] {}",
+                    muted(&local_ts(&l.timestamp)),
+                    truncate_bytes(&l.message, options.max_bytes)
+                );
+            }
+        }
+        if matches!(options.detail, AiOutputDetail::Full) && !ev.nearby_logs.is_empty() {
+            println!("  {}:", muted("nearby logs"));
+            for l in &ev.nearby_logs {
+                println!(
+                    "    [{}] ({}) {}",
+                    muted(&local_ts(&l.timestamp)),
+                    severity(&l.severity),
+                    truncate_bytes(&l.message, options.max_bytes)
+                );
+            }
         }
         if !ev.nearby_errors.is_empty() {
             println!("  {}:", muted("nearby errors"));
@@ -260,7 +323,7 @@ pub(crate) fn print_ai_investigate_response(
                     "    [{}] ({}) {}",
                     muted(&local_ts(&e.timestamp)),
                     severity(&e.severity),
-                    e.message
+                    truncate_bytes(&e.message, options.max_bytes)
                 );
             }
         }
@@ -295,6 +358,66 @@ pub(crate) fn print_ai_investigate_response(
         }
     }
     Ok(())
+}
+
+fn compact_ai_investigate_json(
+    response: &AiInvestigateResponse,
+    options: AiInvestigatePrintOptions,
+) -> Value {
+    let evidence: Vec<Value> = response
+        .evidence
+        .iter()
+        .map(|ev| {
+            let mut item = json!({
+                "incident": ev.incident,
+                "counts": {
+                    "anchors": ev.anchors.len(),
+                    "transcript_before": ev.transcript_before.len(),
+                    "transcript_after": ev.transcript_after.len(),
+                    "nearby_logs": ev.nearby_logs.len(),
+                    "nearby_errors": ev.nearby_errors.len(),
+                },
+                "truncated": {
+                    "transcript_before": ev.transcript_before_truncated,
+                    "transcript_after": ev.transcript_after_truncated,
+                    "nearby_logs": ev.nearby_logs_truncated,
+                },
+                "anchors": compact_logs(&ev.anchors, options.max_bytes),
+                "nearby_errors": compact_logs(&ev.nearby_errors, options.max_bytes),
+                "findings": ev.findings,
+            });
+            if options.include_transcript {
+                item["transcript_before"] =
+                    Value::Array(compact_logs(&ev.transcript_before, options.max_bytes));
+                item["transcript_after"] =
+                    Value::Array(compact_logs(&ev.transcript_after, options.max_bytes));
+            }
+            item
+        })
+        .collect();
+
+    json!({
+        "total_incidents": response.total_incidents,
+        "truncated": response.truncated,
+        "detail": "compact",
+        "include_transcript": options.include_transcript,
+        "evidence": evidence,
+    })
+}
+
+fn compact_logs(logs: &[LogEntry], max_bytes: usize) -> Vec<Value> {
+    logs.iter()
+        .map(|log| {
+            json!({
+                "id": log.id,
+                "timestamp": log.timestamp,
+                "hostname": log.hostname,
+                "severity": log.severity,
+                "app_name": log.app_name,
+                "message": truncate_bytes(&log.message, max_bytes),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
