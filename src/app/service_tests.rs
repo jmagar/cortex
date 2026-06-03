@@ -254,7 +254,7 @@ async fn graph_evidence_lookup_returns_safe_source_summary_and_relationship_cont
             "2026-01-01T00:00:00.000Z",
             "proof-host",
             "info",
-            "Authorization: Bearer abc Cookie=sid client_secret=abc access_token=tok https://user:pass@example.test /home/jmagar/key \u{1b}[31m",
+            "Autho\u{1b}rization: Bea\u{7}rer supersecret Cookie: sid=abc beginning client_secret=abc access_token=tok https://user:pass@example.test /home/jmagar/key \u{1b}[31m",
             "10.0.0.1:514",
         )],
     )
@@ -283,22 +283,23 @@ async fn graph_evidence_lookup_returns_safe_source_summary_and_relationship_cont
 
     assert_eq!(response.evidence.id, evidence_id);
     assert_eq!(response.relationship.id, response.evidence.relationship_id);
-    assert_eq!(
-        response.relationship.src_entity.as_ref().unwrap().id,
-        response.src_entity.id
-    );
-    assert_eq!(
-        response.relationship.dst_entity.as_ref().unwrap().id,
-        response.dst_entity.id
-    );
+    assert_eq!(response.relationship.src_entity_id, response.src_entity.id);
+    assert_eq!(response.relationship.dst_entity_id, response.dst_entity.id);
+    assert!(response.relationship.src_entity.is_none());
+    assert!(response.relationship.dst_entity.is_none());
     let summary = response.source_log_summary.as_ref().unwrap();
     assert_eq!(summary.id, response.evidence.source_log_id.unwrap());
+    assert!(!summary.message.contains("Authorization"));
     assert!(!summary.message.contains("Bearer"));
+    assert!(!summary.message.contains("supersecret"));
     assert!(!summary.message.contains("Cookie"));
+    assert!(!summary.message.contains("sid=abc"));
     assert!(!summary.message.contains("client_secret"));
     assert!(!summary.message.contains("access_token"));
+    assert!(!summary.message.contains("tok"));
     assert!(!summary.message.contains("user:pass"));
     assert!(!summary.message.contains("/home/jmagar"));
+    assert!(summary.message.contains("beginning"));
     assert!(!summary.message.chars().any(char::is_control));
     let json = serde_json::to_string(&response).unwrap();
     assert!(!json.contains("raw"));
@@ -351,8 +352,10 @@ async fn graph_evidence_lookup_reports_deleted_source_log_without_losing_evidenc
         response.missing_source_reason.as_deref(),
         Some("source_log_missing_or_retained_out")
     );
-    assert!(response.relationship.src_entity.is_some());
-    assert!(response.relationship.dst_entity.is_some());
+    assert_eq!(response.relationship.src_entity_id, response.src_entity.id);
+    assert_eq!(response.relationship.dst_entity_id, response.dst_entity.id);
+    assert!(response.relationship.src_entity.is_none());
+    assert!(response.relationship.dst_entity.is_none());
 }
 
 #[tokio::test]

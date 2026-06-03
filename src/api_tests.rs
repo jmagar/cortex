@@ -2421,7 +2421,12 @@ async fn graph_routes_return_shared_service_payloads() {
     assert_eq!(value["resolved_entity"]["canonical_key"], "graph-api-host");
     assert!(value["relationships"].as_array().unwrap().len() >= 1);
     assert_eq!(value["metadata"]["depth"], 1);
-    let evidence_id = value["evidence"][0]["id"].as_i64().unwrap();
+    let evidence = value["evidence"].as_array().unwrap();
+    assert!(
+        !evidence.is_empty(),
+        "expected graph evidence from around route"
+    );
+    let evidence_id = evidence[0]["id"].as_i64().unwrap();
 
     let (status, value) = get_json(
         app.clone(),
@@ -2443,8 +2448,10 @@ async fn graph_routes_return_shared_service_payloads() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(value["evidence"]["id"], evidence_id);
     assert!(value["source_log_summary"].is_object());
-    assert!(value["relationship"]["src_entity"].is_object());
-    assert!(value["relationship"]["dst_entity"].is_object());
+    assert!(value["src_entity"].is_object());
+    assert!(value["dst_entity"].is_object());
+    assert!(value["relationship"]["src_entity"].is_null());
+    assert!(value["relationship"]["dst_entity"].is_null());
     let serialized = value.to_string();
     assert!(!serialized.contains("metadata_json"));
     assert!(!serialized.contains("\"raw\""));

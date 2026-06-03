@@ -503,8 +503,10 @@ async fn graph_evidence_mode_dispatches_and_schema_lists_modes() {
     .await
     .unwrap();
     assert_eq!(value["evidence"]["id"], evidence_id);
-    assert!(value["relationship"]["src_entity"].is_object());
-    assert!(value["relationship"]["dst_entity"].is_object());
+    assert!(value["src_entity"].is_object());
+    assert!(value["dst_entity"].is_object());
+    assert!(value["relationship"]["src_entity"].is_null());
+    assert!(value["relationship"]["dst_entity"].is_null());
     assert!(value["source_log_summary"].is_object());
 
     let defs = crate::mcp::schemas::tool_definitions();
@@ -518,6 +520,10 @@ async fn graph_evidence_mode_dispatches_and_schema_lists_modes() {
         .as_object()
         .unwrap()
         .contains_key("evidence_id"));
+    assert_eq!(
+        defs[0]["inputSchema"]["properties"]["evidence_id"]["minimum"],
+        1
+    );
 }
 
 #[tokio::test]

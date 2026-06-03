@@ -163,7 +163,7 @@ cortex graph around <entity-type> <key> [--limit N] [--json]
 cortex graph around <entity-type:key> [--limit N] [--json]
 cortex graph explain <entity-type> <key> [--depth N] [--beam-width N] [--max-chains N] [--json]
 cortex graph explain <entity-type:key> [--json]
-cortex graph evidence <evidence-id> [--json]
+cortex graph evidence <evidence-id> [--payload-budget BYTES] [--json]
 ```
 
 Shared service responses are also used by MCP and REST graph surfaces.

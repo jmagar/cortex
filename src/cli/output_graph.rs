@@ -320,7 +320,9 @@ pub(crate) fn print_graph_evidence_lookup_response(
     }
     println!("{}", muted("follow-ups:"));
     if let Some(source_log_id) = response.evidence.source_log_id {
-        println!("  cortex get {source_log_id}");
+        println!(
+            "  mcporter call --config config/mcporter.json syslog.cortex action=get id={source_log_id}"
+        );
     }
     println!("  cortex graph around --entity-id {}", rel.src_entity_id);
     println!("  cortex graph around --entity-id {}", rel.dst_entity_id);

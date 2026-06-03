@@ -15,7 +15,7 @@
 
 ## Endpoint matrix
 
-24 routes total. Scope is `read` (mounted via `axum::routing::get`,
+28 routes total. Scope is `read` (mounted via `axum::routing::get`,
 hits read-side `db_permits`) or `admin` (POST + `MAINTENANCE_PERMIT`
 single-flight, audited via `tracing::warn!` before the service call).
 All responses are JSON; error bodies are `{"error": "<message>"}`
@@ -75,7 +75,16 @@ to them by default.
 | GET | `/api/compose/status` | read | (none) | `ComposeMcpStatus { container_name, ownership, runtime_state, health?, published_ports, diagnostics }` | 200, 401, 500 | Y | Redacted read-only projection. If the container cannot run Docker inspection, this still returns 200 with `runtime_state="docker_unavailable"` and diagnostic code `docker_unavailable`. |
 | GET | `/api/compose/doctor` | read | (none) | `ComposeMcpStatus { container_name, ownership, runtime_state, health?, published_ports, diagnostics }` | 200, 401, **503**, 500 | Y | Strict readiness check. Healthy Compose-owned deployment returns 200; Docker/ownership/runtime unready states return 503 with the same structured projection, not a generic error envelope. |
 
-**Total: 24 routes** (1 added in bead `.1` + 6 pre-existing + 8 in `.2` + 3 in `.3` + 4 in `.4` + 2 compose diagnostics).
+### Investigation graph queries (4)
+
+| Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GET | `/api/graph/entity` | read | query: `entity_id?` or `entity_type` + `key` or `alias_type` + `alias_key`; `payload_budget?` | `GraphEntityLookupResponse { resolved_entity?, candidates, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Resolves one graph entity by id, canonical key, or alias without rebuilding the projection. |
+| GET | `/api/graph/around` | read | query: entity selector, `depth?` (1 only), `limit?`, `evidence_sample_limit?`, `payload_budget?` | `GraphAroundResponse { resolved_entity, entities, relationships, evidence, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Bounded one-hop neighborhood with allowlisted evidence samples. |
+| GET | `/api/graph/explain` | read | query: entity selector, `depth?` (clamped to 3), `beam_width?`, `max_chains?`, `evidence_sample_limit?`, `payload_budget?` | `GraphExplainResponse { resolved_entity, chains, narrative, open_questions, missing_evidence, next_queries, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Deterministic evidence-backed explanation; weak evidence becomes open questions, not causal claims. |
+| GET | `/api/graph/evidence` | read | query: `evidence_id` (REQUIRED, minimum 1), `payload_budget?` | `GraphEvidenceLookupResponse { evidence, relationship, src_entity, dst_entity, source_log_summary?, missing_source_reason?, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Proof lookup for one evidence row. Source summaries are redacted/truncated and exclude raw frames and raw metadata. |
+
+**Total: 28 routes** (1 added in bead `.1` + 6 pre-existing + 8 in `.2` + 3 in `.3` + 4 in `.4` + 2 compose diagnostics + 4 graph queries).
 
 ---
 

@@ -491,7 +491,7 @@ Explanation MUST:
 ### 9.4 Evidence Lookup
 
 ```bash
-cortex graph evidence <evidence-id> [--json]
+cortex graph evidence <evidence-id> [--payload-budget BYTES] [--json]
 ```
 
 MCP uses `action=graph mode=evidence evidence_id=<id>`. REST uses

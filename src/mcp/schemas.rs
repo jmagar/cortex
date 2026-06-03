@@ -61,6 +61,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "evidence_id": {
                     "type": "integer",
+                    "minimum": 1,
                     "description": "For action=graph mode=evidence: graph_relationship_evidence id to inspect."
                 },
                 "entity_id": {

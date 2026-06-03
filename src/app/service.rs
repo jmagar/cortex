@@ -3163,12 +3163,8 @@ impl CortexService {
         let src_summary = GraphEntitySummary::from(&src_entity);
         let dst_summary = GraphEntitySummary::from(&dst_entity);
         let evidence = graph_evidence_safe(rows.evidence, limits.payload_budget);
-        let relationship = graph_relationship_to_model(
-            rows.relationship,
-            Some(src_summary.clone()),
-            Some(dst_summary.clone()),
-            vec![evidence.id],
-        );
+        let relationship =
+            graph_relationship_to_model(rows.relationship, None, None, vec![evidence.id]);
         let source_log_summary = rows
             .source_log_summary
             .map(|row| graph_source_log_summary_safe(row, limits.payload_budget));
@@ -3182,6 +3178,8 @@ impl CortexService {
         let payload_truncated = estimated_graph_evidence_lookup_payload_bytes(
             &relationship,
             &evidence,
+            &src_summary,
+            &dst_summary,
             source_log_summary.as_ref(),
         ) > limits.payload_budget as usize;
         Ok(GraphEvidenceLookupResponse {
@@ -3991,7 +3989,7 @@ fn graph_source_log_summary_safe(
     payload_budget: u32,
 ) -> GraphSourceLogSummary {
     let message_limit = (payload_budget / 8).clamp(128, 1024) as usize;
-    let redacted_message = redact_graph_text(row.message);
+    let redacted_message = redact_graph_text_unbounded(row.message);
     let message = truncate_chars(&redacted_message, message_limit);
     GraphSourceLogSummary {
         id: row.id,
@@ -4002,25 +4000,35 @@ fn graph_source_log_summary_safe(
         app_name: row.app_name.map(redact_graph_text),
         process_id: row.process_id.map(redact_graph_text),
         source_ip: redact_graph_text(row.source_ip),
-        message_truncated: redacted_message.chars().count() > message.chars().count(),
+        message_truncated: redacted_message.chars().count() > message_limit,
         message,
     }
 }
 
 fn redact_graph_text(value: String) -> String {
-    let control_stripped: String = value
-        .chars()
-        .map(|ch| if ch.is_control() { ' ' } else { ch })
-        .collect();
+    truncate_chars(&redact_graph_text_unbounded(value), 512)
+}
+
+fn redact_graph_text_unbounded(value: String) -> String {
+    let control_stripped: String = value.chars().filter(|ch| !ch.is_control()).collect();
     let mut out = String::with_capacity(control_stripped.len().min(512));
+    let mut redact_next_value = false;
     for token in control_stripped.split_whitespace() {
         let lower = token.to_ascii_lowercase();
-        let redacted = lower.contains("authorization")
+        let value_marker = lower.contains("authorization")
             || lower.contains("bearer")
-            || lower.contains("cookie")
+            || lower == "cookie"
+            || lower.starts_with("cookie:")
             || lower.contains("set-cookie")
-            || lower.contains("credential")
-            || lower.contains("credentials")
+            || lower == "credential"
+            || lower == "credentials"
+            || lower.starts_with("credential:")
+            || lower.starts_with("credentials:");
+        let redacted = redact_next_value
+            || value_marker
+            || lower.starts_with("cookie=")
+            || lower.starts_with("credential=")
+            || lower.starts_with("credentials=")
             || lower.contains("client_secret")
             || lower.contains("access_token")
             || lower.contains("token=")
@@ -4030,7 +4038,8 @@ fn redact_graph_text(value: String) -> String {
             || lower.contains("apikey")
             || lower.contains("private-key")
             || lower.contains("private_key")
-            || lower.contains("begin")
+            || lower == "begin"
+            || lower.contains("-----begin")
             || lower.contains("userinfo")
             || lower.contains("://") && lower.contains('@')
             || lower.contains("/home/")
@@ -4043,8 +4052,9 @@ fn redact_graph_text(value: String) -> String {
         } else {
             out.push_str(token);
         }
+        redact_next_value = value_marker;
     }
-    truncate_chars(&out, 512)
+    out
 }
 
 fn truncate_chars(value: &str, limit: usize) -> String {
@@ -4096,6 +4106,8 @@ fn estimated_graph_payload_bytes(
 fn estimated_graph_evidence_lookup_payload_bytes(
     relationship: &GraphRelationship,
     evidence: &GraphEvidence,
+    src_entity: &GraphEntitySummary,
+    dst_entity: &GraphEntitySummary,
     source_log_summary: Option<&GraphSourceLogSummary>,
 ) -> usize {
     let relationship_bytes = relationship.relationship_key.len()
@@ -4124,7 +4136,9 @@ fn estimated_graph_evidence_lookup_payload_bytes(
             + summary.source_ip.len()
             + summary.message.len()
     });
-    relationship_bytes + evidence_bytes + source_bytes
+    let top_level_entity_bytes =
+        estimated_entity_summary_bytes(src_entity) + estimated_entity_summary_bytes(dst_entity);
+    relationship_bytes + evidence_bytes + top_level_entity_bytes + source_bytes
 }
 
 fn estimated_entity_summary_bytes(summary: &GraphEntitySummary) -> usize {

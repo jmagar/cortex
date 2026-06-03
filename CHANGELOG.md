@@ -1946,7 +1946,9 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/syslog-mcp/compare/v0.32.3...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/jmagar/cortex/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/jmagar/cortex/compare/v0.32.3...v1.8.0
 [0.32.3]: https://github.com/jmagar/syslog-mcp/compare/v0.32.2...v0.32.3
 [0.32.2]: https://github.com/jmagar/syslog-mcp/compare/v0.32.1...v0.32.2
 [0.32.1]: https://github.com/jmagar/syslog-mcp/compare/v0.32.0...v0.32.1
