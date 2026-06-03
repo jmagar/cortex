@@ -22,6 +22,7 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `tail` | Get N most recent log entries, optionally filtered by host, source_ip, and/or application | no |
 | `errors` | Error/warning summary grouped by hostname and severity level with counts | no |
 | `hosts` | List all hosts with first/last seen timestamps and total log counts | no |
+| `map` | Homelab infrastructure snapshot from known hosts, source identities, apps, and heartbeat status | no |
 | `host_state` | Latest bounded heartbeat state for one host | no |
 | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags and summary counts | no |
 | `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |

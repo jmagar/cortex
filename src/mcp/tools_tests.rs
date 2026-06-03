@@ -130,6 +130,89 @@ async fn fleet_state_action_returns_fleet_snapshot() {
 }
 
 #[tokio::test]
+async fn map_action_returns_infra_snapshot_from_known_hosts() {
+    let h = TestHarness::new();
+    db::insert_logs_batch(
+        &h.pool,
+        &[
+            db::LogBatchEntry {
+                timestamp: "2026-01-01T00:00:00Z".to_string(),
+                hostname: "tootie".to_string(),
+                facility: Some("daemon".to_string()),
+                severity: "info".to_string(),
+                app_name: Some("plex".to_string()),
+                process_id: None,
+                message: "plex started".to_string(),
+                raw: "<14>plex started".to_string(),
+                source_ip: "10.1.0.2:514".to_string(),
+                docker_checkpoint: None,
+                ai_tool: None,
+                ai_project: None,
+                ai_session_id: None,
+                ai_transcript_path: None,
+                metadata_json: None,
+                http_status: None,
+                auth_outcome: None,
+                dns_blocked: None,
+                event_action: None,
+                parse_error: None,
+            },
+            db::LogBatchEntry {
+                timestamp: "2026-01-01T00:01:00Z".to_string(),
+                hostname: "squirts".to_string(),
+                facility: Some("daemon".to_string()),
+                severity: "warning".to_string(),
+                app_name: Some("swag".to_string()),
+                process_id: None,
+                message: "proxy warning".to_string(),
+                raw: "<12>proxy warning".to_string(),
+                source_ip: "10.1.0.8:514".to_string(),
+                docker_checkpoint: None,
+                ai_tool: None,
+                ai_project: None,
+                ai_session_id: None,
+                ai_transcript_path: None,
+                metadata_json: None,
+                http_status: None,
+                auth_outcome: None,
+                dns_blocked: None,
+                event_action: None,
+                parse_error: None,
+            },
+        ],
+    )
+    .unwrap();
+
+    let value = execute_tool(&h.state, "cortex", json!({"action": "map"}), None)
+        .await
+        .unwrap();
+
+    assert_eq!(value["schema"], "cortex.homelab_map.v1");
+    assert_eq!(value["summary"]["hosts"], 2);
+    assert!(value["inventory_sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|source| source["name"] == "docker_containers"));
+
+    let nodes = value["nodes"].as_array().unwrap();
+    let tootie = nodes
+        .iter()
+        .find(|node| node["hostname"] == "tootie")
+        .expect("tootie node missing");
+    assert!(tootie["source_ips"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|source| source["source_ip"] == "10.1.0.2:514"));
+    assert!(tootie["apps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|app| app["app_name"] == "plex"));
+}
+
+#[tokio::test]
 async fn correlate_state_action_requires_reference_time() {
     let h = TestHarness::new();
     let err = execute_tool(

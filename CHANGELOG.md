@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-03
+
+### Added
+
+- Added MCP `action=map`, a bounded homelab infrastructure snapshot that
+  combines known hosts, verified source identities, top observed applications,
+  latest heartbeat status when available, and external inventory-source
+  metadata inspired by `~/docs/scripts`.
+- Added map action coverage to MCP schema/help docs, plugin skill references,
+  and live smoke harnesses.
+
 ## [1.7.1] - 2026-06-02
 
 ### Added

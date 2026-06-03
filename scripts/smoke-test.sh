@@ -10,7 +10,7 @@
 # Requirements: mcporter, nc, curl, python3
 #
 # Action inventory reference:
-#   mcp_call search, mcp_call filter, mcp_call tail, mcp_call errors, mcp_call hosts, mcp_call host_state, mcp_call fleet_state, mcp_call correlate_state,
+#   mcp_call search, mcp_call filter, mcp_call tail, mcp_call errors, mcp_call hosts, mcp_call map, mcp_call host_state, mcp_call fleet_state, mcp_call correlate_state,
 #   mcp_call sessions, mcp_call search_sessions, mcp_call abuse, mcp_call ai_correlate,
 #   mcp_call usage_blocks, mcp_call project_context, mcp_call list_ai_tools, mcp_call list_ai_projects,
 #   mcp_call correlate, mcp_call stats, mcp_call status, mcp_call apps,
@@ -394,6 +394,24 @@ print('ok' if '${SEED_HOST}' in hosts else f'missing: {hosts}')
 " 2>/dev/null || echo "error")
     assert_eq "hosts: seeded host '$SEED_HOST' appears in list" "$SEED_HOST_FOUND" "ok"
 fi
+
+# ── map ───────────────────────────────────────────────────────────────────────
+echo ""
+echo "Action: map"
+MAP=$(mcp_call map 2>&1)
+assert_no_error "map: no error" "$MAP"
+
+MAP_VALID=$(printf '%s\n' "$MAP" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('schema') == 'cortex.homelab_map.v1', 'schema mismatch'
+assert isinstance(d.get('summary'), dict), 'summary missing'
+assert isinstance(d.get('nodes'), list), 'nodes not a list'
+assert isinstance(d.get('inventory_sources'), list), 'inventory_sources not a list'
+assert any(s.get('name') == 'cortex_db' for s in d['inventory_sources']), 'cortex_db source missing'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "map: response structure valid" "$MAP_VALID" "ok"
 
 # ── sessions ──────────────────────────────────────────────────────────────────
 echo ""

@@ -1170,6 +1170,70 @@ pub struct ListHostsResponse {
     pub hosts: Vec<HostEntry>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HomelabMapRequest {
+    /// Maximum host nodes to return. Default 100, max 500.
+    pub host_limit: Option<u32>,
+    /// Maximum source IPs and apps attached to each host. Default 10, max 25.
+    pub per_host_limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapResponse {
+    pub schema: String,
+    pub generated_at: String,
+    pub summary: HomelabMapSummary,
+    pub nodes: Vec<HomelabMapNode>,
+    pub inventory_sources: Vec<HomelabMapInventorySource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapSummary {
+    pub hosts: usize,
+    pub returned_hosts: usize,
+    pub source_ips: usize,
+    pub apps: usize,
+    pub heartbeat_hosts: usize,
+    pub truncated_hosts: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapNode {
+    pub hostname: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    pub log_count: i64,
+    pub source_ips: Vec<HomelabMapSourceIp>,
+    pub apps: Vec<HomelabMapApp>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heartbeat: Option<FleetStateHostRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapSourceIp {
+    pub source_ip: String,
+    pub log_count: i64,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapApp {
+    pub app_name: String,
+    pub log_count: i64,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapInventorySource {
+    pub name: String,
+    pub source: String,
+    pub status: String,
+    pub collects: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CorrelateEventsRequest {

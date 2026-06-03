@@ -4,7 +4,7 @@
 #
 # Exercises broad non-destructive checks for the action-based cortex MCP tool.
 # Action inventory reference (not every action is exercised below):
-#   cortex search, cortex filter, cortex tail, cortex errors, cortex hosts, cortex host_state, cortex fleet_state, cortex correlate_state, cortex sessions,
+#   cortex search, cortex filter, cortex tail, cortex errors, cortex hosts, cortex map, cortex host_state, cortex fleet_state, cortex correlate_state, cortex sessions,
 #   cortex search_sessions, cortex abuse, cortex ai_correlate, cortex usage_blocks, cortex project_context,
 #   cortex list_ai_tools, cortex list_ai_projects, cortex correlate, cortex stats, cortex status, cortex apps,
 #   cortex source_ips, cortex timeline, cortex patterns, cortex context,
@@ -510,6 +510,9 @@ suite_hosts() {
   run_test "cortex hosts: hosts have log_count"    cortex hosts '{}' "hosts.0.log_count"
   run_test "cortex hosts: hosts have first_seen"   cortex hosts '{}' "hosts.0.first_seen"
   run_test "cortex hosts: hosts have last_seen"    cortex hosts '{}' "hosts.0.last_seen"
+  run_test "cortex map: returns schema"             cortex map '{}' "schema"
+  run_test "cortex map: returns nodes array"        cortex map '{}' "nodes"
+  run_test "cortex map: returns inventory sources"  cortex map '{}' "inventory_sources"
 }
 
 suite_sessions() {

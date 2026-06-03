@@ -93,6 +93,8 @@ pub use models::{
     GraphRebuildStatsResponse,
     GraphRelationship,
     GraphResponseMetadata,
+    HomelabMapRequest,
+    HomelabMapResponse,
     HostEntry,
     HostStateRequest,
     HostStateResponse,

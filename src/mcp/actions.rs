@@ -104,6 +104,12 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         cost: Cost::Cheap,
     },
     ActionSpec {
+        name: "map",
+        scope: Scope::Read,
+        description: "Map homelab hosts with source identities, apps, and heartbeat status",
+        cost: Cost::Moderate,
+    },
+    ActionSpec {
         name: "host_state",
         scope: Scope::Read,
         description: "Fetch latest bounded heartbeat state for a host",

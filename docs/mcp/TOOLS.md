@@ -12,6 +12,7 @@ cortex exposes one MCP tool named `cortex`. The required
 | `tail` | Recent log entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
+| `map` | Homelab infrastructure snapshot from known hosts, source identities, apps, and heartbeat status |
 | `host_state` | Latest bounded heartbeat state for one host |
 | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags and summary counts |
 | `correlate_state` | Correlate logs with heartbeat window summaries around a reference time |
@@ -91,6 +92,18 @@ Optional arguments: `from`, `to`, `group_by`.
 List all hosts that have sent syslog messages.
 
 Required argument: `action = "hosts"`
+
+## syslog map
+
+Return a bounded homelab infrastructure snapshot from Cortex's database. The
+response includes host nodes, per-host source identities, top observed apps,
+latest heartbeat status when available, and external inventory sources inspired
+by `~/docs/scripts`.
+
+Required argument: `action = "map"`
+
+Optional arguments: `host_limit` (default 100, max 500), `per_host_limit`
+(default 10, max 25).
 
 ## syslog host_state
 

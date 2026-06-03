@@ -7,11 +7,12 @@ use crate::app::{
     AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
     CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
     GetErrorsRequest, GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest,
-    GraphExplainRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
-    RequestActor, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest,
-    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UsageBlocksRequest,
+    GraphExplainRequest, HomelabMapRequest, HostStateRequest, IncidentContextRequest,
+    IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest,
+    ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest,
+    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
+    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
+    UsageBlocksRequest,
 };
 
 use super::actions;
@@ -43,6 +44,7 @@ async fn tool_cortex(
         "tail" => tool_tail_logs(state, args).await,
         "errors" => tool_get_errors(state, args).await,
         "hosts" => tool_list_hosts(state, args).await,
+        "map" => tool_homelab_map(state, args).await,
         "host_state" => tool_host_state(state, args).await,
         "fleet_state" => tool_fleet_state(state, args).await,
         "correlate" => tool_correlate_events(state, args).await,
@@ -124,6 +126,13 @@ async fn tool_filter_logs(state: &AppState, args: Value) -> anyhow::Result<Value
     let req: FilterLogsRequest = action_payload(args)?;
     let response = state.service.filter_logs(req).await?;
     tracing::debug!(result_count = response.count, "filter_logs completed");
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_homelab_map(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: HomelabMapRequest = action_payload(args)?;
+    let response = state.service.homelab_map(req).await?;
+    tracing::debug!(node_count = response.nodes.len(), "homelab_map completed");
     Ok(serde_json::to_value(response)?)
 }
 
@@ -947,6 +956,18 @@ Groups by hostname and severity level (and optionally app_name), showing counts.
 List all hosts that have sent syslog messages, with first/last seen timestamps and total log counts.
 
 **Parameters:** none
+
+---
+
+## cortex map
+Return a bounded homelab infrastructure snapshot from Cortex's current database.
+The map includes known host nodes, verified source identities, top observed
+applications per host, latest heartbeat status when available, and the external
+inventory sources that complement Cortex's DB-backed view.
+
+**Parameters:**
+- `host_limit` (integer, optional) — maximum host nodes to return (default 100, max 500)
+- `per_host_limit` (integer, optional) — maximum source identities and apps attached to each host (default 10, max 25)
 
 ---
 

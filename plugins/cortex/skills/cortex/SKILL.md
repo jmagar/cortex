@@ -18,6 +18,7 @@ A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argu
 | `tail` | Most recent entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | List all known hosts with first/last seen |
+| `map` | Homelab host/source/app/heartbeat map |
 | `host_state` | Latest bounded heartbeat state for one host |
 | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags and summary counts |
 | `correlate_state` | Correlate logs with heartbeat summaries around a reference time |

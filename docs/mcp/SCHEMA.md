@@ -20,7 +20,7 @@ wins.
 ## Current Actions
 
 cortex exposes one MCP tool named `cortex`. The required `action` argument
-selects one of these 43 actions:
+selects one of these 44 actions:
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
@@ -29,6 +29,7 @@ selects one of these 43 actions:
 | `tail` | `syslog:read` | cheap | Most recent log entries |
 | `errors` | `syslog:read` | cheap | Error/warning summary |
 | `hosts` | `syslog:read` | cheap | Known source hostnames |
+| `map` | `syslog:read` | moderate | Homelab host/source/app/heartbeat map |
 | `host_state` | `syslog:read` | moderate | Latest bounded heartbeat state for one host |
 | `fleet_state` | `syslog:read` | expensive | Fleet-wide heartbeat snapshot with pressure flags |
 | `correlate` | `syslog:read` | moderate | Time-window event correlation |
@@ -131,6 +132,7 @@ handler and service layers.
 | `app_name` | `search`, `filter`, `tail`, `ai_correlate`, `timeline`, `patterns`, `similar_incidents`, `ask_history`, `incident_context` |
 | `from`, `to` | Time range for search/session/AI/analytics actions; required for `incident_context` |
 | `limit`, `offset` | Action-specific bounds; `offset` is for `apps` and `source_ips` pagination |
+| `host_limit`, `per_host_limit` | Node and per-node attachment bounds for `map` |
 | `mode`, `entity_id`, `entity_type`, `key`, `alias_type`, `alias_key`, `depth`, `evidence_sample_limit`, `payload_budget` | Graph lookup and one-hop neighborhood controls for `graph` |
 
 ## Correlation Arguments

@@ -18,7 +18,7 @@
 #   PORT                   Override server port (default: 3100)
 #
 # Action inventory reference (not every action is exercised by this live test):
-#   cortex search, cortex filter, cortex tail, cortex errors, cortex hosts, cortex host_state, cortex fleet_state, cortex correlate_state, cortex sessions,
+#   cortex search, cortex filter, cortex tail, cortex errors, cortex hosts, cortex map, cortex host_state, cortex fleet_state, cortex correlate_state, cortex sessions,
 #   cortex search_sessions, cortex abuse, cortex ai_correlate, cortex usage_blocks, cortex project_context,
 #   cortex list_ai_tools, cortex list_ai_projects, cortex correlate, cortex stats, cortex status, cortex apps,
 #   cortex source_ips, cortex timeline, cortex patterns, cortex context,
@@ -517,6 +517,16 @@ phase_tools() {
   else
     _skip "cortex hosts — entry field validation" "no hosts in DB (no cortex data ingested)"
   fi
+
+  # --- cortex map ---
+  section "  cortex map"
+  local map_result
+  map_result="$(call_tool cortex '{"action":"map"}')" || map_result=""
+
+  assert_jq "cortex map — schema is v1" "${map_result}" '.schema' "cortex.homelab_map.v1"
+  assert_jq "cortex map — summary field present" "${map_result}" '.summary'
+  assert_jq "cortex map — nodes field is array" "${map_result}" '.nodes | type' "array"
+  assert_jq "cortex map — inventory sources field is array" "${map_result}" '.inventory_sources | type' "array"
 
   # --- cortex sessions ---
   section "  cortex sessions"
