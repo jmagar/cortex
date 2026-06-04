@@ -25,7 +25,7 @@ pub use graph::{
     PROJECTION_STATUSES, REASON_CODES, RELATIONSHIP_TYPES, TRUST_LEVELS,
 };
 pub use heartbeat::{
-    heartbeat_host_state, heartbeat_latest_all, heartbeat_metric_snapshot,
+    heartbeat_host_state, heartbeat_latest_all, heartbeat_metric_snapshot_batch,
     heartbeat_window_summaries, HeartbeatHostLookup, HeartbeatHostState, HeartbeatLatestEntry,
     HeartbeatMetricSnapshot, HeartbeatSampleState, HeartbeatStateFlags, HeartbeatWindowSummary,
 };

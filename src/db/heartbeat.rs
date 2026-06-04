@@ -133,8 +133,9 @@ pub fn heartbeat_latest_all(pool: &DbPool) -> Result<Vec<HeartbeatLatestEntry>> 
 /// Fetch aggregated metric values for one heartbeat by `heartbeat_id`.
 ///
 /// All five queries target indexed `heartbeat_id` columns. Each returns at
-/// most one row (or one aggregate). Used by `app::heartbeat_flags::derive_flags`
-/// to compute pressure signals for fleet and correlation views.
+/// most one row (or one aggregate). Kept for targeted tests; production code
+/// uses `heartbeat_metric_snapshot_batch`.
+#[cfg(test)]
 pub fn heartbeat_metric_snapshot(
     pool: &DbPool,
     heartbeat_id: i64,
@@ -197,6 +198,99 @@ pub fn heartbeat_metric_snapshot(
         total_network_errors: net_errors,
         container_unhealthy_count: container_unhealthy,
     })
+}
+
+/// Fetch aggregated metric values for multiple heartbeat IDs in one pass.
+///
+/// Returns a map from heartbeat_id → snapshot. IDs with no data are absent
+/// from the map (callers should use `unwrap_or_default()`).
+pub fn heartbeat_metric_snapshot_batch(
+    pool: &DbPool,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, HeartbeatMetricSnapshot>> {
+    if ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let conn = pool.get()?;
+    let placeholders = ids
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let mut map: std::collections::HashMap<i64, HeartbeatMetricSnapshot> = ids
+        .iter()
+        .map(|&id| (id, HeartbeatMetricSnapshot::default()))
+        .collect();
+
+    let cpu_sql = format!(
+        "SELECT heartbeat_id, usage_percent FROM heartbeat_cpu WHERE heartbeat_id IN ({placeholders})"
+    );
+    let mut stmt = conn.prepare(&cpu_sql)?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, Option<f64>>(1)?))
+    })?;
+    for row in rows.flatten() {
+        map.entry(row.0).or_default().cpu_usage_percent = row.1;
+    }
+
+    let mem_sql = format!(
+        "SELECT heartbeat_id, used_percent, swap_total_bytes, swap_used_bytes \
+         FROM heartbeat_memory WHERE heartbeat_id IN ({placeholders})"
+    );
+    let mut stmt = conn.prepare(&mem_sql)?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, Option<f64>>(1)?,
+            row.get::<_, Option<i64>>(2)?,
+            row.get::<_, Option<i64>>(3)?,
+        ))
+    })?;
+    for row in rows.flatten() {
+        let e = map.entry(row.0).or_default();
+        e.mem_used_percent = row.1;
+        e.swap_total_bytes = row.2;
+        e.swap_used_bytes = row.3;
+    }
+
+    let disk_sql = format!(
+        "SELECT heartbeat_id, MAX(used_percent) FROM heartbeat_disks \
+         WHERE heartbeat_id IN ({placeholders}) GROUP BY heartbeat_id"
+    );
+    let mut stmt = conn.prepare(&disk_sql)?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, Option<f64>>(1)?))
+    })?;
+    for row in rows.flatten() {
+        map.entry(row.0).or_default().max_disk_used_percent = row.1;
+    }
+
+    let net_sql = format!(
+        "SELECT heartbeat_id, SUM(COALESCE(rx_errors,0)+COALESCE(tx_errors,0)) \
+         FROM heartbeat_network WHERE heartbeat_id IN ({placeholders}) GROUP BY heartbeat_id"
+    );
+    let mut stmt = conn.prepare(&net_sql)?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?))
+    })?;
+    for row in rows.flatten() {
+        map.entry(row.0).or_default().total_network_errors = row.1;
+    }
+
+    let ctr_sql = format!(
+        "SELECT heartbeat_id, MAX(COALESCE(unhealthy,0)) FROM heartbeat_containers \
+         WHERE heartbeat_id IN ({placeholders}) GROUP BY heartbeat_id"
+    );
+    let mut stmt = conn.prepare(&ctr_sql)?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?))
+    })?;
+    for row in rows.flatten() {
+        map.entry(row.0).or_default().container_unhealthy_count = row.1;
+    }
+
+    Ok(map)
 }
 
 /// Return all heartbeat rows for `host_id` within `[from, to]` (inclusive),

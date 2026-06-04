@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::inventory::collectors::CollectorOutput;
 use crate::inventory::limits::MAX_RAW_ARTIFACT_BYTES;
-use crate::inventory::redaction::{redact_text, RedactedArtifact};
+use crate::inventory::redaction::RedactedArtifact;
 use crate::inventory::schema::{
     ArtifactRef, ComposeProject, PortMapping, Provenance, ReverseProxyRoute,
 };
@@ -112,7 +112,7 @@ pub(in crate::inventory) fn collect_compose_body(
     )?;
     Ok((
         reference,
-        parse_compose_project(Path::new(&source_path), &redact_text(&body)),
+        parse_compose_project(Path::new(&source_path), artifact.body()),
     ))
 }
 
@@ -153,7 +153,7 @@ pub(in crate::inventory) fn collect_proxy_body(
     )?;
     Ok((
         reference,
-        parse_proxy_routes(Path::new(&source_path), &redact_text(&body)),
+        parse_proxy_routes(Path::new(&source_path), artifact.body()),
     ))
 }
 

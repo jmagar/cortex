@@ -61,7 +61,9 @@ fn test_state_full(
     // `ApiState::with_isolated_maintenance_permit` docs.
     let state = ApiState::new(
         service,
-        ApiConfig { api_token: token },
+        ApiConfig {
+            api_token: crate::config::Secret(token),
+        },
         3100,
         true,
         allowed_origins,
@@ -804,7 +806,7 @@ async fn cors_localhost_defaults_suppressed_on_external_bind() {
     let state = ApiState::new(
         service,
         ApiConfig {
-            api_token: Some("secret".into()),
+            api_token: crate::config::Secret(Some("secret".into())),
         },
         3100,
         // External bind — defaults must be dropped.

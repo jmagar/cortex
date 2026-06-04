@@ -38,7 +38,7 @@ fn loopback_mcp() -> McpConfig {
         server_name: "cortex".into(),
         no_auth: false,
         trusted_gateway_no_auth: false,
-        api_token: None,
+        api_token: crate::config::Secret(None),
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
         auth: AuthConfig::default(),
@@ -94,7 +94,7 @@ fn oauth_mcp(tmp: &std::path::Path) -> McpConfig {
         mode: AuthMode::OAuth,
         public_url: Some("https://syslog.example.com".into()),
         google_client_id: Some("client-id".into()),
-        google_client_secret: Some("client-secret".into()),
+        google_client_secret: Some("client-secret".into()).into(),
         admin_email: "admin@example.com".into(),
         allowed_emails: Vec::new(),
         sqlite_path: tmp.join("auth.db"),
@@ -124,7 +124,7 @@ async fn build_auth_policy_returns_loopback_dev_when_no_auth_and_loopback_bind()
 async fn build_auth_policy_returns_mounted_bearer_only_when_static_token_only() {
     let tmp = tempfile::tempdir().unwrap();
     let mut mcp = loopback_mcp();
-    mcp.api_token = Some("supersecret".into());
+    mcp.api_token = Some("supersecret".into()).into();
     mcp.host = "0.0.0.0".into();
     let config = test_config(tmp.path(), mcp);
     // Bearer-only: AuthLayer is mounted (auth is enforced), but no OAuth state.
@@ -162,7 +162,7 @@ async fn runtime_rejects_non_loopback_oauth_without_static_token_before_otlp_mou
     let tmp = tempfile::tempdir().unwrap();
     let mut mcp = oauth_mcp(tmp.path());
     mcp.host = "0.0.0.0".into();
-    mcp.api_token = None;
+    mcp.api_token = None.into();
     let config = test_config(tmp.path(), mcp);
 
     let err = match RuntimeCore::for_server(config).await {

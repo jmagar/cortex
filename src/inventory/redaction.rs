@@ -143,18 +143,50 @@ fn secret_regexes() -> &'static [Regex] {
         let private_key_label = ["PRI", "VATE ", "KEY"].concat();
         let pem_fence = "-".repeat(5);
         vec![
+            // PEM private keys
             Regex::new(&format!(
                 r#"(?is){pem_fence}BEGIN [A-Z ]*{private_key_label}{pem_fence}.*?{pem_fence}END [A-Z ]*{private_key_label}{pem_fence}"#
             ))
-            .unwrap(),
-            Regex::new(r#"(?i)(\bcurl\b[^\n]*\s-u\s+)["']?[^"'\s]+["']?"#).unwrap(),
-            Regex::new(r#"(?i)([a-z][a-z0-9+.-]*://)[^/@\s:]+(?::[^/@\s]*)?@"#).unwrap(),
-            Regex::new(r#"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)[A-Za-z0-9._~+/=-]{12,}"#).unwrap(),
-            Regex::new(r#"(?i)(cookie\s*[:=]\s*)[^\s;]{8,}"#).unwrap(),
-            Regex::new(r#"(?i)((?:api[_-]?key|x[_-]?api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passphrase|private[_-]?key|psk|client[_-]?secret)\s*[:=]\s*)(?:"[^"\n]{3,}"|'[^'\n]{3,}'|[^\s&,"']{3,})"#).unwrap(),
-            Regex::new(r#"(?i)((?:api[_-]?key|x[_-]?api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passphrase|private[_-]?key|psk|client[_-]?secret)=)(?:"[^"\n]{3,}"|'[^'\n]{3,}'|[^&\s"']+)"#).unwrap(),
-            Regex::new(r#"[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}"#).unwrap(),
-            Regex::new(r#"\b[A-Za-z0-9+/]{32,}={0,2}\b"#).unwrap(),
+            .expect("static PEM regex"),
+            // curl -u user:pass
+            Regex::new(r#"(?i)(\bcurl\b[^\n]*\s-u\s+)["']?[^"'\s]+["']?"#)
+                .expect("static curl-u regex"),
+            // URI userinfo (scheme://user:pass@host)
+            Regex::new(r#"(?i)([a-z][a-z0-9+.-]*://)[^/@\s:]+(?::[^/@\s]*)?@"#)
+                .expect("static URI userinfo regex"),
+            // Authorization / Bearer headers
+            Regex::new(r#"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)[A-Za-z0-9._~+/=-]{12,}"#)
+                .expect("static authorization regex"),
+            // Cookie header
+            Regex::new(r#"(?i)(cookie\s*[:=]\s*)[^\s;]{8,}"#)
+                .expect("static cookie regex"),
+            // KEY=VALUE for known secret key names (quoted or unquoted)
+            Regex::new(r#"(?i)((?:api[_-]?key|x[_-]?api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passphrase|private[_-]?key|psk|client[_-]?secret|webhook|smtp[_-]?pass(?:word)?|db[_-]?pass(?:word)?|database[_-]?url|minio[_-]?(?:root[_-]?)?(?:user|password)|smtp[_-]?url)\s*[:=]\s*)(?:"[^"\n]{3,}"|'[^'\n]{3,}'|[^\s&,"']{3,})"#)
+                .expect("static KEY=VALUE space-sep regex"),
+            // KEY=VALUE env-style (no spaces around =)
+            Regex::new(r#"(?i)((?:api[_-]?key|x[_-]?api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passphrase|private[_-]?key|psk|client[_-]?secret|webhook|smtp[_-]?pass(?:word)?|db[_-]?pass(?:word)?|database[_-]?url|minio[_-]?(?:root[_-]?)?(?:user|password)|smtp[_-]?url)=)(?:"[^"\n]{3,}"|'[^'\n]{3,}'|[^&\s"']+)"#)
+                .expect("static KEY=VALUE env regex"),
+            // Any variable whose name ends in _TOKEN, _SECRET, _PASSWORD, _KEY, _CREDENTIAL
+            Regex::new(r#"(?i)([A-Z_][A-Z0-9_]*(?:_TOKEN|_SECRET|_PASSWORD|_KEY|_CREDENTIAL|_AUTH)\s*=\s*)(?:"[^"\n]{4,}"|'[^'\n]{4,}'|[^\s"'&]{4,})"#)
+                .expect("static suffix env-var regex"),
+            // Vendor-prefixed tokens: AWS, GitHub, GitLab, Slack, Stripe, Twilio, SendGrid, Datadog, NPM
+            Regex::new(r#"(?:AKIA|ASIA|AROA|AIPA|ANPA|ANVA|APKA)[0-9A-Z]{16}"#)
+                .expect("static AWS key regex"),
+            Regex::new(r#"(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}"#)
+                .expect("static GitHub token regex"),
+            Regex::new(r#"glpat-[A-Za-z0-9_\-]{20,}"#)
+                .expect("static GitLab token regex"),
+            Regex::new(r#"xox[baprs]-[A-Za-z0-9\-]{10,}"#)
+                .expect("static Slack token regex"),
+            Regex::new(r#"sk_(?:live|test)_[A-Za-z0-9]{20,}"#)
+                .expect("static Stripe key regex"),
+            // JWT (three base64url segments — handles both base64 and base64url charsets)
+            Regex::new(r#"[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}"#)
+                .expect("static JWT regex"),
+            // High-entropy base64 blobs (>=32 chars). Keep '-' out so UUIDs
+            // and common dashed identifiers are not treated as secrets.
+            Regex::new(r#"\b[A-Za-z0-9+/]{32,}={0,2}\b"#)
+                .expect("static base64 catch-all regex"),
         ]
     })
 }

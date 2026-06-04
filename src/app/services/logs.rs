@@ -73,14 +73,19 @@ impl CortexService {
             .run_db("fleet_state.latest", db::heartbeat_latest_all)
             .await?;
 
+        let hb_ids: Vec<i64> = entries.iter().map(|e| e.heartbeat_id).collect();
+        let metrics_map = self
+            .run_db("fleet_state.metrics", move |pool| {
+                db::heartbeat_metric_snapshot_batch(pool, &hb_ids)
+            })
+            .await?;
+
         let mut rows: Vec<FleetStateHostRow> = Vec::with_capacity(entries.len());
         for entry in &entries {
-            let hb_id = entry.heartbeat_id;
-            let metrics = self
-                .run_db("fleet_state.metrics", move |pool| {
-                    db::heartbeat_metric_snapshot(pool, hb_id)
-                })
-                .await?;
+            let metrics = metrics_map
+                .get(&entry.heartbeat_id)
+                .cloned()
+                .unwrap_or_default();
             let flags = heartbeat_flags::from_latest_and_metrics(entry, &metrics);
             let pressure = heartbeat_flags::pressure_names(&flags);
             let status = heartbeat_flags::host_status_label(&flags);

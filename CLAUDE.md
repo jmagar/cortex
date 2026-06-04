@@ -5,7 +5,7 @@
 **Syslog Intelligence for Homelabs** — Receives RFC 3164/5424 syslog from all homelab hosts (UDP/TCP), ingests Docker logs via socket proxy, stores everything in SQLite with FTS5, and exposes a comprehensive `cortex` MCP tool for AI agents.
 
 **Status**: Active development, Production-ready
-**Version**: 0.29.0
+**Version**: 1.12.0
 
 ## Key Files
 

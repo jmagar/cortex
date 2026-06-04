@@ -150,7 +150,7 @@ fn parse_ports(value: Option<&Value>) -> Vec<PortMapping> {
         .collect()
 }
 
-fn string_map(value: Option<&Value>) -> BTreeMap<String, String> {
+pub(in crate::inventory) fn string_map(value: Option<&Value>) -> BTreeMap<String, String> {
     value
         .and_then(Value::as_object)
         .map(|map| {
@@ -169,7 +169,7 @@ fn provenance(host: &str) -> Provenance {
     )
 }
 
-fn extract_domainish(line: &str) -> Vec<String> {
+pub(in crate::inventory) fn extract_domainish(line: &str) -> Vec<String> {
     line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'))
         .filter(|part| part.contains('.') && part.len() > 3)
         .map(ToString::to_string)

@@ -6,6 +6,63 @@ use std::str::FromStr;
 
 const MAX_CLEANUP_CHUNK_SIZE: usize = 1_000_000;
 
+/// Wrapper for secret string values that prints `[REDACTED]` in Debug output
+/// and is skipped during Serialize so secrets never leak into logs or JSON exports.
+#[derive(Clone, Default, Deserialize)]
+#[serde(transparent)]
+pub struct Secret(pub Option<String>);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            None => write!(f, "None"),
+            Some(_) => write!(f, "Some([REDACTED])"),
+        }
+    }
+}
+
+impl Serialize for Secret {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match &self.0 {
+            None => s.serialize_none(),
+            Some(_) => s.serialize_str("[REDACTED]"),
+        }
+    }
+}
+
+impl Secret {
+    pub fn as_deref(&self) -> Option<&str> {
+        self.0.as_deref()
+    }
+    pub fn is_none(&self) -> bool {
+        self.0.is_none()
+    }
+    pub fn is_some(&self) -> bool {
+        self.0.is_some()
+    }
+    pub fn as_ref(&self) -> Option<&String> {
+        self.0.as_ref()
+    }
+}
+
+impl From<Option<String>> for Secret {
+    fn from(v: Option<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl From<String> for Secret {
+    fn from(v: String) -> Self {
+        Self(Some(v))
+    }
+}
+
+impl PartialEq<Option<String>> for Secret {
+    fn eq(&self, other: &Option<String>) -> bool {
+        &self.0 == other
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
@@ -264,7 +321,7 @@ pub struct McpConfig {
     pub trusted_gateway_no_auth: bool,
     /// Optional bearer token for authenticating MCP requests.
     #[serde(default)]
-    pub api_token: Option<String>,
+    pub api_token: Secret,
     /// Optional additional Host header values accepted by RMCP Host validation.
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
@@ -323,7 +380,7 @@ pub struct AuthConfig {
     /// Google OAuth client secret. Required when `mode == OAuth`. Overridable
     /// via `CORTEX_GOOGLE_CLIENT_SECRET`.
     #[serde(default)]
-    pub google_client_secret: Option<String>,
+    pub google_client_secret: Secret,
     /// Single admin email permitted to log in via Google OAuth. Overridable via
     /// `CORTEX_AUTH_ADMIN_EMAIL`.
     #[serde(default)]
@@ -383,7 +440,7 @@ pub struct ApiConfig {
     /// Required bearer token for the always-on non-MCP JSON API.
     /// Provisioned by `cortex setup repair`. The server fails to start without it.
     #[serde(default)]
-    pub api_token: Option<String>,
+    pub api_token: Secret,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -580,7 +637,7 @@ impl Default for McpConfig {
             server_name: default_server_name(),
             no_auth: false,
             trusted_gateway_no_auth: false,
-            api_token: None,
+            api_token: Secret(None),
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
             auth: AuthConfig::default(),
@@ -595,7 +652,7 @@ impl Default for AuthConfig {
             mode: AuthMode::default(),
             public_url: None,
             google_client_id: None,
-            google_client_secret: None,
+            google_client_secret: Secret(None),
             admin_email: String::new(),
             allowed_emails: Vec::new(),
             sqlite_path: default_auth_sqlite_path(),
@@ -702,7 +759,7 @@ impl Config {
         // MCP static token. (The pre-v1 `SYSLOG_MCP_API_TOKEN` deprecated alias was
         // dropped in the cortex v1.0.0 rebrand — its post-rename name `CORTEX_API_TOKEN`
         // now belongs exclusively to the API/OTLP token, `config.api.api_token`.)
-        env_override_opt_str("CORTEX_TOKEN", &mut config.mcp.api_token);
+        env_override_opt_str("CORTEX_TOKEN", &mut config.mcp.api_token.0);
         env_override_path("CORTEX_DB_PATH", &mut config.storage.db_path);
         // Fail fast when CORTEX_DB_PATH is explicitly set but its parent
         // directory doesn't exist. This catches the common Docker misconfiguration
@@ -762,7 +819,7 @@ impl Config {
         );
         env_override_opt_str(
             "CORTEX_GOOGLE_CLIENT_SECRET",
-            &mut config.mcp.auth.google_client_secret,
+            &mut config.mcp.auth.google_client_secret.0,
         );
         env_override_str("CORTEX_AUTH_ADMIN_EMAIL", &mut config.mcp.auth.admin_email);
         env_override_list(
@@ -774,7 +831,7 @@ impl Config {
             &mut config.mcp.auth.disable_static_token_with_oauth,
         )?;
 
-        env_override_opt_str("CORTEX_API_TOKEN", &mut config.api.api_token);
+        env_override_opt_str("CORTEX_API_TOKEN", &mut config.api.api_token.0);
 
         env_override_opt_str(
             "CORTEX_AUTHELIA_SOURCE_IP",
@@ -1065,10 +1122,10 @@ fn env_override_bool(key: &str, target: &mut bool) -> anyhow::Result<()> {
 }
 
 pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow::Result<()> {
-    if token_is_set_but_blank(&config.mcp.api_token) {
+    if token_is_set_but_blank(&config.mcp.api_token.0) {
         return Err(anyhow::anyhow!("mcp.api_token must not be empty"));
     }
-    if token_is_set_but_blank(&config.api.api_token) {
+    if token_is_set_but_blank(&config.api.api_token.0) {
         return Err(anyhow::anyhow!("api.api_token must not be empty"));
     }
     // Note: CORTEX_API_TOKEN being entirely unset is enforced at
@@ -1108,7 +1165,7 @@ pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow:
                 "CORTEX_GOOGLE_CLIENT_ID is required when CORTEX_AUTH_MODE=oauth"
             ));
         }
-        if option_is_blank(&auth.google_client_secret) {
+        if option_is_blank(&auth.google_client_secret.0) {
             return Err(anyhow::anyhow!(
                 "CORTEX_GOOGLE_CLIENT_SECRET is required when CORTEX_AUTH_MODE=oauth"
             ));

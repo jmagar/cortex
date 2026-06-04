@@ -18,6 +18,8 @@ use crate::otlp::{self, OtlpCounters, OtlpState};
 use crate::receiver::enrichment::EnrichmentConfig;
 use crate::{docker_ingest, mcp, receiver};
 
+mod inventory_refresh;
+
 pub struct RuntimeCore {
     pub config: Config,
     pool: Arc<DbPool>,
@@ -50,6 +52,7 @@ pub struct MaintenanceHandles {
     notification_dispatcher: Option<JoinHandle<()>>,
     notification_evaluator: Option<JoinHandle<()>>,
     notification_digest: Option<JoinHandle<()>>,
+    inventory_refresh: Option<JoinHandle<()>>,
     inventory_backfill: Option<JoinHandle<()>>,
     session_rollup: Option<JoinHandle<()>>,
     timeline_rollup: Option<JoinHandle<()>>,
@@ -99,6 +102,7 @@ impl MaintenanceHandles {
             self.notification_dispatcher,
             self.notification_evaluator,
             self.notification_digest,
+            self.inventory_refresh,
             self.inventory_backfill,
             self.session_rollup,
             self.timeline_rollup,
@@ -146,7 +150,6 @@ const SESSION_ROLLUP_REFRESH_SECS: u64 = 300;
 /// tick folds only the rows ingested since the last watermark (milliseconds), so
 /// a short cadence is cheap.
 const TIMELINE_ROLLUP_REFRESH_SECS: u64 = 60;
-
 /// Cadence for `PRAGMA optimize` (keeps planner stats fresh). 6 hours — stats
 /// track row-count *distribution*, which shifts slowly, so frequent runs add
 /// little. `PRAGMA optimize` no-ops on tables that haven't changed enough.
@@ -209,7 +212,7 @@ impl RuntimeCore {
             authelia_source_ip: config.enrichment.authelia_source_ip.clone(),
             adguard_source_ip: config.enrichment.adguard_source_ip.clone(),
             scrub_prompts: config.enrichment.scrub_prompts,
-            api_token: config.mcp.api_token.clone(),
+            api_token: config.mcp.api_token.0.clone(),
         };
         let observability = Arc::new(RuntimeObservability::default());
         let ingest = crate::ingest::start_writer_from_receiver_config(
@@ -251,7 +254,7 @@ impl RuntimeCore {
     pub fn otlp_router(&self) -> axum::Router {
         let state = OtlpState::new(
             self.ingest.clone(),
-            self.config.mcp.api_token.clone(),
+            self.config.mcp.api_token.0.clone(),
             Arc::clone(&self.otlp_counters),
             self.auth_policy.clone(),
         );
@@ -262,7 +265,7 @@ impl RuntimeCore {
     pub fn heartbeat_router(&self) -> axum::Router {
         let state = HeartbeatState::new(
             Arc::clone(&self.pool),
-            self.config.mcp.api_token.clone(),
+            self.config.mcp.api_token.0.clone(),
             self.auth_policy.clone(),
         );
         crate::heartbeat::router(state)
@@ -315,6 +318,7 @@ impl RuntimeCore {
         let notification_dispatcher = self.spawn_notification_dispatcher(token.clone());
         let notification_evaluator = self.spawn_notification_evaluator(token.clone());
         let notification_digest = self.spawn_notification_digest(token.clone());
+        let inventory_refresh = inventory_refresh::spawn(token.clone());
         let inventory_backfill = self.spawn_inventory_backfill_task(token.clone());
         let session_rollup = self.spawn_session_rollup_task(token.clone());
         let timeline_rollup = self.spawn_timeline_rollup_task(token.clone());
@@ -328,6 +332,7 @@ impl RuntimeCore {
             notification_dispatcher,
             notification_evaluator,
             notification_digest,
+            inventory_refresh,
             inventory_backfill,
             session_rollup,
             timeline_rollup,
@@ -1330,7 +1335,14 @@ fn enforce_restrictive_permissions(path: &Path) -> Result<()> {
 
 #[cfg(not(unix))]
 fn enforce_restrictive_permissions(_path: &Path) -> Result<()> {
-    Ok(())
+    // File-permission enforcement is not implemented on non-Unix platforms.
+    // OAuth mode must not be used in this configuration because the JWT signing
+    // key and auth database cannot be protected to 0600 permissions.
+    anyhow::bail!(
+        "OAuth mode is not supported on non-Unix platforms: cannot enforce \
+         restrictive file permissions (0600) on the JWT signing key and auth database. \
+         Use bearer-token auth instead."
+    )
 }
 
 #[cfg(test)]

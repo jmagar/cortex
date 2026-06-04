@@ -11,8 +11,16 @@ impl CortexService {
         let section_limit = req.section_limit.unwrap_or(100).clamp(1, 250) as usize;
         let sections = RequestedSections::new(req.include_sections.as_deref());
         let config = InventoryConfig::from_env();
-        let cache_status = inventory_status(&config);
-        let mut inventory = read_inventory_cache(&config).ok();
+        let (cache_status, raw_inventory) = tokio::task::spawn_blocking(move || {
+            let status = inventory_status(&config);
+            let inv = read_inventory_cache(&config).ok();
+            (status, inv)
+        })
+        .await
+        .map_err(|e| {
+            ServiceError::Internal(anyhow::anyhow!("inventory cache read panicked: {e}"))
+        })?;
+        let mut inventory = raw_inventory;
         if let Some(inventory) = &mut inventory {
             inventory.freshness.is_stale = cache_status.is_stale;
             inventory.freshness.cache_status = cache_status.status.clone();

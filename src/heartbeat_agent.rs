@@ -490,7 +490,9 @@ impl HeartbeatProbe for LinuxCpuProbe {
 
     fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
         Box::pin(async {
-            let raw = fs::read_to_string("/proc/loadavg").context("read /proc/loadavg")?;
+            let raw = tokio::fs::read_to_string("/proc/loadavg")
+                .await
+                .context("read /proc/loadavg")?;
             let (load1, load5, load15) = parse_loadavg(&raw)?;
             Ok(ProbeOutput::Cpu(HeartbeatCpu {
                 load1,
@@ -518,7 +520,9 @@ impl HeartbeatProbe for LinuxMemoryProbe {
 
     fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
         Box::pin(async {
-            let raw = fs::read_to_string("/proc/meminfo").context("read /proc/meminfo")?;
+            let raw = tokio::fs::read_to_string("/proc/meminfo")
+                .await
+                .context("read /proc/meminfo")?;
             Ok(ProbeOutput::Memory(parse_meminfo(&raw)?))
         })
     }
@@ -563,7 +567,9 @@ impl HeartbeatProbe for LinuxDiskIoProbe {
     fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
         Box::pin(async move {
             let now = Instant::now();
-            let raw = fs::read_to_string("/proc/diskstats").context("read /proc/diskstats")?;
+            let raw = tokio::fs::read_to_string("/proc/diskstats")
+                .await
+                .context("read /proc/diskstats")?;
             let Some((read_bytes, write_bytes)) = parse_diskstats_device(&raw, &self.device) else {
                 bail!("device {} not found in /proc/diskstats", self.device);
             };
@@ -595,7 +601,9 @@ impl HeartbeatProbe for LinuxNetworkProbe {
     fn collect(&self) -> Pin<Box<dyn Future<Output = Result<ProbeOutput>> + Send + '_>> {
         Box::pin(async move {
             let now = Instant::now();
-            let raw = fs::read_to_string("/proc/net/dev").context("read /proc/net/dev")?;
+            let raw = tokio::fs::read_to_string("/proc/net/dev")
+                .await
+                .context("read /proc/net/dev")?;
             let Some(counters) = parse_network_interface(&raw, &self.interface)? else {
                 bail!("interface {} not found in /proc/net/dev", self.interface);
             };

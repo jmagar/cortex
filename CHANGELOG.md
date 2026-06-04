@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-06-04
+
+### Added
+
+- Added SSH-backed remote device inventory for concrete `~/.ssh/config` hosts,
+  collecting host OS, CPU, memory, IPs, listeners, storage, Tailscale IPs, and
+  GPU summaries without depending on external shell scripts.
+- Added SSH-backed remote Docker inventory that maps containers across reachable
+  hosts with status/health, image, ports, networks, mounts, compose/route
+  labels, domains, and environment key names without storing environment values.
+- Added server-side periodic homelab inventory refresh. `cortex serve mcp`
+  refreshes `~/.cortex/inventory` shortly after startup and every
+  `CORTEX_INVENTORY_REFRESH_INTERVAL_SECS` seconds; set the value to `0` to
+  disable background refresh.
+
 ## [1.11.0] - 2026-06-04
 
 ### Added

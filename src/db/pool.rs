@@ -24,7 +24,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 28;
+pub const KNOWN_SCHEMA_VERSION: i64 = 29;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -70,8 +70,12 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     let wal_mode = config.wal_mode;
     let manager = SqliteConnectionManager::file(&config.db_path)
         .with_init(move |conn| configure_connection_pragmas(conn, wal_mode));
+    // connection_timeout is set to 6s — slightly above the service layer's 5s
+    // DB_ACQUIRE_TIMEOUT so the semaphore fires first, giving a clean ServiceError::Busy
+    // rather than an r2d2 timeout on the rare path where background tasks exhaust the pool.
     let pool = Pool::builder()
         .max_size(config.pool_size)
+        .connection_timeout(std::time::Duration::from_secs(6))
         .thread_pool(shared_scheduled_thread_pool())
         .build(manager)?;
 
@@ -1088,6 +1092,24 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         )?;
         tx.commit()?;
         tracing::info!("Migration 28: added graph projection runtime metrics");
+    }
+
+    // Migration 29: add covering indexes for get_error_summary (group_by_app path),
+    // tail_logs severity filter, and extend the ai_session index to include timestamp
+    // so ORDER BY timestamp DESC is index-sortable without a temp b-tree.
+    if !migration_applied(&conn, 29)? {
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_logs_ai_session;
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_session
+                 ON logs(ai_tool, ai_project, ai_session_id, timestamp)
+                 WHERE ai_tool IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_logs_sev_app_hostname_time
+                 ON logs(severity, app_name, hostname, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_logs_sev_time_id
+                 ON logs(severity, timestamp, id);
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (29);",
+        )?;
+        tracing::info!("Migration 29: added covering indexes for error_summary, tail_logs, and ai_session sort");
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance

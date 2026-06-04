@@ -269,22 +269,23 @@ fn list_source_ips_from_logs(
     let offset = params.offset;
     let conn = pool.get()?;
 
-    let total = conn.query_row(
-        "SELECT COUNT(DISTINCT source_ip) FROM logs WHERE source_ip != ''",
-        [],
-        |row| row.get::<_, i64>(0),
-    )? as usize;
-
+    // Single query: the scalar subquery computes the total in one pass alongside the page data.
     let mut stmt = conn.prepare(&format!(
-        "WITH top_ips AS (
-            SELECT source_ip
+        "WITH ip_agg AS (
+            SELECT source_ip, COUNT(*) AS ip_count
             FROM logs
             WHERE source_ip != ''
             GROUP BY source_ip
-            ORDER BY COUNT(*) DESC, source_ip ASC
+         ),
+         top_ips AS (
+            SELECT source_ip
+            FROM ip_agg
+            ORDER BY ip_count DESC, source_ip ASC
             LIMIT {limit} OFFSET {offset}
          )
-         SELECT l.source_ip, l.hostname, COUNT(*), MIN(l.received_at), MAX(l.received_at)
+         SELECT l.source_ip, l.hostname, COUNT(*),
+                MIN(l.received_at), MAX(l.received_at),
+                (SELECT COUNT(*) FROM ip_agg) AS grand_total
          FROM logs l
          JOIN top_ips t ON t.source_ip = l.source_ip
          GROUP BY l.source_ip, l.hostname
@@ -297,12 +298,17 @@ fn list_source_ips_from_logs(
             row.get::<_, i64>(2)?,
             row.get::<_, String>(3)?,
             row.get::<_, String>(4)?,
+            row.get::<_, i64>(5)?,
         ))
     })?;
+    let mut total = 0usize;
 
     let mut by_ip: BTreeMap<String, SourceIpEntry> = BTreeMap::new();
     for row in rows {
-        let (ip, host, count, first, last) = row?;
+        let (ip, host, count, first, last, grand_total) = row?;
+        if total == 0 {
+            total = grand_total as usize;
+        }
         let entry = by_ip.entry(ip.clone()).or_insert_with(|| SourceIpEntry {
             source_ip: ip,
             log_count: 0,
@@ -865,7 +871,7 @@ pub fn patterns(
     top_n: u32,
 ) -> Result<(Vec<PatternEntry>, i64, bool)> {
     let conn = pool.get()?;
-    let scan_limit = scan_limit.clamp(1, 50_000);
+    let scan_limit = scan_limit.clamp(1, 10_000);
 
     let mut sql = String::from("SELECT timestamp, hostname, message FROM logs WHERE 1=1");
     let mut bindings: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -1461,18 +1467,8 @@ pub struct RangeSummary {
 
 pub fn summarize_range(pool: &DbPool, from: &str, to: &str) -> Result<RangeSummary> {
     let conn = pool.get()?;
-    let total_logs: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM logs WHERE timestamp >= ?1 AND timestamp <= ?2",
-        params![from, to],
-        |r| r.get(0),
-    )?;
-    let total_errors: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM logs
-         WHERE timestamp >= ?1 AND timestamp <= ?2
-           AND severity IN ('emerg','alert','crit','err','warning')",
-        params![from, to],
-        |r| r.get(0),
-    )?;
+    // Single-pass: GROUP BY severity gives us the full breakdown; derive totals from it
+    // rather than issuing separate COUNT(*) scans over the same timestamp partition.
     let mut sev_stmt = conn.prepare(
         "SELECT severity, COUNT(*) FROM logs
          WHERE timestamp >= ?1 AND timestamp <= ?2
@@ -1484,6 +1480,14 @@ pub fn summarize_range(pool: &DbPool, from: &str, to: &str) -> Result<RangeSumma
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    const ERROR_SEVERITIES: &[&str] = &["emerg", "alert", "crit", "err", "warning"];
+    let total_logs: i64 = by_severity.iter().map(|(_, n)| n).sum();
+    let total_errors: i64 = by_severity
+        .iter()
+        .filter(|(sev, _)| ERROR_SEVERITIES.iter().any(|e| e.eq_ignore_ascii_case(sev)))
+        .map(|(_, n)| n)
+        .sum();
 
     let mut host_stmt = conn.prepare(
         "SELECT hostname, COUNT(*) FROM logs

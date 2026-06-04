@@ -1,12 +1,16 @@
-use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
+
+use tokio::sync::Semaphore;
 
 use crate::inventory::collectors::CollectorOutput;
 use crate::inventory::limits::MAX_RAW_ARTIFACT_BYTES;
-use crate::inventory::process::{run_command, CommandOutput};
 use crate::inventory::raw_configs::{collect_compose_body, collect_proxy_body};
+use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, run_ssh, ssh_config_buf};
 use crate::inventory::storage::InventoryPaths;
+
+const MAX_CONCURRENT_SSH: usize = 8;
 
 pub async fn collect(
     ssh_config: Option<&Path>,
@@ -15,21 +19,20 @@ pub async fn collect(
     run_id: &str,
     timeout: Duration,
 ) -> CollectorOutput {
-    let hosts = if configured_hosts.is_empty() {
-        ssh_config
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .map(|body| parse_ssh_hosts(&body))
-            .unwrap_or_default()
-    } else {
-        configured_hosts.to_vec()
-    };
-    let ssh_config = ssh_config.map(Path::to_path_buf);
+    let hosts = resolve_ssh_hosts(ssh_config, configured_hosts);
+    let ssh_config = ssh_config_buf(ssh_config);
+    let limiter = Arc::new(Semaphore::new(MAX_CONCURRENT_SSH));
     let mut handles = Vec::new();
     for host in hosts {
         let paths = paths.clone();
         let run_id = run_id.to_string();
         let ssh_config = ssh_config.clone();
+        let permit = Arc::clone(&limiter)
+            .acquire_owned()
+            .await
+            .expect("SSH semaphore closed");
         handles.push(tokio::spawn(async move {
+            let _permit = permit;
             collect_host(host, ssh_config, paths, run_id, timeout).await
         }));
     }
@@ -155,33 +158,6 @@ async fn remote_records(
     }
 }
 
-async fn run_ssh(
-    ssh_config: Option<&Path>,
-    host: &str,
-    remote_command: &str,
-    timeout: Duration,
-) -> Result<CommandOutput> {
-    let mut args = Vec::new();
-    if let Some(config) = ssh_config {
-        args.push("-F".to_string());
-        args.push(config.display().to_string());
-    }
-    args.extend([
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        "-o".to_string(),
-        "ConnectTimeout=4".to_string(),
-        "-o".to_string(),
-        "ServerAliveInterval=3".to_string(),
-        "-o".to_string(),
-        "ServerAliveCountMax=1".to_string(),
-        host.to_string(),
-        remote_command.to_string(),
-    ]);
-    let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-    run_command("ssh", &refs, timeout).await
-}
-
 fn compose_batch_command() -> String {
     batch_command("for d in \"$HOME/compose\" \"$HOME/.cortex/compose\" \"$HOME/.axon/compose\" \"$HOME/workspace\" /mnt/appdata /mnt/cache/appdata /mnt/user/appdata /opt /srv; do [ -d \"$d\" ] && find \"$d\" -maxdepth 4 -type f \\( -name docker-compose.yml -o -name docker-compose.yaml -o -name compose.yml -o -name compose.yaml \\) -print 2>/dev/null; done | sort -u | head -200")
 }
@@ -206,33 +182,6 @@ fn parse_records(stdout: &str) -> Vec<(String, String)> {
             Some((path.to_string(), body.trim_end_matches('\n').to_string()))
         })
         .collect()
-}
-
-fn parse_ssh_hosts(body: &str) -> Vec<String> {
-    let mut hosts = Vec::new();
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') {
-            continue;
-        }
-        let Some(rest) = trimmed
-            .strip_prefix("Host ")
-            .or_else(|| trimmed.strip_prefix("host "))
-        else {
-            continue;
-        };
-        for host in rest.split_whitespace() {
-            if host.contains('*')
-                || host.contains('?')
-                || host.eq_ignore_ascii_case("github.com")
-                || hosts.iter().any(|existing| existing == host)
-            {
-                continue;
-            }
-            hosts.push(host.to_string());
-        }
-    }
-    hosts
 }
 
 fn merge_output(out: &mut CollectorOutput, remote: CollectorOutput) {

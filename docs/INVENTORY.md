@@ -137,10 +137,26 @@ methods as the MCP actions.
 | `CORTEX_INVENTORY_SSH_CONFIG` | no | `~/.ssh/config` | no |
 | `CORTEX_INVENTORY_SSH_HOSTS` | no | all concrete `Host` aliases in SSH config except wildcard patterns and `github.com` | no |
 | `CORTEX_INVENTORY_PROJECT_ROOTS` | no | `~/workspace` | no |
+| `CORTEX_INVENTORY_REFRESH_INTERVAL_SECS` | no | `300` (`0` disables server-side periodic refresh) | no |
 | `CORTEX_UNRAID_URL` | no | (none) | no |
 | `CORTEX_UNRAID_API_KEY` | no | (none) | yes |
 | `CORTEX_UNIFI_URL` | no | (none) | no |
 | `CORTEX_UNIFI_API_KEY` | no | (none) | yes |
+
+## Homelab inventory refresh
+
+`cortex inventory refresh` writes the private cache consumed by MCP
+`action=map` under `~/.cortex/inventory`. The server also refreshes that cache
+automatically: one refresh runs shortly after startup, then every
+`CORTEX_INVENTORY_REFRESH_INTERVAL_SECS` seconds. Set the interval to `0` to
+disable background refresh.
+
+Remote collection is SSH-backed and uses concrete aliases from `~/.ssh/config`
+unless `CORTEX_INVENTORY_SSH_HOSTS` is set. It collects host facts, listener
+ports, storage summaries, Compose YAML artifacts, reverse proxy conf artifacts,
+and compact Docker inspect data including container status/health, image,
+published ports, networks, mounts, compose/route labels, and environment key
+names only. It does not store environment values.
 
 ## Plugin surfaces
 

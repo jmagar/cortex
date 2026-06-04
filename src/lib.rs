@@ -149,7 +149,7 @@ pub mod testing {
             server_name: "cortex".into(),
             no_auth: false,
             trusted_gateway_no_auth: false,
-            api_token: token,
+            api_token: crate::config::Secret(token),
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
             auth: crate::config::AuthConfig {

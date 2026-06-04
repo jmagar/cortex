@@ -747,13 +747,10 @@ pub fn refresh_ai_session_rollup(pool: &DbPool) -> Result<usize> {
          FROM _ai_rollup_staging",
         [],
     )?;
-    let row_count: i64 =
-        tx.query_row("SELECT COUNT(*) FROM ai_session_rollup", [], |r| r.get(0))?;
-    // The swap MUST be faithful: the rollup now holds exactly what we staged.
-    debug_assert_eq!(
-        row_count, staged,
-        "swap row count must equal staged row count"
-    );
+    // The staged count is already known from Phase 1 — use it directly rather than
+    // running a post-INSERT COUNT(*) inside the IMMEDIATE transaction, which
+    // unnecessarily extends write-lock hold time.
+    let row_count = staged;
     tx.execute(
         "UPDATE ai_session_rollup_meta
             SET refreshed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
@@ -889,15 +886,23 @@ pub fn refresh_timeline_rollup(pool: &DbPool) -> Result<usize> {
 /// Returns the number of rollup rows deleted.
 pub fn prune_timeline_rollup(pool: &DbPool) -> Result<usize> {
     let conn = pool.get()?;
-    let oldest_bucket: Option<String> = conn.query_row(
-        &format!("SELECT strftime('{TIMELINE_HOUR_FMT}', MIN(timestamp)) FROM logs"),
-        [],
-        |r| r.get::<_, Option<String>>(0),
-    )?;
-    let Some(oldest_bucket) = oldest_bucket else {
+    // Fetch MIN(timestamp) as a plain string and apply strftime formatting in Rust
+    // so SQLite can use the B-tree MIN optimization (a single leaf seek) rather than
+    // scanning the full index when strftime() wraps the MIN expression.
+    let oldest_ts: Option<String> = conn.query_row("SELECT MIN(timestamp) FROM logs", [], |r| {
+        r.get::<_, Option<String>>(0)
+    })?;
+    let Some(oldest_ts) = oldest_ts else {
         // No logs at all — clear the whole rollup so it can't ghost.
         let n = conn.execute("DELETE FROM timeline_hourly", [])?;
         return Ok(n);
+    };
+    // Truncate to the hour bucket format used by the rollup (e.g. "2024-01-15T14:00:00Z").
+    // Timestamps are RFC 3339 / ISO 8601 strings with at least 13 chars ("YYYY-MM-DDTHH").
+    let oldest_bucket = if oldest_ts.len() >= 13 {
+        format!("{}:00:00Z", &oldest_ts[..13])
+    } else {
+        oldest_ts
     };
     let n = conn.execute(
         "DELETE FROM timeline_hourly WHERE bucket < ?1",
@@ -1259,6 +1264,9 @@ pub fn search_ai_abuse(pool: &DbPool, params: &AiAbuseParams) -> Result<AiAbuseR
     let before = params.before.unwrap_or(2).min(20);
     let after = params.after.unwrap_or(2).min(20);
     let terms = normalized_abuse_terms(&params.terms);
+    if terms.len() > 16 {
+        anyhow::bail!("Too many abuse terms ({}); maximum is 16", terms.len());
+    }
     const CANDIDATE_CAP: usize = 10_000;
 
     let mut sql = String::from(
@@ -1944,9 +1952,10 @@ fn normalized_abuse_terms(custom_terms: &[String]) -> Vec<String> {
 }
 
 fn abuse_fts_query(terms: &[String]) -> String {
+    // FTS5 escapes a literal " inside a phrase by doubling it: "" → match one "
     terms
         .iter()
-        .map(|term| format!("\"{term}\""))
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
         .collect::<Vec<_>>()
         .join(" OR ")
 }
