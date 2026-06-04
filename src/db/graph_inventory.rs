@@ -121,7 +121,7 @@ pub fn project_inventory(
                 graph::SOURCE_KIND_APP_INVENTORY,
                 &service.id,
                 &service.provenance.collected_at,
-                trust(&service.trust_level),
+                graph::TRUST_INFERRED,
                 0.85,
                 &format!("{} observed on {}", service.name, host.key),
             )?;

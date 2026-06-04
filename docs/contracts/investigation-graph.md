@@ -428,7 +428,7 @@ Fields:
 
 | Relationship | Reason Code | Trust | Confidence | Evidence Kind |
 | --- | --- | --- | --- | --- |
-| `service runs_on host` | `inventory_service` | source trust | `0.85` | `app_inventory` |
+| `service runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
 | `compose_project defines_service service` | `compose_config` | `verified` | `0.90` | `app_inventory` |
 | `compose_project has_artifact config_artifact` | `config_artifact` | `verified` | `0.95` | `app_inventory` |
 | `reverse_proxy exposes_domain domain` | `reverse_proxy_config` | `verified` | `0.95` | `app_inventory` |

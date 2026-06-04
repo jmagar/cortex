@@ -290,6 +290,14 @@ pub(super) fn update_projection_meta(
             SET entity_count = ?1,
                 relationship_count = ?2,
                 evidence_count = ?3,
+                is_degraded = CASE
+                    WHEN projection_status = 'failed' THEN is_degraded
+                    ELSE 0
+                END,
+                last_error = CASE
+                    WHEN projection_status = 'failed' THEN last_error
+                    ELSE NULL
+                END,
                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
           WHERE id = 1",
         params![

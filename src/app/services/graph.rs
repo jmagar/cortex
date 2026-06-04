@@ -440,7 +440,6 @@ impl CortexService {
                                 "graph rebuild failed to mark inventory projection degraded"
                             );
                         }
-                        return Err(error);
                     }
                     if let db::graph::GraphRebuildOutcome::Rebuilt(stats) = &mut outcome {
                         let final_status = self
@@ -451,7 +450,7 @@ impl CortexService {
                         stats.evidence_count = final_status.evidence_count;
                     }
                 }
-                Err(error) if !cache_path.exists() => {
+                Err(error) if crate::inventory::is_not_found_error(&error) => {
                     tracing::debug!(
                         %error,
                         path = %cache_path.display(),
@@ -464,7 +463,21 @@ impl CortexService {
                         path = %cache_path.display(),
                         "graph rebuild failed to read inventory cache"
                     );
-                    return Err(error.into());
+                    let error_message = error.to_string();
+                    if let Err(mark_error) = self
+                        .run_db("graph.inventory_cache_failed", move |pool| {
+                            db::graph_inventory::mark_inventory_projection_failed(
+                                pool,
+                                &error_message,
+                            )
+                        })
+                        .await
+                    {
+                        tracing::warn!(
+                            %mark_error,
+                            "graph rebuild failed to mark inventory projection degraded"
+                        );
+                    }
                 }
             }
         }

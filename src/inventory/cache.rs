@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use std::io;
 
 use crate::inventory::config::InventoryConfig;
 use crate::inventory::schema::{CollectionState, HomelabInventory};
@@ -33,6 +34,13 @@ struct InventoryFreshnessMetadata {
 pub fn read_inventory_cache(config: &InventoryConfig) -> Result<HomelabInventory> {
     let paths = InventoryPaths::new(config.root.clone());
     read_json(&paths.normalized_json)
+}
+
+pub fn is_not_found_error(error: &anyhow::Error) -> bool {
+    error
+        .root_cause()
+        .downcast_ref::<io::Error>()
+        .is_some_and(|io_error| io_error.kind() == io::ErrorKind::NotFound)
 }
 
 pub fn inventory_status(config: &InventoryConfig) -> InventoryCacheStatus {

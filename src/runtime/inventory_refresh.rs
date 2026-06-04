@@ -102,10 +102,25 @@ async fn refresh_and_project(pool: &DbPool, maintenance_limiter: &Arc<Semaphore>
                     "inventory_refresh: cache refresh and graph projection complete"
                 ),
                 Err(error) => {
-                    let _ = crate::db::graph_inventory::mark_inventory_projection_failed(
-                        &projection_pool,
-                        &error.to_string(),
-                    );
+                    let projection_error = error.to_string();
+                    let mark_result = tokio::task::spawn_blocking(move || {
+                        crate::db::graph_inventory::mark_inventory_projection_failed(
+                            &projection_pool,
+                            &projection_error,
+                        )
+                    })
+                    .await
+                    .unwrap_or_else(|join_error| {
+                        Err(anyhow::Error::new(join_error)
+                            .context("join projection failure marker task"))
+                    });
+                    if let Err(mark_error) = mark_result {
+                        tracing::error!(
+                            projection_error = %error,
+                            mark_error = %mark_error,
+                            "inventory_refresh: failed to persist projection degraded state"
+                        );
+                    }
                     tracing::warn!(
                         %error,
                         status = %report.status,

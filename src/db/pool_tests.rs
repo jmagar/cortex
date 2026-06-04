@@ -685,14 +685,22 @@ fn migration_30_widens_old_graph_constraints_and_preserves_rows() {
         [],
     )
     .unwrap();
+    let relationship_id = conn
+        .query_row(
+            "SELECT id FROM graph_relationships
+              WHERE relationship_key = 'source_ip:10.0.0.1:514->host:claimed-host'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
     conn.execute(
         "INSERT INTO graph_relationship_evidence
             (relationship_id, evidence_key, source_kind, source_id, observed_at,
              reason_code, trust_level, safe_excerpt, evidence_count)
-         VALUES (1, 'inventory:route', 'app_inventory', 'proxy:squirts',
+         VALUES (?1, 'inventory:route', 'app_inventory', 'proxy:squirts',
              '2026-01-01T00:00:00Z', 'reverse_proxy_config',
              'verified', 'proxy route', 1)",
-        [],
+        rusqlite::params![relationship_id],
     )
     .unwrap();
 }

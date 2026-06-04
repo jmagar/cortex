@@ -21,6 +21,6 @@ pub mod tailscale;
 pub mod unifi;
 pub mod unraid;
 
-pub use cache::{inventory_status, read_inventory_cache, InventoryCacheStatus};
+pub use cache::{inventory_status, is_not_found_error, read_inventory_cache, InventoryCacheStatus};
 pub use config::InventoryConfig;
 pub use orchestrator::{refresh_inventory, InventoryRefreshReport};

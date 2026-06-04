@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-06-04
+
+### Fixed
+
+- Tightened inventory graph projection failure handling so optional inventory
+  cache failures report degraded metadata without aborting explicit graph
+  rebuilds, successful inventory projection clears only stale inventory
+  degradation, and cache misses are distinguished from unreadable cache files.
+
 ## [1.13.1] - 2026-06-04
 
 ### Fixed
@@ -2036,7 +2045,8 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.13.1...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.13.2...HEAD
+[1.13.2]: https://github.com/jmagar/cortex/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/jmagar/cortex/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/jmagar/cortex/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/jmagar/cortex/compare/v1.11.0...v1.12.0
