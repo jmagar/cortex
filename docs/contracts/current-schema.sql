@@ -86,8 +86,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 
 -- ---------------------------------------------------------------------------
--- 2.1.1 `graph_*` — derived investigation graph projection (migration 27)
--- Source: init_pool() migration 27.
+-- 2.1.1 `graph_*` — derived investigation graph projection (migrations 27, 30)
+-- Source: init_pool() migration 27 plus migration 30 vocabulary widening.
 --
 -- Invariants:
 --   - Rebuildable projection only; raw source tables remain authoritative.
@@ -102,7 +102,8 @@ CREATE TABLE IF NOT EXISTS graph_entities (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_type   TEXT NOT NULL CHECK (entity_type IN (
         'host', 'container', 'service', 'app', 'source_ip',
-        'ai_project', 'ai_session', 'error_signature'
+        'ai_project', 'ai_session', 'error_signature', 'compose_project',
+        'reverse_proxy', 'domain', 'network', 'storage', 'config_artifact'
     )),
     canonical_key TEXT NOT NULL,
     display_label TEXT NOT NULL,
@@ -147,12 +148,17 @@ CREATE TABLE IF NOT EXISTS graph_relationships (
     src_entity_id     INTEGER NOT NULL,
     dst_entity_id     INTEGER NOT NULL,
     relationship_type TEXT NOT NULL CHECK (relationship_type IN (
-        'observed_as', 'runs_on', 'emitted_by', 'worked_on', 'matches_signature'
+        'observed_as', 'runs_on', 'emitted_by', 'worked_on',
+        'matches_signature', 'defines_service', 'routes_to',
+        'exposes_domain', 'attached_to', 'mounts', 'backed_by',
+        'has_artifact'
     )),
     reason_code       TEXT NOT NULL CHECK (reason_code IN (
         'syslog_claimed_hostname', 'log_app_name', 'docker_container_id',
         'docker_service_label', 'ai_session_project', 'heartbeat_host_state',
-        'error_signature_match'
+        'error_signature_match', 'inventory_node', 'inventory_service',
+        'compose_config', 'reverse_proxy_config', 'docker_network',
+        'storage_probe', 'config_artifact'
     )),
     trust_level       TEXT NOT NULL CHECK (trust_level IN (
         'verified', 'claimed', 'inferred', 'correlated'
@@ -186,7 +192,9 @@ CREATE TABLE IF NOT EXISTS graph_relationship_evidence (
     reason_code           TEXT NOT NULL CHECK (reason_code IN (
         'syslog_claimed_hostname', 'log_app_name', 'docker_container_id',
         'docker_service_label', 'ai_session_project', 'heartbeat_host_state',
-        'error_signature_match'
+        'error_signature_match', 'inventory_node', 'inventory_service',
+        'compose_config', 'reverse_proxy_config', 'docker_network',
+        'storage_probe', 'config_artifact'
     )),
     reason_text           TEXT,
     confidence_delta      REAL NOT NULL DEFAULT 0.0 CHECK (confidence_delta >= -1.0 AND confidence_delta <= 1.0),

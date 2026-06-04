@@ -98,6 +98,9 @@ Required argument: `action = "hosts"`
 Return a bounded homelab infrastructure snapshot from `~/.cortex/inventory`
 plus live Cortex host/heartbeat overlay. The action is read-only and never
 triggers refresh; raw Compose/proxy artifact bodies are omitted by default.
+Server-side inventory refresh keeps the cache current on a 5-minute baseline
+cadence, reacts to local Compose/proxy config changes, can opt into remote
+Docker event streams over SSH, and projects topology evidence into the graph.
 
 Required argument: `action = "map"`
 

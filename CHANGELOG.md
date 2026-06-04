@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-06-04
+
+### Fixed
+
+- Tightened inventory graph projection failure handling so optional inventory
+  cache failures report degraded metadata without aborting explicit graph
+  rebuilds, successful inventory projection clears only stale inventory
+  degradation, and cache misses are distinguished from unreadable cache files.
+
+## [1.13.1] - 2026-06-04
+
+### Fixed
+
+- Hardened inventory graph projection so inventory refreshes no longer mark the
+  full graph projection lifecycle as ready or overwrite log-derived entity
+  ownership metadata.
+- Scoped Compose project and Docker network graph keys by source host, avoided
+  ambiguous bare service-name links, and kept raw config/cache paths out of
+  graph labels, aliases, source ids, and evidence excerpts.
+- Made remote Docker event streams opt-in and serialized background inventory
+  projection through the maintenance limiter.
+
+## [1.13.0] - 2026-06-04
+
+### Added
+
+- Projected the cached homelab inventory into the investigation graph with
+  evidence-backed topology nodes for Compose projects, reverse proxies, domains,
+  networks, storage, and redacted config artifacts.
+- Added server-side inventory refresh triggers from local Compose/proxy config
+  file watchers, plus opt-in remote Docker `events` streams over SSH, while
+  preserving the 5-minute polling baseline.
+
+### Changed
+
+- Expanded graph vocabulary and schema constraints for inventory topology
+  relationships such as `defines_service`, `routes_to`, `exposes_domain`,
+  `attached_to`, `mounts`, `backed_by`, and `has_artifact`.
+- Documented optional inventory collector env vars, realtime refresh toggles,
+  and media API collector configuration in the env example and inventory docs.
+
 ## [1.12.0] - 2026-06-04
 
 ### Added
@@ -2004,7 +2045,12 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.10.1...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.13.2...HEAD
+[1.13.2]: https://github.com/jmagar/cortex/compare/v1.13.1...v1.13.2
+[1.13.1]: https://github.com/jmagar/cortex/compare/v1.13.0...v1.13.1
+[1.13.0]: https://github.com/jmagar/cortex/compare/v1.12.0...v1.13.0
+[1.12.0]: https://github.com/jmagar/cortex/compare/v1.11.0...v1.12.0
+[1.11.0]: https://github.com/jmagar/cortex/compare/v1.10.1...v1.11.0
 [1.10.1]: https://github.com/jmagar/cortex/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/jmagar/cortex/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/jmagar/cortex/compare/v1.9.0...v1.9.1

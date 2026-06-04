@@ -98,6 +98,12 @@ opening SQLite. The MCP `map` action is read-only: it reads the normalized cache
 and overlays bounded live Cortex host/heartbeat data, but never triggers refresh
 or returns raw artifact bodies.
 
+When the server is running, inventory refresh also projects topology evidence
+into the investigation graph. The baseline refresh interval is 5 minutes, with
+local Compose/proxy config watchers as lower-latency refresh triggers. Remote
+Docker `events` streams over SSH are opt-in via
+`CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS=true`.
+
 On first run, before `normalized/homelab.json` exists, `map` and
 `cortex inventory status --json` report `cache_status: "missing"`. Run
 `cortex inventory refresh --json` to seed `~/.cortex/inventory` and clear that

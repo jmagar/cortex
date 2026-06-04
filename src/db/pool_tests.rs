@@ -360,6 +360,22 @@ fn graph_schema_enforces_vocabulary_and_dedup_keys() {
         [],
     )
     .unwrap();
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES ('reverse_proxy', 'proxy:example.tootie.tv', 'example.tootie.tv',
+             'app_inventory', 'proxy:example.tootie.tv', 'verified')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES ('domain', 'example.tootie.tv', 'example.tootie.tv',
+             'app_inventory', 'example.tootie.tv', 'verified')",
+        [],
+    )
+    .unwrap();
     let source_id: i64 = conn
         .query_row(
             "SELECT id FROM graph_entities WHERE entity_type = 'source_ip'",
@@ -370,6 +386,20 @@ fn graph_schema_enforces_vocabulary_and_dedup_keys() {
     let host_id: i64 = conn
         .query_row(
             "SELECT id FROM graph_entities WHERE entity_type = 'host'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let proxy_id: i64 = conn
+        .query_row(
+            "SELECT id FROM graph_entities WHERE entity_type = 'reverse_proxy'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let domain_id: i64 = conn
+        .query_row(
+            "SELECT id FROM graph_entities WHERE entity_type = 'domain'",
             [],
             |row| row.get(0),
         )
@@ -399,6 +429,16 @@ fn graph_schema_enforces_vocabulary_and_dedup_keys() {
         rusqlite::params![source_id, host_id],
     )
     .unwrap();
+    conn.execute(
+        "INSERT INTO graph_relationships
+            (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+             reason_code, trust_level, confidence, evidence_count)
+         VALUES ('reverse_proxy:example.tootie.tv->domain:example.tootie.tv',
+             ?1, ?2, 'exposes_domain', 'reverse_proxy_config',
+             'verified', 0.90, 1)",
+        rusqlite::params![proxy_id, domain_id],
+    )
+    .unwrap();
     let duplicate_rel = conn.execute(
         "INSERT INTO graph_relationships
             (relationship_key, src_entity_id, dst_entity_id, relationship_type,
@@ -410,7 +450,12 @@ fn graph_schema_enforces_vocabulary_and_dedup_keys() {
     assert!(duplicate_rel.is_err(), "relationship key must dedupe");
 
     let rel_id: i64 = conn
-        .query_row("SELECT id FROM graph_relationships", [], |row| row.get(0))
+        .query_row(
+            "SELECT id FROM graph_relationships
+             WHERE relationship_key = 'source_ip:10.0.0.1:514->host:claimed-host'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     conn.execute(
         "INSERT INTO graph_relationship_evidence
@@ -420,6 +465,25 @@ fn graph_schema_enforces_vocabulary_and_dedup_keys() {
              '2026-01-01T00:00:00Z', 'syslog_claimed_hostname',
              'claimed', 'claimed-host', 3)",
         [rel_id],
+    )
+    .unwrap();
+    let proxy_rel_id: i64 = conn
+        .query_row(
+            "SELECT id FROM graph_relationships
+             WHERE relationship_key = 'reverse_proxy:example.tootie.tv->domain:example.tootie.tv'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    conn.execute(
+        "INSERT INTO graph_relationship_evidence
+            (relationship_id, evidence_key, source_kind, source_id, observed_at,
+             reason_code, trust_level, safe_excerpt, evidence_count)
+         VALUES (?1, 'proxy:example.tootie.tv:route',
+             'app_inventory', 'proxy:example.tootie.tv',
+             '2026-01-01T00:00:00Z', 'reverse_proxy_config',
+             'verified', 'example.tootie.tv routes through proxy config', 1)",
+        [proxy_rel_id],
     )
     .unwrap();
     let duplicate_evidence = conn.execute(
@@ -448,6 +512,197 @@ fn graph_schema_enforces_vocabulary_and_dedup_keys() {
         bad_same_window.is_err(),
         "same_window must not be a persisted v1 relationship type"
     );
+}
+
+#[test]
+fn migration_30_widens_old_graph_constraints_and_preserves_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("graph-migration-30.db");
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (
+                 version INTEGER PRIMARY KEY,
+                 applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             );
+             WITH RECURSIVE versions(version) AS (
+                 SELECT 1 UNION ALL SELECT version + 1 FROM versions WHERE version < 29
+             )
+             INSERT INTO schema_migrations(version) SELECT version FROM versions;
+             CREATE TABLE maintenance_jobs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 kind TEXT NOT NULL,
+                 status TEXT NOT NULL,
+                 started_at TEXT NOT NULL,
+                 finished_at TEXT,
+                 result_json TEXT
+             );
+             CREATE TABLE graph_entities (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 entity_type TEXT NOT NULL CHECK (entity_type IN (
+                     'host', 'container', 'service', 'app', 'source_ip',
+                     'ai_project', 'ai_session', 'error_signature'
+                 )),
+                 canonical_key TEXT NOT NULL,
+                 display_label TEXT NOT NULL,
+                 source_kind TEXT NOT NULL DEFAULT '',
+                 source_id TEXT NOT NULL DEFAULT '',
+                 trust_level TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated'
+                 )),
+                 first_seen_at TEXT,
+                 last_seen_at TEXT,
+                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(entity_type, canonical_key)
+             );
+             CREATE TABLE graph_entity_aliases (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 entity_id INTEGER NOT NULL,
+                 alias_type TEXT NOT NULL,
+                 alias_key TEXT NOT NULL,
+                 alias_value TEXT NOT NULL,
+                 source_kind TEXT NOT NULL DEFAULT '',
+                 trust_level TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated'
+                 )),
+                 first_seen_at TEXT,
+                 last_seen_at TEXT,
+                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(entity_id, alias_type, alias_key, source_kind)
+             );
+             CREATE TABLE graph_relationships (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 relationship_key TEXT NOT NULL UNIQUE,
+                 src_entity_id INTEGER NOT NULL,
+                 dst_entity_id INTEGER NOT NULL,
+                 relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+                     'observed_as', 'runs_on', 'emitted_by', 'worked_on',
+                     'matches_signature'
+                 )),
+                 reason_code TEXT NOT NULL CHECK (reason_code IN (
+                     'syslog_claimed_hostname', 'log_app_name',
+                     'docker_container_id', 'docker_service_label',
+                     'ai_session_project', 'heartbeat_host_state',
+                     'error_signature_match'
+                 )),
+                 trust_level TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated'
+                 )),
+                 confidence REAL NOT NULL DEFAULT 0.0 CHECK (confidence >= 0.0 AND confidence <= 1.0),
+                 evidence_count INTEGER NOT NULL DEFAULT 0 CHECK (evidence_count >= 0),
+                 first_seen_at TEXT,
+                 last_seen_at TEXT,
+                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(src_entity_id, dst_entity_id, relationship_type, relationship_key)
+             );
+             CREATE TABLE graph_relationship_evidence (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 relationship_id INTEGER NOT NULL,
+                 evidence_key TEXT NOT NULL,
+                 source_kind TEXT NOT NULL CHECK (source_kind IN (
+                     'log', 'heartbeat', 'ai_session_rollup', 'error_signature'
+                 )),
+                 source_id TEXT NOT NULL DEFAULT '',
+                 source_log_id INTEGER,
+                 source_heartbeat_id INTEGER,
+                 source_signature_hash TEXT,
+                 observed_at TEXT NOT NULL,
+                 reason_code TEXT NOT NULL CHECK (reason_code IN (
+                     'syslog_claimed_hostname', 'log_app_name',
+                     'docker_container_id', 'docker_service_label',
+                     'ai_session_project', 'heartbeat_host_state',
+                     'error_signature_match'
+                 )),
+                 reason_text TEXT,
+                 confidence_delta REAL NOT NULL DEFAULT 0.0 CHECK (confidence_delta >= 0.0 AND confidence_delta <= 1.0),
+                 trust_level TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated'
+                 )),
+                 safe_excerpt TEXT,
+                 metadata_path TEXT,
+                 evidence_count INTEGER NOT NULL DEFAULT 1 CHECK (evidence_count >= 1),
+                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(relationship_id, evidence_key)
+             );
+             CREATE TABLE graph_projection_meta (
+                 id INTEGER PRIMARY KEY CHECK (id = 1),
+                 projection_status TEXT NOT NULL DEFAULT 'pending',
+                 last_started_at TEXT,
+                 last_completed_at TEXT,
+                 source_watermark TEXT NOT NULL DEFAULT '',
+                 source_row_count INTEGER NOT NULL DEFAULT 0 CHECK (source_row_count >= 0),
+                 entity_count INTEGER NOT NULL DEFAULT 0 CHECK (entity_count >= 0),
+                 relationship_count INTEGER NOT NULL DEFAULT 0 CHECK (relationship_count >= 0),
+                 evidence_count INTEGER NOT NULL DEFAULT 0 CHECK (evidence_count >= 0),
+                 is_degraded INTEGER NOT NULL DEFAULT 0 CHECK (is_degraded IN (0, 1)),
+                 last_error TEXT,
+                 last_runtime_ms INTEGER NOT NULL DEFAULT 0 CHECK (last_runtime_ms >= 0),
+                 last_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK (last_chunk_count >= 0),
+                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             );
+             INSERT INTO graph_projection_meta(id) VALUES (1);
+             INSERT INTO graph_entities
+                 (id, entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+             VALUES
+                 (1, 'source_ip', '10.0.0.1:514', '10.0.0.1:514', 'log', '1', 'verified'),
+                 (2, 'host', 'claimed-host', 'claimed-host', 'log', '1', 'claimed');
+             INSERT INTO graph_entity_aliases
+                 (id, entity_id, alias_type, alias_key, alias_value, source_kind, trust_level)
+             VALUES (1, 2, 'hostname', 'claimed-host', 'claimed-host', 'log', 'claimed');
+             INSERT INTO graph_relationships
+                 (id, relationship_key, src_entity_id, dst_entity_id, relationship_type,
+                  reason_code, trust_level, confidence, evidence_count)
+             VALUES (1, 'source_ip:10.0.0.1:514->host:claimed-host', 1, 2,
+                 'observed_as', 'syslog_claimed_hostname', 'claimed', 0.60, 1);
+             INSERT INTO graph_relationship_evidence
+                 (id, relationship_id, evidence_key, source_kind, source_id, observed_at,
+                  reason_code, trust_level, safe_excerpt, evidence_count)
+             VALUES (1, 1, 'log:1:hostname', 'log', '1', '2026-01-01T00:00:00Z',
+                 'syslog_claimed_hostname', 'claimed', 'claimed-host', 1);",
+        )
+        .unwrap();
+    }
+
+    let pool = init_pool(&test_storage_config(db_path)).unwrap();
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM graph_relationship_evidence WHERE evidence_key = 'log:1:hostname'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES ('compose_project', 'squirts:edge', 'edge',
+             'app_inventory', 'compose:squirts', 'verified')",
+        [],
+    )
+    .unwrap();
+    let relationship_id = conn
+        .query_row(
+            "SELECT id FROM graph_relationships
+              WHERE relationship_key = 'source_ip:10.0.0.1:514->host:claimed-host'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    conn.execute(
+        "INSERT INTO graph_relationship_evidence
+            (relationship_id, evidence_key, source_kind, source_id, observed_at,
+             reason_code, trust_level, safe_excerpt, evidence_count)
+         VALUES (?1, 'inventory:route', 'app_inventory', 'proxy:squirts',
+             '2026-01-01T00:00:00Z', 'reverse_proxy_config',
+             'verified', 'proxy route', 1)",
+        rusqlite::params![relationship_id],
+    )
+    .unwrap();
 }
 
 #[test]

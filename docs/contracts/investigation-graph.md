@@ -104,6 +104,12 @@ source_ip
 ai_project
 ai_session
 error_signature
+compose_project
+reverse_proxy
+domain
+network
+storage
+config_artifact
 ```
 
 Unknown entity types MUST be rejected on public lookup surfaces.
@@ -118,6 +124,13 @@ runs_on
 emitted_by
 worked_on
 matches_signature
+defines_service
+routes_to
+exposes_domain
+attached_to
+mounts
+backed_by
+has_artifact
 ```
 
 ### 4.3 Trust Levels
@@ -160,6 +173,8 @@ The current v1 projection emits evidence rows for:
 ```text
 log
 error_signature
+source_inventory
+app_inventory
 ```
 
 Heartbeat currently contributes host entities and aliases, not relationship
@@ -177,10 +192,20 @@ docker_service_label
 ai_session_project
 heartbeat_host_state
 error_signature_match
+inventory_node
+inventory_service
+compose_config
+reverse_proxy_config
+docker_network
+storage_probe
+config_artifact
 ```
 
 `heartbeat_host_state` is reserved for heartbeat-derived relationship evidence.
 The current v1 implementation uses heartbeat rows for host identity/aliases.
+Inventory projections use `source_inventory` and `app_inventory` evidence to
+link hosts, services, Compose projects, reverse proxy routes, domains, Docker
+networks, storage mounts, and redacted config artifacts.
 
 ## 5. Entity Construction Contract
 
@@ -373,6 +398,48 @@ Fields:
 | `evidence.source_kind` | `error_signature` | `error_signature` |
 | `evidence.source_signature_hash` | signature hash | signature hash |
 | `evidence.metadata_path` | `error_signatures` | `error_signatures` |
+
+### 7.7 Inventory Topology Links
+
+Input:
+
+- normalized `HomelabInventory.nodes`,
+- normalized `HomelabInventory.services`,
+- normalized `HomelabInventory.compose_projects`,
+- normalized `HomelabInventory.reverse_proxies`,
+- normalized `HomelabInventory.networks`,
+- normalized `HomelabInventory.storage`,
+- normalized redacted `HomelabInventory.artifact_refs`.
+
+Outputs:
+
+```text
+service runs_on host
+compose_project defines_service service
+compose_project has_artifact config_artifact
+reverse_proxy exposes_domain domain
+reverse_proxy routes_to service
+service attached_to network
+service mounts storage
+host backed_by storage
+```
+
+Fields:
+
+| Relationship | Reason Code | Trust | Confidence | Evidence Kind |
+| --- | --- | --- | --- | --- |
+| `service runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
+| `compose_project defines_service service` | `compose_config` | `verified` | `0.90` | `app_inventory` |
+| `compose_project has_artifact config_artifact` | `config_artifact` | `verified` | `0.95` | `app_inventory` |
+| `reverse_proxy exposes_domain domain` | `reverse_proxy_config` | `verified` | `0.95` | `app_inventory` |
+| `reverse_proxy routes_to service` | `reverse_proxy_config` | `verified` | `0.85` | `app_inventory` |
+| `service attached_to network` | `docker_network` | `verified` | `0.80` | `app_inventory` |
+| `service mounts storage` | `storage_probe` | `inferred` | `0.65` | `app_inventory` |
+| `host backed_by storage` | `storage_probe` | `verified` | `0.75` | `source_inventory` |
+
+Bare service-name matches are valid only when the service name is unique across
+the inventory snapshot. Ambiguous service names MUST be matched through a
+host-scoped key or left unlinked.
 
 ## 8. Evidence Contract
 

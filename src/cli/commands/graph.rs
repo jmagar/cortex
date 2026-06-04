@@ -18,6 +18,12 @@ const GRAPH_ENTITY_TYPES: &[&str] = &[
     "ai_project",
     "ai_session",
     "error_signature",
+    "compose_project",
+    "reverse_proxy",
+    "domain",
+    "network",
+    "storage",
+    "config_artifact",
 ];
 
 pub(crate) fn parse_entity(args: &[String]) -> Result<CliCommand> {

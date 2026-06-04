@@ -24,7 +24,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 29;
+pub const KNOWN_SCHEMA_VERSION: i64 = 30;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -933,7 +933,9 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                  id            INTEGER PRIMARY KEY AUTOINCREMENT,
                  entity_type   TEXT NOT NULL CHECK (entity_type IN (
                      'host', 'container', 'service', 'app', 'source_ip',
-                     'ai_project', 'ai_session', 'error_signature'
+                     'ai_project', 'ai_session', 'error_signature',
+                     'compose_project', 'reverse_proxy', 'domain', 'network',
+                     'storage', 'config_artifact'
                  )),
                  canonical_key TEXT NOT NULL,
                  display_label TEXT NOT NULL,
@@ -979,13 +981,18 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                  dst_entity_id     INTEGER NOT NULL,
                  relationship_type TEXT NOT NULL CHECK (relationship_type IN (
                      'observed_as', 'runs_on', 'emitted_by', 'worked_on',
-                     'matches_signature'
+                     'matches_signature', 'defines_service', 'routes_to',
+                     'exposes_domain', 'attached_to', 'mounts', 'backed_by',
+                     'has_artifact'
                  )),
                  reason_code       TEXT NOT NULL CHECK (reason_code IN (
                      'syslog_claimed_hostname', 'log_app_name',
                      'docker_container_id', 'docker_service_label',
                      'ai_session_project', 'heartbeat_host_state',
-                     'error_signature_match'
+                     'error_signature_match', 'inventory_node',
+                     'inventory_service', 'compose_config',
+                     'reverse_proxy_config', 'docker_network', 'storage_probe',
+                     'config_artifact'
                  )),
                  trust_level       TEXT NOT NULL CHECK (trust_level IN (
                      'verified', 'claimed', 'inferred', 'correlated'
@@ -1020,7 +1027,10 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                      'syslog_claimed_hostname', 'log_app_name',
                      'docker_container_id', 'docker_service_label',
                      'ai_session_project', 'heartbeat_host_state',
-                     'error_signature_match'
+                     'error_signature_match', 'inventory_node',
+                     'inventory_service', 'compose_config',
+                     'reverse_proxy_config', 'docker_network', 'storage_probe',
+                     'config_artifact'
                  )),
                  reason_text        TEXT,
                  confidence_delta   REAL NOT NULL DEFAULT 0.0 CHECK (confidence_delta >= -1.0 AND confidence_delta <= 1.0),
@@ -1110,6 +1120,162 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              INSERT OR IGNORE INTO schema_migrations (version) VALUES (29);",
         )?;
         tracing::info!("Migration 29: added covering indexes for error_summary, tail_logs, and ai_session sort");
+    }
+
+    // Migration 30: widen graph vocabulary for homelab inventory topology.
+    //
+    // SQLite CHECK constraints are part of the table definition, so adding
+    // entity/relationship/reason values requires rebuilding the constrained
+    // graph tables. The migration is a strict superset and preserves existing
+    // ids so aliases and evidence references remain valid.
+    if !migration_applied(&conn, 30)? {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+
+             CREATE TABLE graph_entities_new (
+                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                 entity_type   TEXT NOT NULL CHECK (entity_type IN (
+                     'host', 'container', 'service', 'app', 'source_ip',
+                     'ai_project', 'ai_session', 'error_signature',
+                     'compose_project', 'reverse_proxy', 'domain', 'network',
+                     'storage', 'config_artifact'
+                 )),
+                 canonical_key TEXT NOT NULL,
+                 display_label TEXT NOT NULL,
+                 source_kind   TEXT NOT NULL DEFAULT '',
+                 source_id     TEXT NOT NULL DEFAULT '',
+                 trust_level   TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated'
+                 )),
+                 first_seen_at TEXT,
+                 last_seen_at  TEXT,
+                 created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(entity_type, canonical_key)
+             );
+             INSERT INTO graph_entities_new
+                 (id, entity_type, canonical_key, display_label, source_kind,
+                  source_id, trust_level, first_seen_at, last_seen_at,
+                  created_at, updated_at)
+             SELECT id, entity_type, canonical_key, display_label, source_kind,
+                    source_id, trust_level, first_seen_at, last_seen_at,
+                    created_at, updated_at
+               FROM graph_entities;
+             DROP TABLE graph_entities;
+             ALTER TABLE graph_entities_new RENAME TO graph_entities;
+             CREATE INDEX idx_graph_entities_type_key
+                 ON graph_entities(entity_type, canonical_key);
+
+             CREATE TABLE graph_relationships_new (
+                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                 relationship_key  TEXT NOT NULL UNIQUE,
+                 src_entity_id     INTEGER NOT NULL,
+                 dst_entity_id     INTEGER NOT NULL,
+                 relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+                     'observed_as', 'runs_on', 'emitted_by', 'worked_on',
+                     'matches_signature', 'defines_service', 'routes_to',
+                     'exposes_domain', 'attached_to', 'mounts', 'backed_by',
+                     'has_artifact'
+                 )),
+                 reason_code       TEXT NOT NULL CHECK (reason_code IN (
+                     'syslog_claimed_hostname', 'log_app_name',
+                     'docker_container_id', 'docker_service_label',
+                     'ai_session_project', 'heartbeat_host_state',
+                     'error_signature_match', 'inventory_node',
+                     'inventory_service', 'compose_config',
+                     'reverse_proxy_config', 'docker_network', 'storage_probe',
+                     'config_artifact'
+                 )),
+                 trust_level       TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated'
+                 )),
+                 confidence        REAL NOT NULL DEFAULT 0.0 CHECK (confidence >= 0.0 AND confidence <= 1.0),
+                 evidence_count    INTEGER NOT NULL DEFAULT 0 CHECK (evidence_count >= 0),
+                 first_seen_at     TEXT,
+                 last_seen_at      TEXT,
+                 created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(src_entity_id, dst_entity_id, relationship_type, relationship_key)
+             );
+             INSERT INTO graph_relationships_new
+                 (id, relationship_key, src_entity_id, dst_entity_id,
+                  relationship_type, reason_code, trust_level, confidence,
+                  evidence_count, first_seen_at, last_seen_at, created_at,
+                  updated_at)
+             SELECT id, relationship_key, src_entity_id, dst_entity_id,
+                    relationship_type, reason_code, trust_level, confidence,
+                    evidence_count, first_seen_at, last_seen_at, created_at,
+                    updated_at
+               FROM graph_relationships;
+             DROP TABLE graph_relationships;
+             ALTER TABLE graph_relationships_new RENAME TO graph_relationships;
+             CREATE INDEX idx_graph_relationships_src_type_seen
+                 ON graph_relationships(src_entity_id, relationship_type, last_seen_at DESC);
+             CREATE INDEX idx_graph_relationships_dst_type_seen
+                 ON graph_relationships(dst_entity_id, relationship_type, last_seen_at DESC);
+
+             CREATE TABLE graph_relationship_evidence_new (
+                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                 relationship_id    INTEGER NOT NULL,
+                 evidence_key       TEXT NOT NULL,
+                 source_kind        TEXT NOT NULL CHECK (source_kind IN (
+                     'log', 'heartbeat', 'ai_session_rollup', 'source_inventory',
+                     'app_inventory', 'error_signature'
+                 )),
+                 source_id          TEXT NOT NULL DEFAULT '',
+                 source_log_id      INTEGER,
+                 source_heartbeat_id INTEGER,
+                 source_signature_hash TEXT,
+                 observed_at        TEXT NOT NULL,
+                 reason_code        TEXT NOT NULL CHECK (reason_code IN (
+                     'syslog_claimed_hostname', 'log_app_name',
+                     'docker_container_id', 'docker_service_label',
+                     'ai_session_project', 'heartbeat_host_state',
+                     'error_signature_match', 'inventory_node',
+                     'inventory_service', 'compose_config',
+                     'reverse_proxy_config', 'docker_network', 'storage_probe',
+                     'config_artifact'
+                 )),
+                 reason_text        TEXT,
+                 confidence_delta   REAL NOT NULL DEFAULT 0.0 CHECK (confidence_delta >= -1.0 AND confidence_delta <= 1.0),
+                 trust_level        TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated'
+                 )),
+                 safe_excerpt       TEXT CHECK (safe_excerpt IS NULL OR length(safe_excerpt) <= 512),
+                 metadata_path      TEXT,
+                 evidence_count     INTEGER NOT NULL DEFAULT 1 CHECK (evidence_count >= 1),
+                 created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(relationship_id, evidence_key)
+             );
+             INSERT INTO graph_relationship_evidence_new
+                 (id, relationship_id, evidence_key, source_kind, source_id,
+                  source_log_id, source_heartbeat_id, source_signature_hash,
+                  observed_at, reason_code, reason_text, confidence_delta,
+                  trust_level, safe_excerpt, metadata_path, evidence_count,
+                  created_at)
+             SELECT id, relationship_id, evidence_key, source_kind, source_id,
+                    source_log_id, source_heartbeat_id, source_signature_hash,
+                    observed_at, reason_code, reason_text, confidence_delta,
+                    trust_level, safe_excerpt, metadata_path, evidence_count,
+                    created_at
+               FROM graph_relationship_evidence;
+             DROP TABLE graph_relationship_evidence;
+             ALTER TABLE graph_relationship_evidence_new RENAME TO graph_relationship_evidence;
+             CREATE INDEX idx_graph_evidence_relationship_seen
+                 ON graph_relationship_evidence(relationship_id, observed_at DESC);
+             CREATE INDEX idx_graph_evidence_source_ref
+                 ON graph_relationship_evidence(source_kind, source_id);
+             CREATE INDEX idx_graph_evidence_log_id
+                 ON graph_relationship_evidence(source_log_id)
+                 WHERE source_log_id IS NOT NULL;
+             CREATE INDEX idx_graph_evidence_heartbeat_id
+                 ON graph_relationship_evidence(source_heartbeat_id)
+                 WHERE source_heartbeat_id IS NOT NULL;
+
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (30);
+             COMMIT;",
+        )?;
+        tracing::info!("Migration 30: widened graph vocabulary for inventory topology");
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance
