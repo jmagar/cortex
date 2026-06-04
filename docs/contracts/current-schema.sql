@@ -86,8 +86,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 
 -- ---------------------------------------------------------------------------
--- 2.1.1 `graph_*` — derived investigation graph projection (migration 27)
--- Source: init_pool() migration 27.
+-- 2.1.1 `graph_*` — derived investigation graph projection (migrations 27, 30)
+-- Source: init_pool() migration 27 plus migration 30 vocabulary widening.
 --
 -- Invariants:
 --   - Rebuildable projection only; raw source tables remain authoritative.

@@ -2,8 +2,8 @@ use super::*;
 use crate::config::StorageConfig;
 use crate::db::{graph, init_pool};
 use crate::inventory::schema::{
-    ArtifactRef, ComposeProject, HomelabInventory, InventoryNode, InventoryService, PortMapping,
-    Provenance, RedactionStatus, ReverseProxyRoute, TrustLevel,
+    ArtifactRef, ComposeProject, HomelabInventory, InventoryNode, InventoryService, NetworkSegment,
+    PortMapping, Provenance, RedactionStatus, ReverseProxyRoute, TrustLevel,
 };
 
 fn count(conn: &rusqlite::Connection, sql: &str) -> i64 {
@@ -103,6 +103,7 @@ fn project_inventory_adds_topology_entities_relationships_and_evidence() {
     });
 
     let stats = project_inventory(&pool, &inventory).unwrap();
+    assert_eq!(stats.source_row_count, 0);
     assert!(stats.entity_count >= 6);
     assert!(stats.relationship_count >= 4);
     assert!(stats.evidence_count >= 4);
@@ -136,7 +137,7 @@ fn project_inventory_adds_topology_entities_relationships_and_evidence() {
         count(
             &conn,
             "SELECT COUNT(*) FROM graph_entities
-             WHERE entity_type = 'compose_project' AND canonical_key = 'edge'"
+             WHERE entity_type = 'compose_project' AND canonical_key = 'squirts:edge'"
         ),
         1
     );
@@ -189,5 +190,249 @@ fn project_inventory_adds_topology_entities_relationships_and_evidence() {
              WHERE source_kind IN ('source_inventory', 'app_inventory')"
         ),
         5
+    );
+}
+
+#[test]
+fn project_inventory_preserves_existing_entity_ownership_and_hides_config_paths() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-graph-ownership.db"),
+    ))
+    .unwrap();
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES ('host', 'squirts', 'squirts', 'log', '42', 'claimed')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let mut inventory =
+        HomelabInventory::empty("inv-test".to_string(), "2026-01-01T00:00:00Z".to_string());
+    inventory.nodes.push(InventoryNode {
+        id: "node:squirts".to_string(),
+        hostname: "squirts".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: provenance("ssh:squirts", "source_inventory"),
+        roles: Vec::new(),
+        ips: Vec::new(),
+        os: None,
+        cpu: None,
+        memory: None,
+        listeners: Vec::new(),
+        storage: Vec::new(),
+        extras: Default::default(),
+    });
+    inventory.artifact_refs.push(ArtifactRef {
+        id: "artifact:compose:squirts:edge".to_string(),
+        kind: "compose".to_string(),
+        collector: "raw_configs".to_string(),
+        source_host: Some("squirts".to_string()),
+        source_path: Some("/opt/edge/compose.yaml".to_string()),
+        cache_path: "/home/jmagar/.cortex/inventory/raw/inv/edge.txt".to_string(),
+        redaction: RedactionStatus::Redacted,
+        byte_len: 42,
+        truncated: false,
+    });
+    inventory.compose_projects.push(ComposeProject {
+        name: "edge".to_string(),
+        provenance: provenance("compose:squirts:/opt/edge/compose.yaml", "app_inventory"),
+        services: Vec::new(),
+        compose_files: vec!["/opt/edge/compose.yaml".to_string()],
+        domains: Vec::new(),
+        ports: Vec::new(),
+    });
+
+    project_inventory(&pool, &inventory).unwrap();
+    let conn = pool.get().unwrap();
+    let (source_kind, source_id, trust_level): (String, String, String) = conn
+        .query_row(
+            "SELECT source_kind, source_id, trust_level
+               FROM graph_entities
+              WHERE entity_type = 'host' AND canonical_key = 'squirts'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(source_kind, "log");
+    assert_eq!(source_id, "42");
+    assert_eq!(trust_level, "claimed");
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities
+              WHERE entity_type = 'config_artifact'
+                AND (display_label LIKE '%/opt/%' OR display_label LIKE '%/.cortex/%')"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entity_aliases
+              WHERE alias_type = 'path'
+                 OR alias_value LIKE '%/opt/%'
+                 OR alias_value LIKE '%/.cortex/%'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationship_evidence
+              WHERE source_id LIKE '%/opt/%'
+                 OR safe_excerpt LIKE '%/opt/%'"
+        ),
+        0
+    );
+}
+
+#[test]
+fn project_inventory_does_not_route_to_ambiguous_service_name() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-graph-ambiguous.db"),
+    ))
+    .unwrap();
+    graph::refresh_graph_projection(&pool).unwrap();
+
+    let mut inventory =
+        HomelabInventory::empty("inv-test".to_string(), "2026-01-01T00:00:00Z".to_string());
+    for host in ["squirts", "tootie"] {
+        inventory.nodes.push(InventoryNode {
+            id: format!("node:{host}"),
+            hostname: host.to_string(),
+            trust_level: TrustLevel::Observed,
+            provenance: provenance(&format!("ssh:{host}"), "source_inventory"),
+            roles: Vec::new(),
+            ips: Vec::new(),
+            os: None,
+            cpu: None,
+            memory: None,
+            listeners: Vec::new(),
+            storage: Vec::new(),
+            extras: Default::default(),
+        });
+        inventory.services.push(InventoryService {
+            id: format!("container:{host}:swag"),
+            name: "swag".to_string(),
+            kind: "container".to_string(),
+            trust_level: TrustLevel::Observed,
+            provenance: provenance(&format!("docker:{host}"), "app_inventory"),
+            host: Some(host.to_string()),
+            image: None,
+            status: Some("running".to_string()),
+            domains: Vec::new(),
+            ports: Vec::new(),
+            mounts: Vec::new(),
+            env_keys: Vec::new(),
+            labels: Default::default(),
+        });
+    }
+    inventory.reverse_proxies.push(ReverseProxyRoute {
+        id: "proxy:ambiguous.tootie.tv".to_string(),
+        server_names: vec!["ambiguous.tootie.tv".to_string()],
+        upstreams: vec!["swag:443".to_string()],
+        provenance: provenance("swag:/config/nginx/proxy.conf", "app_inventory"),
+    });
+
+    project_inventory(&pool, &inventory).unwrap();
+    let conn = pool.get().unwrap();
+    assert_eq!(relationship_count(&conn, "runs_on", "inventory_service"), 2);
+    assert_eq!(
+        relationship_count(&conn, "routes_to", "reverse_proxy_config"),
+        0
+    );
+}
+
+#[test]
+fn project_inventory_scopes_compose_projects_and_networks_by_source_host() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-graph-scoped.db"),
+    ))
+    .unwrap();
+    graph::refresh_graph_projection(&pool).unwrap();
+
+    let mut inventory =
+        HomelabInventory::empty("inv-test".to_string(), "2026-01-01T00:00:00Z".to_string());
+    for host in ["squirts", "tootie"] {
+        inventory.nodes.push(InventoryNode {
+            id: format!("node:{host}"),
+            hostname: host.to_string(),
+            trust_level: TrustLevel::Observed,
+            provenance: provenance(&format!("ssh:{host}"), "source_inventory"),
+            roles: Vec::new(),
+            ips: Vec::new(),
+            os: None,
+            cpu: None,
+            memory: None,
+            listeners: Vec::new(),
+            storage: Vec::new(),
+            extras: Default::default(),
+        });
+        inventory.services.push(InventoryService {
+            id: format!("container:{host}:swag"),
+            name: "swag".to_string(),
+            kind: "container".to_string(),
+            trust_level: TrustLevel::Observed,
+            provenance: provenance(&format!("docker:{host}"), "app_inventory"),
+            host: Some(host.to_string()),
+            image: None,
+            status: Some("running".to_string()),
+            domains: Vec::new(),
+            ports: Vec::new(),
+            mounts: Vec::new(),
+            env_keys: Vec::new(),
+            labels: Default::default(),
+        });
+        inventory.compose_projects.push(ComposeProject {
+            name: "edge".to_string(),
+            provenance: provenance(
+                &format!("compose:{host}:/opt/edge/compose.yaml"),
+                "app_inventory",
+            ),
+            services: vec!["swag".to_string()],
+            compose_files: Vec::new(),
+            domains: Vec::new(),
+            ports: Vec::new(),
+        });
+        inventory.networks.push(NetworkSegment {
+            name: "bridge".to_string(),
+            kind: "docker".to_string(),
+            members: vec!["swag".to_string()],
+            provenance: provenance(&format!("docker:{host}"), "app_inventory"),
+        });
+    }
+
+    project_inventory(&pool, &inventory).unwrap();
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'compose_project'"
+        ),
+        2
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'network'"
+        ),
+        2
+    );
+    assert_eq!(
+        relationship_count(&conn, "defines_service", "compose_config"),
+        2
+    );
+    assert_eq!(
+        relationship_count(&conn, "attached_to", "docker_network"),
+        2
     );
 }

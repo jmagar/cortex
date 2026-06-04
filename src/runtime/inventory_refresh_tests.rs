@@ -1,10 +1,32 @@
 use super::*;
+use std::sync::{Mutex, OnceLock};
+
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 #[test]
 fn inventory_refresh_interval_parser_accepts_zero_disable() {
     assert_eq!(parse_inventory_refresh_interval_secs("0"), Some(0));
     assert_eq!(parse_inventory_refresh_interval_secs("300"), Some(300));
     assert_eq!(parse_inventory_refresh_interval_secs(" nope "), None);
+}
+
+#[test]
+fn remote_docker_events_default_to_disabled() {
+    let _guard = env_lock().lock().unwrap();
+    unsafe {
+        std::env::remove_var("CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS");
+    }
+    assert!(!remote_docker_events_enabled());
+    unsafe {
+        std::env::set_var("CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS", "true");
+    }
+    assert!(remote_docker_events_enabled());
+    unsafe {
+        std::env::remove_var("CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS");
+    }
 }
 
 #[test]

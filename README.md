@@ -100,8 +100,9 @@ or returns raw artifact bodies.
 
 When the server is running, inventory refresh also projects topology evidence
 into the investigation graph. The baseline refresh interval is 5 minutes, with
-local Compose/proxy config watchers and remote Docker `events` streams over SSH
-used as lower-latency refresh triggers when available.
+local Compose/proxy config watchers as lower-latency refresh triggers. Remote
+Docker `events` streams over SSH are opt-in via
+`CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS=true`.
 
 On first run, before `normalized/homelab.json` exists, `map` and
 `cortex inventory status --json` report `cache_status: "missing"`. Run

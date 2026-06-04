@@ -3,7 +3,7 @@ mod sql;
 #[path = "graph_inventory_tests.rs"]
 mod tests;
 
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Entry, BTreeMap};
 
 use anyhow::{Context, Result};
 
@@ -12,9 +12,10 @@ use crate::db::{write_lock, DbPool};
 use crate::inventory::schema::HomelabInventory;
 
 use self::sql::{
-    add_alias, add_relationship, canonical, canonical_or_raw, graph_counts, match_upstream,
-    prune_previous_inventory_projection, service_key, trust, update_projection_meta,
-    upsert_artifact, upsert_entity, upsert_service, upsert_storage,
+    add_alias, add_relationship, canonical, canonical_or_raw, graph_counts, match_service_name,
+    match_upstream, prune_previous_inventory_projection, safe_inventory_source_id,
+    scoped_inventory_key, service_key, trust, update_projection_meta, upsert_artifact,
+    upsert_entity, upsert_service, upsert_storage,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,10 +81,16 @@ pub fn project_inventory(
     }
 
     let mut services = BTreeMap::new();
+    let mut unique_service_aliases = BTreeMap::new();
     for service in &inventory.services {
         let service_entity = upsert_service(&tx, service)?;
-        services.insert(service_key(service), service_entity.clone());
-        services.insert(canonical_or_raw(&service.name), service_entity.clone());
+        let scoped_key = service_key(service);
+        services.insert(scoped_key, service_entity.clone());
+        insert_unique_alias(
+            &mut unique_service_aliases,
+            canonical_or_raw(&service.name),
+            service_entity.clone(),
+        );
 
         for domain in &service.domains {
             if let Some(alias_key) = canonical(domain) {
@@ -151,6 +158,11 @@ pub fn project_inventory(
             )?;
         }
     }
+    services.extend(
+        unique_service_aliases
+            .into_iter()
+            .filter_map(|(key, service)| service.map(|service| (key, service))),
+    );
 
     let mut artifacts = BTreeMap::new();
     for artifact in &inventory.artifact_refs {
@@ -162,19 +174,22 @@ pub fn project_inventory(
     }
 
     for project in &inventory.compose_projects {
-        let project_key = canonical_or_raw(&project.name);
+        let project_key = scoped_inventory_key(&project.provenance.source, &project.name);
+        let project_source = safe_inventory_source_id(&project.provenance.source);
         let project_entity = upsert_entity(
             &tx,
             graph::ENTITY_TYPE_COMPOSE_PROJECT,
             &project_key,
             &project.name,
             graph::SOURCE_KIND_APP_INVENTORY,
-            &project.provenance.source,
+            &project_source,
             graph::TRUST_VERIFIED,
             &project.provenance.collected_at,
         )?;
         for service_name in &project.services {
-            if let Some(service_entity) = services.get(&canonical_or_raw(service_name)) {
+            if let Some(service_entity) =
+                match_service_name(service_name, &project.provenance.source, &services)
+            {
                 add_relationship(
                     &tx,
                     &project_entity,
@@ -182,7 +197,7 @@ pub fn project_inventory(
                     graph::REL_DEFINES_SERVICE,
                     graph::REASON_COMPOSE_CONFIG,
                     graph::SOURCE_KIND_APP_INVENTORY,
-                    &project.provenance.source,
+                    &project_source,
                     &project.provenance.collected_at,
                     graph::TRUST_VERIFIED,
                     0.90,
@@ -192,6 +207,7 @@ pub fn project_inventory(
         }
         for compose_file in &project.compose_files {
             if let Some(artifact) = artifacts.get(compose_file) {
+                let artifact_id = artifact.key.clone();
                 add_relationship(
                     &tx,
                     &project_entity,
@@ -199,11 +215,11 @@ pub fn project_inventory(
                     graph::REL_HAS_ARTIFACT,
                     graph::REASON_CONFIG_ARTIFACT,
                     graph::SOURCE_KIND_APP_INVENTORY,
-                    &project.provenance.source,
+                    &project_source,
                     &project.provenance.collected_at,
                     graph::TRUST_VERIFIED,
                     0.95,
-                    &format!("compose artifact {}", compose_file),
+                    &format!("compose artifact {}", artifact_id),
                 )?;
             }
         }
@@ -248,7 +264,7 @@ pub fn project_inventory(
             )?;
         }
         for upstream in &route.upstreams {
-            if let Some(service) = match_upstream(upstream, &services) {
+            if let Some(service) = match_upstream(upstream, &route.provenance.source, &services) {
                 add_relationship(
                     &tx,
                     &proxy,
@@ -267,18 +283,20 @@ pub fn project_inventory(
     }
 
     for network in &inventory.networks {
+        let network_source = safe_inventory_source_id(&network.provenance.source);
         let network_entity = upsert_entity(
             &tx,
             graph::ENTITY_TYPE_NETWORK,
-            &canonical_or_raw(&network.name),
+            &scoped_inventory_key(&network.provenance.source, &network.name),
             &network.name,
             graph::SOURCE_KIND_APP_INVENTORY,
-            &network.provenance.source,
+            &network_source,
             graph::TRUST_VERIFIED,
             &network.provenance.collected_at,
         )?;
         for member in &network.members {
-            if let Some(service) = services.get(&canonical_or_raw(member)) {
+            if let Some(service) = match_service_name(member, &network.provenance.source, &services)
+            {
                 add_relationship(
                     &tx,
                     service,
@@ -286,7 +304,7 @@ pub fn project_inventory(
                     graph::REL_ATTACHED_TO,
                     graph::REASON_DOCKER_NETWORK,
                     graph::SOURCE_KIND_APP_INVENTORY,
-                    &network.provenance.source,
+                    &network_source,
                     &network.provenance.collected_at,
                     graph::TRUST_VERIFIED,
                     0.80,
@@ -300,8 +318,36 @@ pub fn project_inventory(
         upsert_storage(&tx, storage, &hosts)?;
     }
 
+    let counts = graph_counts(&tx)?;
+    update_projection_meta(&tx, &counts)?;
     let stats = graph_counts(&tx)?;
-    update_projection_meta(&tx, inventory, &stats)?;
     tx.commit().context("commit inventory graph projection")?;
     Ok(stats)
+}
+
+pub fn mark_inventory_projection_failed(pool: &DbPool, error: &str) -> Result<()> {
+    let conn = pool.get().context("borrow sqlite connection")?;
+    let _guard = write_lock();
+    sql::mark_projection_degraded(&conn, error)
+}
+
+fn insert_unique_alias(
+    aliases: &mut BTreeMap<String, Option<sql::EntityRef>>,
+    key: String,
+    service: sql::EntityRef,
+) {
+    match aliases.entry(key) {
+        Entry::Vacant(entry) => {
+            entry.insert(Some(service));
+        }
+        Entry::Occupied(mut entry) => {
+            if entry
+                .get()
+                .as_ref()
+                .is_some_and(|existing| existing.id != service.id)
+            {
+                entry.insert(None);
+            }
+        }
+    }
 }

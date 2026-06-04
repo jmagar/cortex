@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-06-04
+
+### Fixed
+
+- Hardened inventory graph projection so inventory refreshes no longer mark the
+  full graph projection lifecycle as ready or overwrite log-derived entity
+  ownership metadata.
+- Scoped Compose project and Docker network graph keys by source host, avoided
+  ambiguous bare service-name links, and kept raw config/cache paths out of
+  graph labels, aliases, source ids, and evidence excerpts.
+- Made remote Docker event streams opt-in and serialized background inventory
+  projection through the maintenance limiter.
+
 ## [1.13.0] - 2026-06-04
 
 ### Added
@@ -15,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evidence-backed topology nodes for Compose projects, reverse proxies, domains,
   networks, storage, and redacted config artifacts.
 - Added server-side inventory refresh triggers from local Compose/proxy config
-  file watchers and remote Docker `events` streams over SSH, while preserving
-  the 5-minute polling baseline.
+  file watchers, plus opt-in remote Docker `events` streams over SSH, while
+  preserving the 5-minute polling baseline.
 
 ### Changed
 
@@ -2023,7 +2036,11 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.10.1...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.13.1...HEAD
+[1.13.1]: https://github.com/jmagar/cortex/compare/v1.13.0...v1.13.1
+[1.13.0]: https://github.com/jmagar/cortex/compare/v1.12.0...v1.13.0
+[1.12.0]: https://github.com/jmagar/cortex/compare/v1.11.0...v1.12.0
+[1.11.0]: https://github.com/jmagar/cortex/compare/v1.10.1...v1.11.0
 [1.10.1]: https://github.com/jmagar/cortex/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/jmagar/cortex/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/jmagar/cortex/compare/v1.9.0...v1.9.1

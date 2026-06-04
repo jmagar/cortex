@@ -65,32 +65,17 @@ pub(super) fn upsert_artifact(
     artifact: &ArtifactRef,
     observed_at: &str,
 ) -> Result<EntityRef> {
-    let display = artifact
-        .source_path
-        .as_deref()
-        .unwrap_or(artifact.cache_path.as_str());
+    let display = format!("{} artifact {}", artifact.kind, artifact.id);
     let entity = upsert_entity(
         conn,
         graph::ENTITY_TYPE_CONFIG_ARTIFACT,
         &canonical_or_raw(&artifact.id),
-        display,
+        &display,
         graph::SOURCE_KIND_APP_INVENTORY,
         &artifact.id,
         graph::TRUST_VERIFIED,
         observed_at,
     )?;
-    if let Some(path) = &artifact.source_path {
-        add_alias(
-            conn,
-            entity.id,
-            "path",
-            &canonical_or_raw(path),
-            path,
-            graph::SOURCE_KIND_APP_INVENTORY,
-            graph::TRUST_VERIFIED,
-            observed_at,
-        )?;
-    }
     Ok(entity)
 }
 
@@ -150,9 +135,6 @@ pub(super) fn upsert_entity(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
          ON CONFLICT(entity_type, canonical_key) DO UPDATE SET
              display_label = excluded.display_label,
-             source_kind = excluded.source_kind,
-             source_id = excluded.source_id,
-             trust_level = excluded.trust_level,
              last_seen_at = excluded.last_seen_at,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         params![
@@ -301,31 +283,16 @@ pub(super) fn add_relationship(
 
 pub(super) fn update_projection_meta(
     conn: &Connection,
-    inventory: &HomelabInventory,
     counts: &InventoryGraphStats,
 ) -> Result<()> {
     conn.execute(
         "UPDATE graph_projection_meta
-            SET projection_status = 'ready',
-                last_completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                source_watermark = ?1,
-                source_row_count = ?2,
-                entity_count = ?3,
-                relationship_count = ?4,
-                evidence_count = ?5,
-                is_degraded = 0,
-                last_error = NULL,
+            SET entity_count = ?1,
+                relationship_count = ?2,
+                evidence_count = ?3,
                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
           WHERE id = 1",
         params![
-            format!("inventory:{}", inventory.run_id),
-            inventory.summary.nodes as i64
-                + inventory.summary.services as i64
-                + inventory.summary.compose_projects as i64
-                + inventory.summary.reverse_proxies as i64
-                + inventory.summary.networks as i64
-                + inventory.summary.storage as i64
-                + inventory.summary.artifacts as i64,
             counts.entity_count,
             counts.relationship_count,
             counts.evidence_count
@@ -336,11 +303,29 @@ pub(super) fn update_projection_meta(
 
 pub(super) fn graph_counts(conn: &Connection) -> Result<InventoryGraphStats> {
     Ok(InventoryGraphStats {
-        source_row_count: 0,
+        source_row_count: conn
+            .query_row(
+                "SELECT source_row_count FROM graph_projection_meta WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0),
         entity_count: table_count(conn, "graph_entities")?,
         relationship_count: table_count(conn, "graph_relationships")?,
         evidence_count: table_count(conn, "graph_relationship_evidence")?,
     })
+}
+
+pub(super) fn mark_projection_degraded(conn: &Connection, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE graph_projection_meta
+            SET is_degraded = 1,
+                last_error = ?1,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id = 1",
+        [truncate_excerpt(error)],
+    )?;
+    Ok(())
 }
 
 fn table_count(conn: &Connection, table: &str) -> Result<i64> {
@@ -352,6 +337,7 @@ fn table_count(conn: &Connection, table: &str) -> Result<i64> {
 
 pub(super) fn match_upstream<'a>(
     upstream: &str,
+    source: &str,
     services: &'a BTreeMap<String, EntityRef>,
 ) -> Option<&'a EntityRef> {
     let normalized = canonical_or_raw(upstream);
@@ -360,8 +346,39 @@ pub(super) fn match_upstream<'a>(
         .find(|part| !part.is_empty() && !part.starts_with("http"))
         .map(canonical_or_raw);
     prefix
-        .and_then(|key| services.get(&key))
-        .or_else(|| services.get(&normalized))
+        .and_then(|key| match_service_name(&key, source, services))
+        .or_else(|| match_service_name(&normalized, source, services))
+}
+
+pub(super) fn match_service_name<'a>(
+    name: &str,
+    source: &str,
+    services: &'a BTreeMap<String, EntityRef>,
+) -> Option<&'a EntityRef> {
+    source_host(source)
+        .and_then(|host| services.get(&canonical_or_raw(&format!("{host}:{name}"))))
+        .or_else(|| services.get(&canonical_or_raw(name)))
+}
+
+pub(super) fn scoped_inventory_key(source: &str, name: &str) -> String {
+    let scope = source_host(source).unwrap_or("unknown");
+    canonical_or_raw(&format!("{scope}:{name}"))
+}
+
+pub(super) fn safe_inventory_source_id(source: &str) -> String {
+    match source_host(source) {
+        Some(host) => format!(
+            "{}:{}",
+            source.split(':').next().unwrap_or("inventory").trim(),
+            host
+        ),
+        None => source
+            .split(':')
+            .next()
+            .filter(|collector| !collector.trim().is_empty())
+            .unwrap_or("inventory")
+            .to_string(),
+    }
 }
 
 pub(super) fn service_key(service: &InventoryService) -> String {
@@ -378,6 +395,17 @@ pub(super) fn canonical_or_raw(value: &str) -> String {
 
 pub(super) fn canonical(value: &str) -> Option<String> {
     graph::canonical_graph_key(value)
+}
+
+fn source_host(source: &str) -> Option<&str> {
+    let mut parts = source.split(':');
+    let _collector = parts.next()?;
+    let host = parts.next()?.trim();
+    if host.is_empty() || host.starts_with('/') {
+        None
+    } else {
+        Some(host)
+    }
 }
 
 pub(super) fn trust(value: &TrustLevel) -> &'static str {

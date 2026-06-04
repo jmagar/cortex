@@ -3,12 +3,13 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::Context;
 use notify::{
     Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -22,7 +23,11 @@ const INVENTORY_REFRESH_INTERVAL_SECS: u64 = 300;
 const INVENTORY_WATCH_DEBOUNCE_SECS: u64 = 3;
 const REMOTE_DOCKER_EVENT_RECONNECT_SECS: u64 = 10;
 
-pub fn spawn(token: CancellationToken, pool: Arc<DbPool>) -> Option<JoinHandle<()>> {
+pub fn spawn(
+    token: CancellationToken,
+    pool: Arc<DbPool>,
+    maintenance_limiter: Arc<Semaphore>,
+) -> Option<JoinHandle<()>> {
     let interval_secs = inventory_refresh_interval_secs();
     if interval_secs == 0 {
         tracing::info!("inventory_refresh: disabled");
@@ -60,20 +65,31 @@ pub fn spawn(token: CancellationToken, pool: Arc<DbPool>) -> Option<JoinHandle<(
                     _ = interval.tick() => {}
                 }
             }
-            refresh_and_project(&pool).await;
+            refresh_and_project(&pool, &maintenance_limiter).await;
         }
     }))
 }
 
-async fn refresh_and_project(pool: &DbPool) {
+async fn refresh_and_project(pool: &DbPool, maintenance_limiter: &Arc<Semaphore>) {
     let started = Instant::now();
     let config = crate::inventory::InventoryConfig::from_env();
     match crate::inventory::refresh_inventory(config.clone()).await {
         Ok(report) => {
-            let projection = match crate::inventory::read_inventory_cache(&config) {
-                Ok(inventory) => crate::db::graph_inventory::project_inventory(pool, &inventory),
-                Err(error) => Err(error.context("read inventory cache for graph projection")),
+            let Ok(_permit) = Arc::clone(maintenance_limiter).acquire_owned().await else {
+                tracing::error!("inventory_refresh: maintenance limiter closed");
+                return;
             };
+            let pool = pool.clone();
+            let projection_pool = pool.clone();
+            let projection = tokio::task::spawn_blocking(move || {
+                let inventory = crate::inventory::read_inventory_cache(&config)
+                    .context("read inventory cache for graph projection")?;
+                crate::db::graph_inventory::project_inventory(&pool, &inventory)
+            })
+            .await
+            .unwrap_or_else(|error| {
+                Err(anyhow::Error::new(error).context("join graph projection task"))
+            });
             match projection {
                 Ok(stats) => tracing::info!(
                     status = %report.status,
@@ -85,14 +101,20 @@ async fn refresh_and_project(pool: &DbPool) {
                     elapsed_ms = started.elapsed().as_millis(),
                     "inventory_refresh: cache refresh and graph projection complete"
                 ),
-                Err(error) => tracing::warn!(
-                    %error,
-                    status = %report.status,
-                    run_id = %report.run_id,
-                    warnings = report.warnings.len(),
-                    elapsed_ms = started.elapsed().as_millis(),
-                    "inventory_refresh: cache refresh complete but graph projection failed"
-                ),
+                Err(error) => {
+                    let _ = crate::db::graph_inventory::mark_inventory_projection_failed(
+                        &projection_pool,
+                        &error.to_string(),
+                    );
+                    tracing::warn!(
+                        %error,
+                        status = %report.status,
+                        run_id = %report.run_id,
+                        warnings = report.warnings.len(),
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "inventory_refresh: cache refresh complete but graph projection failed"
+                    );
+                }
             }
         }
         Err(error) => tracing::warn!(
@@ -221,8 +243,7 @@ async fn run_remote_docker_events_once(
         .ok_or_else(|| anyhow::anyhow!("ssh stderr unavailable"))?;
     let stderr_task = tokio::spawn(async move {
         let mut reader = BufReader::new(stderr);
-        let mut sink = Vec::new();
-        let _ = reader.read_to_end(&mut sink).await;
+        let _ = io::copy(&mut reader, &mut io::sink()).await;
     });
     let mut lines = BufReader::new(stdout).lines();
     loop {
@@ -286,7 +307,7 @@ fn remote_docker_events_enabled() -> bool {
                 "0" | "false" | "no"
             )
         })
-        .unwrap_or(true)
+        .unwrap_or(false)
 }
 
 fn remote_docker_events_ssh_args(ssh_config: Option<&Path>, host: &str) -> Vec<String> {

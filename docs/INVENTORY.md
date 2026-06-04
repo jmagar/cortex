@@ -139,7 +139,7 @@ methods as the MCP actions.
 | `CORTEX_INVENTORY_PROJECT_ROOTS` | no | `~/workspace` | no |
 | `CORTEX_INVENTORY_REFRESH_INTERVAL_SECS` | no | `300` (`0` disables server-side periodic refresh) | no |
 | `CORTEX_INVENTORY_WATCH_ENABLED` | no | `true` | no |
-| `CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS` | no | `true` | no |
+| `CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS` | no | `false` | no |
 | `CORTEX_UNRAID_URL` | no | (none) | no |
 | `CORTEX_UNRAID_API_KEY` | no | (none) | yes |
 | `CORTEX_UNIFI_URL` | no | (none) | no |
@@ -157,10 +157,10 @@ disable background refresh.
 
 When background refresh is enabled, Cortex also watches local configured
 Compose/proxy config paths and refreshes after a short debounce when they
-change. For SSH hosts that can run Docker, Cortex opens `docker events` streams
-over SSH and uses container events as refresh triggers. Set
-`CORTEX_INVENTORY_WATCH_ENABLED=false` or
-`CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS=false` to disable either trigger.
+change. Set `CORTEX_INVENTORY_WATCH_ENABLED=false` to disable local file
+watching. To use container events as refresh triggers, explicitly set
+`CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS=true`; Cortex then opens `docker events`
+streams over SSH for selected hosts.
 
 Remote collection is SSH-backed and uses concrete aliases from `~/.ssh/config`
 unless `CORTEX_INVENTORY_SSH_HOSTS` is set. It collects host facts, listener

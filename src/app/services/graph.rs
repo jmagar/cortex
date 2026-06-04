@@ -409,11 +409,13 @@ impl CortexService {
     }
 
     pub async fn graph_rebuild(&self) -> ServiceResult<GraphRebuildResponse> {
-        let outcome = self
+        let mut outcome = self
             .run_db("graph.rebuild", db::graph::refresh_graph_projection)
             .await?;
         if matches!(&outcome, db::graph::GraphRebuildOutcome::Rebuilt(_)) {
             let config = crate::inventory::InventoryConfig::from_env();
+            let cache_path =
+                crate::inventory::storage::InventoryPaths::new(config.root.clone()).normalized_json;
             match crate::inventory::read_inventory_cache(&config) {
                 Ok(inventory) => {
                     let project_result = self
@@ -423,12 +425,47 @@ impl CortexService {
                         .await;
                     if let Err(error) = project_result {
                         tracing::warn!(%error, "graph rebuild inventory projection failed");
+                        let error_message = error.to_string();
+                        let mark_result = self
+                            .run_db("graph.inventory_project_failed", move |pool| {
+                                db::graph_inventory::mark_inventory_projection_failed(
+                                    pool,
+                                    &error_message,
+                                )
+                            })
+                            .await;
+                        if let Err(mark_error) = mark_result {
+                            tracing::warn!(
+                                %mark_error,
+                                "graph rebuild failed to mark inventory projection degraded"
+                            );
+                        }
+                        return Err(error);
+                    }
+                    if let db::graph::GraphRebuildOutcome::Rebuilt(stats) = &mut outcome {
+                        let final_status = self
+                            .run_db("graph.status", db::graph::graph_projection_status)
+                            .await?;
+                        stats.entity_count = final_status.entity_count;
+                        stats.relationship_count = final_status.relationship_count;
+                        stats.evidence_count = final_status.evidence_count;
                     }
                 }
-                Err(error) => tracing::debug!(
-                    %error,
-                    "graph rebuild skipped inventory projection; cache unavailable"
-                ),
+                Err(error) if !cache_path.exists() => {
+                    tracing::debug!(
+                        %error,
+                        path = %cache_path.display(),
+                        "graph rebuild skipped inventory projection; cache unavailable"
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        path = %cache_path.display(),
+                        "graph rebuild failed to read inventory cache"
+                    );
+                    return Err(error.into());
+                }
             }
         }
         let status = self.graph_projection_status().await?;
