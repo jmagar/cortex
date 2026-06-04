@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-06-03
+
+### Added
+
+- Added native homelab inventory refresh/status CLI commands that write private
+  normalized, collection-state, and raw redacted artifacts under
+  `~/.cortex/inventory`.
+- Added independent Rust collectors for local host facts, Docker, redacted
+  Compose/proxy configs, Tailscale, Unraid, UniFi, media stack topology, and
+  configured local Git projects.
+- Upgraded MCP `action=map` to `cortex.homelab_map.v2`, reading the cached
+  inventory and overlaying bounded live Cortex host/heartbeat data without
+  triggering refresh or returning raw artifact bodies.
+
 ## [1.9.1] - 2026-06-03
 
 ### Changed
@@ -1955,7 +1969,9 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/jmagar/cortex/compare/v1.9.1...v1.10.0
+[1.9.1]: https://github.com/jmagar/cortex/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/jmagar/cortex/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/jmagar/cortex/compare/v0.32.3...v1.8.0
 [0.32.3]: https://github.com/jmagar/syslog-mcp/compare/v0.32.2...v0.32.3

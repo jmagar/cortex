@@ -162,6 +162,11 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
                 "internal: config commands must be dispatched by main::run_cli before reaching cli::run()"
             )
         }
+        CliCommand::Inventory(_) => {
+            bail!(
+                "internal: inventory commands must be dispatched by main::run_cli before reaching cli::run()"
+            )
+        }
     }
 }
 

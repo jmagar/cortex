@@ -1,4 +1,6 @@
-use super::super::{HeartbeatAgentArgs, HeartbeatCommand, OutputArgs};
+use super::super::{
+    HeartbeatAgentArgs, HeartbeatCommand, InventoryArgs, InventoryCommand, OutputArgs,
+};
 use super::*;
 
 #[test]
@@ -81,6 +83,86 @@ fn parse_rejects_unknown_command() {
         .to_string();
 
     assert!(err.contains("unknown CLI command: wat"));
+}
+
+#[test]
+fn parse_routes_inventory_refresh_json() {
+    assert_eq!(
+        parse_command(vec![
+            "inventory".to_string(),
+            "refresh".to_string(),
+            "--json".to_string(),
+        ])
+        .unwrap(),
+        CliCommand::Inventory(InventoryCommand::Refresh(InventoryArgs { json: true }))
+    );
+}
+
+#[test]
+fn parse_inventory_requires_subcommand() {
+    let err = parse_command(vec!["inventory".to_string()])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        err.contains("inventory subcommand is required"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn parse_inventory_unknown_subcommand_suggests() {
+    let err = parse_command(vec!["inventory".to_string(), "stats".to_string()])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        err.contains("unknown inventory subcommand: stats"),
+        "got: {err}"
+    );
+    assert!(
+        err.contains("refresh") || err.contains("status"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn parse_inventory_rejects_unknown_flag() {
+    let err = parse_command(vec![
+        "inventory".to_string(),
+        "refresh".to_string(),
+        "--wat".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        err.contains("unknown inventory option: --wat"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn parse_inventory_help_does_not_execute_subcommand() {
+    let err = parse_command(vec!["inventory".to_string(), "--help".to_string()])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("Usage: cortex inventory refresh"),
+        "got: {err}"
+    );
+
+    let err = parse_command(vec![
+        "inventory".to_string(),
+        "refresh".to_string(),
+        "--help".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("Usage: cortex inventory refresh"),
+        "got: {err}"
+    );
 }
 
 #[test]

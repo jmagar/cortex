@@ -13,6 +13,7 @@ pub mod doctor;
 pub mod enrich;
 pub mod heartbeat;
 pub mod heartbeat_agent;
+pub mod inventory;
 pub mod logging;
 pub mod mcp;
 pub(crate) mod notifications;

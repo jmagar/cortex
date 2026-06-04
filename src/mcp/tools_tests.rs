@@ -41,6 +41,28 @@ struct TestHarness {
     _dir: tempfile::TempDir,
 }
 
+struct EnvVarGuard {
+    name: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl EnvVarGuard {
+    fn set_path(name: &'static str, value: &std::path::Path) -> Self {
+        let previous = std::env::var_os(name);
+        std::env::set_var(name, value);
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var(self.name, value),
+            None => std::env::remove_var(self.name),
+        }
+    }
+}
+
 impl TestHarness {
     fn new() -> Self {
         let (state, pool, dir) = test_state_with_token(None);
@@ -130,7 +152,10 @@ async fn fleet_state_action_returns_fleet_snapshot() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn map_action_returns_infra_snapshot_from_known_hosts() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
     let h = TestHarness::new();
     db::insert_logs_batch(
         &h.pool,
@@ -187,29 +212,24 @@ async fn map_action_returns_infra_snapshot_from_known_hosts() {
         .await
         .unwrap();
 
-    assert_eq!(value["schema"], "cortex.homelab_map.v1");
+    assert_eq!(value["schema"], "cortex.homelab_map.v2");
+    assert_eq!(value["cache_status"], "missing");
     assert_eq!(value["summary"]["hosts"], 2);
-    assert!(value["inventory_sources"]
+    assert!(value["artifact_refs"].as_array().unwrap().is_empty());
+    assert!(value["collection_errors"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|source| source["name"] == "docker_containers"));
+        .any(|error| { error["collector"] == "cache" && error["severity"] == "warning" }));
 
     let nodes = value["nodes"].as_array().unwrap();
     let tootie = nodes
         .iter()
         .find(|node| node["hostname"] == "tootie")
         .expect("tootie node missing");
-    assert!(tootie["source_ips"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|source| source["source_ip"] == "10.1.0.2:514"));
-    assert!(tootie["apps"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|app| app["app_name"] == "plex"));
+    assert_eq!(tootie["log_count"], 1);
+    assert!(tootie["source_ips"].as_array().unwrap().is_empty());
+    assert!(tootie["apps"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

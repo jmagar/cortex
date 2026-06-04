@@ -109,6 +109,22 @@ cortex hosts
 cortex hosts --json
 ```
 
+### `cortex inventory`
+
+Refresh and inspect the private homelab inventory cache under
+`~/.cortex/inventory`.
+
+```bash
+cortex inventory refresh --json
+cortex inventory status --json
+```
+
+`refresh` runs native Rust collectors for local host facts, Docker endpoints,
+raw-but-redacted Compose YAML and reverse-proxy artifacts, Unraid, Tailscale,
+UniFi, media services, and configured local project roots. Missing provider
+credentials are warnings, not fatal errors for unrelated collectors. `status`
+reads only the cache metadata and does not open SQLite.
+
 ### `cortex sessions`
 
 List AI transcript sessions grouped by project.

@@ -103,6 +103,16 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         return cli::run_config(command);
     }
 
+    if let cli::CliCommand::Inventory(command) = command {
+        if let Some(trigger) = flags.http_flag_trigger() {
+            anyhow::bail!(
+                "{} has no effect on `inventory` (local-only command); remove --http / --server / --token",
+                trigger
+            );
+        }
+        return cli::run_inventory(command).await;
+    }
+
     if let cli::CliCommand::AgentCommand(cli::AgentCommandCommand::Wrap(args)) = command {
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
@@ -530,6 +540,7 @@ impl Mode {
                         | "service"
                         | "setup"
                         | "config"
+                        | "inventory"
                         | "source-ips"
                         | "timeline"
                         | "patterns"
@@ -562,7 +573,7 @@ impl Mode {
                 anyhow::bail!(
                     "--http / --server / --token only apply to CLI query commands \
                      (search, tail, errors, hosts, sessions, incident, entity, graph, ai, shell, agent-command, heartbeat, correlate, stats, db); \
-                     compose, service, setup, and deploy are local-only and reject HTTP flags; \
+                     compose, service, setup, inventory, and deploy are local-only and reject HTTP flags; \
                      got: {}",
                     args.join(" ")
                 );

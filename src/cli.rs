@@ -16,10 +16,10 @@ pub(crate) use args::{
     DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs,
     GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs, GraphRebuildArgs,
     GraphStatusArgs, HeartbeatAgentArgs, HeartbeatCommand, IncidentArgs, IngestRateArgs,
-    NotifyRecentArgs, NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs,
-    ServiceCommand, ServiceLogsArgs, SessionsArgs, SetupArgs, SetupCommand, ShellAtuinIndexArgs,
-    ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs,
-    TimeRangeArgs, TimelineArgs,
+    InventoryArgs, InventoryCommand, NotifyRecentArgs, NotifyTestArgs, OutputArgs, PatternsArgs,
+    PluginHookArgs, SearchArgs, ServiceCommand, ServiceLogsArgs, SessionsArgs, SetupArgs,
+    SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs,
+    SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
@@ -117,6 +117,49 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
                 eprint!("{}", output.stderr);
             }
             output_ops::ensure_command_success(&output)
+        }
+    }
+}
+
+pub(crate) async fn run_inventory(command: InventoryCommand) -> Result<()> {
+    match command {
+        InventoryCommand::Refresh(args) => {
+            let report = cortex::inventory::refresh_inventory(
+                cortex::inventory::InventoryConfig::from_env(),
+            )
+            .await?;
+            if args.json {
+                output_common::print_json(&report)
+            } else {
+                println!("inventory refresh: {}", report.status);
+                println!("root: {}", report.root);
+                println!("normalized: {}", report.normalized_path);
+                println!("collection_state: {}", report.collection_state_path);
+                for warning in report.warnings {
+                    println!("warning: {warning}");
+                }
+                Ok(())
+            }
+        }
+        InventoryCommand::Status(args) => {
+            let status = cortex::inventory::inventory_status(
+                &cortex::inventory::InventoryConfig::from_env(),
+            );
+            if args.json {
+                output_common::print_json(&status)
+            } else {
+                println!("inventory status: {}", status.status);
+                println!("root: {}", status.root);
+                println!("normalized: {}", status.normalized_path);
+                if let Some(generated_at) = status.generated_at {
+                    println!("generated_at: {generated_at}");
+                }
+                println!("stale: {}", status.is_stale);
+                for warning in status.warnings {
+                    println!("warning: {warning}");
+                }
+                Ok(())
+            }
         }
     }
 }

@@ -512,7 +512,10 @@ suite_hosts() {
   run_test "cortex hosts: hosts have last_seen"    cortex hosts '{}' "hosts.0.last_seen"
   run_test "cortex map: returns schema"             cortex map '{}' "schema"
   run_test "cortex map: returns nodes array"        cortex map '{}' "nodes"
-  run_test "cortex map: returns inventory sources"  cortex map '{}' "inventory_sources"
+  run_test "cortex map: returns cache status"       cortex map '{}' "cache_status"
+  run_test "cortex map: returns artifact refs"      cortex map '{}' "artifact_refs"
+  run_test "cortex map: returns collection errors"  cortex map '{}' "collection_errors"
+  run_test "cortex map: returns cortex overlay"     cortex map '{}' "cortex_overlay"
 }
 
 suite_sessions() {

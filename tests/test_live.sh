@@ -523,10 +523,20 @@ phase_tools() {
   local map_result
   map_result="$(call_tool cortex '{"action":"map"}')" || map_result=""
 
-  assert_jq "cortex map — schema is v1" "${map_result}" '.schema' "cortex.homelab_map.v1"
+  assert_jq "cortex map — schema is v2" "${map_result}" '.schema' "cortex.homelab_map.v2"
   assert_jq "cortex map — summary field present" "${map_result}" '.summary'
   assert_jq "cortex map — nodes field is array" "${map_result}" '.nodes | type' "array"
-  assert_jq "cortex map — inventory sources field is array" "${map_result}" '.inventory_sources | type' "array"
+  assert_jq "cortex map — cache status field present" "${map_result}" '.cache_status'
+  assert_jq "cortex map — services field is array" "${map_result}" '.services | type' "array"
+  assert_jq "cortex map — compose projects field is array" "${map_result}" '.compose_projects | type' "array"
+  assert_jq "cortex map — reverse proxies field is array" "${map_result}" '.reverse_proxies | type' "array"
+  assert_jq "cortex map — networks field is array" "${map_result}" '.networks | type' "array"
+  assert_jq "cortex map — storage field is array" "${map_result}" '.storage | type' "array"
+  assert_jq "cortex map — media services field is array" "${map_result}" '.media_services | type' "array"
+  assert_jq "cortex map — projects field is array" "${map_result}" '.projects | type' "array"
+  assert_jq "cortex map — artifact refs field is array" "${map_result}" '.artifact_refs | type' "array"
+  assert_jq "cortex map — collection errors field is array" "${map_result}" '.collection_errors | type' "array"
+  assert_jq "cortex map — cortex overlay field present" "${map_result}" '.cortex_overlay'
 
   # --- cortex sessions ---
   section "  cortex sessions"

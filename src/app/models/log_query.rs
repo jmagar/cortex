@@ -1,4 +1,8 @@
 use super::*;
+use crate::inventory::schema::{
+    ArtifactRef, CollectionError, ComposeProject, InventoryFreshness, InventoryService,
+    MediaService, NetworkSegment, ProjectRepo, ReverseProxyRoute, StorageSummary,
+};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -134,27 +138,49 @@ pub struct ListHostsResponse {
 pub struct HomelabMapRequest {
     /// Maximum host nodes to return. Default 100, max 500.
     pub host_limit: Option<u32>,
-    /// Maximum source IPs and apps attached to each host. Default 10, max 25.
+    /// Deprecated map v1 compatibility option. Map v2 ignores it and reports
+    /// a request warning when collection_errors are included.
     pub per_host_limit: Option<u32>,
+    /// Optional top-level inventory sections to include.
+    pub include_sections: Option<Vec<String>>,
+    /// Per-section item cap. Default 100, max 250.
+    pub section_limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HomelabMapResponse {
     pub schema: String,
     pub generated_at: String,
+    pub cache_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub freshness: Option<InventoryFreshness>,
     pub summary: HomelabMapSummary,
     pub nodes: Vec<HomelabMapNode>,
-    pub inventory_sources: Vec<HomelabMapInventorySource>,
+    pub services: Vec<InventoryService>,
+    pub compose_projects: Vec<ComposeProject>,
+    pub reverse_proxies: Vec<ReverseProxyRoute>,
+    pub networks: Vec<NetworkSegment>,
+    pub storage: Vec<StorageSummary>,
+    pub media_services: Vec<MediaService>,
+    pub projects: Vec<ProjectRepo>,
+    pub artifact_refs: Vec<ArtifactRef>,
+    pub collection_errors: Vec<CollectionError>,
+    pub cortex_overlay: CortexOverlaySummary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HomelabMapSummary {
     pub hosts: usize,
     pub returned_hosts: usize,
-    pub source_ips: usize,
-    pub apps: usize,
+    pub services: usize,
+    pub compose_projects: usize,
+    pub reverse_proxies: usize,
+    pub projects: usize,
+    pub artifacts: usize,
+    pub collection_errors: usize,
     pub heartbeat_hosts: usize,
     pub truncated_hosts: bool,
+    pub truncated_sections: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +191,8 @@ pub struct HomelabMapNode {
     pub log_count: i64,
     pub source_ips: Vec<HomelabMapSourceIp>,
     pub apps: Vec<HomelabMapApp>,
+    pub inventory_roles: Vec<String>,
+    pub inventory_ips: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub heartbeat: Option<FleetStateHostRow>,
 }
@@ -186,11 +214,10 @@ pub struct HomelabMapApp {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HomelabMapInventorySource {
-    pub name: String,
-    pub source: String,
-    pub status: String,
-    pub collects: Vec<String>,
+pub struct CortexOverlaySummary {
+    pub log_hosts: usize,
+    pub heartbeat_hosts: usize,
+    pub overlay_status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
