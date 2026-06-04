@@ -116,7 +116,7 @@ pub async fn refresh_inventory(config: InventoryConfig) -> Result<InventoryRefre
             let started = Utc::now().to_rfc3339();
             let t = Instant::now();
             let out = match tokio::time::timeout(
-                probe_deadline,
+                collector_deadline,
                 crate::inventory::remote_device::collect(
                     config.ssh_config.as_deref(),
                     &config.ssh_hosts,
@@ -272,7 +272,7 @@ pub async fn refresh_inventory(config: InventoryConfig) -> Result<InventoryRefre
             let started = Utc::now().to_rfc3339();
             let t = Instant::now();
             let out = match tokio::time::timeout(
-                probe_deadline,
+                collector_deadline,
                 crate::inventory::projects::collect(&config.project_roots, probe_deadline),
             )
             .await
