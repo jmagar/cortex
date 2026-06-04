@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.3] - 2026-06-04
+
+### Fixed
+
+- Mounted the canonical `~/.cortex` home, SSH config, and workspace into the
+  Compose container so deployed inventory refreshes can collect remote hosts,
+  config artifacts, and project metadata instead of producing a local-only
+  partial cache.
+- Added runtime `ssh`, `git`, and network inspection tools to the container
+  image, and made SSH invocations tolerate newer host config options when using
+  an older container OpenSSH client.
+
 ## [1.13.2] - 2026-06-04
 
 ### Fixed
@@ -2045,7 +2057,8 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.13.2...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.13.3...HEAD
+[1.13.3]: https://github.com/jmagar/cortex/compare/v1.13.2...v1.13.3
 [1.13.2]: https://github.com/jmagar/cortex/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/jmagar/cortex/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/jmagar/cortex/compare/v1.12.0...v1.13.0

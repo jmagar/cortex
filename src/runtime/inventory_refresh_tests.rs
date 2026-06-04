@@ -89,7 +89,9 @@ fn remote_docker_events_ssh_args_include_safe_options_and_remote_command() {
     let args =
         remote_docker_events_ssh_args(Some(std::path::Path::new("/tmp/ssh_config")), "squirts");
 
-    assert_eq!(args[0], "-F");
+    assert_eq!(args[0], "-o");
+    assert_eq!(args[1], "IgnoreUnknown=WarnWeakCrypto");
+    assert_eq!(args[2], "-F");
     assert!(args.contains(&"/tmp/ssh_config".to_string()));
     assert!(args.contains(&"BatchMode=yes".to_string()));
     assert!(args.contains(&"--".to_string()));

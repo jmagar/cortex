@@ -327,6 +327,8 @@ fn remote_docker_events_enabled() -> bool {
 
 fn remote_docker_events_ssh_args(ssh_config: Option<&Path>, host: &str) -> Vec<String> {
     let mut args = Vec::new();
+    args.push("-o".to_string());
+    args.push("IgnoreUnknown=WarnWeakCrypto".to_string());
     if let Some(config) = ssh_config {
         args.push("-F".to_string());
         args.push(config.display().to_string());

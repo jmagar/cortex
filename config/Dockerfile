@@ -35,7 +35,9 @@ RUN --mount=type=cache,id=cortex-cargo-registry-v2,target=/usr/local/cargo/regis
 
 # Runtime
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl git iproute2 openssh-client && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/bin/cortex /usr/local/bin/cortex
 

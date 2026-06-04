@@ -26,11 +26,16 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      CORTEX_HOME: /cortex-home
     ports:
       - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/udp"
       - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/tcp"
       - "${CORTEX_PORT:-3100}:3100/tcp"
     volumes:
+      - ${CORTEX_HOME_VOLUME:-${HOME}/.cortex}:/cortex-home
+      - ${CORTEX_SSH_VOLUME:-${HOME}/.ssh}:/home/cortex/.ssh:ro
+      - ${CORTEX_WORKSPACE_VOLUME:-${HOME}/workspace}:/home/cortex/workspace:ro
       - ${CORTEX_DATA_VOLUME:-cortex-data}:/data
     # The container listens on CORTEX_RECEIVER_PORT (default 1514). To serve host port
     # 514, set CORTEX_RECEIVER_HOST_PORT=514 while leaving CORTEX_RECEIVER_PORT at 1514, or add

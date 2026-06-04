@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use crate::inventory::process::{run_command, CommandOutput};
 
+const SSH_IGNORE_UNKNOWN_OPTIONS: &str = "IgnoreUnknown=WarnWeakCrypto";
+
 pub fn configured_hosts(ssh_config: Option<&Path>, configured_hosts: &[String]) -> Vec<String> {
     if !configured_hosts.is_empty() {
         return configured_hosts
@@ -34,7 +36,15 @@ pub async fn run_ssh(
     remote_command: &str,
     timeout: Duration,
 ) -> Result<CommandOutput> {
+    let args = ssh_args(ssh_config, host, remote_command);
+    let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    run_command("ssh", &refs, timeout).await
+}
+
+fn ssh_args(ssh_config: Option<&Path>, host: &str, remote_command: &str) -> Vec<String> {
     let mut args = Vec::new();
+    args.push("-o".to_string());
+    args.push(SSH_IGNORE_UNKNOWN_OPTIONS.to_string());
     if let Some(config) = ssh_config {
         args.push("-F".to_string());
         args.push(config.display().to_string());
@@ -54,8 +64,7 @@ pub async fn run_ssh(
         host.to_string(),
         remote_command.to_string(),
     ]);
-    let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-    run_command("ssh", &refs, timeout).await
+    args
 }
 
 pub fn ssh_config_buf(ssh_config: Option<&Path>) -> Option<PathBuf> {

@@ -19,3 +19,17 @@ Host dookie
 
     assert_eq!(hosts, vec!["tootie", "shart", "dookie"]);
 }
+
+#[test]
+fn ssh_args_ignore_newer_config_options_before_loading_config() {
+    let args = ssh_args(
+        Some(std::path::Path::new("/tmp/ssh_config")),
+        "tootie",
+        "true",
+    );
+
+    assert_eq!(args[0], "-o");
+    assert_eq!(args[1], "IgnoreUnknown=WarnWeakCrypto");
+    assert_eq!(args[2], "-F");
+    assert_eq!(args[3], "/tmp/ssh_config");
+}
