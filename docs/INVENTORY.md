@@ -134,6 +134,8 @@ methods as the MCP actions.
 | `CORTEX_INVENTORY_DIR` | no | `~/.cortex/inventory` | no |
 | `CORTEX_INVENTORY_COMPOSE_PATHS` | no | `~/.cortex/compose/docker-compose.yml` | no |
 | `CORTEX_INVENTORY_PROXY_PATHS` | no | (none) | no |
+| `CORTEX_INVENTORY_SSH_CONFIG` | no | `~/.ssh/config` | no |
+| `CORTEX_INVENTORY_SSH_HOSTS` | no | all concrete `Host` aliases in SSH config except wildcard patterns and `github.com` | no |
 | `CORTEX_INVENTORY_PROJECT_ROOTS` | no | `~/workspace` | no |
 | `CORTEX_UNRAID_URL` | no | (none) | no |
 | `CORTEX_UNRAID_API_KEY` | no | (none) | yes |

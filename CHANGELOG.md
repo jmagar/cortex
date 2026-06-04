@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-06-04
+
+### Added
+
+- Added SSH-backed homelab config collection from concrete `Host` aliases in
+  `~/.ssh/config`, capturing remote Compose YAML and SWAG/reverse-proxy confs as
+  redacted private artifacts under `~/.cortex/inventory`.
+
+### Changed
+
+- Batched remote config reads per host and config kind so large SWAG
+  proxy-confs directories are collected without one SSH round trip per file.
+
 ## [1.10.1] - 2026-06-04
 
 ### Fixed
