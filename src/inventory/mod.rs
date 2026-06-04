@@ -11,6 +11,7 @@ pub mod process;
 pub mod projects;
 pub mod raw_configs;
 pub mod redaction;
+pub mod remote_configs;
 pub mod schema;
 pub mod storage;
 pub mod tailscale;

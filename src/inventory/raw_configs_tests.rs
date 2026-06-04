@@ -60,3 +60,26 @@ fn proxy_parser_preserves_server_names_and_upstreams() {
 fn proxy_parser_skips_empty_routes() {
     assert!(parse_proxy_routes(Path::new("/tmp/app.conf"), "listen 443;").is_empty());
 }
+
+#[test]
+fn remote_compose_body_preserves_source_host_and_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = InventoryPaths::new(dir.path().join("inventory"));
+    paths.ensure_private_dirs().unwrap();
+
+    let (artifact, project) = collect_compose_body(
+        Some("dookie".to_string()),
+        "dookie:/home/jmagar/compose/docker-compose.yaml".to_string(),
+        "services:\n  axon:\n    ports:\n      - \"3000:3000\"\n".to_string(),
+        &paths,
+        "run",
+    )
+    .unwrap();
+
+    assert_eq!(artifact.source_host.as_deref(), Some("dookie"));
+    assert_eq!(
+        artifact.source_path.as_deref(),
+        Some("dookie:/home/jmagar/compose/docker-compose.yaml")
+    );
+    assert_eq!(project.services, vec!["axon"]);
+}

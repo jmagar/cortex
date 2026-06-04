@@ -85,8 +85,11 @@ pub async fn refresh_inventory(config: InventoryConfig) -> Result<InventoryRefre
         crate::inventory::raw_configs::collect(
             &config.compose_paths,
             &config.proxy_paths,
+            config.ssh_config.as_deref(),
+            &config.ssh_hosts,
             &paths,
             &run_id,
+            config.probe_deadline,
         )
     );
     run_collect!(

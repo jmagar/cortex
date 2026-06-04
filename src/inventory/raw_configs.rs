@@ -3,6 +3,7 @@ use chrono::Utc;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::inventory::collectors::CollectorOutput;
 use crate::inventory::limits::MAX_RAW_ARTIFACT_BYTES;
@@ -15,15 +16,20 @@ use crate::inventory::storage::{write_artifact, InventoryPaths};
 pub async fn collect(
     compose_paths: &[PathBuf],
     proxy_paths: &[PathBuf],
+    ssh_config: Option<&Path>,
+    ssh_hosts: &[String],
     paths: &InventoryPaths,
     run_id: &str,
+    timeout: Duration,
 ) -> CollectorOutput {
     let compose_paths = compose_paths.to_vec();
     let proxy_paths = proxy_paths.to_vec();
     let paths = paths.clone();
     let run_id = run_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        collect_blocking(&compose_paths, &proxy_paths, &paths, &run_id)
+    let local_paths = paths.clone();
+    let local_run_id = run_id.clone();
+    let mut out = tokio::task::spawn_blocking(move || {
+        collect_blocking(&compose_paths, &proxy_paths, &local_paths, &local_run_id)
     })
     .await
     .unwrap_or_else(|error| {
@@ -33,7 +39,12 @@ pub async fn collect(
             format!("raw config collection task failed: {error}"),
         );
         out
-    })
+    });
+    let remote =
+        crate::inventory::remote_configs::collect(ssh_config, ssh_hosts, &paths, &run_id, timeout)
+            .await;
+    merge_output(&mut out, remote);
+    out
 }
 
 fn collect_blocking(
@@ -70,7 +81,17 @@ fn collect_compose_file(
     run_id: &str,
 ) -> Result<(ArtifactRef, ComposeProject)> {
     let body = read_bounded_text(path)?;
-    let artifact_id = artifact_id("compose", path);
+    collect_compose_body(None, path.display().to_string(), body, paths, run_id)
+}
+
+pub(in crate::inventory) fn collect_compose_body(
+    source_host: Option<String>,
+    source_path: String,
+    body: String,
+    paths: &InventoryPaths,
+    run_id: &str,
+) -> Result<(ArtifactRef, ComposeProject)> {
+    let artifact_id = artifact_id("compose", &source_path);
     let artifact = RedactedArtifact::from_text(&body, MAX_RAW_ARTIFACT_BYTES);
     let reference = write_artifact(
         paths,
@@ -81,15 +102,18 @@ fn collect_compose_file(
             id: artifact_id.clone(),
             kind: "compose_yaml".to_string(),
             collector: "raw_configs".to_string(),
-            source_host: None,
-            source_path: Some(path.display().to_string()),
+            source_host,
+            source_path: Some(source_path.clone()),
             cache_path: String::new(),
             redaction: artifact.status(),
             byte_len: 0,
             truncated: artifact.truncated(),
         },
     )?;
-    Ok((reference, parse_compose_project(path, &redact_text(&body))))
+    Ok((
+        reference,
+        parse_compose_project(Path::new(&source_path), &redact_text(&body)),
+    ))
 }
 
 fn collect_proxy_file(
@@ -98,7 +122,17 @@ fn collect_proxy_file(
     run_id: &str,
 ) -> Result<(ArtifactRef, Vec<ReverseProxyRoute>)> {
     let body = read_bounded_text(path)?;
-    let artifact_id = artifact_id("proxy", path);
+    collect_proxy_body(None, path.display().to_string(), body, paths, run_id)
+}
+
+pub(in crate::inventory) fn collect_proxy_body(
+    source_host: Option<String>,
+    source_path: String,
+    body: String,
+    paths: &InventoryPaths,
+    run_id: &str,
+) -> Result<(ArtifactRef, Vec<ReverseProxyRoute>)> {
+    let artifact_id = artifact_id("proxy", &source_path);
     let artifact = RedactedArtifact::from_text(&body, MAX_RAW_ARTIFACT_BYTES);
     let reference = write_artifact(
         paths,
@@ -109,15 +143,18 @@ fn collect_proxy_file(
             id: artifact_id.clone(),
             kind: "reverse_proxy_conf".to_string(),
             collector: "raw_configs".to_string(),
-            source_host: None,
-            source_path: Some(path.display().to_string()),
+            source_host,
+            source_path: Some(source_path.clone()),
             cache_path: String::new(),
             redaction: artifact.status(),
             byte_len: 0,
             truncated: artifact.truncated(),
         },
     )?;
-    Ok((reference, parse_proxy_routes(path, &redact_text(&body))))
+    Ok((
+        reference,
+        parse_proxy_routes(Path::new(&source_path), &redact_text(&body)),
+    ))
 }
 
 fn read_bounded_text(path: &Path) -> Result<String> {
@@ -214,7 +251,7 @@ fn parse_proxy_routes(path: &Path, body: &str) -> Vec<ReverseProxyRoute> {
         return Vec::new();
     }
     vec![ReverseProxyRoute {
-        id: artifact_id("route", path),
+        id: artifact_id("route", &path.display().to_string()),
         server_names,
         upstreams,
         provenance: Provenance::new(
@@ -275,9 +312,23 @@ fn expand_files(paths: &[PathBuf], extensions: &[&str]) -> Vec<PathBuf> {
     out
 }
 
-fn artifact_id(prefix: &str, path: &Path) -> String {
+fn merge_output(out: &mut CollectorOutput, remote: CollectorOutput) {
+    out.nodes.extend(remote.nodes);
+    out.services.extend(remote.services);
+    out.compose_projects.extend(remote.compose_projects);
+    out.reverse_proxies.extend(remote.reverse_proxies);
+    out.networks.extend(remote.networks);
+    out.storage.extend(remote.storage);
+    out.media_services.extend(remote.media_services);
+    out.projects.extend(remote.projects);
+    out.artifacts.extend(remote.artifacts);
+    out.errors.extend(remote.errors);
+    out.warnings.extend(remote.warnings);
+}
+
+fn artifact_id(prefix: &str, source: &str) -> String {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(path.display().to_string().as_bytes());
+    let digest = Sha256::digest(source.as_bytes());
     let digest_hex = format!("{digest:x}");
     format!("{prefix}:{}", &digest_hex[..32])
 }

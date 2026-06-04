@@ -11,6 +11,8 @@ pub struct InventoryConfig {
     pub root: PathBuf,
     pub compose_paths: Vec<PathBuf>,
     pub proxy_paths: Vec<PathBuf>,
+    pub ssh_config: Option<PathBuf>,
+    pub ssh_hosts: Vec<String>,
     pub project_roots: Vec<PathBuf>,
     pub docker_hosts: Vec<String>,
     pub unraid_url: Option<String>,
@@ -45,6 +47,10 @@ impl InventoryConfig {
             compose_paths: env_paths("CORTEX_INVENTORY_COMPOSE_PATHS")
                 .unwrap_or_else(|| vec![cortex_home.join("compose/docker-compose.yml")]),
             proxy_paths: env_paths("CORTEX_INVENTORY_PROXY_PATHS").unwrap_or_default(),
+            ssh_config: env_path("CORTEX_INVENTORY_SSH_CONFIG").or_else(|| {
+                env::var_os("HOME").map(|home| PathBuf::from(home).join(".ssh/config"))
+            }),
+            ssh_hosts: split_env("CORTEX_INVENTORY_SSH_HOSTS"),
             project_roots: env_paths("CORTEX_INVENTORY_PROJECT_ROOTS").unwrap_or_else(|| {
                 env::var_os("HOME")
                     .map(|home| vec![PathBuf::from(home).join("workspace")])
