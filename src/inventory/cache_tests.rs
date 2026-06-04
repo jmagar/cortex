@@ -9,8 +9,6 @@ use std::time::Duration as StdDuration;
 fn status_reports_missing_cache() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = InventoryConfig {
-        remote_config_targets: vec![],
-        ssh_config: None,
         root: dir.path().join("inventory"),
         compose_paths: vec![],
         proxy_paths: vec![],
@@ -34,8 +32,6 @@ fn status_reports_missing_cache() {
 fn status_reports_stale_available_cache() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = InventoryConfig {
-        remote_config_targets: vec![],
-        ssh_config: None,
         root: dir.path().join("inventory"),
         compose_paths: vec![],
         proxy_paths: vec![],
@@ -63,8 +59,6 @@ fn status_reports_stale_available_cache() {
 fn status_reports_fresh_available_cache() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = InventoryConfig {
-        remote_config_targets: vec![],
-        ssh_config: None,
         root: dir.path().join("inventory"),
         compose_paths: vec![],
         proxy_paths: vec![],
@@ -92,8 +86,6 @@ fn status_reports_fresh_available_cache() {
 fn status_ignores_non_metadata_cache_shape() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = InventoryConfig {
-        remote_config_targets: vec![],
-        ssh_config: None,
         root: dir.path().join("inventory"),
         compose_paths: vec![],
         proxy_paths: vec![],
@@ -127,8 +119,6 @@ fn status_ignores_non_metadata_cache_shape() {
 fn status_reports_corrupt_cache() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = InventoryConfig {
-        remote_config_targets: vec![],
-        ssh_config: None,
         root: dir.path().join("inventory"),
         compose_paths: vec![],
         proxy_paths: vec![],
