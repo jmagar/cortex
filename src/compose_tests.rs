@@ -558,8 +558,9 @@ fn status_errors_when_bind_mount_does_not_match_configured_data_volume() {
 #[test]
 fn status_expected_data_mount_uses_configured_env_file() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["CORTEX_ENV_FILE", "CORTEX_DATA_VOLUME"]);
+    let env = EnvGuard::new(&["CORTEX_ENV_FILE", "CORTEX_DATA_VOLUME", "CORTEX_HOME"]);
     env.remove("CORTEX_DATA_VOLUME");
+    env.remove("CORTEX_HOME");
     let dir = tempfile::tempdir().unwrap();
     let data_dir = dir.path().join("data");
     std::fs::create_dir(&data_dir).unwrap();
@@ -592,6 +593,48 @@ fn status_expected_data_mount_uses_configured_env_file() {
             .iter()
             .all(|d| d.code != "data_mount_unexpected"),
         "CORTEX_ENV_FILE should drive the same /data expectation as compose invocation"
+    );
+}
+
+#[test]
+fn status_expected_data_mount_uses_cortex_home_env_file() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["CORTEX_ENV_FILE", "CORTEX_DATA_VOLUME", "CORTEX_HOME"]);
+    env.remove("CORTEX_ENV_FILE");
+    env.remove("CORTEX_DATA_VOLUME");
+    let dir = tempfile::tempdir().unwrap();
+    let home_dir = dir.path().join(".cortex");
+    let data_dir = home_dir.join("data");
+    std::fs::create_dir(&home_dir).unwrap();
+    std::fs::create_dir(&data_dir).unwrap();
+    std::fs::write(
+        home_dir.join(".env"),
+        format!("CORTEX_DATA_VOLUME=\"{}\"\n", data_dir.display()),
+    )
+    .unwrap();
+    env.set("CORTEX_HOME", home_dir.to_str().unwrap());
+
+    let mut container = labelled_container();
+    container.mounts[0].kind = "bind".into();
+    container.mounts[0].volume_name = None;
+    container.mounts[0].source = Some(data_dir);
+    let service = ComposeService::new(
+        FakeInspector {
+            container: Some(container),
+            ..Default::default()
+        },
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+
+    let status = service.status(&ComposeTarget::default()).unwrap();
+
+    assert!(
+        status
+            .diagnostics
+            .iter()
+            .all(|d| d.code != "data_mount_unexpected"),
+        "CORTEX_HOME .env should drive the same /data expectation as compose invocation"
     );
 }
 
@@ -1006,8 +1049,12 @@ fn live_target_allows_listener_without_process_info_when_docker_confirms_owner()
 #[test]
 fn up_invocation_is_detached_and_uses_project_directory_and_all_files() {
     let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-    let env = EnvGuard::new(&["CORTEX_ENV_FILE"]);
+    let env = EnvGuard::new(&["CORTEX_ENV_FILE", "CORTEX_HOME"]);
     env.remove("CORTEX_ENV_FILE");
+    let dir = tempfile::tempdir().unwrap();
+    let empty_home = dir.path().join(".cortex");
+    std::fs::create_dir(&empty_home).unwrap();
+    env.set("CORTEX_HOME", empty_home.to_str().unwrap());
     let service = ComposeService::new(
         FakeInspector::default(),
         FakeRunner,
@@ -1092,6 +1139,65 @@ fn compose_invocation_uses_syslog_env_file_for_substitution() {
         .args
         .windows(2)
         .any(|args| { args[0] == "--env-file" && args[1] == env_file.display().to_string() }));
+    assert_eq!(
+        invocation.env,
+        vec![(
+            "CORTEX_ENV_FILE".to_string(),
+            env_file.display().to_string()
+        )]
+    );
+}
+
+#[test]
+fn compose_invocation_uses_cortex_home_env_file_for_substitution_and_service_env() {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let env = EnvGuard::new(&["CORTEX_ENV_FILE", "CORTEX_HOME"]);
+    env.remove("CORTEX_ENV_FILE");
+    let dir = tempfile::tempdir().unwrap();
+    let project_dir = dir.path().join("project");
+    let home_dir = dir.path().join(".cortex");
+    std::fs::create_dir(&project_dir).unwrap();
+    std::fs::create_dir(&home_dir).unwrap();
+    let home_env = home_dir.join(".env");
+    std::fs::write(&home_env, "CORTEX_DATA_VOLUME=/tmp/cortex-data\n").unwrap();
+    env.set("CORTEX_HOME", home_dir.to_str().unwrap());
+    let compose_file = project_dir.join("docker-compose.yml");
+    std::fs::write(&compose_file, "services: {}\n").unwrap();
+
+    let service = ComposeService::new(
+        FakeInspector::default(),
+        FakeRunner,
+        ComposeDefaults::default(),
+    );
+    let target = ResolvedComposeTarget {
+        target: ComposeTargetSummary {
+            project_dir: Some(project_dir.clone()),
+            compose_file: Some(compose_file.clone()),
+            project_name: Some("cortex".into()),
+            service: "cortex".into(),
+            container_name: "cortex".into(),
+        },
+        source: TargetSource::Explicit,
+        confidence: TargetConfidence::Confirmed,
+        diagnostics: Vec::new(),
+        compose_files: vec![compose_file],
+        compose_working_dir: Some(project_dir),
+        compose_project: Some("cortex".into()),
+    };
+
+    let invocation = service.compose_invocation(&target, ComposeMutation::Up);
+
+    assert!(invocation
+        .args
+        .windows(2)
+        .any(|args| { args[0] == "--env-file" && args[1] == home_env.display().to_string() }));
+    assert_eq!(
+        invocation.env,
+        vec![(
+            "CORTEX_ENV_FILE".to_string(),
+            home_env.display().to_string()
+        )]
+    );
 }
 
 #[test]
@@ -1189,6 +1295,7 @@ fn process_runner_truncates_and_redacts_output() {
             "-c".into(),
             "printf 'token=secret-value\\nvisible-line\\nmore-output\\n'".into(),
         ],
+        env: Vec::new(),
         current_dir: None,
         timeout: Duration::from_secs(5),
         output_limit_bytes: 32,
@@ -1202,11 +1309,31 @@ fn process_runner_truncates_and_redacts_output() {
 
 #[cfg(unix)]
 #[test]
+fn process_runner_applies_invocation_env() {
+    let runner = ProcessRunner;
+    let invocation = ComposeInvocation {
+        program: "sh".into(),
+        args: vec!["-c".into(), "printf '%s' \"$CORTEX_ENV_FILE\"".into()],
+        env: vec![("CORTEX_ENV_FILE".into(), "/tmp/cortex-home.env".into())],
+        current_dir: None,
+        timeout: Duration::from_secs(5),
+        output_limit_bytes: 1024,
+    };
+
+    let output = runner.run(&invocation).unwrap();
+
+    assert_eq!(output.exit_status, Some(0));
+    assert_eq!(output.stdout, "/tmp/cortex-home.env");
+}
+
+#[cfg(unix)]
+#[test]
 fn process_runner_times_out_and_reports_cleanup() {
     let runner = ProcessRunner;
     let invocation = ComposeInvocation {
         program: "sh".into(),
         args: vec!["-c".into(), "sleep 5".into()],
+        env: Vec::new(),
         current_dir: None,
         timeout: Duration::from_millis(100),
         output_limit_bytes: 1024,
@@ -1226,6 +1353,7 @@ fn process_runner_kills_term_ignoring_process_group() {
             "-c".into(),
             "trap '' TERM; sh -c 'trap \"\" TERM; while true; do sleep 1; done' & wait".into(),
         ],
+        env: Vec::new(),
         current_dir: None,
         timeout: Duration::from_millis(100),
         output_limit_bytes: 1024,

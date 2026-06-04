@@ -18,6 +18,9 @@ impl CommandRunner for ProcessRunner {
 
         let mut command = Command::new(&invocation.program);
         command.args(&invocation.args);
+        for (key, value) in &invocation.env {
+            command.env(key, value);
+        }
         if let Some(dir) = &invocation.current_dir {
             command.current_dir(dir);
         }

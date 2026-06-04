@@ -54,9 +54,16 @@ impl<I, R> ComposeService<I, R> {
     }
 
     fn invocation(&self, target: &ResolvedComposeTarget, args: Vec<String>) -> ComposeInvocation {
+        let env = target
+            .compose_working_dir
+            .as_deref()
+            .and_then(compose_env_file)
+            .map(|path| vec![("CORTEX_ENV_FILE".to_string(), path.display().to_string())])
+            .unwrap_or_default();
         ComposeInvocation {
             program: "docker".into(),
             args,
+            env,
             current_dir: target.compose_working_dir.clone(),
             timeout: self.defaults.timeout,
             output_limit_bytes: self.defaults.output_limit_bytes,
@@ -577,6 +584,13 @@ fn compose_env_file(project_dir: &Path) -> Option<PathBuf> {
         .filter(|p| p.is_file())
     {
         return Some(path);
+    }
+
+    if let Ok(home) = crate::setup::cortex_home_dir() {
+        let path = home.join(".env");
+        if path.is_file() {
+            return Some(path);
+        }
     }
 
     project_dir

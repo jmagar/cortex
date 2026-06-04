@@ -219,6 +219,7 @@ pub struct MutationOptions {
 pub struct ComposeInvocation {
     pub program: String,
     pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
     pub current_dir: Option<PathBuf>,
     pub timeout: Duration,
     pub output_limit_bytes: usize,

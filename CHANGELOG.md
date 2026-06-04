@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-06-04
+
+### Fixed
+
+- Passed the resolved Compose env file through `CORTEX_ENV_FILE` for compose
+  mutations and allowed `~/.cortex/.env` to drive compose data-volume checks.
+
 ## [1.10.0] - 2026-06-03
 
 ### Added
@@ -1969,7 +1976,8 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/jmagar/cortex/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/jmagar/cortex/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/jmagar/cortex/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/jmagar/cortex/compare/v1.8.0...v1.9.0
