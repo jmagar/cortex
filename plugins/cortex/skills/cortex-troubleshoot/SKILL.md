@@ -3,7 +3,7 @@ name: cortex-troubleshoot
 description: Troubleshoot cortex connection failures, missing logs, unhealthy containers, restart loops, or vague "logs aren't working" reports.
 ---
 
-# Syslog Troubleshooting Skill
+# Cortex Troubleshooting Skill
 
 Diagnose cortex problems systematically. Use the binary's observability counters and existing diagnostic tooling rather than guessing — the codebase exposes most state needed to localize a failure.
 
@@ -18,7 +18,7 @@ Most common cause: empty / wrong `$CLAUDE_PLUGIN_OPTION_SERVER_URL`, mismatched 
 1. **Is anything listening on the MCP port?**
    `ss -tlnp | grep -E ":$CLAUDE_PLUGIN_OPTION_MCP_PORT"` — if empty, the service is down → branch C
 2. **Is the URL Claude Code is using sane?**
-   Read `~/.claude/settings.json`, find the `pluginConfigs` key that starts with `syslog@`, and inspect `options.server_url` — empty string is a known footgun (the `.mcp.json` substitution produces a literal `/mcp`). Check non-empty, has scheme, no trailing `/mcp`.
+   Read `~/.claude/settings.json`, find the `pluginConfigs` key that starts with `cortex@`, and inspect `options.server_url` — empty string is a known footgun (the `.mcp.json` substitution produces a literal `/mcp`). Check non-empty, has scheme, no trailing `/mcp`.
 3. **Does observed auth match configured auth?**
    Run `curl -sS -o /dev/null -w '%{http_code}' "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp"`.
    - If `$CLAUDE_PLUGIN_OPTION_NO_AUTH` is true or no bearer/OAuth auth is configured, `200` or MCP protocol-level `400/405` can be normal route evidence.
@@ -46,7 +46,7 @@ Most common cause: empty / wrong `$CLAUDE_PLUGIN_OPTION_SERVER_URL`, mismatched 
 2. **If recently restarted / crashing — get the actual error**: use `cortex-logs` for the last 100 lines, or run `docker compose logs` manually. Look for: panic messages, port-bind errors (`address already in use`), DB lock errors, OOM kills.
 3. **Common service-failure causes (ranked by frequency in this plugin's history)**:
    1. Port `$CLAUDE_PLUGIN_OPTION_SYSLOG_PORT` or `$CLAUDE_PLUGIN_OPTION_MCP_PORT` held by another process. First identify the owner with `ss -tulpn`/`lsof`/`fuser`; only kill or restart anything after the user approves the specific process and impact.
-   2. Database lock (another `syslog mcp` stdio process holds it). `pgrep -af "syslog mcp"` to list candidates; only kill stragglers after approval.
+   2. Database lock (another `cortex` stdio process holds it). `pgrep -af "cortex"` to list candidates; only kill stragglers after approval.
    3. Docker image missing/stale: `docker compose pull` to refresh.
 4. **If healthcheck failing but `/health` works manually**: Container is unhealthy because the healthcheck command inside the image is wrong/can't run. Compare image version to what you expect — `docker inspect cortex | jq '.[0].Config.Image'`.
 

@@ -1,9 +1,9 @@
 ---
 name: cortex-frustration-assessment
-description: Consume a syslog abuse_investigate JSON evidence bundle and produce a deep Markdown assessment covering signal authenticity, agent/user/external factors, good practices, recommended follow-ups, and evidence-backed Beads for critical/P1 issues only.
+description: "This skill should be used after running cortex action=abuse_investigate to analyze the resulting evidence bundle. Use when the user asks to assess frustration incidents, evaluate abuse signals, analyze agent or user friction, produce a frustration report, or follow up on abuse_investigate results."
 ---
 
-# Syslog Frustration Assessment
+# Cortex Frustration Assessment
 
 ## Trigger
 

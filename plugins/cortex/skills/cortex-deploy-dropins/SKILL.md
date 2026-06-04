@@ -3,7 +3,7 @@ name: cortex-deploy-dropins
 description: Deploy rsyslog forwarding drop-ins to configured fleet hosts over SSH. Use when configuring fleet forwarding, repairing missing rsyslog forwarding, or updating forwarding after server_url or syslog port changes.
 ---
 
-# Syslog Deploy Drop-ins
+# Cortex Deploy Drop-ins
 
 Install or update `/etc/rsyslog.d/99-cortex.conf` on each configured fleet host.
 

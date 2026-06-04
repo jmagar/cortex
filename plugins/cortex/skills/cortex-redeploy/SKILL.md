@@ -3,13 +3,13 @@ name: cortex-redeploy
 description: Re-run the cortex plugin setup hook with the current userConfig and verify the Docker Compose deployment. Use when the user asks to redeploy cortex, apply plugin config changes immediately, rerun the setup hook, refresh the Docker deployment, or recover after an automated SessionStart/ConfigChange hook did not run.
 ---
 
-# Syslog Redeploy
+# Cortex Redeploy
 
 Run the plugin setup hook directly, then verify the selected deployment mode is healthy.
 
 ## Before Running
 
-Explain that the hook exports current userConfig into environment variables, then delegates to `syslog setup repair`. The shared setup path repairs `~/.cortex/.env`, writes Compose assets under `~/.cortex/compose`, recreates the Docker Compose container when needed, and removes stale user-level `cortex.service` units/drop-ins left by older plugin versions. Recreating the container causes a brief `/health` gap.
+Explain that the hook exports current userConfig into environment variables, then delegates to `cortex setup repair`. The shared setup path repairs `~/.cortex/.env`, writes Compose assets under `~/.cortex/compose`, recreates the Docker Compose container when needed, and removes stale user-level `cortex.service` units/drop-ins left by older plugin versions. Recreating the container causes a brief `/health` gap.
 
 If the user asked for a dry run only, stop after describing what would happen.
 
@@ -38,6 +38,7 @@ If the user asked for a dry run only, stop after describing what would happen.
 
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/scripts/check-runtime-current.sh
+   # Note: if this script is missing, run: docker inspect $(docker compose ps -q cortex) --format '{{.Image}}'
    ```
 
    Expect `CURRENT`. Treat `STALE` or `FAIL` as a failed redeploy verification and include the printed `fix:` line when present.

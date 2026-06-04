@@ -3,7 +3,7 @@ name: cortex-dr
 description: Run a comprehensive cortex health check covering environment, config quality, storage, ports, service status, HTTP health, MCP actions, listener reachability, Docker ingest, and fleet rsyslog forwarding. Use when the user asks for syslog doctor, deployment diagnostics, first-run preflight, health check, sanity check, or broad deployment verification.
 ---
 
-# Syslog Doctor
+# Cortex Doctor
 
 Run a full PASS / WARN / FAIL diagnostic for cortex. Use this when the user needs broad deployment confidence rather than a narrow log query.
 
@@ -93,3 +93,4 @@ End with one verdict:
 - `<N> checks failed`
 
 For each warning or failure, include a concrete next step. Add a footer that deep functional validation is `bash scripts/smoke-test.sh`.
+# Note: if smoke-test.sh is missing, manually send a test syslog: logger -n 127.0.0.1 -P 1514 "cortex smoke test"

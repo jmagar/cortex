@@ -3,13 +3,13 @@ name: cortex
 description: This skill should be used when the user asks to "search logs", "check errors", "tail logs", "show recent logs", "find log entries", "correlate events", "list hosts", "log stats", "syslog", "check homelab logs", or mentions system logs, syslog, log analysis, or log intelligence across homelab hosts.
 ---
 
-# Syslog Skill
+# Cortex Skill
 
 Rust-based syslog receiver and MCP server for homelab log intelligence. Receives RFC 3164/5424 syslog from all homelab hosts, stores in SQLite with FTS5 full-text search, and exposes one MCP tool with action dispatch for AI-driven log analysis.
 
 ## Tool
 
-A single MCP tool, `mcp__syslog__syslog`, dispatches on a required `action` argument:
+A single MCP tool, `mcp__cortex__cortex`, dispatches on a required `action` argument:
 
 | action | purpose |
 |--------|---------|
@@ -70,7 +70,7 @@ The skill works identically in both server mode (this machine hosts the receiver
 For parameter-level details and response shapes, use the live action reference:
 
 ```text
-mcp__syslog__syslog(action="help")
+mcp__cortex__cortex(action="help")
 ```
 
 When working from the repository instead of a live server, use `docs/mcp/TOOLS.md`, `docs/mcp/SCHEMA.md`, and `docs/mcp/CORRELATION.md` as the canonical references. Keep this skill focused on when to use the tool, safe invocation patterns, and common workflows rather than duplicating every action schema.
@@ -149,38 +149,38 @@ curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
 ### Quick homelab health check
 
 ```
-mcp__syslog__syslog(action="errors")
-mcp__syslog__syslog(action="tail", hostname="unraid", n=50)
-mcp__syslog__syslog(action="search", query='OOM OR "out of memory"', hostname="unraid")
+mcp__cortex__cortex(action="errors")
+mcp__cortex__cortex(action="tail", hostname="unraid", n=50)
+mcp__cortex__cortex(action="search", query='OOM OR "out of memory"', hostname="unraid")
 ```
 
 ### Incident investigation
 
 ```
 # 1. Find the incident
-mcp__syslog__syslog(action="search", query='panic OR crash OR "segmentation fault"', limit=10)
+mcp__cortex__cortex(action="search", query='panic OR crash OR "segmentation fault"', limit=10)
 
 # 2. Correlate across hosts at that timestamp
-mcp__syslog__syslog(action="correlate",
+mcp__cortex__cortex(action="correlate",
                     reference_time="<timestamp from step 1>",
                     window_minutes=15,
                     severity_min="warning")
 
 # 3. Confirm which hosts were active
-mcp__syslog__syslog(action="hosts")
+mcp__cortex__cortex(action="hosts")
 ```
 
 ### Trace a specific Docker container's logs
 
 ```
 # Docker ingest sets source_ip to docker://host/container/stream
-mcp__syslog__syslog(action="search", source_ip="docker://squirts/postgres/stdout", limit=50)
+mcp__cortex__cortex(action="search", source_ip="docker://squirts/postgres/stdout", limit=50)
 ```
 
 ### Storage health
 
 ```
-mcp__syslog__syslog(action="stats")
+mcp__cortex__cortex(action="stats")
 # Check: write_blocked, logical_db_size_mb vs threshold, free_disk_mb vs threshold
 ```
 

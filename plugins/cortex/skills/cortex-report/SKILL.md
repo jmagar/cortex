@@ -1,9 +1,9 @@
 ---
 name: cortex-report
-description: Generate a time-bounded markdown report from the cortex MCP server covering fleet activity, errors, stale hosts, correlations, and recommended actions.
+description: "This skill should be used when the user asks for a homelab health report, syslog summary, fleet status report, log analysis summary, 'what happened in the last 24 hours', 'show me this week's errors', 'summarize recent activity', or any time-bounded log analysis that should produce a written markdown report."
 ---
 
-# Syslog Report
+# Cortex Report
 
 ## Overview
 
@@ -45,7 +45,7 @@ Use the `cortex` MCP tool as the source of truth for recent device logs. Query b
 Use this structure unless the user asks for a different format:
 
 ```markdown
-# Syslog Report: <start> to <end>
+# Cortex Report: <start> to <end>
 
 ## Summary
 - Overall status: <healthy/degraded/unknown>

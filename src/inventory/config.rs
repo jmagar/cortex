@@ -11,6 +11,8 @@ pub struct InventoryConfig {
     pub root: PathBuf,
     pub compose_paths: Vec<PathBuf>,
     pub proxy_paths: Vec<PathBuf>,
+    pub remote_config_targets: Vec<RemoteConfigTarget>,
+    pub ssh_config: Option<PathBuf>,
     pub project_roots: Vec<PathBuf>,
     pub docker_hosts: Vec<String>,
     pub unraid_url: Option<String>,
@@ -21,6 +23,19 @@ pub struct InventoryConfig {
     pub collection_deadline: Duration,
     pub collector_deadline: Duration,
     pub probe_deadline: Duration,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteConfigTarget {
+    pub kind: RemoteConfigKind,
+    pub host: String,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RemoteConfigKind {
+    Compose,
+    Proxy,
 }
 
 #[derive(Clone)]
@@ -45,6 +60,10 @@ impl InventoryConfig {
             compose_paths: env_paths("CORTEX_INVENTORY_COMPOSE_PATHS")
                 .unwrap_or_else(|| vec![cortex_home.join("compose/docker-compose.yml")]),
             proxy_paths: env_paths("CORTEX_INVENTORY_PROXY_PATHS").unwrap_or_default(),
+            remote_config_targets: remote_config_targets_from_env(),
+            ssh_config: env_path("CORTEX_INVENTORY_SSH_CONFIG").or_else(|| {
+                env::var_os("HOME").map(|home| PathBuf::from(home).join(".ssh/config"))
+            }),
             project_roots: env_paths("CORTEX_INVENTORY_PROJECT_ROOTS").unwrap_or_else(|| {
                 env::var_os("HOME")
                     .map(|home| vec![PathBuf::from(home).join("workspace")])
@@ -119,6 +138,42 @@ fn env_secs(name: &str, default: u64) -> Duration {
         .filter(|secs| *secs > 0)
         .map(Duration::from_secs)
         .unwrap_or_else(|| Duration::from_secs(default))
+}
+
+fn remote_config_targets_from_env() -> Vec<RemoteConfigTarget> {
+    let mut targets = split_env("CORTEX_INVENTORY_REMOTE_CONFIGS")
+        .into_iter()
+        .filter_map(|entry| parse_remote_config_target(&entry))
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        targets.push(RemoteConfigTarget {
+            kind: RemoteConfigKind::Proxy,
+            host: env_string("SWAG_HOST").unwrap_or_else(|| "squirts".to_string()),
+            path: env_string("SWAG_PROXY_CONFS")
+                .unwrap_or_else(|| "/mnt/appdata/swag/nginx/proxy-confs".to_string()),
+        });
+    }
+    targets
+}
+
+fn parse_remote_config_target(entry: &str) -> Option<RemoteConfigTarget> {
+    let (kind, rest) = entry.split_once(':')?;
+    let (host, path) = rest.split_once(':')?;
+    let kind = match kind {
+        "compose" => RemoteConfigKind::Compose,
+        "proxy" => RemoteConfigKind::Proxy,
+        _ => return None,
+    };
+    let host = host.trim();
+    let path = path.trim();
+    if host.is_empty() || path.is_empty() {
+        return None;
+    }
+    Some(RemoteConfigTarget {
+        kind,
+        host: host.to_string(),
+        path: path.to_string(),
+    })
 }
 
 fn media_services_from_env() -> Vec<MediaServiceConfig> {

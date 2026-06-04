@@ -3,7 +3,7 @@ name: cortex-version-check
 description: Check whether the running cortex Docker container matches the local Compose image. Use when the user asks whether cortex is current, stale, deployed, updated, running the latest plugin image, or needs a restart/recreate after an upgrade. Supports an optional --pull mode for Docker image comparison.
 ---
 
-# Syslog Version Check
+# Cortex Version Check
 
 Check whether the active cortex runtime is current before suggesting a restart or redeploy.
 
@@ -13,6 +13,7 @@ Check whether the active cortex runtime is current before suggesting a restart o
 
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/scripts/check-runtime-current.sh <optional-args>
+   # Note: if this script is missing, run: docker inspect $(docker compose ps -q cortex) --format '{{.Image}}'
    ```
 
    If `CLAUDE_PLUGIN_ROOT` is not available or the script is missing, stop with

@@ -3,7 +3,7 @@ name: cortex-logs
 description: Tail or follow cortex service logs from Docker Compose. Use when the user asks for cortex service logs, startup logs, crash logs, plugin deployment logs, Docker logs, or follow mode. This is for the service's stdout/stderr, not client syslog entries.
 ---
 
-# Syslog Service Logs
+# Cortex Service Logs
 
 Show recent cortex service logs. These are the binary's stdout/stderr, not syslog entries received from clients. Use the `cortex` MCP tool with `action=tail` for received log entries.
 
