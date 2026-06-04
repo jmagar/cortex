@@ -412,6 +412,25 @@ impl CortexService {
         let outcome = self
             .run_db("graph.rebuild", db::graph::refresh_graph_projection)
             .await?;
+        if matches!(&outcome, db::graph::GraphRebuildOutcome::Rebuilt(_)) {
+            let config = crate::inventory::InventoryConfig::from_env();
+            match crate::inventory::read_inventory_cache(&config) {
+                Ok(inventory) => {
+                    let project_result = self
+                        .run_db("graph.inventory_project", move |pool| {
+                            db::graph_inventory::project_inventory(pool, &inventory)
+                        })
+                        .await;
+                    if let Err(error) = project_result {
+                        tracing::warn!(%error, "graph rebuild inventory projection failed");
+                    }
+                }
+                Err(error) => tracing::debug!(
+                    %error,
+                    "graph rebuild skipped inventory projection; cache unavailable"
+                ),
+            }
+        }
         let status = self.graph_projection_status().await?;
         let (outcome, stats) = match outcome {
             db::graph::GraphRebuildOutcome::Rebuilt(stats) => (

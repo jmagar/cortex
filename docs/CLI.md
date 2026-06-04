@@ -125,6 +125,11 @@ UniFi, media services, and configured local project roots. Missing provider
 credentials are warnings, not fatal errors for unrelated collectors. `status`
 reads only the cache metadata and does not open SQLite.
 
+Server-side refresh additionally projects the normalized inventory into the
+investigation graph. It runs on the 5-minute baseline cadence and reacts to
+local Compose/proxy config changes plus remote Docker container events over SSH
+when available.
+
 ### `cortex sessions`
 
 List AI transcript sessions grouped by project.

@@ -318,7 +318,7 @@ impl RuntimeCore {
         let notification_dispatcher = self.spawn_notification_dispatcher(token.clone());
         let notification_evaluator = self.spawn_notification_evaluator(token.clone());
         let notification_digest = self.spawn_notification_digest(token.clone());
-        let inventory_refresh = inventory_refresh::spawn(token.clone());
+        let inventory_refresh = inventory_refresh::spawn(token.clone(), Arc::clone(&self.pool));
         let inventory_backfill = self.spawn_inventory_backfill_task(token.clone());
         let session_rollup = self.spawn_session_rollup_task(token.clone());
         let timeline_rollup = self.spawn_timeline_rollup_task(token.clone());

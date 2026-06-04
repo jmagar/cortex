@@ -138,10 +138,14 @@ methods as the MCP actions.
 | `CORTEX_INVENTORY_SSH_HOSTS` | no | all concrete `Host` aliases in SSH config except wildcard patterns and `github.com` | no |
 | `CORTEX_INVENTORY_PROJECT_ROOTS` | no | `~/workspace` | no |
 | `CORTEX_INVENTORY_REFRESH_INTERVAL_SECS` | no | `300` (`0` disables server-side periodic refresh) | no |
+| `CORTEX_INVENTORY_WATCH_ENABLED` | no | `true` | no |
+| `CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS` | no | `true` | no |
 | `CORTEX_UNRAID_URL` | no | (none) | no |
 | `CORTEX_UNRAID_API_KEY` | no | (none) | yes |
 | `CORTEX_UNIFI_URL` | no | (none) | no |
 | `CORTEX_UNIFI_API_KEY` | no | (none) | yes |
+| `CORTEX_<MEDIA>_URL` | no | (none) | no |
+| `CORTEX_<MEDIA>_API_KEY` / `TOKEN` / `USERNAME` / `PASSWORD` | no | (none) | yes |
 
 ## Homelab inventory refresh
 
@@ -151,12 +155,23 @@ automatically: one refresh runs shortly after startup, then every
 `CORTEX_INVENTORY_REFRESH_INTERVAL_SECS` seconds. Set the interval to `0` to
 disable background refresh.
 
+When background refresh is enabled, Cortex also watches local configured
+Compose/proxy config paths and refreshes after a short debounce when they
+change. For SSH hosts that can run Docker, Cortex opens `docker events` streams
+over SSH and uses container events as refresh triggers. Set
+`CORTEX_INVENTORY_WATCH_ENABLED=false` or
+`CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS=false` to disable either trigger.
+
 Remote collection is SSH-backed and uses concrete aliases from `~/.ssh/config`
 unless `CORTEX_INVENTORY_SSH_HOSTS` is set. It collects host facts, listener
 ports, storage summaries, Compose YAML artifacts, reverse proxy conf artifacts,
 and compact Docker inspect data including container status/health, image,
 published ports, networks, mounts, compose/route labels, and environment key
 names only. It does not store environment values.
+
+Optional provider collectors are activated only when their URL/credential env
+vars are present. Supported media prefixes are `SONARR`, `RADARR`, `PROWLARR`,
+`SABNZBD`, `QBITTORRENT`, `PLEX`, `TAUTULLI`, and `OVERSEERR`.
 
 ## Plugin surfaces
 

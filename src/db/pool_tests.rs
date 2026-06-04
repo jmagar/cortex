@@ -360,6 +360,22 @@ fn graph_schema_enforces_vocabulary_and_dedup_keys() {
         [],
     )
     .unwrap();
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES ('reverse_proxy', 'proxy:example.tootie.tv', 'example.tootie.tv',
+             'app_inventory', 'proxy:example.tootie.tv', 'verified')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES ('domain', 'example.tootie.tv', 'example.tootie.tv',
+             'app_inventory', 'example.tootie.tv', 'verified')",
+        [],
+    )
+    .unwrap();
     let source_id: i64 = conn
         .query_row(
             "SELECT id FROM graph_entities WHERE entity_type = 'source_ip'",
@@ -370,6 +386,20 @@ fn graph_schema_enforces_vocabulary_and_dedup_keys() {
     let host_id: i64 = conn
         .query_row(
             "SELECT id FROM graph_entities WHERE entity_type = 'host'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let proxy_id: i64 = conn
+        .query_row(
+            "SELECT id FROM graph_entities WHERE entity_type = 'reverse_proxy'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let domain_id: i64 = conn
+        .query_row(
+            "SELECT id FROM graph_entities WHERE entity_type = 'domain'",
             [],
             |row| row.get(0),
         )
@@ -399,6 +429,16 @@ fn graph_schema_enforces_vocabulary_and_dedup_keys() {
         rusqlite::params![source_id, host_id],
     )
     .unwrap();
+    conn.execute(
+        "INSERT INTO graph_relationships
+            (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+             reason_code, trust_level, confidence, evidence_count)
+         VALUES ('reverse_proxy:example.tootie.tv->domain:example.tootie.tv',
+             ?1, ?2, 'exposes_domain', 'reverse_proxy_config',
+             'verified', 0.90, 1)",
+        rusqlite::params![proxy_id, domain_id],
+    )
+    .unwrap();
     let duplicate_rel = conn.execute(
         "INSERT INTO graph_relationships
             (relationship_key, src_entity_id, dst_entity_id, relationship_type,
@@ -419,6 +459,17 @@ fn graph_schema_enforces_vocabulary_and_dedup_keys() {
          VALUES (?1, 'log:1:hostname:2026-01-01T00', 'log', '1',
              '2026-01-01T00:00:00Z', 'syslog_claimed_hostname',
              'claimed', 'claimed-host', 3)",
+        [rel_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO graph_relationship_evidence
+            (relationship_id, evidence_key, source_kind, source_id, observed_at,
+             reason_code, trust_level, safe_excerpt, evidence_count)
+         VALUES (?1, 'proxy:example.tootie.tv:route',
+             'app_inventory', 'proxy:example.tootie.tv',
+             '2026-01-01T00:00:00Z', 'reverse_proxy_config',
+             'verified', 'example.tootie.tv routes through proxy config', 1)",
         [rel_id],
     )
     .unwrap();

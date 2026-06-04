@@ -104,6 +104,12 @@ source_ip
 ai_project
 ai_session
 error_signature
+compose_project
+reverse_proxy
+domain
+network
+storage
+config_artifact
 ```
 
 Unknown entity types MUST be rejected on public lookup surfaces.
@@ -118,6 +124,13 @@ runs_on
 emitted_by
 worked_on
 matches_signature
+defines_service
+routes_to
+exposes_domain
+attached_to
+mounts
+backed_by
+has_artifact
 ```
 
 ### 4.3 Trust Levels
@@ -177,10 +190,20 @@ docker_service_label
 ai_session_project
 heartbeat_host_state
 error_signature_match
+inventory_node
+inventory_service
+compose_config
+reverse_proxy_config
+docker_network
+storage_probe
+config_artifact
 ```
 
 `heartbeat_host_state` is reserved for heartbeat-derived relationship evidence.
 The current v1 implementation uses heartbeat rows for host identity/aliases.
+Inventory projections use `source_inventory` and `app_inventory` evidence to
+link hosts, services, Compose projects, reverse proxy routes, domains, Docker
+networks, storage mounts, and redacted config artifacts.
 
 ## 5. Entity Construction Contract
 

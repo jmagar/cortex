@@ -30,6 +30,12 @@ pub const ENTITY_TYPE_SOURCE_IP: &str = "source_ip";
 pub const ENTITY_TYPE_AI_PROJECT: &str = "ai_project";
 pub const ENTITY_TYPE_AI_SESSION: &str = "ai_session";
 pub const ENTITY_TYPE_ERROR_SIGNATURE: &str = "error_signature";
+pub const ENTITY_TYPE_COMPOSE_PROJECT: &str = "compose_project";
+pub const ENTITY_TYPE_REVERSE_PROXY: &str = "reverse_proxy";
+pub const ENTITY_TYPE_DOMAIN: &str = "domain";
+pub const ENTITY_TYPE_NETWORK: &str = "network";
+pub const ENTITY_TYPE_STORAGE: &str = "storage";
+pub const ENTITY_TYPE_CONFIG_ARTIFACT: &str = "config_artifact";
 
 pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_HOST,
@@ -40,6 +46,12 @@ pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_AI_PROJECT,
     ENTITY_TYPE_AI_SESSION,
     ENTITY_TYPE_ERROR_SIGNATURE,
+    ENTITY_TYPE_COMPOSE_PROJECT,
+    ENTITY_TYPE_REVERSE_PROXY,
+    ENTITY_TYPE_DOMAIN,
+    ENTITY_TYPE_NETWORK,
+    ENTITY_TYPE_STORAGE,
+    ENTITY_TYPE_CONFIG_ARTIFACT,
 ];
 
 pub const REL_OBSERVED_AS: &str = "observed_as";
@@ -47,6 +59,13 @@ pub const REL_RUNS_ON: &str = "runs_on";
 pub const REL_EMITTED_BY: &str = "emitted_by";
 pub const REL_WORKED_ON: &str = "worked_on";
 pub const REL_MATCHES_SIGNATURE: &str = "matches_signature";
+pub const REL_DEFINES_SERVICE: &str = "defines_service";
+pub const REL_ROUTES_TO: &str = "routes_to";
+pub const REL_EXPOSES_DOMAIN: &str = "exposes_domain";
+pub const REL_ATTACHED_TO: &str = "attached_to";
+pub const REL_MOUNTS: &str = "mounts";
+pub const REL_BACKED_BY: &str = "backed_by";
+pub const REL_HAS_ARTIFACT: &str = "has_artifact";
 
 pub const RELATIONSHIP_TYPES: &[&str] = &[
     REL_OBSERVED_AS,
@@ -54,6 +73,13 @@ pub const RELATIONSHIP_TYPES: &[&str] = &[
     REL_EMITTED_BY,
     REL_WORKED_ON,
     REL_MATCHES_SIGNATURE,
+    REL_DEFINES_SERVICE,
+    REL_ROUTES_TO,
+    REL_EXPOSES_DOMAIN,
+    REL_ATTACHED_TO,
+    REL_MOUNTS,
+    REL_BACKED_BY,
+    REL_HAS_ARTIFACT,
 ];
 
 pub const TRUST_VERIFIED: &str = "verified";
@@ -91,6 +117,13 @@ pub const REASON_DOCKER_SERVICE_LABEL: &str = "docker_service_label";
 pub const REASON_AI_SESSION_PROJECT: &str = "ai_session_project";
 pub const REASON_HEARTBEAT_HOST_STATE: &str = "heartbeat_host_state";
 pub const REASON_ERROR_SIGNATURE_MATCH: &str = "error_signature_match";
+pub const REASON_INVENTORY_NODE: &str = "inventory_node";
+pub const REASON_INVENTORY_SERVICE: &str = "inventory_service";
+pub const REASON_COMPOSE_CONFIG: &str = "compose_config";
+pub const REASON_REVERSE_PROXY_CONFIG: &str = "reverse_proxy_config";
+pub const REASON_DOCKER_NETWORK: &str = "docker_network";
+pub const REASON_STORAGE_PROBE: &str = "storage_probe";
+pub const REASON_CONFIG_ARTIFACT: &str = "config_artifact";
 
 pub const REASON_CODES: &[&str] = &[
     REASON_SYSLOG_CLAIMED_HOSTNAME,
@@ -100,6 +133,13 @@ pub const REASON_CODES: &[&str] = &[
     REASON_AI_SESSION_PROJECT,
     REASON_HEARTBEAT_HOST_STATE,
     REASON_ERROR_SIGNATURE_MATCH,
+    REASON_INVENTORY_NODE,
+    REASON_INVENTORY_SERVICE,
+    REASON_COMPOSE_CONFIG,
+    REASON_REVERSE_PROXY_CONFIG,
+    REASON_DOCKER_NETWORK,
+    REASON_STORAGE_PROBE,
+    REASON_CONFIG_ARTIFACT,
 ];
 
 pub const PROJECTION_STATUS_NEVER_BUILT: &str = "never_built";

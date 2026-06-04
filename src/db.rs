@@ -3,6 +3,7 @@
 mod analytics;
 pub(crate) mod error_signatures;
 pub mod graph;
+pub mod graph_inventory;
 mod heartbeat;
 mod ingest;
 mod maintenance;
