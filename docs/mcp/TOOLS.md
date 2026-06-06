@@ -96,8 +96,9 @@ Required argument: `action = "hosts"`
 ## syslog map
 
 Return a bounded homelab infrastructure snapshot from `~/.cortex/inventory`
-plus live Cortex host/heartbeat overlay. The action is read-only and never
-triggers refresh; raw Compose/proxy artifact bodies are omitted by default.
+plus live Cortex host/heartbeat overlay, or answer graph-backed topology
+questions. The action is read-only and never triggers refresh; raw Compose/proxy
+artifact bodies are omitted by default.
 Server-side inventory refresh keeps the cache current on a 5-minute baseline
 cadence, reacts to local Compose/proxy config changes, can opt into remote
 Docker event streams over SSH, and projects topology evidence into the graph.
@@ -106,6 +107,10 @@ Required argument: `action = "map"`
 
 Optional arguments: `host_limit` (default 100, max 500), `section_limit`
 (default 100, max 250), and `include_sections` to restrict top-level sections.
+Use `mode = "host_services"` with `host`, `mode = "domain_routes"` with
+`domain`, or `mode = "service_dependencies"` with `service` or `host` +
+`service` to get a `graph_answer` envelope with answer status, topology rows,
+safe evidence, map follow-ups, and graph proof queries.
 
 ## syslog host_state
 

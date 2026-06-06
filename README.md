@@ -46,7 +46,7 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `tail` | Recent log entries |
 | `errors` | Error/warning summary by host and severity |
 | `hosts` | Host registry with first/last seen |
-| `map` | Cached homelab inventory plus live host/heartbeat overlay |
+| `map` | Cached homelab inventory plus graph-backed topology answers |
 | `sessions` | AI transcript sessions by project |
 | `search_sessions` | Ranked grouped session search |
 | `abuse` | Abuse hits in AI transcripts with same-session context |
@@ -97,6 +97,16 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 opening SQLite. The MCP `map` action is read-only: it reads the normalized cache
 and overlays bounded live Cortex host/heartbeat data, but never triggers refresh
 or returns raw artifact bodies.
+
+`map` defaults to the inventory snapshot. Graph-backed modes add a typed
+`graph_answer` envelope with `answer_status`, bounded topology `rows`, safe
+evidence samples, map follow-up queries, and graph proof queries:
+
+```json
+{"action":"map","mode":"host_services","host":"squirts"}
+{"action":"map","mode":"domain_routes","domain":"adguard.tootie.tv"}
+{"action":"map","mode":"service_dependencies","host":"squirts","service":"swag"}
+```
 
 When the server is running, inventory refresh also projects topology evidence
 into the investigation graph. The baseline refresh interval is 5 minutes, with

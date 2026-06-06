@@ -69,6 +69,7 @@ mod journal;
 mod logs;
 mod maintenance;
 mod map;
+mod map_answers;
 mod rag;
 
 pub use compose::run_compose_status;

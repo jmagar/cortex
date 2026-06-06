@@ -29,7 +29,7 @@ selects one of these 44 actions:
 | `tail` | `syslog:read` | cheap | Most recent log entries |
 | `errors` | `syslog:read` | cheap | Error/warning summary |
 | `hosts` | `syslog:read` | cheap | Known source hostnames |
-| `map` | `syslog:read` | moderate | Cached homelab inventory plus bounded live Cortex overlay |
+| `map` | `syslog:read` | moderate | Cached homelab inventory plus graph-backed topology answers |
 | `host_state` | `syslog:read` | moderate | Latest bounded heartbeat state for one host |
 | `fleet_state` | `syslog:read` | expensive | Fleet-wide heartbeat snapshot with pressure flags |
 | `correlate` | `syslog:read` | moderate | Time-window event correlation |
@@ -133,6 +133,7 @@ handler and service layers.
 | `from`, `to` | Time range for search/session/AI/analytics actions; required for `incident_context` |
 | `limit`, `offset` | Action-specific bounds; `offset` is for `apps` and `source_ips` pagination |
 | `host_limit`, `per_host_limit`, `section_limit`, `include_sections` | Node and inventory-section bounds for `map`; `per_host_limit` is accepted for v1 compatibility and ignored by map v2 |
+| `mode`, `host`, `domain`, `service`, `answer_limit`, `evidence_sample_limit`, `payload_budget` | Map snapshot mode and graph-backed map answer controls: `host_services`, `domain_routes`, and `service_dependencies` |
 | `mode`, `entity_id`, `entity_type`, `key`, `alias_type`, `alias_key`, `depth`, `evidence_sample_limit`, `payload_budget` | Graph lookup and one-hop neighborhood controls for `graph` |
 
 ## Correlation Arguments

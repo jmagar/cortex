@@ -22,7 +22,7 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `tail` | Get N most recent log entries, optionally filtered by host, source_ip, and/or application | no |
 | `errors` | Error/warning summary grouped by hostname and severity level with counts | no |
 | `hosts` | List all hosts with first/last seen timestamps and total log counts | no |
-| `map` | Cached homelab inventory plus bounded live Cortex host/heartbeat overlay | no |
+| `map` | Cached homelab inventory plus graph-backed topology answers | no |
 | `host_state` | Latest bounded heartbeat state for one host | no |
 | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags and summary counts | no |
 | `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |
@@ -172,6 +172,18 @@ names only. It does not store environment values.
 Optional provider collectors are activated only when their URL/credential env
 vars are present. Supported media prefixes are `SONARR`, `RADARR`, `PROWLARR`,
 `SABNZBD`, `QBITTORRENT`, `PLEX`, `TAUTULLI`, and `OVERSEERR`.
+
+The MCP `map` action defaults to the bounded snapshot. Set `mode` to ask
+topology questions backed by the graph projection:
+
+```json
+{"action":"map","mode":"host_services","host":"squirts"}
+{"action":"map","mode":"domain_routes","domain":"adguard.tootie.tv"}
+{"action":"map","mode":"service_dependencies","host":"squirts","service":"swag"}
+```
+
+Non-snapshot responses include `graph_answer.answer_status`, bounded `rows`,
+safe evidence samples, map-native `next_queries`, and graph `proof_queries`.
 
 ## Plugin surfaces
 
