@@ -136,6 +136,16 @@ pub struct ListHostsResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HomelabMapRequest {
+    /// Optional graph-backed answer mode. Omit or use `snapshot` for the
+    /// legacy inventory snapshot.
+    pub mode: Option<String>,
+    /// Target host for mode=host_services or service_dependencies.
+    pub host: Option<String>,
+    /// Target domain for mode=domain_routes.
+    pub domain: Option<String>,
+    /// Target service for mode=service_dependencies. Use `host:name` or pass
+    /// `host` separately with a bare service name.
+    pub service: Option<String>,
     /// Maximum host nodes to return. Default 100, max 500.
     pub host_limit: Option<u32>,
     /// Deprecated map v1 compatibility option. Map v2 ignores it and reports
@@ -145,6 +155,12 @@ pub struct HomelabMapRequest {
     pub include_sections: Option<Vec<String>>,
     /// Per-section item cap. Default 100, max 250.
     pub section_limit: Option<u32>,
+    /// Graph relationship cap for graph-backed modes. Default 100, max 500.
+    pub answer_limit: Option<u32>,
+    /// Evidence samples per relationship for graph-backed modes. Default 3, max 5.
+    pub evidence_sample_limit: Option<u32>,
+    /// Approximate graph payload budget in bytes. Default 32768, max 65536.
+    pub payload_budget: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +182,76 @@ pub struct HomelabMapResponse {
     pub artifact_refs: Vec<ArtifactRef>,
     pub collection_errors: Vec<CollectionError>,
     pub cortex_overlay: CortexOverlaySummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_answer: Option<HomelabMapGraphAnswer>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapGraphAnswer {
+    pub mode: String,
+    pub answer_status: String,
+    pub target: HomelabMapGraphTarget,
+    pub rows: Vec<HomelabMapAnswerRow>,
+    pub candidates: Vec<GraphEntityCandidate>,
+    pub evidence: Vec<GraphEvidence>,
+    pub metadata: GraphResponseMetadata,
+    pub truncation: HomelabMapAnswerTruncation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+    pub next_queries: Vec<HomelabMapNextQuery>,
+    pub proof_queries: Vec<HomelabMapProofQuery>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapGraphTarget {
+    pub entity_type: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapAnswerRow {
+    pub entity_type: String,
+    pub key: String,
+    pub label: String,
+    pub relationship_type: String,
+    pub direction: String,
+    pub trust_level: String,
+    pub confidence: f64,
+    pub evidence_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapAnswerTruncation {
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub limit: u32,
+    pub evidence_sample_limit: u32,
+    pub payload_budget: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapNextQuery {
+    pub action: String,
+    pub mode: String,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomelabMapProofQuery {
+    pub action: String,
+    pub mode: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entity_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

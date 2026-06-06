@@ -964,10 +964,23 @@ Return a bounded homelab infrastructure snapshot from Cortex's current database.
 The map includes known host nodes, verified source identities, top observed
 applications per host, latest heartbeat status when available, and the external
 inventory sources that complement Cortex's DB-backed view.
+When `mode` is `host_services`, `domain_routes`, or `service_dependencies`, the
+response also includes `graph_answer` with answer status, topology rows,
+candidates, safe evidence samples, map follow-up queries, and graph proof
+queries.
 
 **Parameters:**
+- `mode` (string, optional) — `snapshot` (default), `host_services`, `domain_routes`, or `service_dependencies`
+- `host` (string, optional) — target host for `host_services`; also used with bare `service` names for `service_dependencies`
+- `domain` (string, optional) — target domain for `domain_routes`
+- `service` (string, optional) — target service for `service_dependencies`, either `host:name` or a bare name with `host`
 - `host_limit` (integer, optional) — maximum host nodes to return (default 100, max 500)
-- `per_host_limit` (integer, optional) — maximum source identities and apps attached to each host (default 10, max 25)
+- `section_limit` (integer, optional) — maximum rows per inventory section (default 100, max 250)
+- `include_sections` (array, optional) — section names to include; defaults to all sections
+- `answer_limit` (integer, optional) — graph relationship cap for graph-backed modes (default 100, max 500)
+- `evidence_sample_limit` (integer, optional) — evidence samples per relationship for graph-backed modes (default 3, max 5)
+- `payload_budget` (integer, optional) — approximate graph payload budget in bytes (default 32768, max 65536)
+- `per_host_limit` (integer, optional) — deprecated map v1 compatibility option; ignored by map v2
 
 ---
 

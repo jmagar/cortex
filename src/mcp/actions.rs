@@ -106,7 +106,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
     ActionSpec {
         name: "map",
         scope: Scope::Read,
-        description: "Map cached homelab inventory with bounded live Cortex overlay",
+        description: "Map homelab inventory and answer graph-backed topology questions",
         cost: Cost::Moderate,
     },
     ActionSpec {

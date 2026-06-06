@@ -2,6 +2,10 @@ use super::*;
 use crate::app::CortexService;
 use crate::config::{McpConfig, StorageConfig};
 use crate::db;
+use crate::inventory::schema::{
+    ArtifactRef, ComposeProject, HomelabInventory, InventoryNode, InventoryService, PortMapping,
+    Provenance, RedactionStatus, ReverseProxyRoute, TrustLevel,
+};
 use crate::mcp::AppState;
 use serde_json::json;
 use std::sync::Arc;
@@ -72,6 +76,80 @@ impl TestHarness {
             _dir: dir,
         }
     }
+}
+
+fn test_provenance(source: &str, kind: &str) -> Provenance {
+    Provenance::new(source, kind, "2026-01-01T00:00:00Z".to_string())
+}
+
+fn project_graph_fixture(pool: &db::DbPool) {
+    db::graph::refresh_graph_projection(pool).unwrap();
+
+    let mut inventory = HomelabInventory::empty(
+        "mcp-map-test".to_string(),
+        "2026-01-01T00:00:00Z".to_string(),
+    );
+    inventory.nodes.push(InventoryNode {
+        id: "node:squirts".to_string(),
+        hostname: "squirts".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: test_provenance("ssh:squirts", "source_inventory"),
+        roles: vec!["edge".to_string()],
+        ips: vec!["10.1.0.8".to_string()],
+        os: Some("Ubuntu".to_string()),
+        cpu: None,
+        memory: None,
+        listeners: Vec::new(),
+        storage: Vec::new(),
+        extras: Default::default(),
+    });
+    inventory.services.push(InventoryService {
+        id: "container:squirts:swag".to_string(),
+        name: "swag".to_string(),
+        kind: "container".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: test_provenance("docker:squirts", "app_inventory"),
+        host: Some("squirts".to_string()),
+        image: Some("lscr.io/linuxserver/swag:latest".to_string()),
+        status: Some("running".to_string()),
+        domains: vec!["adguard.tootie.tv".to_string()],
+        ports: vec![PortMapping {
+            host_ip: Some("0.0.0.0".to_string()),
+            host_port: Some(443),
+            container_port: Some(443),
+            protocol: "tcp".to_string(),
+        }],
+        mounts: Vec::new(),
+        env_keys: vec!["URL".to_string()],
+        labels: Default::default(),
+    });
+    inventory.compose_projects.push(ComposeProject {
+        name: "edge".to_string(),
+        provenance: test_provenance("compose:squirts:/opt/edge/compose.yaml", "app_inventory"),
+        services: vec!["swag".to_string()],
+        compose_files: vec!["/opt/edge/compose.yaml".to_string()],
+        domains: vec!["adguard.tootie.tv".to_string()],
+        ports: Vec::new(),
+    });
+    inventory.reverse_proxies.push(ReverseProxyRoute {
+        id: "proxy:adguard.tootie.tv".to_string(),
+        server_names: vec!["adguard.tootie.tv".to_string()],
+        upstreams: vec!["swag:443".to_string()],
+        provenance: test_provenance("swag:squirts:/config/nginx/proxy.conf", "app_inventory"),
+    });
+    inventory.artifact_refs.push(ArtifactRef {
+        id: "artifact:compose:squirts:edge".to_string(),
+        kind: "compose".to_string(),
+        collector: "raw_configs".to_string(),
+        source_host: Some("squirts".to_string()),
+        source_path: Some("/opt/edge/compose.yaml".to_string()),
+        cache_path: "/home/jmagar/.cortex/inventory/artifacts/edge.yaml".to_string(),
+        redaction: RedactionStatus::Redacted,
+        byte_len: 42,
+        truncated: false,
+    });
+
+    db::graph_inventory::project_inventory(pool, &inventory).unwrap();
 }
 
 #[tokio::test]
@@ -230,6 +308,158 @@ async fn map_action_returns_infra_snapshot_from_known_hosts() {
     assert_eq!(tootie["log_count"], 1);
     assert!(tootie["source_ips"].as_array().unwrap().is_empty());
     assert!(tootie["apps"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn map_action_host_services_mode_returns_graph_answer() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
+    let h = TestHarness::new();
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        project_graph_fixture(&h.pool);
+    }
+
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "host_services",
+            "host": "squirts",
+            "answer_limit": 25,
+            "evidence_sample_limit": 2
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(value["schema"], "cortex.homelab_map.v2");
+    let answer = &value["graph_answer"];
+    assert_eq!(answer["mode"], "host_services");
+    assert_eq!(answer["answer_status"], "ok");
+    assert_eq!(answer["target"]["entity_type"], "host");
+    assert_eq!(answer["target"]["key"], "squirts");
+    assert!(
+        answer["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["entity_type"] == "service"
+                && row["key"] == "squirts:swag"
+                && row["relationship_type"] == "runs_on"),
+        "host_services should include services running on the host: {answer}"
+    );
+    assert!(
+        answer["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|evidence| {
+                evidence["source_kind"] == "app_inventory"
+                    || evidence["source_kind"] == "source_inventory"
+            }),
+        "host_services should include safe evidence samples: {answer}"
+    );
+    assert!(
+        answer["proof_queries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|query| query["action"] == "graph" && query["mode"] == "around"),
+        "host_services should include graph proof query hints: {answer}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn map_action_domain_routes_mode_returns_proxy_graph_answer() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
+    let h = TestHarness::new();
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        project_graph_fixture(&h.pool);
+    }
+
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "domain_routes",
+            "domain": "adguard.tootie.tv"
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let answer = &value["graph_answer"];
+    assert_eq!(answer["mode"], "domain_routes");
+    assert_eq!(answer["answer_status"], "ok");
+    assert_eq!(answer["target"]["entity_type"], "domain");
+    assert_eq!(answer["target"]["key"], "adguard.tootie.tv");
+    assert!(
+        answer["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["entity_type"] == "reverse_proxy"
+                && row["key"] == "proxy:adguard.tootie.tv"
+                && row["relationship_type"] == "exposes_domain"),
+        "domain_routes should include the proxy config that exposes the domain: {answer}"
+    );
+    assert!(
+        answer["proof_queries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|query| query["action"] == "graph" && query["mode"] == "evidence"),
+        "domain_routes should include graph proof follow-up queries: {answer}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn map_action_service_dependencies_mode_accepts_bare_service_with_host() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
+    let h = TestHarness::new();
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        project_graph_fixture(&h.pool);
+    }
+
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "service_dependencies",
+            "host": "squirts",
+            "service": "swag"
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let answer = &value["graph_answer"];
+    assert_eq!(answer["mode"], "service_dependencies");
+    assert_eq!(answer["answer_status"], "ok");
+    assert_eq!(answer["target"]["entity_type"], "service");
+    assert_eq!(answer["target"]["key"], "squirts:swag");
+    assert!(
+        answer["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["entity_type"] == "compose_project" && row["key"] == "squirts:edge"),
+        "service_dependencies should include compose project evidence: {answer}"
+    );
 }
 
 #[tokio::test]

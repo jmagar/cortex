@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-06-06
+
+### Added
+
+- Added graph-backed `map` answer modes for host services, domain routes, and
+  service dependencies, returning bounded graph answers with safe evidence
+  samples alongside the existing inventory snapshot.
+- Documented the new map mode request fields in MCP schema/help text and added
+  MCP tests for the graph-backed map workflows.
+
 ## [1.13.3] - 2026-06-04
 
 ### Fixed
@@ -2057,7 +2067,8 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.13.3...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/jmagar/cortex/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/jmagar/cortex/compare/v1.13.2...v1.13.3
 [1.13.2]: https://github.com/jmagar/cortex/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/jmagar/cortex/compare/v1.13.0...v1.13.1
