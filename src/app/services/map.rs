@@ -7,6 +7,10 @@ use crate::inventory::{
 
 impl CortexService {
     pub async fn homelab_map(&self, req: HomelabMapRequest) -> ServiceResult<HomelabMapResponse> {
+        if is_graph_answer_mode(req.mode.as_deref()) {
+            return self.homelab_map_graph_only(req).await;
+        }
+
         let host_limit = req.host_limit.unwrap_or(100).clamp(1, 500) as usize;
         let section_limit = req.section_limit.unwrap_or(100).clamp(1, 250) as usize;
         let sections = RequestedSections::new(req.include_sections.as_deref());
@@ -166,6 +170,54 @@ impl CortexService {
         })
     }
 
+    async fn homelab_map_graph_only(
+        &self,
+        req: HomelabMapRequest,
+    ) -> ServiceResult<HomelabMapResponse> {
+        let config = InventoryConfig::from_env();
+        let cache_status = tokio::task::spawn_blocking(move || inventory_status(&config))
+            .await
+            .map_err(|e| {
+                ServiceError::Internal(anyhow::anyhow!("inventory status read panicked: {e}"))
+            })?;
+        let graph_answer = self.homelab_map_graph_answer(&req).await?;
+        Ok(HomelabMapResponse {
+            schema: MAP_SCHEMA.to_string(),
+            generated_at: rfc3339_z(Utc::now()),
+            cache_status: cache_status.status,
+            freshness: None,
+            summary: HomelabMapSummary {
+                hosts: 0,
+                returned_hosts: 0,
+                services: 0,
+                compose_projects: 0,
+                reverse_proxies: 0,
+                projects: 0,
+                artifacts: 0,
+                collection_errors: 0,
+                heartbeat_hosts: 0,
+                truncated_hosts: false,
+                truncated_sections: Vec::new(),
+            },
+            nodes: Vec::new(),
+            services: Vec::new(),
+            compose_projects: Vec::new(),
+            reverse_proxies: Vec::new(),
+            networks: Vec::new(),
+            storage: Vec::new(),
+            media_services: Vec::new(),
+            projects: Vec::new(),
+            artifact_refs: Vec::new(),
+            collection_errors: Vec::new(),
+            cortex_overlay: CortexOverlaySummary {
+                log_hosts: 0,
+                heartbeat_hosts: 0,
+                overlay_status: "graph_answer_only".to_string(),
+            },
+            graph_answer,
+        })
+    }
+
     async fn live_host_overlay(
         &self,
         host_limit: usize,
@@ -196,6 +248,13 @@ impl CortexService {
         })
         .await
     }
+}
+
+fn is_graph_answer_mode(mode: Option<&str>) -> bool {
+    matches!(
+        mode.map(str::trim),
+        Some("host_services" | "domain_routes" | "service_dependencies")
+    )
 }
 
 struct RequestedSections {

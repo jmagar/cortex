@@ -342,6 +342,11 @@ async fn map_action_host_services_mode_returns_graph_answer() {
     assert_eq!(answer["answer_status"], "ok");
     assert_eq!(answer["target"]["entity_type"], "host");
     assert_eq!(answer["target"]["key"], "squirts");
+    assert_eq!(value["summary"]["returned_hosts"], 0);
+    assert_eq!(
+        value["cortex_overlay"]["overlay_status"],
+        "graph_answer_only"
+    );
     assert!(
         answer["rows"]
             .as_array()
@@ -413,6 +418,16 @@ async fn map_action_domain_routes_mode_returns_proxy_graph_answer() {
         "domain_routes should include the proxy config that exposes the domain: {answer}"
     );
     assert!(
+        answer["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["entity_type"] == "service"
+                && row["key"] == "squirts:swag"
+                && row["relationship_type"] == "routes_to"),
+        "domain_routes should include the route target service through the proxy: {answer}"
+    );
+    assert!(
         answer["proof_queries"]
             .as_array()
             .unwrap()
@@ -420,6 +435,24 @@ async fn map_action_domain_routes_mode_returns_proxy_graph_answer() {
             .any(|query| query["action"] == "graph" && query["mode"] == "evidence"),
         "domain_routes should include graph proof follow-up queries: {answer}"
     );
+}
+
+#[tokio::test]
+async fn map_action_graph_mode_requires_target_fields_before_snapshot_work() {
+    let h = TestHarness::new();
+    let err = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "host_services"
+        }),
+        None,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("requires `host`"), "{err}");
 }
 
 #[tokio::test]

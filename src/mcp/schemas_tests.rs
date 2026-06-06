@@ -122,6 +122,29 @@ fn schema_graph_exposes_lookup_and_neighborhood_arguments() {
 }
 
 #[test]
+fn schema_mode_constraints_are_action_specific() {
+    let tools = tool_definitions();
+    let schema = &tools[0]["inputSchema"];
+    let constraints = schema["allOf"].as_array().unwrap();
+
+    let graph_modes = constraints
+        .iter()
+        .find(|constraint| constraint["if"]["properties"]["action"]["const"] == "graph")
+        .and_then(|constraint| constraint["then"]["properties"]["mode"]["enum"].as_array())
+        .unwrap();
+    assert!(graph_modes.iter().any(|mode| mode == "around"));
+    assert!(!graph_modes.iter().any(|mode| mode == "host_services"));
+
+    let map_modes = constraints
+        .iter()
+        .find(|constraint| constraint["if"]["properties"]["action"]["const"] == "map")
+        .and_then(|constraint| constraint["then"]["properties"]["mode"]["enum"].as_array())
+        .unwrap();
+    assert!(map_modes.iter().any(|mode| mode == "host_services"));
+    assert!(!map_modes.iter().any(|mode| mode == "around"));
+}
+
+#[test]
 fn schema_timeline_and_patterns_warn_on_full_history_scan() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];

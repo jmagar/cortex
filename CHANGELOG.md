@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-06-06
+
+### Fixed
+
+- Made graph-backed `map` modes use a lightweight graph-only response path
+  instead of paying the full inventory snapshot and heartbeat overlay cost.
+- Filtered map answer rows by each mode's topology relationship contract and
+  expanded `domain_routes` through reverse proxies to include routed services.
+- Added action-conditional MCP schema constraints so graph-only and map-only
+  `mode` values validate against the correct action.
+
 ## [1.14.0] - 2026-06-06
 
 ### Added
