@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bump-version.sh — update version in all version-bearing files atomically.
+# bump-version.sh — update release version-bearing files atomically.
 #
 # Usage:
 #   ./scripts/bump-version.sh 1.3.5
@@ -16,7 +16,6 @@ VERSION_FILES=(
     "${REPO_ROOT}/server.json"
     "${REPO_ROOT}/package.json"
     "${REPO_ROOT}/pyproject.toml"
-    "${REPO_ROOT}/.codex-plugin/plugin.json"
     "${REPO_ROOT}/gemini-extension.json"
     "${REPO_ROOT}/mcpb/manifest.json"
 )

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-version-sync.sh — verify all version-bearing files match.
+# check-version-sync.sh — verify release version-bearing files match.
 # Exits non-zero if versions are out of sync. With --require-changelog, also
 # exits non-zero if CHANGELOG.md is missing an entry for the canonical version.
 set -euo pipefail
@@ -59,16 +59,6 @@ fi
 if [ -f "pyproject.toml" ]; then
   v=$(grep -m1 '^version' pyproject.toml | sed 's/.*"\(.*\)".*/\1/')
   [ -n "$v" ] && versions+=("pyproject.toml=$v") && files_checked+=("pyproject.toml")
-fi
-
-if [ -f ".claude-plugin/plugin.json" ]; then
-  v=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json')).get('version',''))" 2>/dev/null)
-  [ -n "$v" ] && versions+=(".claude-plugin/plugin.json=$v") && files_checked+=(".claude-plugin/plugin.json")
-fi
-
-if [ -f ".codex-plugin/plugin.json" ]; then
-  v=$(python3 -c "import json; print(json.load(open('.codex-plugin/plugin.json')).get('version',''))" 2>/dev/null)
-  [ -n "$v" ] && versions+=(".codex-plugin/plugin.json=$v") && files_checked+=(".codex-plugin/plugin.json")
 fi
 
 if [ -f "gemini-extension.json" ]; then
