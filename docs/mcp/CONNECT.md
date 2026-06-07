@@ -82,7 +82,7 @@ run cleanup jobs, or require `CORTEX_TOKEN`.
 {
   "mcpServers": {
     "cortex": {
-      "command": "/path/to/syslog",
+      "command": "/path/to/cortex",
       "args": ["mcp"],
       "env": {
         "CORTEX_DB_PATH": "/data/cortex.db",
@@ -107,7 +107,7 @@ The generated `dist/cortex-<version>-linux.mcpb` bundles the release
 `cortex` binary and launches it as:
 
 ```bash
-server/syslog mcp
+server/cortex mcp
 ```
 
 The bundle is query-only. It reads `cortex.db` from the configured data
@@ -171,7 +171,7 @@ curl -s -X POST http://localhost:3100/mcp \
 curl -s -X POST http://localhost:3100/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"stats"}}}'
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"stats"}}}'
 ```
 
 If connection fails, check:

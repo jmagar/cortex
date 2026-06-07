@@ -1,10 +1,13 @@
 use super::*;
 use crate::config::StorageConfig;
-use crate::db::{graph, init_pool};
+use crate::db::{graph, init_pool, insert_logs_batch, LogBatchEntry};
 use crate::inventory::schema::{
     ArtifactRef, ComposeProject, HomelabInventory, InventoryNode, InventoryService, NetworkSegment,
     PortMapping, Provenance, RedactionStatus, ReverseProxyRoute, TrustLevel,
 };
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 fn count(conn: &rusqlite::Connection, sql: &str) -> i64 {
     conn.query_row(sql, [], |row| row.get(0)).unwrap()
@@ -28,6 +31,104 @@ fn relationship_count(conn: &rusqlite::Connection, rel_type: &str, reason: &str)
 
 fn provenance(source: &str, kind: &str) -> Provenance {
     Provenance::new(source, kind, "2026-01-01T00:00:00Z".to_string())
+}
+
+fn basic_inventory() -> HomelabInventory {
+    let mut inventory =
+        HomelabInventory::empty("inv-test".to_string(), "2026-01-01T00:00:00Z".to_string());
+    inventory.nodes.push(InventoryNode {
+        id: "node:dookie".to_string(),
+        hostname: "dookie".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: provenance("ssh:dookie", "source_inventory"),
+        roles: Vec::new(),
+        ips: vec!["10.1.0.6".to_string()],
+        os: Some("Ubuntu".to_string()),
+        cpu: None,
+        memory: None,
+        listeners: Vec::new(),
+        storage: Vec::new(),
+        extras: Default::default(),
+    });
+    inventory
+}
+
+fn log_entry(message: &str) -> LogBatchEntry {
+    LogBatchEntry {
+        timestamp: "2026-01-01T00:00:00Z".to_string(),
+        hostname: "writer-test".to_string(),
+        facility: Some("daemon".to_string()),
+        severity: "info".to_string(),
+        app_name: Some("test".to_string()),
+        process_id: None,
+        message: message.to_string(),
+        raw: format!("<14>{message}"),
+        source_ip: "127.0.0.1:1514".to_string(),
+        docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
+        metadata_json: None,
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
+    }
+}
+
+#[test]
+fn project_inventory_does_not_hold_write_lock_while_preparing_projection() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-graph-lock-scope.db"),
+    ))
+    .unwrap();
+    graph::refresh_graph_projection(&pool).unwrap();
+
+    let inventory = basic_inventory();
+    let projection_pool = pool.clone();
+    let (prepared_tx, prepared_rx) = mpsc::channel();
+    let (continue_tx, continue_rx) = mpsc::channel();
+    let projection = thread::spawn(move || {
+        project_inventory_with_apply_hook(&projection_pool, &inventory, || {
+            prepared_tx.send(()).unwrap();
+            continue_rx.recv().unwrap();
+        })
+        .unwrap();
+    });
+
+    prepared_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let writer_pool = pool.clone();
+    let (insert_done_tx, insert_done_rx) = mpsc::channel();
+    let writer = thread::spawn(move || {
+        let started = Instant::now();
+        insert_logs_batch(
+            &writer_pool,
+            &[log_entry("write while projection prepares")],
+        )
+        .unwrap();
+        insert_done_tx.send(started.elapsed()).unwrap();
+    });
+
+    match insert_done_rx.recv_timeout(Duration::from_millis(200)) {
+        Ok(elapsed) => assert!(
+            elapsed < Duration::from_millis(200),
+            "insert waited for projection preparation for {elapsed:?}"
+        ),
+        Err(error) => {
+            continue_tx.send(()).unwrap();
+            projection.join().unwrap();
+            writer.join().unwrap();
+            panic!("insert was blocked by projection preparation: {error}");
+        }
+    }
+
+    continue_tx.send(()).unwrap();
+    projection.join().unwrap();
+    writer.join().unwrap();
 }
 
 #[test]

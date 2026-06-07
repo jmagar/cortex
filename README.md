@@ -501,7 +501,7 @@ separate table:
 ```bash
 cortex shell index --path ~/.zsh_history --shell zsh
 cortex setup agent-command install
-export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/syslog-agent-command-wrapper"
+export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/cortex-agent-command-wrapper"
 cortex agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
 ```
 
@@ -564,16 +564,17 @@ The installer puts the host `cortex` binary in `~/.local/bin` and then runs
 - `~/.cortex/compose/docker-compose.yml` — Docker Compose deployment assets
 - `~/.cortex/data/cortex.db` — SQLite database and WAL/SHM sidecars
 
-Setup writes `COMPOSE_PROJECT_NAME=syslog-jmagar-lab` so direct
-`docker compose` commands in `~/.cortex/compose` target the same canonical
-container as `cortex compose`.
+Setup writes the compose project name used by the shared host deployment.
+Existing installations may still use the legacy `syslog-jmagar-lab` project
+name for container-label compatibility; prefer `cortex compose ...` commands
+because they resolve the live owner before mutating the stack.
 
 Useful installer controls:
 
 ```bash
 CORTEX_INSTALL_DRY_RUN=1 ./install.sh
 CORTEX_INSTALL_PREFIX=/opt/cortex ./install.sh
-CORTEX_VERSION=0.25.4 ./install.sh
+CORTEX_VERSION=<version> ./install.sh
 CORTEX_INSTALL_SKIP_SETUP=1 ./install.sh
 ```
 
@@ -609,7 +610,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 | `batch_size` | no | `100` | Number of parsed messages per SQLite batch |
 | `write_channel_capacity` | no | `10000` | Internal parsed-message queue capacity before listener backpressure |
 | `docker_ingest_enabled` | no | `false` | Pull container logs from remote `docker-socket-proxy` endpoints |
-| `fleet_hosts` | no | — | SSH aliases of fleet hosts. Used for Docker ingest (when enabled, each becomes `http://<alias>:2375`) and the `syslog-deploy-dropins` skill |
+| `fleet_hosts` | no | — | SSH aliases of fleet hosts. Used for Docker ingest (when enabled, each becomes `http://<alias>:2375`) and the `cortex-deploy-dropins` skill |
 
 **SessionStart hook automation** (in server mode):
 
@@ -621,11 +622,11 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 
 **Bundled skills**:
 
-- `syslog-dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
-- `syslog-deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
-- `syslog-redeploy` — re-run plugin setup after config or plugin changes
-- `syslog-logs` — Docker Compose service log tailing
-- `syslog-version-check` — check whether the running Docker container matches the local Compose image; add `--pull` to pull first, otherwise checks only the local image cache
+- `cortex-dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
+- `cortex-deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
+- `cortex-redeploy` — re-run plugin setup after config or plugin changes
+- `cortex-logs` — Docker Compose service log tailing
+- `cortex-version-check` — check whether the running Docker container matches the local Compose image; add `--pull` to pull first, otherwise checks only the local image cache
 
 The plugin deploys the server with Docker Compose through the same `cortex setup`
 path as the one-line installer. You can still build and run the binary locally
@@ -838,10 +839,10 @@ The MCP query API (port 3100, default loopback) supports two auth modes:
 
 | Mode | Config | Effect |
 |------|--------|--------|
-| Bearer token | `CORTEX_TOKEN=<token>` | Static token grants `syslog:read` by default; set `CORTEX_STATIC_TOKEN_ADMIN=true` to also grant `syslog:admin` |
+| Bearer token | `CORTEX_TOKEN=<token>` | Static token grants `cortex:read` by default; set `CORTEX_STATIC_TOKEN_ADMIN=true` to also grant `cortex:admin` |
 | Google OAuth | `CORTEX_AUTH_MODE=oauth` | OAuth users authenticated via `CORTEX_AUTH_ADMIN_EMAIL` |
 
-**Important**: Admin actions such as `ack_error`, `unack_error`, and `notifications_test` require `syslog:admin`. Static bearer tokens are read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true` is explicitly set.
+**Important**: Admin actions such as `ack_error`, `unack_error`, and `notifications_test` require `cortex:admin`. Static bearer tokens are read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true` is explicitly set.
 
 The MCP port defaults to `127.0.0.1:3100` (loopback only). To expose it on a network interface, set `CORTEX_HOST=0.0.0.0` and configure a TLS-terminating reverse proxy in front of it.
 
@@ -1285,7 +1286,7 @@ Stdio mode does not use bearer auth because it is local child-process access. It
 {
   "mcpServers": {
     "cortex": {
-      "command": "/path/to/syslog",
+      "command": "/path/to/cortex",
       "args": ["mcp"],
       "env": {
         "CORTEX_DB_PATH": "/data/cortex.db",

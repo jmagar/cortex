@@ -86,14 +86,22 @@ fn should_refresh_for_relevant_config_events_only() {
 
 #[test]
 fn remote_docker_events_ssh_args_include_safe_options_and_remote_command() {
-    let args =
-        remote_docker_events_ssh_args(Some(std::path::Path::new("/tmp/ssh_config")), "squirts");
+    let context = crate::inventory::ssh::SshContext::new(
+        crate::inventory::ssh::SshOptions {
+            config: Some(std::path::PathBuf::from("/tmp/ssh_config")),
+            ..crate::inventory::ssh::SshOptions::default()
+        }
+        .with_event_stream_defaults(),
+    );
+    let args = remote_docker_events_ssh_args(&context, "squirts").unwrap();
 
     assert_eq!(args[0], "-o");
     assert_eq!(args[1], "IgnoreUnknown=WarnWeakCrypto");
     assert_eq!(args[2], "-F");
     assert!(args.contains(&"/tmp/ssh_config".to_string()));
     assert!(args.contains(&"BatchMode=yes".to_string()));
+    assert!(args.contains(&"StrictHostKeyChecking=yes".to_string()));
+    assert!(args.contains(&"ServerAliveInterval=15".to_string()));
     assert!(args.contains(&"--".to_string()));
     assert_eq!(args[args.len() - 2], "squirts");
     assert_eq!(

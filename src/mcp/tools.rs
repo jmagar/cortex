@@ -3,15 +3,16 @@ use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 use crate::app::{
-    AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
-    AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest, ContextRequest,
-    CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
-    GetErrorsRequest, GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest,
-    GraphEvidenceLookupRequest, GraphExplainRequest, HomelabMapRequest, HostStateRequest,
-    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest, NotificationsRecentRequest,
-    PatternsRequest, ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
-    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
+    AbuseSearchRequest, AckErrorRequest, AiCorrelateRequest, AiIncidentRequest,
+    AiInvestigateRequest, AnomaliesRequest, AskHistoryRequest, ClockSkewRequest, CompareRequest,
+    ContextRequest, CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest,
+    FleetStateRequest, GetErrorsRequest, GetLogRequest, GraphAroundRequest,
+    GraphEntityLookupRequest, GraphEvidenceLookupRequest, GraphExplainRequest, HomelabMapRequest,
+    HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
+    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
+    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
+    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, SimilarIncidentsRequest,
+    TailLogsRequest, TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest,
     UsageBlocksRequest,
 };
 
@@ -38,129 +39,94 @@ async fn tool_cortex(
 ) -> anyhow::Result<Value> {
     let action =
         string_arg(&args, "action").ok_or_else(|| anyhow::anyhow!("action is required"))?;
-    match action.as_str() {
-        "search" => tool_search_logs(state, args).await,
-        "filter" => tool_filter_logs(state, args).await,
-        "tail" => tool_tail_logs(state, args).await,
-        "errors" => tool_get_errors(state, args).await,
-        "hosts" => tool_list_hosts(state, args).await,
-        "map" => tool_homelab_map(state, args).await,
-        "host_state" => tool_host_state(state, args).await,
-        "fleet_state" => tool_fleet_state(state, args).await,
-        "correlate" => tool_correlate_events(state, args).await,
-        "correlate_state" => tool_correlate_state(state, args).await,
-        "stats" => tool_get_stats(state, args).await,
-        "status" => tool_get_status(state, args).await,
-        "apps" => tool_list_apps(state, args).await,
-        "sessions" => tool_list_sessions(state, args).await,
-        "search_sessions" => tool_search_sessions(state, args).await,
-        "abuse" => tool_search_abuse(state, args).await,
-        "abuse_incidents" => tool_abuse_incidents(state, args).await,
-        "abuse_investigate" => tool_abuse_investigate(state, args).await,
-        "ai_correlate" => tool_ai_correlate(state, args).await,
-        "usage_blocks" => tool_usage_blocks(state, args).await,
-        "project_context" => tool_project_context(state, args).await,
-        "list_ai_tools" => tool_list_ai_tools(state, args).await,
-        "list_ai_projects" => tool_list_ai_projects(state, args).await,
-        "source_ips" => tool_list_source_ips(state, args).await,
-        "timeline" => tool_timeline(state, args).await,
-        "patterns" => tool_patterns(state, args).await,
-        "context" => tool_context(state, args).await,
-        "get" => tool_get_log(state, args).await,
-        "ingest_rate" => tool_ingest_rate(state, args).await,
-        "silent_hosts" => tool_silent_hosts(state, args).await,
-        "clock_skew" => tool_clock_skew(state, args).await,
-        "anomalies" => tool_anomalies(state, args).await,
-        "compare" => tool_compare(state, args).await,
-        "compose_status" => tool_compose_status(args).await,
-        "compose_doctor" => tool_compose_doctor(args).await,
-        "unaddressed_errors" => tool_unaddressed_errors(state, args).await,
-        "ack_error" => tool_ack_error(state, args, auth).await,
-        "unack_error" => tool_unack_error(state, args, auth).await,
-        "notifications_recent" => tool_notifications_recent(state, args).await,
-        "notifications_test" => tool_notifications_test(state, args, auth).await,
-        "similar_incidents" => tool_similar_incidents(state, args).await,
-        "ask_history" => tool_ask_history(state, args).await,
-        "incident_context" => tool_incident_context(state, args).await,
-        "graph" => tool_graph(state, args).await,
-        "help" => tool_cortex_help().await,
-        _ => Err(anyhow::anyhow!(
+    let Some(handler) = actions::handler_for(&action) else {
+        return Err(anyhow::anyhow!(
             "unknown cortex action: {action}; expected one of {}",
             actions::action_names().join(", ")
-        )),
+        ));
+    };
+    match handler {
+        actions::ActionHandler::Search => tool_search_logs(state, args).await,
+        actions::ActionHandler::Filter => tool_filter_logs(state, args).await,
+        actions::ActionHandler::Tail => tool_tail_logs(state, args).await,
+        actions::ActionHandler::Errors => tool_get_errors(state, args).await,
+        actions::ActionHandler::Hosts => tool_list_hosts(state, args).await,
+        actions::ActionHandler::Map => tool_homelab_map(state, args).await,
+        actions::ActionHandler::HostState => tool_host_state(state, args).await,
+        actions::ActionHandler::FleetState => tool_fleet_state(state, args).await,
+        actions::ActionHandler::Correlate => tool_correlate_events(state, args).await,
+        actions::ActionHandler::CorrelateState => tool_correlate_state(state, args).await,
+        actions::ActionHandler::Stats => tool_get_stats(state, args).await,
+        actions::ActionHandler::Status => tool_get_status(state, args).await,
+        actions::ActionHandler::Apps => tool_list_apps(state, args).await,
+        actions::ActionHandler::Sessions => tool_list_sessions(state, args).await,
+        actions::ActionHandler::SearchSessions => tool_search_sessions(state, args).await,
+        actions::ActionHandler::Abuse => tool_search_abuse(state, args).await,
+        actions::ActionHandler::AbuseIncidents => tool_abuse_incidents(state, args).await,
+        actions::ActionHandler::AbuseInvestigate => tool_abuse_investigate(state, args).await,
+        actions::ActionHandler::AiCorrelate => tool_ai_correlate(state, args).await,
+        actions::ActionHandler::UsageBlocks => tool_usage_blocks(state, args).await,
+        actions::ActionHandler::ProjectContext => tool_project_context(state, args).await,
+        actions::ActionHandler::ListAiTools => tool_list_ai_tools(state, args).await,
+        actions::ActionHandler::ListAiProjects => tool_list_ai_projects(state, args).await,
+        actions::ActionHandler::SourceIps => tool_list_source_ips(state, args).await,
+        actions::ActionHandler::Timeline => tool_timeline(state, args).await,
+        actions::ActionHandler::Patterns => tool_patterns(state, args).await,
+        actions::ActionHandler::Context => tool_context(state, args).await,
+        actions::ActionHandler::Get => tool_get_log(state, args).await,
+        actions::ActionHandler::IngestRate => tool_ingest_rate(state, args).await,
+        actions::ActionHandler::SilentHosts => tool_silent_hosts(state, args).await,
+        actions::ActionHandler::ClockSkew => tool_clock_skew(state, args).await,
+        actions::ActionHandler::Anomalies => tool_anomalies(state, args).await,
+        actions::ActionHandler::Compare => tool_compare(state, args).await,
+        actions::ActionHandler::ComposeStatus => tool_compose_status(args).await,
+        actions::ActionHandler::ComposeDoctor => tool_compose_doctor(args).await,
+        actions::ActionHandler::UnaddressedErrors => tool_unaddressed_errors(state, args).await,
+        actions::ActionHandler::AckError => tool_ack_error(state, args, auth).await,
+        actions::ActionHandler::UnackError => tool_unack_error(state, args, auth).await,
+        actions::ActionHandler::NotificationsRecent => tool_notifications_recent(state, args).await,
+        actions::ActionHandler::NotificationsTest => {
+            tool_notifications_test(state, args, auth).await
+        }
+        actions::ActionHandler::SimilarIncidents => tool_similar_incidents(state, args).await,
+        actions::ActionHandler::AskHistory => tool_ask_history(state, args).await,
+        actions::ActionHandler::IncidentContext => tool_incident_context(state, args).await,
+        actions::ActionHandler::Graph => tool_graph(state, args).await,
+        actions::ActionHandler::Help => tool_cortex_help().await,
     }
 }
 
 async fn tool_search_logs(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .search_logs(SearchLogsRequest {
-            query: string_arg(&args, "query"),
-            hostname: string_arg(&args, "hostname"),
-            source_ip: string_arg(&args, "source_ip"),
-            severity: string_arg(&args, "severity"),
-            app_name: string_arg(&args, "app_name"),
-            facility: string_arg(&args, "facility"),
-            exclude_facility: string_arg(&args, "exclude_facility"),
-            process_id: string_arg(&args, "process_id"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            received_from: string_arg(&args, "received_from"),
-            received_to: string_arg(&args, "received_to"),
-            limit: u32_arg(&args, "limit")?,
-            source_kind: string_arg(&args, "source_kind"),
-            tool: string_arg(&args, "tool"),
-            project: string_arg(&args, "project"),
-            session_id: string_arg(&args, "session_id"),
-            container: string_arg(&args, "container"),
-            docker_host: string_arg(&args, "docker_host"),
-            stream: string_arg(&args, "stream"),
-            event_action: string_arg(&args, "event_action"),
-        })
-        .await?;
+    let req: SearchLogsRequest = action_payload(args, "search")?;
+    let response = state.service.search_logs(req).await?;
     tracing::debug!(result_count = response.count, "search_logs completed");
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_filter_logs(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let req: FilterLogsRequest = action_payload(args)?;
+    let req: FilterLogsRequest = action_payload(args, "filter")?;
     let response = state.service.filter_logs(req).await?;
     tracing::debug!(result_count = response.count, "filter_logs completed");
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_homelab_map(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let req: HomelabMapRequest = action_payload(args)?;
+    let req: HomelabMapRequest = action_payload(args, "map")?;
     let response = state.service.homelab_map(req).await?;
     tracing::debug!(node_count = response.nodes.len(), "homelab_map completed");
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_tail_logs(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .tail_logs(TailLogsRequest {
-            hostname: string_arg(&args, "hostname"),
-            source_ip: string_arg(&args, "source_ip"),
-            app_name: string_arg(&args, "app_name"),
-            severity_min: string_arg(&args, "severity_min"),
-            n: u32_arg(&args, "n")?,
-        })
-        .await?;
+    let req: TailLogsRequest = action_payload(args, "tail")?;
+    let response = state.service.tail_logs(req).await?;
     tracing::debug!(result_count = response.count, "tail_logs completed");
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_get_errors(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .get_errors(GetErrorsRequest {
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            group_by: string_arg(&args, "group_by"),
-            limit: u32_arg(&args, "limit")?,
-        })
-        .await?;
+    let req: GetErrorsRequest = action_payload(args, "errors")?;
+    let response = state.service.get_errors(req).await?;
     tracing::debug!(
         summary_rows = response.summary.len(),
         "get_errors completed"
@@ -169,16 +135,8 @@ async fn tool_get_errors(state: &AppState, args: Value) -> anyhow::Result<Value>
 }
 
 async fn tool_list_apps(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .list_apps(ListAppsRequest {
-            hostname: string_arg(&args, "hostname"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            limit: u32_arg(&args, "limit")?,
-            offset: u32_arg(&args, "offset")?,
-        })
-        .await?;
+    let req: ListAppsRequest = action_payload(args, "apps")?;
+    let response = state.service.list_apps(req).await?;
     tracing::debug!(
         app_count = response.apps.len(),
         total = response.total,
@@ -188,111 +146,43 @@ async fn tool_list_apps(state: &AppState, args: Value) -> anyhow::Result<Value> 
 }
 
 async fn tool_host_state(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let req: HostStateRequest = action_payload(args)?;
+    let req: HostStateRequest = action_payload(args, "host_state")?;
     Ok(serde_json::to_value(state.service.host_state(req).await?)?)
 }
 
 async fn tool_fleet_state(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let req: FleetStateRequest = action_payload(args)?;
+    let req: FleetStateRequest = action_payload(args, "fleet_state")?;
     Ok(serde_json::to_value(state.service.fleet_state(req).await?)?)
 }
 async fn tool_correlate_state(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let req: CorrelateStateRequest = action_payload(args)?;
+    let req: CorrelateStateRequest = action_payload(args, "correlate_state")?;
     Ok(serde_json::to_value(
         state.service.correlate_state(req).await?,
     )?)
 }
 
 async fn tool_list_sessions(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .list_sessions(ListSessionsRequest {
-            project: string_arg(&args, "project"),
-            tool: string_arg(&args, "tool"),
-            hostname: string_arg(&args, "hostname"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            limit: u32_arg(&args, "limit")?,
-        })
-        .await?;
+    let req: ListSessionsRequest = action_payload(args, "sessions")?;
+    let response = state.service.list_sessions(req).await?;
     tracing::debug!(session_count = response.count, "list_sessions completed");
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_search_sessions(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let query = string_arg(&args, "query").ok_or_else(|| anyhow::anyhow!("query is required"))?;
-    let response = state
-        .service
-        .search_sessions(SearchSessionsRequest {
-            query,
-            project: string_arg(&args, "project"),
-            tool: string_arg(&args, "tool"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            limit: u32_arg(&args, "limit")?,
-        })
-        .await?;
+    let req: SearchSessionsRequest = action_payload(args, "search_sessions")?;
+    let response = state.service.search_sessions(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_search_abuse(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let terms = args
-        .get("terms")
-        .map(|value| {
-            if let Some(values) = value.as_array() {
-                values
-                    .iter()
-                    .filter_map(|value| value.as_str().map(ToString::to_string))
-                    .collect()
-            } else {
-                value
-                    .as_str()
-                    .map(|term| vec![term.to_string()])
-                    .unwrap_or_default()
-            }
-        })
-        .unwrap_or_default();
-    let response = state
-        .service
-        .search_abuse(AbuseSearchRequest {
-            project: string_arg(&args, "project"),
-            tool: string_arg(&args, "tool"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            limit: u32_arg(&args, "limit")?,
-            before: u32_arg(&args, "before")?,
-            after: u32_arg(&args, "after")?,
-            terms,
-        })
-        .await?;
+    let req: AbuseSearchRequest = action_payload(args, "abuse")?;
+    let response = state.service.search_abuse(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_abuse_incidents(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let terms = args
-        .get("terms")
-        .map(|v| {
-            if let Some(arr) = v.as_array() {
-                arr.iter()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect()
-            } else {
-                v.as_str().map(|s| vec![s.to_string()]).unwrap_or_default()
-            }
-        })
-        .unwrap_or_default();
-    let response = state
-        .service
-        .list_ai_incidents(AiIncidentRequest {
-            project: string_arg(&args, "project"),
-            tool: string_arg(&args, "tool"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            limit: u32_arg(&args, "limit")?,
-            window_minutes: u32_arg(&args, "window_minutes")?,
-            terms,
-        })
-        .await?;
+    let req: AiIncidentRequest = action_payload(args, "abuse_incidents")?;
+    let response = state.service.list_ai_incidents(req).await?;
     tracing::debug!(
         incident_count = response.incidents.len(),
         total = response.total_incidents,
@@ -302,32 +192,8 @@ async fn tool_abuse_incidents(state: &AppState, args: Value) -> anyhow::Result<V
 }
 
 async fn tool_abuse_investigate(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let terms = args
-        .get("terms")
-        .map(|v| {
-            if let Some(arr) = v.as_array() {
-                arr.iter()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect()
-            } else {
-                v.as_str().map(|s| vec![s.to_string()]).unwrap_or_default()
-            }
-        })
-        .unwrap_or_default();
-    let response = state
-        .service
-        .investigate_ai_incidents(AiInvestigateRequest {
-            incident_id: string_arg(&args, "incident_id"),
-            project: string_arg(&args, "project"),
-            tool: string_arg(&args, "tool"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            limit: u32_arg(&args, "limit")?,
-            window_minutes: u32_arg(&args, "window_minutes")?,
-            correlation_window_minutes: u32_arg(&args, "correlation_window_minutes")?,
-            terms,
-        })
-        .await?;
+    let req: AiInvestigateRequest = action_payload(args, "abuse_investigate")?;
+    let response = state.service.investigate_ai_incidents(req).await?;
     tracing::debug!(
         evidence_count = response.evidence.len(),
         total_incidents = response.total_incidents,
@@ -337,87 +203,38 @@ async fn tool_abuse_investigate(state: &AppState, args: Value) -> anyhow::Result
 }
 
 async fn tool_ai_correlate(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .correlate_ai_logs(AiCorrelateRequest {
-            project: string_arg(&args, "project"),
-            tool: string_arg(&args, "tool"),
-            session_id: string_arg(&args, "session_id"),
-            ai_query: string_arg(&args, "ai_query"),
-            log_query: string_arg(&args, "log_query"),
-            hostname: string_arg(&args, "hostname"),
-            source_ip: string_arg(&args, "source_ip"),
-            app_name: string_arg(&args, "app_name"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            window_minutes: u32_arg(&args, "window_minutes")?,
-            severity_min: string_arg(&args, "severity_min"),
-            limit: u32_arg(&args, "limit")?,
-            events_per_anchor: u32_arg(&args, "events_per_anchor")?,
-        })
-        .await?;
+    let req: AiCorrelateRequest = action_payload(args, "ai_correlate")?;
+    let response = state.service.correlate_ai_logs(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_usage_blocks(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .usage_blocks(UsageBlocksRequest {
-            project: string_arg(&args, "project"),
-            tool: string_arg(&args, "tool"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-        })
-        .await?;
+    let req: UsageBlocksRequest = action_payload(args, "usage_blocks")?;
+    let response = state.service.usage_blocks(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_project_context(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let project =
-        string_arg(&args, "project").ok_or_else(|| anyhow::anyhow!("project is required"))?;
-    let response = state
-        .service
-        .project_context(ProjectContextRequest {
-            project,
-            tool: string_arg(&args, "tool"),
-            limit: u32_arg(&args, "limit")?,
-        })
-        .await?;
+    let req: ProjectContextRequest = action_payload(args, "project_context")?;
+    let response = state.service.project_context(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_list_ai_tools(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .list_ai_tools(ListAiToolsRequest {
-            project: string_arg(&args, "project"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-        })
-        .await?;
+    let req: ListAiToolsRequest = action_payload(args, "list_ai_tools")?;
+    let response = state.service.list_ai_tools(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_list_ai_projects(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .list_ai_projects(ListAiProjectsRequest {
-            tool: string_arg(&args, "tool"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-        })
-        .await?;
+    let req: ListAiProjectsRequest = action_payload(args, "list_ai_projects")?;
+    let response = state.service.list_ai_projects(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_list_source_ips(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .list_source_ips(ListSourceIpsRequest {
-            limit: u32_arg(&args, "limit")?,
-            offset: u32_arg(&args, "offset")?,
-        })
-        .await?;
+    let req: ListSourceIpsRequest = action_payload(args, "source_ips")?;
+    let response = state.service.list_source_ips(req).await?;
     tracing::debug!(
         source_ip_count = response.source_ips.len(),
         total = response.total,
@@ -463,36 +280,15 @@ async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {
     // Default lookback is centralized in `CortexService::timeline` (bead dyqw):
     // it applies a bucket-sized window only when neither `from` nor `to` is set,
     // preventing full table scans without recreating the logic per transport.
-    let response = state
-        .service
-        .timeline(TimelineRequest {
-            bucket: string_arg(&args, "bucket"),
-            group_by: string_arg(&args, "group_by"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            hostname: string_arg(&args, "hostname"),
-            app_name: string_arg(&args, "app_name"),
-            severity_min: string_arg(&args, "severity_min"),
-        })
-        .await?;
+    let req: TimelineRequest = action_payload(args, "timeline")?;
+    let response = state.service.timeline(req).await?;
     tracing::debug!(point_count = response.points.len(), "timeline completed");
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_patterns(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let top_n = u32_arg(&args, "top_n")?.or(u32_arg(&args, "limit")?);
-    let response = state
-        .service
-        .patterns(PatternsRequest {
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            hostname: string_arg(&args, "hostname"),
-            app_name: string_arg(&args, "app_name"),
-            severity_min: string_arg(&args, "severity_min"),
-            scan_limit: u32_arg(&args, "scan_limit")?,
-            top_n,
-        })
-        .await?;
+    let req: PatternsRequest = action_payload(args, "patterns")?;
+    let response = state.service.patterns(req).await?;
     tracing::debug!(
         pattern_count = response.patterns.len(),
         scanned = response.scanned,
@@ -503,83 +299,44 @@ async fn tool_patterns(state: &AppState, args: Value) -> anyhow::Result<Value> {
 }
 
 async fn tool_context(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .context(ContextRequest {
-            log_id: i64_arg(&args, "log_id")?,
-            hostname: string_arg(&args, "hostname"),
-            timestamp: string_arg(&args, "timestamp"),
-            before: u32_arg(&args, "before")?,
-            after: u32_arg(&args, "after")?,
-        })
-        .await?;
+    let req: ContextRequest = action_payload(args, "context")?;
+    let response = state.service.context(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_get_log(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let id = i64_arg(&args, "id")?.ok_or_else(|| anyhow::anyhow!("`id` is required"))?;
-    let response = state.service.get_log(GetLogRequest { id }).await?;
+    let req: GetLogRequest = action_payload(args, "get")?;
+    let response = state.service.get_log(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_ingest_rate(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .ingest_rate(IngestRateRequest {
-            by_host: bool_arg(&args, "by_host"),
-        })
-        .await?;
+    let req: IngestRateRequest = action_payload(args, "ingest_rate")?;
+    let response = state.service.ingest_rate(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_silent_hosts(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .silent_hosts(SilentHostsRequest {
-            silent_minutes: u32_arg(&args, "silent_minutes")?,
-        })
-        .await?;
+    let req: SilentHostsRequest = action_payload(args, "silent_hosts")?;
+    let response = state.service.silent_hosts(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_clock_skew(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .clock_skew(ClockSkewRequest {
-            since: string_arg(&args, "since"),
-            limit: u32_arg(&args, "limit")?,
-        })
-        .await?;
+    let req: ClockSkewRequest = action_payload(args, "clock_skew")?;
+    let response = state.service.clock_skew(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_anomalies(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let response = state
-        .service
-        .anomalies(AnomaliesRequest {
-            recent_minutes: u32_arg(&args, "recent_minutes")?,
-            baseline_minutes: u32_arg(&args, "baseline_minutes")?,
-        })
-        .await?;
+    let req: AnomaliesRequest = action_payload(args, "anomalies")?;
+    let response = state.service.anomalies(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
 async fn tool_compare(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let a_from =
-        string_arg(&args, "a_from").ok_or_else(|| anyhow::anyhow!("`a_from` is required"))?;
-    let a_to = string_arg(&args, "a_to").ok_or_else(|| anyhow::anyhow!("`a_to` is required"))?;
-    let b_from =
-        string_arg(&args, "b_from").ok_or_else(|| anyhow::anyhow!("`b_from` is required"))?;
-    let b_to = string_arg(&args, "b_to").ok_or_else(|| anyhow::anyhow!("`b_to` is required"))?;
-    let response = state
-        .service
-        .compare(CompareRequest {
-            a_from,
-            a_to,
-            b_from,
-            b_to,
-        })
-        .await?;
+    let req: CompareRequest = action_payload(args, "compare")?;
+    let response = state.service.compare(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
@@ -590,20 +347,8 @@ async fn tool_list_hosts(state: &AppState, _args: Value) -> anyhow::Result<Value
 }
 
 async fn tool_correlate_events(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let reference_time = string_arg(&args, "reference_time")
-        .ok_or_else(|| anyhow::anyhow!("reference_time is required"))?;
-    let response = state
-        .service
-        .correlate_events(CorrelateEventsRequest {
-            reference_time,
-            window_minutes: u32_arg(&args, "window_minutes")?,
-            severity_min: string_arg(&args, "severity_min"),
-            hostname: string_arg(&args, "hostname"),
-            source_ip: string_arg(&args, "source_ip"),
-            query: string_arg(&args, "query"),
-            limit: u32_arg(&args, "limit")?,
-        })
-        .await?;
+    let req: CorrelateEventsRequest = action_payload(args, "correlate")?;
+    let response = state.service.correlate_events(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
@@ -680,56 +425,21 @@ fn extract_actor(state: &AppState, auth: Option<&AuthContext>) -> RequestActor {
     }
 }
 
-fn action_payload<T: DeserializeOwned>(args: Value) -> anyhow::Result<T> {
+fn action_payload<T: DeserializeOwned>(args: Value, action: &str) -> anyhow::Result<T> {
     let mut object = args
         .as_object()
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("tool arguments must be a JSON object"))?;
     object.remove("action");
     serde_json::from_value(Value::Object(object))
-        .map_err(|err| anyhow::anyhow!("invalid filter arguments: {err}"))
-}
-
-fn u32_arg(args: &Value, name: &str) -> anyhow::Result<Option<u32>> {
-    let Some(value) = args.get(name) else {
-        return Ok(None);
-    };
-    let unsigned = value
-        .as_u64()
-        .ok_or_else(|| anyhow::anyhow!("{name} must be an unsigned integer"))?;
-    u32::try_from(unsigned)
-        .map(Some)
-        .map_err(|_| anyhow::anyhow!("{name} must be <= {}", u32::MAX))
-}
-
-fn i64_arg(args: &Value, name: &str) -> anyhow::Result<Option<i64>> {
-    let Some(value) = args.get(name) else {
-        return Ok(None);
-    };
-    if let Some(n) = value.as_i64() {
-        return Ok(Some(n));
-    }
-    if let Some(n) = value.as_u64() {
-        return i64::try_from(n)
-            .map(Some)
-            .map_err(|_| anyhow::anyhow!("{name} must fit in i64"));
-    }
-    Err(anyhow::anyhow!("{name} must be an integer"))
-}
-
-fn bool_arg(args: &Value, name: &str) -> Option<bool> {
-    args.get(name).and_then(|v| v.as_bool())
+        .map_err(|err| anyhow::anyhow!("invalid {action} arguments: {err}"))
 }
 
 // ---------------------------------------------------------------------------
 // Error detection actions
 
 async fn tool_unaddressed_errors(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    use crate::app::UnaddressedErrorsRequest;
-    let req = UnaddressedErrorsRequest {
-        limit: u32_arg(&args, "limit")?,
-        include_acknowledged: bool_arg(&args, "include_acknowledged"),
-    };
+    let req: UnaddressedErrorsRequest = action_payload(args, "unaddressed_errors")?;
     let resp = state.service.unaddressed_errors(req).await?;
     Ok(serde_json::to_value(resp)?)
 }
@@ -739,13 +449,7 @@ async fn tool_ack_error(
     args: Value,
     auth: Option<&AuthContext>,
 ) -> anyhow::Result<Value> {
-    use crate::app::AckErrorRequest;
-    let hash = string_arg(&args, "signature_hash")
-        .ok_or_else(|| anyhow::anyhow!("signature_hash is required"))?;
-    let req = AckErrorRequest {
-        signature_hash: hash,
-        notes: string_arg(&args, "notes"),
-    };
+    let req: AckErrorRequest = action_payload(args, "ack_error")?;
     let actor = extract_actor(state, auth);
     let resp = state.service.ack_error(req, actor).await?;
     Ok(serde_json::to_value(resp)?)
@@ -756,27 +460,15 @@ async fn tool_unack_error(
     args: Value,
     auth: Option<&AuthContext>,
 ) -> anyhow::Result<Value> {
-    use crate::app::UnackErrorRequest;
-    let hash = string_arg(&args, "signature_hash")
-        .ok_or_else(|| anyhow::anyhow!("signature_hash is required"))?;
-    let req = UnackErrorRequest {
-        signature_hash: hash,
-        reason: string_arg(&args, "reason"),
-    };
+    let req: UnackErrorRequest = action_payload(args, "unack_error")?;
     let actor = extract_actor(state, auth);
     let resp = state.service.unack_error(req, actor).await?;
     Ok(serde_json::to_value(resp)?)
 }
 
 async fn tool_notifications_recent(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let firings = state
-        .service
-        .notifications_recent_checked(NotificationsRecentRequest {
-            limit: args.get("limit").and_then(|v| v.as_i64()),
-            rule_id: string_arg(&args, "rule_id"),
-            since: string_arg(&args, "since"),
-        })
-        .await?;
+    let req: NotificationsRecentRequest = action_payload(args, "notifications_recent")?;
+    let firings = state.service.notifications_recent_checked(req).await?;
     Ok(serde_json::to_value(firings)?)
 }
 
@@ -1448,20 +1140,8 @@ Returns this markdown documentation.
 // ---------------------------------------------------------------------------
 
 async fn tool_similar_incidents(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let query = string_arg(&args, "query").ok_or_else(|| anyhow::anyhow!("query is required"))?;
-    let response = state
-        .service
-        .similar_incidents(SimilarIncidentsRequest {
-            query,
-            hostname: string_arg(&args, "hostname"),
-            app_name: string_arg(&args, "app_name"),
-            severity_min: string_arg(&args, "severity_min"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            window_minutes: u32_arg(&args, "window_minutes")?,
-            limit: u32_arg(&args, "limit")?,
-        })
-        .await?;
+    let req: SimilarIncidentsRequest = action_payload(args, "similar_incidents")?;
+    let response = state.service.similar_incidents(req).await?;
     tracing::debug!(
         cluster_count = response.total_clusters,
         "similar_incidents completed"
@@ -1470,18 +1150,8 @@ async fn tool_similar_incidents(state: &AppState, args: Value) -> anyhow::Result
 }
 
 async fn tool_ask_history(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let query = string_arg(&args, "query").ok_or_else(|| anyhow::anyhow!("query is required"))?;
-    let response = state
-        .service
-        .ask_history(AskHistoryRequest {
-            query,
-            hostname: string_arg(&args, "hostname"),
-            app_name: string_arg(&args, "app_name"),
-            from: string_arg(&args, "from"),
-            to: string_arg(&args, "to"),
-            limit: u32_arg(&args, "limit")?,
-        })
-        .await?;
+    let req: AskHistoryRequest = action_payload(args, "ask_history")?;
+    let response = state.service.ask_history(req).await?;
     tracing::debug!(
         session_count = response.sessions.len(),
         "ask_history completed"
@@ -1490,22 +1160,8 @@ async fn tool_ask_history(state: &AppState, args: Value) -> anyhow::Result<Value
 }
 
 async fn tool_incident_context(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let from = string_arg(&args, "from")
-        .ok_or_else(|| anyhow::anyhow!("from is required for incident_context"))?;
-    let to = string_arg(&args, "to")
-        .ok_or_else(|| anyhow::anyhow!("to is required for incident_context"))?;
-    let response = state
-        .service
-        .incident_context(IncidentContextRequest {
-            from,
-            to,
-            hostname: string_arg(&args, "hostname"),
-            app_name: string_arg(&args, "app_name"),
-            query: string_arg(&args, "query"),
-            severity_min: string_arg(&args, "severity_min"),
-            limit: u32_arg(&args, "limit")?,
-        })
-        .await?;
+    let req: IncidentContextRequest = action_payload(args, "incident_context")?;
+    let response = state.service.incident_context(req).await?;
     tracing::debug!(
         total_logs = response.total_logs,
         error_count = response.error_logs.len(),
@@ -1518,25 +1174,25 @@ async fn tool_graph(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let mode = string_arg(&args, "mode").unwrap_or_else(|| "around".to_string());
     match mode.as_str() {
         "entity" => {
-            let req: GraphEntityLookupRequest = action_payload(args)?;
+            let req: GraphEntityLookupRequest = action_payload(args, "graph")?;
             Ok(serde_json::to_value(
                 state.service.graph_entity_lookup(req).await?,
             )?)
         }
         "around" => {
-            let req: GraphAroundRequest = action_payload(args)?;
+            let req: GraphAroundRequest = action_payload(args, "graph")?;
             Ok(serde_json::to_value(
                 state.service.graph_around(req).await?,
             )?)
         }
         "explain" => {
-            let req: GraphExplainRequest = action_payload(args)?;
+            let req: GraphExplainRequest = action_payload(args, "graph")?;
             Ok(serde_json::to_value(
                 state.service.graph_explain(req).await?,
             )?)
         }
         "evidence" => {
-            let req: GraphEvidenceLookupRequest = action_payload(args)?;
+            let req: GraphEvidenceLookupRequest = action_payload(args, "graph")?;
             Ok(serde_json::to_value(
                 state.service.graph_evidence_lookup(req).await?,
             )?)

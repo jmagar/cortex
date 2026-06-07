@@ -1,7 +1,7 @@
 use chrono::Utc;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use crate::inventory::collectors::CollectorOutput;
@@ -9,20 +9,22 @@ use crate::inventory::docker::{extract_domainish, string_map};
 use crate::inventory::schema::{
     InventoryService, MountRef, NetworkSegment, PortMapping, Provenance, TrustLevel,
 };
-use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, run_ssh, ssh_config_buf};
+use crate::inventory::ssh::{
+    configured_hosts as resolve_ssh_hosts, run_ssh_with_context, SshContext,
+};
 
 pub async fn collect(
     ssh_config: Option<&Path>,
     configured_hosts: &[String],
+    ssh_context: &SshContext,
     timeout: Duration,
 ) -> CollectorOutput {
     let hosts = resolve_ssh_hosts(ssh_config, configured_hosts);
-    let ssh_config = ssh_config_buf(ssh_config);
     let mut handles = Vec::new();
     for host in hosts {
-        let ssh_config = ssh_config.clone();
+        let ssh_context = ssh_context.clone();
         handles.push(tokio::spawn(async move {
-            collect_host(host, ssh_config, timeout).await
+            collect_host(host, ssh_context, timeout).await
         }));
     }
 
@@ -39,13 +41,9 @@ pub async fn collect(
     out
 }
 
-async fn collect_host(
-    host: String,
-    ssh_config: Option<PathBuf>,
-    timeout: Duration,
-) -> CollectorOutput {
+async fn collect_host(host: String, ssh_context: SshContext, timeout: Duration) -> CollectorOutput {
     let mut out = CollectorOutput::new("remote_docker");
-    match run_ssh(ssh_config.as_deref(), &host, docker_command(), timeout).await {
+    match run_ssh_with_context(&ssh_context, &host, docker_command(), timeout).await {
         Ok(output) if output.status == Some(0) && !output.stdout.trim().is_empty() => {
             normalize_inspect_lines(&host, &output.stdout, &mut out);
         }

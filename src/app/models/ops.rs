@@ -5,6 +5,7 @@ use super::*;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnaddressedErrorsRequest {
     /// Maximum number of signatures to return.
     pub limit: Option<u32>,
@@ -33,6 +34,7 @@ pub struct ErrorSignatureEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AckErrorRequest {
     pub signature_hash: String,
     pub notes: Option<String>,
@@ -46,6 +48,7 @@ pub struct AckErrorResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnackErrorRequest {
     pub signature_hash: String,
     pub reason: Option<String>,

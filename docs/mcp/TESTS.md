@@ -50,7 +50,7 @@ rows, not just empty response envelopes.
 the HTTP MCP endpoint for `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `usage_blocks`,
 `project_context`, `list_ai_tools`, and `list_ai_projects`.
 The AI smoke scripts resolve `CORTEX_BIN` first, then `cortex` on `PATH`, then
-the repo-local debug binary at `target/debug/syslog`, so repo-local builds do
+the repo-local debug binary at `target/debug/cortex`, so repo-local builds do
 not require an installed shell binary.
 
 Action registry covered by live/script references: `search`, `filter`, `tail`, `errors`,
@@ -66,38 +66,38 @@ Action registry covered by live/script references: `search`, `filter`, `tail`, `
 
 ```bash
 # List available tools
-mcporter list syslog --config config/mcporter.json
+mcporter list cortex --config config/mcporter.json
 
 # Call actions through the single cortex tool
-mcporter call --config config/mcporter.json syslog.cortex action=stats
-mcporter call --config config/mcporter.json syslog.cortex action=status
-mcporter call --config config/mcporter.json syslog.cortex action=tail n=10
-mcporter call --config config/mcporter.json syslog.cortex action=search query=error limit=5
-mcporter call --config config/mcporter.json syslog.cortex action=hosts
-mcporter call --config config/mcporter.json syslog.cortex action=host_state host_id=host-id
-mcporter call --config config/mcporter.json syslog.cortex action=sessions
-mcporter call --config config/mcporter.json syslog.cortex action=abuse terms=ai-smoke-authentication limit=5
-mcporter call --config config/mcporter.json syslog.cortex action=abuse_incidents limit=3
-mcporter call --config config/mcporter.json syslog.cortex action=abuse_investigate limit=1
-mcporter call --config config/mcporter.json syslog.cortex action=correlate_state reference_time=2026-01-01T00:00:00Z window_minutes=10
-mcporter call --config config/mcporter.json syslog.cortex action=ai_correlate project=/tmp/cortex-ai-smoke limit=2 events_per_anchor=3
-mcporter call --config config/mcporter.json syslog.cortex action=apps
-mcporter call --config config/mcporter.json syslog.cortex action=source_ips
-mcporter call --config config/mcporter.json syslog.cortex action=timeline
-mcporter call --config config/mcporter.json syslog.cortex action=patterns
-mcporter call --config config/mcporter.json syslog.cortex action=context hostname=host timestamp=2026-01-01T00:00:00Z
-mcporter call --config config/mcporter.json syslog.cortex action=get id=1
-mcporter call --config config/mcporter.json syslog.cortex action=ingest_rate
-mcporter call --config config/mcporter.json syslog.cortex action=silent_hosts
-mcporter call --config config/mcporter.json syslog.cortex action=clock_skew
-mcporter call --config config/mcporter.json syslog.cortex action=anomalies
-mcporter call --config config/mcporter.json syslog.cortex action=compare a_from=2026-01-01T00:00:00Z a_to=2026-01-01T01:00:00Z b_from=2026-01-01T01:00:00Z b_to=2026-01-01T02:00:00Z
-mcporter call --config config/mcporter.json syslog.cortex action=compose_status
-mcporter call --config config/mcporter.json syslog.cortex action=compose_doctor
-mcporter call --config config/mcporter.json syslog.cortex action=graph mode=entity entity_type=host key=example-host
-mcporter call --config config/mcporter.json syslog.cortex action=graph mode=around entity_type=host key=example-host depth=1
-mcporter call --config config/mcporter.json syslog.cortex action=graph mode=explain entity_type=host key=example-host depth=2
-mcporter call --config config/mcporter.json syslog.cortex action=graph mode=evidence evidence_id=12345
+mcporter call --config config/mcporter.json cortex.cortex action=stats
+mcporter call --config config/mcporter.json cortex.cortex action=status
+mcporter call --config config/mcporter.json cortex.cortex action=tail n=10
+mcporter call --config config/mcporter.json cortex.cortex action=search query=error limit=5
+mcporter call --config config/mcporter.json cortex.cortex action=hosts
+mcporter call --config config/mcporter.json cortex.cortex action=host_state host_id=host-id
+mcporter call --config config/mcporter.json cortex.cortex action=sessions
+mcporter call --config config/mcporter.json cortex.cortex action=abuse terms=ai-smoke-authentication limit=5
+mcporter call --config config/mcporter.json cortex.cortex action=abuse_incidents limit=3
+mcporter call --config config/mcporter.json cortex.cortex action=abuse_investigate limit=1
+mcporter call --config config/mcporter.json cortex.cortex action=correlate_state reference_time=2026-01-01T00:00:00Z window_minutes=10
+mcporter call --config config/mcporter.json cortex.cortex action=ai_correlate project=/tmp/cortex-ai-smoke limit=2 events_per_anchor=3
+mcporter call --config config/mcporter.json cortex.cortex action=apps
+mcporter call --config config/mcporter.json cortex.cortex action=source_ips
+mcporter call --config config/mcporter.json cortex.cortex action=timeline
+mcporter call --config config/mcporter.json cortex.cortex action=patterns
+mcporter call --config config/mcporter.json cortex.cortex action=context hostname=host timestamp=2026-01-01T00:00:00Z
+mcporter call --config config/mcporter.json cortex.cortex action=get id=1
+mcporter call --config config/mcporter.json cortex.cortex action=ingest_rate
+mcporter call --config config/mcporter.json cortex.cortex action=silent_hosts
+mcporter call --config config/mcporter.json cortex.cortex action=clock_skew
+mcporter call --config config/mcporter.json cortex.cortex action=anomalies
+mcporter call --config config/mcporter.json cortex.cortex action=compare a_from=2026-01-01T00:00:00Z a_to=2026-01-01T01:00:00Z b_from=2026-01-01T01:00:00Z b_to=2026-01-01T02:00:00Z
+mcporter call --config config/mcporter.json cortex.cortex action=compose_status
+mcporter call --config config/mcporter.json cortex.cortex action=compose_doctor
+mcporter call --config config/mcporter.json cortex.cortex action=graph mode=entity entity_type=host key=example-host
+mcporter call --config config/mcporter.json cortex.cortex action=graph mode=around entity_type=host key=example-host depth=1
+mcporter call --config config/mcporter.json cortex.cortex action=graph mode=explain entity_type=host key=example-host depth=2
+mcporter call --config config/mcporter.json cortex.cortex action=graph mode=evidence evidence_id=12345
 ```
 
 For graph proof UX smoke, use a real bounded evidence id from
@@ -145,31 +145,31 @@ curl http://localhost:3100/health
 curl -s -X POST http://localhost:3100/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"tail","n":10}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"tail","n":10}}}'
 
 # Search
 curl -s -X POST http://localhost:3100/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"search","query":"error","limit":5}}}'
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"search","query":"error","limit":5}}}'
 
 # Stats
 curl -s -X POST http://localhost:3100/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"stats"}}}'
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"stats"}}}'
 
 # Status
 curl -s -X POST http://localhost:3100/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"status"}}}'
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"status"}}}'
 ```
 
 ## Testing checklist
 
-- [ ] **All actions return expected shape** -- syslog search, syslog tail, syslog errors, syslog hosts, syslog host_state, syslog sessions, syslog correlate, syslog stats, syslog status, syslog help
-- [ ] **AI session analytics return expected shape and seeded rows** -- syslog search_sessions, syslog abuse, syslog ai_correlate, syslog usage_blocks, syslog project_context, syslog list_ai_tools, syslog list_ai_projects
+- [ ] **All actions return expected shape** -- cortex search, cortex tail, cortex errors, cortex hosts, cortex host_state, cortex sessions, cortex correlate, cortex stats, cortex status, cortex help
+- [ ] **AI session analytics return expected shape and seeded rows** -- cortex search_sessions, cortex abuse, cortex ai_correlate, cortex usage_blocks, cortex project_context, cortex list_ai_tools, cortex list_ai_projects
 - [ ] **Auth: valid token** -- 200 with correct Bearer token
 - [ ] **Auth: invalid token** -- 401 Unauthorized
 - [ ] **Auth: no token when required** -- 401 Unauthorized

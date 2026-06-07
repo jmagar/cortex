@@ -19,6 +19,15 @@ jobs:
       - name: Check version sync
         run: bash scripts/check-version-sync.sh
 
+      - name: Check plugin manifest version policy
+        run: bash scripts/check-plugin-manifest-versions.sh
+
+      - name: Check agent memory symlinks
+        run: bash scripts/check-agent-memory-symlinks.sh
+
+      - name: Check public identity strings
+        run: bash scripts/check-public-identity.sh
+
   fmt:
     name: Formatting
     runs-on: ubuntu-latest
@@ -45,7 +54,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
   test:
     name: Tests

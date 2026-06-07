@@ -1,8 +1,9 @@
 [package]
 name = "cortex"
-version = "1.14.1"
+version = "1.14.2"
 edition = "2021"
 rust-version = "1.86"
+license = "MIT"
 description = "Homelab intelligence platform — syslog/OTLP/Docker log aggregation, fleet awareness, and AI agent coordination over MCP, CLI, and HTTP"
 autobins = false
 
@@ -17,6 +18,8 @@ tokio-util = { version = "0.7", features = ["rt"] }
 
 # HTTP / MCP transport
 axum = "0.8"
+# rmcp 1.6.0 is the supported lower bound for cortex's current API surface.
+# Cargo.lock may resolve a newer compatible 1.x release; see docs/RUST.md.
 rmcp = { version = "1.6.0", default-features = false, features = [
   "server",
   "macros",

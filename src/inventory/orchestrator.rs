@@ -10,6 +10,8 @@ use crate::inventory::schema::{
     CollectionState, CollectorState, GraphProjectionSummary, HomelabInventory,
 };
 use crate::inventory::storage::{write_json_private, InventoryPaths, RefreshLock};
+use std::future::Future;
+use std::pin::Pin;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct InventoryRefreshReport {
@@ -26,9 +28,22 @@ pub struct InventoryRefreshReport {
     pub artifact_paths: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct InventoryRefreshOutcome {
+    pub report: InventoryRefreshReport,
+    pub inventory: HomelabInventory,
+}
+
 type NamedOutput = (&'static str, String, String, u128, CollectorOutput);
+type CollectorFuture<'a> = Pin<Box<dyn Future<Output = NamedOutput> + Send + 'a>>;
 
 pub async fn refresh_inventory(config: InventoryConfig) -> Result<InventoryRefreshReport> {
+    Ok(refresh_inventory_with_inventory(config).await?.report)
+}
+
+pub async fn refresh_inventory_with_inventory(
+    config: InventoryConfig,
+) -> Result<InventoryRefreshOutcome> {
     let paths = InventoryPaths::new(config.root.clone());
     paths.ensure_private_dirs()?;
     let _lock = RefreshLock::acquire(&paths.lock_file)?;
@@ -45,6 +60,9 @@ pub async fn refresh_inventory(config: InventoryConfig) -> Result<InventoryRefre
     let mut states = Vec::new();
     let mut all_warnings = Vec::new();
     let mut collector_outputs = Vec::new();
+    let ssh_context = crate::inventory::ssh::SshContext::new(
+        crate::inventory::ssh::SshOptions::from_env(config.ssh_config.as_deref()),
+    );
 
     // Run all collectors concurrently. Each collector has an individual timeout,
     // and the whole batch has a separate wall-clock deadline.
@@ -63,231 +81,84 @@ pub async fn refresh_inventory(config: InventoryConfig) -> Result<InventoryRefre
         "projects",
     ];
 
-    let futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = NamedOutput> + Send>>> = vec![
-        Box::pin(async {
-            let started = Utc::now().to_rfc3339();
-            let t = Instant::now();
-            let out = match tokio::time::timeout(
-                collector_deadline,
-                crate::inventory::raw_configs::collect(
-                    &config.compose_paths,
-                    &config.proxy_paths,
-                    config.ssh_config.as_deref(),
-                    &config.ssh_hosts,
-                    &paths,
-                    &run_id,
-                    probe_deadline,
-                ),
-            )
-            .await
-            {
-                Ok(o) => o,
-                Err(_) => timeout_output("raw_configs", collector_deadline),
-            };
-            (
-                "raw_configs",
-                started,
-                Utc::now().to_rfc3339(),
-                t.elapsed().as_millis(),
-                out,
-            )
-        }),
-        Box::pin(async {
-            let started = Utc::now().to_rfc3339();
-            let t = Instant::now();
-            let out = match tokio::time::timeout(
+    let futures: Vec<CollectorFuture<'_>> = vec![
+        collector_task(
+            "raw_configs",
+            collector_deadline,
+            crate::inventory::raw_configs::collect(crate::inventory::raw_configs::CollectOptions {
+                compose_paths: &config.compose_paths,
+                proxy_paths: &config.proxy_paths,
+                ssh_config: config.ssh_config.as_deref(),
+                ssh_hosts: &config.ssh_hosts,
+                ssh_context: &ssh_context,
+                paths: &paths,
+                run_id: &run_id,
+                timeout: probe_deadline,
+            }),
+        ),
+        collector_task(
+            "device",
+            probe_deadline,
+            crate::inventory::device::collect(probe_deadline),
+        ),
+        collector_task(
+            "remote_device",
+            collector_deadline,
+            crate::inventory::remote_device::collect(
+                config.ssh_config.as_deref(),
+                &config.ssh_hosts,
+                &ssh_context,
                 probe_deadline,
-                crate::inventory::device::collect(probe_deadline),
-            )
-            .await
-            {
-                Ok(o) => o,
-                Err(_) => timeout_output("device", probe_deadline),
-            };
-            (
-                "device",
-                started,
-                Utc::now().to_rfc3339(),
-                t.elapsed().as_millis(),
-                out,
-            )
-        }),
-        Box::pin(async {
-            let started = Utc::now().to_rfc3339();
-            let t = Instant::now();
-            let out = match tokio::time::timeout(
+            ),
+        ),
+        collector_task(
+            "docker",
+            collector_deadline,
+            crate::inventory::docker::collect(&config.docker_hosts, collector_deadline),
+        ),
+        collector_task(
+            "remote_docker",
+            collector_deadline,
+            crate::inventory::remote_docker::collect(
+                config.ssh_config.as_deref(),
+                &config.ssh_hosts,
+                &ssh_context,
                 collector_deadline,
-                crate::inventory::remote_device::collect(
-                    config.ssh_config.as_deref(),
-                    &config.ssh_hosts,
-                    probe_deadline,
-                ),
-            )
-            .await
-            {
-                Ok(o) => o,
-                Err(_) => timeout_output("remote_device", probe_deadline),
-            };
-            (
-                "remote_device",
-                started,
-                Utc::now().to_rfc3339(),
-                t.elapsed().as_millis(),
-                out,
-            )
-        }),
-        Box::pin(async {
-            let started = Utc::now().to_rfc3339();
-            let t = Instant::now();
-            let out = match tokio::time::timeout(
+            ),
+        ),
+        collector_task(
+            "tailscale",
+            probe_deadline,
+            crate::inventory::tailscale::collect(probe_deadline),
+        ),
+        collector_task(
+            "unraid",
+            collector_deadline,
+            crate::inventory::unraid::collect(
+                config.unraid_url.as_deref(),
+                config.unraid_api_key.as_deref(),
                 collector_deadline,
-                crate::inventory::docker::collect(&config.docker_hosts, collector_deadline),
-            )
-            .await
-            {
-                Ok(o) => o,
-                Err(_) => timeout_output("docker", collector_deadline),
-            };
-            (
-                "docker",
-                started,
-                Utc::now().to_rfc3339(),
-                t.elapsed().as_millis(),
-                out,
-            )
-        }),
-        Box::pin(async {
-            let started = Utc::now().to_rfc3339();
-            let t = Instant::now();
-            let out = match tokio::time::timeout(
+            ),
+        ),
+        collector_task(
+            "unifi",
+            collector_deadline,
+            crate::inventory::unifi::collect(
+                config.unifi_url.as_deref(),
+                config.unifi_api_key.as_deref(),
                 collector_deadline,
-                crate::inventory::remote_docker::collect(
-                    config.ssh_config.as_deref(),
-                    &config.ssh_hosts,
-                    collector_deadline,
-                ),
-            )
-            .await
-            {
-                Ok(o) => o,
-                Err(_) => timeout_output("remote_docker", collector_deadline),
-            };
-            (
-                "remote_docker",
-                started,
-                Utc::now().to_rfc3339(),
-                t.elapsed().as_millis(),
-                out,
-            )
-        }),
-        Box::pin(async {
-            let started = Utc::now().to_rfc3339();
-            let t = Instant::now();
-            let out = match tokio::time::timeout(
-                probe_deadline,
-                crate::inventory::tailscale::collect(probe_deadline),
-            )
-            .await
-            {
-                Ok(o) => o,
-                Err(_) => timeout_output("tailscale", probe_deadline),
-            };
-            (
-                "tailscale",
-                started,
-                Utc::now().to_rfc3339(),
-                t.elapsed().as_millis(),
-                out,
-            )
-        }),
-        Box::pin(async {
-            let started = Utc::now().to_rfc3339();
-            let t = Instant::now();
-            let out = match tokio::time::timeout(
-                collector_deadline,
-                crate::inventory::unraid::collect(
-                    config.unraid_url.as_deref(),
-                    config.unraid_api_key.as_deref(),
-                    collector_deadline,
-                ),
-            )
-            .await
-            {
-                Ok(o) => o,
-                Err(_) => timeout_output("unraid", collector_deadline),
-            };
-            (
-                "unraid",
-                started,
-                Utc::now().to_rfc3339(),
-                t.elapsed().as_millis(),
-                out,
-            )
-        }),
-        Box::pin(async {
-            let started = Utc::now().to_rfc3339();
-            let t = Instant::now();
-            let out = match tokio::time::timeout(
-                collector_deadline,
-                crate::inventory::unifi::collect(
-                    config.unifi_url.as_deref(),
-                    config.unifi_api_key.as_deref(),
-                    collector_deadline,
-                ),
-            )
-            .await
-            {
-                Ok(o) => o,
-                Err(_) => timeout_output("unifi", collector_deadline),
-            };
-            (
-                "unifi",
-                started,
-                Utc::now().to_rfc3339(),
-                t.elapsed().as_millis(),
-                out,
-            )
-        }),
-        Box::pin(async {
-            let started = Utc::now().to_rfc3339();
-            let t = Instant::now();
-            let out = match tokio::time::timeout(
-                collector_deadline,
-                crate::inventory::media_stack::collect(&config.media_services, collector_deadline),
-            )
-            .await
-            {
-                Ok(o) => o,
-                Err(_) => timeout_output("media_stack", collector_deadline),
-            };
-            (
-                "media_stack",
-                started,
-                Utc::now().to_rfc3339(),
-                t.elapsed().as_millis(),
-                out,
-            )
-        }),
-        Box::pin(async {
-            let started = Utc::now().to_rfc3339();
-            let t = Instant::now();
-            let out = match tokio::time::timeout(
-                collector_deadline,
-                crate::inventory::projects::collect(&config.project_roots, probe_deadline),
-            )
-            .await
-            {
-                Ok(o) => o,
-                Err(_) => timeout_output("projects", probe_deadline),
-            };
-            (
-                "projects",
-                started,
-                Utc::now().to_rfc3339(),
-                t.elapsed().as_millis(),
-                out,
-            )
-        }),
+            ),
+        ),
+        collector_task(
+            "media_stack",
+            collector_deadline,
+            crate::inventory::media_stack::collect(&config.media_services, collector_deadline),
+        ),
+        collector_task(
+            "projects",
+            collector_deadline,
+            crate::inventory::projects::collect(&config.project_roots, probe_deadline),
+        ),
     ];
 
     let results = match tokio::time::timeout(
@@ -366,7 +237,7 @@ pub async fn refresh_inventory(config: InventoryConfig) -> Result<InventoryRefre
     write_json_private(&paths.normalized_json, &inventory)
         .context("write normalized inventory cache")?;
     write_json_private(&paths.collection_state_json, &state).context("write collection state")?;
-    Ok(InventoryRefreshReport {
+    let report = InventoryRefreshReport {
         run_id,
         status,
         root: paths.root.display().to_string(),
@@ -382,6 +253,32 @@ pub async fn refresh_inventory(config: InventoryConfig) -> Result<InventoryRefre
             .iter()
             .map(|artifact| artifact.cache_path.clone())
             .collect(),
+    };
+    Ok(InventoryRefreshOutcome { report, inventory })
+}
+
+fn collector_task<'a, F>(
+    name: &'static str,
+    deadline: std::time::Duration,
+    future: F,
+) -> CollectorFuture<'a>
+where
+    F: Future<Output = CollectorOutput> + Send + 'a,
+{
+    Box::pin(async move {
+        let started = Utc::now().to_rfc3339();
+        let t = Instant::now();
+        let out = match tokio::time::timeout(deadline, future).await {
+            Ok(output) => output,
+            Err(_) => timeout_output(name, deadline),
+        };
+        (
+            name,
+            started,
+            Utc::now().to_rfc3339(),
+            t.elapsed().as_millis(),
+            out,
+        )
     })
 }
 

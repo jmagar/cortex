@@ -17,6 +17,8 @@ yanked = "deny"
 ignore = [
   # RUSTSEC-2023-0071 — Marvin Attack (RSA timing side-channel) in the `rsa` crate.
   # Pulled in transitively: lab-auth → jsonwebtoken → rsa v0.9.10 / v0.10.0-rc.18.
+  # Owner: cortex maintainer. Review cadence: every release; next review no later
+  # than 2026-07-31 or when lab-auth/jsonwebtoken releases a hardened path.
   # No upstream fix exists yet (as of 2026-05). The RSA keys are used for JWT
   # signing/verification only (short-lived tokens, not long-term data encryption)
   # and the server is not on the PKCS#1 v1.5 decrypt path that is vulnerable.
@@ -38,7 +40,6 @@ allow = [
   "Unicode-3.0",
   "CC0-1.0",
   "Zlib",                           # foldhash (via hashbrown → rusqlite → lab-auth)
-  "MPL-2.0",                        # option-ext (via dirs-sys → dirs)
   "CDLA-Permissive-2.0",            # webpki-roots / webpki-root-certs (via reqwest → rustls)
 ]
 # Confidence threshold for license text detection (0.0–1.0)
@@ -47,11 +48,14 @@ confidence-threshold = 0.8
 # ── Bans ──────────────────────────────────────────────────────────────────────
 
 [bans]
-# Warn on multiple versions of the same crate — forces explicit resolution
-multiple-versions = "warn"
-# "warn" not "deny": git deps with a pinned rev have no semver version field,
-# which cargo-deny treats as a wildcard — but the rev IS the pin.
-wildcards = "warn"
+# Duplicate versions are dominated by the transitive auth/MCP/Windows target
+# stack and are reviewed during release dependency audits. Keep this check quiet
+# so cargo-deny output highlights advisories, license drift, and source drift.
+multiple-versions = "allow"
+# Git deps with pinned revs have no semver version field, which cargo-deny
+# treats as a wildcard. The rev is the pin; source policy below still restricts
+# the allowed git remotes.
+wildcards = "allow"
 # Allow path deps (e.g. the self-referencing dev dep) to omit a version.
 allow-wildcard-paths = true
 

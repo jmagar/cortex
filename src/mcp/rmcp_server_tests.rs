@@ -541,7 +541,7 @@ async fn rmcp_numeric_args_reject_wrong_type_values() {
             json!({
                 "action": "correlate",
                 "reference_time": "2026-01-01T00:00:00Z",
-                "limit": null
+                "limit": "10"
             }),
         ),
     ] {

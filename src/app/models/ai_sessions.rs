@@ -1,6 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListSessionsRequest {
     pub project: Option<String>,
     pub tool: Option<String>,

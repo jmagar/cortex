@@ -19,12 +19,13 @@ All version-bearing files must match. Update together:
 | File | Field |
 | --- | --- |
 | `Cargo.toml` | `version = "X.Y.Z"` in `[package]` |
-| `.claude-plugin/plugin.json` | `"version": "X.Y.Z"` |
-| `.codex-plugin/plugin.json` | `"version": "X.Y.Z"` |
-| `gemini-extension.json` | `"version": "X.Y.Z"` |
 | `server.json` | `"version": "X.Y.Z"` |
 | `mcpb/manifest.json` | `"version": "X.Y.Z"` |
 | `CHANGELOG.md` | New entry under `## X.Y.Z` |
+
+Plugin manifests such as `.claude-plugin/plugin.json` are intentionally
+unversioned. `scripts/check-plugin-manifest-versions.sh` is the guardrail that
+prevents top-level plugin manifest `version` keys from coming back.
 
 ## Publish workflow
 
@@ -38,7 +39,7 @@ Steps executed:
 2. Pull latest from origin
 3. Read current version from `Cargo.toml`
 4. Compute new version based on bump type
-5. Update `Cargo.toml`, plugin manifests, and `gemini-extension.json`
+5. Update `Cargo.toml`, `server.json`, `mcpb/manifest.json`, and `CHANGELOG.md`
 6. Run `cargo check` to update `Cargo.lock`
 7. Commit: `release: vX.Y.Z`
 8. Tag: `vX.Y.Z`
@@ -60,14 +61,13 @@ MCP Registry metadata at repo root:
 ```json
 {
   "name": "tv.tootie/cortex",
-  "title": "Syslog MCP",
+  "title": "Cortex",
   "description": "Syslog receiver and MCP server for homelab log intelligence.",
-  "version": "0.21.7",
+  "version": "X.Y.Z",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/cortex:0.21.7",
-      "version": "0.21.7"
+      "identifier": "ghcr.io/jmagar/cortex:vX.Y.Z"
     }
   ]
 }

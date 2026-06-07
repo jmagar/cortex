@@ -45,3 +45,12 @@ explicit `./target` exclusion. All other settings (mold linker, profile
 tuning, Cranelift) are inherited from the global config.
 
 This repo has no xtask crate, so no `[alias]` section is needed.
+
+## rmcp version intent
+
+`Cargo.toml` declares `rmcp = "1.6.0"` as the supported lower bound for the
+HTTP and stdio MCP API surface cortex uses. Cargo may resolve a newer compatible
+`1.x` release in `Cargo.lock` (currently the lockfile resolves `rmcp 1.7.0`).
+That is intentional semver behavior, not a mismatch. Do not pin the manifest to
+the lockfile version unless cortex starts depending on an API that requires that
+newer release.

@@ -21,7 +21,7 @@ scripts/
 
 ## Hook definitions
 
-Hooks are registered in `plugins/syslog/hooks/hooks.json` and executed by Claude Code at the appropriate lifecycle point.
+Hooks are registered in `plugins/cortex/hooks/hooks.json` and executed by Claude Code at the appropriate lifecycle point.
 
 ### SessionStart — plugin-setup.sh
 

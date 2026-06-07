@@ -447,7 +447,7 @@ spool into SQLite.
 
 ```bash
 cortex setup agent-command install
-export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/syslog-agent-command-wrapper"
+export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/cortex-agent-command-wrapper"
 
 cortex agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
 cortex agent-command wrap --spool ~/.local/state/cortex/agent-command.jsonl -- cargo test
@@ -515,7 +515,7 @@ remain blocking errors. Installing the watch service disables the older
 ### `cortex setup debug-wrapper`
 
 Install, remove, or inspect the host-local debug wrapper at
-`~/.local/bin/syslog`.
+`~/.local/bin/cortex`.
 
 ```bash
 cortex setup debug-wrapper install
@@ -524,11 +524,11 @@ cortex setup debug-wrapper remove
 ```
 
 The wrapper is intentionally machine-local. It `cd`s into the configured repo
-or worktree, builds `cargo build --bin syslog` into `.cache/cargo`, then execs
+or worktree, builds `cargo build --bin cortex` into `.cache/cargo`, then execs
 the fresh debug binary. For non-server commands it defaults Docker ingest off
 and bearer auth mode on, so regular CLI checks do not accidentally start
 container-log ingestion or OAuth-only config paths. Override the source checkout
-with `CORTEX_REPO=/path/to/cortex syslog ...`.
+with `CORTEX_REPO=/path/to/cortex cortex ...`.
 
 ### `cortex setup debug-compose`
 
@@ -544,10 +544,10 @@ cortex setup debug-compose remove
 The override is machine-local. It points the canonical Docker Compose project at
 the current repo/worktree and builds the `cortex:local-debug` image with the
 debug profile. This keeps `docker compose up -d --build` aligned with the same
-code that the host debug wrapper builds. `cortex setup` also writes
-`COMPOSE_PROJECT_NAME=syslog-jmagar-lab` to the setup `.env`, so direct
-`docker compose` commands target the canonical project instead of a cwd-derived
-project name.
+code that the host debug wrapper builds. Existing setup environments may still
+carry the legacy `COMPOSE_PROJECT_NAME=syslog-jmagar-lab` for container-label
+compatibility; use `cortex compose ...` when possible because it resolves the
+live owner before mutating the stack.
 
 ### `cortex setup doctor`
 
@@ -626,7 +626,7 @@ bash scripts/smoke-ai-mcp.sh
 ```
 
 The smoke scripts resolve `CORTEX_BIN` first, then `cortex` on `PATH`, then the
-repo-local debug binary at `target/debug/syslog`.
+repo-local debug binary at `target/debug/cortex`.
 
 With `syslog-ai-watch.service` installed, new transcript lines usually become
 searchable within a few seconds of the writer closing or flushing the file.
@@ -993,7 +993,7 @@ models.
 The MCP-only `status` and `help` actions are runtime/protocol helpers, not
 direct database queries. Compose mutations (`up`, `down`, `restart`, `pull`,
 `logs`) are CLI-only and are not exposed over MCP. Admin MCP actions such as
-`ack_error`, `unack_error`, and `notifications_test` require `syslog:admin`
+`ack_error`, `unack_error`, and `notifications_test` require `cortex:admin`
 when auth is mounted.
 
 Use direct CLI mode for terminal queries and scripts on a host that can read the

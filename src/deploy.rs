@@ -42,16 +42,11 @@ struct SshRemoteRunner;
 
 impl RemoteRunner for SshRemoteRunner {
     fn run(&mut self, host: &str, script: &str, stdin: Option<&str>) -> io::Result<RemoteOutput> {
+        let args = crate::inventory::ssh::SshOptions::from_env(None)
+            .ssh_args(host, "sh -s")
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
         let mut child = Command::new("ssh")
-            .args([
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=10",
-                host,
-                "sh",
-                "-s",
-            ])
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -86,6 +81,12 @@ fn run_remote_deploy_with_runner(
     dry_run: bool,
     runner: &mut dyn RemoteRunner,
 ) -> io::Result<RemoteDeployReport> {
+    if !crate::inventory::ssh::is_safe_ssh_host(host) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unsafe ssh host: {host}"),
+        ));
+    }
     let started = Instant::now();
     let mut phases = Vec::new();
 
@@ -637,5 +638,30 @@ mod tests {
             .commands
             .iter()
             .any(|cmd| cmd.contains(". ~/.cortex/.env")));
+    }
+
+    #[test]
+    fn remote_deploy_rejects_option_like_hosts_before_running_ssh() {
+        let mut runner = FakeRemoteRunner::ok();
+
+        let error =
+            run_remote_deploy_with_runner("-oProxyCommand=touch /tmp/pwned", true, &mut runner)
+                .unwrap_err();
+
+        assert!(error.to_string().contains("unsafe ssh host"));
+        assert!(runner.commands.is_empty());
+    }
+
+    #[test]
+    fn remote_deploy_accepts_safe_hosts() {
+        let mut runner = FakeRemoteRunner::ok();
+
+        let report = run_remote_deploy_with_runner("tootie", true, &mut runner).unwrap();
+
+        assert_eq!(report.host, "tootie");
+        assert!(runner
+            .commands
+            .iter()
+            .all(|command| command.starts_with("tootie:")));
     }
 }

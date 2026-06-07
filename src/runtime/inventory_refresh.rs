@@ -3,7 +3,6 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::Context;
 use notify::{
     Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
@@ -73,8 +72,10 @@ pub fn spawn(
 async fn refresh_and_project(pool: &DbPool, maintenance_limiter: &Arc<Semaphore>) {
     let started = Instant::now();
     let config = crate::inventory::InventoryConfig::from_env();
-    match crate::inventory::refresh_inventory(config.clone()).await {
-        Ok(report) => {
+    match crate::inventory::refresh_inventory_with_inventory(config).await {
+        Ok(outcome) => {
+            let report = outcome.report;
+            let inventory = outcome.inventory;
             let Ok(_permit) = Arc::clone(maintenance_limiter).acquire_owned().await else {
                 tracing::error!("inventory_refresh: maintenance limiter closed");
                 return;
@@ -82,8 +83,6 @@ async fn refresh_and_project(pool: &DbPool, maintenance_limiter: &Arc<Semaphore>
             let pool = pool.clone();
             let projection_pool = pool.clone();
             let projection = tokio::task::spawn_blocking(move || {
-                let inventory = crate::inventory::read_inventory_cache(&config)
-                    .context("read inventory cache for graph projection")?;
                 crate::db::graph_inventory::project_inventory(&pool, &inventory)
             })
             .await
@@ -204,20 +203,24 @@ fn spawn_remote_docker_event_tasks(
         tracing::info!("inventory_refresh: remote Docker event streams disabled");
         return Vec::new();
     }
+    let ssh_context = crate::inventory::ssh::SshContext::new(
+        crate::inventory::ssh::SshOptions::from_env(config.ssh_config.as_deref())
+            .with_event_stream_defaults(),
+    );
     let hosts =
         crate::inventory::ssh::configured_hosts(config.ssh_config.as_deref(), &config.ssh_hosts);
     hosts
         .into_iter()
         .map(|host| {
-            let ssh_config = config.ssh_config.clone();
             let trigger = trigger.clone();
             let token = token.clone();
+            let ssh_context = ssh_context.clone();
             tokio::spawn(async move {
                 loop {
                     tokio::select! {
                         biased;
                         _ = token.cancelled() => break,
-                        result = run_remote_docker_events_once(&host, ssh_config.as_deref(), trigger.clone(), token.clone()) => {
+                        result = run_remote_docker_events_once(&host, &ssh_context, trigger.clone(), token.clone()) => {
                             if let Err(error) = result {
                                 tracing::debug!(%error, host = %host, "inventory_refresh: remote Docker events unavailable");
                             }
@@ -236,11 +239,12 @@ fn spawn_remote_docker_event_tasks(
 
 async fn run_remote_docker_events_once(
     host: &str,
-    ssh_config: Option<&Path>,
+    ssh_context: &crate::inventory::ssh::SshContext,
     trigger: mpsc::Sender<()>,
     token: CancellationToken,
 ) -> anyhow::Result<()> {
-    let args = remote_docker_events_ssh_args(ssh_config, host);
+    let _permit = ssh_context.acquire_owned().await?;
+    let args = remote_docker_events_ssh_args(ssh_context, host)?;
     let mut child = Command::new("ssh")
         .args(args)
         .stdin(Stdio::null())
@@ -325,30 +329,14 @@ fn remote_docker_events_enabled() -> bool {
         .unwrap_or(false)
 }
 
-fn remote_docker_events_ssh_args(ssh_config: Option<&Path>, host: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    args.push("-o".to_string());
-    args.push("IgnoreUnknown=WarnWeakCrypto".to_string());
-    if let Some(config) = ssh_config {
-        args.push("-F".to_string());
-        args.push(config.display().to_string());
-    }
-    args.extend([
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        "-o".to_string(),
-        "StrictHostKeyChecking=accept-new".to_string(),
-        "-o".to_string(),
-        "ConnectTimeout=4".to_string(),
-        "-o".to_string(),
-        "ServerAliveInterval=15".to_string(),
-        "-o".to_string(),
-        "ServerAliveCountMax=2".to_string(),
-        "--".to_string(),
-        host.to_string(),
-        "docker events --filter type=container --format '{{json .}}'".to_string(),
-    ]);
-    args
+fn remote_docker_events_ssh_args(
+    ssh_context: &crate::inventory::ssh::SshContext,
+    host: &str,
+) -> anyhow::Result<Vec<String>> {
+    ssh_context.ssh_args(
+        host,
+        "docker events --filter type=container --format '{{json .}}'",
+    )
 }
 
 fn watched_config_targets(config: &crate::inventory::InventoryConfig) -> Vec<PathBuf> {

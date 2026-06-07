@@ -41,8 +41,8 @@ cleanup_interval_secs = 60
 host = "0.0.0.0"
 port = 3100
 server_name = "cortex"
-allowed_hosts = ["syslog.example.com", "syslog.example.com:443"]
-allowed_origins = ["https://syslog.example.com"]
+allowed_hosts = ["cortex.example.com", "cortex.example.com:443"]
+allowed_origins = ["https://cortex.example.com"]
 
 [api]
 enabled = false
@@ -61,9 +61,9 @@ allow_insecure_http = true
 Bind host fields (`CORTEX_RECEIVER_HOST` and `CORTEX_HOST`) must be hostnames or IP
 addresses without `:` because their ports are configured separately.
 `allowed_hosts` / `CORTEX_ALLOWED_HOSTS` are RMCP Host-header allow-list
-entries and may include `host:port` values such as `syslog.example.com:443`.
+entries and may include `host:port` values such as `cortex.example.com:443`.
 `allowed_origins` / `CORTEX_ALLOWED_ORIGINS` remain full browser origin URLs
-such as `https://syslog.example.com`.
+such as `https://cortex.example.com`.
 
 ## Environment variables
 
@@ -232,12 +232,12 @@ When installed as a Claude Code plugin, users are prompted for:
 
 | Field | Sensitive | Description |
 | --- | --- | --- |
-| `server_url` | no | Base server URL (e.g. `https://syslog.example.com`) |
+| `server_url` | no | Base server URL (e.g. `https://cortex.example.com`) |
 | `api_token` | yes | Bearer token used by the plugin MCP client; enforced by the server unless `no_auth=true` |
 | `no_auth` | no | Explicit no-auth mode; non-loopback server binds also require `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true` |
 | `is_server` | no | Whether this host owns the Docker Compose deployment |
 
-These values are interpolated into `plugins/syslog/.mcp.json` via `${user_config.*}` syntax. See [plugin/CONFIG.md](plugin/CONFIG.md) for details.
+These values are interpolated into `plugins/cortex/mcp.json` via `${user_config.*}` syntax. See [plugin/CONFIG.md](plugin/CONFIG.md) for details.
 
 ## .env.example conventions
 

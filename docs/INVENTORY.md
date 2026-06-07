@@ -64,7 +64,7 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `help` | Returns markdown documentation for all actions | no |
 
 Most MCP actions are read-only. `ack_error`, `unack_error`, and
-`notifications_test` require `syslog:admin`; they mutate acknowledgement/audit
+`notifications_test` require `cortex:admin`; they mutate acknowledgement/audit
 or notification state through service-owned actor and safety policy.
 
 ## Direct CLI commands
@@ -169,6 +169,15 @@ and compact Docker inspect data including container status/health, image,
 published ports, networks, mounts, compose/route labels, and environment key
 names only. It does not store environment values.
 
+SSH targets are validated before invoking OpenSSH, option-like hosts are
+rejected, and the command builder inserts `--` before the host argument.
+Inventory, remote Docker events, and deploy helpers share strict host-key
+defaults, a fleet-wide concurrency budget, and retry backoff. The default is
+`StrictHostKeyChecking=yes`; bootstrap TOFU is available only when explicitly
+opted in with `CORTEX_INVENTORY_SSH_TRUST_ON_FIRST_USE=true`. Set
+`CORTEX_INVENTORY_SSH_KNOWN_HOSTS` when automation should use a managed
+known-hosts file.
+
 Optional provider collectors are activated only when their URL/credential env
 vars are present. Supported media prefixes are `SONARR`, `RADARR`, `PROWLARR`,
 `SABNZBD`, `QBITTORRENT`, `PLEX`, `TAUTULLI`, and `OVERSEERR`.
@@ -189,10 +198,10 @@ safe evidence samples, map-native `next_queries`, and graph `proof_queries`.
 
 | Surface | Present | Path |
 | --- | --- | --- |
-| Skills | yes | `plugins/syslog/skills/` |
+| Skills | yes | `plugins/cortex/skills/` |
 | Agents | no | -- |
 | Commands | no | -- |
-| Hooks | yes | `plugins/syslog/hooks/` |
+| Hooks | yes | `plugins/cortex/hooks/` |
 | Channels | no | -- |
 | Output styles | no | -- |
 | Schedules | no | -- |

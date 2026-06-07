@@ -53,7 +53,7 @@ cortex exposes one MCP tool named `cortex`. The required
 | `graph` | Resolve graph entities, neighborhoods, evidence-backed explanations, and evidence proof rows |
 | `help` | Markdown reference for all actions |
 
-## syslog search
+## cortex search
 
 Full-text search across all syslog messages. Uses SQLite FTS5 with porter stemming.
 
@@ -61,7 +61,7 @@ Required argument: `action = "search"`
 
 Optional arguments: `query`, `hostname`, `source_ip`, `severity`, `app_name`, `facility`, `process_id`, `from`, `to`, `limit`.
 
-## syslog filter
+## cortex filter
 
 Structured filter-only log retrieval. This action rejects `query`; use `search` for FTS5 message-body search.
 
@@ -69,7 +69,7 @@ Required argument: `action = "filter"`
 
 Optional arguments: `hostname`, `source_ip`, `source_kind`, `tool`, `project`, `session_id`, `container`, `docker_host`, `stream`, `event_action`, `severity`, `app_name`, `facility`, `exclude_facility`, `process_id`, `from`, `to`, `received_from`, `received_to`, `limit`.
 
-## syslog tail
+## cortex tail
 
 Get the N most recent log entries. Equivalent to `tail -f` across all hosts.
 
@@ -77,7 +77,7 @@ Required argument: `action = "tail"`
 
 Optional arguments: `hostname`, `source_ip`, `app_name`, `severity_min`, `n`.
 
-## syslog errors
+## cortex errors
 
 Get a summary of errors and warnings across all hosts in a time window, grouped by hostname and severity.
 
@@ -87,13 +87,13 @@ Optional arguments: `from`, `to`, `group_by`.
 
 `group_by` currently supports `app_name` for hostname + app + severity grouping.
 
-## syslog hosts
+## cortex hosts
 
 List all hosts that have sent syslog messages.
 
 Required argument: `action = "hosts"`
 
-## syslog map
+## cortex map
 
 Return a bounded homelab infrastructure snapshot from `~/.cortex/inventory`
 plus live Cortex host/heartbeat overlay, or answer graph-backed topology
@@ -112,7 +112,7 @@ Use `mode = "host_services"` with `host`, `mode = "domain_routes"` with
 `service` to get a `graph_answer` envelope with answer status, topology rows,
 safe evidence, map follow-ups, and graph proof queries.
 
-## syslog host_state
+## cortex host_state
 
 Return latest bounded heartbeat state for one host.
 
@@ -120,7 +120,7 @@ Required argument: `action = "host_state"` plus either `host_id` or uniquely res
 
 Optional arguments: `since`, `limit` (default 1, max 100).
 
-## syslog correlate_state
+## cortex correlate_state
 
 Correlate non-AI logs with per-host heartbeat window summaries around a
 reference time. Bounded by default; never performs a full-history scan.
@@ -135,7 +135,7 @@ max 500).
 Response includes the resolved `window`, a `heartbeat_summary` plus matching
 `logs` per host, and a `truncated` flag.
 
-## syslog sessions
+## cortex sessions
 
 List AI transcript sessions grouped by project, tool, session, and host.
 
@@ -143,7 +143,7 @@ Required argument: `action = "sessions"`
 
 Optional arguments: `project`, `tool`, `hostname`, `from`, `to`, `limit`.
 
-## syslog search_sessions
+## cortex search_sessions
 
 Search AI transcript rows with FTS5 and return grouped session results ranked by relevance.
 
@@ -151,7 +151,7 @@ Required arguments: `action = "search_sessions"`, `query`
 
 Optional arguments: `project`, `tool`, `from`, `to`, `limit`.
 
-## syslog abuse
+## cortex abuse
 
 Detect abuse in AI transcript rows and return the hit plus surrounding rows
 from the same AI session.
@@ -163,7 +163,7 @@ Optional arguments: `project`, `tool`, `from`, `to`, `limit`, `before`, `after`,
 `terms` replaces the built-in abuse detector list when provided. `before`
 and `after` default to 2 and are capped at 20.
 
-## syslog abuse_incidents
+## cortex abuse_incidents
 
 Groups AI transcript abuse hits into scored incident candidates by `(project, tool, session_id, hostname)` within a configurable time window. Returns incidents ordered by priority score with labels: `low` / `medium` / `high` / `critical`.
 
@@ -171,7 +171,7 @@ Response includes `incidents`, `total_incidents`, `candidate_rows`, `candidate_c
 
 Optional arguments: `project`, `tool`, `from`, `to`, `limit` (default 20, max 100), `window_minutes` (default 10, max 120), `terms`.
 
-## syslog abuse_investigate
+## cortex abuse_investigate
 
 Expands the top abuse incidents into deterministic evidence bundles. Each bundle includes transcript context before and after the incident, the abuse anchor entries, and nearby non-AI syslog/Docker logs in the correlation window.
 
@@ -190,7 +190,7 @@ Response includes `evidence` (array of bundles), `total_incidents`, `truncated`.
 
 Optional arguments: `project`, `tool`, `from`, `to`, `limit` (default 3, max 10), `window_minutes`, `correlation_window_minutes` (default 5, max 120), `terms`.
 
-## syslog ai_correlate
+## cortex ai_correlate
 
 Use AI transcript rows as timeline anchors and pull nearby non-AI syslog,
 Docker, OTLP, and host events from the same database. Related logs explicitly
@@ -205,7 +205,7 @@ Optional arguments: `project`, `tool`, `session_id`, `ai_query`, `log_query`,
 `limit` caps AI anchors at 50. `events_per_anchor` caps related non-AI rows at
 200 per anchor. `window_minutes` searches before and after each AI timestamp.
 
-## syslog usage_blocks
+## cortex usage_blocks
 
 Bucket AI activity into deterministic 5-hour UTC windows.
 
@@ -213,7 +213,7 @@ Required argument: `action = "usage_blocks"`
 
 Optional arguments: `project`, `tool`, `from`, `to`.
 
-## syslog project_context
+## cortex project_context
 
 Summarize one AI project path with tools, sessions, hosts, counts, and recent representative entries.
 
@@ -221,7 +221,7 @@ Required arguments: `action = "project_context"`, `project`
 
 Optional arguments: `tool`, `limit`.
 
-## syslog list_ai_tools
+## cortex list_ai_tools
 
 List distinct AI tools with counts and first/last seen timestamps.
 
@@ -229,7 +229,7 @@ Required argument: `action = "list_ai_tools"`
 
 Optional arguments: `project`, `from`, `to`.
 
-## syslog list_ai_projects
+## cortex list_ai_projects
 
 List distinct AI projects with counts, tools used, and first/last seen timestamps.
 
@@ -237,7 +237,7 @@ Required argument: `action = "list_ai_projects"`
 
 Optional arguments: `tool`, `from`, `to`.
 
-## syslog correlate
+## cortex correlate
 
 Search for related events across multiple hosts within a time window.
 
@@ -245,19 +245,19 @@ Required arguments: `action = "correlate"`, `reference_time`.
 
 Optional arguments: `window_minutes`, `severity_min`, `hostname`, `source_ip`, `query`, `limit`.
 
-## syslog stats
+## cortex stats
 
 Get database statistics including storage health, runtime ingest counters, queue depth, writer failure/drop state, and OTLP receiver counters.
 
 Required argument: `action = "stats"`
 
-## syslog status
+## cortex status
 
 Get lightweight runtime status without the full DB statistics query.
 
 Required argument: `action = "status"`
 
-## syslog compose_status
+## cortex compose_status
 
 Get redacted read-only Docker Compose diagnostics for the canonical cortex deployment. MCP output omits host paths, mount sources, image ids, and raw command output.
 
@@ -265,13 +265,13 @@ Required argument: `action = "compose_status"`
 
 Target override arguments such as `project_dir`, `compose_file`, `project_name`, `container`, and `container_name` are rejected.
 
-## syslog compose_doctor
+## cortex compose_doctor
 
 Run strict deployment-health checks for the canonical cortex Compose deployment. It returns the same redacted diagnostic shape as `compose_status` when healthy, and returns a tool error when Docker/Compose ownership or runtime checks are not ready for lifecycle work. Compose lifecycle mutations are CLI-only.
 
 Required argument: `action = "compose_doctor"`
 
-## syslog help
+## cortex help
 
 Return markdown documentation for all actions.
 

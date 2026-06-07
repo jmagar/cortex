@@ -33,7 +33,7 @@ The installed binary is `cortex`. Use `cortex mcp` for local MCP clients that re
 curl -fsSL https://raw.githubusercontent.com/jmagar/cortex/main/install.sh | sh
 ```
 
-The installer installs the `cortex` binary to `~/.local/bin/syslog`, then runs
+The installer installs the `cortex` binary to `~/.local/bin/cortex`, then runs
 `cortex setup`. Setup owns the shared Docker-only runtime layout:
 
 | Path | Purpose |

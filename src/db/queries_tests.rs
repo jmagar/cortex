@@ -72,7 +72,13 @@ fn search_logs_fts_plan_uses_bounded_candidate_window() {
     };
     let (sql, bindings) = search_logs_fts_sql(params.query.as_deref().unwrap(), &params, 100);
     assert!(sql.contains("fts_candidates"));
-    assert!(sql.contains(&format!("LIMIT {SEARCH_FTS_CANDIDATE_CAP}")));
+    assert!(sql.contains("LIMIT ?"));
+    assert!(
+        bindings
+            .iter()
+            .any(|value| matches!(value, rusqlite::types::Value::Integer(limit) if *limit == SEARCH_FTS_CANDIDATE_CAP as i64)),
+        "FTS candidate cap should be carried as a bound parameter"
+    );
 
     let plan = query_plan(&pool, &sql, &bindings);
     assert!(

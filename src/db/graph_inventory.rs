@@ -12,10 +12,9 @@ use crate::db::{write_lock, DbPool};
 use crate::inventory::schema::HomelabInventory;
 
 use self::sql::{
-    add_alias, add_relationship, canonical, canonical_or_raw, graph_counts, match_service_name,
-    match_upstream, prune_previous_inventory_projection, safe_inventory_source_id,
-    scoped_inventory_key, service_key, trust, update_projection_meta, upsert_artifact,
-    upsert_entity, upsert_service, upsert_storage,
+    add_alias, add_relationship, canonical, canonical_or_raw, graph_counts,
+    prune_previous_inventory_projection, safe_inventory_source_id, scoped_inventory_key,
+    service_key, trust, update_projection_meta, upsert_entity,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +29,26 @@ pub fn project_inventory(
     pool: &DbPool,
     inventory: &HomelabInventory,
 ) -> Result<InventoryGraphStats> {
+    let plan = build_projection_plan(inventory);
+    apply_projection_plan(pool, &plan, || {})
+}
+
+#[cfg(test)]
+fn project_inventory_with_apply_hook(
+    pool: &DbPool,
+    inventory: &HomelabInventory,
+    before_apply: impl FnOnce(),
+) -> Result<InventoryGraphStats> {
+    let plan = build_projection_plan(inventory);
+    apply_projection_plan(pool, &plan, before_apply)
+}
+
+fn apply_projection_plan(
+    pool: &DbPool,
+    plan: &InventoryProjectionPlan,
+    before_apply: impl FnOnce(),
+) -> Result<InventoryGraphStats> {
+    before_apply();
     let mut conn = pool.get().context("borrow sqlite connection")?;
     let _guard = write_lock();
     let tx = conn
@@ -38,13 +57,76 @@ pub fn project_inventory(
 
     prune_previous_inventory_projection(&tx)?;
 
+    let mut entities = BTreeMap::new();
+    for entity in &plan.entities {
+        let entity_ref = upsert_entity(
+            &tx,
+            entity.key.kind,
+            &entity.key.key,
+            &entity.display_label,
+            entity.source_kind,
+            &entity.source_id,
+            entity.trust_level,
+            &entity.observed_at,
+        )?;
+        entities.insert(entity.key.clone(), entity_ref);
+    }
+
+    for alias in &plan.aliases {
+        let entity = entities
+            .get(&alias.entity)
+            .with_context(|| format!("missing planned entity {}", alias.entity.key))?;
+        add_alias(
+            &tx,
+            entity.id,
+            alias.alias_type,
+            &alias.alias_key,
+            &alias.alias_value,
+            alias.source_kind,
+            alias.trust_level,
+            &alias.observed_at,
+        )?;
+    }
+
+    for relationship in &plan.relationships {
+        let src = entities
+            .get(&relationship.src)
+            .with_context(|| format!("missing planned source entity {}", relationship.src.key))?;
+        let dst = entities.get(&relationship.dst).with_context(|| {
+            format!(
+                "missing planned destination entity {}",
+                relationship.dst.key
+            )
+        })?;
+        add_relationship(
+            &tx,
+            src,
+            dst,
+            relationship.relationship_type,
+            relationship.reason_code,
+            relationship.source_kind,
+            &relationship.source_id,
+            &relationship.observed_at,
+            relationship.trust_level,
+            relationship.confidence,
+            &relationship.safe_excerpt,
+        )?;
+    }
+
+    let stats = graph_counts(&tx)?;
+    update_projection_meta(&tx, &stats)?;
+    tx.commit().context("commit inventory graph projection")?;
+    Ok(stats)
+}
+
+fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPlan {
+    let mut plan = InventoryProjectionPlan::default();
     let mut hosts = BTreeMap::new();
     for node in &inventory.nodes {
         let Some(key) = canonical(&node.hostname) else {
             continue;
         };
-        let entity = upsert_entity(
-            &tx,
+        let entity = plan.entity(
             graph::ENTITY_TYPE_HOST,
             &key,
             &node.hostname,
@@ -52,29 +134,27 @@ pub fn project_inventory(
             &node.id,
             trust(&node.trust_level),
             &node.provenance.collected_at,
-        )?;
-        add_alias(
-            &tx,
-            entity.id,
+        );
+        plan.alias(
+            &entity,
             "hostname",
             &key,
             &node.hostname,
             graph::SOURCE_KIND_SOURCE_INVENTORY,
             trust(&node.trust_level),
             &node.provenance.collected_at,
-        )?;
+        );
         for ip in &node.ips {
             if let Some(alias_key) = canonical(ip) {
-                add_alias(
-                    &tx,
-                    entity.id,
+                plan.alias(
+                    &entity,
                     "ip",
                     &alias_key,
                     ip,
                     graph::SOURCE_KIND_SOURCE_INVENTORY,
                     trust(&node.trust_level),
                     &node.provenance.collected_at,
-                )?;
+                );
             }
         }
         hosts.insert(key, entity);
@@ -83,7 +163,15 @@ pub fn project_inventory(
     let mut services = BTreeMap::new();
     let mut unique_service_aliases = BTreeMap::new();
     for service in &inventory.services {
-        let service_entity = upsert_service(&tx, service)?;
+        let service_entity = plan.entity(
+            graph::ENTITY_TYPE_SERVICE,
+            &service_key(service),
+            &service.name,
+            graph::SOURCE_KIND_APP_INVENTORY,
+            &service.id,
+            trust(&service.trust_level),
+            &service.provenance.collected_at,
+        );
         let scoped_key = service_key(service);
         services.insert(scoped_key, service_entity.clone());
         insert_unique_alias(
@@ -94,16 +182,15 @@ pub fn project_inventory(
 
         for domain in &service.domains {
             if let Some(alias_key) = canonical(domain) {
-                add_alias(
-                    &tx,
-                    service_entity.id,
+                plan.alias(
+                    &service_entity,
                     "domain",
                     &alias_key,
                     domain,
                     graph::SOURCE_KIND_APP_INVENTORY,
                     trust(&service.trust_level),
                     &service.provenance.collected_at,
-                )?;
+                );
             }
         }
 
@@ -112,8 +199,7 @@ pub fn project_inventory(
             .as_ref()
             .and_then(|h| hosts.get(&canonical_or_raw(h)))
         {
-            add_relationship(
-                &tx,
+            plan.relationship(
                 &service_entity,
                 host,
                 graph::REL_RUNS_ON,
@@ -124,7 +210,7 @@ pub fn project_inventory(
                 graph::TRUST_INFERRED,
                 0.85,
                 &format!("{} observed on {}", service.name, host.key),
-            )?;
+            );
         }
 
         for mount in &service.mounts {
@@ -133,8 +219,7 @@ pub fn project_inventory(
                 service.host.as_deref().unwrap_or("unknown"),
                 mount.target
             ));
-            let storage = upsert_entity(
-                &tx,
+            let storage = plan.entity(
                 graph::ENTITY_TYPE_STORAGE,
                 &storage_key,
                 &mount.target,
@@ -142,9 +227,8 @@ pub fn project_inventory(
                 &storage_key,
                 graph::TRUST_INFERRED,
                 &service.provenance.collected_at,
-            )?;
-            add_relationship(
-                &tx,
+            );
+            plan.relationship(
                 &service_entity,
                 &storage,
                 graph::REL_MOUNTS,
@@ -155,7 +239,7 @@ pub fn project_inventory(
                 graph::TRUST_INFERRED,
                 0.65,
                 &format!("{} mounts {}", service.name, mount.target),
-            )?;
+            );
         }
     }
     services.extend(
@@ -166,7 +250,16 @@ pub fn project_inventory(
 
     let mut artifacts = BTreeMap::new();
     for artifact in &inventory.artifact_refs {
-        let entity = upsert_artifact(&tx, artifact, &inventory.generated_at)?;
+        let display = format!("{} artifact {}", artifact.kind, artifact.id);
+        let entity = plan.entity(
+            graph::ENTITY_TYPE_CONFIG_ARTIFACT,
+            &canonical_or_raw(&artifact.id),
+            &display,
+            graph::SOURCE_KIND_APP_INVENTORY,
+            &artifact.id,
+            graph::TRUST_VERIFIED,
+            &inventory.generated_at,
+        );
         artifacts.insert(artifact.id.clone(), entity.clone());
         if let Some(path) = &artifact.source_path {
             artifacts.insert(path.clone(), entity);
@@ -176,8 +269,7 @@ pub fn project_inventory(
     for project in &inventory.compose_projects {
         let project_key = scoped_inventory_key(&project.provenance.source, &project.name);
         let project_source = safe_inventory_source_id(&project.provenance.source);
-        let project_entity = upsert_entity(
-            &tx,
+        let project_entity = plan.entity(
             graph::ENTITY_TYPE_COMPOSE_PROJECT,
             &project_key,
             &project.name,
@@ -185,13 +277,12 @@ pub fn project_inventory(
             &project_source,
             graph::TRUST_VERIFIED,
             &project.provenance.collected_at,
-        )?;
+        );
         for service_name in &project.services {
             if let Some(service_entity) =
-                match_service_name(service_name, &project.provenance.source, &services)
+                match_service_name_key(service_name, &project.provenance.source, &services)
             {
-                add_relationship(
-                    &tx,
+                plan.relationship(
                     &project_entity,
                     service_entity,
                     graph::REL_DEFINES_SERVICE,
@@ -202,14 +293,13 @@ pub fn project_inventory(
                     graph::TRUST_VERIFIED,
                     0.90,
                     &format!("compose project {} defines {}", project.name, service_name),
-                )?;
+                );
             }
         }
         for compose_file in &project.compose_files {
             if let Some(artifact) = artifacts.get(compose_file) {
                 let artifact_id = artifact.key.clone();
-                add_relationship(
-                    &tx,
+                plan.relationship(
                     &project_entity,
                     artifact,
                     graph::REL_HAS_ARTIFACT,
@@ -220,15 +310,14 @@ pub fn project_inventory(
                     graph::TRUST_VERIFIED,
                     0.95,
                     &format!("compose artifact {}", artifact_id),
-                )?;
+                );
             }
         }
     }
 
     for route in &inventory.reverse_proxies {
         let proxy_key = canonical_or_raw(&route.id);
-        let proxy = upsert_entity(
-            &tx,
+        let proxy = plan.entity(
             graph::ENTITY_TYPE_REVERSE_PROXY,
             &proxy_key,
             route.server_names.first().unwrap_or(&route.id),
@@ -236,11 +325,10 @@ pub fn project_inventory(
             &route.id,
             graph::TRUST_VERIFIED,
             &route.provenance.collected_at,
-        )?;
+        );
         for domain in &route.server_names {
             let domain_key = canonical_or_raw(domain);
-            let domain_entity = upsert_entity(
-                &tx,
+            let domain_entity = plan.entity(
                 graph::ENTITY_TYPE_DOMAIN,
                 &domain_key,
                 domain,
@@ -248,9 +336,8 @@ pub fn project_inventory(
                 &route.id,
                 graph::TRUST_VERIFIED,
                 &route.provenance.collected_at,
-            )?;
-            add_relationship(
-                &tx,
+            );
+            plan.relationship(
                 &proxy,
                 &domain_entity,
                 graph::REL_EXPOSES_DOMAIN,
@@ -261,12 +348,12 @@ pub fn project_inventory(
                 graph::TRUST_VERIFIED,
                 0.95,
                 &format!("proxy exposes {}", domain),
-            )?;
+            );
         }
         for upstream in &route.upstreams {
-            if let Some(service) = match_upstream(upstream, &route.provenance.source, &services) {
-                add_relationship(
-                    &tx,
+            if let Some(service) = match_upstream_key(upstream, &route.provenance.source, &services)
+            {
+                plan.relationship(
                     &proxy,
                     service,
                     graph::REL_ROUTES_TO,
@@ -277,15 +364,14 @@ pub fn project_inventory(
                     graph::TRUST_VERIFIED,
                     0.85,
                     &format!("proxy routes to {}", upstream),
-                )?;
+                );
             }
         }
     }
 
     for network in &inventory.networks {
         let network_source = safe_inventory_source_id(&network.provenance.source);
-        let network_entity = upsert_entity(
-            &tx,
+        let network_entity = plan.entity(
             graph::ENTITY_TYPE_NETWORK,
             &scoped_inventory_key(&network.provenance.source, &network.name),
             &network.name,
@@ -293,12 +379,12 @@ pub fn project_inventory(
             &network_source,
             graph::TRUST_VERIFIED,
             &network.provenance.collected_at,
-        )?;
+        );
         for member in &network.members {
-            if let Some(service) = match_service_name(member, &network.provenance.source, &services)
+            if let Some(service) =
+                match_service_name_key(member, &network.provenance.source, &services)
             {
-                add_relationship(
-                    &tx,
+                plan.relationship(
                     service,
                     &network_entity,
                     graph::REL_ATTACHED_TO,
@@ -309,20 +395,43 @@ pub fn project_inventory(
                     graph::TRUST_VERIFIED,
                     0.80,
                     &format!("{} attached to network {}", member, network.name),
-                )?;
+                );
             }
         }
     }
 
     for storage in &inventory.storage {
-        upsert_storage(&tx, storage, &hosts)?;
+        let entity = plan.entity(
+            graph::ENTITY_TYPE_STORAGE,
+            &canonical_or_raw(&storage.id),
+            &storage.mount,
+            graph::SOURCE_KIND_SOURCE_INVENTORY,
+            &storage.id,
+            graph::TRUST_VERIFIED,
+            &storage.provenance.collected_at,
+        );
+        if let Some(host) = storage
+            .id
+            .split(':')
+            .nth(1)
+            .and_then(|host| hosts.get(&canonical_or_raw(host)))
+        {
+            plan.relationship(
+                host,
+                &entity,
+                graph::REL_BACKED_BY,
+                graph::REASON_STORAGE_PROBE,
+                graph::SOURCE_KIND_SOURCE_INVENTORY,
+                &storage.id,
+                &storage.provenance.collected_at,
+                graph::TRUST_VERIFIED,
+                0.75,
+                &format!("{} storage mounted at {}", host.key, storage.mount),
+            );
+        }
     }
 
-    let counts = graph_counts(&tx)?;
-    update_projection_meta(&tx, &counts)?;
-    let stats = graph_counts(&tx)?;
-    tx.commit().context("commit inventory graph projection")?;
-    Ok(stats)
+    plan
 }
 
 pub fn mark_inventory_projection_failed(pool: &DbPool, error: &str) -> Result<()> {
@@ -332,9 +441,9 @@ pub fn mark_inventory_projection_failed(pool: &DbPool, error: &str) -> Result<()
 }
 
 fn insert_unique_alias(
-    aliases: &mut BTreeMap<String, Option<sql::EntityRef>>,
+    aliases: &mut BTreeMap<String, Option<PlannedEntityKey>>,
     key: String,
-    service: sql::EntityRef,
+    service: PlannedEntityKey,
 ) {
     match aliases.entry(key) {
         Entry::Vacant(entry) => {
@@ -344,10 +453,172 @@ fn insert_unique_alias(
             if entry
                 .get()
                 .as_ref()
-                .is_some_and(|existing| existing.id != service.id)
+                .is_some_and(|existing| existing != &service)
             {
                 entry.insert(None);
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PlannedEntityKey {
+    kind: &'static str,
+    key: String,
+}
+
+#[derive(Debug, Clone)]
+struct EntityPlan {
+    key: PlannedEntityKey,
+    display_label: String,
+    source_kind: &'static str,
+    source_id: String,
+    trust_level: &'static str,
+    observed_at: String,
+}
+
+#[derive(Debug, Clone)]
+struct AliasPlan {
+    entity: PlannedEntityKey,
+    alias_type: &'static str,
+    alias_key: String,
+    alias_value: String,
+    source_kind: &'static str,
+    trust_level: &'static str,
+    observed_at: String,
+}
+
+#[derive(Debug, Clone)]
+struct RelationshipPlan {
+    src: PlannedEntityKey,
+    dst: PlannedEntityKey,
+    relationship_type: &'static str,
+    reason_code: &'static str,
+    source_kind: &'static str,
+    source_id: String,
+    observed_at: String,
+    trust_level: &'static str,
+    confidence: f64,
+    safe_excerpt: String,
+}
+
+#[derive(Debug, Default)]
+struct InventoryProjectionPlan {
+    entities: Vec<EntityPlan>,
+    aliases: Vec<AliasPlan>,
+    relationships: Vec<RelationshipPlan>,
+}
+
+impl InventoryProjectionPlan {
+    #[allow(clippy::too_many_arguments)]
+    fn entity(
+        &mut self,
+        kind: &'static str,
+        key: &str,
+        display_label: &str,
+        source_kind: &'static str,
+        source_id: &str,
+        trust_level: &'static str,
+        observed_at: &str,
+    ) -> PlannedEntityKey {
+        let key = PlannedEntityKey {
+            kind,
+            key: key.to_string(),
+        };
+        self.entities.push(EntityPlan {
+            key: key.clone(),
+            display_label: display_label.to_string(),
+            source_kind,
+            source_id: source_id.to_string(),
+            trust_level,
+            observed_at: observed_at.to_string(),
+        });
+        key
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn alias(
+        &mut self,
+        entity: &PlannedEntityKey,
+        alias_type: &'static str,
+        alias_key: &str,
+        alias_value: &str,
+        source_kind: &'static str,
+        trust_level: &'static str,
+        observed_at: &str,
+    ) {
+        self.aliases.push(AliasPlan {
+            entity: entity.clone(),
+            alias_type,
+            alias_key: alias_key.to_string(),
+            alias_value: alias_value.to_string(),
+            source_kind,
+            trust_level,
+            observed_at: observed_at.to_string(),
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn relationship(
+        &mut self,
+        src: &PlannedEntityKey,
+        dst: &PlannedEntityKey,
+        relationship_type: &'static str,
+        reason_code: &'static str,
+        source_kind: &'static str,
+        source_id: &str,
+        observed_at: &str,
+        trust_level: &'static str,
+        confidence: f64,
+        safe_excerpt: &str,
+    ) {
+        self.relationships.push(RelationshipPlan {
+            src: src.clone(),
+            dst: dst.clone(),
+            relationship_type,
+            reason_code,
+            source_kind,
+            source_id: source_id.to_string(),
+            observed_at: observed_at.to_string(),
+            trust_level,
+            confidence,
+            safe_excerpt: safe_excerpt.to_string(),
+        });
+    }
+}
+
+fn match_upstream_key<'a>(
+    upstream: &str,
+    source: &str,
+    services: &'a BTreeMap<String, PlannedEntityKey>,
+) -> Option<&'a PlannedEntityKey> {
+    let normalized = canonical_or_raw(upstream);
+    let prefix = upstream
+        .split([':', '/', '@'])
+        .find(|part| !part.is_empty() && !part.starts_with("http"))
+        .map(canonical_or_raw);
+    prefix
+        .and_then(|key| match_service_name_key(&key, source, services))
+        .or_else(|| match_service_name_key(&normalized, source, services))
+}
+
+fn match_service_name_key<'a>(
+    name: &str,
+    source: &str,
+    services: &'a BTreeMap<String, PlannedEntityKey>,
+) -> Option<&'a PlannedEntityKey> {
+    source_host(source)
+        .and_then(|host| services.get(&canonical_or_raw(&format!("{host}:{name}"))))
+        .or_else(|| services.get(&canonical_or_raw(name)))
+}
+
+fn source_host(source: &str) -> Option<&str> {
+    let mut parts = source.split(':');
+    let _collector = parts.next()?;
+    let host = parts.next()?.trim();
+    if host.is_empty() || host.starts_with('/') {
+        None
+    } else {
+        Some(host)
     }
 }

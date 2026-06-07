@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.2] - 2026-06-07
+
+### Fixed
+
+- Shortened inventory graph projection write-lock scope by planning expensive
+  projection work in memory before applying graph mutations, and avoided the
+  redundant graph count query on successful projection.
+- Hardened SSH-backed inventory and drop-in deploy flows with shared host
+  validation, strict host key checking by default, explicit TOFU opt-in,
+  bounded concurrency, retry backoff, and a shared SSH argument policy.
+- Aligned MCP argument parsing with typed request structs so unknown fields are
+  rejected consistently with HTTP validation, and moved action dispatch behind
+  the action registry.
+- Moved expensive log pattern clustering out of the DB closure, bound SQL
+  limits instead of interpolating them on touched query paths, and reused the
+  freshly collected inventory snapshot for graph projection.
+
+### Changed
+
+- Rebranded current docs, plugin docs, schema metadata, mcporter examples, and
+  release guidance around the `cortex` tool name, `cortex:*` scopes, and the
+  current plugin/package naming.
+- Clarified current-versus-archive documentation authority, release/version
+  policy, live smoke gates, security trust assumptions, OAuth non-Unix behavior,
+  cargo-deny exception ownership, and rmcp lower-bound intent.
+- Made `CLAUDE.md` the agent-memory source of truth and restored sibling
+  `AGENTS.md` symlinks wherever local `CLAUDE.md` files exist.
+
+### CI
+
+- Ran clippy with `--all-targets` and added checks for agent-memory symlinks,
+  unversioned plugin manifests, and stale public project identity strings.
+
 ## [1.14.1] - 2026-06-06
 
 ### Fixed

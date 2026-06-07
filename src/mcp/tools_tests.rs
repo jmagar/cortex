@@ -587,7 +587,7 @@ async fn numeric_args_reject_out_of_range_values() {
     )
     .await
     .unwrap_err();
-    assert!(err.to_string().contains("n must be <="));
+    assert!(err.to_string().contains("invalid tail arguments"));
 }
 
 #[tokio::test]
@@ -597,12 +597,61 @@ async fn numeric_args_reject_wrong_type_values() {
         json!({"action": "tail", "n": "not-a-number"}),
         json!({"action": "search", "limit": "5"}),
         json!({"action": "correlate", "reference_time": "2026-01-01T00:00:00Z", "window_minutes": "5"}),
-        json!({"action": "correlate", "reference_time": "2026-01-01T00:00:00Z", "limit": null}),
+        json!({"action": "correlate", "reference_time": "2026-01-01T00:00:00Z", "limit": "10"}),
     ] {
         let err = execute_tool(&h.state, "cortex", args, None)
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("must be an unsigned integer"));
+        assert!(
+            err.to_string().contains("invalid ")
+                && (err.to_string().contains("invalid type")
+                    || err.to_string().contains("invalid value"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn mcp_rejects_unknown_fields_for_typed_request_actions() {
+    let h = TestHarness::new();
+    for args in [
+        json!({"action": "search", "query": "anything", "bogus": true}),
+        json!({"action": "tail", "n": 1, "bogus": true}),
+        json!({"action": "errors", "bogus": true}),
+        json!({"action": "apps", "bogus": true}),
+        json!({"action": "sessions", "bogus": true}),
+        json!({"action": "abuse_incidents", "bogus": true}),
+        json!({"action": "abuse_investigate", "bogus": true}),
+        json!({"action": "ai_correlate", "bogus": true}),
+        json!({"action": "usage_blocks", "bogus": true}),
+        json!({"action": "list_ai_tools", "bogus": true}),
+        json!({"action": "list_ai_projects", "bogus": true}),
+        json!({"action": "source_ips", "bogus": true}),
+        json!({"action": "timeline", "bogus": true}),
+        json!({"action": "patterns", "bogus": true}),
+        json!({"action": "context", "bogus": true}),
+        json!({"action": "get", "id": 1, "bogus": true}),
+        json!({"action": "ingest_rate", "bogus": true}),
+        json!({"action": "silent_hosts", "bogus": true}),
+        json!({"action": "clock_skew", "bogus": true}),
+        json!({"action": "anomalies", "bogus": true}),
+        json!({"action": "compare", "a_from": "2026-01-01T00:00:00Z", "a_to": "2026-01-01T00:01:00Z", "b_from": "2026-01-01T00:01:00Z", "b_to": "2026-01-01T00:02:00Z", "bogus": true}),
+        json!({"action": "unaddressed_errors", "bogus": true}),
+        json!({"action": "ack_error", "signature_hash": "abc", "bogus": true}),
+        json!({"action": "unack_error", "signature_hash": "abc", "bogus": true}),
+        json!({"action": "notifications_recent", "bogus": true}),
+        json!({"action": "similar_incidents", "query": "x", "bogus": true}),
+        json!({"action": "ask_history", "query": "x", "bogus": true}),
+        json!({"action": "incident_context", "from": "2026-01-01T00:00:00Z", "to": "2026-01-01T00:01:00Z", "bogus": true}),
+    ] {
+        let action = args["action"].as_str().unwrap().to_string();
+        let err = execute_tool(&h.state, "cortex", args, None)
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains(&format!("invalid {action} arguments")) && msg.contains("unknown field"),
+            "action={action} returned unexpected error: {msg}"
+        );
     }
 }
 

@@ -109,8 +109,8 @@ curl -s -X POST http://localhost:3100/mcp \
 RMCP validates the `Host` header to reduce DNS rebinding risk. Loopback hosts and the configured bind host are allowed by default. Add public names or proxy authorities with:
 
 ```bash
-CORTEX_ALLOWED_HOSTS=syslog.example.com,syslog.example.com:443
-CORTEX_ALLOWED_ORIGINS=https://syslog.example.com
+CORTEX_ALLOWED_HOSTS=cortex.example.com,cortex.example.com:443
+CORTEX_ALLOWED_ORIGINS=https://cortex.example.com
 ```
 
 ## Direct stdio transport
@@ -131,7 +131,7 @@ Ingestion still requires the daemon to be running somewhere. Stdio mode only que
 {
   "mcpServers": {
     "cortex": {
-      "command": "/path/to/syslog",
+      "command": "/path/to/cortex",
       "args": ["mcp"],
       "env": {
         "CORTEX_DB_PATH": "/data/cortex.db",
