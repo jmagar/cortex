@@ -4,9 +4,7 @@ use std::time::Duration;
 use crate::inventory::collectors::CollectorOutput;
 use crate::inventory::limits::MAX_RAW_ARTIFACT_BYTES;
 use crate::inventory::raw_configs::{collect_compose_body, collect_proxy_body};
-use crate::inventory::ssh::{
-    configured_hosts as resolve_ssh_hosts, run_ssh_with_context, SshContext,
-};
+use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, SshContext};
 use crate::inventory::storage::InventoryPaths;
 
 pub async fn collect(
@@ -17,9 +15,20 @@ pub async fn collect(
     run_id: &str,
     timeout: Duration,
 ) -> CollectorOutput {
-    let hosts = resolve_ssh_hosts(ssh_config, configured_hosts);
+    let resolution = resolve_ssh_hosts(ssh_config, configured_hosts);
+    let mut out = CollectorOutput::new("raw_configs");
+    for warning in &resolution.warnings {
+        out.warn("host_resolution", warning);
+    }
+    if resolution.no_usable_explicit_hosts() {
+        out.warn(
+            "host_resolution",
+            "remote config collector skipped because no explicitly configured SSH hosts were usable",
+        );
+        return out;
+    }
     let mut handles = Vec::new();
-    for host in hosts {
+    for host in resolution.hosts {
         let paths = paths.clone();
         let run_id = run_id.to_string();
         let ssh_context = ssh_context.clone();
@@ -28,7 +37,6 @@ pub async fn collect(
         }));
     }
 
-    let mut out = CollectorOutput::new("raw_configs");
     for handle in handles {
         match handle.await {
             Ok(host_output) => merge_output(&mut out, host_output),
@@ -114,7 +122,7 @@ async fn remote_records(
     command: String,
     timeout: Duration,
 ) -> Vec<(String, String)> {
-    match run_ssh_with_context(ssh_context, host, &command, timeout).await {
+    match ssh_context.run(host, &command, timeout).await {
         Ok(output) if output.status == Some(0) => parse_records(&output.stdout),
         Ok(output) => {
             out.warn(

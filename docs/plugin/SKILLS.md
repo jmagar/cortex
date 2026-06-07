@@ -13,14 +13,15 @@ Patterns for defining skills (domain knowledge modules) within the cortex plugin
 
 ```
 plugins/
-  skills/
-    syslog/
-      SKILL.md           # Skill definition with tool reference and workflows
-    cortex-dr/
-      SKILL.md           # Full deployment diagnostic workflow
-    cortex-deploy-dropins/
-      SKILL.md           # Fleet rsyslog drop-in deployment workflow
-    ...
+  cortex/
+    skills/
+      cortex/
+        SKILL.md           # Skill definition with tool reference and workflows
+      cortex-dr/
+        SKILL.md           # Full deployment diagnostic workflow
+      cortex-deploy-dropins/
+        SKILL.md           # Fleet rsyslog drop-in deployment workflow
+      ...
 ```
 
 ## Skills

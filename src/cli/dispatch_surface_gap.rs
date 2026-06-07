@@ -244,6 +244,7 @@ impl EntityArgs {
     pub(crate) fn into_request(self) -> GraphEntityLookupRequest {
         GraphEntityLookupRequest {
             mode: Some("entity".into()),
+            entity_id: None,
             entity_type: self.entity_type,
             key: self.key,
             alias_type: self.alias_type,

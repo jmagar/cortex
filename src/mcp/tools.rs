@@ -39,60 +39,56 @@ async fn tool_cortex(
 ) -> anyhow::Result<Value> {
     let action =
         string_arg(&args, "action").ok_or_else(|| anyhow::anyhow!("action is required"))?;
-    let Some(handler) = actions::handler_for(&action) else {
-        return Err(anyhow::anyhow!(
+    match action.as_str() {
+        "search" => tool_search_logs(state, args).await,
+        "filter" => tool_filter_logs(state, args).await,
+        "tail" => tool_tail_logs(state, args).await,
+        "errors" => tool_get_errors(state, args).await,
+        "hosts" => tool_list_hosts(state, args).await,
+        "map" => tool_homelab_map(state, args).await,
+        "host_state" => tool_host_state(state, args).await,
+        "fleet_state" => tool_fleet_state(state, args).await,
+        "correlate" => tool_correlate_events(state, args).await,
+        "correlate_state" => tool_correlate_state(state, args).await,
+        "stats" => tool_get_stats(state, args).await,
+        "status" => tool_get_status(state, args).await,
+        "apps" => tool_list_apps(state, args).await,
+        "sessions" => tool_list_sessions(state, args).await,
+        "search_sessions" => tool_search_sessions(state, args).await,
+        "abuse" => tool_search_abuse(state, args).await,
+        "abuse_incidents" => tool_abuse_incidents(state, args).await,
+        "abuse_investigate" => tool_abuse_investigate(state, args).await,
+        "ai_correlate" => tool_ai_correlate(state, args).await,
+        "usage_blocks" => tool_usage_blocks(state, args).await,
+        "project_context" => tool_project_context(state, args).await,
+        "list_ai_tools" => tool_list_ai_tools(state, args).await,
+        "list_ai_projects" => tool_list_ai_projects(state, args).await,
+        "source_ips" => tool_list_source_ips(state, args).await,
+        "timeline" => tool_timeline(state, args).await,
+        "patterns" => tool_patterns(state, args).await,
+        "context" => tool_context(state, args).await,
+        "get" => tool_get_log(state, args).await,
+        "ingest_rate" => tool_ingest_rate(state, args).await,
+        "silent_hosts" => tool_silent_hosts(state, args).await,
+        "clock_skew" => tool_clock_skew(state, args).await,
+        "anomalies" => tool_anomalies(state, args).await,
+        "compare" => tool_compare(state, args).await,
+        "compose_status" => tool_compose_status(args).await,
+        "compose_doctor" => tool_compose_doctor(args).await,
+        "unaddressed_errors" => tool_unaddressed_errors(state, args).await,
+        "ack_error" => tool_ack_error(state, args, auth).await,
+        "unack_error" => tool_unack_error(state, args, auth).await,
+        "notifications_recent" => tool_notifications_recent(state, args).await,
+        "notifications_test" => tool_notifications_test(state, args, auth).await,
+        "similar_incidents" => tool_similar_incidents(state, args).await,
+        "ask_history" => tool_ask_history(state, args).await,
+        "incident_context" => tool_incident_context(state, args).await,
+        "graph" => tool_graph(state, args).await,
+        "help" => tool_cortex_help().await,
+        _ => Err(anyhow::anyhow!(
             "unknown cortex action: {action}; expected one of {}",
             actions::action_names().join(", ")
-        ));
-    };
-    match handler {
-        actions::ActionHandler::Search => tool_search_logs(state, args).await,
-        actions::ActionHandler::Filter => tool_filter_logs(state, args).await,
-        actions::ActionHandler::Tail => tool_tail_logs(state, args).await,
-        actions::ActionHandler::Errors => tool_get_errors(state, args).await,
-        actions::ActionHandler::Hosts => tool_list_hosts(state, args).await,
-        actions::ActionHandler::Map => tool_homelab_map(state, args).await,
-        actions::ActionHandler::HostState => tool_host_state(state, args).await,
-        actions::ActionHandler::FleetState => tool_fleet_state(state, args).await,
-        actions::ActionHandler::Correlate => tool_correlate_events(state, args).await,
-        actions::ActionHandler::CorrelateState => tool_correlate_state(state, args).await,
-        actions::ActionHandler::Stats => tool_get_stats(state, args).await,
-        actions::ActionHandler::Status => tool_get_status(state, args).await,
-        actions::ActionHandler::Apps => tool_list_apps(state, args).await,
-        actions::ActionHandler::Sessions => tool_list_sessions(state, args).await,
-        actions::ActionHandler::SearchSessions => tool_search_sessions(state, args).await,
-        actions::ActionHandler::Abuse => tool_search_abuse(state, args).await,
-        actions::ActionHandler::AbuseIncidents => tool_abuse_incidents(state, args).await,
-        actions::ActionHandler::AbuseInvestigate => tool_abuse_investigate(state, args).await,
-        actions::ActionHandler::AiCorrelate => tool_ai_correlate(state, args).await,
-        actions::ActionHandler::UsageBlocks => tool_usage_blocks(state, args).await,
-        actions::ActionHandler::ProjectContext => tool_project_context(state, args).await,
-        actions::ActionHandler::ListAiTools => tool_list_ai_tools(state, args).await,
-        actions::ActionHandler::ListAiProjects => tool_list_ai_projects(state, args).await,
-        actions::ActionHandler::SourceIps => tool_list_source_ips(state, args).await,
-        actions::ActionHandler::Timeline => tool_timeline(state, args).await,
-        actions::ActionHandler::Patterns => tool_patterns(state, args).await,
-        actions::ActionHandler::Context => tool_context(state, args).await,
-        actions::ActionHandler::Get => tool_get_log(state, args).await,
-        actions::ActionHandler::IngestRate => tool_ingest_rate(state, args).await,
-        actions::ActionHandler::SilentHosts => tool_silent_hosts(state, args).await,
-        actions::ActionHandler::ClockSkew => tool_clock_skew(state, args).await,
-        actions::ActionHandler::Anomalies => tool_anomalies(state, args).await,
-        actions::ActionHandler::Compare => tool_compare(state, args).await,
-        actions::ActionHandler::ComposeStatus => tool_compose_status(args).await,
-        actions::ActionHandler::ComposeDoctor => tool_compose_doctor(args).await,
-        actions::ActionHandler::UnaddressedErrors => tool_unaddressed_errors(state, args).await,
-        actions::ActionHandler::AckError => tool_ack_error(state, args, auth).await,
-        actions::ActionHandler::UnackError => tool_unack_error(state, args, auth).await,
-        actions::ActionHandler::NotificationsRecent => tool_notifications_recent(state, args).await,
-        actions::ActionHandler::NotificationsTest => {
-            tool_notifications_test(state, args, auth).await
-        }
-        actions::ActionHandler::SimilarIncidents => tool_similar_incidents(state, args).await,
-        actions::ActionHandler::AskHistory => tool_ask_history(state, args).await,
-        actions::ActionHandler::IncidentContext => tool_incident_context(state, args).await,
-        actions::ActionHandler::Graph => tool_graph(state, args).await,
-        actions::ActionHandler::Help => tool_cortex_help().await,
+        )),
     }
 }
 
@@ -895,7 +891,7 @@ host distribution.
 - `from` / `to` (string, optional) — time range (ISO 8601)
 - `hostname`, `app_name` (string, optional) — narrow the population
 - `severity_min` (string, optional) — only cluster entries at or above this severity
-- `scan_limit` (integer, optional) — max messages to read (default 10000, max 50000)
+- `scan_limit` (integer, optional) — max messages to read (default 10000, max 10000)
 - `top_n` (integer, optional) — max templates to return (default 20, max 200)
 - `limit` (integer, optional) — alias for `top_n` for agent/CLI ergonomics
 

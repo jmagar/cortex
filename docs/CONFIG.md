@@ -209,7 +209,7 @@ For populated databases, treat heavy migrations as a planned upgrade step:
 4. Wait for `curl -sf http://localhost:3100/health` to succeed.
 5. Run `cortex stats --json` or `mcporter call ... action=stats` and confirm `total_logs`, storage metrics, and `write_blocked` match expectations.
 
-If a migration must be abandoned, stop the new process before changing files, restore the WAL-safe backup, and restart the previous image or binary. See [runbooks/deploy.md](runbooks/deploy.md) for the full deploy checklist.
+If a migration must be abandoned, stop the new process before changing files, restore the WAL-safe backup, and restart the previous image or binary. See [RELEASE.md](RELEASE.md) for the current deploy gate checklist.
 
 ## Validation rules
 

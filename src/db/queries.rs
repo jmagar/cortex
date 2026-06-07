@@ -234,8 +234,21 @@ pub fn tail_logs(
     n: u32,
 ) -> Result<Vec<LogEntry>> {
     let conn = pool.get()?;
-    let n = n.min(500);
+    let (sql, bindings) = tail_logs_sql(hostname, source_ip, app_name, severity_in, n);
 
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn tail_logs_sql(
+    hostname: Option<&str>,
+    source_ip: Option<&str>,
+    app_name: Option<&str>,
+    severity_in: Option<&[String]>,
+    n: u32,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let n = n.min(500);
     let mut sql = String::from(
         "SELECT id, timestamp, hostname, facility, severity,
                 app_name, process_id, message, received_at, source_ip,
@@ -275,10 +288,7 @@ pub fn tail_logs(
 
     sql.push_str(" ORDER BY timestamp DESC");
     push_bound_limit(&mut sql, &mut bindings, &mut idx, "LIMIT", n);
-
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    (sql, bindings)
 }
 
 /// Get error/warning summary per host in a time window. When `group_by_app` is
@@ -291,7 +301,26 @@ pub fn get_error_summary(
     limit: Option<u32>,
 ) -> Result<Vec<ErrorSummaryEntry>> {
     let conn = pool.get()?;
+    let (sql, bindings) = get_error_summary_sql(from, to, group_by_app, limit);
 
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+        Ok(ErrorSummaryEntry {
+            hostname: row.get(0)?,
+            app_name: row.get::<_, Option<String>>(1)?,
+            severity: row.get(2)?,
+            count: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn get_error_summary_sql(
+    from: Option<&str>,
+    to: Option<&str>,
+    group_by_app: bool,
+    limit: Option<u32>,
+) -> (String, Vec<rusqlite::types::Value>) {
     let from = from.unwrap_or("1970-01-01T00:00:00Z");
     // Upper sentinel: any valid RFC 3339 timestamp will sort before this.
     let to = to.unwrap_or("9999-12-31T23:59:59Z");
@@ -322,17 +351,7 @@ pub fn get_error_summary(
     if let Some(limit) = limit {
         push_bound_limit(&mut sql, &mut bindings, &mut idx, "LIMIT", limit.max(1));
     }
-
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
-        Ok(ErrorSummaryEntry {
-            hostname: row.get(0)?,
-            app_name: row.get::<_, Option<String>>(1)?,
-            severity: row.get(2)?,
-            count: row.get(3)?,
-        })
-    })?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    (sql, bindings)
 }
 
 /// List all known hosts with stats

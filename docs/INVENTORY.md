@@ -171,8 +171,10 @@ names only. It does not store environment values.
 
 SSH targets are validated before invoking OpenSSH, option-like hosts are
 rejected, and the command builder inserts `--` before the host argument.
-Inventory, remote Docker events, and deploy helpers share strict host-key
-defaults, a fleet-wide concurrency budget, and retry backoff. The default is
+Inventory collectors and remote Docker event streams share strict host-key
+defaults, a fleet-wide concurrency budget, and retry backoff. Deploy helpers
+share host validation, the `--` delimiter, and the host-key argument policy, but
+they do not use the inventory retry/concurrency context. The default is
 `StrictHostKeyChecking=yes`; bootstrap TOFU is available only when explicitly
 opted in with `CORTEX_INVENTORY_SSH_TRUST_ON_FIRST_USE=true`. Set
 `CORTEX_INVENTORY_SSH_KNOWN_HOSTS` when automation should use a managed

@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   projection work in memory before applying graph mutations, and avoided the
   redundant graph count query on successful projection.
 - Hardened SSH-backed inventory and drop-in deploy flows with shared host
-  validation, strict host key checking by default, explicit TOFU opt-in,
-  bounded concurrency, retry backoff, and a shared SSH argument policy.
+  validation, strict host key checking by default, explicit TOFU opt-in, and a
+  shared SSH argument policy. Inventory collectors and remote Docker event
+  streams also share bounded concurrency and retry backoff.
 - Aligned MCP argument parsing with typed request structs so unknown fields are
   rejected consistently with HTTP validation, and moved action dispatch behind
   the action registry.

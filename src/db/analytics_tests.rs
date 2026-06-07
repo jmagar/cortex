@@ -522,13 +522,40 @@ fn patterns_clusters_by_template() {
         ],
     )
     .unwrap();
-    let (pats, scanned, truncated) =
-        patterns(&pool, None, None, None, None, None, 100, 10).unwrap();
+    let (rows, truncated) = fetch_pattern_rows(&pool, None, None, None, None, None, 100).unwrap();
+    let (pats, scanned) = cluster_pattern_rows(rows, 10);
     assert!(!truncated);
     assert_eq!(scanned, 4);
     let top = &pats[0];
     assert_eq!(top.count, 3);
     assert_eq!(top.host_count, 2);
+}
+
+#[test]
+fn fetch_pattern_rows_limit_is_bound_and_clamped() {
+    let (sql, bindings, scan_limit) = pattern_rows_sql(
+        Some("2026-01-01T00:00:00Z"),
+        Some("2026-01-01T01:00:00Z"),
+        Some("h1"),
+        Some("sshd"),
+        Some(&["err".to_string(), "warning".to_string()]),
+        PATTERN_SCAN_LIMIT_MAX + 1,
+    );
+    assert_eq!(scan_limit, PATTERN_SCAN_LIMIT_MAX);
+    assert!(
+        sql.contains("LIMIT ?"),
+        "fetch_pattern_rows must bind LIMIT instead of interpolating it: {sql}"
+    );
+    assert!(
+        bindings.iter().any(|value| {
+            matches!(
+                value,
+                rusqlite::types::Value::Integer(limit)
+                    if *limit == i64::from(PATTERN_SCAN_LIMIT_MAX + 1)
+            )
+        }),
+        "fetch_pattern_rows should bind scan_limit+1 for truncation detection, got: {bindings:?}"
+    );
 }
 
 #[test]

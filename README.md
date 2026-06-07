@@ -1085,7 +1085,8 @@ Before upgrading a populated database:
 3. Start the new version and monitor logs for `Migration N: starting ...` and `Migration N: ... created`.
 4. Keep the previous image or binary available until `/health` returns `ok` and `cortex stats` reports sane counts.
 
-See [docs/runbooks/deploy.md](docs/runbooks/deploy.md) for the deploy checklist.
+See [docs/RELEASE.md](docs/RELEASE.md) for the current release and deploy
+gate checklist.
 
 ---
 

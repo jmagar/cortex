@@ -12,6 +12,7 @@ pub(crate) mod notifications;
 mod pool;
 mod queries;
 
+pub(crate) use analytics::PATTERN_SCAN_LIMIT_MAX;
 pub use analytics::{
     anomalies, clock_skew, context_around, fetch_log_by_id, get_ai_project_context,
     get_ai_usage_blocks, ingest_rate, ingest_rate_by_host, list_apps, list_source_ips,

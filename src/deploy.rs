@@ -42,9 +42,11 @@ struct SshRemoteRunner;
 
 impl RemoteRunner for SshRemoteRunner {
     fn run(&mut self, host: &str, script: &str, stdin: Option<&str>) -> io::Result<RemoteOutput> {
-        let args = crate::inventory::ssh::SshOptions::from_env(None)
-            .ssh_args(host, "sh -s")
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+        let args = crate::inventory::ssh::SshContext::new(
+            crate::inventory::ssh::SshOptions::from_env(None),
+        )
+        .ssh_args(host, "sh -s")
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
         let mut child = Command::new("ssh")
             .args(args)
             .stdin(Stdio::piped())

@@ -15,7 +15,7 @@ Complete documentation for `cortex` -- a Rust syslog receiver and MCP server for
 | `api.md` | REST API endpoint matrix (22 routes), versioning, perf, threat model, response caps, VACUUM caveats |
 | `architecture.md` | Caller → DB diagram (HTTP CLI default + direct-SQLite consumers) |
 | `rollout.md` | Manual v0.26 upgrade playbook for HTTP CLI cutover |
-| `CHECKLIST.md` | Pre-release quality checklist -- version sync, security, CI, registry |
+| `CHECKLIST.md` | Supplemental pre-release audit checklist -- current version policy and release gates point to `RELEASE.md` |
 | `GUARDRAILS.md` | Security guardrails -- credentials, Docker, auth, input handling |
 | `INVENTORY.md` | Component inventory -- tools, env vars, surfaces, dependencies |
 | `OAUTH.md` | OAuth/JWT operator configuration and runtime model |

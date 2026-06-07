@@ -87,10 +87,9 @@ fn should_refresh_for_relevant_config_events_only() {
 #[test]
 fn remote_docker_events_ssh_args_include_safe_options_and_remote_command() {
     let context = crate::inventory::ssh::SshContext::new(
-        crate::inventory::ssh::SshOptions {
-            config: Some(std::path::PathBuf::from("/tmp/ssh_config")),
-            ..crate::inventory::ssh::SshOptions::default()
-        }
+        crate::inventory::ssh::SshOptions::for_config(Some(std::path::Path::new(
+            "/tmp/ssh_config",
+        )))
         .with_event_stream_defaults(),
     );
     let args = remote_docker_events_ssh_args(&context, "squirts").unwrap();
@@ -108,4 +107,39 @@ fn remote_docker_events_ssh_args_include_safe_options_and_remote_command() {
         args[args.len() - 1],
         "docker events --filter type=container --format '{{json .}}'"
     );
+}
+
+#[test]
+fn remote_docker_events_output_sample_is_bounded() {
+    let mut sample = OutputSample::default();
+    sample.push_line(&"x".repeat(5000));
+
+    let rendered = sample.as_str();
+    assert!(rendered.ends_with("...<truncated>"));
+    assert!(rendered.len() <= 4110);
+}
+
+#[tokio::test]
+async fn remote_docker_event_stream_cancels_while_waiting_for_ssh_limiter() {
+    let context = crate::inventory::ssh::SshContext::new(
+        crate::inventory::ssh::SshOptions::default()
+            .with_max_concurrent(1)
+            .unwrap(),
+    );
+    let _held = context.acquire_owned().await.unwrap();
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+    let token = tokio_util::sync::CancellationToken::new();
+    let child = token.child_token();
+
+    let task = tokio::spawn({
+        let context = context.clone();
+        async move { run_remote_docker_events_once("tootie", &context, tx, child).await }
+    });
+    token.cancel();
+
+    let result = tokio::time::timeout(std::time::Duration::from_millis(100), task)
+        .await
+        .expect("event stream task should return promptly after cancellation")
+        .expect("join");
+    assert!(result.is_ok());
 }

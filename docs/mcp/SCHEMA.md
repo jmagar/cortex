@@ -134,7 +134,7 @@ handler and service layers.
 | `limit`, `offset` | Action-specific bounds; `offset` is for `apps` and `source_ips` pagination |
 | `host_limit`, `per_host_limit`, `section_limit`, `include_sections` | Node and inventory-section bounds for `map`; `per_host_limit` is accepted for v1 compatibility and ignored by map v2 |
 | `mode`, `host`, `domain`, `service`, `answer_limit`, `evidence_sample_limit`, `payload_budget` | Map snapshot mode and graph-backed map answer controls: `host_services`, `domain_routes`, and `service_dependencies` |
-| `mode`, `entity_id`, `entity_type`, `key`, `alias_type`, `alias_key`, `depth`, `evidence_sample_limit`, `payload_budget` | Graph lookup and one-hop neighborhood controls for `graph` |
+| `mode`, `entity_id`, `entity_type`, `key`, `alias_type`, `alias_key`, `depth`, `evidence_id`, `evidence_sample_limit`, `payload_budget` | Graph controls. Targeted modes require exactly one lookup strategy: `entity_id`, `entity_type` + `key`, or `alias_type` + `alias_key`. `evidence` requires `evidence_id`. |
 
 ## Correlation Arguments
 
@@ -148,7 +148,7 @@ See [CORRELATION.md](CORRELATION.md) for the full behavior matrix.
 | `similar_incidents` | `query`, `hostname`, `app_name`, `severity_min`, `from`, `to`, `window_minutes`, `limit` |
 | `ask_history` | `query`, `hostname`, `app_name`, `from`, `to`, `limit` |
 | `incident_context` | `from`, `to`, `hostname`, `app_name`, `severity_min`, `limit`; `query` is accepted by the request shape but intentionally ignored in v1 |
-| `graph` | `mode=entity|around`; exact lookup with `entity_type` + `key`, alias lookup with `alias_type` + `alias_key`, or one-hop `around` by `entity_id`; optional `limit`, `depth=1`, `evidence_sample_limit`, `payload_budget` |
+| `graph` | `mode=entity|around|explain|evidence`; entity/around/explain require exactly one target lookup strategy (`entity_id`, `entity_type` + `key`, or `alias_type` + `alias_key`); `around` accepts `depth=1` only; `explain` accepts `depth=1..3`; `evidence` requires `evidence_id`; optional `limit`, `evidence_sample_limit`, `payload_budget` |
 
 ## Validation
 

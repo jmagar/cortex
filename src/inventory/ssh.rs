@@ -1,9 +1,12 @@
 use anyhow::{anyhow, Result};
 use futures_util::future::BoxFuture;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore};
+use tokio_util::sync::CancellationToken;
 
 use crate::inventory::process::{run_command, CommandOutput};
 
@@ -26,15 +29,15 @@ pub enum SshHostKeyPolicy {
 
 #[derive(Clone)]
 pub struct SshOptions {
-    pub config: Option<PathBuf>,
-    pub known_hosts: Option<PathBuf>,
-    pub host_key_policy: SshHostKeyPolicy,
-    pub connect_timeout_secs: u64,
-    pub server_alive_interval_secs: u64,
-    pub server_alive_count_max: u64,
-    pub max_concurrent: usize,
-    pub retry_attempts: usize,
-    pub retry_initial_backoff: Duration,
+    config: Option<PathBuf>,
+    known_hosts: Option<PathBuf>,
+    host_key_policy: SshHostKeyPolicy,
+    connect_timeout_secs: u64,
+    server_alive_interval_secs: u64,
+    server_alive_count_max: u64,
+    max_concurrent: usize,
+    retry_attempts: usize,
+    retry_initial_backoff: Duration,
 }
 
 impl Default for SshOptions {
@@ -82,13 +85,67 @@ impl SshOptions {
         options
     }
 
+    pub fn with_known_hosts(mut self, known_hosts: Option<PathBuf>) -> Self {
+        self.known_hosts = known_hosts;
+        self
+    }
+
+    pub fn with_host_key_policy(mut self, policy: SshHostKeyPolicy) -> Self {
+        self.host_key_policy = policy;
+        self
+    }
+
+    pub fn with_connect_timeout_secs(mut self, secs: u64) -> Result<Self> {
+        if secs == 0 {
+            anyhow::bail!("ssh connect timeout must be greater than zero");
+        }
+        self.connect_timeout_secs = secs;
+        Ok(self)
+    }
+
+    pub fn with_server_alive(mut self, interval_secs: u64, count_max: u64) -> Result<Self> {
+        if interval_secs == 0 {
+            anyhow::bail!("ssh server alive interval must be greater than zero");
+        }
+        if count_max == 0 {
+            anyhow::bail!("ssh server alive count must be greater than zero");
+        }
+        self.server_alive_interval_secs = interval_secs;
+        self.server_alive_count_max = count_max;
+        Ok(self)
+    }
+
+    pub fn with_max_concurrent(mut self, max_concurrent: usize) -> Result<Self> {
+        if max_concurrent == 0 {
+            anyhow::bail!("ssh max_concurrent must be greater than zero");
+        }
+        self.max_concurrent = max_concurrent;
+        Ok(self)
+    }
+
+    pub fn with_retry_attempts(mut self, retry_attempts: usize) -> Result<Self> {
+        if retry_attempts == 0 {
+            anyhow::bail!("ssh retry_attempts must be greater than zero");
+        }
+        self.retry_attempts = retry_attempts;
+        Ok(self)
+    }
+
+    pub fn with_retry_initial_backoff(mut self, backoff: Duration) -> Result<Self> {
+        if backoff.is_zero() {
+            anyhow::bail!("ssh retry initial backoff must be greater than zero");
+        }
+        self.retry_initial_backoff = backoff;
+        Ok(self)
+    }
+
     pub fn with_event_stream_defaults(mut self) -> Self {
         self.server_alive_interval_secs = 15;
         self.server_alive_count_max = 2;
         self
     }
 
-    pub fn ssh_args(&self, host: &str, remote_command: &str) -> Result<Vec<String>> {
+    fn ssh_args(&self, host: &str, remote_command: &str) -> Result<Vec<String>> {
         if !is_safe_ssh_host(host) {
             anyhow::bail!("unsafe ssh host: {host}");
         }
@@ -183,13 +240,22 @@ impl SshContext {
             }
             drop(_permit);
             if attempt + 1 < attempts {
-                tokio::time::sleep(backoff_delay(self.options.retry_initial_backoff, attempt))
-                    .await;
+                tokio::time::sleep(backoff_delay_for_host(
+                    host,
+                    self.options.retry_initial_backoff,
+                    attempt,
+                ))
+                .await;
             }
         }
         Err(last_error.unwrap_or_else(|| anyhow!("ssh command failed without an error")))
     }
 
+    /// Build a safe `ssh` argv for long-lived streaming processes.
+    ///
+    /// Prefer [`SshContext::run`] for bounded commands. Deploy streaming and
+    /// Docker event streaming still need direct argv access so callers can wire
+    /// stdin/stdout and cancellation around the child process.
     pub fn ssh_args(&self, host: &str, remote_command: &str) -> Result<Vec<String>> {
         self.options.ssh_args(host, remote_command)
     }
@@ -200,11 +266,40 @@ impl SshContext {
             .await
             .map_err(|_| anyhow!("ssh concurrency limiter closed"))
     }
+
+    pub async fn acquire_owned_cancellable(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<Option<OwnedSemaphorePermit>> {
+        tokio::select! {
+            biased;
+            _ = token.cancelled() => Ok(None),
+            permit = Arc::clone(&self.limiter).acquire_owned() => permit
+                .map(Some)
+                .map_err(closed_limiter_error),
+        }
+    }
+}
+
+fn closed_limiter_error(_: AcquireError) -> anyhow::Error {
+    anyhow!("ssh concurrency limiter closed")
+}
+
+fn backoff_delay_for_host(host: &str, initial: Duration, attempt: usize) -> Duration {
+    backoff_delay(initial, attempt).saturating_add(retry_jitter(host, initial, attempt))
 }
 
 fn backoff_delay(initial: Duration, attempt: usize) -> Duration {
     let multiplier = 1u32.checked_shl(attempt as u32).unwrap_or(u32::MAX);
     initial.saturating_mul(multiplier)
+}
+
+fn retry_jitter(host: &str, initial: Duration, attempt: usize) -> Duration {
+    let max_jitter_ms = (initial.as_millis() / 2).max(1).min(u128::from(u64::MAX)) as u64;
+    let mut hasher = DefaultHasher::new();
+    host.hash(&mut hasher);
+    attempt.hash(&mut hasher);
+    Duration::from_millis(hasher.finish() % (max_jitter_ms + 1))
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -236,18 +331,64 @@ fn env_bool(name: &str) -> Option<bool> {
     })
 }
 
-pub fn configured_hosts(ssh_config: Option<&Path>, configured_hosts: &[String]) -> Vec<String> {
-    if !configured_hosts.is_empty() {
-        return configured_hosts
-            .iter()
-            .filter(|h| is_safe_ssh_host(h))
-            .cloned()
-            .collect();
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostResolution {
+    pub hosts: Vec<String>,
+    pub warnings: Vec<String>,
+    pub explicit_hosts_configured: bool,
+}
+
+impl HostResolution {
+    pub fn no_usable_explicit_hosts(&self) -> bool {
+        self.explicit_hosts_configured && self.hosts.is_empty()
     }
-    ssh_config
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .map(|body| parse_ssh_hosts(&body))
-        .unwrap_or_default()
+}
+
+pub fn configured_hosts(ssh_config: Option<&Path>, configured_hosts: &[String]) -> HostResolution {
+    if !configured_hosts.is_empty() {
+        let mut hosts = Vec::new();
+        let mut warnings = Vec::new();
+        for host in configured_hosts {
+            if is_safe_ssh_host(host) {
+                hosts.push(host.clone());
+            } else {
+                warnings.push(format!("rejected unsafe configured SSH host `{host}`"));
+            }
+        }
+        if hosts.is_empty() {
+            warnings.push("all explicitly configured SSH hosts were rejected".to_string());
+        }
+        return HostResolution {
+            hosts,
+            warnings,
+            explicit_hosts_configured: true,
+        };
+    }
+    let Some(path) = ssh_config else {
+        return HostResolution {
+            hosts: Vec::new(),
+            warnings: Vec::new(),
+            explicit_hosts_configured: false,
+        };
+    };
+    match std::fs::read_to_string(path) {
+        Ok(body) => {
+            let (hosts, warnings) = parse_ssh_hosts_with_warnings(&body);
+            HostResolution {
+                hosts,
+                warnings,
+                explicit_hosts_configured: false,
+            }
+        }
+        Err(error) => HostResolution {
+            hosts: Vec::new(),
+            warnings: vec![format!(
+                "ssh config `{}` could not be read: {error}",
+                path.display()
+            )],
+            explicit_hosts_configured: false,
+        },
+    }
 }
 
 /// Reject SSH host strings that could be interpreted as options or cause arg splitting.
@@ -260,37 +401,9 @@ pub fn is_safe_ssh_host(host: &str) -> bool {
         })
 }
 
-pub async fn run_ssh(
-    ssh_config: Option<&Path>,
-    host: &str,
-    remote_command: &str,
-    timeout: Duration,
-) -> Result<CommandOutput> {
-    SshContext::new(SshOptions::for_config(ssh_config))
-        .run(host, remote_command, timeout)
-        .await
-}
-
-pub async fn run_ssh_with_context(
-    context: &SshContext,
-    host: &str,
-    remote_command: &str,
-    timeout: Duration,
-) -> Result<CommandOutput> {
-    context.run(host, remote_command, timeout).await
-}
-
-#[cfg(test)]
-fn ssh_args(ssh_config: Option<&Path>, host: &str, remote_command: &str) -> Result<Vec<String>> {
-    SshOptions::for_config(ssh_config).ssh_args(host, remote_command)
-}
-
-pub fn ssh_config_buf(ssh_config: Option<&Path>) -> Option<PathBuf> {
-    ssh_config.map(Path::to_path_buf)
-}
-
-fn parse_ssh_hosts(body: &str) -> Vec<String> {
+fn parse_ssh_hosts_with_warnings(body: &str) -> (Vec<String>, Vec<String>) {
     let mut hosts = Vec::new();
+    let mut warnings = Vec::new();
     for line in body.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('#') {
@@ -303,18 +416,20 @@ fn parse_ssh_hosts(body: &str) -> Vec<String> {
             continue;
         };
         for host in rest.split_whitespace() {
-            if host.contains('*')
-                || host.contains('?')
-                || host.eq_ignore_ascii_case("github.com")
-                || !is_safe_ssh_host(host)
-                || hosts.iter().any(|existing| existing == host)
-            {
+            if host.contains('*') || host.contains('?') || host.eq_ignore_ascii_case("github.com") {
+                continue;
+            }
+            if !is_safe_ssh_host(host) {
+                warnings.push(format!("rejected unsafe SSH config host `{host}`"));
+                continue;
+            }
+            if hosts.iter().any(|existing| existing == host) {
                 continue;
             }
             hosts.push(host.to_string());
         }
     }
-    hosts
+    (hosts, warnings)
 }
 
 #[cfg(test)]

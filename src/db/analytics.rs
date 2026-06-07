@@ -850,6 +850,8 @@ pub struct PatternEntry {
     pub hostnames: Vec<String>,
 }
 
+pub(crate) const PATTERN_SCAN_LIMIT_MAX: u32 = 10_000;
+
 #[derive(Debug, Clone)]
 pub(crate) struct PatternSourceRow {
     timestamp: String,
@@ -877,7 +879,32 @@ pub(crate) fn fetch_pattern_rows(
     scan_limit: u32,
 ) -> Result<(Vec<PatternSourceRow>, bool)> {
     let conn = pool.get()?;
-    let scan_limit = scan_limit.clamp(1, 10_000);
+    let (sql, bindings, scan_limit) =
+        pattern_rows_sql(from, to, hostname, app_name, severity_in, scan_limit);
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), |r| {
+        Ok(PatternSourceRow {
+            timestamp: r.get::<_, String>(0)?,
+            hostname: r.get::<_, String>(1)?,
+            message: r.get::<_, String>(2)?,
+        })
+    })?;
+    let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    let overflow = rows.len() > scan_limit as usize;
+    rows.truncate(scan_limit as usize);
+    Ok((rows, overflow))
+}
+
+fn pattern_rows_sql(
+    from: Option<&str>,
+    to: Option<&str>,
+    hostname: Option<&str>,
+    app_name: Option<&str>,
+    severity_in: Option<&[String]>,
+    scan_limit: u32,
+) -> (String, Vec<rusqlite::types::Value>, u32) {
+    let scan_limit = scan_limit.clamp(1, PATTERN_SCAN_LIMIT_MAX);
 
     let mut sql = String::from("SELECT timestamp, hostname, message FROM logs WHERE 1=1");
     let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
@@ -916,19 +943,7 @@ pub(crate) fn fetch_pattern_rows(
     // Cap rows scanned to bound CPU/memory — we ask for one extra to detect truncation.
     sql.push_str(&format!(" ORDER BY timestamp DESC LIMIT ?{idx}"));
     bindings.push(rusqlite::types::Value::Integer(i64::from(scan_limit) + 1));
-
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), |r| {
-        Ok(PatternSourceRow {
-            timestamp: r.get::<_, String>(0)?,
-            hostname: r.get::<_, String>(1)?,
-            message: r.get::<_, String>(2)?,
-        })
-    })?;
-    let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    let overflow = rows.len() > scan_limit as usize;
-    rows.truncate(scan_limit as usize);
-    Ok((rows, overflow))
+    (sql, bindings, scan_limit)
 }
 
 pub(crate) fn cluster_pattern_rows(
@@ -989,24 +1004,6 @@ pub(crate) fn cluster_pattern_rows(
     out.sort_by_key(|entry| Reverse(entry.count));
     out.truncate(top_n as usize);
     (out, total_scanned)
-}
-
-#[allow(clippy::too_many_arguments)]
-#[cfg(test)]
-pub fn patterns(
-    pool: &DbPool,
-    from: Option<&str>,
-    to: Option<&str>,
-    hostname: Option<&str>,
-    app_name: Option<&str>,
-    severity_in: Option<&[String]>,
-    scan_limit: u32,
-    top_n: u32,
-) -> Result<(Vec<PatternEntry>, i64, bool)> {
-    let (rows, overflow) =
-        fetch_pattern_rows(pool, from, to, hostname, app_name, severity_in, scan_limit)?;
-    let (patterns, scanned) = cluster_pattern_rows(rows, top_n);
-    Ok((patterns, scanned, overflow))
 }
 
 // -----------------------------------------------------------------------------

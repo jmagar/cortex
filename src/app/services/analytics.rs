@@ -118,7 +118,7 @@ impl CortexService {
             Some(min) => Some(severity_at_or_above(min)?),
             None => None,
         };
-        let scan_limit = req.scan_limit.unwrap_or(10_000);
+        let scan_limit = req.scan_limit.unwrap_or(db::PATTERN_SCAN_LIMIT_MAX);
         let top_n = req.top_n.unwrap_or(20).min(200);
         let (rows, truncated) = self
             .run_db("patterns_fetch", move |pool| {

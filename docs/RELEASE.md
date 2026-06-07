@@ -16,6 +16,8 @@ cargo deny check
 bash scripts/check-version-sync.sh
 bash scripts/check-plugin-manifest-versions.sh
 bash scripts/check-agent-memory-symlinks.sh
+bash scripts/check-public-identity.sh
+git diff --check
 ```
 
 For release commits, also require:

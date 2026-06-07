@@ -12,7 +12,7 @@ spread across the code and setup docs.
 | OAuth/JWT | disabled unless `CORTEX_AUTH_MODE=oauth` | Google identity plus the configured cortex allowlist; static token is disabled by default in OAuth mode |
 | OTLP `/v1/logs` | loopback or bearer-token protected | OAuth JWTs do not authorize OTLP ingest today |
 | Docker ingest | disabled unless configured | trust the docker-socket-proxy host and private network path; proxy must be read-only |
-| SSH inventory/deploy | disabled unless hosts are configured | uses validated host aliases, `--` delimiter, shared concurrency limits, retry backoff, and strict host key checking by default |
+| SSH inventory/deploy | disabled unless hosts are configured | inventory and remote Docker events use validated host aliases, strict host keys, shared concurrency limits, and retry backoff; deploy uses the same host validation, `--` delimiter, and host-key argument policy |
 
 ## Auth Scopes
 

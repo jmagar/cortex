@@ -97,7 +97,8 @@ One MCP tool: **`cortex`** — dispatches by `action` argument.
 
 ## Plugin Skills
 
-Skills available after installing the Claude Code plugin (`plugins/skills/`):
+Skills available after installing the Claude Code plugin
+(`plugins/cortex/skills/<skill>/`):
 
 | Command | Description |
 |---------|-------------|

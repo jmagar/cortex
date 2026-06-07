@@ -322,6 +322,7 @@ impl RuntimeCore {
             token.clone(),
             Arc::clone(&self.pool),
             Arc::clone(&self.maintenance_permit),
+            Arc::clone(&self.observability),
         );
         let inventory_backfill = self.spawn_inventory_backfill_task(token.clone());
         let session_rollup = self.spawn_session_rollup_task(token.clone());

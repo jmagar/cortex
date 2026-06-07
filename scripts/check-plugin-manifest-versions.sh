@@ -22,6 +22,23 @@ while IFS= read -r path; do
 done < <(find plugins -path '*/plugin.json' -type f 2>/dev/null | sort || true)
 
 for path in "${manifest_paths[@]}"; do
+  if ! python3 - "$path" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        json.load(fh)
+except Exception as exc:
+    print(exc, file=sys.stderr)
+    sys.exit(1)
+PY
+  then
+    echo "[plugin-manifest] FAIL — $path is not valid JSON" >&2
+    status=1
+    continue
+  fi
+
   if python3 - "$path" <<'PY'
 import json
 import sys

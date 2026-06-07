@@ -610,40 +610,141 @@ async fn numeric_args_reject_wrong_type_values() {
     }
 }
 
+fn sample_args_for_action(action: &str) -> Option<serde_json::Value> {
+    Some(match action {
+        "graph" => sample_graph_args_for_mode("entity"),
+        "host_state" => json!({"action": action, "host_id": "schema-heartbeat"}),
+        "correlate" => json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"}),
+        "correlate_state" => {
+            json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"})
+        }
+        "search_sessions" => json!({"action": action, "query": "schema"}),
+        "ai_correlate" => json!({"action": action, "project": "/tmp/project"}),
+        "project_context" => json!({"action": action, "project": "/tmp/project"}),
+        "context" => {
+            json!({"action": action, "hostname": "schema-test-host", "timestamp": "2026-01-01T00:00:00Z"})
+        }
+        "get" => json!({"action": action, "id": 1}),
+        "compare" => {
+            json!({"action": action, "a_from": "2026-01-01T00:00:00Z", "a_to": "2026-01-01T00:01:00Z", "b_from": "2026-01-01T00:01:00Z", "b_to": "2026-01-01T00:02:00Z"})
+        }
+        "ack_error" | "unack_error" => {
+            json!({"action": action, "signature_hash": "0000000000000000000000000000000000000000000000000000000000000000"})
+        }
+        "similar_incidents" | "ask_history" => json!({"action": action, "query": "test"}),
+        "incident_context" => {
+            json!({"action": action, "from": "2026-01-01T00:00:00Z", "to": "2026-01-01T01:00:00Z"})
+        }
+        "filter" => json!({"action": action, "hostname": "schema-test-host"}),
+        "map" => json!({"action": action, "mode": "snapshot"}),
+        "abuse" => json!({"action": action, "terms": ["schema"]}),
+        "fleet_state"
+        | "search"
+        | "tail"
+        | "errors"
+        | "hosts"
+        | "stats"
+        | "status"
+        | "apps"
+        | "sessions"
+        | "abuse_incidents"
+        | "abuse_investigate"
+        | "usage_blocks"
+        | "list_ai_tools"
+        | "list_ai_projects"
+        | "source_ips"
+        | "timeline"
+        | "patterns"
+        | "ingest_rate"
+        | "silent_hosts"
+        | "clock_skew"
+        | "anomalies"
+        | "compose_status"
+        | "compose_doctor"
+        | "unaddressed_errors"
+        | "notifications_recent"
+        | "notifications_test"
+        | "help" => json!({"action": action}),
+        _ => return None,
+    })
+}
+
+fn sample_graph_args_for_mode(mode: &str) -> serde_json::Value {
+    match mode {
+        "entity" => {
+            json!({"action": "graph", "mode": "entity", "entity_type": "host", "key": "schema-test-host"})
+        }
+        "around" => {
+            json!({"action": "graph", "mode": "around", "entity_type": "host", "key": "schema-test-host"})
+        }
+        "explain" => {
+            json!({"action": "graph", "mode": "explain", "entity_type": "host", "key": "schema-test-host"})
+        }
+        "evidence" => json!({"action": "graph", "mode": "evidence", "evidence_id": 1}),
+        other => panic!("unsupported graph test mode: {other}"),
+    }
+}
+
+fn typed_unknown_field_samples() -> Vec<serde_json::Value> {
+    let mut samples = [
+        "search",
+        "filter",
+        "tail",
+        "errors",
+        "map",
+        "host_state",
+        "fleet_state",
+        "correlate",
+        "correlate_state",
+        "apps",
+        "sessions",
+        "search_sessions",
+        "abuse",
+        "abuse_incidents",
+        "abuse_investigate",
+        "ai_correlate",
+        "usage_blocks",
+        "project_context",
+        "list_ai_tools",
+        "list_ai_projects",
+        "source_ips",
+        "timeline",
+        "patterns",
+        "context",
+        "get",
+        "ingest_rate",
+        "silent_hosts",
+        "clock_skew",
+        "anomalies",
+        "compare",
+        "unaddressed_errors",
+        "ack_error",
+        "unack_error",
+        "notifications_recent",
+        "similar_incidents",
+        "ask_history",
+        "incident_context",
+    ]
+    .into_iter()
+    .filter_map(sample_args_for_action)
+    .collect::<Vec<_>>();
+
+    samples.extend(
+        ["entity", "around", "explain", "evidence"]
+            .into_iter()
+            .map(sample_graph_args_for_mode),
+    );
+    samples
+}
+
 #[tokio::test]
 async fn mcp_rejects_unknown_fields_for_typed_request_actions() {
     let h = TestHarness::new();
-    for args in [
-        json!({"action": "search", "query": "anything", "bogus": true}),
-        json!({"action": "tail", "n": 1, "bogus": true}),
-        json!({"action": "errors", "bogus": true}),
-        json!({"action": "apps", "bogus": true}),
-        json!({"action": "sessions", "bogus": true}),
-        json!({"action": "abuse_incidents", "bogus": true}),
-        json!({"action": "abuse_investigate", "bogus": true}),
-        json!({"action": "ai_correlate", "bogus": true}),
-        json!({"action": "usage_blocks", "bogus": true}),
-        json!({"action": "list_ai_tools", "bogus": true}),
-        json!({"action": "list_ai_projects", "bogus": true}),
-        json!({"action": "source_ips", "bogus": true}),
-        json!({"action": "timeline", "bogus": true}),
-        json!({"action": "patterns", "bogus": true}),
-        json!({"action": "context", "bogus": true}),
-        json!({"action": "get", "id": 1, "bogus": true}),
-        json!({"action": "ingest_rate", "bogus": true}),
-        json!({"action": "silent_hosts", "bogus": true}),
-        json!({"action": "clock_skew", "bogus": true}),
-        json!({"action": "anomalies", "bogus": true}),
-        json!({"action": "compare", "a_from": "2026-01-01T00:00:00Z", "a_to": "2026-01-01T00:01:00Z", "b_from": "2026-01-01T00:01:00Z", "b_to": "2026-01-01T00:02:00Z", "bogus": true}),
-        json!({"action": "unaddressed_errors", "bogus": true}),
-        json!({"action": "ack_error", "signature_hash": "abc", "bogus": true}),
-        json!({"action": "unack_error", "signature_hash": "abc", "bogus": true}),
-        json!({"action": "notifications_recent", "bogus": true}),
-        json!({"action": "similar_incidents", "query": "x", "bogus": true}),
-        json!({"action": "ask_history", "query": "x", "bogus": true}),
-        json!({"action": "incident_context", "from": "2026-01-01T00:00:00Z", "to": "2026-01-01T00:01:00Z", "bogus": true}),
-    ] {
+    for mut args in typed_unknown_field_samples() {
         let action = args["action"].as_str().unwrap().to_string();
+        args.as_object_mut()
+            .unwrap()
+            .insert("bogus".to_string(), json!(true));
         let err = execute_tool(&h.state, "cortex", args, None)
             .await
             .unwrap_err();
@@ -706,40 +807,9 @@ async fn schema_actions_are_dispatchable() {
         db::graph::refresh_graph_projection(&h.pool).unwrap();
     }
     for action in &super::actions::action_names() {
-        let args = match *action {
-            "graph" => {
-                json!({"action": action, "mode": "entity", "entity_type": "host", "key": "schema-test-host"})
-            }
-            "host_state" => json!({"action": action, "host_id": "schema-heartbeat"}),
-            "correlate" => {
-                json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"})
-            }
-            "correlate_state" => {
-                json!({"action": action, "reference_time": "2026-01-01T00:00:00Z"})
-            }
-            "search_sessions" => json!({"action": action, "query": "schema"}),
-            "ai_correlate" => json!({"action": action, "project": "/tmp/project"}),
-            "project_context" => json!({"action": action, "project": "/tmp/project"}),
-            "context" => {
-                json!({"action": action, "hostname": "schema-test-host", "timestamp": "2026-01-01T00:00:00Z"})
-            }
-            "get" => json!({"action": action, "id": 1}),
-            "compare" => {
-                json!({"action": action, "a_from": "2026-01-01T00:00:00Z", "a_to": "2026-01-01T00:01:00Z", "b_from": "2026-01-01T00:01:00Z", "b_to": "2026-01-01T00:02:00Z"})
-            }
-            // ack_error / unack_error require signature_hash; provide a non-existent one
-            // so they dispatch and return NotFound (not "required parameter" error).
-            "ack_error" | "unack_error" => {
-                json!({"action": action, "signature_hash": "0000000000000000000000000000000000000000000000000000000000000000"})
-            }
-            // RAG v1 actions require query or time range.
-            "similar_incidents" => json!({"action": action, "query": "test"}),
-            "ask_history" => json!({"action": action, "query": "test"}),
-            "incident_context" => {
-                json!({"action": action, "from": "2026-01-01T00:00:00Z", "to": "2026-01-01T01:00:00Z"})
-            }
-            _ => json!({"action": action}),
-        };
+        let args = sample_args_for_action(action).unwrap_or_else(|| {
+            panic!("schema dispatch test lacks a sample for registered action: {action}")
+        });
         let result = execute_tool(&h.state, "cortex", args, None).await;
         if *action == "compose_doctor" {
             if let Err(error) = result {
@@ -855,6 +925,48 @@ async fn graph_evidence_mode_dispatches_and_schema_lists_modes() {
     assert_eq!(
         defs[0]["inputSchema"]["properties"]["evidence_id"]["minimum"],
         1
+    );
+}
+
+#[tokio::test]
+async fn graph_action_rejects_mixed_target_fields_and_depth_zero() {
+    let h = TestHarness::new();
+    let mixed = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "graph",
+            "mode": "around",
+            "entity_id": 1,
+            "entity_type": "host",
+            "key": "schema-test-host"
+        }),
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        mixed.to_string().contains("exactly one lookup strategy"),
+        "unexpected graph mixed-target error: {mixed}"
+    );
+
+    let depth_zero = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "graph",
+            "mode": "around",
+            "entity_type": "host",
+            "key": "schema-test-host",
+            "depth": 0
+        }),
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        depth_zero.to_string().contains("depth=1"),
+        "unexpected graph depth=0 error: {depth_zero}"
     );
 }
 

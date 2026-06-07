@@ -8,9 +8,7 @@ use crate::inventory::collectors::CollectorOutput;
 use crate::inventory::schema::{
     InventoryNode, ListenerFact, Provenance, StorageSummary, TrustLevel,
 };
-use crate::inventory::ssh::{
-    configured_hosts as resolve_ssh_hosts, run_ssh_with_context, SshContext,
-};
+use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, SshContext};
 
 pub async fn collect(
     ssh_config: Option<&Path>,
@@ -18,16 +16,26 @@ pub async fn collect(
     ssh_context: &SshContext,
     timeout: Duration,
 ) -> CollectorOutput {
-    let hosts = resolve_ssh_hosts(ssh_config, configured_hosts);
+    let resolution = resolve_ssh_hosts(ssh_config, configured_hosts);
+    let mut out = CollectorOutput::new("remote_device");
+    for warning in &resolution.warnings {
+        out.warn("host_resolution", warning);
+    }
+    if resolution.no_usable_explicit_hosts() {
+        out.warn(
+            "host_resolution",
+            "remote device collector skipped because no explicitly configured SSH hosts were usable",
+        );
+        return out;
+    }
     let mut handles = Vec::new();
-    for host in hosts {
+    for host in resolution.hosts {
         let ssh_context = ssh_context.clone();
         handles.push(tokio::spawn(async move {
             collect_host(host, ssh_context, timeout).await
         }));
     }
 
-    let mut out = CollectorOutput::new("remote_device");
     for handle in handles {
         match handle.await {
             Ok(host_output) => merge_output(&mut out, host_output),
@@ -42,7 +50,7 @@ pub async fn collect(
 
 async fn collect_host(host: String, ssh_context: SshContext, timeout: Duration) -> CollectorOutput {
     let mut out = CollectorOutput::new("remote_device");
-    match run_ssh_with_context(&ssh_context, &host, device_command(), timeout).await {
+    match ssh_context.run(&host, device_command(), timeout).await {
         Ok(output) if output.status == Some(0) => normalize_host(&host, &output.stdout, &mut out),
         Ok(output) => out.warn(
             "probe",

@@ -13,19 +13,21 @@ Lifecycle hooks that run automatically during Claude Code sessions.
 
 ```
 plugins/
-  hooks/
-    hooks.json              # Hook definitions
+  cortex/
+    hooks/
+      hooks.json            # Hook definitions
 scripts/
-  plugin-setup.sh           # SessionStart hook: shared setup repair
+  plugin-setup.sh           # Manual/legacy thin adapter
 ```
 
 ## Hook definitions
 
 Hooks are registered in `plugins/cortex/hooks/hooks.json` and executed by Claude Code at the appropriate lifecycle point.
 
-### SessionStart — plugin-setup.sh
+### SessionStart — cortex setup plugin-hook
 
-Runs `${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh` at the start of every Claude Code session.
+Runs `${CLAUDE_PLUGIN_ROOT}/bin/cortex setup plugin-hook` at the start of
+every Claude Code session.
 
 Responsibilities:
 - Server mode: exports current Claude Code `userConfig` values as
@@ -46,7 +48,7 @@ Responsibilities:
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/cortex setup plugin-hook"
           }
         ]
       }
@@ -57,7 +59,14 @@ Responsibilities:
 
 ## Manual execution
 
-Run the setup script outside of Claude Code:
+Run the binary-owned hook outside of Claude Code:
+
+```bash
+plugins/cortex/bin/cortex setup plugin-hook
+```
+
+The legacy script remains a thin manual adapter for environments that still
+need to map `CLAUDE_PLUGIN_OPTION_*` values before delegating to the binary:
 
 ```bash
 bash scripts/plugin-setup.sh
