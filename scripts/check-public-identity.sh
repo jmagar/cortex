@@ -13,6 +13,8 @@ patterns=(
   '/path/to/syslog'
   'plugins/syslog'
   'syslog.cortex'
+  'docs/syslog.subdomain.conf'
+  'syslog.subdomain.conf'
   'mcporter list syslog'
   'x-syslog-action-metadata'
   'x-syslog-agent-guidance'

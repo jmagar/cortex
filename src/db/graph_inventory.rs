@@ -595,11 +595,15 @@ fn match_upstream_key<'a>(
     let normalized = canonical_or_raw(upstream);
     let prefix = upstream
         .split([':', '/', '@'])
-        .find(|part| !part.is_empty() && !part.starts_with("http"))
+        .find(|part| !part.is_empty() && !is_url_scheme_token(part))
         .map(canonical_or_raw);
     prefix
         .and_then(|key| match_service_name_key(&key, source, services))
         .or_else(|| match_service_name_key(&normalized, source, services))
+}
+
+fn is_url_scheme_token(part: &str) -> bool {
+    part.eq_ignore_ascii_case("http") || part.eq_ignore_ascii_case("https")
 }
 
 fn match_service_name_key<'a>(

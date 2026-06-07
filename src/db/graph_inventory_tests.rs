@@ -452,6 +452,74 @@ fn project_inventory_does_not_route_to_ambiguous_service_name() {
 }
 
 #[test]
+fn project_inventory_routes_to_service_name_beginning_with_http() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-graph-http-prefix.db"),
+    ))
+    .unwrap();
+    graph::refresh_graph_projection(&pool).unwrap();
+
+    let mut inventory =
+        HomelabInventory::empty("inv-test".to_string(), "2026-01-01T00:00:00Z".to_string());
+    inventory.nodes.push(InventoryNode {
+        id: "node:squirts".to_string(),
+        hostname: "squirts".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: provenance("ssh:squirts", "source_inventory"),
+        roles: Vec::new(),
+        ips: Vec::new(),
+        os: None,
+        cpu: None,
+        memory: None,
+        listeners: Vec::new(),
+        storage: Vec::new(),
+        extras: Default::default(),
+    });
+    inventory.services.push(InventoryService {
+        id: "container:squirts:http-api".to_string(),
+        name: "http-api".to_string(),
+        kind: "container".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: provenance("docker:squirts", "app_inventory"),
+        host: Some("squirts".to_string()),
+        image: None,
+        status: Some("running".to_string()),
+        domains: Vec::new(),
+        ports: Vec::new(),
+        mounts: Vec::new(),
+        env_keys: Vec::new(),
+        labels: Default::default(),
+    });
+    inventory.reverse_proxies.push(ReverseProxyRoute {
+        id: "proxy:http-api.tootie.tv".to_string(),
+        server_names: vec!["http-api.tootie.tv".to_string()],
+        upstreams: vec!["http://http-api:8080".to_string()],
+        provenance: provenance("swag:squirts:/config/nginx/proxy.conf", "app_inventory"),
+    });
+
+    project_inventory(&pool, &inventory).unwrap();
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        relationship_count(&conn, "routes_to", "reverse_proxy_config"),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*)
+               FROM graph_relationships rel
+               JOIN graph_entities dst ON dst.id = rel.dst_entity_id
+              WHERE rel.relationship_type = 'routes_to'
+                AND dst.entity_type = 'service'
+                AND dst.canonical_key = 'squirts:http-api'"
+        ),
+        1
+    );
+}
+
+#[test]
 fn project_inventory_scopes_compose_projects_and_networks_by_source_host() {
     let _guard = graph::GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();

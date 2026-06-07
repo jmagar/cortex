@@ -285,7 +285,7 @@ where
 fn timeout_output(name: &'static str, deadline: std::time::Duration) -> CollectorOutput {
     let mut out = CollectorOutput::new(name);
     out.warn(
-        "timeout",
+        "collection_timeout",
         format!("collector {name} exceeded {}ms", deadline.as_millis()),
     );
     out

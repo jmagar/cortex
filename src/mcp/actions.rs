@@ -47,6 +47,56 @@ impl Cost {
     }
 }
 
+/// Executable handler bound to an action registry row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ActionHandler {
+    SearchLogs,
+    FilterLogs,
+    TailLogs,
+    GetErrors,
+    ListHosts,
+    HomelabMap,
+    HostState,
+    FleetState,
+    CorrelateEvents,
+    CorrelateState,
+    GetStats,
+    GetStatus,
+    ListApps,
+    ListSessions,
+    SearchSessions,
+    SearchAbuse,
+    AbuseIncidents,
+    AbuseInvestigate,
+    AiCorrelate,
+    UsageBlocks,
+    ProjectContext,
+    ListAiTools,
+    ListAiProjects,
+    ListSourceIps,
+    Timeline,
+    Patterns,
+    Context,
+    GetLog,
+    IngestRate,
+    SilentHosts,
+    ClockSkew,
+    Anomalies,
+    Compare,
+    ComposeStatus,
+    ComposeDoctor,
+    UnaddressedErrors,
+    AckError,
+    UnackError,
+    NotificationsRecent,
+    NotificationsTest,
+    SimilarIncidents,
+    AskHistory,
+    IncidentContext,
+    Graph,
+    Help,
+}
+
 /// Metadata for a single MCP action.
 #[derive(Debug)]
 pub(super) struct ActionSpec {
@@ -58,288 +108,341 @@ pub(super) struct ActionSpec {
     pub description: &'static str,
     /// Relative cost for agent/tool planning.
     pub cost: Cost,
+    /// Registry-owned executable handler for this action.
+    pub handler: ActionHandler,
+}
+
+macro_rules! action_spec {
+    ($name:literal, $scope:ident, $description:literal, $cost:ident, $handler:ident) => {
+        ActionSpec {
+            name: $name,
+            scope: Scope::$scope,
+            description: $description,
+            cost: Cost::$cost,
+            handler: ActionHandler::$handler,
+        }
+    };
 }
 
 /// The single authoritative table of all supported MCP actions.
 ///
 /// # Maintenance
 /// When adding a new action:
-/// 1. Add an `ActionSpec` row here.
-/// 2. Add a handler branch in `src/mcp/tools.rs`.
+/// 1. Add an `ActionSpec` row here with the executable handler.
+/// 2. Add the handler implementation branch in `src/mcp/tools.rs`.
 pub(super) const ACTION_SPECS: &[ActionSpec] = &[
     // ── Read-only queries ──────────────────────────────────────────────────
-    ActionSpec {
-        name: "search",
-        scope: Scope::Read,
-        description: "Full-text search over syslog messages",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "filter",
-        scope: Scope::Read,
-        description: "Filter logs by indexed fields without a full-text query",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "tail",
-        scope: Scope::Read,
-        description: "Stream the most recent log entries",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "errors",
-        scope: Scope::Read,
-        description: "List recent error-level log entries",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "hosts",
-        scope: Scope::Read,
-        description: "Enumerate all known source hostnames",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "map",
-        scope: Scope::Read,
-        description: "Map homelab inventory and answer graph-backed topology questions",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "host_state",
-        scope: Scope::Read,
-        description: "Fetch latest bounded heartbeat state for a host",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "fleet_state",
-        scope: Scope::Read,
-        description: "Fleet-wide heartbeat snapshot with pressure flags",
-        cost: Cost::Expensive,
-    },
-    ActionSpec {
-        name: "correlate",
-        scope: Scope::Read,
-        description: "Correlate events across hosts/services",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "correlate_state",
-        scope: Scope::Read,
-        description: "Correlate logs with heartbeat summaries around a reference time",
-        cost: Cost::Expensive,
-    },
-    ActionSpec {
-        name: "stats",
-        scope: Scope::Read,
-        description: "Aggregate log statistics",
-        cost: Cost::Expensive,
-    },
-    ActionSpec {
-        name: "status",
-        scope: Scope::Read,
-        description: "Server health and ingestion status",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "apps",
-        scope: Scope::Read,
-        description: "Enumerate all known application names",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "sessions",
-        scope: Scope::Read,
-        description: "List AI transcript sessions",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "search_sessions",
-        scope: Scope::Read,
-        description: "Full-text search over AI transcript sessions",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "abuse",
-        scope: Scope::Read,
-        description: "Detect resource-abuse patterns in AI sessions",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "abuse_incidents",
-        scope: Scope::Read,
-        description: "List detected abuse incidents",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "abuse_investigate",
-        scope: Scope::Read,
-        description: "Deep-dive investigation of an abuse incident",
-        cost: Cost::Expensive,
-    },
-    ActionSpec {
-        name: "ai_correlate",
-        scope: Scope::Read,
-        description: "Correlate AI transcript events with syslog",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "usage_blocks",
-        scope: Scope::Read,
-        description: "Summarise AI session usage by project",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "project_context",
-        scope: Scope::Read,
-        description: "Full project context from AI transcripts",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "list_ai_tools",
-        scope: Scope::Read,
-        description: "List AI tools observed in transcripts",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "list_ai_projects",
-        scope: Scope::Read,
-        description: "List AI projects with transcript activity",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "source_ips",
-        scope: Scope::Read,
-        description: "Enumerate unique source IP addresses",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "timeline",
-        scope: Scope::Read,
-        description: "Log volume over time (bucketed)",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "patterns",
-        scope: Scope::Read,
-        description: "Recurring message patterns",
-        cost: Cost::Expensive,
-    },
-    ActionSpec {
-        name: "context",
-        scope: Scope::Read,
-        description: "Contextual log entries around a pivot",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "get",
-        scope: Scope::Read,
-        description: "Fetch a single log entry by ID",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "ingest_rate",
-        scope: Scope::Read,
-        description: "Current log ingestion rate",
-        cost: Cost::Expensive,
-    },
-    ActionSpec {
-        name: "silent_hosts",
-        scope: Scope::Read,
-        description: "Hosts that have gone silent",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "clock_skew",
-        scope: Scope::Read,
-        description: "Detect clock skew between hosts",
-        cost: Cost::Expensive,
-    },
-    ActionSpec {
-        name: "anomalies",
-        scope: Scope::Read,
-        description: "Detect log-volume anomalies",
-        cost: Cost::Expensive,
-    },
-    ActionSpec {
-        name: "compare",
-        scope: Scope::Read,
-        description: "Compare log patterns between time windows",
-        cost: Cost::Expensive,
-    },
-    ActionSpec {
-        name: "compose_status",
-        scope: Scope::Read,
-        description: "Docker Compose stack status",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "compose_doctor",
-        scope: Scope::Read,
-        description: "Docker Compose coordination diagnostics",
-        cost: Cost::Expensive,
-    },
-    ActionSpec {
-        name: "unaddressed_errors",
-        scope: Scope::Read,
-        description: "List unacknowledged error signatures",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "notifications_recent",
-        scope: Scope::Read,
-        description: "Recent notification firings",
-        cost: Cost::Cheap,
-    },
-    ActionSpec {
-        name: "similar_incidents",
-        scope: Scope::Read,
-        description: "Find similar past incidents",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "ask_history",
-        scope: Scope::Read,
-        description: "Query AI transcript history",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "incident_context",
-        scope: Scope::Read,
-        description: "Full context for an incident",
-        cost: Cost::Moderate,
-    },
-    ActionSpec {
-        name: "graph",
-        scope: Scope::Read,
-        description: "Resolve graph entities, neighborhoods, and evidence-backed explanations",
-        cost: Cost::Expensive,
-    },
+    action_spec!(
+        "search",
+        Read,
+        "Full-text search over syslog messages",
+        Cheap,
+        SearchLogs
+    ),
+    action_spec!(
+        "filter",
+        Read,
+        "Filter logs by indexed fields without a full-text query",
+        Cheap,
+        FilterLogs
+    ),
+    action_spec!(
+        "tail",
+        Read,
+        "Stream the most recent log entries",
+        Cheap,
+        TailLogs
+    ),
+    action_spec!(
+        "errors",
+        Read,
+        "List recent error-level log entries",
+        Cheap,
+        GetErrors
+    ),
+    action_spec!(
+        "hosts",
+        Read,
+        "Enumerate all known source hostnames",
+        Cheap,
+        ListHosts
+    ),
+    action_spec!(
+        "map",
+        Read,
+        "Map homelab inventory and answer graph-backed topology questions",
+        Moderate,
+        HomelabMap
+    ),
+    action_spec!(
+        "host_state",
+        Read,
+        "Fetch latest bounded heartbeat state for a host",
+        Moderate,
+        HostState
+    ),
+    action_spec!(
+        "fleet_state",
+        Read,
+        "Fleet-wide heartbeat snapshot with pressure flags",
+        Expensive,
+        FleetState
+    ),
+    action_spec!(
+        "correlate",
+        Read,
+        "Correlate events across hosts/services",
+        Moderate,
+        CorrelateEvents
+    ),
+    action_spec!(
+        "correlate_state",
+        Read,
+        "Correlate logs with heartbeat summaries around a reference time",
+        Expensive,
+        CorrelateState
+    ),
+    action_spec!(
+        "stats",
+        Read,
+        "Aggregate log statistics",
+        Expensive,
+        GetStats
+    ),
+    action_spec!(
+        "status",
+        Read,
+        "Server health and ingestion status",
+        Cheap,
+        GetStatus
+    ),
+    action_spec!(
+        "apps",
+        Read,
+        "Enumerate all known application names",
+        Cheap,
+        ListApps
+    ),
+    action_spec!(
+        "sessions",
+        Read,
+        "List AI transcript sessions",
+        Cheap,
+        ListSessions
+    ),
+    action_spec!(
+        "search_sessions",
+        Read,
+        "Full-text search over AI transcript sessions",
+        Cheap,
+        SearchSessions
+    ),
+    action_spec!(
+        "abuse",
+        Read,
+        "Detect resource-abuse patterns in AI sessions",
+        Moderate,
+        SearchAbuse
+    ),
+    action_spec!(
+        "abuse_incidents",
+        Read,
+        "List detected abuse incidents",
+        Moderate,
+        AbuseIncidents
+    ),
+    action_spec!(
+        "abuse_investigate",
+        Read,
+        "Deep-dive investigation of an abuse incident",
+        Expensive,
+        AbuseInvestigate
+    ),
+    action_spec!(
+        "ai_correlate",
+        Read,
+        "Correlate AI transcript events with syslog",
+        Moderate,
+        AiCorrelate
+    ),
+    action_spec!(
+        "usage_blocks",
+        Read,
+        "Summarise AI session usage by project",
+        Cheap,
+        UsageBlocks
+    ),
+    action_spec!(
+        "project_context",
+        Read,
+        "Full project context from AI transcripts",
+        Moderate,
+        ProjectContext
+    ),
+    action_spec!(
+        "list_ai_tools",
+        Read,
+        "List AI tools observed in transcripts",
+        Cheap,
+        ListAiTools
+    ),
+    action_spec!(
+        "list_ai_projects",
+        Read,
+        "List AI projects with transcript activity",
+        Cheap,
+        ListAiProjects
+    ),
+    action_spec!(
+        "source_ips",
+        Read,
+        "Enumerate unique source IP addresses",
+        Cheap,
+        ListSourceIps
+    ),
+    action_spec!(
+        "timeline",
+        Read,
+        "Log volume over time (bucketed)",
+        Cheap,
+        Timeline
+    ),
+    action_spec!(
+        "patterns",
+        Read,
+        "Recurring message patterns",
+        Expensive,
+        Patterns
+    ),
+    action_spec!(
+        "context",
+        Read,
+        "Contextual log entries around a pivot",
+        Cheap,
+        Context
+    ),
+    action_spec!("get", Read, "Fetch a single log entry by ID", Cheap, GetLog),
+    action_spec!(
+        "ingest_rate",
+        Read,
+        "Current log ingestion rate",
+        Expensive,
+        IngestRate
+    ),
+    action_spec!(
+        "silent_hosts",
+        Read,
+        "Hosts that have gone silent",
+        Moderate,
+        SilentHosts
+    ),
+    action_spec!(
+        "clock_skew",
+        Read,
+        "Detect clock skew between hosts",
+        Expensive,
+        ClockSkew
+    ),
+    action_spec!(
+        "anomalies",
+        Read,
+        "Detect log-volume anomalies",
+        Expensive,
+        Anomalies
+    ),
+    action_spec!(
+        "compare",
+        Read,
+        "Compare log patterns between time windows",
+        Expensive,
+        Compare
+    ),
+    action_spec!(
+        "compose_status",
+        Read,
+        "Docker Compose stack status",
+        Moderate,
+        ComposeStatus
+    ),
+    action_spec!(
+        "compose_doctor",
+        Read,
+        "Docker Compose coordination diagnostics",
+        Expensive,
+        ComposeDoctor
+    ),
+    action_spec!(
+        "unaddressed_errors",
+        Read,
+        "List unacknowledged error signatures",
+        Moderate,
+        UnaddressedErrors
+    ),
+    action_spec!(
+        "notifications_recent",
+        Read,
+        "Recent notification firings",
+        Cheap,
+        NotificationsRecent
+    ),
+    action_spec!(
+        "similar_incidents",
+        Read,
+        "Find similar past incidents",
+        Moderate,
+        SimilarIncidents
+    ),
+    action_spec!(
+        "ask_history",
+        Read,
+        "Query AI transcript history",
+        Moderate,
+        AskHistory
+    ),
+    action_spec!(
+        "incident_context",
+        Read,
+        "Full context for an incident",
+        Moderate,
+        IncidentContext
+    ),
+    action_spec!(
+        "graph",
+        Read,
+        "Resolve graph entities, neighborhoods, and evidence-backed explanations",
+        Expensive,
+        Graph
+    ),
     // ── Admin / write actions ──────────────────────────────────────────────
-    ActionSpec {
-        name: "ack_error",
-        scope: Scope::Admin,
-        description: "Acknowledge an error signature",
-        cost: Cost::Write,
-    },
-    ActionSpec {
-        name: "unack_error",
-        scope: Scope::Admin,
-        description: "Revoke an error signature acknowledgement",
-        cost: Cost::Write,
-    },
-    ActionSpec {
-        name: "notifications_test",
-        scope: Scope::Admin,
-        description: "Send a test notification via Apprise",
-        cost: Cost::Write,
-    },
+    action_spec!(
+        "ack_error",
+        Admin,
+        "Acknowledge an error signature",
+        Write,
+        AckError
+    ),
+    action_spec!(
+        "unack_error",
+        Admin,
+        "Revoke an error signature acknowledgement",
+        Write,
+        UnackError
+    ),
+    action_spec!(
+        "notifications_test",
+        Admin,
+        "Send a test notification via Apprise",
+        Write,
+        NotificationsTest
+    ),
     // ── Informational (auth required, no scope gate) ───────────────────────
-    ActionSpec {
-        name: "help",
-        scope: Scope::InfoOnly,
-        description: "List available actions and their parameters",
-        cost: Cost::Cheap,
-    },
+    action_spec!(
+        "help",
+        InfoOnly,
+        "List available actions and their parameters",
+        Cheap,
+        Help
+    ),
 ];
 
 /// All action names in registration order. Used to populate the JSON schema
@@ -347,6 +450,14 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
 /// and scope table cannot drift.
 pub(super) fn action_names() -> Vec<&'static str> {
     ACTION_SPECS.iter().map(|s| s.name).collect()
+}
+
+/// Find the executable handler for a registered action.
+pub(super) fn handler_for(action: &str) -> Option<ActionHandler> {
+    ACTION_SPECS
+        .iter()
+        .find(|s| s.name == action)
+        .map(|s| s.handler)
 }
 
 /// Map an action name to its required MCP scope string.

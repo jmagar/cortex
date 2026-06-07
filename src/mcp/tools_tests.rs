@@ -756,6 +756,23 @@ async fn mcp_rejects_unknown_fields_for_typed_request_actions() {
     }
 }
 
+#[test]
+fn action_registry_rows_have_executable_handlers() {
+    for spec in super::actions::ACTION_SPECS {
+        assert_eq!(
+            super::actions::handler_for(spec.name),
+            Some(spec.handler),
+            "registered action lacks handler lookup: {}",
+            spec.name
+        );
+        assert!(
+            sample_args_for_action(spec.name).is_some(),
+            "schema dispatch test lacks executable sample for handler-backed action: {}",
+            spec.name
+        );
+    }
+}
+
 #[tokio::test]
 async fn schema_actions_are_dispatchable() {
     let h = TestHarness::new();

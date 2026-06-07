@@ -87,6 +87,28 @@ async fn refresh_skips_collectors_after_collection_deadline() {
         .all(|collector| collector.status == "skipped"));
 }
 
+#[tokio::test]
+async fn collector_deadline_timeout_is_reported_as_skipped() {
+    let result = collector_task("slow_collector", Duration::from_millis(1), async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        CollectorOutput::new("slow_collector")
+    })
+    .await;
+    let mut states = Vec::new();
+    let mut warnings = Vec::new();
+    let mut outputs = Vec::new();
+
+    run_collector(result, &mut states, &mut warnings, &mut outputs);
+
+    assert_eq!(states.len(), 1);
+    assert_eq!(states[0].status, "skipped");
+    assert!(warnings[0].contains("exceeded"));
+    assert!(outputs[0]
+        .errors
+        .iter()
+        .any(|error| error.phase == "collection_timeout"));
+}
+
 #[test]
 fn inventory_has_output_counts_media_only_inventory() {
     let mut inventory = HomelabInventory::empty("run".to_string(), Utc::now().to_rfc3339());

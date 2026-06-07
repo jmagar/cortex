@@ -128,7 +128,7 @@ sudo iptables -t nat -A PREROUTING -p tcp --dport 514 -j REDIRECT --to-port 1514
 When exposing MCP over HTTPS via SWAG:
 - Add auth at the proxy layer or set `CORTEX_TOKEN`
 - Add public reverse-proxy hostnames to `CORTEX_ALLOWED_HOSTS` so RMCP Host validation accepts them
-- See `docs/syslog.subdomain.conf` for a working nginx config
+- Use `/config/nginx/proxy-confs/cortex.subdomain.conf` on the SWAG host, or an equivalent nginx vhost
 
 ## Input handling
 

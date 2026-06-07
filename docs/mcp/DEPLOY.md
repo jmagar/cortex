@@ -170,7 +170,8 @@ Port 1514 is used instead of the standard syslog port 514 to avoid needing root 
 
 ## SWAG reverse proxy
 
-See `docs/syslog.subdomain.conf` for a working nginx config that exposes MCP over HTTPS at `https://cortex.tootie.tv/mcp`.
+Use `/config/nginx/proxy-confs/cortex.subdomain.conf` on the SWAG host, or an
+equivalent nginx vhost, to expose MCP over HTTPS at `https://cortex.tootie.tv/mcp`.
 
 The MCP endpoint uses RMCP Streamable HTTP in stateless JSON-response mode.
 Clients use `POST /mcp`; `GET` and `DELETE` on `/mcp` are not supported after
