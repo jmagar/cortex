@@ -39,19 +39,32 @@ if [ "${#tracked_current_files[@]}" -eq 0 ]; then
   exit 1
 fi
 
+search_name="grep"
+search_status_error=2
+search_current_files() {
+  grep -nF -- "$1" "${tracked_current_files[@]}"
+}
+
+if command -v rg >/dev/null 2>&1; then
+  search_name="rg"
+  search_current_files() {
+    rg -n --fixed-strings -- "$1" "${tracked_current_files[@]}"
+  }
+fi
+
 for pattern in "${patterns[@]}"; do
   set +e
-  rg -n --fixed-strings -- "$pattern" "${tracked_current_files[@]}"
-  rg_status=$?
+  search_current_files "$pattern"
+  search_status=$?
   set -e
-  if [ "$rg_status" -eq 0 ]; then
+  if [ "$search_status" -eq 0 ]; then
     echo "[public-identity] FAIL — stale identity token found: $pattern" >&2
     status=1
-  elif [ "$rg_status" -eq 2 ]; then
-    echo "[public-identity] FAIL — rg failed while scanning for: $pattern" >&2
+  elif [ "$search_status" -eq "$search_status_error" ]; then
+    echo "[public-identity] FAIL — $search_name failed while scanning for: $pattern" >&2
     status=1
-  elif [ "$rg_status" -ne 1 ]; then
-    echo "[public-identity] FAIL — unexpected rg exit $rg_status while scanning for: $pattern" >&2
+  elif [ "$search_status" -ne 1 ]; then
+    echo "[public-identity] FAIL — unexpected $search_name exit $search_status while scanning for: $pattern" >&2
     status=1
   fi
 done
