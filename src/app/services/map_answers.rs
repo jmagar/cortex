@@ -30,9 +30,12 @@ impl CortexService {
                 "service".to_string(),
                 service_dependency_key(req.host.as_deref(), req.service.as_deref())?,
             ),
+            "findings" => {
+                return self.homelab_map_findings_answer(req).await.map(Some);
+            }
             _ => {
                 return Err(ServiceError::InvalidInput(format!(
-                    "unsupported map mode `{mode}`; expected snapshot, host_services, domain_routes, or service_dependencies"
+                    "unsupported map mode `{mode}`; expected snapshot, host_services, domain_routes, service_dependencies, or findings"
                 )));
             }
         };
@@ -152,6 +155,7 @@ fn map_graph_answer(
         }),
         next_queries,
         proof_queries,
+        findings: Vec::new(),
     }
 }
 

@@ -108,9 +108,16 @@ Required argument: `action = "map"`
 Optional arguments: `host_limit` (default 100, max 500), `section_limit`
 (default 100, max 250), and `include_sections` to restrict top-level sections.
 Use `mode = "host_services"` with `host`, `mode = "domain_routes"` with
-`domain`, or `mode = "service_dependencies"` with `service` or `host` +
-`service` to get a `graph_answer` envelope with answer status, topology rows,
-safe evidence, map follow-ups, and graph proof queries.
+`domain`, `mode = "service_dependencies"` with `service` or `host` +
+`service`, or `mode = "findings"` to get a `graph_answer` envelope with answer
+status, topology rows or findings, safe evidence, map follow-ups, and graph
+proof queries.
+
+`mode = "findings"` supports `finding_limit`, `evidence_per_finding`, and
+`finding_types` (`potential_public_route`, `risky_mounts`, `collector_health`).
+Route findings prove configured reverse-proxy routes only; they do not claim
+unauthenticated internet exposure without separate listener/perimeter evidence.
+Risk and hygiene evidence is bounded and redacted.
 
 ## cortex host_state
 

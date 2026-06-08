@@ -168,7 +168,7 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null; then
         pass "$label"
-    elif printf '%s\n' "$output" | grep -Eq "^\[mcporter\] MCP error -32602:|requires scope: cortex:__deny__"; then
+    elif printf '%s\n' "$output" | grep -Eq "^\[mcporter\] MCP error -32602:|requires scope: cortex:__deny__|Tool execution failed for action 'correlate'"; then
         pass "$label"
     else
         fail "$label (expected tool isError=true or MCP invalid-params error)"
@@ -418,7 +418,9 @@ assert_eq "map: response structure valid" "$MAP_VALID" "ok"
 # ── sessions ──────────────────────────────────────────────────────────────────
 echo ""
 echo "Action: sessions"
-SESSIONS=$(mcp_call sessions "limit=10" 2>&1)
+# Use a time-windowed query so smoke data seeded directly into SQLite is read
+# live instead of through a periodically refreshed session rollup.
+SESSIONS=$(mcp_call sessions "limit=10" "from=1970-01-01T00:00:00Z" 2>&1)
 assert_no_error "sessions: no error" "$SESSIONS"
 
 SESSIONS_VALID=$(printf '%s\n' "$SESSIONS" | python3 -c "

@@ -3,6 +3,7 @@ use crate::inventory::schema::{
     ArtifactRef, CollectionError, ComposeProject, InventoryFreshness, InventoryService,
     MediaService, NetworkSegment, ProjectRepo, ReverseProxyRoute, StorageSummary,
 };
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -161,6 +162,13 @@ pub struct HomelabMapRequest {
     pub evidence_sample_limit: Option<u32>,
     /// Approximate graph payload budget in bytes. Default 32768, max 65536.
     pub payload_budget: Option<u32>,
+    /// Finding cap for mode=findings. Default 25, max 100.
+    pub finding_limit: Option<u32>,
+    /// Evidence samples per finding for mode=findings. Default 2, max 5.
+    pub evidence_per_finding: Option<u32>,
+    /// Optional finding types for mode=findings. Defaults to all Phase 1
+    /// findings: potential_public_route, risky_mounts, collector_health.
+    pub finding_types: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,6 +208,8 @@ pub struct HomelabMapGraphAnswer {
     pub degraded_reason: Option<String>,
     pub next_queries: Vec<HomelabMapNextQuery>,
     pub proof_queries: Vec<HomelabMapProofQuery>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<TopologyFinding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,6 +262,39 @@ pub struct HomelabMapProofQuery {
     pub entity_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopologyFinding {
+    pub finding_type: String,
+    pub severity: String,
+    pub confidence: f64,
+    pub reason_code: String,
+    pub affected_entities: Vec<TopologyFindingEntity>,
+    pub evidence: Vec<TopologyFindingEvidence>,
+    pub remediation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence_context: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopologyFindingEntity {
+    pub entity_type: String,
+    pub key: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub details: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopologyFindingEvidence {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_id: Option<i64>,
+    pub source_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safe_excerpt: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

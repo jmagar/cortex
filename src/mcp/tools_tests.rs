@@ -3,9 +3,11 @@ use crate::app::CortexService;
 use crate::config::{McpConfig, StorageConfig};
 use crate::db;
 use crate::inventory::schema::{
-    ArtifactRef, ComposeProject, HomelabInventory, InventoryNode, InventoryService, PortMapping,
-    Provenance, RedactionStatus, ReverseProxyRoute, TrustLevel,
+    ArtifactRef, CollectionError, ComposeProject, HomelabInventory, InventoryNode,
+    InventoryService, MountRef, PortMapping, Provenance, RedactionStatus, ReverseProxyRoute,
+    TrustLevel,
 };
+use crate::inventory::storage::InventoryPaths;
 use crate::mcp::AppState;
 use serde_json::json;
 use std::sync::Arc;
@@ -82,9 +84,7 @@ fn test_provenance(source: &str, kind: &str) -> Provenance {
     Provenance::new(source, kind, "2026-01-01T00:00:00Z".to_string())
 }
 
-fn project_graph_fixture(pool: &db::DbPool) {
-    db::graph::refresh_graph_projection(pool).unwrap();
-
+fn graph_inventory_fixture() -> HomelabInventory {
     let mut inventory = HomelabInventory::empty(
         "mcp-map-test".to_string(),
         "2026-01-01T00:00:00Z".to_string(),
@@ -119,7 +119,11 @@ fn project_graph_fixture(pool: &db::DbPool) {
             container_port: Some(443),
             protocol: "tcp".to_string(),
         }],
-        mounts: Vec::new(),
+        mounts: vec![MountRef {
+            source: Some("/var/run/docker.sock".to_string()),
+            target: "/var/run/docker.sock".to_string(),
+            read_only: false,
+        }],
         env_keys: vec!["URL".to_string()],
         labels: Default::default(),
     });
@@ -148,8 +152,33 @@ fn project_graph_fixture(pool: &db::DbPool) {
         byte_len: 42,
         truncated: false,
     });
+    inventory.collection_errors.push(CollectionError {
+        collector: "raw_configs".to_string(),
+        phase: "collect".to_string(),
+        severity: "warning".to_string(),
+        message: "raw path /secret/config.conf failed with token abc".to_string(),
+        elapsed_ms: 25,
+        truncated: false,
+    });
+    inventory.recompute_summary();
+    inventory
+}
+
+fn project_graph_fixture(pool: &db::DbPool) {
+    db::graph::refresh_graph_projection(pool).unwrap();
+    let inventory = graph_inventory_fixture();
 
     db::graph_inventory::project_inventory(pool, &inventory).unwrap();
+}
+
+fn write_inventory_cache_fixture(root: &std::path::Path, inventory: &HomelabInventory) {
+    let paths = InventoryPaths::new(root.to_path_buf());
+    std::fs::create_dir_all(&paths.normalized_dir).unwrap();
+    std::fs::write(
+        &paths.normalized_json,
+        serde_json::to_vec_pretty(inventory).unwrap(),
+    )
+    .unwrap();
 }
 
 #[tokio::test]
@@ -492,6 +521,89 @@ async fn map_action_service_dependencies_mode_accepts_bare_service_with_host() {
             .iter()
             .any(|row| row["entity_type"] == "compose_project" && row["key"] == "squirts:edge"),
         "service_dependencies should include compose project evidence: {answer}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn map_action_findings_mode_returns_topology_findings_without_raw_leaks() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
+    let h = TestHarness::new();
+    let inventory = graph_inventory_fixture();
+    write_inventory_cache_fixture(inventory_dir.path(), &inventory);
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        db::graph::refresh_graph_projection(&h.pool).unwrap();
+        db::graph_inventory::project_inventory(&h.pool, &inventory).unwrap();
+    }
+
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "findings",
+            "finding_limit": 10,
+            "evidence_per_finding": 1
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let answer = &value["graph_answer"];
+    assert_eq!(answer["mode"], "findings");
+    assert_eq!(answer["target"]["entity_type"], "topology");
+    assert_eq!(value["summary"]["returned_hosts"], 0);
+    assert!(
+        answer["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |finding| finding["finding_type"] == "potential_public_route"
+                    && finding["reason_code"] == "reverse_proxy_route_configured"
+                    && finding["affected_entities"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|entity| entity["key"] == "adguard.tootie.tv")
+            ),
+        "findings should include bounded public route proof: {answer}"
+    );
+    assert!(
+        answer["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["finding_type"] == "risky_mounts"
+                && finding["reason_code"] == "docker_socket_mount"
+                && finding["affected_entities"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(
+                        |entity| entity["details"]["mount_source_kind"] == "docker_socket"
+                            && entity["details"]["read_only"] == "false"
+                    )),
+        "findings should include docker socket mount details: {answer}"
+    );
+    assert!(
+        answer["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["finding_type"] == "collector_health"
+                && finding["reason_code"] == "collector_partial"),
+        "findings should include degraded collector context: {answer}"
+    );
+    let rendered = serde_json::to_string(answer).unwrap();
+    assert!(!rendered.contains("/secret/config.conf"), "{rendered}");
+    assert!(!rendered.contains("abc"), "{rendered}");
+    assert!(
+        !rendered.contains("/home/jmagar/.cortex/inventory"),
+        "{rendered}"
     );
 }
 

@@ -24,7 +24,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 30;
+pub const KNOWN_SCHEMA_VERSION: i64 = 31;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -1009,6 +1009,8 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                  ON graph_relationships(src_entity_id, relationship_type, last_seen_at DESC);
              CREATE INDEX IF NOT EXISTS idx_graph_relationships_dst_type_seen
                  ON graph_relationships(dst_entity_id, relationship_type, last_seen_at DESC);
+             CREATE INDEX IF NOT EXISTS idx_graph_relationships_type_seen
+                 ON graph_relationships(relationship_type, last_seen_at DESC);
 
              CREATE TABLE IF NOT EXISTS graph_relationship_evidence (
                  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1213,6 +1215,8 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                  ON graph_relationships(src_entity_id, relationship_type, last_seen_at DESC);
              CREATE INDEX idx_graph_relationships_dst_type_seen
                  ON graph_relationships(dst_entity_id, relationship_type, last_seen_at DESC);
+             CREATE INDEX idx_graph_relationships_type_seen
+                 ON graph_relationships(relationship_type, last_seen_at DESC);
 
              CREATE TABLE graph_relationship_evidence_new (
                  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1276,6 +1280,18 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              COMMIT;",
         )?;
         tracing::info!("Migration 30: widened graph vocabulary for inventory topology");
+    }
+
+    // Migration 31: relationship-type covering index for bounded topology
+    // findings. Findings ask for all relationships of one graph vocabulary
+    // type, so the src/dst-specific graph indexes are not sufficient.
+    if !migration_applied(&conn, 31)? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_graph_relationships_type_seen
+                 ON graph_relationships(relationship_type, last_seen_at DESC);
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (31);",
+        )?;
+        tracing::info!("Migration 31: added graph relationship type index for topology findings");
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance
