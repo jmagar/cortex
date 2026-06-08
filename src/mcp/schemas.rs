@@ -1,3 +1,4 @@
+use crate::app::topology_findings;
 use crate::db::{PATTERN_SCAN_LIMIT_MAX, SEVERITY_LEVELS};
 use serde_json::{json, Value};
 
@@ -225,7 +226,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "payload_budget": {
                     "type": "integer",
-                    "description": "For action=graph and action=map graph-backed modes: approximate graph payload budget in bytes, default 32768, clamped 4096..65536."
+                    "description": "For action=graph and action=map graph-backed modes, including mode=findings: approximate graph payload budget in bytes, default 32768, clamped 4096..65536."
                 },
                 "finding_limit": {
                     "type": "integer",
@@ -243,9 +244,9 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "type": "array",
                     "items": {
                         "type": "string",
-                        "enum": ["potential_public_route", "risky_mounts", "collector_health"]
+                        "enum": topology_findings::TYPES
                     },
-                    "description": "For action=map mode=findings: optional Phase 1 finding types to return."
+                    "description": "For action=map mode=findings: optional supported finding types to return."
                 },
                 "offset": {
                     "type": "integer",

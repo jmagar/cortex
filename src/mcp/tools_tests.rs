@@ -3,9 +3,9 @@ use crate::app::CortexService;
 use crate::config::{McpConfig, StorageConfig};
 use crate::db;
 use crate::inventory::schema::{
-    ArtifactRef, CollectionError, ComposeProject, HomelabInventory, InventoryNode,
-    InventoryService, MountRef, PortMapping, Provenance, RedactionStatus, ReverseProxyRoute,
-    TrustLevel,
+    ArtifactRef, CollectionError, CollectionState, CollectorState, ComposeProject,
+    HomelabInventory, InventoryNode, InventoryService, MountRef, PortMapping, Provenance,
+    RedactionStatus, ReverseProxyRoute, TrustLevel,
 };
 use crate::inventory::storage::InventoryPaths;
 use crate::mcp::AppState;
@@ -164,6 +164,35 @@ fn graph_inventory_fixture() -> HomelabInventory {
     inventory
 }
 
+fn graph_inventory_without_route_target_fixture() -> HomelabInventory {
+    let mut inventory = HomelabInventory::empty(
+        "mcp-map-no-target-test".to_string(),
+        "2026-01-01T00:00:00Z".to_string(),
+    );
+    inventory.nodes.push(InventoryNode {
+        id: "node:squirts".to_string(),
+        hostname: "squirts".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: test_provenance("ssh:squirts", "source_inventory"),
+        roles: vec!["edge".to_string()],
+        ips: vec!["10.1.0.8".to_string()],
+        os: Some("Ubuntu".to_string()),
+        cpu: None,
+        memory: None,
+        listeners: Vec::new(),
+        storage: Vec::new(),
+        extras: Default::default(),
+    });
+    inventory.reverse_proxies.push(ReverseProxyRoute {
+        id: "proxy:orphan.tootie.tv".to_string(),
+        server_names: vec!["orphan.tootie.tv".to_string()],
+        upstreams: vec!["missing-service:443".to_string()],
+        provenance: test_provenance("swag:squirts:/config/nginx/orphan.conf", "app_inventory"),
+    });
+    inventory.recompute_summary();
+    inventory
+}
+
 fn project_graph_fixture(pool: &db::DbPool) {
     db::graph::refresh_graph_projection(pool).unwrap();
     let inventory = graph_inventory_fixture();
@@ -179,6 +208,38 @@ fn write_inventory_cache_fixture(root: &std::path::Path, inventory: &HomelabInve
         serde_json::to_vec_pretty(inventory).unwrap(),
     )
     .unwrap();
+}
+
+fn write_collection_state_fixture(root: &std::path::Path, collectors: Vec<CollectorState>) {
+    let paths = InventoryPaths::new(root.to_path_buf());
+    std::fs::create_dir_all(&paths.root).unwrap();
+    let state = CollectionState {
+        schema: "cortex.inventory.collection_state.v1".to_string(),
+        run_id: "test-run".to_string(),
+        started_at: "2026-01-01T00:00:00Z".to_string(),
+        finished_at: "2026-01-01T00:00:01Z".to_string(),
+        status: "partial".to_string(),
+        collectors,
+        artifact_refs: Vec::new(),
+        errors: Vec::new(),
+    };
+    std::fs::write(
+        &paths.collection_state_json,
+        serde_json::to_vec_pretty(&state).unwrap(),
+    )
+    .unwrap();
+}
+
+fn collector_state(name: &str, status: &str, warnings: Vec<&str>) -> CollectorState {
+    CollectorState {
+        name: name.to_string(),
+        status: status.to_string(),
+        started_at: "2026-01-01T00:00:00Z".to_string(),
+        finished_at: "2026-01-01T00:00:01Z".to_string(),
+        elapsed_ms: 10,
+        warnings: warnings.into_iter().map(str::to_string).collect(),
+        artifacts: Vec::new(),
+    }
 }
 
 #[tokio::test]
@@ -604,6 +665,291 @@ async fn map_action_findings_mode_returns_topology_findings_without_raw_leaks() 
     assert!(
         !rendered.contains("/home/jmagar/.cortex/inventory"),
         "{rendered}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn map_action_findings_payload_budget_trims_findings() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
+    let h = TestHarness::new();
+    let inventory = graph_inventory_fixture();
+    write_inventory_cache_fixture(inventory_dir.path(), &inventory);
+    write_collection_state_fixture(
+        inventory_dir.path(),
+        vec![
+            collector_state("raw_configs", "partial", vec!["raw /secret/token abc"]),
+            collector_state("docker", "partial", vec!["socket warning"]),
+            collector_state("reverse_proxy", "partial", vec!["proxy warning"]),
+            collector_state("compose", "partial", vec!["compose warning"]),
+        ],
+    );
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        db::graph::refresh_graph_projection(&h.pool).unwrap();
+        db::graph_inventory::project_inventory(&h.pool, &inventory).unwrap();
+    }
+
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "findings",
+            "finding_limit": 100,
+            "evidence_per_finding": 5,
+            "payload_budget": 4096
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let answer = &value["graph_answer"];
+    assert_eq!(answer["truncation"]["truncated"], true);
+    assert_eq!(answer["truncation"]["reason"], "payload_budget");
+    assert_eq!(answer["metadata"]["truncated_reason"], "payload_budget");
+    assert!(
+        answer["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["evidence_truncated"] == true),
+        "budget trimming should mark at least one finding evidence-truncated: {answer}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn map_action_findings_type_subset_and_invalid_value_are_enforced() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
+    let h = TestHarness::new();
+    let inventory = graph_inventory_fixture();
+    write_inventory_cache_fixture(inventory_dir.path(), &inventory);
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        db::graph::refresh_graph_projection(&h.pool).unwrap();
+        db::graph_inventory::project_inventory(&h.pool, &inventory).unwrap();
+    }
+
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "findings",
+            "finding_types": ["collector_health"]
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+    let findings = value["graph_answer"]["findings"].as_array().unwrap();
+    assert!(!findings.is_empty(), "{value}");
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding["finding_type"] == "collector_health"),
+        "subset should only return collector health findings: {value}"
+    );
+
+    let err = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "findings",
+            "finding_types": ["bad"]
+        }),
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("unsupported finding type"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn map_action_findings_collector_health_cache_branches_are_safe() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
+    let h = TestHarness::new();
+
+    let missing_value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "findings",
+            "finding_types": ["collector_health"]
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+    let missing_answer = &missing_value["graph_answer"];
+    assert_eq!(missing_answer["answer_status"], "degraded");
+    assert!(
+        missing_answer["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |finding| finding["reason_code"] == "inventory_cache_missing"
+                    || finding["reason_code"] == "collection_state_unavailable"
+            ),
+        "missing cache should surface collector health findings: {missing_answer}"
+    );
+
+    let inventory = graph_inventory_fixture();
+    write_inventory_cache_fixture(inventory_dir.path(), &inventory);
+    write_collection_state_fixture(
+        inventory_dir.path(),
+        vec![collector_state(
+            "raw_configs",
+            "ok",
+            vec!["raw path /secret/config.conf token abc"],
+        )],
+    );
+    let stale_value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "findings",
+            "finding_types": ["collector_health"]
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+    let stale_answer = &stale_value["graph_answer"];
+    assert!(
+        stale_answer["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["reason_code"] == "inventory_cache_stale"
+                || finding["reason_code"] == "collector_degraded"),
+        "stale cache and collector warnings should surface: {stale_answer}"
+    );
+    let rendered = serde_json::to_string(stale_answer).unwrap();
+    assert!(!rendered.contains("/secret/config.conf"), "{rendered}");
+    assert!(!rendered.contains("abc"), "{rendered}");
+
+    let paths = InventoryPaths::new(inventory_dir.path().to_path_buf());
+    std::fs::write(&paths.normalized_json, b"{not json").unwrap();
+    let corrupt_value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "findings",
+            "finding_types": ["collector_health"]
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(
+        corrupt_value["graph_answer"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["reason_code"] == "inventory_cache_unreadable"),
+        "corrupt cache should surface unreadable collector health: {corrupt_value}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn map_action_findings_degrades_when_graph_projection_was_never_built() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
+    let h = TestHarness::new();
+    write_inventory_cache_fixture(inventory_dir.path(), &graph_inventory_fixture());
+
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "findings",
+            "finding_types": ["potential_public_route"]
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+    let answer = &value["graph_answer"];
+    assert_eq!(answer["answer_status"], "degraded");
+    assert_eq!(answer["degraded_reason"], "graph_projection_not_ready");
+    assert!(
+        answer["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["reason_code"] == "graph_projection_not_ready"),
+        "graph projection health finding should prevent empty-ok: {answer}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn map_action_findings_public_route_without_target_is_low_confidence() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
+    let h = TestHarness::new();
+    let inventory = graph_inventory_without_route_target_fixture();
+    write_inventory_cache_fixture(inventory_dir.path(), &inventory);
+    write_collection_state_fixture(
+        inventory_dir.path(),
+        vec![collector_state("raw_configs", "partial", vec!["redacted"])],
+    );
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        db::graph::refresh_graph_projection(&h.pool).unwrap();
+        db::graph_inventory::project_inventory(&h.pool, &inventory).unwrap();
+    }
+
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "findings",
+            "finding_types": ["potential_public_route"]
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let answer = &value["graph_answer"];
+    let finding = answer["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["reason_code"] == "reverse_proxy_domain_without_target_proof")
+        .unwrap_or_else(|| panic!("expected no-target route finding: {answer}"));
+    assert_eq!(finding["severity"], "low");
+    assert_eq!(finding["finding_type"], "potential_public_route");
+    assert!(finding["confidence_context"]
+        .as_str()
+        .unwrap()
+        .contains("Confidence reduced"));
+    assert!(
+        finding["affected_entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entity| entity["entity_type"] != "service"),
+        "no-target finding should not invent a routed service: {finding}"
     );
 }
 

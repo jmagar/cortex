@@ -196,7 +196,7 @@ topology questions backed by the graph projection:
 
 Non-snapshot responses include `graph_answer.answer_status`, bounded `rows`,
 safe evidence samples, map-native `next_queries`, and graph `proof_queries`.
-`mode=findings` instead fills `graph_answer.findings` with Phase 1 topology
+`mode=findings` instead fills `graph_answer.findings` with supported topology
 findings: `potential_public_route`, `risky_mounts`, and `collector_health`.
 These findings use relationship-specific graph proof for configured routes and
 mounts, normalized inventory for mount source/target/read-only detail, and

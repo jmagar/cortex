@@ -68,6 +68,36 @@ fn seed_inventory(pool: &DbPool, services: usize) {
     crate::db::graph_inventory::project_inventory(pool, &inventory).unwrap();
 }
 
+fn seed_inventory_without_route_target(pool: &DbPool) {
+    let mut inventory = HomelabInventory::empty(
+        "graph-findings-no-target-test".to_string(),
+        "2026-01-01T00:00:00Z".to_string(),
+    );
+    inventory.nodes.push(InventoryNode {
+        id: "node:squirts".to_string(),
+        hostname: "squirts".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: provenance("ssh:squirts"),
+        roles: Vec::new(),
+        ips: Vec::new(),
+        os: None,
+        cpu: None,
+        memory: None,
+        listeners: Vec::new(),
+        storage: Vec::new(),
+        extras: Default::default(),
+    });
+    inventory.reverse_proxies.push(ReverseProxyRoute {
+        id: "proxy:orphan.example.test".to_string(),
+        server_names: vec!["orphan.example.test".to_string()],
+        upstreams: vec!["missing-service:80".to_string()],
+        provenance: provenance("swag:squirts:/redacted.conf"),
+    });
+    let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
+    crate::db::graph::refresh_graph_projection(pool).unwrap();
+    crate::db::graph_inventory::project_inventory(pool, &inventory).unwrap();
+}
+
 #[test]
 fn public_route_findings_return_route_target_and_evidence() {
     let (pool, _dir) = test_pool();
@@ -81,6 +111,21 @@ fn public_route_findings_return_route_target_and_evidence() {
     assert_eq!(rows[0].service_key.as_deref(), Some("squirts:svc-0"));
     assert!(rows[0].exposes_evidence_id.is_some());
     assert!(rows[0].routes_evidence_id.is_some());
+}
+
+#[test]
+fn public_route_findings_return_domain_without_route_target() {
+    let (pool, _dir) = test_pool();
+    seed_inventory_without_route_target(&pool);
+
+    let rows = list_public_route_findings(&pool, 10).unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].domain_key, "orphan.example.test");
+    assert_eq!(rows[0].proxy_key, "proxy:orphan.example.test");
+    assert!(rows[0].service_key.is_none());
+    assert!(rows[0].routes_evidence_id.is_none());
+    assert!(rows[0].exposes_evidence_id.is_some());
 }
 
 #[test]
