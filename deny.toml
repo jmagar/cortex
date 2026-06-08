@@ -52,10 +52,10 @@ confidence-threshold = 0.8
 # stack and are reviewed during release dependency audits. Keep this check quiet
 # so cargo-deny output highlights advisories, license drift, and source drift.
 multiple-versions = "allow"
-# Git deps with pinned revs have no semver version field, which cargo-deny
-# treats as a wildcard. The rev is the pin; source policy below still restricts
-# the allowed git remotes.
-wildcards = "allow"
+# Keep wildcard dependency requirements visible. Git deps are pinned by `rev`,
+# and source policy below restricts remotes, but accidental broad crate specs
+# should still show up during dependency audits.
+wildcards = "warn"
 # Allow path deps (e.g. the self-referencing dev dep) to omit a version.
 allow-wildcard-paths = true
 

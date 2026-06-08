@@ -120,9 +120,9 @@ impl CortexService {
         };
         let scan_limit = req.scan_limit.unwrap_or(db::PATTERN_SCAN_LIMIT_MAX);
         let top_n = req.top_n.unwrap_or(20).min(200);
-        let (rows, truncated) = self
-            .run_db("patterns_fetch", move |pool| {
-                db::fetch_pattern_rows(
+        let (patterns, scanned, truncated) = self
+            .run_db("patterns", move |pool| {
+                let (rows, truncated) = db::fetch_pattern_rows(
                     pool,
                     from.as_deref(),
                     to.as_deref(),
@@ -130,10 +130,11 @@ impl CortexService {
                     req.app_name.as_deref(),
                     severity_in.as_deref(),
                     scan_limit,
-                )
+                )?;
+                let (patterns, scanned) = db::cluster_pattern_rows(rows, top_n);
+                Ok((patterns, scanned, truncated))
             })
             .await?;
-        let (patterns, scanned) = db::cluster_pattern_rows(rows, top_n);
         Ok(PatternsResponse {
             patterns: patterns.into_iter().map(Into::into).collect(),
             scanned,

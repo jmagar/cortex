@@ -39,15 +39,16 @@ PY
     continue
   fi
 
-  if python3 - "$path" <<'PY'
+  has_version="$(python3 - "$path" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as fh:
     payload = json.load(fh)
-sys.exit(0 if "version" in payload else 1)
+print("yes" if "version" in payload else "no")
 PY
-  then
+  )"
+  if [ "$has_version" = "yes" ]; then
     echo "[plugin-manifest] FAIL — $path must not contain a top-level version key" >&2
     status=1
   fi

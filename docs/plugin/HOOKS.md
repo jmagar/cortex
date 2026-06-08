@@ -62,7 +62,8 @@ Responsibilities:
 Run the binary-owned hook outside of Claude Code:
 
 ```bash
-plugins/cortex/bin/cortex setup plugin-hook
+CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$PWD/plugins/cortex}" \
+  "$CLAUDE_PLUGIN_ROOT/bin/cortex" setup plugin-hook
 ```
 
 The legacy script remains a thin manual adapter for environments that still

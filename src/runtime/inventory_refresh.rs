@@ -210,10 +210,6 @@ fn spawn_remote_docker_event_tasks(
         tracing::info!("inventory_refresh: remote Docker event streams disabled");
         return Vec::new();
     }
-    let ssh_context = crate::inventory::ssh::SshContext::new(
-        crate::inventory::ssh::SshOptions::from_env(config.ssh_config.as_deref())
-            .with_event_stream_defaults(),
-    );
     let resolution =
         crate::inventory::ssh::configured_hosts(config.ssh_config.as_deref(), &config.ssh_hosts);
     for warning in &resolution.warnings {
@@ -225,6 +221,12 @@ fn spawn_remote_docker_event_tasks(
         );
         return Vec::new();
     }
+    let ssh_context = crate::inventory::ssh::SshContext::new(
+        crate::inventory::ssh::SshOptions::from_env(config.ssh_config.as_deref())
+            .with_event_stream_defaults()
+            .with_max_concurrent(resolution.hosts.len().max(1))
+            .expect("event stream host count is non-zero after host resolution"),
+    );
     resolution
         .hosts
         .into_iter()
