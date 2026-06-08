@@ -178,6 +178,34 @@ fn schema_mode_constraints_are_action_specific() {
 }
 
 #[test]
+fn schema_map_findings_exposes_findings_arguments() {
+    let tools = tool_definitions();
+    let props = &tools[0]["inputSchema"]["properties"];
+
+    assert!(props["mode"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|mode| mode == "findings"));
+    assert_eq!(props["finding_limit"]["minimum"], 1);
+    assert_eq!(props["finding_limit"]["maximum"], 100);
+    assert_eq!(props["evidence_per_finding"]["minimum"], 1);
+    assert_eq!(props["evidence_per_finding"]["maximum"], 5);
+    assert!(props["payload_budget"]["description"]
+        .as_str()
+        .unwrap()
+        .contains("mode=findings"));
+    assert_eq!(
+        props["finding_types"]["items"]["enum"],
+        serde_json::json!(crate::app::topology_findings::TYPES)
+    );
+    assert!(props["finding_types"]["description"]
+        .as_str()
+        .unwrap()
+        .contains("supported finding types"));
+}
+
+#[test]
 fn schema_timeline_and_patterns_warn_on_full_history_scan() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];

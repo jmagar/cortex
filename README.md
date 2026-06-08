@@ -106,7 +106,16 @@ evidence samples, map follow-up queries, and graph proof queries:
 {"action":"map","mode":"host_services","host":"squirts"}
 {"action":"map","mode":"domain_routes","domain":"adguard.tootie.tv"}
 {"action":"map","mode":"service_dependencies","host":"squirts","service":"swag"}
+{"action":"map","mode":"findings","finding_types":["potential_public_route","risky_mounts","collector_health"]}
 ```
+
+`mode=findings` returns bounded topology risk and hygiene findings derived from
+the graph plus normalized inventory/cache state. Findings include severity,
+confidence, reason code, affected entities, safe evidence IDs/excerpts, and
+remediation hints. They deliberately avoid raw config contents, raw artifact or
+cache paths, credential-bearing upstream URLs, and raw collector warning text;
+`potential_public_route` means configured reverse-proxy routing, not proof of
+unauthenticated public internet exposure.
 
 When the server is running, inventory refresh also projects topology evidence
 into the investigation graph. The baseline refresh interval is 5 minutes, with

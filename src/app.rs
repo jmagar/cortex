@@ -13,6 +13,7 @@ pub use correlate::severity_at_or_above;
 pub use error::{ServiceError, ServiceResult};
 pub use incident_findings::{ContributingFactor, FailureMode, IncidentFindings, PreventionHint};
 pub use models::{
+    topology_findings,
     AbuseIncident,
     AbuseMatch,
     AbuseSearchRequest,

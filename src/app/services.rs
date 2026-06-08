@@ -39,8 +39,8 @@ use super::models::{
     ProjectContextResponse, RequestActor, SearchLogsRequest, SearchLogsResponse,
     SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry, ServiceLogsRequest,
     ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest,
-    SimilarIncidentsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
-    UsageBlocksRequest, UsageBlocksResponse,
+    SimilarIncidentsResponse, TailLogsRequest, TimelineRequest, TimelineResponse, TopologyFinding,
+    TopologyFindingEntity, TopologyFindingEvidence, UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
@@ -70,6 +70,7 @@ mod logs;
 mod maintenance;
 mod map;
 mod map_answers;
+mod map_findings;
 mod rag;
 
 pub use compose::run_compose_status;

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-06-07
+
+### Added
+
+- Added `map` `mode=findings` for bounded topology risk and hygiene findings:
+  `potential_public_route`, `risky_mounts`, and `collector_health`.
+- Added relationship-type graph finding helpers and an index for bounded
+  route/mount proof queries without broad graph scans.
+- Documented findings semantics and redaction boundaries for route, mount, and
+  collector-health evidence.
+
 ## [1.14.2] - 2026-06-07
 
 ### Fixed

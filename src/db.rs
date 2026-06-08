@@ -3,6 +3,7 @@
 mod analytics;
 pub(crate) mod error_signatures;
 pub mod graph;
+pub mod graph_findings;
 pub mod graph_inventory;
 mod heartbeat;
 mod ingest;
@@ -26,6 +27,10 @@ pub use graph::{
     is_known_entity_type, is_known_evidence_source_kind, is_known_reason_code,
     is_known_relationship_type, is_known_trust_level, ENTITY_TYPES, EVIDENCE_SOURCE_KINDS,
     PROJECTION_STATUSES, REASON_CODES, RELATIONSHIP_TYPES, TRUST_LEVELS,
+};
+pub use graph_findings::{
+    list_mount_relationship_findings, list_public_route_findings, MountRelationshipFindingRow,
+    PublicRouteFindingRow,
 };
 pub use heartbeat::{
     heartbeat_host_state, heartbeat_latest_all, heartbeat_metric_snapshot_batch,

@@ -191,10 +191,18 @@ topology questions backed by the graph projection:
 {"action":"map","mode":"host_services","host":"squirts"}
 {"action":"map","mode":"domain_routes","domain":"adguard.tootie.tv"}
 {"action":"map","mode":"service_dependencies","host":"squirts","service":"swag"}
+{"action":"map","mode":"findings","finding_limit":25}
 ```
 
 Non-snapshot responses include `graph_answer.answer_status`, bounded `rows`,
 safe evidence samples, map-native `next_queries`, and graph `proof_queries`.
+`mode=findings` instead fills `graph_answer.findings` with supported topology
+findings: `potential_public_route`, `risky_mounts`, and `collector_health`.
+These findings use relationship-specific graph proof for configured routes and
+mounts, normalized inventory for mount source/target/read-only detail, and
+cache/collector state for degraded-confidence context. Evidence is intentionally
+safe: no raw config bodies, raw cache paths, credential-bearing upstream URLs,
+raw collector warnings, raw frames, or `metadata_json` are returned.
 
 ## Plugin surfaces
 

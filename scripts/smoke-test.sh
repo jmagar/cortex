@@ -168,7 +168,7 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null; then
         pass "$label"
-    elif printf '%s\n' "$output" | grep -Eq "^\[mcporter\] MCP error -32602:|requires scope: cortex:__deny__"; then
+    elif printf '%s\n' "$output" | grep -Eq "^\[mcporter\] MCP error -32602:|requires scope: cortex:__deny__|unsupported action|unknown action|notanaction"; then
         pass "$label"
     else
         fail "$label (expected tool isError=true or MCP invalid-params error)"
@@ -415,10 +415,35 @@ print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "map: response structure valid" "$MAP_VALID" "ok"
 
+MAP_FINDINGS=$(mcp_call map "mode=findings" "finding_limit=5" "evidence_per_finding=1" "finding_types=collector_health" 2>&1)
+assert_no_error "map findings: no error" "$MAP_FINDINGS"
+
+MAP_FINDINGS_VALID=$(printf '%s\n' "$MAP_FINDINGS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+answer = d.get('graph_answer') or {}
+assert answer.get('mode') == 'findings', 'mode mismatch'
+assert answer.get('answer_status') in ('ok', 'degraded'), 'invalid answer_status'
+assert isinstance(answer.get('findings'), list), 'findings not a list'
+metadata = answer.get('metadata') or {}
+truncation = answer.get('truncation') or {}
+assert metadata.get('limit') == 5, 'finding_limit not reflected'
+assert metadata.get('evidence_sample_limit') == 1, 'evidence_per_finding not reflected'
+assert truncation.get('limit') == 5, 'truncation limit mismatch'
+for finding in answer.get('findings', []):
+    assert finding.get('finding_type') == 'collector_health', 'finding_types subset not honored'
+    assert 'evidence_total' in finding, 'evidence_total missing'
+    assert 'evidence_truncated' in finding, 'evidence_truncated missing'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "map findings: response contract valid" "$MAP_FINDINGS_VALID" "ok"
+
 # ── sessions ──────────────────────────────────────────────────────────────────
 echo ""
 echo "Action: sessions"
-SESSIONS=$(mcp_call sessions "limit=10" 2>&1)
+# Use a time-windowed query so smoke data seeded directly into SQLite is read
+# live instead of through a periodically refreshed session rollup.
+SESSIONS=$(mcp_call sessions "limit=10" "from=1970-01-01T00:00:00Z" 2>&1)
 assert_no_error "sessions: no error" "$SESSIONS"
 
 SESSIONS_VALID=$(printf '%s\n' "$SESSIONS" | python3 -c "

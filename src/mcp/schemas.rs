@@ -1,3 +1,4 @@
+use crate::app::topology_findings;
 use crate::db::{PATTERN_SCAN_LIMIT_MAX, SEVERITY_LEVELS};
 use serde_json::{json, Value};
 
@@ -57,8 +58,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["entity", "around", "explain", "evidence", "snapshot", "host_services", "domain_routes", "service_dependencies"],
-                    "description": "For action=graph: entity resolves an entity by key or alias; around returns a bounded one-hop neighborhood; explain returns conservative evidence-backed chains; evidence resolves one evidence row by evidence_id. Defaults to around. For action=map: snapshot returns the inventory snapshot; host_services, domain_routes, and service_dependencies add a graph_answer."
+                    "enum": ["entity", "around", "explain", "evidence", "snapshot", "host_services", "domain_routes", "service_dependencies", "findings"],
+                    "description": "For action=graph: entity resolves an entity by key or alias; around returns a bounded one-hop neighborhood; explain returns conservative evidence-backed chains; evidence resolves one evidence row by evidence_id. Defaults to around. For action=map: snapshot returns the inventory snapshot; host_services, domain_routes, service_dependencies, and findings add a graph_answer."
                 },
                 "evidence_id": {
                     "type": "integer",
@@ -225,7 +226,27 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "payload_budget": {
                     "type": "integer",
-                    "description": "For action=graph and action=map graph-backed modes: approximate graph payload budget in bytes, default 32768, clamped 4096..65536."
+                    "description": "For action=graph and action=map graph-backed modes, including mode=findings: approximate graph payload budget in bytes, default 32768, clamped 4096..65536."
+                },
+                "finding_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "For action=map mode=findings: maximum findings returned, default 25, max 100."
+                },
+                "evidence_per_finding": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "For action=map mode=findings: bounded safe evidence samples per finding, default 2, max 5."
+                },
+                "finding_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": topology_findings::TYPES
+                    },
+                    "description": "For action=map mode=findings: optional supported finding types to return."
                 },
                 "offset": {
                     "type": "integer",
@@ -464,7 +485,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "then": {
                         "properties": {
                             "mode": {
-                                "enum": ["snapshot", "host_services", "domain_routes", "service_dependencies"]
+                                "enum": ["snapshot", "host_services", "domain_routes", "service_dependencies", "findings"]
                             }
                         }
                     }

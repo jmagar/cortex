@@ -253,7 +253,7 @@ impl CortexService {
 fn is_graph_answer_mode(mode: Option<&str>) -> bool {
     matches!(
         mode.map(str::trim),
-        Some("host_services" | "domain_routes" | "service_dependencies")
+        Some("host_services" | "domain_routes" | "service_dependencies" | "findings")
     )
 }
 
