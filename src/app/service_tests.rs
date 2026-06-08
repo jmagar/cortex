@@ -99,6 +99,16 @@ async fn graph_entity_lookup_resolves_exact_key_and_alias() {
     assert_eq!(exact.metadata.projection_status, "ready");
     assert_eq!(exact.metadata.depth, 0);
 
+    let by_id = service
+        .graph_entity_lookup(GraphEntityLookupRequest {
+            mode: None,
+            entity_id: Some(resolved.id),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(by_id.resolved_entity.unwrap().id, resolved.id);
+
     let alias = service
         .graph_entity_lookup(GraphEntityLookupRequest {
             mode: None,
@@ -111,6 +121,54 @@ async fn graph_entity_lookup_resolves_exact_key_and_alias() {
     assert_eq!(alias.resolved_entity.unwrap().id, resolved.id);
     assert_eq!(alias.candidates.len(), 1);
     assert_eq!(alias.candidates[0].match_reason, "alias");
+}
+
+#[tokio::test]
+async fn graph_entity_lookup_rejects_mixed_or_partial_target_fields() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[entry(
+            "2026-01-01T00:00:00.000Z",
+            "host-a",
+            "info",
+            "ready",
+            "10.0.0.1:514",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection_for_test(&pool);
+    let host = crate::db::graph::find_graph_entity_by_key(&pool, "host", "host-a")
+        .unwrap()
+        .unwrap();
+
+    let mixed = service
+        .graph_entity_lookup(GraphEntityLookupRequest {
+            mode: None,
+            entity_id: Some(host.id),
+            entity_type: Some("host".into()),
+            key: Some("host-a".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        mixed.to_string().contains("exactly one lookup strategy"),
+        "unexpected mixed-target error: {mixed}"
+    );
+
+    let partial = service
+        .graph_entity_lookup(GraphEntityLookupRequest {
+            mode: None,
+            entity_type: Some("host".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        partial.to_string().contains("`key` is required"),
+        "unexpected partial-target error: {partial}"
+    );
 }
 
 #[tokio::test]
@@ -569,6 +627,38 @@ async fn graph_around_rejects_depth_above_one_and_redacts_safe_evidence() {
     assert!(
         depth_err.to_string().contains("depth=1"),
         "unexpected depth error: {depth_err}"
+    );
+
+    let zero_depth_err = service
+        .graph_around(GraphAroundRequest {
+            mode: None,
+            entity_type: Some("host".into()),
+            key: Some("host-a".into()),
+            depth: Some(0),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        zero_depth_err.to_string().contains("depth=1"),
+        "unexpected depth=0 error: {zero_depth_err}"
+    );
+
+    let mixed_target_err = service
+        .graph_around(GraphAroundRequest {
+            mode: None,
+            entity_id: Some(1),
+            entity_type: Some("host".into()),
+            key: Some("host-a".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        mixed_target_err
+            .to_string()
+            .contains("exactly one lookup strategy"),
+        "unexpected mixed-target error: {mixed_target_err}"
     );
 
     let response = service

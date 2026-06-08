@@ -1,7 +1,6 @@
 <!--
 plugin: cortex
 surface: plugin-manifests
-version: 0.21.7
 author: Jacob Magar
 license: MIT
 description: Current cortex Claude Code plugin manifest reference.
@@ -10,17 +9,17 @@ description: Current cortex Claude Code plugin manifest reference.
 # Plugin Manifest Reference -- cortex
 
 This repo currently ships the Claude Code plugin manifest at
-`.claude-plugin/plugin.json`. The manifest version is kept in sync with
-`Cargo.toml`; future plugin manifests must use the same version.
+`.claude-plugin/plugin.json`. Plugin manifests are intentionally unversioned;
+release versions live in `Cargo.toml`, `server.json`, and `mcpb/manifest.json`.
 
 ## File locations
 
 | File | Platform | Status |
 | --- | --- | --- |
 | `.claude-plugin/plugin.json` | Claude Code | Current plugin manifest |
-| `plugins/syslog/.mcp.json` | Claude Code | MCP server template referenced by the manifest |
-| `plugins/syslog/hooks/hooks.json` | Claude Code | SessionStart and ConfigChange hook registration |
-| `plugins/syslog/skills/` | Claude Code | Plugin skill surfaces |
+| `plugins/cortex/mcp.json` | Claude Code | MCP server template referenced by the manifest |
+| `plugins/cortex/hooks/hooks.json` | Claude Code | SessionStart and ConfigChange hook registration |
+| `plugins/cortex/skills/` | Claude Code | Plugin skill surfaces |
 
 This repo does not currently ship tracked Codex or Gemini manifest files. It
 does ship `server.json` for MCP Registry metadata. Do not copy older Codex or
@@ -33,8 +32,8 @@ The current manifest declares:
 
 | Field | Purpose |
 | --- | --- |
-| `mcpServers` | Points Claude Code at `./plugins/syslog/.mcp.json` |
-| `hooks` | Runs `plugins/syslog/hooks/hooks.json` |
+| `mcpServers` | Points Claude Code at `./plugins/cortex/mcp.json` |
+| `hooks` | Runs `plugins/cortex/hooks/hooks.json` |
 | `skills` | Exposes repo-local plugin skills |
 | `userConfig.server_url` | Base HTTP URL for the running cortex server |
 | `userConfig.api_token` | Required Bearer token used by the plugin MCP client; enforced by the server unless `no_auth=true` |
@@ -45,14 +44,16 @@ The current manifest declares:
 | `userConfig.auth_mode` and OAuth fields | Optional OAuth/JWT configuration |
 | `userConfig.docker_ingest_*` | Optional docker-socket-proxy log ingestion |
 
-`plugins/syslog/.mcp.json` interpolates these values with `${user_config.*}`
+`plugins/cortex/mcp.json` interpolates these values with `${user_config.*}`
 placeholders. Keep docs and validation scripts aligned with that syntax.
 
 ## Version synchronization
 
 Use `just publish [major|minor|patch]` for releases. That flow bumps
-`Cargo.toml`, `.claude-plugin/plugin.json`, and any future version-bearing
-files together, then updates `CHANGELOG.md`.
+`Cargo.toml`, `server.json`, `mcpb/manifest.json`, and `CHANGELOG.md`. Keep
+`.claude-plugin/plugin.json` and any future Claude/Codex/Gemini plugin
+manifests free of a top-level `version` key; CI runs
+`scripts/check-plugin-manifest-versions.sh` to enforce that convention.
 
 ## See also
 

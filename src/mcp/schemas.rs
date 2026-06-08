@@ -1,4 +1,4 @@
-use crate::db::SEVERITY_LEVELS;
+use crate::db::{PATTERN_SCAN_LIMIT_MAX, SEVERITY_LEVELS};
 use serde_json::{json, Value};
 
 use super::actions;
@@ -44,6 +44,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
         },
         "inputSchema": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "action": {
                     "type": "string",
@@ -66,6 +67,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "entity_id": {
                     "type": "integer",
+                    "minimum": 1,
                     "description": "For action=graph mode=around or explain: exact graph entity id to expand."
                 },
                 "entity_type": {
@@ -213,6 +215,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "depth": {
                     "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3,
                     "description": "For action=graph mode=around or explain: traversal depth. Around supports depth=1 only; explain clamps to 1..3."
                 },
                 "evidence_sample_limit": {
@@ -255,7 +259,9 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "scan_limit": {
                     "type": "integer",
-                    "description": "For action=patterns: max messages to scan, default 10000, max 50000."
+                    "minimum": 1,
+                    "maximum": PATTERN_SCAN_LIMIT_MAX,
+                    "description": "For action=patterns: max messages to scan, default 10000, max 10000."
                 },
                 "top_n": {
                     "type": "integer",
@@ -359,7 +365,93 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                             "mode": {
                                 "enum": ["entity", "around", "explain", "evidence"]
                             }
-                        }
+                        },
+                        "oneOf": [
+                            {
+                                "properties": {
+                                    "mode": { "enum": ["entity", "around", "explain"] }
+                                },
+                                "oneOf": [
+                                    {
+                                        "required": ["entity_id"],
+                                        "not": {
+                                            "anyOf": [
+                                                { "required": ["entity_type"] },
+                                                { "required": ["key"] },
+                                                { "required": ["alias_type"] },
+                                                { "required": ["alias_key"] }
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "required": ["entity_type", "key"],
+                                        "not": {
+                                            "anyOf": [
+                                                { "required": ["entity_id"] },
+                                                { "required": ["alias_type"] },
+                                                { "required": ["alias_key"] }
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "required": ["alias_type", "alias_key"],
+                                        "not": {
+                                            "anyOf": [
+                                                { "required": ["entity_id"] },
+                                                { "required": ["entity_type"] },
+                                                { "required": ["key"] }
+                                            ]
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "properties": {
+                                    "mode": { "const": "evidence" }
+                                },
+                                "required": ["mode", "evidence_id"],
+                                "not": {
+                                    "anyOf": [
+                                        { "required": ["entity_id"] },
+                                        { "required": ["entity_type"] },
+                                        { "required": ["key"] },
+                                        { "required": ["alias_type"] },
+                                        { "required": ["alias_key"] }
+                                    ]
+                                }
+                            }
+                        ],
+                        "allOf": [
+                            {
+                                "if": {
+                                    "properties": {
+                                        "mode": { "const": "around" }
+                                    },
+                                    "required": ["mode"]
+                                },
+                                "then": {
+                                    "properties": {
+                                        "depth": {
+                                            "minimum": 1,
+                                            "maximum": 1
+                                        }
+                                    }
+                                }
+                            },
+                            {
+                                "if": {
+                                    "not": { "required": ["mode"] }
+                                },
+                                "then": {
+                                    "properties": {
+                                        "depth": {
+                                            "minimum": 1,
+                                            "maximum": 1
+                                        }
+                                    }
+                                }
+                            }
+                        ]
                     }
                 },
                 {

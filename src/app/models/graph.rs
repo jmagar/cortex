@@ -7,6 +7,7 @@ use super::*;
 pub struct GraphEntityLookupRequest {
     /// Adapter hint for MCP/CLI shared payloads. Service methods ignore it.
     pub mode: Option<String>,
+    pub entity_id: Option<i64>,
     pub entity_type: Option<String>,
     pub key: Option<String>,
     pub alias_type: Option<String>,

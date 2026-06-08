@@ -13,14 +13,15 @@ Patterns for defining skills (domain knowledge modules) within the cortex plugin
 
 ```
 plugins/
-  skills/
-    syslog/
-      SKILL.md           # Skill definition with tool reference and workflows
-    cortex-dr/
-      SKILL.md           # Full deployment diagnostic workflow
-    cortex-deploy-dropins/
-      SKILL.md           # Fleet rsyslog drop-in deployment workflow
-    ...
+  cortex/
+    skills/
+      cortex/
+        SKILL.md           # Skill definition with tool reference and workflows
+      cortex-dr/
+        SKILL.md           # Full deployment diagnostic workflow
+      cortex-deploy-dropins/
+        SKILL.md           # Fleet rsyslog drop-in deployment workflow
+      ...
 ```
 
 ## Skills
@@ -38,7 +39,7 @@ plugins/
 
 ### Contents
 
-`plugins/syslog/skills/cortex/SKILL.md` includes:
+`plugins/cortex/skills/cortex/SKILL.md` includes:
 - Tool inventory (1 tool: `cortex`, with the current MCP action set described)
 - Parameter reference for each tool
 - FTS5 query syntax guide
@@ -49,14 +50,14 @@ plugins/
 
 ```bash
 just validate-skills
-# Checks skill definitions under plugins/syslog/skills/
+# Checks skill definitions under plugins/cortex/skills/
 ```
 
 ## Adding a skill
 
 If additional skills are needed:
 
-1. Create `plugins/syslog/skills/<name>/SKILL.md`
+1. Create `plugins/cortex/skills/<name>/SKILL.md`
 2. Add frontmatter with `name` and `description`
 3. Document tools, workflows, and examples
 4. Run `just validate-skills`

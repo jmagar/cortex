@@ -72,7 +72,13 @@ fn search_logs_fts_plan_uses_bounded_candidate_window() {
     };
     let (sql, bindings) = search_logs_fts_sql(params.query.as_deref().unwrap(), &params, 100);
     assert!(sql.contains("fts_candidates"));
-    assert!(sql.contains(&format!("LIMIT {SEARCH_FTS_CANDIDATE_CAP}")));
+    assert!(sql.contains("LIMIT ?"));
+    assert!(
+        bindings
+            .iter()
+            .any(|value| matches!(value, rusqlite::types::Value::Integer(limit) if *limit == SEARCH_FTS_CANDIDATE_CAP as i64)),
+        "FTS candidate cap should be carried as a bound parameter"
+    );
 
     let plan = query_plan(&pool, &sql, &bindings);
     assert!(
@@ -82,6 +88,48 @@ fn search_logs_fts_plan_uses_bounded_candidate_window() {
     assert!(
         plan.contains("SCAN logs_fts VIRTUAL TABLE"),
         "FTS search should remain FTS-driven; got:\n{plan}"
+    );
+}
+
+#[test]
+fn tail_logs_limit_is_bound_and_clamped() {
+    let levels = vec!["err".to_string(), "warning".to_string()];
+    let (sql, bindings) = tail_logs_sql(
+        Some("host-a"),
+        Some("10.0.0.1:514"),
+        Some("sshd"),
+        Some(&levels),
+        50_000,
+    );
+    assert!(
+        sql.contains("LIMIT ?"),
+        "tail_logs must bind LIMIT instead of interpolating it: {sql}"
+    );
+    assert!(
+        bindings
+            .iter()
+            .any(|value| matches!(value, rusqlite::types::Value::Integer(limit) if *limit == 500)),
+        "tail_logs should clamp and bind limit=500, got: {bindings:?}"
+    );
+}
+
+#[test]
+fn get_error_summary_limit_is_bound_and_min_clamped() {
+    let (sql, bindings) = get_error_summary_sql(
+        Some("2026-01-01T00:00:00Z"),
+        Some("2026-01-01T01:00:00Z"),
+        true,
+        Some(0),
+    );
+    assert!(
+        sql.contains("LIMIT ?"),
+        "get_error_summary must bind LIMIT instead of interpolating it: {sql}"
+    );
+    assert!(
+        bindings
+            .iter()
+            .any(|value| matches!(value, rusqlite::types::Value::Integer(limit) if *limit == 1)),
+        "get_error_summary should clamp and bind limit=1, got: {bindings:?}"
     );
 }
 

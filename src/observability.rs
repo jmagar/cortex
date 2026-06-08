@@ -26,6 +26,7 @@ pub struct RuntimeObservability {
     docker_ingest_tasks_spawned: AtomicU64,
     docker_ingest_host_streams_active: AtomicU64,
     docker_ingest_container_streams_active: AtomicU64,
+    remote_docker_event_stream_failures: AtomicU64,
     ingest_entries_enqueued: AtomicU64,
     ingest_enqueue_errors: AtomicU64,
     ingest_queue_depth: AtomicUsize,
@@ -42,6 +43,8 @@ pub struct RuntimeObservability {
     last_docker_ingest_event_at: Mutex<Option<String>>,
     last_docker_ingest_log_at: Mutex<Option<String>>,
     last_docker_ingest_error_at: Mutex<Option<String>>,
+    last_remote_docker_event_stream_error_at: Mutex<Option<String>>,
+    last_remote_docker_event_stream_error: Mutex<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -66,6 +69,7 @@ pub struct RuntimeObservabilitySnapshot {
     pub docker_ingest_tasks_spawned: u64,
     pub docker_ingest_host_streams_active: u64,
     pub docker_ingest_container_streams_active: u64,
+    pub remote_docker_event_stream_failures: u64,
     pub ingest_entries_enqueued: u64,
     pub ingest_enqueue_errors: u64,
     pub ingest_queue_depth: usize,
@@ -83,6 +87,8 @@ pub struct RuntimeObservabilitySnapshot {
     pub last_docker_ingest_event_at: Option<String>,
     pub last_docker_ingest_log_at: Option<String>,
     pub last_docker_ingest_error_at: Option<String>,
+    pub last_remote_docker_event_stream_error_at: Option<String>,
+    pub last_remote_docker_event_stream_error: Option<String>,
 }
 
 impl RuntimeObservability {
@@ -227,6 +233,22 @@ impl RuntimeObservability {
             .ok();
     }
 
+    pub fn record_remote_docker_event_stream_failure(&self, host: &str, error: &str) {
+        self.remote_docker_event_stream_failures
+            .fetch_add(1, Ordering::Relaxed);
+        let now = now_iso();
+        *self
+            .last_remote_docker_event_stream_error_at
+            .lock()
+            .expect("last_remote_docker_event_stream_error_at mutex poisoned") = Some(now);
+        *self
+            .last_remote_docker_event_stream_error
+            .lock()
+            .expect("last_remote_docker_event_stream_error mutex poisoned") =
+            Some(format!("{host}: {error}"));
+        self.touch_error();
+    }
+
     pub fn record_enqueue_ok(&self, queue_depth: usize) {
         self.ingest_entries_enqueued.fetch_add(1, Ordering::Relaxed);
         self.set_queue_depth(queue_depth);
@@ -322,6 +344,9 @@ impl RuntimeObservability {
             docker_ingest_container_streams_active: self
                 .docker_ingest_container_streams_active
                 .load(Ordering::Relaxed),
+            remote_docker_event_stream_failures: self
+                .remote_docker_event_stream_failures
+                .load(Ordering::Relaxed),
             ingest_entries_enqueued: self.ingest_entries_enqueued.load(Ordering::Relaxed),
             ingest_enqueue_errors: self.ingest_enqueue_errors.load(Ordering::Relaxed),
             ingest_queue_depth: queue_depth,
@@ -362,6 +387,16 @@ impl RuntimeObservability {
                 .last_docker_ingest_error_at
                 .lock()
                 .expect("last_docker_ingest_error_at mutex poisoned")
+                .clone(),
+            last_remote_docker_event_stream_error_at: self
+                .last_remote_docker_event_stream_error_at
+                .lock()
+                .expect("last_remote_docker_event_stream_error_at mutex poisoned")
+                .clone(),
+            last_remote_docker_event_stream_error: self
+                .last_remote_docker_event_stream_error
+                .lock()
+                .expect("last_remote_docker_event_stream_error mutex poisoned")
                 .clone(),
         }
     }
@@ -432,6 +467,7 @@ mod tests {
         obs.record_docker_ingest_task_spawned();
         obs.record_docker_ingest_host_stream_started();
         obs.record_docker_ingest_container_stream_started();
+        obs.record_remote_docker_event_stream_failure("tootie", "exit status 255");
 
         let snapshot = obs.snapshot();
 
@@ -443,11 +479,17 @@ mod tests {
         assert_eq!(snapshot.docker_ingest_tasks_spawned, 1);
         assert_eq!(snapshot.docker_ingest_host_streams_active, 1);
         assert_eq!(snapshot.docker_ingest_container_streams_active, 1);
+        assert_eq!(snapshot.remote_docker_event_stream_failures, 1);
         assert!(snapshot.last_ingest_at.is_some());
         assert!(snapshot.last_error_at.is_some());
         assert!(snapshot.last_docker_ingest_event_at.is_some());
         assert!(snapshot.last_docker_ingest_log_at.is_some());
         assert!(snapshot.last_docker_ingest_error_at.is_some());
+        assert!(snapshot.last_remote_docker_event_stream_error_at.is_some());
+        assert_eq!(
+            snapshot.last_remote_docker_event_stream_error.as_deref(),
+            Some("tootie: exit status 255")
+        );
 
         obs.record_docker_ingest_host_stream_ended();
         obs.record_docker_ingest_host_stream_ended();

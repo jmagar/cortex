@@ -5,7 +5,7 @@ description: Re-run the cortex plugin setup hook with the current userConfig and
 
 # Cortex Redeploy
 
-Run the plugin setup hook directly, then verify the selected deployment mode is healthy.
+Run the binary-owned plugin setup hook directly, then verify the selected deployment mode is healthy.
 
 ## Before Running
 
@@ -18,7 +18,7 @@ If the user asked for a dry run only, stop after describing what would happen.
 1. Run:
 
    ```bash
-   ${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh
+   ${CLAUDE_PLUGIN_ROOT}/bin/cortex setup plugin-hook
    ```
 
    Capture stdout, stderr, and exit code.

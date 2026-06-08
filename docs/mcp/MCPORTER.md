@@ -31,7 +31,7 @@ mcporter config is at `config/mcporter.json`:
 
 ```json
 {
-  "servers": {
+  "mcpServers": {
     "cortex": {
       "transport": "http",
       "url": "http://localhost:3100/mcp"
@@ -44,16 +44,16 @@ mcporter config is at `config/mcporter.json`:
 
 ```bash
 # List available tools
-mcporter list syslog --config config/mcporter.json
+mcporter list cortex --config config/mcporter.json
 
 # Call actions through the single cortex tool
-mcporter call --config config/mcporter.json syslog.cortex action=stats
-mcporter call --config config/mcporter.json syslog.cortex action=tail n=10
-mcporter call --config config/mcporter.json syslog.cortex action=search query=error limit=5
-mcporter call --config config/mcporter.json syslog.cortex action=hosts
-mcporter call --config config/mcporter.json syslog.cortex action=errors
-mcporter call --config config/mcporter.json syslog.cortex action=status
-mcporter call --config config/mcporter.json syslog.cortex action=help
+mcporter call --config config/mcporter.json cortex.cortex action=stats
+mcporter call --config config/mcporter.json cortex.cortex action=tail n=10
+mcporter call --config config/mcporter.json cortex.cortex action=search query=error limit=5
+mcporter call --config config/mcporter.json cortex.cortex action=hosts
+mcporter call --config config/mcporter.json cortex.cortex action=errors
+mcporter call --config config/mcporter.json cortex.cortex action=status
+mcporter call --config config/mcporter.json cortex.cortex action=help
 ```
 
 ## Test assertions
@@ -77,8 +77,8 @@ The smoke test validates:
 
 ```
   PASS: health endpoint returns ok
-  PASS: syslog search returns count field
-  FAIL: syslog tail count should be <= 10, got 50
+  PASS: cortex search returns count field
+  FAIL: cortex tail count should be <= 10, got 50
   ---
   30 assertions: 29 PASS, 1 FAIL
 ```

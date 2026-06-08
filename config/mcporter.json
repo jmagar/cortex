@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "syslog": {
+    "cortex": {
       "url": "http://localhost:3100/mcp",
       "transport": "http"
     }

@@ -1,31 +1,41 @@
 use chrono::Utc;
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use crate::inventory::collectors::CollectorOutput;
 use crate::inventory::schema::{
     InventoryNode, ListenerFact, Provenance, StorageSummary, TrustLevel,
 };
-use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, run_ssh, ssh_config_buf};
+use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, SshContext};
 
 pub async fn collect(
     ssh_config: Option<&Path>,
     configured_hosts: &[String],
+    ssh_context: &SshContext,
     timeout: Duration,
 ) -> CollectorOutput {
-    let hosts = resolve_ssh_hosts(ssh_config, configured_hosts);
-    let ssh_config = ssh_config_buf(ssh_config);
+    let resolution = resolve_ssh_hosts(ssh_config, configured_hosts);
+    let mut out = CollectorOutput::new("remote_device");
+    for warning in &resolution.warnings {
+        out.warn("host_resolution", warning);
+    }
+    if resolution.no_usable_explicit_hosts() {
+        out.warn(
+            "host_resolution",
+            "remote device collector skipped because no explicitly configured SSH hosts were usable",
+        );
+        return out;
+    }
     let mut handles = Vec::new();
-    for host in hosts {
-        let ssh_config = ssh_config.clone();
+    for host in resolution.hosts {
+        let ssh_context = ssh_context.clone();
         handles.push(tokio::spawn(async move {
-            collect_host(host, ssh_config, timeout).await
+            collect_host(host, ssh_context, timeout).await
         }));
     }
 
-    let mut out = CollectorOutput::new("remote_device");
     for handle in handles {
         match handle.await {
             Ok(host_output) => merge_output(&mut out, host_output),
@@ -38,13 +48,9 @@ pub async fn collect(
     out
 }
 
-async fn collect_host(
-    host: String,
-    ssh_config: Option<PathBuf>,
-    timeout: Duration,
-) -> CollectorOutput {
+async fn collect_host(host: String, ssh_context: SshContext, timeout: Duration) -> CollectorOutput {
     let mut out = CollectorOutput::new("remote_device");
-    match run_ssh(ssh_config.as_deref(), &host, device_command(), timeout).await {
+    match ssh_context.run(&host, device_command(), timeout).await {
         Ok(output) if output.status == Some(0) => normalize_host(&host, &output.stdout, &mut out),
         Ok(output) => out.warn(
             "probe",

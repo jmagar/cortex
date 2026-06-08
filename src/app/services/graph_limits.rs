@@ -59,7 +59,7 @@ impl GraphLimits {
 
     pub(super) fn from_around_request(req: &GraphAroundRequest) -> ServiceResult<Self> {
         let depth = req.depth.unwrap_or(1);
-        if depth > 1 {
+        if depth != 1 {
             return Err(ServiceError::InvalidInput(
                 "graph around supports depth=1 only in v1".into(),
             ));

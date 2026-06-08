@@ -18,6 +18,7 @@ pub struct ContextResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GetLogRequest {
     pub id: i64,
 }
@@ -71,6 +72,7 @@ impl From<db::LogEntryWithRaw> for LogEntryWithRaw {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct IngestRateRequest {
     pub by_host: Option<bool>,
 }
@@ -127,6 +129,7 @@ impl From<db::IngestRatePerHost> for IngestRatePerHost {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SilentHostsRequest {
     /// Hosts whose `last_seen` is older than `silent_minutes` ago (default 30).
     pub silent_minutes: Option<u32>,
@@ -164,6 +167,7 @@ impl From<db::SilentHostEntry> for SilentHostEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ClockSkewRequest {
     pub since: Option<String>,
     /// Max host rows to return, sorted by absolute average skew.
@@ -198,6 +202,7 @@ impl From<db::ClockSkewEntry> for ClockSkewEntry {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnomaliesRequest {
     /// Recent window in minutes (default 15, max 1440).
     pub recent_minutes: Option<u32>,
@@ -246,6 +251,7 @@ impl From<db::AnomalyEntry> for AnomalyEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CompareRequest {
     pub a_from: String,
     pub a_to: String,

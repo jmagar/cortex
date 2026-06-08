@@ -60,7 +60,7 @@ echo
 check "jq is available" "command -v jq"
 
 PLUGIN_JSON=".claude-plugin/plugin.json"
-MCP_JSON="plugins/cortex/.mcp.json"
+MCP_JSON="plugins/cortex/mcp.json"
 HOOKS_JSON="plugins/cortex/hooks/hooks.json"
 SKILLS_DIR="plugins/cortex/skills"
 
@@ -68,12 +68,11 @@ check "plugin manifest exists" "test -f '${PLUGIN_JSON}'"
 check "plugin manifest is valid JSON" "jq empty '${PLUGIN_JSON}'"
 check "plugin name is cortex" "test \"\$(jq -er '.name' '${PLUGIN_JSON}')\" = 'cortex'"
 check "plugin manifest omits version" "jq -er 'has(\"version\") | not' '${PLUGIN_JSON}'"
-check "plugin points to MCP config" "test \"\$(jq -er '.mcpServers' '${PLUGIN_JSON}')\" = './plugins/cortex/.mcp.json'"
 check "plugin points to hooks config" "test \"\$(jq -er '.hooks' '${PLUGIN_JSON}')\" = './plugins/cortex/hooks/hooks.json'"
 check "plugin points to skills directory" "test \"\$(jq -er '.skills' '${PLUGIN_JSON}')\" = './plugins/cortex/skills'"
 check "plugin declares server_url userConfig" "jq -er '.userConfig.server_url.default == \"http://localhost:3100\"' '${PLUGIN_JSON}'"
-check "plugin declares syslog_port userConfig" "jq -er '.userConfig.syslog_port.default == 1514' '${PLUGIN_JSON}'"
-check "plugin declares syslog_host_port userConfig" "jq -er '.userConfig.syslog_host_port.default == 1514' '${PLUGIN_JSON}'"
+check "plugin declares cortex_receiver_port userConfig" "jq -er '.userConfig.cortex_receiver_port.default == 1514' '${PLUGIN_JSON}'"
+check "plugin declares cortex_receiver_host_port userConfig" "jq -er '.userConfig.cortex_receiver_host_port.default == 1514' '${PLUGIN_JSON}'"
 check "plugin declares mcp_port userConfig" "jq -er '.userConfig.mcp_port.default == 3100' '${PLUGIN_JSON}'"
 check "plugin declares api_token as sensitive" "jq -er '.userConfig.api_token.sensitive == true' '${PLUGIN_JSON}'"
 
@@ -86,8 +85,8 @@ check "MCP Authorization header uses api_token" "jq -er '.mcpServers.cortex.head
 
 check "hooks config exists" "test -f '${HOOKS_JSON}'"
 check "hooks config is valid JSON" "jq empty '${HOOKS_JSON}'"
-check "SessionStart runs plugin setup" "jq -er '.hooks.SessionStart[]?.hooks[]?.command == \"\${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh\"' '${HOOKS_JSON}'"
-check "ConfigChange runs plugin setup" "jq -er '.hooks.ConfigChange[]? | select(.matcher == \"user_settings\") | .hooks[]?.command == \"\${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh\"' '${HOOKS_JSON}'"
+check "SessionStart runs binary plugin hook" "jq -er '.hooks.SessionStart[]?.hooks[]?.command == \"\${CLAUDE_PLUGIN_ROOT}/bin/cortex setup plugin-hook\"' '${HOOKS_JSON}'"
+check "ConfigChange runs binary plugin hook" "jq -er '.hooks.ConfigChange[]? | select(.matcher == \"user_settings\") | .hooks[]?.command == \"\${CLAUDE_PLUGIN_ROOT}/bin/cortex setup plugin-hook\"' '${HOOKS_JSON}'"
 
 check "skills directory exists" "test -d '${SKILLS_DIR}'"
 

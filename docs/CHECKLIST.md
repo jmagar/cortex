@@ -1,10 +1,14 @@
-# Plugin Checklist -- cortex
+# Release Audit Checklist -- cortex
 
-Pre-release and quality checklist. Complete all items before tagging a release.
+Supplemental pre-release audit checklist. `docs/RELEASE.md` is the source of
+truth for hermetic and live release gates.
 
 ## Version and metadata
 
-- [ ] All version-bearing files in sync: `Cargo.toml`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`, `server.json`
+- [ ] Version-bearing files in sync: `Cargo.toml`, `Cargo.lock`,
+      `server.json`, `mcpb/manifest.json`, and `CHANGELOG.md`
+- [ ] Plugin manifests are unversioned:
+      `.claude-plugin/plugin.json` and `plugins/**/plugin.json`
 - [ ] `CHANGELOG.md` has an entry for the new version
 - [ ] README version badge is correct
 
@@ -18,7 +22,7 @@ Pre-release and quality checklist. Complete all items before tagging a release.
 
 - [ ] `CLAUDE.md` is current and matches repo structure
 - [ ] `README.md` has up-to-date tool reference and environment variable table
-- [ ] `skills/cortex/SKILL.md` has correct frontmatter and tool descriptions
+- [ ] `plugins/cortex/skills/cortex/SKILL.md` has correct frontmatter and tool descriptions
 - [ ] Setup instructions work from a clean clone
 
 ## Security
@@ -34,26 +38,27 @@ Pre-release and quality checklist. Complete all items before tagging a release.
 
 ## Build and test
 
-- [ ] Docker image builds: `just docker-build`
-- [ ] Docker healthcheck passes: `just health`
-- [ ] CI pipeline passes: `just lint && just test`
+- [ ] Docker image builds: `docker compose build`
+- [ ] Docker healthcheck passes against the intended deployment
+- [ ] CI pipeline passes the hermetic gates in `docs/RELEASE.md`
 - [ ] Live smoke test passes: `just test-live`
-- [ ] `cargo clippy -- -D warnings` produces zero warnings
+- [ ] `cargo clippy --all-targets -- -D warnings` produces zero warnings
 
 ## Deployment
 
 - [ ] `docker-compose.yml` uses correct ports (1514 UDP/TCP, 3100 TCP)
-- [ ] `entrypoint.sh` is executable
-- [ ] SWAG reverse proxy config tested (see `docs/syslog.subdomain.conf`)
+- [ ] `cortex compose doctor` passes before lifecycle mutations
+- [ ] Reverse proxy config tested when exposing the service externally
 
 ## Registry (if publishing)
 
 - [ ] `server.json` for MCP registry is valid JSON with correct version
+- [ ] `mcpb/manifest.json` is valid JSON with matching package metadata
 - [ ] OCI image published to `ghcr.io/jmagar/cortex`
 - [ ] Crate published to crates.io (if applicable)
 - [ ] DNS verification for `tv.tootie/cortex`
 
 ## Marketplace (if applicable)
 
-- [ ] Entry in `claude-homelab` marketplace manifest
-- [ ] Plugin installs correctly: `/plugin marketplace add jmagar/claude-homelab`
+- [ ] Entry in the active plugin marketplace manifest is current
+- [ ] Plugin installs correctly from the current marketplace source

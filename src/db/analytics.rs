@@ -850,6 +850,15 @@ pub struct PatternEntry {
     pub hostnames: Vec<String>,
 }
 
+pub(crate) const PATTERN_SCAN_LIMIT_MAX: u32 = 10_000;
+
+#[derive(Debug, Clone)]
+pub(crate) struct PatternSourceRow {
+    timestamp: String,
+    hostname: String,
+    message: String,
+}
+
 fn split_csv(value: Option<String>) -> Vec<String> {
     value
         .unwrap_or_default()
@@ -860,7 +869,7 @@ fn split_csv(value: Option<String>) -> Vec<String> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn patterns(
+pub(crate) fn fetch_pattern_rows(
     pool: &DbPool,
     from: Option<&str>,
     to: Option<&str>,
@@ -868,32 +877,56 @@ pub fn patterns(
     app_name: Option<&str>,
     severity_in: Option<&[String]>,
     scan_limit: u32,
-    top_n: u32,
-) -> Result<(Vec<PatternEntry>, i64, bool)> {
+) -> Result<(Vec<PatternSourceRow>, bool)> {
     let conn = pool.get()?;
-    let scan_limit = scan_limit.clamp(1, 10_000);
+    let (sql, bindings, scan_limit) =
+        pattern_rows_sql(from, to, hostname, app_name, severity_in, scan_limit);
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), |r| {
+        Ok(PatternSourceRow {
+            timestamp: r.get::<_, String>(0)?,
+            hostname: r.get::<_, String>(1)?,
+            message: r.get::<_, String>(2)?,
+        })
+    })?;
+    let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    let overflow = rows.len() > scan_limit as usize;
+    rows.truncate(scan_limit as usize);
+    Ok((rows, overflow))
+}
+
+fn pattern_rows_sql(
+    from: Option<&str>,
+    to: Option<&str>,
+    hostname: Option<&str>,
+    app_name: Option<&str>,
+    severity_in: Option<&[String]>,
+    scan_limit: u32,
+) -> (String, Vec<rusqlite::types::Value>, u32) {
+    let scan_limit = scan_limit.clamp(1, PATTERN_SCAN_LIMIT_MAX);
 
     let mut sql = String::from("SELECT timestamp, hostname, message FROM logs WHERE 1=1");
-    let mut bindings: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
     let mut idx = 1usize;
     if let Some(f) = from {
         sql.push_str(&format!(" AND timestamp >= ?{idx}"));
-        bindings.push(Box::new(f.to_string()));
+        bindings.push(rusqlite::types::Value::Text(f.to_string()));
         idx += 1;
     }
     if let Some(t) = to {
         sql.push_str(&format!(" AND timestamp <= ?{idx}"));
-        bindings.push(Box::new(t.to_string()));
+        bindings.push(rusqlite::types::Value::Text(t.to_string()));
         idx += 1;
     }
     if let Some(h) = hostname {
         sql.push_str(&format!(" AND hostname = ?{idx}"));
-        bindings.push(Box::new(h.to_string()));
+        bindings.push(rusqlite::types::Value::Text(h.to_string()));
         idx += 1;
     }
     if let Some(a) = app_name {
         sql.push_str(&format!(" AND app_name = ?{idx}"));
-        bindings.push(Box::new(a.to_string()));
+        bindings.push(rusqlite::types::Value::Text(a.to_string()));
         idx += 1;
     }
     if let Some(levels) = severity_in {
@@ -902,26 +935,21 @@ pub fn patterns(
                 (0..levels.len()).map(|i| format!("?{}", idx + i)).collect();
             sql.push_str(&format!(" AND severity IN ({})", placeholders.join(", ")));
             for lvl in levels {
-                bindings.push(Box::new(lvl.clone()));
+                bindings.push(rusqlite::types::Value::Text(lvl.clone()));
+                idx += 1;
             }
         }
     }
     // Cap rows scanned to bound CPU/memory — we ask for one extra to detect truncation.
-    sql.push_str(&format!(
-        " ORDER BY timestamp DESC LIMIT {}",
-        scan_limit + 1
-    ));
+    sql.push_str(&format!(" ORDER BY timestamp DESC LIMIT ?{idx}"));
+    bindings.push(rusqlite::types::Value::Integer(i64::from(scan_limit) + 1));
+    (sql, bindings, scan_limit)
+}
 
-    let mut stmt = conn.prepare(&sql)?;
-    let bind_refs: Vec<&dyn rusqlite::types::ToSql> = bindings.iter().map(|b| b.as_ref()).collect();
-    let rows = stmt.query_map(rusqlite::params_from_iter(bind_refs.iter().copied()), |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-        ))
-    })?;
-
+pub(crate) fn cluster_pattern_rows(
+    rows: Vec<PatternSourceRow>,
+    top_n: u32,
+) -> (Vec<PatternEntry>, i64) {
     struct Acc {
         count: i64,
         sample: String,
@@ -930,35 +958,31 @@ pub fn patterns(
         hosts: BTreeMap<String, i64>,
     }
     let mut by_template: BTreeMap<String, Acc> = BTreeMap::new();
-    let mut scanned = 0i64;
-    let mut overflow = false;
     for row in rows {
-        let (ts, host, msg) = row?;
-        scanned += 1;
-        if scanned > scan_limit as i64 {
-            overflow = true;
-            break;
-        }
-        let template = crate::app::error_detection::normalize::normalize_template(&msg);
+        let PatternSourceRow {
+            timestamp,
+            hostname,
+            message,
+        } = row;
+        let template = crate::app::error_detection::normalize::normalize_template(&message);
         let entry = by_template.entry(template).or_insert_with(|| Acc {
             count: 0,
-            sample: msg.clone(),
-            first_seen: ts.clone(),
-            last_seen: ts.clone(),
+            sample: message.clone(),
+            first_seen: timestamp.clone(),
+            last_seen: timestamp.clone(),
             hosts: BTreeMap::new(),
         });
         entry.count += 1;
-        if ts < entry.first_seen {
-            entry.first_seen = ts.clone();
+        if timestamp < entry.first_seen {
+            entry.first_seen = timestamp.clone();
         }
-        if ts > entry.last_seen {
-            entry.last_seen = ts;
+        if timestamp > entry.last_seen {
+            entry.last_seen = timestamp;
         }
-        *entry.hosts.entry(host).or_insert(0) += 1;
+        *entry.hosts.entry(hostname).or_insert(0) += 1;
     }
 
-    let total_scanned = scanned.min(scan_limit as i64);
-
+    let total_scanned = by_template.values().map(|entry| entry.count).sum();
     let mut out: Vec<PatternEntry> = by_template
         .into_iter()
         .map(|(template, acc)| {
@@ -979,7 +1003,7 @@ pub fn patterns(
         .collect();
     out.sort_by_key(|entry| Reverse(entry.count));
     out.truncate(top_n as usize);
-    Ok((out, total_scanned, overflow))
+    (out, total_scanned)
 }
 
 // -----------------------------------------------------------------------------

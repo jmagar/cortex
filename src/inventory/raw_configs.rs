@@ -11,21 +11,25 @@ use crate::inventory::redaction::RedactedArtifact;
 use crate::inventory::schema::{
     ArtifactRef, ComposeProject, PortMapping, Provenance, ReverseProxyRoute,
 };
+use crate::inventory::ssh::SshContext;
 use crate::inventory::storage::{write_artifact, InventoryPaths};
 
-pub async fn collect(
-    compose_paths: &[PathBuf],
-    proxy_paths: &[PathBuf],
-    ssh_config: Option<&Path>,
-    ssh_hosts: &[String],
-    paths: &InventoryPaths,
-    run_id: &str,
-    timeout: Duration,
-) -> CollectorOutput {
-    let compose_paths = compose_paths.to_vec();
-    let proxy_paths = proxy_paths.to_vec();
-    let paths = paths.clone();
-    let run_id = run_id.to_string();
+pub struct CollectOptions<'a> {
+    pub compose_paths: &'a [PathBuf],
+    pub proxy_paths: &'a [PathBuf],
+    pub ssh_config: Option<&'a Path>,
+    pub ssh_hosts: &'a [String],
+    pub ssh_context: &'a SshContext,
+    pub paths: &'a InventoryPaths,
+    pub run_id: &'a str,
+    pub timeout: Duration,
+}
+
+pub async fn collect(options: CollectOptions<'_>) -> CollectorOutput {
+    let compose_paths = options.compose_paths.to_vec();
+    let proxy_paths = options.proxy_paths.to_vec();
+    let paths = options.paths.clone();
+    let run_id = options.run_id.to_string();
     let local_paths = paths.clone();
     let local_run_id = run_id.clone();
     let mut out = tokio::task::spawn_blocking(move || {
@@ -40,9 +44,15 @@ pub async fn collect(
         );
         out
     });
-    let remote =
-        crate::inventory::remote_configs::collect(ssh_config, ssh_hosts, &paths, &run_id, timeout)
-            .await;
+    let remote = crate::inventory::remote_configs::collect(
+        options.ssh_config,
+        options.ssh_hosts,
+        options.ssh_context,
+        &paths,
+        &run_id,
+        options.timeout,
+    )
+    .await;
     merge_output(&mut out, remote);
     out
 }

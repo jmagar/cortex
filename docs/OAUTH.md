@@ -18,7 +18,7 @@ Client (browser/Claude)  │  cortex HTTP :3100             │
     Bearer static     ──▶    constant-time compare            │
                          │                                    │
                          │  RMCP tool dispatch                │
-                         │    scope check (syslog:read)       │
+                         │    scope check (cortex:read)       │
                          │    → SyslogService / SQLite        │
                          └────────────────────────────────────┘
 
@@ -39,7 +39,7 @@ Intentionally not mounted:
 1. Client sends unauthenticated request to `/mcp` → receives `401 WWW-Authenticate: Bearer resource_metadata="…"`.
 2. Client fetches `/.well-known/oauth-protected-resource` to discover the authorization server.
 3. Client fetches `/.well-known/oauth-authorization-server` for the full metadata document.
-4. Client constructs an `/authorize` URL (PKCE S256, `scope=syslog:read`), opens in browser.
+4. Client constructs an `/authorize` URL (PKCE S256, `scope=cortex:read`), opens in browser.
 5. User authenticates with Google; Google redirects to `/auth/google/callback`.
 6. Server validates the Google email against `admin_email` plus any lab-auth `allowed_users` rows, issues an RS256 access token (1h TTL) and a refresh token (8h TTL).
 7. Client uses `POST /token?grant_type=refresh_token` to obtain new access tokens without re-prompting.
@@ -62,7 +62,7 @@ Intentionally not mounted:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `CORTEX_AUTH_MODE` | yes | Set to `oauth` to activate |
-| `CORTEX_PUBLIC_URL` | yes | Base URL (e.g. `https://syslog.example.com`). Sets issuer + audience. |
+| `CORTEX_PUBLIC_URL` | yes | Base URL (e.g. `https://cortex.example.com`). Sets issuer + audience. |
 | `CORTEX_GOOGLE_CLIENT_ID` | yes | From Google Console |
 | `CORTEX_GOOGLE_CLIENT_SECRET` | yes | From Google Console |
 | `CORTEX_AUTH_ADMIN_EMAIL` | yes | Bootstrap allowed Google account |
@@ -76,7 +76,7 @@ These are **not** env vars — they go in `config.toml`:
 ```toml
 [mcp.auth]
 mode = "oauth"
-public_url = "https://syslog.example.com"
+public_url = "https://cortex.example.com"
 google_client_id = "..."         # overridden by CORTEX_GOOGLE_CLIENT_ID
 google_client_secret = "..."     # overridden by CORTEX_GOOGLE_CLIENT_SECRET
 
@@ -108,6 +108,7 @@ disable_static_token_with_oauth = true   # default: true
 - **`admin_email` is required**. It is the only config-backed OAuth email gate cortex passes into lab-auth today. lab-auth also honors rows in its `allowed_users` table. Startup rejects OAuth configs with a blank `admin_email`, and also rejects non-empty config-level `allowed_emails` until cortex can pass or enforce that list.
 - **`disable_static_token_with_oauth` defaults to `true` for `/mcp`**. OAuth-mode `/mcp` rejects `CORTEX_TOKEN` by default. Set `CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in config.toml for break-glass bearer access.
 - **Non-loopback OAuth deployments still need `CORTEX_TOKEN` for OTLP `/v1/logs` unless OTLP exposure is loopback-only or service auth is explicitly disabled behind an upstream auth layer.** OTLP ingest does not accept OAuth JWTs today.
+- **OAuth file-permission checks are Unix-oriented and fail closed on non-Unix platforms.** Run OAuth mode on Linux/Unix until cortex grows audited non-Unix ACL validation.
 - **Stdio mode always uses LoopbackDev**. `cargo run -- mcp` ignores the auth config entirely — no credentials are needed or enforced.
 - **Docker bind-mount ownership**. `auth.db` and `auth-jwt.pem` are written by the container UID. Host-side backup scripts may need `sudo` or a sidecar copy step.
 - **`/register` is never mounted**. cortex supports authorization-code OAuth routes but disables dynamic client registration.

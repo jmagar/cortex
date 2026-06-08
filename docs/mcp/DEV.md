@@ -50,7 +50,7 @@ cortex/
    curl -s -X POST http://localhost:3100/mcp \
      -H "Content-Type: application/json" \
      -H "Accept: application/json, text/event-stream" \
-     -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"syslog","arguments":{"action":"tail","n":10}}}'
+     -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"tail","n":10}}}'
    ```
 4. **Run checks**:
    ```bash
@@ -64,11 +64,11 @@ cortex/
 ## Adding a new MCP action
 
 1. **Register the action** -- add an `ActionSpec` row to `src/mcp/actions.rs::ACTION_SPECS`. The schema enum and scope checks are derived from this table.
-2. **Add adapter entry** -- add a match arm in `tool_syslog()`.
+2. **Add adapter entry** -- add a match arm in `tool_cortex()`.
 3. **Implement handler** -- write an async function that calls `SyslogService`.
 4. **Add database query** -- implement the query function in `src/db.rs` with parameterized SQL.
 5. **Add sidecar unit tests** -- place tests in the relevant `src/<module>_tests.rs` file and keep the source module limited to the `#[cfg(test)] #[path = "..._tests.rs"] mod tests;` hook.
-6. **Update syslog help** -- add the action to the help text in `tool_syslog_help()`.
+6. **Update cortex help** -- add the action to the help text in `tool_cortex_help()`.
 7. **Update public docs** -- refresh `docs/mcp/TOOLS.md`, `docs/mcp/SCHEMA.md`, `docs/mcp/TESTS.md`, and relevant skill docs.
 8. **Update plugin manifests** -- keep the public tool name as `cortex`.
 
@@ -95,9 +95,9 @@ RUST_LOG=cortex=debug,tower_http=info cargo run
 ### mcporter testing
 
 ```bash
-mcporter list syslog --config config/mcporter.json
-mcporter call --config config/mcporter.json syslog.cortex action=stats
-mcporter call --config config/mcporter.json syslog.cortex action=tail n=10
+mcporter list cortex --config config/mcporter.json
+mcporter call --config config/mcporter.json cortex.cortex action=stats
+mcporter call --config config/mcporter.json cortex.cortex action=tail n=10
 ```
 
 ### MCP Inspector

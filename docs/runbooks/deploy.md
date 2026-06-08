@@ -90,7 +90,7 @@ docker compose logs -f cortex
 
 # 5. Verify health and storage state after completion.
 curl -sf http://localhost:3100/health
-mcporter call --config config/mcporter.json syslog.cortex action=stats
+mcporter call --config config/mcporter.json cortex.cortex action=stats
 ```
 
 Expected operator signals:

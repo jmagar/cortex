@@ -468,7 +468,7 @@ print('ok' if d.get('total_candidates', 0) >= 1 else 'missing')
     assert_eq "search_sessions: seeded fixture is searchable" "$SEARCH_SESSIONS_FOUND" "ok"
 fi
 
-ABUSE=$(mcp_call abuse "project=${AI_SMOKE_PROJECT}" "terms=ai-smoke-authentication" "limit=5" "before=1" "after=1" 2>&1)
+ABUSE=$(mcp_call abuse "project=${AI_SMOKE_PROJECT}" 'terms=["ai-smoke-authentication"]' "limit=5" "before=1" "after=1" 2>&1)
 assert_no_error "abuse: no error" "$ABUSE"
 ABUSE_VALID=$(printf '%s\n' "$ABUSE" | python3 -c "
 import sys, json

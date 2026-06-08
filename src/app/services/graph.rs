@@ -3,6 +3,18 @@ use super::graph_safety::*;
 use super::graph_support::*;
 use super::*;
 
+enum GraphTarget {
+    EntityId(i64),
+    CanonicalKey {
+        entity_type: String,
+        key: String,
+    },
+    Alias {
+        alias_type: String,
+        alias_key: String,
+    },
+}
+
 impl CortexService {
     pub async fn graph_entity_lookup(
         &self,
@@ -12,52 +24,16 @@ impl CortexService {
         let status = self
             .run_db("graph.status", db::graph::graph_projection_status)
             .await?;
-
-        if let (Some(entity_type), Some(key)) = (req.entity_type.clone(), req.key.clone()) {
-            validate_graph_entity_type(&entity_type)?;
-            let entity = self
-                .run_db("graph.entity_key", move |pool| {
-                    db::graph::find_graph_entity_by_key(pool, &entity_type, &key)
-                })
-                .await?
-                .ok_or_else(|| ServiceError::NotFound("graph entity not found".into()))?;
-            return Ok(GraphEntityLookupResponse {
-                resolved_entity: Some(entity.into()),
-                candidates: Vec::new(),
-                metadata: graph_metadata(&status, limits, false, None),
-            });
-        }
-
-        let alias_type = req
-            .alias_type
-            .clone()
-            .ok_or_else(|| ServiceError::InvalidInput("alias_type is required".into()))?;
-        let alias_key = req
-            .alias_key
-            .clone()
-            .ok_or_else(|| ServiceError::InvalidInput("alias_key is required".into()))?;
-        if alias_type.trim().is_empty() || alias_key.trim().is_empty() {
-            return Err(ServiceError::InvalidInput(
-                "alias_type and alias_key must be non-empty".into(),
-            ));
-        }
-        let candidates = self
-            .run_db("graph.entity_alias", move |pool| {
-                db::graph::find_graph_entities_by_alias(pool, &alias_type, &alias_key, limits.limit)
-            })
+        let target = resolve_graph_target(
+            req.entity_id,
+            req.entity_type.clone(),
+            req.key.clone(),
+            req.alias_type.clone(),
+            req.alias_key.clone(),
+        )?;
+        let (resolved_entity, candidates) = self
+            .resolve_graph_target_entity(target, limits.limit)
             .await?;
-        if candidates.is_empty() {
-            return Err(ServiceError::NotFound(
-                "graph entity alias not found".into(),
-            ));
-        }
-        let candidates: Vec<GraphEntityCandidate> =
-            candidates.into_iter().map(Into::into).collect();
-        let resolved_entity = if candidates.len() == 1 {
-            candidates.first().map(|candidate| candidate.entity.clone())
-        } else {
-            None
-        };
         Ok(GraphEntityLookupResponse {
             resolved_entity,
             candidates,
@@ -73,30 +49,16 @@ impl CortexService {
         let status = self
             .run_db("graph.status", db::graph::graph_projection_status)
             .await?;
-
-        let (resolved_entity, candidates) = if let Some(entity_id) = req.entity_id {
-            let entity = self
-                .run_db("graph.entity_id", move |pool| {
-                    db::graph::find_graph_entity_by_id(pool, entity_id)
-                })
-                .await?
-                .ok_or_else(|| ServiceError::NotFound("graph entity not found".into()))?;
-            (Some(GraphEntity::from(entity)), Vec::new())
-        } else {
-            let lookup = self
-                .graph_entity_lookup(GraphEntityLookupRequest {
-                    mode: None,
-                    entity_type: req.entity_type.clone(),
-                    key: req.key.clone(),
-                    alias_type: req.alias_type.clone(),
-                    alias_key: req.alias_key.clone(),
-                    limit: Some(limits.limit),
-                    evidence_sample_limit: Some(limits.evidence_sample_limit),
-                    payload_budget: Some(limits.payload_budget),
-                })
-                .await?;
-            (lookup.resolved_entity, lookup.candidates)
-        };
+        let target = resolve_graph_target(
+            req.entity_id,
+            req.entity_type.clone(),
+            req.key.clone(),
+            req.alias_type.clone(),
+            req.alias_key.clone(),
+        )?;
+        let (resolved_entity, candidates) = self
+            .resolve_graph_target_entity(target, limits.limit)
+            .await?;
 
         let Some(entity) = resolved_entity.clone() else {
             return Ok(GraphAroundResponse {
@@ -175,30 +137,16 @@ impl CortexService {
         let status = self
             .run_db("graph.status", db::graph::graph_projection_status)
             .await?;
-
-        let (resolved_entity, candidates) = if let Some(entity_id) = req.entity_id {
-            let entity = self
-                .run_db("graph.entity_id", move |pool| {
-                    db::graph::find_graph_entity_by_id(pool, entity_id)
-                })
-                .await?
-                .ok_or_else(|| ServiceError::NotFound("graph entity not found".into()))?;
-            (Some(GraphEntity::from(entity)), Vec::new())
-        } else {
-            let lookup = self
-                .graph_entity_lookup(GraphEntityLookupRequest {
-                    mode: None,
-                    entity_type: req.entity_type.clone(),
-                    key: req.key.clone(),
-                    alias_type: req.alias_type.clone(),
-                    alias_key: req.alias_key.clone(),
-                    limit: Some(limits.beam_width),
-                    evidence_sample_limit: Some(limits.evidence_sample_limit),
-                    payload_budget: Some(limits.payload_budget),
-                })
-                .await?;
-            (lookup.resolved_entity, lookup.candidates)
-        };
+        let target = resolve_graph_target(
+            req.entity_id,
+            req.entity_type.clone(),
+            req.key.clone(),
+            req.alias_type.clone(),
+            req.alias_key.clone(),
+        )?;
+        let (resolved_entity, candidates) = self
+            .resolve_graph_target_entity(target, limits.beam_width)
+            .await?;
 
         let Some(root) = resolved_entity.clone() else {
             return Ok(GraphExplainResponse {
@@ -495,4 +443,115 @@ impl CortexService {
             status,
         })
     }
+
+    async fn resolve_graph_target_entity(
+        &self,
+        target: GraphTarget,
+        candidate_limit: u32,
+    ) -> ServiceResult<(Option<GraphEntity>, Vec<GraphEntityCandidate>)> {
+        match target {
+            GraphTarget::EntityId(entity_id) => {
+                let entity = self
+                    .run_db("graph.entity_id", move |pool| {
+                        db::graph::find_graph_entity_by_id(pool, entity_id)
+                    })
+                    .await?
+                    .ok_or_else(|| ServiceError::NotFound("graph entity not found".into()))?;
+                Ok((Some(entity.into()), Vec::new()))
+            }
+            GraphTarget::CanonicalKey { entity_type, key } => {
+                validate_graph_entity_type(&entity_type)?;
+                let entity = self
+                    .run_db("graph.entity_key", move |pool| {
+                        db::graph::find_graph_entity_by_key(pool, &entity_type, &key)
+                    })
+                    .await?
+                    .ok_or_else(|| ServiceError::NotFound("graph entity not found".into()))?;
+                Ok((Some(entity.into()), Vec::new()))
+            }
+            GraphTarget::Alias {
+                alias_type,
+                alias_key,
+            } => {
+                let candidates = self
+                    .run_db("graph.entity_alias", move |pool| {
+                        db::graph::find_graph_entities_by_alias(
+                            pool,
+                            &alias_type,
+                            &alias_key,
+                            candidate_limit,
+                        )
+                    })
+                    .await?;
+                if candidates.is_empty() {
+                    return Err(ServiceError::NotFound(
+                        "graph entity alias not found".into(),
+                    ));
+                }
+                let candidates: Vec<GraphEntityCandidate> =
+                    candidates.into_iter().map(Into::into).collect();
+                let resolved_entity = if candidates.len() == 1 {
+                    candidates.first().map(|candidate| candidate.entity.clone())
+                } else {
+                    None
+                };
+                Ok((resolved_entity, candidates))
+            }
+        }
+    }
+}
+
+fn resolve_graph_target(
+    entity_id: Option<i64>,
+    entity_type: Option<String>,
+    key: Option<String>,
+    alias_type: Option<String>,
+    alias_key: Option<String>,
+) -> ServiceResult<GraphTarget> {
+    let has_entity_id = entity_id.is_some();
+    let has_canonical = entity_type.is_some() || key.is_some();
+    let has_alias = alias_type.is_some() || alias_key.is_some();
+    let strategy_count = [has_entity_id, has_canonical, has_alias]
+        .into_iter()
+        .filter(|present| *present)
+        .count();
+    if strategy_count != 1 {
+        return Err(ServiceError::InvalidInput(
+            "graph target requires exactly one lookup strategy: entity_id, entity_type+key, or alias_type+alias_key".into(),
+        ));
+    }
+
+    if let Some(entity_id) = entity_id {
+        if entity_id <= 0 {
+            return Err(ServiceError::InvalidInput(
+                "entity_id must be a positive integer".into(),
+            ));
+        }
+        return Ok(GraphTarget::EntityId(entity_id));
+    }
+
+    if has_canonical {
+        let entity_type = non_empty_graph_target_field(entity_type, "entity_type")?;
+        let key = non_empty_graph_target_field(key, "key")?;
+        return Ok(GraphTarget::CanonicalKey { entity_type, key });
+    }
+
+    let alias_type = non_empty_graph_target_field(alias_type, "alias_type")?;
+    let alias_key = non_empty_graph_target_field(alias_key, "alias_key")?;
+    Ok(GraphTarget::Alias {
+        alias_type,
+        alias_key,
+    })
+}
+
+fn non_empty_graph_target_field(value: Option<String>, field: &str) -> ServiceResult<String> {
+    let value = value.ok_or_else(|| {
+        ServiceError::InvalidInput(format!("graph target field `{field}` is required"))
+    })?;
+    if value.trim().is_empty() {
+        return Err(ServiceError::InvalidInput(format!(
+            "graph target field `{field}` must be non-empty"
+        )));
+    }
+    Ok(value)
 }

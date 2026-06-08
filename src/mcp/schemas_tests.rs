@@ -95,6 +95,10 @@ fn schema_apps_exposes_pagination_and_total() {
 fn schema_graph_exposes_lookup_and_neighborhood_arguments() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];
+    assert_eq!(tools[0]["inputSchema"]["additionalProperties"], false);
+    assert_eq!(props["entity_id"]["minimum"], 1);
+    assert_eq!(props["depth"]["minimum"], 1);
+    assert_eq!(props["depth"]["maximum"], 3);
     for name in [
         "mode",
         "entity_id",
@@ -119,6 +123,35 @@ fn schema_graph_exposes_lookup_and_neighborhood_arguments() {
             .contains("action=graph"),
         "limit description must document graph caps"
     );
+}
+
+#[test]
+fn schema_graph_target_constraints_match_runtime_validation() {
+    let tools = tool_definitions();
+    let constraints = tools[0]["inputSchema"]["allOf"].as_array().unwrap();
+    let graph_then = constraints
+        .iter()
+        .find(|constraint| constraint["if"]["properties"]["action"]["const"] == "graph")
+        .map(|constraint| &constraint["then"])
+        .unwrap();
+
+    let target_or_evidence = graph_then["oneOf"].as_array().unwrap();
+    assert_eq!(target_or_evidence.len(), 2);
+    let target_strategies = target_or_evidence[0]["oneOf"].as_array().unwrap();
+    assert_eq!(target_strategies.len(), 3);
+    assert_eq!(target_strategies[0]["required"][0], "entity_id");
+    assert_eq!(target_strategies[1]["required"][0], "entity_type");
+    assert_eq!(target_strategies[1]["required"][1], "key");
+    assert_eq!(target_strategies[2]["required"][0], "alias_type");
+    assert_eq!(target_strategies[2]["required"][1], "alias_key");
+    assert_eq!(target_or_evidence[1]["required"][0], "mode");
+    assert_eq!(target_or_evidence[1]["required"][1], "evidence_id");
+
+    let depth_constraints = graph_then["allOf"].as_array().unwrap();
+    assert!(depth_constraints.iter().any(|constraint| {
+        constraint["then"]["properties"]["depth"]["maximum"] == 1
+            && constraint["then"]["properties"]["depth"]["minimum"] == 1
+    }));
 }
 
 #[test]
@@ -149,6 +182,14 @@ fn schema_timeline_and_patterns_warn_on_full_history_scan() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];
     let from_desc = props["from"]["description"].as_str().unwrap();
+    assert_eq!(
+        props["scan_limit"]["maximum"],
+        crate::db::PATTERN_SCAN_LIMIT_MAX
+    );
+    assert!(props["scan_limit"]["description"]
+        .as_str()
+        .unwrap()
+        .contains("max 10000"));
     assert!(
         from_desc.contains("full-history scan"),
         "from/to description must warn that omitting them causes a full-history scan for timeline/patterns"

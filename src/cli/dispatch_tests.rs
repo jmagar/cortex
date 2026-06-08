@@ -146,7 +146,7 @@ fn entity_args_into_graph_lookup_request_snapshot() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "GraphEntityLookupRequest { mode: Some(\"entity\"), entity_type: Some(\"host\"), key: Some(\"tootie\"), alias_type: None, alias_key: None, limit: Some(5), evidence_sample_limit: Some(2), payload_budget: Some(8192) }"
+        "GraphEntityLookupRequest { mode: Some(\"entity\"), entity_id: None, entity_type: Some(\"host\"), key: Some(\"tootie\"), alias_type: None, alias_key: None, limit: Some(5), evidence_sample_limit: Some(2), payload_budget: Some(8192) }"
     );
 }
 

@@ -421,6 +421,7 @@ fn is_validation_error(error: &anyhow::Error) -> bool {
         error.downcast_ref::<ServiceError>(),
         Some(ServiceError::InvalidInput(_))
     ) || error.to_string().contains(" is required")
+        || error.to_string().contains(" arguments: invalid ")
         || error.to_string().contains("must be an unsigned integer")
         || error.to_string().contains(" must be <=")
         || error.to_string().contains("target override")
@@ -511,16 +512,6 @@ fn check_scope(auth: &AuthContext, required_scope: &str, action: &str) -> Result
 }
 
 /// Map a cortex tool action to the minimum required scope.
-///
-/// Map an action name to the MCP scope required to invoke it.
-///
-/// Delegates to [`actions::required_scope_for`] — the single authoritative
-/// source. Kept as a local wrapper so call sites inside this module are
-/// unchanged.
-///
-/// - `None` for `InfoOnly` actions (auth context required, no scope gate).
-/// - `Some(READ_SCOPE)` / `Some(ADMIN_SCOPE)` for normal actions.
-/// - `Some(DENY_SCOPE)` for unknown actions (fail-closed).
 fn required_scope_for(action: &str) -> Option<&'static str> {
     actions::required_scope_for(action)
 }

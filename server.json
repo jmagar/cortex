@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "tv.tootie/cortex",
-  "title": "Syslog MCP",
+  "title": "Cortex",
   "description": "Syslog receiver and MCP server for homelab log intelligence.",
   "repository": {
     "url": "https://github.com/jmagar/cortex",
     "source": "github"
   },
-  "version": "1.14.1",
+  "version": "1.14.2",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/cortex:v1.14.1",
+      "identifier": "ghcr.io/jmagar/cortex:v1.14.2",
       "transport": {
         "type": "stdio"
       },

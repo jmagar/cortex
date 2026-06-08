@@ -13,12 +13,25 @@ Index for the `plugin/` documentation subdirectory. These docs cover every Claud
 
 | File | Purpose |
 | --- | --- |
-| `AGENTS.md` | Agent definitions (none -- cortex has no agents) |
 | `CHANNELS.md` | Channel integration (none) |
 | `CONFIG.md` | Plugin settings: userConfig, settings.json |
-| `HOOKS.md` | Lifecycle hooks: SessionStart → `scripts/plugin-setup.sh` → `cortex setup repair` |
+| `HOOKS.md` | Lifecycle hooks: SessionStart/ConfigChange → `bin/cortex setup plugin-hook` |
 | `MARKETPLACES.md` | Marketplace publishing: Claude, Codex, Gemini, MCP Registry |
 | `OUTPUT-STYLES.md` | Output style definitions (none) |
 | `PLUGINS.md` | Plugin manifest reference: .claude-plugin, .codex-plugin, gemini-extension |
 | `SCHEDULES.md` | Scheduled tasks (none) |
-| `SKILLS.md` | Skill definitions under `plugins/syslog/skills/`, including MCP usage, reports, diagnostics, deployment, logs, and version checks |
+| `SKILLS.md` | Skill definitions under `plugins/cortex/skills/`, including MCP usage, reports, diagnostics, deployment, logs, and version checks |
+
+## Agent definitions
+
+cortex does not define plugin-local agents. The MCP tools are consumed directly
+by external agents (Claude Code, Codex, Gemini) without an intermediary agent
+layer.
+
+The consuming agents live outside this repo:
+
+- `claude-homelab` homelab-core agents can call cortex tools for log analysis.
+- Custom agents in other repos can connect to cortex via HTTP transport.
+
+See [../mcp/TOOLS.md](../mcp/TOOLS.md) for the tool surface and
+[../mcp/CONNECT.md](../mcp/CONNECT.md) for connection patterns.

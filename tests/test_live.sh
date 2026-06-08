@@ -559,7 +559,7 @@ phase_tools() {
   fi
 
   local abuse_result
-  abuse_result="$(call_tool cortex "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"action":"abuse","project":$project,"terms":$term,"limit":5,"before":1,"after":1}')")" || abuse_result=""
+  abuse_result="$(call_tool cortex "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" --arg term "ai-smoke-authentication" '{"action":"abuse","project":$project,"terms":[$term],"limit":5,"before":1,"after":1}')")" || abuse_result=""
   assert_jq "cortex abuse — terms field is array" "${abuse_result}" '.terms | type' "array"
   assert_jq "cortex abuse — matches field is array" "${abuse_result}" '.matches | type' "array"
   if [[ "${AI_SEEDED}" == true ]]; then

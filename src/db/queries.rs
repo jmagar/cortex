@@ -17,6 +17,19 @@ use super::pool::DbPool;
 const SEARCH_FTS_CANDIDATE_CAP: usize = 10_000;
 const SIMILAR_INCIDENT_FTS_CANDIDATE_CAP: usize = 5_000;
 
+fn push_bound_limit(
+    sql: &mut String,
+    bindings: &mut Vec<rusqlite::types::Value>,
+    idx: &mut usize,
+    keyword: &str,
+    limit: impl Into<i64>,
+) {
+    let idx_value = *idx;
+    bindings.push(rusqlite::types::Value::Integer(limit.into()));
+    *idx += 1;
+    sql.push_str(&format!(" {keyword} ?{idx_value}"));
+}
+
 /// Validate a user-supplied FTS5 query before execution.
 ///
 /// Limits:
@@ -69,9 +82,8 @@ fn search_logs_fts_sql(
              WHERE l.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?1)"
         );
         append_filters(&mut sql, &mut bindings, &mut idx, params);
-        sql.push_str(&format!(
-            " ORDER BY l.timestamp DESC, l.id DESC LIMIT {limit}"
-        ));
+        sql.push_str(" ORDER BY l.timestamp DESC, l.id DESC");
+        push_bound_limit(&mut sql, &mut bindings, &mut idx, "LIMIT", limit);
         return (sql, bindings);
     }
 
@@ -86,16 +98,23 @@ fn search_logs_fts_sql(
             WHERE logs_fts MATCH ?1",
     );
     append_filters(&mut sql, &mut bindings, &mut idx, params);
+    sql.push_str(" ORDER BY logs_fts.rowid DESC");
+    push_bound_limit(
+        &mut sql,
+        &mut bindings,
+        &mut idx,
+        "LIMIT",
+        SEARCH_FTS_CANDIDATE_CAP as i64,
+    );
     sql.push_str(&format!(
-        " ORDER BY logs_fts.rowid DESC
-          LIMIT {SEARCH_FTS_CANDIDATE_CAP}
+        "
          )
          SELECT {FTS_SELECT_COLS}
          FROM fts_candidates c
          JOIN logs l ON l.id = c.id
-         ORDER BY c.ts DESC, l.id DESC
-         LIMIT {limit}"
+         ORDER BY c.ts DESC, l.id DESC"
     ));
+    push_bound_limit(&mut sql, &mut bindings, &mut idx, "LIMIT", limit);
     (sql, bindings)
 }
 
@@ -196,7 +215,8 @@ pub fn search_logs(pool: &DbPool, params: &SearchParams) -> Result<Vec<LogEntry>
         let mut idx = 1;
 
         append_filters(&mut sql, &mut bindings, &mut idx, params);
-        sql.push_str(&format!(" ORDER BY l.timestamp DESC LIMIT {limit}"));
+        sql.push_str(" ORDER BY l.timestamp DESC");
+        push_bound_limit(&mut sql, &mut bindings, &mut idx, "LIMIT", limit);
 
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
@@ -214,8 +234,21 @@ pub fn tail_logs(
     n: u32,
 ) -> Result<Vec<LogEntry>> {
     let conn = pool.get()?;
-    let n = n.min(500);
+    let (sql, bindings) = tail_logs_sql(hostname, source_ip, app_name, severity_in, n);
 
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn tail_logs_sql(
+    hostname: Option<&str>,
+    source_ip: Option<&str>,
+    app_name: Option<&str>,
+    severity_in: Option<&[String]>,
+    n: u32,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let n = n.min(500);
     let mut sql = String::from(
         "SELECT id, timestamp, hostname, facility, severity,
                 app_name, process_id, message, received_at, source_ip,
@@ -253,11 +286,9 @@ pub fn tail_logs(
         }
     }
 
-    sql.push_str(&format!(" ORDER BY timestamp DESC LIMIT {n}"));
-
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    sql.push_str(" ORDER BY timestamp DESC");
+    push_bound_limit(&mut sql, &mut bindings, &mut idx, "LIMIT", n);
+    (sql, bindings)
 }
 
 /// Get error/warning summary per host in a time window. When `group_by_app` is
@@ -270,56 +301,57 @@ pub fn get_error_summary(
     limit: Option<u32>,
 ) -> Result<Vec<ErrorSummaryEntry>> {
     let conn = pool.get()?;
+    let (sql, bindings) = get_error_summary_sql(from, to, group_by_app, limit);
 
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+        Ok(ErrorSummaryEntry {
+            hostname: row.get(0)?,
+            app_name: row.get::<_, Option<String>>(1)?,
+            severity: row.get(2)?,
+            count: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn get_error_summary_sql(
+    from: Option<&str>,
+    to: Option<&str>,
+    group_by_app: bool,
+    limit: Option<u32>,
+) -> (String, Vec<rusqlite::types::Value>) {
     let from = from.unwrap_or("1970-01-01T00:00:00Z");
     // Upper sentinel: any valid RFC 3339 timestamp will sort before this.
     let to = to.unwrap_or("9999-12-31T23:59:59Z");
 
-    if group_by_app {
-        let mut stmt = conn.prepare(
-            "SELECT hostname, app_name, severity, COUNT(*) as count
-             FROM logs
-             WHERE severity IN ('emerg', 'alert', 'crit', 'err', 'warning')
-               AND timestamp BETWEEN ?1 AND ?2
-             GROUP BY hostname, app_name, severity
-             ORDER BY hostname, app_name, count DESC",
-        )?;
-        let rows = stmt.query_map(params![from, to], |row| {
-            Ok(ErrorSummaryEntry {
-                hostname: row.get(0)?,
-                app_name: row.get::<_, Option<String>>(1)?,
-                severity: row.get(2)?,
-                count: row.get(3)?,
-            })
-        })?;
-        let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-        if let Some(limit) = limit {
-            rows.truncate(limit as usize);
-        }
-        Ok(rows)
+    let mut bindings = vec![
+        rusqlite::types::Value::Text(from.to_string()),
+        rusqlite::types::Value::Text(to.to_string()),
+    ];
+    let mut idx = 3usize;
+
+    let mut sql = if group_by_app {
+        "SELECT hostname, app_name, severity, COUNT(*) as count
+         FROM logs
+         WHERE severity IN ('emerg', 'alert', 'crit', 'err', 'warning')
+           AND timestamp BETWEEN ?1 AND ?2
+         GROUP BY hostname, app_name, severity
+         ORDER BY hostname, app_name, count DESC"
+            .to_string()
     } else {
-        let mut stmt = conn.prepare(
-            "SELECT hostname, severity, COUNT(*) as count
-             FROM logs
-             WHERE severity IN ('emerg', 'alert', 'crit', 'err', 'warning')
-               AND timestamp BETWEEN ?1 AND ?2
-             GROUP BY hostname, severity
-             ORDER BY hostname, count DESC",
-        )?;
-        let rows = stmt.query_map(params![from, to], |row| {
-            Ok(ErrorSummaryEntry {
-                hostname: row.get(0)?,
-                app_name: None,
-                severity: row.get(1)?,
-                count: row.get(2)?,
-            })
-        })?;
-        let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-        if let Some(limit) = limit {
-            rows.truncate(limit as usize);
-        }
-        Ok(rows)
+        "SELECT hostname, NULL AS app_name, severity, COUNT(*) as count
+         FROM logs
+         WHERE severity IN ('emerg', 'alert', 'crit', 'err', 'warning')
+           AND timestamp BETWEEN ?1 AND ?2
+         GROUP BY hostname, severity
+         ORDER BY hostname, count DESC"
+            .to_string()
+    };
+    if let Some(limit) = limit {
+        push_bound_limit(&mut sql, &mut bindings, &mut idx, "LIMIT", limit.max(1));
     }
+    (sql, bindings)
 }
 
 /// List all known hosts with stats

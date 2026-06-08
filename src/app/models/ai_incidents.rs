@@ -1,6 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AiIncidentRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -62,6 +63,7 @@ impl From<db::AbuseIncident> for AbuseIncident {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AiInvestigateRequest {
     // `incident_id` exists on the service-layer request but is NOT part of the
     // `/api/ai/investigate` query surface (`AiInvestigateQuery` in api.rs uses

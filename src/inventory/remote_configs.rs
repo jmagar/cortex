@@ -1,43 +1,42 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::Path;
 use std::time::Duration;
-
-use tokio::sync::Semaphore;
 
 use crate::inventory::collectors::CollectorOutput;
 use crate::inventory::limits::MAX_RAW_ARTIFACT_BYTES;
 use crate::inventory::raw_configs::{collect_compose_body, collect_proxy_body};
-use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, run_ssh, ssh_config_buf};
+use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, SshContext};
 use crate::inventory::storage::InventoryPaths;
-
-const MAX_CONCURRENT_SSH: usize = 8;
 
 pub async fn collect(
     ssh_config: Option<&Path>,
     configured_hosts: &[String],
+    ssh_context: &SshContext,
     paths: &InventoryPaths,
     run_id: &str,
     timeout: Duration,
 ) -> CollectorOutput {
-    let hosts = resolve_ssh_hosts(ssh_config, configured_hosts);
-    let ssh_config = ssh_config_buf(ssh_config);
-    let limiter = Arc::new(Semaphore::new(MAX_CONCURRENT_SSH));
+    let resolution = resolve_ssh_hosts(ssh_config, configured_hosts);
+    let mut out = CollectorOutput::new("raw_configs");
+    for warning in &resolution.warnings {
+        out.warn("host_resolution", warning);
+    }
+    if resolution.no_usable_explicit_hosts() {
+        out.warn(
+            "host_resolution",
+            "remote config collector skipped because no explicitly configured SSH hosts were usable",
+        );
+        return out;
+    }
     let mut handles = Vec::new();
-    for host in hosts {
+    for host in resolution.hosts {
         let paths = paths.clone();
         let run_id = run_id.to_string();
-        let ssh_config = ssh_config.clone();
-        let permit = Arc::clone(&limiter)
-            .acquire_owned()
-            .await
-            .expect("SSH semaphore closed");
+        let ssh_context = ssh_context.clone();
         handles.push(tokio::spawn(async move {
-            let _permit = permit;
-            collect_host(host, ssh_config, paths, run_id, timeout).await
+            collect_host(host, ssh_context, paths, run_id, timeout).await
         }));
     }
 
-    let mut out = CollectorOutput::new("raw_configs");
     for handle in handles {
         match handle.await {
             Ok(host_output) => merge_output(&mut out, host_output),
@@ -52,43 +51,27 @@ pub async fn collect(
 
 async fn collect_host(
     host: String,
-    ssh_config: Option<PathBuf>,
+    ssh_context: SshContext,
     paths: InventoryPaths,
     run_id: String,
     timeout: Duration,
 ) -> CollectorOutput {
     let mut out = CollectorOutput::new("raw_configs");
-    collect_compose(
-        &mut out,
-        &host,
-        ssh_config.as_deref(),
-        &paths,
-        &run_id,
-        timeout,
-    )
-    .await;
-    collect_proxy(
-        &mut out,
-        &host,
-        ssh_config.as_deref(),
-        &paths,
-        &run_id,
-        timeout,
-    )
-    .await;
+    collect_compose(&mut out, &host, &ssh_context, &paths, &run_id, timeout).await;
+    collect_proxy(&mut out, &host, &ssh_context, &paths, &run_id, timeout).await;
     out
 }
 
 async fn collect_compose(
     out: &mut CollectorOutput,
     host: &str,
-    ssh_config: Option<&Path>,
+    ssh_context: &SshContext,
     paths: &InventoryPaths,
     run_id: &str,
     timeout: Duration,
 ) {
     for (path, body) in
-        remote_records(out, host, ssh_config, compose_batch_command(), timeout).await
+        remote_records(out, host, ssh_context, compose_batch_command(), timeout).await
     {
         match collect_compose_body(
             Some(host.to_string()),
@@ -109,12 +92,12 @@ async fn collect_compose(
 async fn collect_proxy(
     out: &mut CollectorOutput,
     host: &str,
-    ssh_config: Option<&Path>,
+    ssh_context: &SshContext,
     paths: &InventoryPaths,
     run_id: &str,
     timeout: Duration,
 ) {
-    for (path, body) in remote_records(out, host, ssh_config, proxy_batch_command(), timeout).await
+    for (path, body) in remote_records(out, host, ssh_context, proxy_batch_command(), timeout).await
     {
         match collect_proxy_body(
             Some(host.to_string()),
@@ -135,11 +118,11 @@ async fn collect_proxy(
 async fn remote_records(
     out: &mut CollectorOutput,
     host: &str,
-    ssh_config: Option<&Path>,
+    ssh_context: &SshContext,
     command: String,
     timeout: Duration,
 ) -> Vec<(String, String)> {
-    match run_ssh(ssh_config, host, &command, timeout).await {
+    match ssh_context.run(host, &command, timeout).await {
         Ok(output) if output.status == Some(0) => parse_records(&output.stdout),
         Ok(output) => {
             out.warn(

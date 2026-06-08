@@ -33,7 +33,7 @@ The installed binary is `cortex`. Use `cortex mcp` for local MCP clients that re
 curl -fsSL https://raw.githubusercontent.com/jmagar/cortex/main/install.sh | sh
 ```
 
-The installer installs the `cortex` binary to `~/.local/bin/syslog`, then runs
+The installer installs the `cortex` binary to `~/.local/bin/cortex`, then runs
 `cortex setup`. Setup owns the shared Docker-only runtime layout:
 
 | Path | Purpose |
@@ -170,7 +170,8 @@ Port 1514 is used instead of the standard syslog port 514 to avoid needing root 
 
 ## SWAG reverse proxy
 
-See `docs/syslog.subdomain.conf` for a working nginx config that exposes MCP over HTTPS at `https://cortex.tootie.tv/mcp`.
+Use `/config/nginx/proxy-confs/cortex.subdomain.conf` on the SWAG host, or an
+equivalent nginx vhost, to expose MCP over HTTPS at `https://cortex.tootie.tv/mcp`.
 
 The MCP endpoint uses RMCP Streamable HTTP in stateless JSON-response mode.
 Clients use `POST /mcp`; `GET` and `DELETE` on `/mcp` are not supported after

@@ -10,12 +10,12 @@ cortex exposes one public MCP tool, `cortex`, and dispatches on the required
 ```rust
 async fn execute_tool(state: &AppState, name: &str, args: Value) -> anyhow::Result<Value> {
     match name {
-        "syslog" => tool_syslog(state, args).await,
+        "cortex" => tool_cortex(state, args).await,
         _ => Err(anyhow::anyhow!("Unknown tool: {name}")),
     }
 }
 
-async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
+async fn tool_cortex(state: &AppState, args: Value) -> anyhow::Result<Value> {
     match string_arg(&args, "action").as_deref() {
         Some("search") => tool_search_logs(state, args).await,
         Some("tail") => tool_tail_logs(state, args).await,
@@ -24,7 +24,7 @@ async fn tool_syslog(state: &AppState, args: Value) -> anyhow::Result<Value> {
         Some("correlate") => tool_correlate_events(state, args).await,
         Some("stats") => tool_get_stats(state, args).await,
         Some("status") => tool_get_status(state, args).await,
-        Some("help") => tool_syslog_help().await,
+        Some("help") => tool_cortex_help().await,
         _ => Err(anyhow::anyhow!("action is required")),
     }
 }

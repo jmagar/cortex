@@ -34,7 +34,7 @@ MCP CLI clients (mcporter, curl, Claude Code) are not browser-based and ignore C
 Set a comma-separated origin allow-list:
 
 ```bash
-CORTEX_ALLOWED_ORIGINS=https://syslog.example.com,https://logs.example.com
+CORTEX_ALLOWED_ORIGINS=https://cortex.example.com,https://logs.example.com
 ```
 
 Each value must be a full browser origin URL. Add matching reverse-proxy Host

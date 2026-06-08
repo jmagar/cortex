@@ -9,7 +9,7 @@ markdown file:
 - `src/mcp/actions.rs::ACTION_SPECS` registers action names, scopes, costs, and descriptions.
 - `src/mcp/actions.rs::action_names()` derives the schema enum.
 - `src/mcp/schemas.rs::tool_definitions()` builds `tools/list` and `cortex://schema/mcp-tool`.
-- `src/mcp/tools.rs::tool_syslog()` dispatches handlers.
+- `src/mcp/tools.rs::tool_cortex()` dispatches handlers.
 - `src/app/models.rs` defines typed request and response payloads.
 
 The MCP server exposes a single tool named `cortex`; every operation is selected
@@ -21,56 +21,61 @@ Existing action names, required parameters, caps/defaults, and top-level
 response keys are stable. Renaming, removing, or tightening them is a breaking
 change. Adding optional parameters or optional response fields is non-breaking.
 
-Most actions require `syslog:read` when auth is mounted. `ack_error`,
-`unack_error`, and `notifications_test` require `syslog:admin`. `help` has no
+Most actions require `cortex:read` when auth is mounted. `ack_error`,
+`unack_error`, and `notifications_test` require `cortex:admin`. `help` has no
 action-level scope requirement, though the protected endpoint still requires
 transport auth when configured.
 
 ## Current Action Index
 
-The live registry currently contains 40 actions:
+The live registry currently contains 44 actions:
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
-| `search` | `syslog:read` | cheap | Full-text search over syslog messages |
-| `filter` | `syslog:read` | cheap | Filter logs by indexed fields without FTS5 |
-| `tail` | `syslog:read` | cheap | Most recent log entries |
-| `errors` | `syslog:read` | cheap | Error/warning summary |
-| `hosts` | `syslog:read` | cheap | Known source hostnames |
-| `correlate` | `syslog:read` | moderate | Time-window event correlation |
-| `stats` | `syslog:read` | expensive | DB statistics and runtime observability |
-| `status` | `syslog:read` | cheap | Lightweight health and runtime status |
-| `apps` | `syslog:read` | cheap | Distinct application names with counts |
-| `sessions` | `syslog:read` | cheap | AI transcript session inventory |
-| `search_sessions` | `syslog:read` | cheap | FTS5 search over AI transcript sessions |
-| `abuse` | `syslog:read` | moderate | Abuse-term hits with same-session context |
-| `abuse_incidents` | `syslog:read` | moderate | Grouped abuse incident candidates |
-| `abuse_investigate` | `syslog:read` | expensive | Evidence bundles for abuse incidents |
-| `ai_correlate` | `syslog:read` | moderate | AI transcript anchors with nearby non-AI logs |
-| `usage_blocks` | `syslog:read` | cheap | AI activity in 5-hour UTC blocks |
-| `project_context` | `syslog:read` | moderate | AI project summary and recent entries |
-| `list_ai_tools` | `syslog:read` | cheap | AI tools observed in transcripts |
-| `list_ai_projects` | `syslog:read` | cheap | AI projects observed in transcripts |
-| `source_ips` | `syslog:read` | cheap | Distinct source identifiers with counts |
-| `timeline` | `syslog:read` | cheap | Bucketed log counts over time |
-| `patterns` | `syslog:read` | expensive | Near-duplicate message template clusters |
-| `context` | `syslog:read` | cheap | Logs surrounding a pivot id or timestamp |
-| `get` | `syslog:read` | cheap | One log entry by id, including raw frame |
-| `ingest_rate` | `syslog:read` | expensive | Recent ingest throughput and write-block state |
-| `silent_hosts` | `syslog:read` | moderate | Hosts older than a staleness threshold |
-| `clock_skew` | `syslog:read` | expensive | Per-host received_at minus timestamp distribution |
-| `anomalies` | `syslog:read` | expensive | Recent vs baseline volume/error comparison |
-| `compare` | `syslog:read` | expensive | Side-by-side comparison of two time ranges |
-| `compose_status` | `syslog:read` | moderate | Redacted self Compose status projection |
-| `compose_doctor` | `syslog:read` | expensive | Strict self Compose health diagnostics |
-| `unaddressed_errors` | `syslog:read` | moderate | Unacknowledged repeating error signatures |
-| `notifications_recent` | `syslog:read` | cheap | Recent notification firings |
-| `similar_incidents` | `syslog:read` | moderate | FTS5 historical incident clusters |
-| `ask_history` | `syslog:read` | moderate | AI transcript history with nearby log context |
-| `incident_context` | `syslog:read` | moderate | Window bundle: log aggregates, errors, AI sessions |
-| `ack_error` | `syslog:admin` | write | Acknowledge an error signature |
-| `unack_error` | `syslog:admin` | write | Revoke an error acknowledgement |
-| `notifications_test` | `syslog:admin` | write | Send a test Apprise notification |
+| `search` | `cortex:read` | cheap | Full-text search over syslog messages |
+| `filter` | `cortex:read` | cheap | Filter logs by indexed fields without FTS5 |
+| `tail` | `cortex:read` | cheap | Most recent log entries |
+| `errors` | `cortex:read` | cheap | Error/warning summary |
+| `hosts` | `cortex:read` | cheap | Known source hostnames |
+| `map` | `cortex:read` | moderate | Cached homelab inventory plus graph-backed topology answers |
+| `host_state` | `cortex:read` | moderate | Latest bounded heartbeat state for one host |
+| `fleet_state` | `cortex:read` | expensive | Fleet-wide heartbeat snapshot with pressure flags |
+| `correlate` | `cortex:read` | moderate | Time-window event correlation |
+| `correlate_state` | `cortex:read` | expensive | Correlate logs with heartbeat summaries around a reference time |
+| `stats` | `cortex:read` | expensive | DB statistics and runtime observability |
+| `status` | `cortex:read` | cheap | Lightweight health and runtime status |
+| `apps` | `cortex:read` | cheap | Distinct application names with counts |
+| `sessions` | `cortex:read` | cheap | AI transcript session inventory |
+| `search_sessions` | `cortex:read` | cheap | FTS5 search over AI transcript sessions |
+| `abuse` | `cortex:read` | moderate | Abuse-term hits with same-session context |
+| `abuse_incidents` | `cortex:read` | moderate | Grouped abuse incident candidates |
+| `abuse_investigate` | `cortex:read` | expensive | Evidence bundles for abuse incidents |
+| `ai_correlate` | `cortex:read` | moderate | AI transcript anchors with nearby non-AI logs |
+| `usage_blocks` | `cortex:read` | cheap | AI activity in 5-hour UTC blocks |
+| `project_context` | `cortex:read` | moderate | AI project summary and recent entries |
+| `list_ai_tools` | `cortex:read` | cheap | AI tools observed in transcripts |
+| `list_ai_projects` | `cortex:read` | cheap | AI projects observed in transcripts |
+| `source_ips` | `cortex:read` | cheap | Distinct source identifiers with counts |
+| `timeline` | `cortex:read` | cheap | Bucketed log counts over time |
+| `patterns` | `cortex:read` | expensive | Near-duplicate message template clusters |
+| `context` | `cortex:read` | cheap | Logs surrounding a pivot id or timestamp |
+| `get` | `cortex:read` | cheap | One log entry by id, including raw frame |
+| `ingest_rate` | `cortex:read` | expensive | Recent ingest throughput and write-block state |
+| `silent_hosts` | `cortex:read` | moderate | Hosts older than a staleness threshold |
+| `clock_skew` | `cortex:read` | expensive | Per-host received_at minus timestamp distribution |
+| `anomalies` | `cortex:read` | expensive | Recent vs baseline volume/error comparison |
+| `compare` | `cortex:read` | expensive | Side-by-side comparison of two time ranges |
+| `compose_status` | `cortex:read` | moderate | Redacted self Compose status projection |
+| `compose_doctor` | `cortex:read` | expensive | Strict self Compose health diagnostics |
+| `unaddressed_errors` | `cortex:read` | moderate | Unacknowledged repeating error signatures |
+| `notifications_recent` | `cortex:read` | cheap | Recent notification firings |
+| `similar_incidents` | `cortex:read` | moderate | FTS5 historical incident clusters |
+| `ask_history` | `cortex:read` | moderate | AI transcript history with nearby log context |
+| `incident_context` | `cortex:read` | moderate | Window bundle: log aggregates, errors, AI sessions |
+| `graph` | `cortex:read` | moderate | Entity lookup and one-hop graph neighborhoods |
+| `ack_error` | `cortex:admin` | write | Acknowledge an error signature |
+| `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
+| `notifications_test` | `cortex:admin` | write | Send a test Apprise notification |
 | `help` | none | cheap | Markdown action reference |
 
 ## Schema Shape
@@ -79,10 +84,10 @@ The generated MCP schema is an action-dispatched flat JSON schema. The
 `action` enum is derived from `ACTION_SPECS`; shared properties are declared at
 the top level and action handlers perform per-action validation.
 
-The runtime schema also includes syslog-specific metadata:
+The runtime schema also includes cortex-specific metadata:
 
-- `x-syslog-action-metadata`: action names, costs, and descriptions.
-- `x-syslog-agent-guidance`: cost ordering and suggested first-pass actions.
+- `x-cortex-action-metadata`: action names, costs, and descriptions.
+- `x-cortex-agent-guidance`: cost ordering and suggested first-pass actions.
 
 ## Response Envelope
 

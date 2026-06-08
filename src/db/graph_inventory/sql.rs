@@ -1,12 +1,8 @@
-use std::collections::BTreeMap;
-
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 
 use crate::db::graph;
-use crate::inventory::schema::{
-    ArtifactRef, HomelabInventory, InventoryService, StorageSummary, TrustLevel,
-};
+use crate::inventory::schema::{InventoryService, TrustLevel};
 
 use super::InventoryGraphStats;
 
@@ -44,76 +40,6 @@ pub(super) fn prune_previous_inventory_projection(conn: &Connection) -> Result<(
             AND id NOT IN (SELECT dst_entity_id FROM graph_relationships)",
         [],
     )?;
-    Ok(())
-}
-
-pub(super) fn upsert_service(conn: &Connection, service: &InventoryService) -> Result<EntityRef> {
-    upsert_entity(
-        conn,
-        graph::ENTITY_TYPE_SERVICE,
-        &service_key(service),
-        &service.name,
-        graph::SOURCE_KIND_APP_INVENTORY,
-        &service.id,
-        trust(&service.trust_level),
-        &service.provenance.collected_at,
-    )
-}
-
-pub(super) fn upsert_artifact(
-    conn: &Connection,
-    artifact: &ArtifactRef,
-    observed_at: &str,
-) -> Result<EntityRef> {
-    let display = format!("{} artifact {}", artifact.kind, artifact.id);
-    let entity = upsert_entity(
-        conn,
-        graph::ENTITY_TYPE_CONFIG_ARTIFACT,
-        &canonical_or_raw(&artifact.id),
-        &display,
-        graph::SOURCE_KIND_APP_INVENTORY,
-        &artifact.id,
-        graph::TRUST_VERIFIED,
-        observed_at,
-    )?;
-    Ok(entity)
-}
-
-pub(super) fn upsert_storage(
-    conn: &Connection,
-    storage: &StorageSummary,
-    hosts: &BTreeMap<String, EntityRef>,
-) -> Result<()> {
-    let entity = upsert_entity(
-        conn,
-        graph::ENTITY_TYPE_STORAGE,
-        &canonical_or_raw(&storage.id),
-        &storage.mount,
-        graph::SOURCE_KIND_SOURCE_INVENTORY,
-        &storage.id,
-        graph::TRUST_VERIFIED,
-        &storage.provenance.collected_at,
-    )?;
-    if let Some(host) = storage
-        .id
-        .split(':')
-        .nth(1)
-        .and_then(|host| hosts.get(&canonical_or_raw(host)))
-    {
-        add_relationship(
-            conn,
-            host,
-            &entity,
-            graph::REL_BACKED_BY,
-            graph::REASON_STORAGE_PROBE,
-            graph::SOURCE_KIND_SOURCE_INVENTORY,
-            &storage.id,
-            &storage.provenance.collected_at,
-            graph::TRUST_VERIFIED,
-            0.75,
-            &format!("{} storage mounted at {}", host.key, storage.mount),
-        )?;
-    }
     Ok(())
 }
 
@@ -341,31 +267,6 @@ fn table_count(conn: &Connection, table: &str) -> Result<i64> {
         row.get(0)
     })
     .with_context(|| format!("count {table}"))
-}
-
-pub(super) fn match_upstream<'a>(
-    upstream: &str,
-    source: &str,
-    services: &'a BTreeMap<String, EntityRef>,
-) -> Option<&'a EntityRef> {
-    let normalized = canonical_or_raw(upstream);
-    let prefix = upstream
-        .split([':', '/', '@'])
-        .find(|part| !part.is_empty() && !part.starts_with("http"))
-        .map(canonical_or_raw);
-    prefix
-        .and_then(|key| match_service_name(&key, source, services))
-        .or_else(|| match_service_name(&normalized, source, services))
-}
-
-pub(super) fn match_service_name<'a>(
-    name: &str,
-    source: &str,
-    services: &'a BTreeMap<String, EntityRef>,
-) -> Option<&'a EntityRef> {
-    source_host(source)
-        .and_then(|host| services.get(&canonical_or_raw(&format!("{host}:{name}"))))
-        .or_else(|| services.get(&canonical_or_raw(name)))
 }
 
 pub(super) fn scoped_inventory_key(source: &str, name: &str) -> String {

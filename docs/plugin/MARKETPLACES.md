@@ -1,7 +1,6 @@
 <!--
 plugin: cortex
 surface: marketplace-publishing
-version: 0.25.1
 author: Jacob Magar
 license: MIT
 description: Marketplace publishing and registry package reference for cortex.
@@ -51,7 +50,7 @@ Example registry entry:
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/cortex:v0.25.1"
+      "identifier": "ghcr.io/jmagar/cortex:vX.Y.Z"
     }
   ]
 }
@@ -64,7 +63,7 @@ cortex uses OCI (Docker) images as the primary distribution package, not PyPI or
 | Registry | Image |
 | --- | --- |
 | GHCR | `ghcr.io/jmagar/cortex:latest` |
-| GHCR (versioned) | `ghcr.io/jmagar/cortex:v0.25.1` |
+| GHCR (versioned) | `ghcr.io/jmagar/cortex:vX.Y.Z` |
 
 Additionally published to crates.io for `cargo install` usage.
 

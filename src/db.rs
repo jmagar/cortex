@@ -12,14 +12,16 @@ pub(crate) mod notifications;
 mod pool;
 mod queries;
 
+pub(crate) use analytics::PATTERN_SCAN_LIMIT_MAX;
 pub use analytics::{
     anomalies, clock_skew, context_around, fetch_log_by_id, get_ai_project_context,
-    get_ai_usage_blocks, ingest_rate, ingest_rate_by_host, list_apps, list_source_ips, patterns,
+    get_ai_usage_blocks, ingest_rate, ingest_rate_by_host, list_apps, list_source_ips,
     silent_hosts, summarize_range, timeline, AnomalyEntry, AppEntry, Bucket, ClockSkewEntry,
     ContextRef, IngestRateBuckets, IngestRatePerHost, ListAppsParams, ListAppsResult,
     ListSourceIpsParams, ListSourceIpsResult, LogEntryWithRaw, PatternEntry, RangeSummary,
     SilentHostEntry, SourceIpEntry, SourceIpHostBreakdown, TimelineGroupBy, TimelinePoint,
 };
+pub(crate) use analytics::{cluster_pattern_rows, fetch_pattern_rows};
 pub use graph::{
     is_known_entity_type, is_known_evidence_source_kind, is_known_reason_code,
     is_known_relationship_type, is_known_trust_level, ENTITY_TYPES, EVIDENCE_SOURCE_KINDS,
