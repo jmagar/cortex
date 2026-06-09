@@ -13,6 +13,10 @@ services:
         required: false
     environment:
       CORTEX_HOME: /cortex-home
+      # Accept the Host header used by the Labby gateway when it proxies this
+      # service over the docker network (http://cortex:3100/mcp). Without this,
+      # RMCP Host validation rejects gateway calls with "Host header is not allowed".
+      CORTEX_ALLOWED_HOSTS: "cortex,cortex:3100"
     ports:
       - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/udp"
       - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/tcp"
