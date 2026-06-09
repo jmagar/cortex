@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-06-08
+
+### Fixed
+
+- Allow the Labby gateway's `Host: cortex:3100` header via
+  `CORTEX_ALLOWED_HOSTS` in `docker-compose.yml`, so the gateway can proxy this
+  service over the docker network without RMCP Host validation rejecting calls
+  with "Host header is not allowed". Keeps the allowlist version-controlled
+  instead of living only in the gitignored `.env`.
+
 ## [1.15.0] - 2026-06-07
 
 ### Added
