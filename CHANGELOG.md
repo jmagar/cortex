@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.4] - 2026-06-10
+
+### Fixed
+
+- `resolve_cortex_binary()` replaces `sh -c "command -v cortex"` with a cross-platform PATH walk — eliminates "Unix shell script not found" from `cortex doctor` on Windows
+
 ## [1.16.3] - 2026-06-10
 
 ### Fixed
