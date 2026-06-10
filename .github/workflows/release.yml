@@ -6,6 +6,9 @@ name: release
 #
 # Manual dry-run via workflow_dispatch builds everything but skips the Release
 # creation (artifacts are still uploaded to the workflow run for inspection).
+#
+# NOTE: cortex uses target-dir = ".cache/cargo" in .cargo/config.toml so all
+# artifact paths use .cache/cargo/release/ instead of target/release/.
 on:
   push:
     tags: ["v*"]
@@ -16,6 +19,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Disable the bash rustc-wrapper on CI — it's a local sccache shim that
+  # doesn't exist on the runner and would break the build.
+  CARGO_BUILD_RUSTC_WRAPPER: ""
 
 jobs:
   cortex-linux:
@@ -29,6 +35,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: release-cortex-linux
+          cache-directories: .cache/cargo
 
       - name: cargo build --release --bin cortex
         run: cargo build --release --locked --bin cortex
@@ -36,7 +43,7 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          cd target/release
+          cd .cache/cargo/release
           tar -czf cortex-linux-x86_64.tar.gz cortex
           sha256sum cortex-linux-x86_64.tar.gz > cortex-linux-x86_64.tar.gz.sha256
 
@@ -44,8 +51,8 @@ jobs:
         with:
           name: cortex-linux-x86_64
           path: |
-            target/release/cortex-linux-x86_64.tar.gz
-            target/release/cortex-linux-x86_64.tar.gz.sha256
+            .cache/cargo/release/cortex-linux-x86_64.tar.gz
+            .cache/cargo/release/cortex-linux-x86_64.tar.gz.sha256
           if-no-files-found: error
 
   cortex-windows:
@@ -59,19 +66,16 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: release-cortex-windows
+          cache-directories: .cache/cargo
 
       - name: cargo build --release --bin cortex
         run: cargo build --release --locked --bin cortex
-        env:
-          # Disable sccache wrapper on Windows — bash rustc-wrapper scripts
-          # don't run as Win32 applications.
-          CARGO_BUILD_RUSTC_WRAPPER: ""
 
       - name: Package
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Push-Location target/release
+          Push-Location .cache/cargo/release
           Compress-Archive -Path cortex.exe -DestinationPath cortex-windows-x86_64.zip -Force
           $hash = (Get-FileHash cortex-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
           "$hash  cortex-windows-x86_64.zip" | Out-File -Encoding ascii cortex-windows-x86_64.zip.sha256
@@ -81,8 +85,8 @@ jobs:
         with:
           name: cortex-windows-x86_64
           path: |
-            target/release/cortex-windows-x86_64.zip
-            target/release/cortex-windows-x86_64.zip.sha256
+            .cache/cargo/release/cortex-windows-x86_64.zip
+            .cache/cargo/release/cortex-windows-x86_64.zip.sha256
           if-no-files-found: error
 
   publish:

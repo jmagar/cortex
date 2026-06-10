@@ -95,9 +95,7 @@ supports-hyperlinks = "3"
 
 # Utils
 anyhow = "1"
-libc = "0.2"
 lru = "0.16"
-rustix = { version = "1", features = ["fs"] }
 tempfile = "3"
 regex = "1"
 sha2 = "0.10"
@@ -122,6 +120,10 @@ opentelemetry-proto = { version = "0.31", default-features = false, features = [
 ] }
 prost = "0.14"
 notify = "8.2.0"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+rustix = { version = "1", features = ["fs"] }
 
 [features]
 test-support = []
