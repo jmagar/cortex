@@ -470,17 +470,35 @@ fn validate_absolute_home(path: PathBuf) -> io::Result<PathBuf> {
 }
 
 fn resolve_cortex_binary() -> io::Result<PathBuf> {
+    #[cfg(windows)]
+    const BIN: &str = "cortex.exe";
+    #[cfg(not(windows))]
+    const BIN: &str = "cortex";
+
+    // Check same directory as the running binary first (co-installed).
     let current = std::env::current_exe()?;
-    let output = std::process::Command::new("sh")
-        .args(["-c", "command -v cortex"])
-        .output()?;
-    if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return validate_executable_path(PathBuf::from(path));
+    if let Some(dir) = current.parent() {
+        let candidate = dir.join(BIN);
+        if candidate.is_file() {
+            return validate_executable_path(candidate);
         }
     }
-    if current.file_name().and_then(|name| name.to_str()) == Some("cortex") {
+    // Walk PATH without spawning a shell — works on Windows and Unix.
+    if let Some(path_var) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(BIN);
+            if candidate.is_file() {
+                return validate_executable_path(candidate);
+            }
+        }
+    }
+    // Fall back to the running executable if it is named cortex.
+    if current
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n == "cortex" || n == "cortex.exe")
+        .unwrap_or(false)
+    {
         return validate_executable_path(current);
     }
     Err(io::Error::new(
