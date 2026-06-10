@@ -20,7 +20,10 @@ x-common-service: &common-service
 services:
   cortex:
     <<: *common-service
-    image: ghcr.io/jmagar/cortex:${CORTEX_VERSION:-1.0.0}
+    # Default tag is kept in sync by scripts/bump-version.sh (version canon);
+    # previously this was frozen at 1.0.0 while migrations moved forward —
+    # a stale binary against a newer schema (full-review OH1).
+    image: ghcr.io/jmagar/cortex:${CORTEX_VERSION:-1.15.1}
     container_name: cortex
     user: "${CORTEX_UID:-1000}:${CORTEX_GID:-1000}"
     env_file:
@@ -28,13 +31,22 @@ services:
         required: false
     environment:
       CORTEX_HOME: /cortex-home
+      # Accept the Host header used by the Labby gateway when it proxies this
+      # service over the docker network (parity with docker-compose.yml).
+      CORTEX_ALLOWED_HOSTS: "cortex,cortex:3100"
     ports:
+      # Syslog ingestion must be reachable by remote forwarders — published wide.
       - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/udp"
       - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/tcp"
-      - "${CORTEX_PORT:-3100}:3100/tcp"
+      # MCP/API binds loopback by default (unauthenticated by default). The
+      # Labby gateway uses the docker network. To expose deliberately, set
+      # CORTEX_MCP_BIND=0.0.0.0 AND CORTEX_TOKEN.
+      - "${CORTEX_MCP_BIND:-127.0.0.1}:${CORTEX_PORT:-3100}:3100/tcp"
     volumes:
       - ${CORTEX_HOME_VOLUME:-${HOME}/.cortex}:/cortex-home
-      - ${CORTEX_SSH_VOLUME:-${HOME}/.ssh}:/home/cortex/.ssh:ro
+      # Dedicated inventory key directory — never point this at ~/.ssh
+      # (full-review SM2; see docker-compose.yml for details).
+      - ${CORTEX_SSH_VOLUME:-${HOME}/.cortex/ssh}:/home/cortex/.ssh:ro
       - ${CORTEX_WORKSPACE_VOLUME:-${HOME}/workspace}:/home/cortex/workspace:ro
       - ${CORTEX_DATA_VOLUME:-cortex-data}:/data
     # The container listens on CORTEX_RECEIVER_PORT (default 1514). To serve host port

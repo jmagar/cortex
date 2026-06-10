@@ -18,12 +18,24 @@ services:
       # RMCP Host validation rejects gateway calls with "Host header is not allowed".
       CORTEX_ALLOWED_HOSTS: "cortex,cortex:3100"
     ports:
+      # Syslog ingestion must be reachable by remote forwarders — published wide.
+      # Restrict senders with CORTEX_ALLOWED_SOURCE_CIDRS if needed.
       - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/udp"
       - "${CORTEX_RECEIVER_HOST_PORT:-1514}:${CORTEX_RECEIVER_PORT:-1514}/tcp"
-      - "${CORTEX_PORT:-3100}:3100/tcp"
+      # MCP/API is unauthenticated by default, so it binds loopback by default.
+      # The Labby gateway reaches it over the docker network (http://cortex:3100)
+      # and needs no host publishing at all. To expose on the LAN deliberately,
+      # set CORTEX_MCP_BIND=0.0.0.0 (or a specific interface IP) AND set
+      # CORTEX_TOKEN so the exposed endpoint requires auth.
+      - "${CORTEX_MCP_BIND:-127.0.0.1}:${CORTEX_PORT:-3100}:3100/tcp"
     volumes:
       - ${CORTEX_HOME_VOLUME:-${HOME}/.cortex}:/cortex-home
-      - ${CORTEX_SSH_VOLUME:-${HOME}/.ssh}:/home/cortex/.ssh:ro
+      # SSH identity for fleet inventory collection. Defaults to a DEDICATED
+      # key directory (~/.cortex/ssh) — provision it with a least-privilege
+      # deploy key + known_hosts. Do NOT point this at ~/.ssh: any container
+      # compromise could read your personal private keys and pivot across the
+      # fleet (full-review SM2). Set CORTEX_SSH_VOLUME to override.
+      - ${CORTEX_SSH_VOLUME:-${HOME}/.cortex/ssh}:/home/cortex/.ssh:ro
       - ${CORTEX_WORKSPACE_VOLUME:-${HOME}/workspace}:/home/cortex/workspace:ro
       - ${CORTEX_DATA_VOLUME:-cortex-data}:/data
     networks:
@@ -48,6 +60,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          # Parity with docker-compose.prod.yml: 512M previously triggered OOM
+          # restarts under heavy stats/sessions aggregations (full-review OM7).
+          # Tune per-host via CORTEX_MEMORY_LIMIT / CORTEX_CPU_LIMIT.
+          memory: ${CORTEX_MEMORY_LIMIT:-2G}
+          cpus: '${CORTEX_CPU_LIMIT:-1.0}'
 
 volumes:
   cortex-data:

@@ -88,7 +88,24 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?;
         let page_count: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
         if page_count > 0 {
+            // One-time conversion: a full VACUUM rewrites the whole file with
+            // the write lock held — minutes on a multi-GB DB. Log loudly so a
+            // long first boot after this policy change is explainable and the
+            // compose healthcheck start_period can be tuned (full-review PM7).
+            let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+            let db_mb = (page_count * page_size) / (1024 * 1024);
+            tracing::info!(
+                db_size_mb = db_mb,
+                "Converting database to auto_vacuum=INCREMENTAL — one-time full \
+                 VACUUM; this can take minutes on large databases"
+            );
+            let vacuum_started = std::time::Instant::now();
             conn.execute_batch("VACUUM;")?;
+            tracing::info!(
+                db_size_mb = db_mb,
+                elapsed_ms = vacuum_started.elapsed().as_millis() as u64,
+                "auto_vacuum conversion VACUUM complete"
+            );
         }
     }
 

@@ -1399,7 +1399,10 @@ fn ensure_entity(
     first_seen_at: Option<&str>,
     last_seen_at: Option<&str>,
 ) -> Result<i64> {
-    conn.execute(
+    // prepare_cached throughout this helper and its siblings: these run 6-8
+    // times PER LOG ROW during a full rebuild — re-parsing the SQL each call
+    // dominated rebuild time on large DBs (full-review PH2).
+    conn.prepare_cached(
         "INSERT INTO _graph_entities_staging
              (entity_type, canonical_key, display_label, source_kind, source_id,
               trust_level, first_seen_at, last_seen_at)
@@ -1419,23 +1422,22 @@ fn ensure_entity(
                  WHEN excluded.last_seen_at > _graph_entities_staging.last_seen_at THEN excluded.last_seen_at
                  ELSE _graph_entities_staging.last_seen_at END,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-        params![
-            entity_type,
-            canonical_key,
-            display_label,
-            source_kind,
-            source_id,
-            trust_level,
-            first_seen_at,
-            last_seen_at
-        ],
-    )?;
-    conn.query_row(
+    )?
+    .execute(params![
+        entity_type,
+        canonical_key,
+        display_label,
+        source_kind,
+        source_id,
+        trust_level,
+        first_seen_at,
+        last_seen_at
+    ])?;
+    conn.prepare_cached(
         "SELECT id FROM _graph_entities_staging
          WHERE entity_type = ?1 AND canonical_key = ?2",
-        params![entity_type, canonical_key],
-        |row| row.get(0),
-    )
+    )?
+    .query_row(params![entity_type, canonical_key], |row| row.get(0))
     .map_err(Into::into)
 }
 
@@ -1451,7 +1453,7 @@ fn insert_alias(
     first_seen_at: Option<&str>,
     last_seen_at: Option<&str>,
 ) -> Result<()> {
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO _graph_aliases_staging
              (entity_id, alias_type, alias_key, alias_value, source_kind,
               trust_level, first_seen_at, last_seen_at)
@@ -1461,17 +1463,17 @@ fn insert_alias(
                  WHEN excluded.last_seen_at > _graph_aliases_staging.last_seen_at THEN excluded.last_seen_at
                  ELSE _graph_aliases_staging.last_seen_at END,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-        params![
-            entity_id,
-            alias_type,
-            alias_key,
-            alias_value,
-            source_kind,
-            trust_level,
-            first_seen_at,
-            last_seen_at
-        ],
-    )?;
+    )?
+    .execute(params![
+        entity_id,
+        alias_type,
+        alias_key,
+        alias_value,
+        source_kind,
+        trust_level,
+        first_seen_at,
+        last_seen_at
+    ])?;
     Ok(())
 }
 
@@ -1502,7 +1504,7 @@ fn ensure_relationship_with_evidence(
     evidence: EvidenceInput<'_>,
 ) -> Result<()> {
     let relationship_key = format!("{src_entity_id}:{relationship_type}:{dst_entity_id}");
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO _graph_relationships_staging
              (relationship_key, src_entity_id, dst_entity_id, relationship_type,
               reason_code, trust_level, confidence, evidence_count,
@@ -1517,23 +1519,21 @@ fn ensure_relationship_with_evidence(
                  WHEN excluded.last_seen_at > _graph_relationships_staging.last_seen_at THEN excluded.last_seen_at
                  ELSE _graph_relationships_staging.last_seen_at END,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-        params![
-            relationship_key,
-            src_entity_id,
-            dst_entity_id,
-            relationship_type,
-            reason_code,
-            trust_level,
-            confidence,
-            evidence.observed_at
-        ],
-    )?;
-    let relationship_id: i64 = conn.query_row(
-        "SELECT id FROM _graph_relationships_staging WHERE relationship_key = ?1",
-        [relationship_key],
-        |row| row.get(0),
-    )?;
-    conn.execute(
+    )?
+    .execute(params![
+        relationship_key,
+        src_entity_id,
+        dst_entity_id,
+        relationship_type,
+        reason_code,
+        trust_level,
+        confidence,
+        evidence.observed_at
+    ])?;
+    let relationship_id: i64 = conn
+        .prepare_cached("SELECT id FROM _graph_relationships_staging WHERE relationship_key = ?1")?
+        .query_row([relationship_key], |row| row.get(0))?;
+    conn.prepare_cached(
         "INSERT INTO _graph_evidence_staging
              (relationship_id, evidence_key, source_kind, source_id, source_log_id,
               source_heartbeat_id, source_signature_hash, observed_at, reason_code,
@@ -1545,24 +1545,24 @@ fn ensure_relationship_with_evidence(
              observed_at = CASE
                  WHEN excluded.observed_at > _graph_evidence_staging.observed_at THEN excluded.observed_at
                  ELSE _graph_evidence_staging.observed_at END",
-        params![
-            relationship_id,
-            evidence.evidence_key,
-            evidence.source_kind,
-            evidence.source_id,
-            evidence.source_log_id,
-            evidence.source_heartbeat_id,
-            evidence.source_signature_hash,
-            evidence.observed_at,
-            reason_code,
-            evidence.reason_text,
-            evidence.confidence_delta,
-            evidence.trust_level,
-            evidence.safe_excerpt.map(truncate_safe_excerpt),
-            evidence.metadata_path
-        ],
-    )?;
-    conn.execute(
+    )?
+    .execute(params![
+        relationship_id,
+        evidence.evidence_key,
+        evidence.source_kind,
+        evidence.source_id,
+        evidence.source_log_id,
+        evidence.source_heartbeat_id,
+        evidence.source_signature_hash,
+        evidence.observed_at,
+        reason_code,
+        evidence.reason_text,
+        evidence.confidence_delta,
+        evidence.trust_level,
+        evidence.safe_excerpt.map(truncate_safe_excerpt),
+        evidence.metadata_path
+    ])?;
+    conn.prepare_cached(
         "UPDATE _graph_relationships_staging
          SET evidence_count = (
              SELECT COALESCE(SUM(evidence_count), 0)
@@ -1570,8 +1570,8 @@ fn ensure_relationship_with_evidence(
              WHERE relationship_id = ?1
          )
          WHERE id = ?1",
-        [relationship_id],
-    )?;
+    )?
+    .execute([relationship_id])?;
     Ok(())
 }
 

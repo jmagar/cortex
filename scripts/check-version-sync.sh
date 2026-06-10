@@ -76,6 +76,12 @@ if [ -f "mcpb/manifest.json" ]; then
   [ -n "$v" ] && versions+=("mcpb/manifest.json=$v") && files_checked+=("mcpb/manifest.json")
 fi
 
+if [ -f "docker-compose.prod.yml" ]; then
+  # Default image tag: ghcr.io/jmagar/cortex:${CORTEX_VERSION:-X.Y.Z}
+  v=$(grep -m1 -o 'CORTEX_VERSION:-[0-9][0-9.]*' docker-compose.prod.yml | cut -d- -f2)
+  [ -n "$v" ] && versions+=("docker-compose.prod.yml=$v") && files_checked+=("docker-compose.prod.yml")
+fi
+
 # Need at least one version source
 if [ ${#versions[@]} -eq 0 ]; then
   echo "[version-sync] No version-bearing files found — skipping"
