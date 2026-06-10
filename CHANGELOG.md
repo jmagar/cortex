@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.5] - 2026-06-10
+
+### Changed
+
+- Move completed plans (rmcp-streamable-http-refactor, compose-lifecycle-cli) to `docs/plans/complete/`
+
 ## [1.16.4] - 2026-06-10
 
 ### Fixed

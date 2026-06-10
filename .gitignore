@@ -75,3 +75,4 @@ CLAUDE.md.local
 logs/
 backups/
 /bin/
+.claude/scheduled_tasks.lock
