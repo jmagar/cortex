@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-06-09
+
 ### Security
 
 - Docker Compose now publishes the MCP/HTTP port 3100 on `127.0.0.1` by
