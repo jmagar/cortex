@@ -8,7 +8,7 @@ use crate::inventory::collectors::CollectorOutput;
 use crate::inventory::schema::{
     InventoryNode, ListenerFact, Provenance, StorageSummary, TrustLevel,
 };
-use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, SshContext};
+use crate::inventory::ssh::{SshContext, configured_hosts as resolve_ssh_hosts};
 
 pub async fn collect(
     ssh_config: Option<&Path>,

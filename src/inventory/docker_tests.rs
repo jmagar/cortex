@@ -22,10 +22,12 @@ fn normalizes_container_ports_labels_and_domains() {
     );
     assert_eq!(out.services[0].name, "app");
     assert_eq!(out.services[0].ports[0].host_port, Some(8080));
-    assert!(out.services[0]
-        .domains
-        .iter()
-        .any(|d| d.contains("app.example.test")));
+    assert!(
+        out.services[0]
+            .domains
+            .iter()
+            .any(|d| d.contains("app.example.test"))
+    );
     assert_eq!(out.networks[0].name, "net");
 }
 

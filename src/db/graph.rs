@@ -11,11 +11,11 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::pool::{write_lock, DbPool};
+use super::pool::{DbPool, write_lock};
 
 const GRAPH_REBUILD_CHUNK_SIZE: i64 = 10_000;
 static GRAPH_REBUILD_LOCK: Mutex<()> = Mutex::new(());

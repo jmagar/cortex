@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cortex::app::{IncidentResponse, ServiceLogsResponse};
 use cortex::scanner::{
     AiDoctorReport, CheckpointEntry, IndexResult, ParseErrorEntry, PruneCheckpointsResult,
@@ -424,15 +424,27 @@ pub(crate) fn print_index_response(response: &IndexResult, json: bool) -> Result
         cyan(&response.discovered_files.to_string()),
         cyan(&response.ingested.to_string()),
         muted(&response.skipped_dupes.to_string()),
-        if response.parse_errors > 0 { error(&response.parse_errors.to_string()) } else { muted(&response.parse_errors.to_string()) },
+        if response.parse_errors > 0 {
+            error(&response.parse_errors.to_string())
+        } else {
+            muted(&response.parse_errors.to_string())
+        },
         muted(&response.skipped_files.to_string()),
         muted(&response.unsupported_files.to_string()),
         muted(&response.skipped_symlinks.to_string()),
         muted(&response.skipped_unsafe_paths.to_string()),
-        if response.storage_blocked_chunks > 0 { error(&response.storage_blocked_chunks.to_string()) } else { muted(&response.storage_blocked_chunks.to_string()) },
+        if response.storage_blocked_chunks > 0 {
+            error(&response.storage_blocked_chunks.to_string())
+        } else {
+            muted(&response.storage_blocked_chunks.to_string())
+        },
         muted(&response.dropped_metadata_fields.to_string()),
         cyan(&response.checkpoint_updates.to_string()),
-        if !response.file_errors.is_empty() { error(&response.file_errors.len().to_string()) } else { muted(&response.file_errors.len().to_string()) }
+        if !response.file_errors.is_empty() {
+            error(&response.file_errors.len().to_string())
+        } else {
+            muted(&response.file_errors.len().to_string())
+        }
     );
     for e in &response.file_errors {
         eprintln!(

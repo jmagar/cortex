@@ -20,8 +20,8 @@ const SLOW_DB_MS: u128 = 500;
 use crate::config::NotificationsConfig;
 use crate::db::DbPool;
 use crate::notifications::rules::{
-    evaluate_authelia_mfa_fail, evaluate_container_die_nonzero, evaluate_fail2ban_ban,
-    evaluate_ingest_silence, evaluate_oom_kill, LogRow,
+    LogRow, evaluate_authelia_mfa_fail, evaluate_container_die_nonzero, evaluate_fail2ban_ban,
+    evaluate_ingest_silence, evaluate_oom_kill,
 };
 
 /// Run one evaluation cycle.

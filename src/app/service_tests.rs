@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::config::StorageConfig;
-use crate::db::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
+use crate::db::{DbPool, LogBatchEntry, init_pool, insert_logs_batch};
 
 use super::*;
 
@@ -230,10 +230,12 @@ async fn graph_entity_lookup_returns_candidates_for_ambiguous_alias() {
         .unwrap();
     assert!(response.resolved_entity.is_none());
     assert_eq!(response.candidates.len(), 2);
-    assert!(response
-        .candidates
-        .iter()
-        .all(|candidate| candidate.match_reason == "alias"));
+    assert!(
+        response
+            .candidates
+            .iter()
+            .all(|candidate| candidate.match_reason == "alias")
+    );
 }
 
 #[tokio::test]
@@ -274,18 +276,24 @@ async fn graph_around_returns_one_hop_relationships_evidence_and_metadata() {
     assert!(!response.entities.is_empty());
     assert!(!response.relationships.is_empty());
     assert!(!response.evidence.is_empty());
-    assert!(response
-        .relationships
-        .iter()
-        .any(|rel| rel.relationship_type == "observed_as"));
-    assert!(response
-        .relationships
-        .iter()
-        .any(|rel| rel.relationship_type == "emitted_by"));
-    assert!(response
-        .relationships
-        .iter()
-        .all(|rel| !rel.evidence_ids.is_empty()));
+    assert!(
+        response
+            .relationships
+            .iter()
+            .any(|rel| rel.relationship_type == "observed_as")
+    );
+    assert!(
+        response
+            .relationships
+            .iter()
+            .any(|rel| rel.relationship_type == "emitted_by")
+    );
+    assert!(
+        response
+            .relationships
+            .iter()
+            .all(|rel| !rel.evidence_ids.is_empty())
+    );
     assert!(response.relationships.iter().all(|rel| {
         rel.src_entity.is_some()
             && rel.dst_entity.is_some()
@@ -297,10 +305,12 @@ async fn graph_around_returns_one_hop_relationships_evidence_and_metadata() {
             && evidence.safe_excerpt.is_some()
             && evidence.source_kind == "log"
     }));
-    assert!(response
-        .next_queries
-        .iter()
-        .all(|query| query.mode == "around"));
+    assert!(
+        response
+            .next_queries
+            .iter()
+            .all(|query| query.mode == "around")
+    );
 }
 
 #[tokio::test]
@@ -536,10 +546,12 @@ async fn graph_explain_returns_conservative_evidence_backed_chain() {
     assert!(narrative.summary.contains("not a proven root cause"));
     assert!(!narrative.summary.contains("caused"));
     assert!(!response.chains.is_empty());
-    assert!(response
-        .chains
-        .iter()
-        .all(|chain| !chain.relationship_ids.is_empty() && !chain.evidence_ids.is_empty()));
+    assert!(
+        response
+            .chains
+            .iter()
+            .all(|chain| !chain.relationship_ids.is_empty() && !chain.evidence_ids.is_empty())
+    );
     assert!(response.chains.iter().all(|chain| {
         chain
             .relationships
@@ -580,10 +592,12 @@ async fn graph_explain_declines_without_relationship_evidence() {
 
     assert!(response.narrative.is_none());
     assert!(response.chains.is_empty());
-    assert!(response
-        .missing_evidence
-        .iter()
-        .any(|item| item.contains("relationship evidence")));
+    assert!(
+        response
+            .missing_evidence
+            .iter()
+            .any(|item| item.contains("relationship evidence"))
+    );
     assert!(!response.open_questions.is_empty());
 }
 
@@ -1031,10 +1045,12 @@ async fn correlate_ai_logs_batches_related_windows_with_per_anchor_caps() {
         .filter(|anchor| anchor.related_truncated)
         .count();
     assert_eq!(truncated_count, 1);
-    assert!(response
-        .anchors
-        .iter()
-        .all(|anchor| anchor.related.len() == 1));
+    assert!(
+        response
+            .anchors
+            .iter()
+            .all(|anchor| anchor.related.len() == 1)
+    );
 }
 
 #[tokio::test]
@@ -1188,9 +1204,10 @@ async fn filter_logs_rejects_conflicting_source_kind_tool_alias() {
         .await
         .unwrap_err();
 
-    assert!(err
-        .to_string()
-        .contains("source_kind=claude conflicts with tool=codex"));
+    assert!(
+        err.to_string()
+            .contains("source_kind=claude conflicts with tool=codex")
+    );
 }
 
 #[tokio::test]

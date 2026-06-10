@@ -18,7 +18,7 @@
 //! `super::*`, so output is byte-identical between modes: the HTTP path
 //! proxies the same service the Local path would invoke server-side.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cortex::app::{
     CorrelateEventsRequest, FilterLogsRequest, GetErrorsRequest, IncidentRequest,
     ListSessionsRequest, SearchLogsRequest, TailLogsRequest,

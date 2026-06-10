@@ -370,9 +370,13 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     assert!(unit.contains(
         "Environment=PATH=/home/me/.local/bin:/home/me/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
     ));
-    assert!(unit.contains("Environment=CARGO_TARGET_DIR=/home/me/.local/state/cortex/cargo-target"));
+    assert!(
+        unit.contains("Environment=CARGO_TARGET_DIR=/home/me/.local/state/cortex/cargo-target")
+    );
     assert!(unit.contains("WorkingDirectory=/"));
-    assert!(unit.contains("ExecStart=/home/me/.local/bin/cortex ai watch --no-initial-scan --json"));
+    assert!(
+        unit.contains("ExecStart=/home/me/.local/bin/cortex ai watch --no-initial-scan --json")
+    );
     assert!(unit.contains("Restart=on-failure"));
     assert!(unit.contains("StartLimitBurst=5"));
     assert!(unit.contains("UMask=0077"));
@@ -380,7 +384,9 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     assert!(unit.contains("PrivateTmp=true"));
     assert!(unit.contains("ProtectSystem=strict"));
     assert!(unit.contains("ProtectHome=read-only"));
-    assert!(unit.contains("BindReadOnlyPaths=-/home/me/.claude/projects -/home/me/.codex/sessions"));
+    assert!(
+        unit.contains("BindReadOnlyPaths=-/home/me/.claude/projects -/home/me/.codex/sessions")
+    );
     assert!(unit.contains("BindPaths=/home/me/.cortex/data /home/me/.local/state/cortex"));
     assert!(unit.contains("ReadWritePaths=/home/me/.cortex/data /home/me/.local/state/cortex"));
     assert!(unit.contains("WantedBy=default.target"));
@@ -420,9 +426,10 @@ fn db_path_from_setup_env_rejects_container_db_without_absolute_data_volume() {
     .unwrap();
 
     let err = db_path_from_setup_env(&env_path).unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("CORTEX_DATA_VOLUME is not absolute"));
+    assert!(
+        err.to_string()
+            .contains("CORTEX_DATA_VOLUME is not absolute")
+    );
 }
 
 #[test]
@@ -502,9 +509,11 @@ fn ai_watch_service_content_phase_detects_stale_unit() {
     );
 
     assert!(matches!(phase.status, SetupStatus::Error));
-    assert!(phase
-        .detail
-        .contains("does not match generated AI watch unit"));
+    assert!(
+        phase
+            .detail
+            .contains("does not match generated AI watch unit")
+    );
 }
 
 #[test]
@@ -529,9 +538,11 @@ fn debug_wrapper_content_phase_detects_stale_wrapper() {
     let phase = check_debug_wrapper_content_phase(&wrapper, dir.path());
 
     assert!(matches!(phase.status, SetupStatus::Error));
-    assert!(phase
-        .detail
-        .contains("does not match generated debug wrapper"));
+    assert!(
+        phase
+            .detail
+            .contains("does not match generated debug wrapper")
+    );
 }
 
 #[test]
@@ -553,9 +564,11 @@ fn debug_compose_content_phase_detects_stale_override() {
     let phase = check_debug_compose_content_phase(&override_path, dir.path());
 
     assert!(matches!(phase.status, SetupStatus::Error));
-    assert!(phase
-        .detail
-        .contains("does not match generated debug Compose override"));
+    assert!(
+        phase
+            .detail
+            .contains("does not match generated debug Compose override")
+    );
 }
 
 #[test]

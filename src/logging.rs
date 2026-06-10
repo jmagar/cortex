@@ -6,7 +6,7 @@
 pub mod aurora;
 
 use std::io::IsTerminal;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// Initialize tracing with:
 /// - Console layer: Aurora-colored output to stderr (color auto-detected)
@@ -50,8 +50,8 @@ pub fn should_colorize() -> bool {
 use std::fmt as stdfmt;
 use tracing::{Event, Subscriber};
 use tracing_subscriber::fmt::{
-    format::{FormatEvent, FormatFields, Writer},
     FmtContext,
+    format::{FormatEvent, FormatFields, Writer},
 };
 use tracing_subscriber::registry::LookupSpan;
 

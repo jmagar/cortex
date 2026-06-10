@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde_json::Value;
 
-use super::{record_key_from_line, ParsedTranscriptRecord};
+use super::{ParsedTranscriptRecord, record_key_from_line};
 
 pub fn parse_line(
     line: &str,

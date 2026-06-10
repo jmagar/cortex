@@ -14,20 +14,20 @@ use std::time::{Duration, Instant};
 
 use crate::mcp::AuthPolicy;
 use axum::{
+    Router,
     extract::{ConnectInfo, State},
     http::{
-        header::{AUTHORIZATION, RETRY_AFTER, USER_AGENT},
         HeaderMap, HeaderValue, StatusCode,
+        header::{AUTHORIZATION, RETRY_AFTER, USER_AGENT},
     },
-    middleware::{from_fn, Next},
+    middleware::{Next, from_fn},
     response::{IntoResponse, Json},
     routing::post,
-    Router,
 };
 use bytes::Bytes;
 use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest,
-    common::v1::{any_value::Value as AnyValueKind, AnyValue},
+    common::v1::{AnyValue, any_value::Value as AnyValueKind},
 };
 use prost::Message;
 use serde_json::json;
@@ -35,7 +35,7 @@ use sha2::{Digest, Sha256};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::db::LogBatchEntry;
-use crate::enrich::{stamp_source_kind, SourceKind};
+use crate::enrich::{SourceKind, stamp_source_kind};
 use crate::ingest::IngestTx;
 use crate::ingest_metadata::{attrs_to_metadata_object, bounded_metadata_json};
 use lab_auth::middleware::{parse_bearer_token, tokens_equal};

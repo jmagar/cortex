@@ -268,12 +268,16 @@ fn indexing_health_reports_schema_drift_and_recent_failures() {
     assert_eq!(health.recent_failure_count, 1);
     assert_eq!(health.recent_schema_error_count, 2);
     assert_eq!(health.affected_paths, vec!["/tmp/session.jsonl"]);
-    assert!(health
-        .stale_indicators
-        .contains(&"schema_drift".to_string()));
-    assert!(health
-        .stale_indicators
-        .contains(&"recent_schema_errors".to_string()));
+    assert!(
+        health
+            .stale_indicators
+            .contains(&"schema_drift".to_string())
+    );
+    assert!(
+        health
+            .stale_indicators
+            .contains(&"recent_schema_errors".to_string())
+    );
 }
 
 #[test]

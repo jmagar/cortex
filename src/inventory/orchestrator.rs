@@ -5,11 +5,11 @@ use std::time::Instant;
 
 use crate::inventory::collectors::CollectorOutput;
 use crate::inventory::config::InventoryConfig;
-use crate::inventory::limits::{cap_vec, INVENTORY_SCHEMA, MAX_SECTION_ITEMS};
+use crate::inventory::limits::{INVENTORY_SCHEMA, MAX_SECTION_ITEMS, cap_vec};
 use crate::inventory::schema::{
     CollectionState, CollectorState, GraphProjectionSummary, HomelabInventory,
 };
-use crate::inventory::storage::{write_json_private, InventoryPaths, RefreshLock};
+use crate::inventory::storage::{InventoryPaths, RefreshLock, write_json_private};
 use std::future::Future;
 use std::pin::Pin;
 

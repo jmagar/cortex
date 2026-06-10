@@ -2,7 +2,7 @@ use regex::Regex;
 use serde_json::{Map, Value};
 use std::sync::OnceLock;
 
-use crate::inventory::limits::{truncate_text, MAX_ARRAY_ENTRIES, MAX_JSON_DEPTH};
+use crate::inventory::limits::{MAX_ARRAY_ENTRIES, MAX_JSON_DEPTH, truncate_text};
 use crate::inventory::schema::RedactionStatus;
 
 const REDACTED: &str = "[REDACTED]";

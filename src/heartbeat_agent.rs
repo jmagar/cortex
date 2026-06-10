@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use getrandom::fill as random_fill;
 use serde::{Deserialize, Serialize};

@@ -15,12 +15,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{
+    Router,
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
-    middleware::{from_fn, Next},
+    middleware::{Next, from_fn},
     response::{IntoResponse, Json},
     routing::post,
-    Router,
 };
 use bytes::Bytes;
 use lab_auth::middleware::{parse_bearer_token, tokens_equal};

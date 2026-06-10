@@ -12,7 +12,7 @@ use crate::inventory::schema::{
     ArtifactRef, ComposeProject, PortMapping, Provenance, ReverseProxyRoute,
 };
 use crate::inventory::ssh::SshContext;
-use crate::inventory::storage::{write_artifact, InventoryPaths};
+use crate::inventory::storage::{InventoryPaths, write_artifact};
 
 pub struct CollectOptions<'a> {
     pub compose_paths: &'a [PathBuf],

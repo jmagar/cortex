@@ -1,11 +1,13 @@
 use rusqlite::{Error as SqliteError, ErrorCode};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 use std::time::Instant;
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info};
 
-use super::enrichment::{enrich_entry, EnrichmentConfig};
+use super::enrichment::{EnrichmentConfig, enrich_entry};
 use crate::config::StorageConfig;
 use crate::db::{self, DbPool};
 use crate::enrich::EnrichmentPipeline;
@@ -171,11 +173,7 @@ pub(super) async fn flush_batch(
     let count = batch_to_write.len();
     let started = Instant::now();
     debug!(count, "Attempting batch flush");
-    let enforcement = context
-        .storage_state
-        .lock()
-        .expect("storage state mutex poisoned")
-        .clone();
+    let enforcement = context.storage_state.lock().clone();
     if let Some(state) = enforcement {
         if state.write_blocked {
             let err = anyhow::anyhow!(
@@ -470,8 +468,8 @@ pub(super) fn summarize_top_senders(
     }
     entries.sort_by(|a, b| {
         b.1.cmp(a.1)
-            .then_with(|| a.0 .0.cmp(&b.0 .0))
-            .then_with(|| a.0 .1.cmp(&b.0 .1))
+            .then_with(|| a.0.0.cmp(&b.0.0))
+            .then_with(|| a.0.1.cmp(&b.0.1))
     });
     entries
         .into_iter()

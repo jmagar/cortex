@@ -6,8 +6,8 @@ use std::time::Instant;
 use serde::Serialize;
 
 use crate::setup::{
-    default_env_for_data_dir, dockerfile_asset, installed_compose_asset, render_env, PhaseTimer,
-    SetupPhase, SetupStatus,
+    PhaseTimer, SetupPhase, SetupStatus, default_env_for_data_dir, dockerfile_asset,
+    installed_compose_asset, render_env,
 };
 
 const REMOTE_HOME_SUFFIX: &str = ".cortex";

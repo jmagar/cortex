@@ -129,10 +129,12 @@ mod tests {
         ]);
 
         assert_eq!(value["Authorization"], REDACTED);
-        assert!(value["normal"]
-            .as_str()
-            .unwrap()
-            .ends_with("...[truncated]"));
+        assert!(
+            value["normal"]
+                .as_str()
+                .unwrap()
+                .ends_with("...[truncated]")
+        );
     }
 
     #[test]

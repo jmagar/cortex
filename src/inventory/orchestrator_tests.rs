@@ -81,10 +81,12 @@ async fn refresh_skips_collectors_after_collection_deadline() {
     let report = refresh_inventory(cfg).await.unwrap();
     assert_eq!(report.status, "partial");
     assert!(!report.collectors.is_empty());
-    assert!(report
-        .collectors
-        .iter()
-        .all(|collector| collector.status == "skipped"));
+    assert!(
+        report
+            .collectors
+            .iter()
+            .all(|collector| collector.status == "skipped")
+    );
 }
 
 #[tokio::test]
@@ -103,10 +105,12 @@ async fn collector_deadline_timeout_is_reported_as_skipped() {
     assert_eq!(states.len(), 1);
     assert_eq!(states[0].status, "skipped");
     assert!(warnings[0].contains("exceeded"));
-    assert!(outputs[0]
-        .errors
-        .iter()
-        .any(|error| error.phase == "collection_timeout"));
+    assert!(
+        outputs[0]
+            .errors
+            .iter()
+            .any(|error| error.phase == "collection_timeout")
+    );
 }
 
 #[test]

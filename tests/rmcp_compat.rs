@@ -1,13 +1,13 @@
 use axum::{
-    body::{to_bytes, Body},
-    http::{header, Request, StatusCode},
     Router,
+    body::{Body, to_bytes},
+    http::{Request, StatusCode, header},
 };
 use rmcp::{
-    transport::streamable_http_server::{
-        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
-    },
     ServerHandler,
+    transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+    },
 };
 use tower::util::ServiceExt;
 

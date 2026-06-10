@@ -1,13 +1,13 @@
 //! Parse functions for `cortex entity` and `cortex graph`.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
-use crate::cli::parse_common::{value_after_equals, FlagCursor};
-use crate::cli::{parse_i64_flag, parse_u32_flag};
+use crate::cli::parse_common::{FlagCursor, value_after_equals};
 use crate::cli::{
     CliCommand, EntityArgs, GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs,
     GraphRebuildArgs, GraphStatusArgs,
 };
+use crate::cli::{parse_i64_flag, parse_u32_flag};
 
 const GRAPH_ENTITY_TYPES: &[&str] = &[
     "host",
@@ -234,7 +234,9 @@ fn parse_graph_around(args: &[String]) -> Result<CliCommand> {
         && !has_exact_lookup(parsed.entity_type.as_deref(), parsed.key.as_deref())
         && !has_alias_lookup(parsed.alias_type.as_deref(), parsed.alias_key.as_deref())
     {
-        bail!("graph around requires --entity-id, <entity-type> <key>, <entity-type:key>, or --alias-type with --alias-key");
+        bail!(
+            "graph around requires --entity-id, <entity-type> <key>, <entity-type:key>, or --alias-type with --alias-key"
+        );
     }
     Ok(CliCommand::Graph(GraphCommand::Around(parsed)))
 }
@@ -332,7 +334,9 @@ fn parse_graph_explain(args: &[String]) -> Result<CliCommand> {
         && !has_exact_lookup(parsed.entity_type.as_deref(), parsed.key.as_deref())
         && !has_alias_lookup(parsed.alias_type.as_deref(), parsed.alias_key.as_deref())
     {
-        bail!("graph explain requires --entity-id, <entity-type> <key>, <entity-type:key>, or --alias-type with --alias-key");
+        bail!(
+            "graph explain requires --entity-id, <entity-type> <key>, <entity-type:key>, or --alias-type with --alias-key"
+        );
     }
     Ok(CliCommand::Graph(GraphCommand::Explain(parsed)))
 }

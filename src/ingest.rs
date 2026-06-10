@@ -1,4 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -113,7 +115,7 @@ impl IngestTx {
         let _ = self.shutdown_tx.send(true);
         // Drop our tx clone — not strictly required since the shutdown arm in
         // the writer doesn't wait for EOF, but good hygiene.
-        let handle = self.writer_handle.lock().unwrap().take();
+        let handle = self.writer_handle.lock().take();
         drop(self.tx);
         if let Some(handle) = handle {
             let _ = tokio::time::timeout(timeout, handle).await;

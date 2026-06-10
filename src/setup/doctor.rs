@@ -7,8 +7,8 @@ use super::ai_watch::{run_ai_watch_service_setup, transcript_root_permissions_ph
 use super::debug_wrapper::{check_debug_compose_content_phase, check_debug_wrapper_content_phase};
 use super::firstrun::filesystem_phase;
 use super::{
-    check_file_phase, setup_report, AiWatchServiceAction, PhaseTimer, SetupPhase, SetupReport,
-    SetupReportInput, SetupStatus,
+    AiWatchServiceAction, PhaseTimer, SetupPhase, SetupReport, SetupReportInput, SetupStatus,
+    check_file_phase, setup_report,
 };
 
 pub async fn run_setup_doctor() -> io::Result<SetupReport> {

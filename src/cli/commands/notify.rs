@@ -2,10 +2,10 @@
 //!
 //! Extracted from `src/cli.rs` as part of Q-C1 (cli.rs split).
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use super::super::args::{CliCommand, NotifyCommand, NotifyRecentArgs, NotifyTestArgs};
-use super::super::{parse_i64_flag, FlagCursor};
+use super::super::{FlagCursor, parse_i64_flag};
 
 /// Dispatch `cortex notify <subcommand> [args]`.
 pub(crate) fn parse_notify(args: &[String]) -> Result<CliCommand> {

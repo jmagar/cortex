@@ -5,10 +5,9 @@ use crate::db::{DockerCheckpoint, LogBatchEntry};
 use crate::docker_ingest::models::ContainerMeta;
 
 use super::{
-    docker_log_since_unix, entry_is_at_or_before_checkpoint, event_task_policy,
-    jittered_reconnect_delay_ms, next_reconnect_backoff_ms, should_ingest_container,
-    should_reset_reconnect_backoff, DockerEventTaskPolicy, StreamEnd,
-    MIN_STREAM_DURATION_FOR_BACKOFF_RESET,
+    DockerEventTaskPolicy, MIN_STREAM_DURATION_FOR_BACKOFF_RESET, StreamEnd, docker_log_since_unix,
+    entry_is_at_or_before_checkpoint, event_task_policy, jittered_reconnect_delay_ms,
+    next_reconnect_backoff_ms, should_ingest_container, should_reset_reconnect_backoff,
 };
 
 fn docker_entry(timestamp: &str) -> LogBatchEntry {

@@ -5,8 +5,8 @@ mod tests;
 use anyhow::Result;
 use rusqlite::params;
 
-use crate::db::graph;
 use crate::db::DbPool;
+use crate::db::graph;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PublicRouteFindingRow {

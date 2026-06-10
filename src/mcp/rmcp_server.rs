@@ -2,6 +2,7 @@ use std::{borrow::Cow, net::Ipv6Addr, sync::Arc};
 
 use lab_auth::AuthContext;
 use rmcp::{
+    ErrorData, RoleServer, ServerHandler,
     model::{
         CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, GetPromptResult,
         Implementation, ListPromptsResult, ListResourcesResult, ListToolsResult, Meta,
@@ -10,9 +11,8 @@ use rmcp::{
     },
     service::RequestContext,
     transport::streamable_http_server::{
-        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
     },
-    ErrorData, RoleServer, ServerHandler,
 };
 use serde_json::{Map, Value};
 
@@ -21,7 +21,7 @@ use crate::config::McpConfig;
 
 use super::actions;
 use super::prompts::{get_prompt, prompt_definitions};
-use super::{schemas::tool_definitions, tools::execute_tool, AppState, AuthPolicy};
+use super::{AppState, AuthPolicy, schemas::tool_definitions, tools::execute_tool};
 
 #[derive(Clone)]
 pub struct CortexRmcpServer {
@@ -188,22 +188,20 @@ impl ServerHandler for CortexRmcpServer {
                 let text = serde_json::to_string_pretty(&schema).map_err(|error| {
                     ErrorData::internal_error(format!("serialization error: {error}"), None)
                 })?;
-                Ok(ReadResourceResult::new(vec![ResourceContents::text(
-                    text,
-                    SCHEMA_RESOURCE_URI,
-                )
-                .with_mime_type("application/json")]))
+                Ok(ReadResourceResult::new(vec![
+                    ResourceContents::text(text, SCHEMA_RESOURCE_URI)
+                        .with_mime_type("application/json"),
+                ]))
             }
             PROMPT_OUTPUT_SCHEMA_RESOURCE_URI => {
                 let text =
                     serde_json::to_string_pretty(&prompt_output_schema()).map_err(|error| {
                         ErrorData::internal_error(format!("serialization error: {error}"), None)
                     })?;
-                Ok(ReadResourceResult::new(vec![ResourceContents::text(
-                    text,
-                    PROMPT_OUTPUT_SCHEMA_RESOURCE_URI,
-                )
-                .with_mime_type("application/schema+json")]))
+                Ok(ReadResourceResult::new(vec![
+                    ResourceContents::text(text, PROMPT_OUTPUT_SCHEMA_RESOURCE_URI)
+                        .with_mime_type("application/schema+json"),
+                ]))
             }
             QUERY_WIDGET_RESOURCE_URI => Ok(ReadResourceResult::new(vec![query_widget_contents()])),
             _ => Err(ErrorData::invalid_params(

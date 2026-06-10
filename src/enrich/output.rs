@@ -2,7 +2,7 @@
 
 use crate::db::LogBatchEntry;
 use crate::enrich::ParserOutput;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const PARSE_ERROR_MAX_BYTES: usize = 512;
 

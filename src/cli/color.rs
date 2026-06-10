@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cortex::color_policy::{self, ColorChoice};
 
 // Aurora design-system CLI tokens (dark-first, operator-grade palette).

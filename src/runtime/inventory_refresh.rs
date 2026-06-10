@@ -8,7 +8,7 @@ use notify::{
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 

@@ -8,8 +8,8 @@ use bollard::query_parameters::{
     LogsOptionsBuilder,
 };
 use bollard::{BollardRequest, Docker};
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 
 use super::models::ContainerMeta;

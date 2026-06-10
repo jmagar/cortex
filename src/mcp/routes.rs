@@ -1,20 +1,20 @@
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use axum::{
+    Router,
     extract::State,
-    http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
+    http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header},
     response::{IntoResponse, Json},
     routing::get,
-    Router,
 };
 use serde_json::json;
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
 
 use super::rmcp_server::allowed_origins;
-use super::{build_auth_layer, streamable_http_config, streamable_http_service};
 use super::{AppState, AuthPolicy};
+use super::{build_auth_layer, streamable_http_config, streamable_http_service};
 
 const MCP_BODY_LIMIT_BYTES: u64 = 65_536;
 const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
@@ -41,15 +41,14 @@ pub fn router(state: AppState) -> Router {
             .map(|u| Arc::<str>::from(format!("{}/mcp", u.trim_end_matches('/')))),
         AuthPolicy::LoopbackDev | AuthPolicy::TrustedGatewayUnscoped => None,
     };
-    let authenticated = if let Some(layer) = build_auth_layer(
+    let authenticated = match build_auth_layer(
         &state.auth_policy,
         state.config.api_token.as_deref().map(Arc::<str>::from),
         resource_url,
         state.config.static_token_is_admin,
     ) {
-        mcp_service.layer(layer)
-    } else {
-        mcp_service
+        Some(layer) => mcp_service.layer(layer),
+        _ => mcp_service,
     };
 
     // Build the OAuth router (Router<()> — state already baked in) when

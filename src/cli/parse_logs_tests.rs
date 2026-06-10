@@ -94,9 +94,10 @@ fn parse_filter_collects_structured_filters_and_rejects_query_terms() {
     }
 
     let err = parse_filter(&strings(&["error"])).unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("filter does not accept positional query terms"));
+    assert!(
+        err.to_string()
+            .contains("filter does not accept positional query terms")
+    );
 }
 
 #[test]

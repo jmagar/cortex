@@ -6,10 +6,10 @@
 //! missing flags are caught in `CompareArgs::into_request()` so the error
 //! message points the operator at the missing flag.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
-use super::super::args::{CliCommand, CompareArgs};
 use super::super::FlagCursor;
+use super::super::args::{CliCommand, CompareArgs};
 
 pub(crate) fn parse_compare(args: &[String]) -> Result<CliCommand> {
     let mut parsed = CompareArgs::default();

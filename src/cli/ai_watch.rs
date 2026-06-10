@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cortex::app::CortexService;
 use cortex::scanner::AiDoctorReport;
 use serde::Serialize;

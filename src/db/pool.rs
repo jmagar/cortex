@@ -1153,7 +1153,9 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                  ON logs(severity, timestamp, id);
              INSERT OR IGNORE INTO schema_migrations (version) VALUES (29);",
         )?;
-        tracing::info!("Migration 29: added covering indexes for error_summary, tail_logs, and ai_session sort");
+        tracing::info!(
+            "Migration 29: added covering indexes for error_summary, tail_logs, and ai_session sort"
+        );
     }
 
     // Migration 30: widen graph vocabulary for homelab inventory topology.

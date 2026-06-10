@@ -1,6 +1,6 @@
 use crate::app::topology_findings;
 use crate::app::{PATTERN_SCAN_LIMIT_MAX, SEVERITY_LEVELS};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::actions;
 

@@ -3,11 +3,11 @@ use cortex::app::{
     AiIncidentResponse, AiInvestigateResponse, AskHistoryResponse, IncidentContextResponse,
     LogEntry, SimilarIncidentsResponse,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
+use super::AiOutputDetail;
 use super::color::{cyan, muted, primary, severity, violet, warn};
 use super::output_common::{local_ts, print_json, truncate, truncate_bytes};
-use super::AiOutputDetail;
 
 pub(crate) fn print_similar_incidents_response(
     response: &SimilarIncidentsResponse,
@@ -266,9 +266,17 @@ pub(crate) fn print_ai_investigate_response_with_options(
             "  {} anchor(s), {} transcript-before{}, {} transcript-after{}, {} nearby log(s), {} nearby error(s)",
             cyan(&ev.anchors.len().to_string()),
             cyan(&ev.transcript_before.len().to_string()),
-            if ev.transcript_before_truncated { " (trunc)" } else { "" },
+            if ev.transcript_before_truncated {
+                " (trunc)"
+            } else {
+                ""
+            },
             cyan(&ev.transcript_after.len().to_string()),
-            if ev.transcript_after_truncated { " (trunc)" } else { "" },
+            if ev.transcript_after_truncated {
+                " (trunc)"
+            } else {
+                ""
+            },
             cyan(&ev.nearby_logs.len().to_string()),
             cyan(&ev.nearby_errors.len().to_string()),
         );

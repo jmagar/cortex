@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use super::parse_admin::{parse_compose, parse_db, parse_service, parse_setup, parse_stats};
 use super::parse_ai::parse_ai;
@@ -7,7 +7,7 @@ use super::parse_logs::{
     parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_ingest_rate,
     parse_patterns, parse_search, parse_sessions, parse_source_ips, parse_tail, parse_timeline,
 };
-use super::{commands, parse_config, suggest, CliCommand};
+use super::{CliCommand, commands, parse_config, suggest};
 
 const TOP_LEVEL_COMMANDS: &[&str] = &[
     "search",

@@ -169,45 +169,44 @@ impl CortexService {
         // Resolve optional host filter
         let host_id: Option<String> = if let Some(host) = req.host.as_deref() {
             let h = host.to_owned();
-            let resolved = self
-                .run_db("correlate_state.resolve_host", move |pool| {
-                    let conn = pool.get()?;
-                    // Try host_id first
-                    let exists: bool = conn
-                        .query_row(
-                            "SELECT COUNT(*) FROM host_heartbeats_latest WHERE host_id = ?1",
-                            [&h],
-                            |row| row.get::<_, i64>(0),
-                        )
-                        .map(|c| c > 0)?;
-                    if exists {
-                        return Ok(Some(h));
-                    }
-                    // Hostname fallback (unique only)
-                    let mut stmt = conn.prepare(
-                        "SELECT host_id FROM host_heartbeats_latest
+
+            self.run_db("correlate_state.resolve_host", move |pool| {
+                let conn = pool.get()?;
+                // Try host_id first
+                let exists: bool = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM host_heartbeats_latest WHERE host_id = ?1",
+                        [&h],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map(|c| c > 0)?;
+                if exists {
+                    return Ok(Some(h));
+                }
+                // Hostname fallback (unique only)
+                let mut stmt = conn.prepare(
+                    "SELECT host_id FROM host_heartbeats_latest
                          WHERE hostname = ?1",
-                    )?;
-                    let ids: Vec<String> = stmt
-                        .query_map([&h], |row| row.get(0))?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    match ids.as_slice() {
-                        [] => Err(anyhow::anyhow!("not_found")),
-                        [id] => Ok(Some(id.clone())),
-                        _ => Err(anyhow::anyhow!("ambiguous_host")),
-                    }
-                })
-                .await
-                .map_err(|e| match e {
-                    ServiceError::Internal(ref inner) if inner.to_string() == "not_found" => {
-                        ServiceError::NotFound("correlate_state host not found".into())
-                    }
-                    ServiceError::Internal(ref inner) if inner.to_string() == "ambiguous_host" => {
-                        ServiceError::InvalidInput("ambiguous_host".into())
-                    }
-                    other => other,
-                })?;
-            resolved
+                )?;
+                let ids: Vec<String> = stmt
+                    .query_map([&h], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                match ids.as_slice() {
+                    [] => Err(anyhow::anyhow!("not_found")),
+                    [id] => Ok(Some(id.clone())),
+                    _ => Err(anyhow::anyhow!("ambiguous_host")),
+                }
+            })
+            .await
+            .map_err(|e| match e {
+                ServiceError::Internal(ref inner) if inner.to_string() == "not_found" => {
+                    ServiceError::NotFound("correlate_state host not found".into())
+                }
+                ServiceError::Internal(ref inner) if inner.to_string() == "ambiguous_host" => {
+                    ServiceError::InvalidInput("ambiguous_host".into())
+                }
+                other => other,
+            })?
         } else {
             None
         };

@@ -27,9 +27,11 @@ fn write_toml_file_replaces_visible_content_and_cleans_temp() {
     write_toml_file(&path, "new = 1\n").unwrap();
 
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "new = 1\n");
-    assert!(!dir.path().read_dir().unwrap().any(|entry| entry
-        .unwrap()
-        .file_name()
-        .to_string_lossy()
-        .contains(".tmp.")));
+    assert!(!dir.path().read_dir().unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".tmp.")
+    }));
 }

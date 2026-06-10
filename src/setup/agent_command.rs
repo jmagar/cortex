@@ -5,9 +5,9 @@ use std::time::Instant;
 
 use super::firstrun::ensure_private_dir;
 use super::{
-    check_file_phase, host_local_report_input, setup_path_value, setup_report,
-    write_executable_file, write_private_file, AgentCommandAction, PhaseTimer, SetupPhase,
-    SetupReport, SetupStatus,
+    AgentCommandAction, PhaseTimer, SetupPhase, SetupReport, SetupStatus, check_file_phase,
+    host_local_report_input, setup_path_value, setup_report, write_executable_file,
+    write_private_file,
 };
 
 pub async fn run_agent_command_setup(action: AgentCommandAction) -> io::Result<SetupReport> {

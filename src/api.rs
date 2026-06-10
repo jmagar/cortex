@@ -16,11 +16,11 @@ use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 
 use axum::{
+    Router,
     extract::{ConnectInfo, Path, Query, State},
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
-    Router,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -43,7 +43,7 @@ use crate::app::{
     UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
-use crate::mcp::{build_auth_layer, AuthPolicy};
+use crate::mcp::{AuthPolicy, build_auth_layer};
 
 /// Crate version cached at compile time (CARGO_PKG_VERSION).
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -298,18 +298,21 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
             auth_state: auth_state.clone(),
         },
     };
-    let routes = if let Some(layer) = build_auth_layer(
+    let routes = match build_auth_layer(
         &forced_policy,
         state.config.api_token.as_deref().map(Arc::<str>::from),
         None,
         state.static_token_is_admin,
     ) {
-        routes.layer(layer)
-    } else {
-        // `forced_policy` is always `Mounted`, so `build_auth_layer` returns
-        // `Some(_)`. Reach here only if `build_auth_layer` ever changes its
-        // contract — fail loud rather than mount routes without auth.
-        anyhow::bail!("internal: auth layer construction returned None for /api/* (forced Mounted)")
+        Some(layer) => routes.layer(layer),
+        _ => {
+            // `forced_policy` is always `Mounted`, so `build_auth_layer` returns
+            // `Some(_)`. Reach here only if `build_auth_layer` ever changes its
+            // contract — fail loud rather than mount routes without auth.
+            anyhow::bail!(
+                "internal: auth layer construction returned None for /api/* (forced Mounted)"
+            )
+        }
     };
 
     let cors = cors_layer(state.cors_port, state.loopback_bind, &state.allowed_origins);

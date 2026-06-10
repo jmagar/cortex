@@ -4,7 +4,7 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use serde_json::{json, Map};
+use serde_json::{Map, json};
 
 use crate::enrich::{Parser, ParserError, ParserInput, ParserOutput};
 

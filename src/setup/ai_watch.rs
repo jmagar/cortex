@@ -8,10 +8,10 @@ use super::systemd::{
     systemctl_user_phase, systemctl_user_required_named_phase, systemctl_user_state,
 };
 use super::{
-    check_file_phase, host_local_report_input, setup_path_value, setup_report,
-    should_skip_ai_watch_systemd_enable, skipped_phase, AiWatchServiceAction, PhaseTimer,
-    SetupIssueKind, SetupPhase, SetupReport, SetupStatus, AI_WATCH_SERVICE_ACTIVE_PHASE,
-    AI_WATCH_SERVICE_ENABLED_PHASE,
+    AI_WATCH_SERVICE_ACTIVE_PHASE, AI_WATCH_SERVICE_ENABLED_PHASE, AiWatchServiceAction,
+    PhaseTimer, SetupIssueKind, SetupPhase, SetupReport, SetupStatus, check_file_phase,
+    host_local_report_input, setup_path_value, setup_report, should_skip_ai_watch_systemd_enable,
+    skipped_phase,
 };
 
 pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Result<SetupReport> {

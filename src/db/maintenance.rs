@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use chrono::Utc;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 
 use crate::config::StorageConfig;
 
@@ -1028,16 +1028,22 @@ fn reconcile_hosts(pool: &DbPool, hostnames: &[String]) -> Result<()> {
 
 fn checkpoint_wal_and_incremental_vacuum(pool: &DbPool) -> Result<()> {
     let conn = pool.get()?;
-    if let Err(e) = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);") {
-        tracing::warn!(error = %e, "WAL checkpoint skipped (non-fatal)");
-    } else {
-        tracing::debug!("WAL checkpoint completed");
+    match conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);") {
+        Err(e) => {
+            tracing::warn!(error = %e, "WAL checkpoint skipped (non-fatal)");
+        }
+        _ => {
+            tracing::debug!("WAL checkpoint completed");
+        }
     }
     let _write_guard = crate::db::write_lock();
-    if let Err(e) = conn.execute_batch("PRAGMA incremental_vacuum(1000);") {
-        tracing::warn!(error = %e, "incremental vacuum skipped (non-fatal)");
-    } else {
-        tracing::debug!("Incremental vacuum completed");
+    match conn.execute_batch("PRAGMA incremental_vacuum(1000);") {
+        Err(e) => {
+            tracing::warn!(error = %e, "incremental vacuum skipped (non-fatal)");
+        }
+        _ => {
+            tracing::debug!("Incremental vacuum completed");
+        }
     }
     Ok(())
 }

@@ -14,7 +14,7 @@
 //!   materialization; time-windowed reads run live against `logs`.
 
 use anyhow::Result;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 
 use crate::config::StorageConfig;
 
@@ -1864,18 +1864,17 @@ pub fn investigate_ai_incidents(
                 placeholders.join(",")
             );
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt
-                .query_map(
-                    rusqlite::params_from_iter(
-                        incident
-                            .anchor_ids
-                            .iter()
-                            .map(|id| rusqlite::types::Value::Integer(*id)),
-                    ),
-                    map_row,
-                )?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            rows
+
+            stmt.query_map(
+                rusqlite::params_from_iter(
+                    incident
+                        .anchor_ids
+                        .iter()
+                        .map(|id| rusqlite::types::Value::Integer(*id)),
+                ),
+                map_row,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?
         };
 
         // Transcript context: entries in the same session before first anchor and after last anchor.
@@ -1893,18 +1892,17 @@ pub fn investigate_ai_incidents(
                          ORDER BY timestamp DESC
                          LIMIT 21",
                 )?;
-                let rows = stmt
-                    .query_map(
-                        rusqlite::params![
-                            &incident.session_id,
-                            &incident.project,
-                            &incident.tool,
-                            &first.timestamp,
-                        ],
-                        map_row,
-                    )?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                rows
+
+                stmt.query_map(
+                    rusqlite::params![
+                        &incident.session_id,
+                        &incident.project,
+                        &incident.tool,
+                        &first.timestamp,
+                    ],
+                    map_row,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?
             };
             let truncated = rows.len() > TRANSCRIPT_CAP;
             let mut out = rows;
@@ -1927,18 +1925,17 @@ pub fn investigate_ai_incidents(
                      ORDER BY timestamp ASC
                      LIMIT 21",
                 )?;
-                let rows = stmt
-                    .query_map(
-                        rusqlite::params![
-                            &incident.session_id,
-                            &incident.project,
-                            &incident.tool,
-                            &last.timestamp,
-                        ],
-                        map_row,
-                    )?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                rows
+
+                stmt.query_map(
+                    rusqlite::params![
+                        &incident.session_id,
+                        &incident.project,
+                        &incident.tool,
+                        &last.timestamp,
+                    ],
+                    map_row,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?
             };
             let truncated = rows.len() > TRANSCRIPT_CAP;
             let mut out = rows;

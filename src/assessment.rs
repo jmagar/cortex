@@ -1,5 +1,5 @@
-use anyhow::{anyhow, bail, Context, Result};
-use serde_json::{json, Value};
+use anyhow::{Context, Result, anyhow, bail};
+use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -575,7 +575,8 @@ mod tests {
     impl EnvGuard {
         fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
             let old = std::env::var_os(name);
-            std::env::set_var(name, value);
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(name, value) };
             Self { name, old }
         }
     }
@@ -583,8 +584,10 @@ mod tests {
     impl Drop for EnvGuard {
         fn drop(&mut self) {
             match &self.old {
-                Some(value) => std::env::set_var(self.name, value),
-                None => std::env::remove_var(self.name),
+                // TODO: Audit that the environment access only happens in single-threaded code.
+                Some(value) => unsafe { std::env::set_var(self.name, value) },
+                // TODO: Audit that the environment access only happens in single-threaded code.
+                None => unsafe { std::env::remove_var(self.name) },
             }
         }
     }
@@ -602,7 +605,9 @@ mod tests {
         assert!(SKILL_MD.contains("write exactly: **Trend evidence unavailable.**"));
         assert!(SKILL_MD.contains("Never write \"no systemic failure\""));
         assert!(SKILL_MD.contains("Never collapse \"real frustration with incidental profanity\""));
-        assert!(SKILL_MD.contains("The executive summary must preserve the same uncertainty level"));
+        assert!(
+            SKILL_MD.contains("The executive summary must preserve the same uncertainty level")
+        );
     }
 
     #[test]
@@ -626,23 +631,27 @@ mod tests {
         let spec = config.command_spec().unwrap();
         assert_eq!(spec.program, "gemini");
         assert_eq!(spec.output_mode, "stream-json");
-        assert!(spec
-            .args
-            .windows(2)
-            .any(|w| w == ["--prompt", GEMINI_STDIN_PROMPT_STUB]));
-        assert!(spec
-            .args
-            .windows(2)
-            .any(|w| w == ["--approval-mode", "plan"]));
+        assert!(
+            spec.args
+                .windows(2)
+                .any(|w| w == ["--prompt", GEMINI_STDIN_PROMPT_STUB])
+        );
+        assert!(
+            spec.args
+                .windows(2)
+                .any(|w| w == ["--approval-mode", "plan"])
+        );
         assert!(spec.args.windows(2).any(|w| w == ["--extensions", "none"]));
-        assert!(spec
-            .args
-            .windows(2)
-            .any(|w| w == ["--output-format", "stream-json"]));
-        assert!(spec
-            .args
-            .windows(2)
-            .any(|w| w == ["--model", "gemini-test"]));
+        assert!(
+            spec.args
+                .windows(2)
+                .any(|w| w == ["--output-format", "stream-json"])
+        );
+        assert!(
+            spec.args
+                .windows(2)
+                .any(|w| w == ["--model", "gemini-test"])
+        );
     }
 
     #[test]
@@ -672,11 +681,13 @@ mod tests {
         let home = prepare_gemini_home(&config).unwrap();
         let isolated = home.path().join(".gemini");
         assert!(isolated.join("oauth_creds.json").is_file());
-        assert!(isolated
-            .join("skills")
-            .join(SKILL_NAME)
-            .join("SKILL.md")
-            .is_file());
+        assert!(
+            isolated
+                .join("skills")
+                .join(SKILL_NAME)
+                .join("SKILL.md")
+                .is_file()
+        );
 
         let settings: Value =
             serde_json::from_slice(&fs::read(isolated.join("settings.json")).unwrap()).unwrap();

@@ -46,7 +46,7 @@ use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
 use super::{ServiceError, ServiceResult};
 use crate::app::{correlate, heartbeat_flags, models, os_adapter, time};
-use crate::assessment::{build_assessment_prompt, run_gemini_assessment, GeminiAssessConfig};
+use crate::assessment::{GeminiAssessConfig, build_assessment_prompt, run_gemini_assessment};
 use crate::command_log::{self, CommandLogImportResult};
 use crate::config::StorageConfig;
 use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy};

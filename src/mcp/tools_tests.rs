@@ -55,7 +55,8 @@ struct EnvVarGuard {
 impl EnvVarGuard {
     fn set_path(name: &'static str, value: &std::path::Path) -> Self {
         let previous = std::env::var_os(name);
-        std::env::set_var(name, value);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(name, value) };
         Self { name, previous }
     }
 }
@@ -63,8 +64,10 @@ impl EnvVarGuard {
 impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         match &self.previous {
-            Some(value) => std::env::set_var(self.name, value),
-            None => std::env::remove_var(self.name),
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            Some(value) => unsafe { std::env::set_var(self.name, value) },
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var(self.name) },
         }
     }
 }
@@ -384,11 +387,13 @@ async fn map_action_returns_infra_snapshot_from_known_hosts() {
     assert_eq!(value["cache_status"], "missing");
     assert_eq!(value["summary"]["hosts"], 2);
     assert!(value["artifact_refs"].as_array().unwrap().is_empty());
-    assert!(value["collection_errors"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|error| { error["collector"] == "cache" && error["severity"] == "warning" }));
+    assert!(
+        value["collection_errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|error| { error["collector"] == "cache" && error["severity"] == "warning" })
+    );
 
     let nodes = value["nodes"].as_array().unwrap();
     let tootie = nodes
@@ -640,14 +645,10 @@ async fn map_action_findings_mode_returns_topology_findings_without_raw_leaks() 
             .iter()
             .any(|finding| finding["finding_type"] == "risky_mounts"
                 && finding["reason_code"] == "docker_socket_mount"
-                && finding["affected_entities"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(
-                        |entity| entity["details"]["mount_source_kind"] == "docker_socket"
-                            && entity["details"]["read_only"] == "false"
-                    )),
+                && finding["affected_entities"].as_array().unwrap().iter().any(
+                    |entity| entity["details"]["mount_source_kind"] == "docker_socket"
+                        && entity["details"]["read_only"] == "false"
+                )),
         "findings should include docker socket mount details: {answer}"
     );
     assert!(
@@ -939,10 +940,12 @@ async fn map_action_findings_public_route_without_target_is_low_confidence() {
         .unwrap_or_else(|| panic!("expected no-target route finding: {answer}"));
     assert_eq!(finding["severity"], "low");
     assert_eq!(finding["finding_type"], "potential_public_route");
-    assert!(finding["confidence_context"]
-        .as_str()
-        .unwrap()
-        .contains("Confidence reduced"));
+    assert!(
+        finding["confidence_context"]
+            .as_str()
+            .unwrap()
+            .contains("Confidence reduced")
+    );
     assert!(
         finding["affected_entities"]
             .as_array()
@@ -1393,10 +1396,12 @@ async fn graph_evidence_mode_dispatches_and_schema_lists_modes() {
     for expected in ["entity", "around", "explain", "evidence"] {
         assert!(mode_enum.iter().any(|value| value == expected));
     }
-    assert!(defs[0]["inputSchema"]["properties"]
-        .as_object()
-        .unwrap()
-        .contains_key("evidence_id"));
+    assert!(
+        defs[0]["inputSchema"]["properties"]
+            .as_object()
+            .unwrap()
+            .contains_key("evidence_id")
+    );
     assert_eq!(
         defs[0]["inputSchema"]["properties"]["evidence_id"]["minimum"],
         1

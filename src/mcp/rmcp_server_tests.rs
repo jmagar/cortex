@@ -1,26 +1,26 @@
 use std::sync::Arc;
 
 use axum::{
-    body::{to_bytes, Body},
-    extract::Request as AxumRequest,
-    http::{header, Request, StatusCode},
-    middleware::{self, Next},
     Router,
+    body::{Body, to_bytes},
+    extract::Request as AxumRequest,
+    http::{Request, StatusCode, header},
+    middleware::{self, Next},
 };
 use lab_auth::AuthContext;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 use crate::{
     app::CortexService,
     config::{McpConfig, StorageConfig},
     db::{self, DbPool, LogBatchEntry},
-    mcp::{streamable_http_config, streamable_http_service, AppState, AuthPolicy},
+    mcp::{AppState, AuthPolicy, streamable_http_config, streamable_http_service},
 };
 
 use super::{
-    actions, allowed_hosts, allowed_origins, classify_tool_error, required_scope_for,
-    ToolErrorClass,
+    ToolErrorClass, actions, allowed_hosts, allowed_origins, classify_tool_error,
+    required_scope_for,
 };
 
 fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
@@ -467,9 +467,11 @@ async fn rmcp_prompts_get_rejects_unknown_prompt() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(response["error"]["code"], -32602);
-    assert!(response["error"]["message"]
-        .as_str()
-        .is_some_and(|message| message.contains("unknown prompt")));
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown prompt"))
+    );
 }
 
 #[tokio::test]

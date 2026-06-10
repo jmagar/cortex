@@ -3,12 +3,12 @@ mod sql;
 #[path = "graph_inventory_tests.rs"]
 mod tests;
 
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::collections::{BTreeMap, btree_map::Entry};
 
 use anyhow::{Context, Result};
 
 use crate::db::graph;
-use crate::db::{write_lock, DbPool};
+use crate::db::{DbPool, write_lock};
 use crate::inventory::schema::HomelabInventory;
 
 use self::sql::{

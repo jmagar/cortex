@@ -14,7 +14,7 @@
 
 use lab_auth::AuthContext;
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCorrelateRequest, AiIncidentRequest,
@@ -30,8 +30,8 @@ use crate::app::{
     UsageBlocksRequest,
 };
 
-use super::actions;
 use super::AppState;
+use super::actions;
 
 /// Execute a tool by name
 pub(super) async fn execute_tool(
@@ -547,9 +547,7 @@ const ADMIN_ACTION_HELP: &[AdminActionHelp] = &[
     AdminActionHelp {
         action: "notifications_test",
         description: "Send a test notification via the server-configured Apprise URLs. Rate-limited to 10 per minute per actor.\nCaller-supplied Apprise URLs are ignored for security; the server uses its own configured URLs.",
-        parameters: &[
-            "`body` (string, optional) — notification body text (default: test message)",
-        ],
+        parameters: &["`body` (string, optional) — notification body text (default: test message)"],
     },
 ];
 

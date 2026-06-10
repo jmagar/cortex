@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
-use cortex::heartbeat_agent::{run_agent, HeartbeatAgentConfig};
+use cortex::heartbeat_agent::{HeartbeatAgentConfig, run_agent};
 
 use super::{HeartbeatAgentArgs, HeartbeatCommand};
 

@@ -3,10 +3,10 @@ use super::*;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Request, StatusCode};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 use crate::config::StorageConfig;

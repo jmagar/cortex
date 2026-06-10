@@ -61,11 +61,12 @@ fn timeout_evidence_produces_tool_timeout_with_matching_ids() {
     let m = mode(&f, TOOL_TIMEOUT).expect("tool_timeout mode");
     assert_eq!(m.evidence_ids, vec![10]);
     assert_eq!(m.confidence, "low"); // single hit → conservative
-                                     // Prevention hint is tied to the detected category.
-    assert!(f
-        .prevention_hints
-        .iter()
-        .any(|h| h.category == TOOL_TIMEOUT && !h.hint.is_empty()));
+    // Prevention hint is tied to the detected category.
+    assert!(
+        f.prevention_hints
+            .iter()
+            .any(|h| h.category == TOOL_TIMEOUT && !h.hint.is_empty())
+    );
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use crate::config::StorageConfig;
-use crate::db::{init_pool, search_logs, SearchParams};
+use crate::db::{SearchParams, init_pool, search_logs};
 use serial_test::serial;
 
 use super::*;
@@ -97,8 +97,10 @@ fn wrapper_executes_multi_arg_commands_without_shell_reparse() {
     std::fs::set_permissions(&fake_shell, std::fs::Permissions::from_mode(0o755)).unwrap();
     let previous_shell = std::env::var_os("SHELL");
     let previous_out = std::env::var_os("CORTEX_TEST_ARG_OUT");
-    std::env::set_var("SHELL", &fake_shell);
-    std::env::set_var("CORTEX_TEST_ARG_OUT", &arg_out);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("SHELL", &fake_shell) };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("CORTEX_TEST_ARG_OUT", &arg_out) };
 
     let exit_code = run_agent_command_wrapper(
         &spool,
@@ -114,12 +116,16 @@ fn wrapper_executes_multi_arg_commands_without_shell_reparse() {
     .unwrap();
 
     match previous_shell {
-        Some(value) => std::env::set_var("SHELL", value),
-        None => std::env::remove_var("SHELL"),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(value) => unsafe { std::env::set_var("SHELL", value) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("SHELL") },
     }
     match previous_out {
-        Some(value) => std::env::set_var("CORTEX_TEST_ARG_OUT", value),
-        None => std::env::remove_var("CORTEX_TEST_ARG_OUT"),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(value) => unsafe { std::env::set_var("CORTEX_TEST_ARG_OUT", value) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("CORTEX_TEST_ARG_OUT") },
     }
     assert_eq!(exit_code, 0);
     assert_eq!(
@@ -157,16 +163,20 @@ fn imports_zsh_history_as_shell_history_rows() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].facility.as_deref(), Some("shell"));
     assert_eq!(rows[0].app_name.as_deref(), Some("zsh"));
-    assert!(rows[0]
-        .metadata_json
-        .as_deref()
-        .unwrap()
-        .contains("shell-history"));
-    assert!(rows[0]
-        .metadata_json
-        .as_deref()
-        .unwrap()
-        .contains("\"shell\""));
+    assert!(
+        rows[0]
+            .metadata_json
+            .as_deref()
+            .unwrap()
+            .contains("shell-history")
+    );
+    assert!(
+        rows[0]
+            .metadata_json
+            .as_deref()
+            .unwrap()
+            .contains("\"shell\"")
+    );
     assert!(rows[0].message.contains("[REDACTED]"));
 }
 
@@ -381,16 +391,20 @@ fn imports_agent_spool_as_agent_command_rows() {
     assert_eq!(rows[0].severity, "warning");
     assert_eq!(rows[0].ai_tool.as_deref(), Some("claude-code"));
     assert!(rows[0].message.contains("[REDACTED]"));
-    assert!(rows[0]
-        .metadata_json
-        .as_deref()
-        .unwrap()
-        .contains("agent-command"));
-    assert!(rows[0]
-        .metadata_json
-        .as_deref()
-        .unwrap()
-        .contains("agent_command"));
+    assert!(
+        rows[0]
+            .metadata_json
+            .as_deref()
+            .unwrap()
+            .contains("agent-command")
+    );
+    assert!(
+        rows[0]
+            .metadata_json
+            .as_deref()
+            .unwrap()
+            .contains("agent_command")
+    );
     assert_eq!(std::fs::read_to_string(&spool).unwrap(), "");
     let second = import_agent_command_spool(&pool, &spool).unwrap();
     assert_eq!(second.scanned, 0);

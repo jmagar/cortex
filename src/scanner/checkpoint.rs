@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{params, OptionalExtension, Transaction};
+use rusqlite::{OptionalExtension, Transaction, params};
 
 use crate::db::DbPool;
 use std::path::Path;

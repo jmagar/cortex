@@ -14,7 +14,9 @@
 //! lock. Shutdown drains the ingest channel, then checkpoints the WAL.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -23,7 +25,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::app::CortexService;
-use crate::config::{mcp_bind_is_loopback, validate_auth_config, AuthMode, Config};
+use crate::config::{AuthMode, Config, mcp_bind_is_loopback, validate_auth_config};
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::heartbeat::HeartbeatState;
 use crate::ingest::IngestTx;
@@ -208,11 +210,10 @@ impl RuntimeCore {
             && (config.storage.max_db_size_mb > 0 || config.storage.min_free_disk_mb > 0)
         {
             let initial_outcome = db::enforce_storage_budget(&pool, &config.storage)?;
-            *storage_state.lock().expect("storage state mutex poisoned") =
-                Some(StorageBudgetState {
-                    metrics: initial_outcome.metrics.clone(),
-                    write_blocked: initial_outcome.write_blocked,
-                });
+            *storage_state.lock() = Some(StorageBudgetState {
+                metrics: initial_outcome.metrics.clone(),
+                write_blocked: initial_outcome.write_blocked,
+            });
             tracing::info!(
                 deleted_rows = initial_outcome.deleted_rows,
                 logical_db_size_bytes = initial_outcome.metrics.logical_db_size_bytes,
@@ -309,10 +310,13 @@ impl RuntimeCore {
     pub async fn shutdown(self, timeout: std::time::Duration) {
         let pool = Arc::clone(&self.pool);
         self.ingest.shutdown(timeout).await;
-        if let Err(e) = db::db_wal_checkpoint(&pool, "truncate") {
-            tracing::warn!(error = %e, "WAL checkpoint on shutdown failed (non-fatal)");
-        } else {
-            tracing::info!("WAL checkpoint completed on clean shutdown");
+        match db::db_wal_checkpoint(&pool, "truncate") {
+            Err(e) => {
+                tracing::warn!(error = %e, "WAL checkpoint on shutdown failed (non-fatal)");
+            }
+            _ => {
+                tracing::info!("WAL checkpoint completed on clean shutdown");
+            }
         }
     }
 
@@ -851,7 +855,6 @@ impl RuntimeCore {
                 // flapping at the trigger threshold (syslog-mcp-w4hh).
                 let prev_write_blocked = shared_storage_state
                     .lock()
-                    .expect("storage state mutex poisoned")
                     .as_ref()
                     .map(|s| s.write_blocked)
                     .unwrap_or(false);
@@ -905,9 +908,7 @@ impl RuntimeCore {
                 {
                     Ok(outcome) => {
                         let previous_blocked = {
-                            let mut state = shared_storage_state
-                                .lock()
-                                .expect("storage state mutex poisoned");
+                            let mut state = shared_storage_state.lock();
                             let previous_blocked = state.as_ref().map(|s| s.write_blocked);
                             *state = Some(StorageBudgetState {
                                 metrics: outcome.metrics.clone(),

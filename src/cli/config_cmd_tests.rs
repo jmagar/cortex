@@ -16,11 +16,13 @@ fn env_write_replaces_file_atomically_visible_content() {
         list_env_entries(&path).unwrap(),
         vec![("CORTEX_RECEIVER_HOST".to_string(), "0.0.0.0".to_string())]
     );
-    assert!(!dir.path().read_dir().unwrap().any(|entry| entry
-        .unwrap()
-        .file_name()
-        .to_string_lossy()
-        .contains(".tmp.")));
+    assert!(!dir.path().read_dir().unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".tmp.")
+    }));
 }
 
 #[test]

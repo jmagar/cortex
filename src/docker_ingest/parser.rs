@@ -4,7 +4,7 @@ use bollard::models::{EventActor, EventMessage};
 use chrono::TimeZone;
 
 use crate::db;
-use crate::enrich::{stamp_source_kind, SourceKind};
+use crate::enrich::{SourceKind, stamp_source_kind};
 use crate::ingest_metadata::bounded_metadata_json;
 
 use super::models::ContainerMeta;
@@ -273,11 +273,11 @@ fn infer_json_severity(message: &str) -> Option<&'static str> {
         parsed.get("severity_text"),
         parsed.get("log").and_then(|log| log.get("level")),
     ];
-    let severity = candidates
+
+    candidates
         .into_iter()
         .flatten()
-        .find_map(|value| value.as_str().and_then(normalize_level));
-    severity
+        .find_map(|value| value.as_str().and_then(normalize_level))
 }
 
 fn infer_text_severity(message: &str) -> Option<&'static str> {

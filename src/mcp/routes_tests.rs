@@ -4,7 +4,7 @@ use crate::config::{McpConfig, StorageConfig};
 use crate::db;
 use crate::mcp::{AppState, AuthPolicy};
 use axum::body::to_bytes;
-use axum::http::{header, Method, Request, StatusCode};
+use axum::http::{Method, Request, StatusCode, header};
 use std::sync::Arc;
 use tower::util::ServiceExt;
 

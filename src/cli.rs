@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cortex::app::ServiceLogsRequest;
 use cortex::compose::{
     CliDockerInspect, ComposeDefaults, ComposeMutation, ComposeService, ProcessRunner,
@@ -31,7 +31,7 @@ mod run;
 pub(crate) use dispatch_command_log::run_agent_command_wrap;
 #[allow(unused_imports)]
 pub(crate) use run::ENV_USE_HTTP;
-pub(crate) use run::{run, CliMode, GlobalFlags};
+pub(crate) use run::{CliMode, GlobalFlags, run};
 
 mod ai_watch;
 pub(crate) mod color;
@@ -65,7 +65,7 @@ mod table;
 
 pub(crate) use config_cmd::run_config;
 pub(crate) use heartbeat_agent::run_heartbeat_no_db;
-pub(crate) use parse_common::{parse_i64_flag, parse_u32_flag, FlagCursor};
+pub(crate) use parse_common::{FlagCursor, parse_i64_flag, parse_u32_flag};
 pub(crate) use setup::install_self;
 pub(crate) use setup::run_setup;
 
@@ -192,8 +192,8 @@ pub(crate) async fn run_service_no_db(command: CliCommand) -> Result<()> {
 use ai_watch::smoke_watch_target;
 #[cfg(test)]
 use coordination::{
-    ai_watch_coordination_phase, canonicalize_with_warning, lookup_systemd_db_path,
-    parse_systemctl_env_output, DoctorCache, SystemctlEnv,
+    DoctorCache, SystemctlEnv, ai_watch_coordination_phase, canonicalize_with_warning,
+    lookup_systemd_db_path, parse_systemctl_env_output,
 };
 #[cfg(test)]
 use cortex::scanner::AiDoctorReport;

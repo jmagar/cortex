@@ -1,7 +1,7 @@
 use anyhow::Result;
 use axum::Router;
 use cortex::{api, doctor, logging, mcp, runtime::RuntimeCore};
-use rmcp::{transport::stdio, ServiceExt};
+use rmcp::{ServiceExt, transport::stdio};
 use tracing::info;
 
 mod cli;

@@ -11,7 +11,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::db::{self, LogBatchEntry};
-use crate::enrich::{stamp_source_kind, SourceKind};
+use crate::enrich::{SourceKind, stamp_source_kind};
 use crate::ingest_metadata::bounded_metadata_json;
 use crate::receiver::enrichment::scrub_ai_message;
 

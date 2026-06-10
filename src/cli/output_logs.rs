@@ -5,9 +5,9 @@ use cortex::app::{
     SearchLogsResponse, SearchSessionsResponse, UsageBlocksResponse,
 };
 
+use super::AiOutputDetail;
 use super::color::{cyan, muted, primary, severity, violet};
 use super::output_common::{local_ts, print_json, print_log, truncate};
-use super::AiOutputDetail;
 
 pub(crate) fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()> {
     if json {

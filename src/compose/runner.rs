@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use super::format::redact_sensitive;
 use super::types::{CommandOutput, CommandRunner, ComposeInvocation, TimeoutCleanupStatus};

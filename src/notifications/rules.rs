@@ -3,7 +3,7 @@
 //! Each function takes a slice of log rows and returns `OutboxInsertParams`
 //! for rows that match the rule. The evaluator calls these functions periodically.
 
-use crate::db::notifications::{backoff_next_attempt_at, OutboxInsertParams};
+use crate::db::notifications::{OutboxInsertParams, backoff_next_attempt_at};
 use crate::notifications::apprise::escape_for_notification;
 
 /// A minimal log row used for rule evaluation.

@@ -9,8 +9,8 @@ use crate::heartbeat_agent;
 use super::firstrun::parse_env;
 use super::systemd::{systemctl_user_named_phase, systemctl_user_state};
 use super::{
-    check_file_phase, host_local_report_input, setup_path_value, setup_report, write_private_file,
-    HeartbeatAgentAction, PhaseTimer, SetupPhase, SetupReport, SetupStatus,
+    HeartbeatAgentAction, PhaseTimer, SetupPhase, SetupReport, SetupStatus, check_file_phase,
+    host_local_report_input, setup_path_value, setup_report, write_private_file,
 };
 
 const UNIT_NAME: &str = "cortex-heartbeat-agent.service";

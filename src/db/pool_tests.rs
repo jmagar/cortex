@@ -1,9 +1,9 @@
 use super::*;
 use crate::config::StorageConfig;
 use crate::db::{
-    insert_logs_batch, is_known_entity_type, is_known_evidence_source_kind, is_known_reason_code,
-    is_known_relationship_type, is_known_trust_level, LogBatchEntry, ENTITY_TYPES,
-    EVIDENCE_SOURCE_KINDS, REASON_CODES, RELATIONSHIP_TYPES, TRUST_LEVELS,
+    ENTITY_TYPES, EVIDENCE_SOURCE_KINDS, LogBatchEntry, REASON_CODES, RELATIONSHIP_TYPES,
+    TRUST_LEVELS, insert_logs_batch, is_known_entity_type, is_known_evidence_source_kind,
+    is_known_reason_code, is_known_relationship_type, is_known_trust_level,
 };
 
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {

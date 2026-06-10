@@ -2,8 +2,8 @@ use super::*;
 use crate::app::error_detection::normalize::normalize_template;
 use crate::config::StorageConfig;
 use crate::db::{
-    init_pool, insert_logs_batch, prune_timeline_rollup, refresh_timeline_rollup,
-    timeline_rollup_status, DbPool, LogBatchEntry,
+    DbPool, LogBatchEntry, init_pool, insert_logs_batch, prune_timeline_rollup,
+    refresh_timeline_rollup, timeline_rollup_status,
 };
 
 fn test_pool() -> (DbPool, tempfile::TempDir) {
@@ -636,12 +636,16 @@ fn context_timestamp_only_anchor_splits_symmetrically() {
     // 5 strictly-less timestamps, 4 strictly-greater. Neither contains a row at 05.
     assert_eq!(before.len(), 5);
     assert_eq!(after.len(), 4);
-    assert!(before
-        .iter()
-        .all(|r| r.timestamp.as_str() < "2026-01-01T00:00:05Z"));
-    assert!(after
-        .iter()
-        .all(|r| r.timestamp.as_str() > "2026-01-01T00:00:05Z"));
+    assert!(
+        before
+            .iter()
+            .all(|r| r.timestamp.as_str() < "2026-01-01T00:00:05Z")
+    );
+    assert!(
+        after
+            .iter()
+            .all(|r| r.timestamp.as_str() > "2026-01-01T00:00:05Z")
+    );
 }
 
 fn ai_entry(ts: &str, tool: &str, project: &str, session_id: &str, message: &str) -> LogBatchEntry {

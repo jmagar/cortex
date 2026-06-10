@@ -1041,7 +1041,8 @@ fn load_setup_env_file() {
             }
         }
         tracing::trace!(key, "load_setup_env_file: setting env entry");
-        std::env::set_var(key, value);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(key, value) };
     }
 }
 

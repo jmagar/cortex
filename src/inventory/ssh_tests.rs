@@ -3,8 +3,8 @@ use crate::inventory::process::CommandOutput;
 use futures_util::future::join_all;
 use std::collections::BTreeMap;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
 };
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -46,11 +46,13 @@ fn ssh_args_ignore_newer_config_options_before_loading_config() {
 
 #[test]
 fn ssh_args_reject_option_like_hosts_and_use_strict_host_keys_by_default() {
-    assert!(SshContext::new(SshOptions::default())
-        .ssh_args("-oProxyCommand=touch /tmp/pwned", "true")
-        .unwrap_err()
-        .to_string()
-        .contains("unsafe ssh host"));
+    assert!(
+        SshContext::new(SshOptions::default())
+            .ssh_args("-oProxyCommand=touch /tmp/pwned", "true")
+            .unwrap_err()
+            .to_string()
+            .contains("unsafe ssh host")
+    );
 
     let args = SshContext::new(
         SshOptions::default()
@@ -152,10 +154,12 @@ fn configured_hosts_reports_rejected_explicit_hosts() {
     assert_eq!(resolution.hosts, vec!["tootie"]);
     assert!(resolution.explicit_hosts_configured);
     assert_eq!(resolution.warnings.len(), 2);
-    assert!(resolution
-        .warnings
-        .iter()
-        .any(|warning| warning.contains("-oProxyCommand=bad")));
+    assert!(
+        resolution
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("-oProxyCommand=bad"))
+    );
 }
 
 #[test]
@@ -164,10 +168,12 @@ fn configured_hosts_reports_all_explicit_hosts_rejected() {
 
     assert!(resolution.hosts.is_empty());
     assert!(resolution.no_usable_explicit_hosts());
-    assert!(resolution
-        .warnings
-        .iter()
-        .any(|warning| warning.contains("all explicitly configured SSH hosts were rejected")));
+    assert!(
+        resolution
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("all explicitly configured SSH hosts were rejected"))
+    );
 }
 
 #[test]
@@ -177,10 +183,12 @@ fn configured_hosts_reports_unreadable_ssh_config() {
 
     assert!(resolution.hosts.is_empty());
     assert!(!resolution.explicit_hosts_configured);
-    assert!(resolution
-        .warnings
-        .iter()
-        .any(|warning| warning.contains("could not be read")));
+    assert!(
+        resolution
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("could not be read"))
+    );
 }
 
 #[test]
@@ -190,9 +198,11 @@ fn ssh_options_reject_invalid_zero_values() {
     assert!(SshOptions::default().with_server_alive(1, 0).is_err());
     assert!(SshOptions::default().with_max_concurrent(0).is_err());
     assert!(SshOptions::default().with_retry_attempts(0).is_err());
-    assert!(SshOptions::default()
-        .with_retry_initial_backoff(Duration::ZERO)
-        .is_err());
+    assert!(
+        SshOptions::default()
+            .with_retry_initial_backoff(Duration::ZERO)
+            .is_err()
+    );
 
     let args = SshContext::new(SshOptions::default().with_connect_timeout_secs(7).unwrap())
         .ssh_args("tootie", "true")

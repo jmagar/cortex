@@ -13,12 +13,12 @@ use cortex::app::{
     HostStateRequest, ListAppsRequest, SilentHostsRequest,
 };
 
+use super::CliMode;
 use super::args::{
     AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, EntityArgs,
     FleetStateArgs, GraphAroundArgs, GraphEvidenceArgs, GraphExplainArgs, GraphRebuildArgs,
     GraphStatusArgs, HostStateArgs, SilentHostsArgs,
 };
-use super::CliMode;
 
 impl SilentHostsArgs {
     pub(crate) fn into_request(self) -> SilentHostsRequest {

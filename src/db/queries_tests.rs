@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::StorageConfig;
-use crate::db::{init_pool, insert_logs_batch, AiRelatedWindow, DbPool, LogBatchEntry};
+use crate::db::{AiRelatedWindow, DbPool, LogBatchEntry, init_pool, insert_logs_batch};
 
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {
     StorageConfig::for_test(db_path)
@@ -680,9 +680,10 @@ fn tail_logs_filters_multiple_severities() {
 
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|row| row.hostname == "host-a"));
-    assert!(rows
-        .iter()
-        .all(|row| ["err", "warning"].contains(&row.severity.as_str())));
+    assert!(
+        rows.iter()
+            .all(|row| ["err", "warning"].contains(&row.severity.as_str()))
+    );
 }
 
 #[test]
@@ -833,9 +834,10 @@ fn search_logs_filters_by_source_ip_prefix_without_fts() {
     .unwrap();
 
     assert_eq!(rows.len(), 2);
-    assert!(rows
-        .iter()
-        .all(|row| row.source_ip.starts_with("docker://dookie/cortex/")));
+    assert!(
+        rows.iter()
+            .all(|row| row.source_ip.starts_with("docker://dookie/cortex/"))
+    );
 }
 
 #[test]
@@ -1365,10 +1367,12 @@ fn investigate_ai_incidents_exact_id_can_fetch_beyond_top_ten() {
         },
     )
     .unwrap();
-    assert!(!top_ten
-        .evidence
-        .iter()
-        .any(|bundle| bundle.incident.incident_id == target_id));
+    assert!(
+        !top_ten
+            .evidence
+            .iter()
+            .any(|bundle| bundle.incident.incident_id == target_id)
+    );
 
     let exact = investigate_ai_incidents(
         &pool,
@@ -1694,10 +1698,12 @@ fn rollup_status_reports_refresh_time() {
     seed_ai_sessions(&pool);
 
     // Never refreshed => no staleness timestamp.
-    assert!(ai_session_rollup_status(&pool)
-        .unwrap()
-        .refreshed_at
-        .is_none());
+    assert!(
+        ai_session_rollup_status(&pool)
+            .unwrap()
+            .refreshed_at
+            .is_none()
+    );
 
     refresh_ai_session_rollup(&pool).unwrap();
     let status = ai_session_rollup_status(&pool).unwrap();

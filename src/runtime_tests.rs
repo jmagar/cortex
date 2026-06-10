@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::{background_interval, build_auth_policy, RuntimeCore};
+use super::{RuntimeCore, background_interval, build_auth_policy};
 use crate::config::{AuthConfig, AuthMode, Config, McpConfig, StorageConfig};
 use crate::mcp::AuthPolicy;
 

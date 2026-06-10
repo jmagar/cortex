@@ -15,7 +15,7 @@ mod schemas;
 mod tools;
 
 pub use rmcp_server::{
-    rmcp_server, streamable_http_config, streamable_http_service, CortexRmcpServer,
+    CortexRmcpServer, rmcp_server, streamable_http_config, streamable_http_service,
 };
 pub use routes::router;
 

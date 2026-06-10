@@ -3,10 +3,10 @@
 //! Surface parity (cxih.4): exposes the `host_state` MCP action and
 //! `GET /api/host-state` REST route as a top-level CLI subcommand.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use super::super::args::{CliCommand, HostStateArgs};
-use super::super::{parse_u32_flag, FlagCursor};
+use super::super::{FlagCursor, parse_u32_flag};
 
 pub(crate) fn parse_host_state(args: &[String]) -> Result<CliCommand> {
     let mut parsed = HostStateArgs::default();

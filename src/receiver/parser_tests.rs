@@ -91,10 +91,11 @@ fn test_extract_cef_fields_config_change() {
     let cef = extract_cef_fields(text);
     assert_eq!(cef.hostname, Some("The Mothership".to_string()));
     assert_eq!(cef.app_name, Some("Admin Made Config Changes".to_string()));
-    assert!(cef
-        .message
-        .unwrap()
-        .starts_with("Jacob Magar changed Syslog Settings"));
+    assert!(
+        cef.message
+            .unwrap()
+            .starts_with("Jacob Magar changed Syslog Settings")
+    );
 }
 
 #[test]

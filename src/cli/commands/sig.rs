@@ -2,10 +2,10 @@
 //!
 //! Extracted from `src/cli.rs` as part of Q-C1 (cli.rs split).
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use super::super::args::{CliCommand, SigAckArgs, SigCommand, SigListArgs, SigUnackArgs};
-use super::super::{parse_u32_flag, FlagCursor};
+use super::super::{FlagCursor, parse_u32_flag};
 
 /// Dispatch `cortex sig <subcommand> [args]`.
 pub(crate) fn parse_sig(args: &[String]) -> Result<CliCommand> {

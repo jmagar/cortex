@@ -54,7 +54,7 @@ pub mod testing {
     };
 
     // Re-export db internals for integration tests (behind test-support feature).
-    pub use crate::db::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
+    pub use crate::db::{DbPool, LogBatchEntry, init_pool, insert_logs_batch};
 
     /// Build an [`AppState`] with [`AuthPolicy::LoopbackDev`].
     /// `data_dir` must remain alive for the duration of the test.

@@ -12,7 +12,7 @@
 //! 3. For client installs (`IS_SERVER != "true"`), validate connectivity to the
 //!    remote server's `/health` and return early — no local server setup.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::time::Duration;
 
 /// Outcome of the plugin-option preparation step.
@@ -131,7 +131,8 @@ fn export_if_set(env_name: &str, option_name: &str) -> Result<()> {
     }
     // SAFETY (edition 2021): set_var is safe here; this runs early in the
     // plugin-hook path before any threads read these vars.
-    std::env::set_var(env_name, value);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var(env_name, value) };
     Ok(())
 }
 
@@ -195,7 +196,8 @@ fn prepare_oauth_env() -> Result<()> {
         .unwrap_or(true);
     if public_unset && server_url.starts_with("https://") {
         // SAFETY (edition 2021): early single-threaded plugin-hook path.
-        std::env::set_var("CORTEX_PUBLIC_URL", strip_trailing_mcp_path(&server_url));
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("CORTEX_PUBLIC_URL", strip_trailing_mcp_path(&server_url)) };
     }
 
     let mut redirects = std::env::var("CORTEX_AUTH_ALLOWED_REDIRECT_URIS").unwrap_or_default();
@@ -207,16 +209,20 @@ fn prepare_oauth_env() -> Result<()> {
         }
     }
     // SAFETY (edition 2021): early single-threaded plugin-hook path.
-    std::env::set_var("CORTEX_AUTH_ALLOWED_REDIRECT_URIS", redirects);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("CORTEX_AUTH_ALLOWED_REDIRECT_URIS", redirects) };
 
     let disable_static = std::env::var("CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH")
         .ok()
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "false".to_string());
-    std::env::set_var(
-        "CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
-        disable_static,
-    );
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe {
+        std::env::set_var(
+            "CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH",
+            disable_static,
+        )
+    };
     Ok(())
 }
 

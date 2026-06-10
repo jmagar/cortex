@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::StorageConfig;
-use crate::db::{graph, init_pool, insert_logs_batch, LogBatchEntry};
+use crate::db::{LogBatchEntry, graph, init_pool, insert_logs_batch};
 use crate::inventory::schema::{
     ArtifactRef, ComposeProject, HomelabInventory, InventoryNode, InventoryService, NetworkSegment,
     PortMapping, Provenance, RedactionStatus, ReverseProxyRoute, TrustLevel,

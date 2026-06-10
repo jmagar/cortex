@@ -1,5 +1,5 @@
 // scanner_tests.rs
-use super::{process_chunk, NORMALIZER_VERSION};
+use super::{NORMALIZER_VERSION, process_chunk};
 use crate::config::StorageConfig;
 use crate::db::{self, DbPool};
 use tempfile::TempDir;

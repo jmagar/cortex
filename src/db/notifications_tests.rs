@@ -3,9 +3,9 @@ mod notifications_db_tests {
     use rusqlite::Connection;
 
     use crate::db::notifications::{
-        backoff_next_attempt_at, firings_insert, firings_recent, firings_recent_dedup_check,
-        outbox_claim_pending, outbox_insert, outbox_mark_dead, outbox_mark_dropped,
-        outbox_mark_sent, outbox_schedule_retry, FiringInsertParams, OutboxInsertParams,
+        FiringInsertParams, OutboxInsertParams, backoff_next_attempt_at, firings_insert,
+        firings_recent, firings_recent_dedup_check, outbox_claim_pending, outbox_insert,
+        outbox_mark_dead, outbox_mark_dropped, outbox_mark_sent, outbox_schedule_retry,
     };
 
     fn in_memory_conn() -> Connection {

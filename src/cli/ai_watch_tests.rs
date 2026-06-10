@@ -12,9 +12,11 @@ fn smoke_watch_target_prefers_writable_claude_root() {
     let target = smoke_watch_target(&doctor, "stamp", "session-1", "2026-01-01T00:00:00Z").unwrap();
 
     assert_eq!(target.tool, "claude");
-    assert!(target
-        .transcript_path
-        .ends_with("syslog-smoke-watch-stamp.jsonl"));
+    assert!(
+        target
+            .transcript_path
+            .ends_with("syslog-smoke-watch-stamp.jsonl")
+    );
     assert!(target.body.contains("session-1"));
 }
 

@@ -31,7 +31,7 @@ use crate::cli::{
     GraphExplainArgs, IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs, SessionsArgs,
     SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::time::Duration;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};

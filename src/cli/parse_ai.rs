@@ -1,11 +1,11 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use super::parse_ai_more::{
     parse_ai_ask_history, parse_ai_assess, parse_ai_incident_context, parse_ai_incidents,
     parse_ai_investigate, parse_ai_similar,
 };
 use super::parse_common::{
-    parse_output_args, parse_positive_u64_flag, parse_u32_flag, value_after_equals, FlagCursor,
+    FlagCursor, parse_output_args, parse_positive_u64_flag, parse_u32_flag, value_after_equals,
 };
 use super::{
     AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiCommand, AiContextArgs,

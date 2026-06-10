@@ -25,12 +25,16 @@ fn tool_definition_exposes_agent_cost_metadata() {
     let tools = tool_definitions();
     let metadata = tools[0]["x-cortex-action-metadata"].as_array().unwrap();
     assert_eq!(metadata.len(), super::actions::ACTION_SPECS.len());
-    assert!(metadata
-        .iter()
-        .any(|action| { action["name"] == "status" && action["cost"] == "cheap" }));
-    assert!(metadata
-        .iter()
-        .any(|action| { action["name"] == "patterns" && action["cost"] == "expensive" }));
+    assert!(
+        metadata
+            .iter()
+            .any(|action| { action["name"] == "status" && action["cost"] == "cheap" })
+    );
+    assert!(
+        metadata
+            .iter()
+            .any(|action| { action["name"] == "patterns" && action["cost"] == "expensive" })
+    );
     assert_eq!(
         tools[0]["x-cortex-agent-guidance"]["default_bounds"]["timeline_bucket"],
         "minute"
@@ -182,27 +186,33 @@ fn schema_map_findings_exposes_findings_arguments() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];
 
-    assert!(props["mode"]["enum"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|mode| mode == "findings"));
+    assert!(
+        props["mode"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|mode| mode == "findings")
+    );
     assert_eq!(props["finding_limit"]["minimum"], 1);
     assert_eq!(props["finding_limit"]["maximum"], 100);
     assert_eq!(props["evidence_per_finding"]["minimum"], 1);
     assert_eq!(props["evidence_per_finding"]["maximum"], 5);
-    assert!(props["payload_budget"]["description"]
-        .as_str()
-        .unwrap()
-        .contains("mode=findings"));
+    assert!(
+        props["payload_budget"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("mode=findings")
+    );
     assert_eq!(
         props["finding_types"]["items"]["enum"],
         serde_json::json!(crate::app::topology_findings::TYPES)
     );
-    assert!(props["finding_types"]["description"]
-        .as_str()
-        .unwrap()
-        .contains("supported finding types"));
+    assert!(
+        props["finding_types"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("supported finding types")
+    );
 }
 
 #[test]
@@ -214,10 +224,12 @@ fn schema_timeline_and_patterns_warn_on_full_history_scan() {
         props["scan_limit"]["maximum"],
         crate::db::PATTERN_SCAN_LIMIT_MAX
     );
-    assert!(props["scan_limit"]["description"]
-        .as_str()
-        .unwrap()
-        .contains("max 10000"));
+    assert!(
+        props["scan_limit"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("max 10000")
+    );
     assert!(
         from_desc.contains("full-history scan"),
         "from/to description must warn that omitting them causes a full-history scan for timeline/patterns"

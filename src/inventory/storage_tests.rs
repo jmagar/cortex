@@ -9,7 +9,7 @@ fn write_json_creates_private_file_and_rejects_symlink() {
 
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{symlink, PermissionsExt};
+        use std::os::unix::fs::{PermissionsExt, symlink};
         assert_eq!(
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600

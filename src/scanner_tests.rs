@@ -1,7 +1,7 @@
 use super::*;
 use crate::config::StorageConfig;
 use crate::db::{
-    init_pool, search_ai_sessions, search_logs, tail_logs, SearchAiSessionsParams, SearchParams,
+    SearchAiSessionsParams, SearchParams, init_pool, search_ai_sessions, search_logs, tail_logs,
 };
 use serial_test::serial;
 
@@ -89,11 +89,13 @@ fn list_checkpoints_reports_errors_and_import_counts() {
 
     assert_eq!(checkpoints.len(), 1);
     assert_eq!(checkpoints[0].imported_records, 1);
-    assert!(checkpoints[0]
-        .last_error
-        .as_deref()
-        .unwrap()
-        .contains("failed to parse"));
+    assert!(
+        checkpoints[0]
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("failed to parse")
+    );
 }
 
 #[test]
@@ -216,9 +218,11 @@ fn parse_errors_are_counted_without_panicking() {
             |row| row.get(0),
         )
         .unwrap();
-    assert!(last_error
-        .unwrap()
-        .contains("1 transcript record(s) failed to parse"));
+    assert!(
+        last_error
+            .unwrap()
+            .contains("1 transcript record(s) failed to parse")
+    );
 }
 
 #[test]
@@ -963,7 +967,8 @@ struct HomeOverride(Option<std::ffi::OsString>);
 impl HomeOverride {
     fn set(path: &std::path::Path) -> Self {
         let previous = std::env::var_os("HOME");
-        std::env::set_var("HOME", path);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("HOME", path) };
         Self(previous)
     }
 }
@@ -971,9 +976,11 @@ impl HomeOverride {
 impl Drop for HomeOverride {
     fn drop(&mut self) {
         if let Some(home) = &self.0 {
-            std::env::set_var("HOME", home);
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var("HOME", home) };
         } else {
-            std::env::remove_var("HOME");
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::remove_var("HOME") };
         }
     }
 }
@@ -1017,8 +1024,10 @@ fn index_roots_skips_unreadable_directories_and_continues() {
     assert_eq!(result.ingested, 1);
     assert_eq!(result.skipped_files, 1);
     assert_eq!(result.file_errors.len(), 1);
-    assert!(result.file_errors[0]
-        .error
-        .to_ascii_lowercase()
-        .contains("permission denied"));
+    assert!(
+        result.file_errors[0]
+            .error
+            .to_ascii_lowercase()
+            .contains("permission denied")
+    );
 }
