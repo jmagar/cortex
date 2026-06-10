@@ -234,7 +234,9 @@ fn search_fts_plan_selection_branches_on_indexed_filter() {
     assert!(sql.contains("fts_candidates"), "unfiltered uses CTE plan");
     assert!(!sql.contains("l.id IN (SELECT rowid"));
 
-    // Indexed equality filter → index-led intersect plan (no candidate cap).
+    // Selective indexed equality filter → index-led intersect plan with a
+    // bounded match-set subquery (full-review PH1: the non-correlated IN
+    // subquery is materialized in full, so it must carry a cap).
     let filtered = SearchParams {
         hostname: Some("host-a".to_string()),
         ..plain.clone()
@@ -242,8 +244,14 @@ fn search_fts_plan_selection_branches_on_indexed_filter() {
     assert!(filtered.has_indexed_equality_filter());
     let (sql, _) = search_logs_fts_sql("disk", &filtered, 50);
     assert!(
-        sql.contains("l.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?1)"),
+        sql.contains("l.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?1"),
         "filtered search must use the intersect plan, got:\n{sql}"
+    );
+    assert!(
+        sql.contains(&format!(
+            "ORDER BY rowid DESC LIMIT {SEARCH_FTS_FAST_PATH_MATCH_CAP}"
+        )),
+        "intersect plan must bound the materialized match set, got:\n{sql}"
     );
     assert!(
         !sql.contains("fts_candidates"),
@@ -253,6 +261,42 @@ fn search_fts_plan_selection_branches_on_indexed_filter() {
         sql.contains("l.hostname = ?2"),
         "filter applied via append_filters"
     );
+}
+
+#[test]
+fn search_fts_severity_only_filter_uses_capped_candidate_plan() {
+    // Severity partitions are huge (a single severity can be >90% of the
+    // table); a rare term + severity-only filter previously walked the whole
+    // partition via the fast path (full-review PH1). Severity-only must take
+    // the capped-candidate plan.
+    let severity_only = SearchParams {
+        query: Some("disk".to_string()),
+        severity: Some("info".to_string()),
+        ..Default::default()
+    };
+    assert!(!severity_only.has_indexed_equality_filter());
+    let (sql, _) = search_logs_fts_sql("disk", &severity_only, 50);
+    assert!(
+        sql.contains("fts_candidates"),
+        "severity-only search must use the capped CTE plan, got:\n{sql}"
+    );
+
+    let severity_in_only = SearchParams {
+        query: Some("disk".to_string()),
+        severity_in: Some(vec!["emerg".to_string(), "alert".to_string()]),
+        ..Default::default()
+    };
+    assert!(!severity_in_only.has_indexed_equality_filter());
+
+    // Severity combined with a selective filter still gets the fast path
+    // (the selective column's index leads).
+    let combined = SearchParams {
+        query: Some("disk".to_string()),
+        severity: Some("info".to_string()),
+        hostname: Some("host-a".to_string()),
+        ..Default::default()
+    };
+    assert!(combined.has_indexed_equality_filter());
 }
 
 #[test]

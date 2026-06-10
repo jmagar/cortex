@@ -1422,3 +1422,78 @@ async fn timeline_applies_default_lookback_only_when_from_and_to_both_absent() {
         "with `to` set and `from` omitted, the default must be skipped so both logs (<= to) are counted"
     );
 }
+
+#[test]
+fn read_permits_reserve_a_writer_connection() {
+    // full-review PH3: one pooled connection stays reachable by writers.
+    assert_eq!(read_permits_for_pool(4), 3);
+    assert_eq!(read_permits_for_pool(2), 1);
+    // Floor of 1 keeps single-connection test pools usable (the writer
+    // shares in that degenerate case).
+    assert_eq!(read_permits_for_pool(1), 1);
+    assert_eq!(read_permits_for_pool(0), 1);
+}
+
+/// full-review PH3/TH1: with every read permit held by slow MCP reads, the
+/// batch-writer path (direct pool access, no service permit) must still reach
+/// a connection promptly. Before the permit reservation, 4 concurrent reads
+/// held all 4 pooled connections and the writer blocked up to the pool
+/// timeout per flush — the ingest channel then filled and packets dropped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn batch_writer_completes_under_saturated_read_permits() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = StorageConfig::for_test(dir.path().join("writer-liveness.db"));
+    storage.pool_size = 4;
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let service = CortexService::new(Arc::clone(&pool), storage);
+
+    // Saturate every read permit (pool_size - 1 = 3) with reads that pin a
+    // pooled connection for longer than the writer's deadline below.
+    let mut readers = Vec::new();
+    for _ in 0..3 {
+        let svc = service.clone();
+        readers.push(tokio::spawn(async move {
+            svc.run_db("test.slow_read", |pool| {
+                let _conn = pool.get()?;
+                std::thread::sleep(std::time::Duration::from_millis(1200));
+                Ok(())
+            })
+            .await
+        }));
+    }
+    // Let the readers acquire their permits and connections.
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let pool_w = Arc::clone(&pool);
+    let write_start = std::time::Instant::now();
+    let written = tokio::task::spawn_blocking(move || {
+        insert_logs_batch(
+            &pool_w,
+            &[entry(
+                "2026-01-01T00:00:00Z",
+                "host-w",
+                "info",
+                "writer liveness probe",
+                "127.0.0.1:514",
+            )],
+        )
+    })
+    .await
+    .expect("spawn_blocking join")
+    .expect("batch insert should succeed");
+    let elapsed = write_start.elapsed();
+
+    assert_eq!(written, 1);
+    assert!(
+        elapsed < std::time::Duration::from_millis(800),
+        "writer must reach the reserved connection promptly under read \
+         saturation; took {elapsed:?}"
+    );
+
+    for reader in readers {
+        reader
+            .await
+            .expect("reader join")
+            .expect("slow read should succeed");
+    }
+}

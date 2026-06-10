@@ -96,25 +96,67 @@ impl ServerHandler for CortexRmcpServer {
                 );
                 tool_result_from_json(result)
             }
-            Err(error) if is_validation_error(&error) => {
-                tracing::warn!(
-                    tool = %tool_name,
-                    error_class = "invalid_params",
-                    "MCP tool execution rejected invalid params"
-                );
-                Err(ErrorData::invalid_params(error.to_string(), None))
-            }
-            Err(error) => {
-                tracing::error!(
-                    tool = %tool_name,
-                    error = %error,
-                    error_class = "tool_execution",
-                    "MCP tool execution failed"
-                );
-                Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Tool execution failed for action '{action}'. Check server logs for details."
-                ))]))
-            }
+            // Mirror api.rs::respond(): every ServiceError variant maps to a
+            // distinct client-visible class so MCP clients can tell retryable
+            // contention from bad input from server faults (full-review AH1).
+            Err(error) => match classify_tool_error(&error) {
+                ToolErrorClass::InvalidParams => {
+                    tracing::warn!(
+                        tool = %tool_name,
+                        error_class = "invalid_params",
+                        "MCP tool execution rejected invalid params"
+                    );
+                    Err(ErrorData::invalid_params(error.to_string(), None))
+                }
+                ToolErrorClass::Retryable => {
+                    tracing::warn!(
+                        tool = %tool_name,
+                        error = %error,
+                        error_class = "retryable",
+                        "MCP tool execution hit transient contention"
+                    );
+                    Ok(CallToolResult::error(vec![Content::text(format!(
+                        "Action '{action}' is temporarily unavailable (database busy). \
+                         Retry shortly."
+                    ))]))
+                }
+                ToolErrorClass::NotFound => {
+                    tracing::warn!(
+                        tool = %tool_name,
+                        error = %error,
+                        error_class = "not_found",
+                        "MCP tool execution target not found"
+                    );
+                    // NotFound messages are client-safe by construction
+                    // (e.g. "log id 42 not found") — see ServiceError docs.
+                    Ok(CallToolResult::error(vec![Content::text(format!(
+                        "Not found: {error}"
+                    ))]))
+                }
+                ToolErrorClass::Conflict => {
+                    tracing::warn!(
+                        tool = %tool_name,
+                        error = %error,
+                        error_class = "conflict",
+                        "MCP tool execution hit a constraint conflict"
+                    );
+                    Ok(CallToolResult::error(vec![Content::text(format!(
+                        "Conflict: {error}"
+                    ))]))
+                }
+                ToolErrorClass::Internal => {
+                    tracing::error!(
+                        tool = %tool_name,
+                        error = %error,
+                        error_class = "tool_execution",
+                        "MCP tool execution failed"
+                    );
+                    Ok(CallToolResult::error(vec![Content::text(format!(
+                        "Tool execution failed for action '{action}'. \
+                         Check server logs for details."
+                    ))]))
+                }
+            },
         }
     }
 
@@ -416,16 +458,42 @@ fn tool_result_from_json(value: Value) -> Result<CallToolResult, ErrorData> {
     Ok(result)
 }
 
-fn is_validation_error(error: &anyhow::Error) -> bool {
-    matches!(
-        error.downcast_ref::<ServiceError>(),
-        Some(ServiceError::InvalidInput(_))
-    ) || error.to_string().contains(" is required")
-        || error.to_string().contains(" arguments: invalid ")
-        || error.to_string().contains("must be an unsigned integer")
-        || error.to_string().contains(" must be <=")
-        || error.to_string().contains("target override")
-        || error.to_string().contains("unknown cortex action")
+/// Client-facing classification of a tool-execution error.
+///
+/// Derived ONLY from the typed [`ServiceError`] in the anyhow chain — the
+/// previous string-matching classifier (`" is required"`, `" must be <="`, …)
+/// misclassified any future error message containing those substrings and
+/// could not distinguish "retry me" from "your input was wrong" (full-review
+/// AH1). All caller-input failures are now raised as
+/// `ServiceError::InvalidInput` at the source (`tools.rs::invalid_input`,
+/// service-layer validation), so no string heuristics are needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolErrorClass {
+    /// Caller-supplied arguments were invalid → JSON-RPC `invalid_params`.
+    InvalidParams,
+    /// Transient resource contention (SQLite busy, pool timeout) → the
+    /// caller should retry.
+    Retryable,
+    /// The referenced resource does not exist.
+    NotFound,
+    /// A uniqueness/constraint conflict.
+    Conflict,
+    /// Everything else — details stay server-side.
+    Internal,
+}
+
+fn classify_tool_error(error: &anyhow::Error) -> ToolErrorClass {
+    match error.downcast_ref::<ServiceError>() {
+        Some(ServiceError::InvalidInput(_)) => ToolErrorClass::InvalidParams,
+        Some(ServiceError::Busy(_)) | Some(ServiceError::DatabaseTimeout) => {
+            ToolErrorClass::Retryable
+        }
+        Some(ServiceError::NotFound(_)) | Some(ServiceError::RowNotFound) => {
+            ToolErrorClass::NotFound
+        }
+        Some(ServiceError::ConstraintViolation { .. }) => ToolErrorClass::Conflict,
+        Some(ServiceError::Internal(_)) | None => ToolErrorClass::Internal,
+    }
 }
 
 fn safe_result_count(value: &Value) -> Option<usize> {

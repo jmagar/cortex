@@ -37,13 +37,13 @@ async fn tool_cortex(
     args: Value,
     auth: Option<&AuthContext>,
 ) -> anyhow::Result<Value> {
-    let action =
-        string_arg(&args, "action").ok_or_else(|| anyhow::anyhow!("action is required"))?;
+    let action = string_arg(&args, "action")
+        .ok_or_else(|| invalid_input("action is required".to_string()))?;
     let Some(handler) = actions::handler_for(&action) else {
-        return Err(anyhow::anyhow!(
+        return Err(invalid_input(format!(
             "unknown cortex action: {action}; expected one of {}",
             actions::action_names().join(", ")
-        ));
+        )));
     };
     dispatch_cortex_action(handler, state, args, auth).await
 }
@@ -262,7 +262,9 @@ fn reject_compose_target_overrides(args: &Value) -> anyhow::Result<()> {
         "service",
     ] {
         if args.get(key).is_some() {
-            anyhow::bail!("compose MCP actions do not accept target override: {key}");
+            return Err(invalid_input(format!(
+                "compose MCP actions do not accept target override: {key}"
+            )));
         }
     }
     Ok(())
@@ -434,14 +436,22 @@ fn extract_actor(state: &AppState, auth: Option<&AuthContext>) -> RequestActor {
     }
 }
 
+/// Build a caller-input error that the MCP error classifier maps to
+/// `invalid_params` (full-review AH1). All argument-shape failures in this
+/// module MUST go through this so classification is type-driven, not
+/// string-matched.
+fn invalid_input(message: String) -> anyhow::Error {
+    anyhow::Error::from(crate::app::ServiceError::InvalidInput(message))
+}
+
 fn action_payload<T: DeserializeOwned>(args: Value, action: &str) -> anyhow::Result<T> {
     let mut object = args
         .as_object()
         .cloned()
-        .ok_or_else(|| anyhow::anyhow!("tool arguments must be a JSON object"))?;
+        .ok_or_else(|| invalid_input("tool arguments must be a JSON object".to_string()))?;
     object.remove("action");
     serde_json::from_value(Value::Object(object))
-        .map_err(|err| anyhow::anyhow!("invalid {action} arguments: {err}"))
+        .map_err(|err| invalid_input(format!("invalid {action} arguments: {err}")))
 }
 
 // ---------------------------------------------------------------------------

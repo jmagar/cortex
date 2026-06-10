@@ -93,9 +93,22 @@ pub struct CortexService {
     pub(super) os: Arc<dyn OsAdapter + Send + Sync>,
 }
 
+/// Number of read permits issued for a given r2d2 pool size.
+///
+/// One connection is RESERVED for writers: the syslog batch writer (and other
+/// ingest-side writers) call `pool.get()` directly without holding a service
+/// permit, so issuing `pool_size` read permits let concurrent slow MCP reads
+/// hold every connection — the writer then blocked up to the pool timeout per
+/// flush, the ingest channel filled, and packets dropped (full-review PH3).
+/// `pool_size - 1` guarantees the writer can always reach a connection within
+/// its retry budget. Floor of 1 keeps single-connection test pools usable.
+fn read_permits_for_pool(pool_size: u32) -> usize {
+    (pool_size.saturating_sub(1)).max(1) as usize
+}
+
 impl CortexService {
     pub(crate) fn new(pool: Arc<DbPool>, storage: StorageConfig) -> Self {
-        let permits = storage.pool_size.max(1) as usize;
+        let permits = read_permits_for_pool(storage.pool_size);
         Self {
             pool,
             storage,
@@ -113,7 +126,7 @@ impl CortexService {
         storage: StorageConfig,
         os: Arc<dyn OsAdapter + Send + Sync>,
     ) -> Self {
-        let permits = storage.pool_size.max(1) as usize;
+        let permits = read_permits_for_pool(storage.pool_size);
         Self {
             pool,
             storage,
@@ -168,7 +181,14 @@ impl CortexService {
                     "Task join error: {e}"
                 )));
             }
-            Ok(r) => r.map_err(ServiceError::Internal),
+            // Preserve typed ServiceErrors raised inside the closure (e.g.
+            // InvalidInput/NotFound from query helpers) instead of flattening
+            // everything to Internal — the MCP surface maps each variant to a
+            // distinct client-visible error class (full-review AH1).
+            Ok(r) => r.map_err(|e| match e.downcast::<ServiceError>() {
+                Ok(svc) => svc,
+                Err(e) => ServiceError::Internal(e),
+            }),
         };
 
         if exec_ms > SLOW_DB_MS {

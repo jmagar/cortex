@@ -16,6 +16,16 @@ use super::pool::DbPool;
 
 const SEARCH_FTS_CANDIDATE_CAP: usize = 10_000;
 const SIMILAR_INCIDENT_FTS_CANDIDATE_CAP: usize = 5_000;
+/// Cap on the FTS match-set materialization in the fast (index-led) search
+/// path. The `id IN (SELECT rowid FROM logs_fts ...)` subquery is
+/// non-correlated, so SQLite materializes the whole match set into an
+/// ephemeral index before walking the filter's composite index — for a common
+/// term on a multi-million-row DB that was unbounded memory and a full FTS
+/// walk (full-review PH1). 200K most-recent matches is recency-biased and far
+/// larger than any result LIMIT (search caps at 1000), so in practice results
+/// are unaffected; matches older than the newest 200K are no longer
+/// intersected.
+const SEARCH_FTS_FAST_PATH_MATCH_CAP: usize = 200_000;
 
 fn push_bound_limit(
     sql: &mut String,
@@ -66,20 +76,26 @@ fn search_logs_fts_sql(
     let mut idx = 2;
 
     if params.has_indexed_equality_filter() {
-        // Fast path: an indexed equality filter (hostname / severity / source_ip
-        // / app_name) is present. Lead with that filter's composite
-        // `(<col>, timestamp)` index and intersect against the FTS match set via
-        // a bloom-filtered `id IN (...)` subquery. SQLite walks the filtered
-        // partition newest-first and stops at LIMIT, so a host-scoped search of
-        // a common term drops from ~200s (full FTS scan) to sub-second.
+        // Fast path: a selective indexed equality filter (hostname / source_ip
+        // / app_name / event_action / ai_project — NOT severity, see
+        // `has_indexed_equality_filter`) is present. Lead with that filter's
+        // composite `(<col>, timestamp)` index and intersect against the FTS
+        // match set via a bloom-filtered `id IN (...)` subquery. SQLite walks
+        // the filtered partition newest-first and stops at LIMIT, so a
+        // host-scoped search of a common term drops from ~200s (full FTS scan)
+        // to sub-second.
         //
-        // This is also fully complete — no candidate cap — unlike the
-        // unfiltered plan below, because the leading index bounds the work to
-        // the (smaller) filtered partition rather than the entire match set.
+        // The match-set subquery is capped at the most-recent
+        // SEARCH_FTS_FAST_PATH_MATCH_CAP rowids: the non-correlated IN
+        // subquery is materialized in full before the index walk, which was
+        // unbounded memory for common terms (full-review PH1). Results for
+        // matches older than the newest 200K are dropped — callers needing
+        // deeper history should narrow the time range.
         let mut sql = format!(
             "SELECT {FTS_SELECT_COLS}
              FROM logs l
-             WHERE l.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?1)"
+             WHERE l.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?1
+                            ORDER BY rowid DESC LIMIT {SEARCH_FTS_FAST_PATH_MATCH_CAP})"
         );
         append_filters(&mut sql, &mut bindings, &mut idx, params);
         sql.push_str(" ORDER BY l.timestamp DESC, l.id DESC");
