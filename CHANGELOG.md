@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.2] - 2026-06-10
+
+### Fixed
+
+- Windows build: replaced `rustix::fs::statvfs` (Unix-only) in
+  `src/db/maintenance.rs` with a `#[cfg]`-gated implementation that calls
+  `GetDiskFreeSpaceExW` on Windows via an inline `extern "system"` declaration
+  (no new dependencies).
+- Windows build: replaced `libc::gethostname` (Unix-only) in `src/scanner.rs`
+  with a `#[cfg(unix)]`/`#[cfg(not(unix))]` split that falls back to
+  `COMPUTERNAME`/`HOSTNAME` env vars on Windows.
+
 ## [1.16.1] - 2026-06-10
 
 ### Changed

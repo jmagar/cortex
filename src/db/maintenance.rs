@@ -17,9 +17,57 @@ pub struct SystemDiskSpaceProbe;
 
 impl DiskSpaceProbe for SystemDiskSpaceProbe {
     fn free_bytes(&self, path: &Path) -> Result<u64> {
-        let stats = rustix::fs::statvfs(path)?;
-        Ok(stats.f_bavail.saturating_mul(stats.f_bsize))
+        free_bytes_impl(path)
     }
+}
+
+#[cfg(unix)]
+fn free_bytes_impl(path: &Path) -> Result<u64> {
+    let stats = rustix::fs::statvfs(path)?;
+    Ok(stats.f_bavail.saturating_mul(stats.f_bsize))
+}
+
+#[cfg(windows)]
+fn free_bytes_impl(path: &Path) -> Result<u64> {
+    use std::os::windows::ffi::OsStrExt;
+
+    // Declare GetDiskFreeSpaceExW inline — avoids adding a windows-sys dep.
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lpDirectoryName: *const u16,
+            lpFreeBytesAvailableToCaller: *mut u64,
+            lpTotalNumberOfBytes: *mut u64,
+            lpTotalNumberOfFreeBytes: *mut u64,
+        ) -> i32;
+    }
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut free_bytes: u64 = 0;
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free_bytes,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if ok != 0 {
+        return Ok(free_bytes);
+    }
+    anyhow::bail!(
+        "GetDiskFreeSpaceExW failed: {}",
+        std::io::Error::last_os_error()
+    )
+}
+
+#[cfg(not(any(unix, windows)))]
+fn free_bytes_impl(path: &Path) -> Result<u64> {
+    let _ = path;
+    anyhow::bail!("free_bytes: unsupported platform")
 }
 
 pub fn get_storage_metrics(pool: &DbPool, config: &StorageConfig) -> Result<StorageMetrics> {

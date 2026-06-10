@@ -1065,18 +1065,34 @@ fn normalize_timestamp(timestamp: Option<&str>) -> Result<String> {
 }
 
 fn local_hostname() -> String {
-    let mut buf = vec![0u8; 256];
-    let result = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
-    if result == 0 {
-        let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-        if let Ok(name) = std::str::from_utf8(&buf[..len]) {
-            let name = name.trim();
-            if !name.is_empty() && name != "localhost" {
-                return name.to_string();
+    #[cfg(unix)]
+    {
+        let mut buf = vec![0u8; 256];
+        let result = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
+        if result == 0 {
+            let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+            if let Ok(name) = std::str::from_utf8(&buf[..len]) {
+                let name = name.trim();
+                if !name.is_empty() && name != "localhost" {
+                    return name.to_string();
+                }
             }
         }
+        std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
     }
-    std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
+    #[cfg(not(unix))]
+    {
+        // On Windows use COMPUTERNAME; fall back to HOSTNAME then "localhost".
+        for var in &["COMPUTERNAME", "HOSTNAME"] {
+            if let Ok(name) = std::env::var(var) {
+                let name = name.trim().to_string();
+                if !name.is_empty() && name != "localhost" {
+                    return name;
+                }
+            }
+        }
+        "localhost".to_string()
+    }
 }
 
 fn log_entry_string_bytes(entry: &LogBatchEntry) -> usize {
