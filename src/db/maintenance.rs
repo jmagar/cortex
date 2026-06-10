@@ -797,76 +797,74 @@ fn delete_oldest_logs_chunk(
         None
     };
 
-    // Common deletable-id selection. `source_ip` is stored as `ip:port`; we
-    // PARTITION on the IP portion only (strip the ephemeral port) so all packets
-    // from one peer share a single per-source budget. Window functions require
-    // SQLite >= 3.25 (rusqlite `bundled` ships 3.4x).
-    let deletable_select = if floor_enabled {
-        "SELECT id FROM logs \
-         WHERE id NOT IN ( \
-             SELECT id FROM ( \
-                 SELECT id, ROW_NUMBER() OVER ( \
-                     PARTITION BY substr(source_ip, 1, \
-                         CASE WHEN instr(source_ip, ':') > 0 \
-                              THEN instr(source_ip, ':') - 1 \
-                              ELSE length(source_ip) END) \
-                     ORDER BY received_at DESC, id DESC \
-                 ) AS rn \
-                 FROM logs \
-                 WHERE severity IN ('err','crit','alert','emerg') \
-                   AND received_at >= :window_start \
-             ) WHERE rn <= :cap \
-         ) \
-         ORDER BY received_at ASC, id ASC LIMIT :chunk"
-    } else {
-        "SELECT id FROM logs ORDER BY received_at ASC, id ASC LIMIT :chunk"
-    };
+    // Materialize the protected-id set ONCE per chunk into a TEMP table.
+    // Previously the window-function subquery (a full err+ window scan) was
+    // embedded in BOTH the hostnames SELECT and the DELETE, executing twice
+    // per 1000-row chunk inside the recovery loop while holding the write
+    // lock (full-review PM3). The DELETE now collects hostnames via
+    // RETURNING, so the whole chunk costs one window-fn pass and one
+    // delete-select pass.
+    //
+    // `source_ip` is stored as `ip:port`; we PARTITION on the IP portion only
+    // (strip the ephemeral port) so all packets from one peer share a single
+    // per-source budget. Window functions require SQLite >= 3.25 and
+    // RETURNING requires >= 3.35 (rusqlite `bundled` ships 3.4x).
+    if floor_enabled {
+        conn.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS _err_floor_protected (id INTEGER PRIMARY KEY);
+             DELETE FROM _err_floor_protected;",
+        )?;
+        conn.prepare_cached(
+            "INSERT INTO _err_floor_protected (id)
+             SELECT id FROM (
+                 SELECT id, ROW_NUMBER() OVER (
+                     PARTITION BY substr(source_ip, 1,
+                         CASE WHEN instr(source_ip, ':') > 0
+                              THEN instr(source_ip, ':') - 1
+                              ELSE length(source_ip) END)
+                     ORDER BY received_at DESC, id DESC
+                 ) AS rn
+                 FROM logs
+                 WHERE severity IN ('err','crit','alert','emerg')
+                   AND received_at >= :window_start
+             ) WHERE rn <= :cap",
+        )?
+        .execute(rusqlite::named_params! {
+            ":window_start": window_start.as_deref().unwrap_or(""),
+            ":cap": config.err_floor_per_source_cap as i64,
+        })?;
+    }
 
-    // Collect distinct hostnames from the chunk we're about to delete.
-    let hostnames: Vec<String> = {
-        let sql = format!("SELECT DISTINCT hostname FROM logs WHERE id IN ({deletable_select})");
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = if floor_enabled {
-            stmt.query_map(
-                rusqlite::named_params! {
-                    ":window_start": window_start.as_deref().unwrap_or(""),
-                    ":cap": config.err_floor_per_source_cap as i64,
-                    ":chunk": chunk_size as i64,
-                },
-                |row| row.get(0),
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-        } else {
-            stmt.query_map(
-                rusqlite::named_params! { ":chunk": chunk_size as i64 },
-                |row| row.get(0),
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        rows
-    };
-
-    // Delete the deletable chunk. When the floor is active, protected err+ rows
-    // are never in this set — so this path no longer overrides the err+ exemption.
+    // Delete the deletable chunk, collecting hostnames from the deleted rows
+    // via RETURNING. When the floor is active, protected err+ rows are never
+    // in this set — so this path never overrides the err+ exemption.
     // Serialize the DELETE behind the process-wide write lock (v1.1.3) so it
     // never races other writers against SQLite's single write lock.
-    let delete_sql = format!("DELETE FROM logs WHERE id IN ({deletable_select})");
-    let _write_guard = crate::db::write_lock();
-    let deleted_rows = if floor_enabled {
-        conn.execute(
-            &delete_sql,
-            rusqlite::named_params! {
-                ":window_start": window_start.as_deref().unwrap_or(""),
-                ":cap": config.err_floor_per_source_cap as i64,
-                ":chunk": chunk_size as i64,
-            },
-        )?
+    let delete_sql = if floor_enabled {
+        "DELETE FROM logs WHERE id IN (
+             SELECT id FROM logs
+             WHERE id NOT IN (SELECT id FROM _err_floor_protected)
+             ORDER BY received_at ASC, id ASC LIMIT :chunk)
+         RETURNING hostname"
     } else {
-        conn.execute(
-            &delete_sql,
-            rusqlite::named_params! { ":chunk": chunk_size as i64 },
-        )?
+        "DELETE FROM logs WHERE id IN (
+             SELECT id FROM logs ORDER BY received_at ASC, id ASC LIMIT :chunk)
+         RETURNING hostname"
     };
+    let _write_guard = crate::db::write_lock();
+    let deleted_hostnames: Vec<String> = conn
+        .prepare_cached(delete_sql)?
+        .query_map(
+            rusqlite::named_params! { ":chunk": chunk_size as i64 },
+            |row| row.get(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let deleted_rows = deleted_hostnames.len();
+    let hostnames: Vec<String> = deleted_hostnames
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
 
     tracing::debug!(
         deleted_rows,

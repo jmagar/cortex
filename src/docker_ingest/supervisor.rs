@@ -386,8 +386,20 @@ async fn follow_container_logs_once(
     container_id: &str,
     container: &ContainerMeta,
 ) -> Result<()> {
-    let checkpoint = load_checkpoint(pool, host_name, container_id)?
-        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok());
+    // spawn_blocking: load_checkpoint does `pool.get()` (blocks up to the 6s
+    // pool timeout under contention) plus a synchronous query. Dozens of
+    // container streams reconnecting after an outage previously parked that
+    // wait on executor threads, stalling unrelated async work (full-review
+    // PM8).
+    let checkpoint = {
+        let pool = Arc::clone(pool);
+        let host = host_name.to_string();
+        let container = container_id.to_string();
+        tokio::task::spawn_blocking(move || load_checkpoint(&pool, &host, &container))
+            .await
+            .map_err(|e| anyhow::anyhow!("checkpoint load task join error: {e}"))??
+            .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
+    };
     let since_unix = docker_log_since_unix(checkpoint.as_ref(), chrono::Utc::now().timestamp());
     let mut logs = docker.logs(
         container_id,

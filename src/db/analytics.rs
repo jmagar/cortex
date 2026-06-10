@@ -1491,54 +1491,59 @@ pub struct RangeSummary {
 
 pub fn summarize_range(pool: &DbPool, from: &str, to: &str) -> Result<RangeSummary> {
     let conn = pool.get()?;
-    // Single-pass: GROUP BY severity gives us the full breakdown; derive totals from it
-    // rather than issuing separate COUNT(*) scans over the same timestamp partition.
-    let mut sev_stmt = conn.prepare(
-        "SELECT severity, COUNT(*) FROM logs
+    // ONE scan of the timestamp partition per range (previously three —
+    // severity, hosts, apps — so `compare` cost six unbounded scans per call,
+    // full-review PM4). The grouped cardinality (distinct severity × host ×
+    // app tuples) is small relative to row count; all three breakdowns are
+    // derived from it in memory. Serving fully from the timeline_hourly
+    // rollup (O(hours)) is tracked as a follow-up — it needs partial-edge-
+    // hour reconciliation to stay exact.
+    let mut stmt = conn.prepare_cached(
+        "SELECT severity, hostname, app_name, COUNT(*) FROM logs
          WHERE timestamp >= ?1 AND timestamp <= ?2
-         GROUP BY severity
-         ORDER BY COUNT(*) DESC",
+         GROUP BY severity, hostname, app_name",
     )?;
-    let by_severity = sev_stmt
+    let grouped = stmt
         .query_map(params![from, to], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
     const ERROR_SEVERITIES: &[&str] = &["emerg", "alert", "crit", "err", "warning"];
-    let total_logs: i64 = by_severity.iter().map(|(_, n)| n).sum();
-    let total_errors: i64 = by_severity
+    let mut sev_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut host_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut app_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for (severity, hostname, app_name, count) in grouped {
+        *host_counts.entry(hostname).or_default() += count;
+        if let Some(app) = app_name.filter(|a| !a.is_empty()) {
+            *app_counts.entry(app).or_default() += count;
+        }
+        *sev_counts.entry(severity).or_default() += count;
+    }
+
+    let total_logs: i64 = sev_counts.values().sum();
+    let total_errors: i64 = sev_counts
         .iter()
         .filter(|(sev, _)| ERROR_SEVERITIES.iter().any(|e| e.eq_ignore_ascii_case(sev)))
         .map(|(_, n)| n)
         .sum();
 
-    let mut host_stmt = conn.prepare(
-        "SELECT hostname, COUNT(*) FROM logs
-         WHERE timestamp >= ?1 AND timestamp <= ?2
-         GROUP BY hostname
-         ORDER BY COUNT(*) DESC, source_ip ASC
-         LIMIT 10",
-    )?;
-    let top_hosts = host_stmt
-        .query_map(params![from, to], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    fn sorted_desc(counts: std::collections::HashMap<String, i64>) -> Vec<(String, i64)> {
+        let mut v: Vec<(String, i64)> = counts.into_iter().collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        v
+    }
 
-    let mut app_stmt = conn.prepare(
-        "SELECT app_name, COUNT(*) FROM logs
-         WHERE timestamp >= ?1 AND timestamp <= ?2
-           AND app_name IS NOT NULL AND app_name != ''
-         GROUP BY app_name
-         ORDER BY COUNT(*) DESC, source_ip ASC
-         LIMIT 10",
-    )?;
-    let top_apps = app_stmt
-        .query_map(params![from, to], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let by_severity = sorted_desc(sev_counts);
+    let mut top_hosts = sorted_desc(host_counts);
+    top_hosts.truncate(10);
+    let mut top_apps = sorted_desc(app_counts);
+    top_apps.truncate(10);
 
     Ok(RangeSummary {
         from: from.to_string(),

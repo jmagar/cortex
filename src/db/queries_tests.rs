@@ -92,6 +92,49 @@ fn search_logs_fts_plan_uses_bounded_candidate_window() {
 }
 
 #[test]
+fn tail_logs_severity_only_uses_per_severity_index_probes() {
+    // full-review PM6: severity-only tails previously walked
+    // idx_logs_timestamp newest-first and filtered — O(table) for rare
+    // severities. The fast path probes idx_logs_sev_time once per severity.
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_entry("2026-01-01T00:00:01Z", "host-a", "emerg", "kernel meltdown"),
+            make_entry("2026-01-01T00:00:02Z", "host-a", "info", "routine chatter"),
+            make_entry("2026-01-01T00:00:03Z", "host-b", "alert", "raid degraded"),
+        ],
+    )
+    .unwrap();
+
+    let levels = vec!["emerg".to_string(), "alert".to_string()];
+    let (sql, bindings) = tail_logs_sql(None, None, None, Some(&levels), 50);
+    assert!(
+        sql.contains("UNION ALL"),
+        "severity-only tail must use per-severity probes, got:\n{sql}"
+    );
+    let plan = query_plan(&pool, &sql, &bindings);
+    assert!(
+        plan.contains("idx_logs_sev_time"),
+        "each arm must probe the (severity, timestamp) index; got:\n{plan}"
+    );
+    assert!(
+        !plan.contains("SCAN logs USING INDEX idx_logs_timestamp"),
+        "severity-only tail must not walk the global timestamp index; got:\n{plan}"
+    );
+
+    // Behavior: newest-first across severities, info excluded.
+    let rows = tail_logs(&pool, None, None, None, Some(&levels), 50).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].severity, "alert");
+    assert_eq!(rows[1].severity, "emerg");
+
+    // A second filter still takes the generic plan.
+    let (sql, _) = tail_logs_sql(Some("host-a"), None, None, Some(&levels), 50);
+    assert!(!sql.contains("UNION ALL"));
+}
+
+#[test]
 fn tail_logs_limit_is_bound_and_clamped() {
     let levels = vec!["err".to_string(), "warning".to_string()];
     let (sql, bindings) = tail_logs_sql(

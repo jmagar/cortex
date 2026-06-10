@@ -21,6 +21,13 @@ use super::background_interval;
 /// by `cortex map`. Set `CORTEX_INVENTORY_REFRESH_INTERVAL_SECS=0` to disable.
 const INVENTORY_REFRESH_INTERVAL_SECS: u64 = 300;
 const INVENTORY_WATCH_DEBOUNCE_SECS: u64 = 3;
+/// Minimum interval between watch-triggered refreshes. A crash-looping
+/// container on any monitored host emits `docker events` lines continuously;
+/// with only the 3s debounce each burst re-triggered a full SSH fan-out plus
+/// a graph projection under the write lock, indefinitely (full-review PM5).
+/// Watch events arriving inside the cooldown coalesce into one trailing
+/// refresh; the 5-minute interval tick still guarantees eventual consistency.
+const INVENTORY_WATCH_COOLDOWN_SECS: u64 = 60;
 const REMOTE_DOCKER_EVENT_RECONNECT_SECS: u64 = 10;
 
 pub fn spawn(
@@ -46,6 +53,7 @@ pub fn spawn(
         );
         let mut interval = background_interval(tokio::time::Duration::from_secs(interval_secs));
         let mut eager = true;
+        let mut last_refresh: Option<Instant> = None;
         loop {
             if eager {
                 tokio::select! {
@@ -66,11 +74,34 @@ pub fn spawn(
                     }
                     Some(()) = watch_rx.recv() => {
                         debounce_watch_events(&mut watch_rx).await;
+                        // Trailing-edge cooldown: wait out the remainder of
+                        // INVENTORY_WATCH_COOLDOWN_SECS since the last refresh,
+                        // coalescing any further watch events that arrive in
+                        // the meantime (full-review PM5).
+                        if let Some(last) = last_refresh {
+                            let cooldown =
+                                Duration::from_secs(INVENTORY_WATCH_COOLDOWN_SECS);
+                            let since = last.elapsed();
+                            if since < cooldown {
+                                tokio::select! {
+                                    biased;
+                                    _ = token.cancelled() => {
+                                        tracing::debug!(
+                                            "inventory_refresh: cooperative shutdown"
+                                        );
+                                        break;
+                                    }
+                                    _ = tokio::time::sleep(cooldown - since) => {}
+                                }
+                                while watch_rx.try_recv().is_ok() {}
+                            }
+                        }
                     }
                     _ = interval.tick() => {}
                 }
             }
             refresh_and_project(&pool, &maintenance_limiter).await;
+            last_refresh = Some(Instant::now());
         }
     }))
 }
