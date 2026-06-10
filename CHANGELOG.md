@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.3] - 2026-06-10
+
+### Fixed
+
+- Windows build: `unsafe extern "system"` block required by Rust edition 2024
+  for the inline `GetDiskFreeSpaceExW` declaration in `src/db/maintenance.rs`.
+
 ## [1.16.2] - 2026-06-10
 
 ### Fixed
