@@ -42,13 +42,13 @@ Key modules in `src/` (most are directories with sidecar `*_tests.rs` files):
 
 | Module | Purpose |
 |--------|---------|
-| `config.rs` | Config: `config.toml` + env vars (`CORTEX_*`, `CORTEX_*`, `CORTEX_API_*`, `CORTEX_DOCKER_*`) |
+| `config.rs` | Config: `config.toml` + `CORTEX_*` env vars (listener, MCP, storage, API, Docker ingest, notifications) |
 | `runtime.rs` | `RuntimeCore`: wires all subsystems, starts syslog ingest, spawns maintenance tasks |
 | `app/` | Service layer: `SyslogService`, request/response models, business logic |
 | `db/` | SQLite pool, FTS5 queries, maintenance (retention, storage enforcement) |
 | `syslog/` | UDP + TCP listeners, RFC 3164/5424 parsing, mpsc batch writer |
 | `mcp/` | RMCP Streamable HTTP server, single `cortex` tool with action dispatch |
-| `api.rs` | Optional non-MCP REST API (enabled via `CORTEX_API_ENABLED=true`) |
+| `api.rs` | Always-on non-MCP REST API (`/api/*`); requires `CORTEX_API_TOKEN` at startup |
 | `docker_ingest/` | Docker container log ingestion via remote docker-socket-proxy endpoints |
 | `main.rs` | Entrypoint: `serve mcp` (full server with ingest) or `mcp` (stdio query-only) |
 
@@ -63,47 +63,63 @@ Tests: unit tests live in sidecar files beside their source modules (e.g. `src/d
 
 ## MCP Tools
 
-One MCP tool: **`cortex`** — dispatches by `action` argument.
+One MCP tool: **`cortex`** — dispatches by `action` argument. 45 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
+
+Scope taxonomy: every action requires `cortex:read` except the three **admin** actions `ack_error`, `unack_error`, and `notifications_test`, which require `cortex:admin` (static bearer tokens get read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true`); `help` is info-only (no scope gate).
 
 | Action | Description |
 |--------|-------------|
-| `search` | Full-text search (FTS5 syntax) with host/severity/app/time filters |
-| `tail` | Recent N entries, optionally filtered by host/app |
-| `errors` | Error/warning summary grouped by host and severity |
-| `hosts` | All known hosts with first/last seen + log counts |
-| `correlate` | Cross-host event correlation in a time window |
-| `stats` | DB stats (total logs, logical/physical size, free disk, configured thresholds, write-block state, time range) |
-| `status` | Lightweight runtime and DB health |
-| `apps` | Distinct application names with log and host counts |
-| `sessions` | AI transcript sessions grouped by project/tool/session/host |
-| `search_sessions` | Full-text search over indexed AI transcript sessions |
-| `usage_blocks` | AI transcript activity grouped into time blocks |
-| `project_context` | Recent AI transcript context for a project |
-| `list_ai_tools` | AI tools present in transcript metadata |
-| `list_ai_projects` | AI projects present in transcript metadata |
-| `source_ips` | Distinct source identifiers with hostname breakdown |
-| `timeline` | Bucketed counts over time |
-| `patterns` | Near-duplicate message template clusters |
-| `context` | Surrounding logs around a log id or timestamp |
-| `get` | One log entry by id, including raw frame |
-| `ingest_rate` | Recent ingest throughput and write-block state |
-| `silent_hosts` | Hosts whose last_seen is older than a threshold |
-| `clock_skew` | Per-host received_at minus timestamp distribution |
-| `anomalies` | Recent vs baseline volume/error comparison |
-| `compare` | Side-by-side comparison of two time ranges |
-| `compose_status` | Redacted Docker Compose runtime status projection |
-| `compose_doctor` | Redacted Docker Compose diagnostics projection |
-| `help` | Built-in usage reference |
+| `search` | Full-text search over syslog messages |
+| `filter` | Filter logs by indexed fields without a full-text query |
+| `tail` | Stream the most recent log entries |
+| `errors` | List recent error-level log entries |
+| `hosts` | Enumerate all known source hostnames |
+| `map` | Map homelab inventory and answer graph-backed topology questions |
+| `host_state` | Fetch latest bounded heartbeat state for a host |
+| `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags |
+| `correlate` | Correlate events across hosts/services |
+| `correlate_state` | Correlate logs with heartbeat summaries around a reference time |
+| `stats` | Aggregate log statistics |
+| `status` | Server health and ingestion status |
+| `apps` | Enumerate all known application names |
+| `sessions` | List AI transcript sessions |
+| `search_sessions` | Full-text search over AI transcript sessions |
+| `abuse` | Detect resource-abuse patterns in AI sessions |
+| `abuse_incidents` | List detected abuse incidents |
+| `abuse_investigate` | Deep-dive investigation of an abuse incident |
+| `ai_correlate` | Correlate AI transcript events with syslog |
+| `usage_blocks` | Summarise AI session usage by project |
+| `project_context` | Full project context from AI transcripts |
+| `list_ai_tools` | List AI tools observed in transcripts |
+| `list_ai_projects` | List AI projects with transcript activity |
+| `source_ips` | Enumerate unique source IP addresses |
+| `timeline` | Log volume over time (bucketed) |
+| `patterns` | Recurring message patterns |
+| `context` | Contextual log entries around a pivot |
+| `get` | Fetch a single log entry by ID |
+| `ingest_rate` | Current log ingestion rate |
+| `silent_hosts` | Hosts that have gone silent |
+| `clock_skew` | Detect clock skew between hosts |
+| `anomalies` | Detect log-volume anomalies |
+| `compare` | Compare log patterns between time windows |
+| `compose_status` | Docker Compose stack status |
+| `compose_doctor` | Docker Compose coordination diagnostics |
+| `unaddressed_errors` | List unacknowledged error signatures |
+| `notifications_recent` | Recent notification firings |
+| `similar_incidents` | Find similar past incidents |
+| `ask_history` | Query AI transcript history |
+| `incident_context` | Full context for an incident |
+| `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations |
+| `ack_error` | **(admin)** Acknowledge an error signature |
+| `unack_error` | **(admin)** Revoke an error signature acknowledgement |
+| `notifications_test` | **(admin)** Send a test notification via Apprise |
+| `help` | List available actions and their parameters |
 
 ## Plugin Skills
 
-Skills available after installing the Claude Code plugin
-(`plugins/cortex/skills/<skill>/`):
+9 skills ship with the Claude Code plugin — see `plugins/cortex/skills/<skill>/SKILL.md` for each:
 
-| Command | Description |
-|---------|-------------|
-| `/cortex-dr` | Full health check: MCP, HTTP /health, service status, syslog port, Docker ingest, fleet drop-ins (named `dr` to avoid colliding with Claude Code's built-in `/doctor`) |
-| `/cortex-deploy-dropins` | Push rsyslog forwarding configs to `fleet_hosts` via SSH (idempotent) |
+`cortex` (primary log-intelligence skill), `cortex-deploy-dropins` (push rsyslog forwarding configs to `fleet_hosts` via SSH), `cortex-dr` (full health check; named `dr` to avoid colliding with Claude Code's built-in `/doctor`), `cortex-frustration-assessment` (analyze `abuse_investigate` evidence bundles), `cortex-logs` (Compose service log tailing), `cortex-redeploy` (re-run plugin setup hook), `cortex-report` (time-bounded markdown health reports), `cortex-troubleshoot` (connection/ingest failure triage), `cortex-version-check` (running container vs local Compose image).
 
 ## Config
 
@@ -118,23 +134,25 @@ CORTEX_BATCH_SIZE=100
 CORTEX_FLUSH_INTERVAL=500        # ms
 
 # MCP server
-CORTEX_HOST=0.0.0.0
+CORTEX_HOST=127.0.0.1               # default loopback; 0.0.0.0 requires CORTEX_TOKEN/OAuth
 CORTEX_PORT=3100
-CORTEX_TOKEN=your-secret-token      # optional; enables Bearer auth on /mcp
-                                         # (CORTEX_API_TOKEN still works, logs deprecation)
+CORTEX_MCP_BIND=127.0.0.1           # Compose host publish interface for port 3100
+CORTEX_TOKEN=your-secret-token      # optional on loopback; required on non-loopback binds
 CORTEX_ALLOWED_HOSTS=myhost.local   # optional; comma-separated extra Host allowlist
 CORTEX_ALLOWED_ORIGINS=https://app  # optional; comma-separated extra Origin allowlist
 
 # Storage
 CORTEX_DB_PATH=data/cortex.db
-CORTEX_POOL_SIZE=4
-CORTEX_RETENTION_DAYS=90     # 0 = keep forever
-CORTEX_MAX_DB_SIZE_MB=1024        # 0 = disable logical DB size guard
+CORTEX_POOL_SIZE=4                # MCP reads get pool_size - 1 permits (1 reserved for writer)
+CORTEX_RETENTION_DAYS=90     # 0 = keep forever; hourly purge, err+ exempt (see Retention)
+CORTEX_MAX_DB_SIZE_MB=1024        # 0 = disable logical DB size guard (breach deletes oldest)
 CORTEX_RECOVERY_DB_SIZE_MB=900    # cleanup target after DB-size breach
-CORTEX_MIN_FREE_DISK_MB=512       # 0 = disable free-disk guard
-CORTEX_RECOVERY_FREE_DISK_MB=768  # cleanup target after free-disk breach
+CORTEX_MIN_FREE_DISK_MB=0         # disabled by default; breach BLOCKS WRITES (no deletes)
+CORTEX_RECOVERY_FREE_DISK_MB=0    # hysteresis target before writes resume
 CORTEX_CLEANUP_INTERVAL_SECS=60   # storage-budget enforcement interval (>= 5)
-CORTEX_CLEANUP_CHUNK_SIZE=1000    # rows deleted per enforcement cycle
+CORTEX_CLEANUP_CHUNK_SIZE=2000    # rows deleted per enforcement cycle
+CORTEX_ERR_FLOOR_WINDOW_HOURS=24  # err+ floor: protect recent err+ rows from disk-pressure deletes
+CORTEX_ERR_FLOOR_PER_SOURCE_CAP=10000  # max protected err+ rows per source IP
 
 # OAuth / JWT auth (disabled by default — set CORTEX_AUTH_MODE=oauth to activate)
 CORTEX_AUTH_MODE=bearer             # bearer (default) or oauth
@@ -143,15 +161,14 @@ CORTEX_GOOGLE_CLIENT_ID=...         # required when CORTEX_AUTH_MODE=oauth
 CORTEX_GOOGLE_CLIENT_SECRET=...     # required when CORTEX_AUTH_MODE=oauth
 # Paths, TTLs, allowlist → config.toml [mcp.auth] (not env vars). See docs/OAUTH.md.
 
-# Non-MCP REST API (disabled by default)
-CORTEX_API_ENABLED=false                # set true to mount /api/* endpoints
-CORTEX_API_TOKEN=your-api-token         # required when CORTEX_API_ENABLED=true
+# Non-MCP REST API (always on; gated by its token)
+CORTEX_API_TOKEN=your-api-token         # REQUIRED at startup — /api/* is always mounted
 
 # Docker container log ingestion (disabled by default)
 CORTEX_DOCKER_INGEST_ENABLED=false      # set true to ingest from docker-socket-proxy hosts
 CORTEX_DOCKER_HOSTS=host-a,host-b      # comma-separated hostnames → http://<host>:2375
 CORTEX_DOCKER_RECONNECT_INITIAL_MS=1000
-CORTEX_DOCKER_RECONNECT_MAX_MS=60000
+CORTEX_DOCKER_RECONNECT_MAX_MS=30000
 
 # Log verbosity (set to debug or trace for development)
 RUST_LOG=info
@@ -163,11 +180,12 @@ RUST_LOG=info
 |------|---------|
 | `config.toml` | Runtime config (syslog bind, DB path, retention) |
 | `docker-compose.yml` | Production deployment (ports 1514, 3100) |
-| `docs/SETUP.md` | Per-host syslog forwarding (rsyslog, UniFi, ATT router, WSL) |
+| `docs/SETUP.md` | Setup guide (clone, build, configure, deploy, verify); per-host forwarder configs (rsyslog, UniFi, ATT router, WSL) live in README "Syslog Forwarder Setup" |
 | `src/db/queries.rs` | All SQL queries and FTS5 search implementation |
+| `src/mcp/actions.rs` | `ACTION_SPECS` — authoritative registry of all 45 MCP actions and their scopes |
 | `src/mcp/tools.rs` | Single `cortex` tool with action dispatch |
 | `config/mcporter.json` | mcporter config (HTTP transport to localhost:3100) |
-| `CORTEX_DOCKER_HOSTS` env var | Docker ingest host list — comma-separated hostnames, each becomes `http://<host>:2375` |
+| `config/systemd/` | `cortex-backup.service` / `.timer` — daily WAL-safe backup units |
 | `scripts/smoke-test.sh` | Live smoke test — all MCP actions via mcporter, strict PASS/FAIL |
 | `scripts/backup.sh` | WAL-safe SQLite backup script (checkpoint + `.backup` method) |
 | `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset helper for local/dev recovery |
@@ -178,6 +196,16 @@ RUST_LOG=info
 | `CHANGELOG.md` | Version history; entry required per version bump |
 | `.lavra/memory/recall.sh` | Query the local knowledge DB: `bash .lavra/memory/recall.sh <keyword>` |
 
+## Retention
+
+(Referenced by the `purge_old_logs` rustdoc in `src/db/maintenance.rs`.)
+
+- The age-based purge runs **hourly** (fixed cadence; `CORTEX_CLEANUP_INTERVAL_SECS` controls the separate storage-budget loop). Cutoff uses `received_at` (server clock).
+- `CORTEX_RETENTION_DAYS=0` disables the global age purge entirely.
+- **err+ exemption**: `severity IN (err, crit, alert, emerg)` rows are never aged out by retention. They are deletable only under DB-size pressure, and even then only outside the err+ floor (`CORTEX_ERR_FLOOR_WINDOW_HOURS=24`, `CORTEX_ERR_FLOOR_PER_SOURCE_CAP=10000` rows per source IP). Permanent err+ retention is therefore only guaranteed while `max_db_size_mb` is not breached.
+- **AdGuard tags** (`adguard-allowed`/`adguard-query`/`adguard-rewrite`) are hard-capped at **7 days** regardless of `retention_days`; **heartbeats** at **14 days**.
+- Deletes run in 10,000-row chunks, releasing the write lock between chunks; an incremental FTS5 merge follows.
+
 ## Gotchas
 
 - **Port 1514 not 514** — avoids needing root; use iptables PREROUTING to redirect 514→1514 for devices that can't be reconfigured (see docs/SETUP.md)
@@ -186,8 +214,8 @@ RUST_LOG=info
 - **WAL mode** — SQLite runs in WAL mode; copying `.db`, `.db-wal`, and `.db-shm` together without a checkpoint captures potentially inconsistent state. Safe backup options: (1) run `PRAGMA wal_checkpoint(FULL);` first, then copy all three files, or (2) use `sqlite3 source.db '.backup dest.db'` which is WAL-safe and requires no manual checkpoint
 - **MCP transport** — HTTP MCP runs in stateless JSON-response mode on `POST /mcp`; SSE streams (`GET /mcp` or `/sse`) are not enabled in the current server.
 - **Data volume** — DB lives in `./data/` (bind mount); `*.db` is gitignored so the database files won't be committed
-- **Retention purge** — `retention_days` defaults to 90; logs older than 90 days are **permanently deleted hourly** with no recovery path. Set `CORTEX_RETENTION_DAYS=0` to disable purging entirely.
-- **Storage guardrail** — Logical DB size and free-disk limits are enabled by default (`1024/900 MB` DB, `512/768 MB` free disk). When thresholds are breached, the server deletes oldest logs by `received_at` until recovery targets are met. If cleanup still cannot recover enough space, the batch writer blocks new writes until storage becomes healthy again.
+- **Retention purge** — `retention_days` defaults to 90; logs older than 90 days are **permanently deleted hourly** with no recovery path, **except err/crit/alert/emerg rows, which are exempt from retention aging** (deletable only under disk pressure within the err+ floor bounds). Set `CORTEX_RETENTION_DAYS=0` to disable the global age purge (AdGuard 7-day and heartbeat 14-day caps still apply). See "Retention" above.
+- **Storage guardrail** — The logical DB-size guard is enabled by default (`1024/900 MB`): a breach deletes oldest logs by `received_at` until the recovery target, sparing the err+ floor. The free-disk guard is **disabled by default** (`0/0`); when enabled, a breach **blocks writes** (with hysteresis) instead of deleting data. If cleanup cannot recover enough space, the batch writer blocks new writes until storage becomes healthy again.
 - **CEF hostname vs source_ip** — For UniFi CEF messages, the stored `hostname` comes from the CEF `UNIFIdeviceName` extension field (message body), **not** the syslog header. Any LAN device can spoof this value. `source_ip` is the only network-verified identity. See `src/syslog/parser.rs` for the trust boundary.
 - **Batch writer failure** — If `insert_logs_batch` fails, the batch is retained for the next flush (up to 1000 entries, then discarded). A 250ms pause prevents hammering a failing DB. Persistent write failures will eventually cause data loss via the 10K-entry channel cap. The mpsc channel is in-memory only — no durable write-ahead log.
 - **correlate action limit cap** — The `limit` parameter is silently capped at 999 (not 1000) because the implementation fetches `limit+1` rows to detect truncation, and `search` hard-caps at 1000.

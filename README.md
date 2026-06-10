@@ -364,7 +364,7 @@ Return database statistics including total logs, total hosts, time range covered
   "physical_db_size_mb": "328.00",
   "free_disk_mb": "14200.00",
   "max_db_size_mb": 1024,
-  "min_free_disk_mb": 512,
+  "min_free_disk_mb": 0,
   "write_blocked": false,
   "runtime_observability": {
     "syslog_udp_packets_received": 280000,
@@ -407,6 +407,10 @@ Return lightweight runtime status without the heavier DB statistics query. Use t
 Return markdown documentation for all tools in this toolset.
 
 **Parameters:** none
+
+---
+
+The sections above document only the most common actions in detail. For the full 45-action surface with per-action parameters, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md) or call `action=help` against a running server.
 
 ---
 
@@ -629,12 +633,16 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 - Repairs shared assets under `~/.cortex` and removes stale user-level `cortex.service` units/drop-ins left by older plugin versions
 - All idempotent — safe to run on every session
 
-**Bundled skills**:
+**Bundled skills** (all 9, from `plugins/cortex/skills/`):
 
+- `cortex` — primary log-intelligence skill: search, tail, errors, correlate, stats, and the rest of the MCP action surface
 - `cortex-dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
 - `cortex-deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
+- `cortex-frustration-assessment` — analyze an `abuse_investigate` evidence bundle into a frustration/abuse report
+- `cortex-logs` — Docker Compose service log tailing (the service's own stdout/stderr, not client syslog)
 - `cortex-redeploy` — re-run plugin setup after config or plugin changes
-- `cortex-logs` — Docker Compose service log tailing
+- `cortex-report` — time-bounded homelab health/log-analysis markdown reports
+- `cortex-troubleshoot` — diagnose connection failures, missing logs, unhealthy containers, and restart loops
 - `cortex-version-check` — check whether the running Docker container matches the local Compose image; add `--pull` to pull first, otherwise checks only the local image cache
 
 The plugin deploys the server with Docker Compose through the same `cortex setup`
@@ -656,8 +664,8 @@ docker compose up -d
 ```
 
 The container binds:
-- `UDP :1514` and `TCP :1514` for syslog ingestion
-- `TCP :3100` for the MCP HTTP API
+- `UDP :1514` and `TCP :1514` for syslog ingestion (published on all interfaces — senders must reach it)
+- `TCP :3100` for the MCP HTTP API, published on `127.0.0.1` only by default. Set `CORTEX_MCP_BIND=0.0.0.0` (plus `CORTEX_TOKEN`) to expose it; containers on the same Docker network (e.g. the Labby gateway) reach `http://cortex:3100` either way.
 
 ### Local build
 
@@ -676,9 +684,9 @@ cortex supports two auth modes, selectable via `CORTEX_AUTH_MODE`.
 
 **Bearer-only (default)** — set `CORTEX_TOKEN` and all `/mcp` requests must present that token as `Authorization: Bearer <token>`. No OAuth routes are mounted.
 
-**Loopback no-auth** — set `NO_AUTH=true` only for local development on loopback binds.
+**Loopback no-auth** — set `CORTEX_NO_AUTH=true` only for local development on loopback binds.
 
-**Gateway-protected no-auth** — on non-loopback binds, set both `NO_AUTH=true` and `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true` only when an upstream gateway or reverse proxy enforces auth before traffic reaches cortex. This intentionally disables service-local MCP auth.
+**Gateway-protected no-auth (TrustedGatewayUnscoped)** — on non-loopback binds, set both `CORTEX_NO_AUTH=true` and `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true` only when an upstream gateway or reverse proxy enforces auth before traffic reaches cortex. This intentionally disables service-local MCP auth **and the read/admin scope gates** — every caller can run the write actions `ack_error`, `unack_error`, and `notifications_test`. **Never combine this mode with host-published ports**; keep `CORTEX_MCP_BIND=127.0.0.1` (the default) so only the gateway's Docker network path reaches cortex. See [docs/SECURITY.md](docs/SECURITY.md).
 
 **OAuth (Google)** — set `CORTEX_AUTH_MODE=oauth`, the OAuth provider env vars, and an allowlisted admin email. The server issues RS256 JWTs after users authenticate via Google. Bearer tokens and OAuth JWTs can coexist (OAuth mode disables the static token by default; set `CORTEX_AUTH_DISABLE_STATIC_TOKEN_WITH_OAUTH=false` or `disable_static_token_with_oauth = false` in `config.toml` for break-glass access).
 
@@ -702,20 +710,20 @@ Configuration is loaded from three sources in priority order (highest wins):
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CORTEX_TOKEN` | no | — | Bearer token for `/mcp`. Omit to disable auth. |
-| `CORTEX_HOST` | no | `0.0.0.0` | Bind host for the MCP HTTP server |
+| `CORTEX_TOKEN` | no | — | Bearer token for `/mcp`. Omit to disable auth (loopback binds only). Required when exposing port 3100 beyond loopback. |
+| `CORTEX_HOST` | no | `127.0.0.1` | Bind host for the MCP HTTP server (loopback by default) |
 | `CORTEX_PORT` | no | `3100` | Bind port for the MCP HTTP server |
+| `CORTEX_MCP_BIND` | no | `127.0.0.1` | Docker Compose only: host interface port 3100 is published on. Set `0.0.0.0` together with `CORTEX_TOKEN` to expose it. |
 | `CORTEX_ALLOWED_HOSTS` | no | — | Extra comma-separated Host header values accepted by RMCP Host validation |
 | `CORTEX_ALLOWED_ORIGINS` | no | — | Extra comma-separated browser origins accepted by RMCP Origin validation |
 
 #### Non-MCP API
 
-The plain JSON API is disabled by default. When enabled, it is mounted under `/api/*` on the same HTTP listener and requires a separate bearer token.
+The plain JSON API is always mounted under `/api/*` on the same HTTP listener and requires its own bearer token — the server fails to start (on the server path) without it. `cortex setup repair` generates one if missing.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CORTEX_API_ENABLED` | no | `false` | Enable the non-MCP JSON API |
-| `CORTEX_API_TOKEN` | yes, when enabled | — | Bearer token for `/api/*` routes |
+| `CORTEX_API_TOKEN` | yes | — | Bearer token for `/api/*` routes |
 
 #### Syslog listener
 
@@ -725,7 +733,7 @@ The plain JSON API is disabled by default. When enabled, it is mounted under `/a
 | `CORTEX_RECEIVER_PORT` | no | `1514` | Bind port for UDP + TCP syslog listeners |
 | `CORTEX_RECEIVER_HOST_PORT` | no | `1514` | Docker Compose host port published to container port `1514` |
 | `CORTEX_MAX_MESSAGE_SIZE` | no | `8192` | Max bytes per UDP datagram or newline-delimited TCP frame. Oversized newline-delimited TCP frames are dropped and the connection stays open; oversized unterminated frames are dropped and the connection is closed. |
-| `CORTEX_MAX_TCP_CONNECTIONS` | no | `1024` | Maximum simultaneous TCP syslog connections |
+| `CORTEX_MAX_TCP_CONNECTIONS` | no | `512` | Maximum simultaneous TCP syslog connections |
 | `CORTEX_TCP_IDLE_TIMEOUT_SECS` | no | `300` | Idle timeout per TCP read before closing inactive connections |
 | `CORTEX_BATCH_SIZE` | no | `100` | Number of messages per batch write |
 | `CORTEX_FLUSH_INTERVAL` | no | `500` | Batch flush interval in milliseconds |
@@ -739,7 +747,7 @@ Optional pull-based Docker log ingestion keeps each remote host on its normal Do
 |----------|----------|---------|-------------|
 | `CORTEX_DOCKER_INGEST_ENABLED` | no | `false` | Enable remote Docker log ingestion |
 | `CORTEX_DOCKER_HOSTS` | one of the two | — | Comma-separated hostnames; each becomes `http://<name>:2375` with `allow_insecure_http = true`. Takes priority over `CORTEX_DOCKER_HOSTS_FILE`. |
-| `CORTEX_DOCKER_HOSTS_FILE` | one of the two | — | Path to a TOML file with a `[[hosts]]` array (use when you need per-host `base_url` or TLS). If the file does not exist, a warning is logged and no hosts are loaded — the container will not crash. Mount the file via `CORTEX_CONFIG_VOLUME`. |
+| `CORTEX_DOCKER_HOSTS_FILE` | one of the two | — | Path to a TOML file with a `[[hosts]]` array (use when you need per-host `base_url` or TLS). If the file does not exist, a warning is logged and no hosts are loaded — the container will not crash. Mount the file into the container (e.g. under `/cortex-home` via `CORTEX_HOME_VOLUME`). |
 | `CORTEX_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | Initial reconnect delay after host stream failure |
 | `CORTEX_DOCKER_RECONNECT_MAX_MS` | no | `30000` | Maximum reconnect delay after repeated failures |
 
@@ -766,14 +774,16 @@ Docker ingest is intentionally not part of the default smoke test because it nee
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `CORTEX_DB_PATH` | no | `/data/cortex.db` | SQLite database path |
-| `CORTEX_POOL_SIZE` | no | `4` | SQLite connection pool size |
-| `CORTEX_RETENTION_DAYS` | no | `90` | Days to retain logs. `0` = keep forever. |
-| `CORTEX_MAX_DB_SIZE_MB` | no | `1024` | Logical DB size trigger for write-blocking. `0` = disabled. |
+| `CORTEX_POOL_SIZE` | no | `4` | SQLite connection pool size. MCP/REST reads get `pool_size - 1` permits; one connection is reserved for the ingest writer. |
+| `CORTEX_RETENTION_DAYS` | no | `90` | Days to retain logs. `0` = keep forever. Purge runs hourly; err+ severities are exempt (see [Retention Policy](#retention-policy)). |
+| `CORTEX_MAX_DB_SIZE_MB` | no | `1024` | Logical DB size trigger: breach deletes oldest logs. `0` = disabled. |
 | `CORTEX_RECOVERY_DB_SIZE_MB` | no | `900` | Cleanup target after DB size trigger. Must be less than max. |
-| `CORTEX_MIN_FREE_DISK_MB` | no | `512` | Free disk trigger for write-blocking. `0` = disabled. |
-| `CORTEX_RECOVERY_FREE_DISK_MB` | no | `768` | Cleanup target after free disk trigger. Must be greater than min. |
+| `CORTEX_MIN_FREE_DISK_MB` | no | `0` | Free disk threshold. **Disabled by default.** A breach blocks writes (it does not delete data). |
+| `CORTEX_RECOVERY_FREE_DISK_MB` | no | `0` | Hysteresis target before writes resume after a free-disk breach. Must be greater than min when enabled. |
 | `CORTEX_CLEANUP_INTERVAL_SECS` | no | `60` | Storage budget enforcement interval. Minimum `5`. |
 | `CORTEX_CLEANUP_CHUNK_SIZE` | no | `2000` | Rows deleted per enforcement chunk |
+| `CORTEX_ERR_FLOOR_WINDOW_HOURS` | no | `24` | err+ rows received within this window are protected from disk-pressure deletion. `0` = disable the floor. |
+| `CORTEX_ERR_FLOOR_PER_SOURCE_CAP` | no | `10000` | Max protected err+ rows per source IP within the window. `0` = disable the floor. |
 
 #### Container
 
@@ -782,7 +792,8 @@ Docker ingest is intentionally not part of the default smoke test because it nee
 | `CORTEX_UID` | no | `1000` | Container user ID for data volume ownership |
 | `CORTEX_GID` | no | `1000` | Container group ID for data volume ownership |
 | `CORTEX_DATA_VOLUME` | no | `cortex-data` | Docker volume name or bind-mount path |
-| `CORTEX_CONFIG_VOLUME` | no | `./config` | Read-only config mount for optional files such as `docker-hosts.toml` |
+| `CORTEX_HOME_VOLUME` | no | `~/.cortex` | Shared cortex home (inventory cache, setup env) mounted at `/cortex-home` |
+| `CORTEX_SSH_VOLUME` | no | `~/.cortex/ssh` | Dedicated SSH key dir mounted read-only at `/home/cortex/.ssh`. Never point at `~/.ssh` — see Security Model |
 | `DOCKER_NETWORK` | no | `cortex` | Docker network name (must exist) |
 | `RUST_LOG` | no | `info` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |
 | `TZ` | no | `UTC` | Container timezone |
@@ -806,12 +817,12 @@ retention_days = 90   # 0 = keep forever
 wal_mode = true
 max_db_size_mb = 1024
 recovery_db_size_mb = 900
-min_free_disk_mb = 512
-recovery_free_disk_mb = 768
+min_free_disk_mb = 0      # 0 = free-disk guard disabled (default)
+recovery_free_disk_mb = 0
 cleanup_interval_secs = 60
 
 [mcp]
-host = "0.0.0.0"
+host = "127.0.0.1"
 port = 3100
 server_name = "cortex"
 # api_token = "your-secret-token"
@@ -853,7 +864,13 @@ The MCP query API (port 3100, default loopback) supports two auth modes:
 
 **Important**: Admin actions such as `ack_error`, `unack_error`, and `notifications_test` require `cortex:admin`. Static bearer tokens are read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true` is explicitly set.
 
-The MCP port defaults to `127.0.0.1:3100` (loopback only). To expose it on a network interface, set `CORTEX_HOST=0.0.0.0` and configure a TLS-terminating reverse proxy in front of it.
+The MCP port defaults to `127.0.0.1:3100` (loopback only), and the Docker Compose files publish container port 3100 on `127.0.0.1` by default (`CORTEX_MCP_BIND` overrides the host interface). The Labby gateway reaches cortex over the Docker network at `http://cortex:3100` regardless of the host publish address. To expose port 3100 on a network interface, set `CORTEX_MCP_BIND=0.0.0.0` (Compose) or `CORTEX_HOST=0.0.0.0` (bare binary), **set `CORTEX_TOKEN`**, and put a TLS-terminating reverse proxy in front of it.
+
+### SSH key exposure (inventory mount)
+
+The Compose files mount an SSH key directory read-only at `/home/cortex/.ssh` for the fleet inventory collectors. The default source is a **dedicated key dir, `~/.cortex/ssh`** (override with `CORTEX_SSH_VOLUME`). **Never point `CORTEX_SSH_VOLUME` at `~/.ssh`** — mounting your personal SSH directory gives the container every identity you own and creates a lateral-movement path across the fleet.
+
+Provision a least-privilege deploy key instead: generate a dedicated keypair in `~/.cortex/ssh`, write a minimal `config` listing only the hosts cortex should collect from, curate a `known_hosts` file (`ssh-keyscan`), and restrict the key on each fleet host with a `restrict,command="..."` `authorized_keys` entry under a low-privilege user. Full walkthrough: [docs/SECURITY.md](docs/SECURITY.md) "SSH Key Exposure".
 
 ---
 
@@ -1055,11 +1072,63 @@ sudo firewall-cmd --reload
 
 ---
 
+## Heartbeats
+
+The heartbeat agent is a small host-local loop (the same `cortex` binary) that collects bounded system state (load, memory, disk, top processes) and POSTs it to the server's `POST /v1/heartbeats` endpoint on port 3100 every 30 seconds. Heartbeat rows feed the `host_state`, `fleet_state`, and `correlate_state` MCP actions and are retained for 14 days.
+
+Install it as a user systemd service on each fleet host:
+
+```bash
+cortex setup heartbeat-agent install   # write + enable the systemd unit
+cortex setup heartbeat-agent check     # inspect unit/env state
+cortex setup heartbeat-agent remove    # remove the unit
+cortex heartbeat agent --once --emit   # one-shot foreground run for debugging
+```
+
+Configuration:
+
+- `CORTEX_HEARTBEAT_TARGET` — server base URL (default `http://127.0.0.1:3100`; falls back to `CORTEX_URL`)
+- `CORTEX_HEARTBEAT_TOKEN` — bearer token sent with each POST (falls back to `CORTEX_TOKEN`)
+
+When the server has `CORTEX_TOKEN` set, heartbeat POSTs must carry that token; on an unauthenticated loopback-only server no token is needed.
+
+---
+
+## OTLP Ingest
+
+The shared HTTP listener on port 3100 also accepts OpenTelemetry logs at `POST /v1/logs` (logs only — `/v1/metrics` and `/v1/traces` return 404). The endpoint decodes **binary protobuf** (`ExportLogsServiceRequest`; OTLP/JSON is not supported) and enforces a **4 MiB** request body limit (413 responses include `Retry-After: 86400`).
+
+Auth matches MCP: when `CORTEX_TOKEN` is set, requests need `Authorization: Bearer <token>`. Exposing `/v1/logs` on a non-loopback bind without a static bearer token is blocked at startup (OAuth JWTs do not authorize OTLP ingest today).
+
+Minimal OpenTelemetry Collector exporter config:
+
+```yaml
+exporters:
+  otlphttp/cortex:
+    endpoint: http://CORTEX_SERVER:3100
+    encoding: proto
+    headers:
+      Authorization: "Bearer ${env:CORTEX_TOKEN}"
+
+service:
+  pipelines:
+    logs:
+      exporters: [otlphttp/cortex]
+```
+
+---
+
 ## Retention Policy
 
-Logs are retained for `CORTEX_RETENTION_DAYS` days (default `90`). Set to `0` to keep logs forever.
+Logs are retained for `CORTEX_RETENTION_DAYS` days (default `90`). Set to `0` to disable the global age-based purge (the AdGuard and heartbeat caps below still apply).
 
-The retention job runs on `CORTEX_CLEANUP_INTERVAL_SECS` (default 60 seconds). It deletes logs in chunks of 10,000 rows, releasing the write lock between chunks so ingest can proceed. Retention cutoff uses `received_at` (the server-side ingestion timestamp), not the `timestamp` in the message. This prevents devices with misconfigured clocks from causing premature or indefinite retention.
+The retention purge runs **hourly** (the separate storage-budget enforcement loop runs on `CORTEX_CLEANUP_INTERVAL_SECS`). It deletes logs in chunks of 10,000 rows, releasing the write lock between chunks so ingest can proceed. Retention cutoff uses `received_at` (the server-side ingestion timestamp), not the `timestamp` in the message. This prevents devices with misconfigured clocks from causing premature or indefinite retention.
+
+Severity-based exemptions and per-source caps:
+
+- **err+ exemption** — rows with `severity IN (err, crit, alert, emerg)` are never aged out by retention. They can still be deleted under DB-size pressure, but only outside the err+ floor (`CORTEX_ERR_FLOOR_WINDOW_HOURS=24`, `CORTEX_ERR_FLOOR_PER_SOURCE_CAP=10000`).
+- **AdGuard tags** — `adguard-allowed` / `adguard-query` / `adguard-rewrite` rows are hard-capped at **7 days** regardless of `retention_days` (DNS query volume would otherwise dominate the FTS index).
+- **Heartbeats** — heartbeat telemetry rows are capped at **14 days**.
 
 After large deletions, an incremental FTS5 merge runs to reclaim index space without long write-lock durations.
 
@@ -1069,17 +1138,17 @@ After large deletions, an incremental FTS5 merge runs to reclaim index space wit
 
 Two independent guards protect against disk exhaustion:
 
-**DB size guard** (`CORTEX_MAX_DB_SIZE_MB`, default 1024 MB)
+**DB size guard** (`CORTEX_MAX_DB_SIZE_MB`, default 1024 MB — enabled)
 
-When the logical SQLite DB size exceeds `max_db_size_mb`, the oldest logs are deleted in chunks of `CORTEX_CLEANUP_CHUNK_SIZE` rows until the size drops below `recovery_db_size_mb`.
+When the logical SQLite DB size exceeds `max_db_size_mb`, the oldest logs are deleted in chunks of `CORTEX_CLEANUP_CHUNK_SIZE` rows until the size drops below `recovery_db_size_mb`. High-severity rows inside the err+ floor (`CORTEX_ERR_FLOOR_WINDOW_HOURS=24`, capped at `CORTEX_ERR_FLOOR_PER_SOURCE_CAP=10000` rows per source IP) are excluded from the deletable set.
 
-**Free disk guard** (`CORTEX_MIN_FREE_DISK_MB`, default 512 MB)
+**Free disk guard** (`CORTEX_MIN_FREE_DISK_MB`, default 0 — **disabled**)
 
-When available disk drops below `min_free_disk_mb`, the oldest logs are deleted until free disk exceeds `recovery_free_disk_mb`.
+Whole-filesystem free space is an external condition cortex cannot fix by deleting its own data, so a free-disk breach **blocks new writes** rather than self-trimming. Writes resume once free disk rises above `recovery_free_disk_mb` (hysteresis prevents oscillation). Enable by setting both `min_free_disk_mb` and a higher `recovery_free_disk_mb`.
 
 **Write-blocking behavior**
 
-If enforcement cannot free enough space (e.g. the DB is empty but storage is still over limit), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (`CORTEX_WRITE_CHANNEL_CAPACITY`, default 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `cortex stats` reflects the current state.
+If enforcement cannot free enough space (or the free-disk guard trips), the batch writer enters write-blocked state. New log messages accumulate in an in-memory buffer (`CORTEX_WRITE_CHANNEL_CAPACITY`, default 10,000 messages). Writes resume automatically when space recovers. The `write_blocked` field in `cortex stats` reflects the current state.
 
 Disable either guard by setting its trigger to `0` (also set the recovery target to `0`).
 
@@ -1329,7 +1398,7 @@ The Docker image remains daemon-focused and exposes HTTP MCP via `cortex serve m
 | `src/lib.rs` | Reusable library boundary |
 | `src/app/` | Shared typed log application service |
 | `src/runtime.rs` | Config, DB, syslog, and maintenance orchestration |
-| `src/api.rs` | Optional non-MCP JSON API routes |
+| `src/api.rs` | Always-on non-MCP JSON API routes (`/api/*`, token-gated) |
 | `src/config.rs` | Configuration loading and validation |
 | `src/db.rs` + `src/db/` | SQLite schema, FTS5, retention, storage budget |
 | `src/syslog.rs` + `src/syslog/` | UDP/TCP listeners, syslog parser, batch writer |

@@ -1,0 +1,33 @@
+# cortex-backup.service — WAL-safe SQLite backup via scripts/backup.sh
+#
+# Install (user units, recommended for the ~/.cortex layout):
+#   mkdir -p ~/.config/systemd/user
+#   cp config/systemd/cortex-backup.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now cortex-backup.timer
+#
+# Or system-wide: copy to /etc/systemd/system/ and use sudo systemctl.
+#
+# Adjust WorkingDirectory (the cortex repo checkout), CORTEX_DB_PATH, and
+# BACKUP_DIR for your host. Keep BACKUP_DIR on a different disk — or rsync
+# the backups to another host afterwards — so a dead drive doesn't take the
+# backups with the database.
+
+[Unit]
+Description=cortex WAL-safe SQLite backup
+# Backups work against a live WAL database; no need to stop the service.
+
+[Service]
+Type=oneshot
+# Path to the cortex repo checkout containing scripts/backup.sh.
+WorkingDirectory=%h/workspace/cortex
+# Live database path (host-side bind mount of the container's /data).
+Environment=CORTEX_DB_PATH=%h/.cortex/data/cortex.db
+# Destination directory for timestamped backup files.
+Environment=BACKUP_DIR=%h/.cortex/backups
+ExecStart=/usr/bin/env bash -c 'exec bash scripts/backup.sh "$BACKUP_DIR"'
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

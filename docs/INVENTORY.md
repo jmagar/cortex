@@ -114,20 +114,19 @@ methods as the MCP actions.
 | `CORTEX_MAX_MESSAGE_SIZE` | no | `8192` | no |
 | `CORTEX_BATCH_SIZE` | no | `100` | no |
 | `CORTEX_FLUSH_INTERVAL` | no | `500` | no |
-| `CORTEX_HOST` | no | `0.0.0.0` | no |
+| `CORTEX_HOST` | no | `127.0.0.1` | no |
 | `CORTEX_PORT` | no | `3100` | no |
 | `CORTEX_TOKEN` | no | (none) | yes |
 | `CORTEX_ALLOWED_HOSTS` | no | (none) | no |
 | `CORTEX_ALLOWED_ORIGINS` | no | (none) | no |
-| `CORTEX_API_ENABLED` | no | `false` | no |
-| `CORTEX_API_TOKEN` | yes when enabled | (none) | yes |
+| `CORTEX_API_TOKEN` | yes (always-on `/api/*`) | (none) | yes |
 | `CORTEX_DB_PATH` | no | `/data/cortex.db` | no |
 | `CORTEX_POOL_SIZE` | no | `4` | no |
 | `CORTEX_RETENTION_DAYS` | no | `90` | no |
 | `CORTEX_MAX_DB_SIZE_MB` | no | `1024` | no |
 | `CORTEX_RECOVERY_DB_SIZE_MB` | no | `900` | no |
-| `CORTEX_MIN_FREE_DISK_MB` | no | `512` | no |
-| `CORTEX_RECOVERY_FREE_DISK_MB` | no | `768` | no |
+| `CORTEX_MIN_FREE_DISK_MB` | no | `0` (disabled; breach blocks writes) | no |
+| `CORTEX_RECOVERY_FREE_DISK_MB` | no | `0` | no |
 | `CORTEX_CLEANUP_INTERVAL_SECS` | no | `60` | no |
 | `CORTEX_CLEANUP_CHUNK_SIZE` | no | `2000` | no |
 | `RUST_LOG` | no | `info` | no |
