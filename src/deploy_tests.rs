@@ -67,18 +67,24 @@ fn remote_dry_run_only_checks_ssh_and_docker() {
     let report = run_remote_deploy_with_runner("host-a", true, &mut runner).unwrap();
 
     assert_eq!(report.host, "host-a");
-    assert!(runner
-        .commands
-        .iter()
-        .any(|cmd| cmd.contains("docker --version")));
-    assert!(!runner
-        .commands
-        .iter()
-        .any(|cmd| cmd.contains("docker compose") && cmd.contains("up -d")));
-    assert!(!runner
-        .commands
-        .iter()
-        .any(|cmd| cmd.contains("cat > ~/.cortex/.env")));
+    assert!(
+        runner
+            .commands
+            .iter()
+            .any(|cmd| cmd.contains("docker --version"))
+    );
+    assert!(
+        !runner
+            .commands
+            .iter()
+            .any(|cmd| cmd.contains("docker compose") && cmd.contains("up -d"))
+    );
+    assert!(
+        !runner
+            .commands
+            .iter()
+            .any(|cmd| cmd.contains("cat > ~/.cortex/.env"))
+    );
 }
 
 #[test]
@@ -154,10 +160,12 @@ fn remote_deploy_does_not_source_env_as_shell() {
     let mut runner = FakeRemoteRunner::ok();
     run_remote_deploy_with_runner("host-a", false, &mut runner).unwrap();
 
-    assert!(!runner
-        .commands
-        .iter()
-        .any(|cmd| cmd.contains(". ~/.cortex/.env")));
+    assert!(
+        !runner
+            .commands
+            .iter()
+            .any(|cmd| cmd.contains(". ~/.cortex/.env"))
+    );
 }
 
 #[test]
@@ -178,8 +186,10 @@ fn remote_deploy_accepts_safe_hosts() {
     let report = run_remote_deploy_with_runner("tootie", true, &mut runner).unwrap();
 
     assert_eq!(report.host, "tootie");
-    assert!(runner
-        .commands
-        .iter()
-        .all(|command| command.starts_with("tootie:")));
+    assert!(
+        runner
+            .commands
+            .iter()
+            .all(|command| command.starts_with("tootie:"))
+    );
 }

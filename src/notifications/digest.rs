@@ -16,8 +16,8 @@ use tokio::sync::Semaphore;
 const SLOW_DB_MS: u128 = 5_000;
 
 use crate::config::NotificationsConfig;
-use crate::db::notifications::{backoff_next_attempt_at, outbox_insert, OutboxInsertParams};
 use crate::db::DbPool;
+use crate::db::notifications::{OutboxInsertParams, backoff_next_attempt_at, outbox_insert};
 use crate::notifications::apprise::escape_for_notification;
 
 /// Summary for one host in the digest.

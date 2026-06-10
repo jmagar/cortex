@@ -1,10 +1,10 @@
 use super::dispatch::http_or_cancel;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cortex::app::{DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest};
 
-use super::output_ops::{print_db_integrity_job_started, print_db_integrity_job_status};
 use super::DbIntegrityStatusArgs;
+use super::output_ops::{print_db_integrity_job_started, print_db_integrity_job_status};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -229,14 +229,14 @@ pub(crate) async fn run_db_backup(mode: &CliMode, args: DbBackupArgs) -> Result<
                 Ok(result) => result?,
                 Err(_elapsed) => {
                     bail!(
-                            "Backup timed out after {}s (DB may be very large).\n\
+                        "Backup timed out after {}s (DB may be very large).\n\
                              Run the backup inside the container where there is no timeout:\n\
                              \n\
                              \tdocker exec cortex cortex db backup --output /data/backup-$(date +%Y%m%d).db\n\
                              \n\
                              This operation may take several minutes on a 31 GB+ database.",
-                            BACKUP_HTTP_TIMEOUT.as_secs()
-                        );
+                        BACKUP_HTTP_TIMEOUT.as_secs()
+                    );
                 }
             };
             print_db_backup_response(&response, args.json)

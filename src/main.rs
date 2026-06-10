@@ -1,7 +1,7 @@
 use anyhow::Result;
 use axum::Router;
 use cortex::{api, doctor, logging, mcp, runtime::RuntimeCore};
-use rmcp::{transport::stdio, ServiceExt};
+use rmcp::{ServiceExt, transport::stdio};
 use tracing::info;
 
 mod cli;
@@ -327,8 +327,8 @@ async fn serve_mcp() -> Result<()> {
         "Configuration loaded"
     );
 
-    runtime.start_syslog().await?;
-    let maintenance = runtime.spawn_maintenance_tasks();
+    let mut maintenance = runtime.spawn_maintenance_tasks();
+    runtime.start_syslog(&mut maintenance).await?;
 
     let mut app: Router = mcp::router(runtime.mcp_state());
     // /api/* is always-on. The container fails to start without
@@ -342,7 +342,6 @@ async fn serve_mcp() -> Result<()> {
             cortex::config::mcp_bind_is_loopback(&runtime.config),
             runtime.config.mcp.allowed_origins.clone(),
             runtime.auth_policy().clone(),
-            runtime.pool(),
             runtime.config.mcp.static_token_is_admin,
         )?;
         app = app.merge(api::router(api_state)?);

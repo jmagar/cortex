@@ -3,10 +3,10 @@
 //! Surface parity (cxih.4): exposes the `fleet_state` MCP action and
 //! `GET /api/fleet-state` REST route as a top-level CLI subcommand.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
-use super::super::args::{CliCommand, FleetStateArgs};
 use super::super::FlagCursor;
+use super::super::args::{CliCommand, FleetStateArgs};
 
 pub(crate) fn parse_fleet_state(args: &[String]) -> Result<CliCommand> {
     let mut parsed = FleetStateArgs::default();

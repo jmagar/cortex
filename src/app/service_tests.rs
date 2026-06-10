@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::config::StorageConfig;
-use crate::db::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
+use crate::db::{DbPool, LogBatchEntry, init_pool, insert_logs_batch};
 
 use super::*;
 
@@ -230,10 +230,12 @@ async fn graph_entity_lookup_returns_candidates_for_ambiguous_alias() {
         .unwrap();
     assert!(response.resolved_entity.is_none());
     assert_eq!(response.candidates.len(), 2);
-    assert!(response
-        .candidates
-        .iter()
-        .all(|candidate| candidate.match_reason == "alias"));
+    assert!(
+        response
+            .candidates
+            .iter()
+            .all(|candidate| candidate.match_reason == "alias")
+    );
 }
 
 #[tokio::test]
@@ -274,18 +276,24 @@ async fn graph_around_returns_one_hop_relationships_evidence_and_metadata() {
     assert!(!response.entities.is_empty());
     assert!(!response.relationships.is_empty());
     assert!(!response.evidence.is_empty());
-    assert!(response
-        .relationships
-        .iter()
-        .any(|rel| rel.relationship_type == "observed_as"));
-    assert!(response
-        .relationships
-        .iter()
-        .any(|rel| rel.relationship_type == "emitted_by"));
-    assert!(response
-        .relationships
-        .iter()
-        .all(|rel| !rel.evidence_ids.is_empty()));
+    assert!(
+        response
+            .relationships
+            .iter()
+            .any(|rel| rel.relationship_type == "observed_as")
+    );
+    assert!(
+        response
+            .relationships
+            .iter()
+            .any(|rel| rel.relationship_type == "emitted_by")
+    );
+    assert!(
+        response
+            .relationships
+            .iter()
+            .all(|rel| !rel.evidence_ids.is_empty())
+    );
     assert!(response.relationships.iter().all(|rel| {
         rel.src_entity.is_some()
             && rel.dst_entity.is_some()
@@ -297,10 +305,12 @@ async fn graph_around_returns_one_hop_relationships_evidence_and_metadata() {
             && evidence.safe_excerpt.is_some()
             && evidence.source_kind == "log"
     }));
-    assert!(response
-        .next_queries
-        .iter()
-        .all(|query| query.mode == "around"));
+    assert!(
+        response
+            .next_queries
+            .iter()
+            .all(|query| query.mode == "around")
+    );
 }
 
 #[tokio::test]
@@ -536,10 +546,12 @@ async fn graph_explain_returns_conservative_evidence_backed_chain() {
     assert!(narrative.summary.contains("not a proven root cause"));
     assert!(!narrative.summary.contains("caused"));
     assert!(!response.chains.is_empty());
-    assert!(response
-        .chains
-        .iter()
-        .all(|chain| !chain.relationship_ids.is_empty() && !chain.evidence_ids.is_empty()));
+    assert!(
+        response
+            .chains
+            .iter()
+            .all(|chain| !chain.relationship_ids.is_empty() && !chain.evidence_ids.is_empty())
+    );
     assert!(response.chains.iter().all(|chain| {
         chain
             .relationships
@@ -580,10 +592,12 @@ async fn graph_explain_declines_without_relationship_evidence() {
 
     assert!(response.narrative.is_none());
     assert!(response.chains.is_empty());
-    assert!(response
-        .missing_evidence
-        .iter()
-        .any(|item| item.contains("relationship evidence")));
+    assert!(
+        response
+            .missing_evidence
+            .iter()
+            .any(|item| item.contains("relationship evidence"))
+    );
     assert!(!response.open_questions.is_empty());
 }
 
@@ -1031,10 +1045,12 @@ async fn correlate_ai_logs_batches_related_windows_with_per_anchor_caps() {
         .filter(|anchor| anchor.related_truncated)
         .count();
     assert_eq!(truncated_count, 1);
-    assert!(response
-        .anchors
-        .iter()
-        .all(|anchor| anchor.related.len() == 1));
+    assert!(
+        response
+            .anchors
+            .iter()
+            .all(|anchor| anchor.related.len() == 1)
+    );
 }
 
 #[tokio::test]
@@ -1188,9 +1204,10 @@ async fn filter_logs_rejects_conflicting_source_kind_tool_alias() {
         .await
         .unwrap_err();
 
-    assert!(err
-        .to_string()
-        .contains("source_kind=claude conflicts with tool=codex"));
+    assert!(
+        err.to_string()
+            .contains("source_kind=claude conflicts with tool=codex")
+    );
 }
 
 #[tokio::test]
@@ -1421,4 +1438,119 @@ async fn timeline_applies_default_lookback_only_when_from_and_to_both_absent() {
         total2, 2,
         "with `to` set and `from` omitted, the default must be skipped so both logs (<= to) are counted"
     );
+}
+
+#[tokio::test]
+async fn run_db_preserves_typed_service_error_through_anyhow_chain() {
+    let (service, _pool, _dir) = test_service();
+
+    let err = service
+        .run_db("test.invalid_input", |_pool| {
+            Err::<(), _>(anyhow::Error::new(ServiceError::InvalidInput(
+                "bad limit".into(),
+            )))
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ServiceError::InvalidInput(_)),
+        "expected InvalidInput, got {err:?}"
+    );
+
+    let err = service
+        .run_db("test.not_found", |_pool| {
+            Err::<(), _>(anyhow::Error::new(ServiceError::NotFound("row 42".into())))
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ServiceError::NotFound(_)),
+        "expected NotFound, got {err:?}"
+    );
+
+    let err = service
+        .run_db("test.internal", |_pool| {
+            Err::<(), _>(anyhow::anyhow!("disk I/O error"))
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ServiceError::Internal(_)),
+        "expected Internal, got {err:?}"
+    );
+}
+
+#[test]
+fn read_permits_reserve_a_writer_connection() {
+    // full-review PH3: one pooled connection stays reachable by writers.
+    assert_eq!(read_permits_for_pool(4), 3);
+    assert_eq!(read_permits_for_pool(2), 1);
+    // Floor of 1 keeps single-connection test pools usable (the writer
+    // shares in that degenerate case).
+    assert_eq!(read_permits_for_pool(1), 1);
+    assert_eq!(read_permits_for_pool(0), 1);
+}
+
+/// full-review PH3/TH1: with every read permit held by slow MCP reads, the
+/// batch-writer path (direct pool access, no service permit) must still reach
+/// a connection promptly. Before the permit reservation, 4 concurrent reads
+/// held all 4 pooled connections and the writer blocked up to the pool
+/// timeout per flush — the ingest channel then filled and packets dropped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn batch_writer_completes_under_saturated_read_permits() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = StorageConfig::for_test(dir.path().join("writer-liveness.db"));
+    storage.pool_size = 4;
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let service = CortexService::new(Arc::clone(&pool), storage);
+
+    // Saturate every read permit (pool_size - 1 = 3) with reads that pin a
+    // pooled connection for longer than the writer's deadline below.
+    let mut readers = Vec::new();
+    for _ in 0..3 {
+        let svc = service.clone();
+        readers.push(tokio::spawn(async move {
+            svc.run_db("test.slow_read", |pool| {
+                let _conn = pool.get()?;
+                std::thread::sleep(std::time::Duration::from_millis(1200));
+                Ok(())
+            })
+            .await
+        }));
+    }
+    // Let the readers acquire their permits and connections.
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let pool_w = Arc::clone(&pool);
+    let write_start = std::time::Instant::now();
+    let written = tokio::task::spawn_blocking(move || {
+        insert_logs_batch(
+            &pool_w,
+            &[entry(
+                "2026-01-01T00:00:00Z",
+                "host-w",
+                "info",
+                "writer liveness probe",
+                "127.0.0.1:514",
+            )],
+        )
+    })
+    .await
+    .expect("spawn_blocking join")
+    .expect("batch insert should succeed");
+    let elapsed = write_start.elapsed();
+
+    assert_eq!(written, 1);
+    assert!(
+        elapsed < std::time::Duration::from_millis(800),
+        "writer must reach the reserved connection promptly under read \
+         saturation; took {elapsed:?}"
+    );
+
+    for reader in readers {
+        reader
+            .await
+            .expect("reader join")
+            .expect("slow read should succeed");
+    }
 }

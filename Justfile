@@ -17,12 +17,14 @@ build:
 
 release:
     cargo build --release
+    just link-bin
 
 check:
     cargo check
     bash scripts/check-rust-module-size.sh --limit 500 src/cli.rs src/cli
 
 lint:
+    just test-cargo-wrapper
     cargo clippy -- -D warnings
 
 fmt:
@@ -31,12 +33,16 @@ fmt:
 test:
     env -u CORTEX_API_TOKEN -u NO_AUTH cargo nextest run
 
+# Verify Cargo wrapper binary sync behavior
+test-cargo-wrapper:
+    scripts/test-cargo-rustc-wrapper.sh
+
 # Doc tests (nextest does not run these; no executable doc tests currently exist)
 test-doc:
     cargo test --doc
 
 docker-build:
-    docker build -t cortex .
+    docker build -f config/Dockerfile -t cortex .
 
 up:
     docker compose up -d
@@ -168,8 +174,34 @@ build-plugin: release
     if [ ! -x "$target_dir/release/cortex" ] && [ -x ".cache/cargo/release/cortex" ]; then
       target_dir=".cache/cargo"
     fi
-    mkdir -p plugins/cortex/bin
+    mkdir -p bin plugins/cortex/bin
+    install -m 755 "$target_dir/release/cortex" bin/cortex
     install -m 755 "$target_dir/release/cortex" plugins/cortex/bin/cortex
+
+# Symlink the compiled release binary into PATH and all known plugin cache slots.
+# Called automatically by `just release` and `just install`. Safe to call manually
+# after `cargo build --release` so that `cortex` on $PATH matches the repo build.
+link-bin:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CORTEX_TARGET_DIR="${CARGO_TARGET_DIR:-.cache/cargo}"
+    case "$CORTEX_TARGET_DIR" in
+      /*) CORTEX_BIN="$CORTEX_TARGET_DIR/release/cortex" ;;
+      *)  CORTEX_BIN="$(pwd)/$CORTEX_TARGET_DIR/release/cortex" ;;
+    esac
+    if [ ! -x "$CORTEX_BIN" ]; then
+      echo "release binary not found at $CORTEX_BIN — run 'just release' first" >&2
+      exit 1
+    fi
+    mkdir -p ~/.local/bin
+    ln -sf "$CORTEX_BIN" ~/.local/bin/cortex
+    while IFS= read -r -d '' plugin_bin; do
+      ln -sf "$CORTEX_BIN" "$plugin_bin"
+    done < <(find "${HOME}/.claude/plugins/cache/jmagar-lab/cortex" -maxdepth 3 -name "cortex" \( -type f -o -type l \) -print0 2>/dev/null)
+    echo "cortex → $CORTEX_BIN"
+
+install: release
+    just link-bin
 
 build-mcpb:
     bash scripts/build-mcpb.sh

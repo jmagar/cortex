@@ -22,12 +22,12 @@ use anyhow::Result;
 use tokio::sync::Semaphore;
 
 use crate::config::NotificationsConfig;
-use crate::db::notifications::{
-    backoff_next_attempt_at, firings_insert, firings_recent_dedup_check, outbox_claim_pending,
-    outbox_mark_dead, outbox_mark_dropped, outbox_mark_sent, outbox_schedule_retry,
-    FiringInsertParams,
-};
 use crate::db::DbPool;
+use crate::db::notifications::{
+    FiringInsertParams, backoff_next_attempt_at, firings_insert, firings_recent_dedup_check,
+    outbox_claim_pending, outbox_mark_dead, outbox_mark_dropped, outbox_mark_sent,
+    outbox_schedule_retry,
+};
 use crate::notifications::apprise::{AppriseClient, AppriseError, NotifyType};
 
 const CLAIM_LIMIT: i64 = 50;

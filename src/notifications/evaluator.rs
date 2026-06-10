@@ -20,8 +20,8 @@ const SLOW_DB_MS: u128 = 500;
 use crate::config::NotificationsConfig;
 use crate::db::DbPool;
 use crate::notifications::rules::{
-    evaluate_authelia_mfa_fail, evaluate_container_die_nonzero, evaluate_fail2ban_ban,
-    evaluate_oom_kill, LogRow,
+    LogRow, evaluate_authelia_mfa_fail, evaluate_container_die_nonzero, evaluate_fail2ban_ban,
+    evaluate_ingest_silence, evaluate_oom_kill,
 };
 
 /// Run one evaluation cycle.
@@ -73,6 +73,24 @@ pub(crate) async fn run_evaluation_cycle(
                 if is_last || offset >= MAX_ROWS {
                     break;
                 }
+            }
+
+            // Metric rule: ingest silence. Unlike the log-scan rules above it
+            // needs the age of the newest row across the whole table, not the
+            // recent window (a silent ingest pipeline has no recent rows at
+            // all). MAX(received_at) is an O(1) reverse index probe.
+            if cfg.evaluators.ingest_silence {
+                let newest_row_age_secs = newest_row_age_secs(&conn)?;
+                let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| {
+                    tracing::warn!("HOSTNAME env var not set; using 'localhost' for notification dedup keys — multi-host deployments may suppress alerts");
+                    "localhost".to_string()
+                });
+                out.extend(evaluate_ingest_silence(
+                    &hostname,
+                    newest_row_age_secs,
+                    cfg.evaluators.ingest_silence_threshold_secs,
+                    &apprise_urls_json,
+                ));
             }
             drop(conn);
             Ok(out)
@@ -156,7 +174,25 @@ pub(crate) async fn run_evaluation_cycle(
 }
 
 fn build_urls_json(cfg: &NotificationsConfig) -> String {
-    serde_json::to_string(&cfg.apprise_urls).unwrap_or_else(|_| "[]".to_string())
+    serde_json::to_string(&cfg.apprise_urls).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "failed to serialize apprise_urls — notifications will be dropped");
+        "[]".to_string()
+    })
+}
+
+/// Age in seconds of the newest row in `logs`, or `None` when the table is
+/// empty. Served by a reverse probe of `idx_logs_received_at` — O(1).
+fn newest_row_age_secs(conn: &rusqlite::Connection) -> rusqlite::Result<Option<u64>> {
+    let age: Option<i64> = conn.query_row(
+        "SELECT CAST(strftime('%s','now') AS INTEGER) -
+                CAST(strftime('%s', MAX(received_at)) AS INTEGER)
+         FROM logs",
+        [],
+        |row| row.get(0),
+    )?;
+    // Clock skew can make the newest row appear to be from the future;
+    // clamp to 0 rather than reporting a huge unsigned wraparound.
+    Ok(age.map(|a| a.max(0) as u64))
 }
 
 /// Fetch log rows from the last `window_secs` seconds for rule evaluation.

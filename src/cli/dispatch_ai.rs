@@ -1,6 +1,6 @@
 use super::dispatch::http_or_cancel;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cortex::app::{
     AbuseSearchRequest, AiAssessRequest, AiCheckpointsRequest, AiCorrelateRequest,
     AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
@@ -16,14 +16,14 @@ use super::output_ai::{
     print_checkpoints_response, print_index_response, print_prune_checkpoints_response,
 };
 use super::output_ai_more::{
-    print_ai_incidents_response, print_ai_investigate_response_with_options,
-    print_ask_history_response, print_incident_context_response, print_similar_incidents_response,
-    AiInvestigatePrintOptions,
+    AiInvestigatePrintOptions, print_ai_incidents_response,
+    print_ai_investigate_response_with_options, print_ask_history_response,
+    print_incident_context_response, print_similar_incidents_response,
 };
 use super::output_logs::{
-    print_abuse_search_response, print_ai_correlate_response, print_ai_projects_response,
-    print_ai_tools_response, print_project_context_response, print_search_sessions_response,
-    print_usage_blocks_response_with_options, UsageBlocksPrintOptions,
+    UsageBlocksPrintOptions, print_abuse_search_response, print_ai_correlate_response,
+    print_ai_projects_response, print_ai_tools_response, print_project_context_response,
+    print_search_sessions_response, print_usage_blocks_response_with_options,
 };
 use super::{
     AiAbuseArgs, AiAddArgs, AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs,

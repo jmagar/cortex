@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use super::types::{
     ContainerInfo, DockerInspect, ListenerInfo, MountInfo, PortInfo, SystemdStatus,

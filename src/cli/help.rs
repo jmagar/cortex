@@ -90,17 +90,23 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "search",
         summary: "Full-text search across all logs",
-        usage: &["cortex search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]"],
+        usage: &[
+            "cortex search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]",
+        ],
     },
     CommandDoc {
         name: "filter",
         summary: "Filter logs by structured fields (host, container, severity…)",
-        usage: &["cortex filter [--hostname HOST] [--source-ip SOURCE] [--source-kind KIND] [--tool TOOL] [--project PATH] [--session-id ID] [--container NAME] [--docker-host HOST] [--stream stdout|stderr] [--event-action ACTION] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]"],
+        usage: &[
+            "cortex filter [--hostname HOST] [--source-ip SOURCE] [--source-kind KIND] [--tool TOOL] [--project PATH] [--session-id ID] [--container NAME] [--docker-host HOST] [--stream stdout|stderr] [--event-action ACTION] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]",
+        ],
     },
     CommandDoc {
         name: "tail",
         summary: "Show the most recent log lines",
-        usage: &["cortex tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]"],
+        usage: &[
+            "cortex tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]",
+        ],
     },
     CommandDoc {
         name: "errors",
@@ -115,12 +121,16 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "sessions",
         summary: "List indexed AI sessions",
-        usage: &["cortex sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]"],
+        usage: &[
+            "cortex sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]",
+        ],
     },
     CommandDoc {
         name: "incident",
         summary: "Logs surrounding a point in time",
-        usage: &["cortex incident --around TIME [--minutes N] [--service SERVICE] [--host HOST] [--limit N] [--json]"],
+        usage: &[
+            "cortex incident --around TIME [--minutes N] [--service SERVICE] [--host HOST] [--limit N] [--json]",
+        ],
     },
     CommandDoc {
         name: "source-ips",
@@ -160,12 +170,16 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "timeline",
         summary: "Log volume over time, bucketed",
-        usage: &["cortex timeline [--bucket minute|hour|day] [--group-by FIELD] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]"],
+        usage: &[
+            "cortex timeline [--bucket minute|hour|day] [--group-by FIELD] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]",
+        ],
     },
     CommandDoc {
         name: "patterns",
         summary: "Recurring message patterns",
-        usage: &["cortex patterns [--top-n N] [--scan-limit N] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]"],
+        usage: &[
+            "cortex patterns [--top-n N] [--scan-limit N] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]",
+        ],
     },
     CommandDoc {
         name: "ingest-rate",
@@ -175,7 +189,9 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "apps",
         summary: "Top application/program names by volume",
-        usage: &["cortex apps [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--offset N] [--json]"],
+        usage: &[
+            "cortex apps [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--offset N] [--json]",
+        ],
     },
     CommandDoc {
         name: "correlate",
@@ -187,17 +203,23 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "host-state",
         summary: "Per-host health/pressure snapshot",
-        usage: &["cortex host-state [--host-id ID] [--hostname HOST] [--since TIME] [--limit N] [--json]"],
+        usage: &[
+            "cortex host-state [--host-id ID] [--hostname HOST] [--since TIME] [--limit N] [--json]",
+        ],
     },
     CommandDoc {
         name: "fleet-state",
         summary: "Fleet-wide host state overview",
-        usage: &["cortex fleet-state [--include-ok|--exclude-ok] [--sort pressure|freshness|hostname] [--json]"],
+        usage: &[
+            "cortex fleet-state [--include-ok|--exclude-ok] [--sort pressure|freshness|hostname] [--json]",
+        ],
     },
     CommandDoc {
         name: "correlate-state",
         summary: "Correlate host state at a reference time",
-        usage: &["cortex correlate-state --reference-time TIME [--window-minutes N] [--host HOST] [--severity-min LEVEL] [--limit N] [--json]"],
+        usage: &[
+            "cortex correlate-state --reference-time TIME [--window-minutes N] [--host HOST] [--severity-min LEVEL] [--limit N] [--json]",
+        ],
     },
     CommandDoc {
         name: "silent-hosts",
@@ -283,7 +305,9 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "heartbeat",
         summary: "Run the host heartbeat agent",
-        usage: &["cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]"],
+        usage: &[
+            "cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]",
+        ],
     },
     CommandDoc {
         name: "inventory",
@@ -386,17 +410,23 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
     NestedCommandDoc {
         path: "ai search",
         summary: "Full-text search over indexed AI transcript sessions",
-        usage: &["cortex ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]"],
+        usage: &[
+            "cortex ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "ai abuse",
         summary: "Find risky or failure-related transcript messages",
-        usage: &["cortex ai abuse [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]"],
+        usage: &[
+            "cortex ai abuse [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "ai incidents",
         summary: "Cluster AI transcript abuse matches into incidents",
-        usage: &["cortex ai incidents [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]"],
+        usage: &[
+            "cortex ai incidents [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "ai investigate",
@@ -409,12 +439,16 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
     NestedCommandDoc {
         path: "ai assess",
         summary: "Assess one AI incident with optional model context",
-        usage: &["cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]"],
+        usage: &[
+            "cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "ai correlate",
         summary: "Correlate AI transcript anchors with non-AI logs",
-        usage: &["cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--from TIME] [--to TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]"],
+        usage: &[
+            "cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--from TIME] [--to TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "ai blocks",
@@ -452,7 +486,9 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
     NestedCommandDoc {
         path: "ai watch",
         summary: "Run the local transcript watch daemon",
-        usage: &["cortex ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]"],
+        usage: &[
+            "cortex ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "ai checkpoints",
@@ -487,17 +523,23 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
     NestedCommandDoc {
         path: "ai similar",
         summary: "Find incidents similar to a free-text query",
-        usage: &["cortex ai similar QUERY [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--window-minutes N] [--limit N] [--json]"],
+        usage: &[
+            "cortex ai similar QUERY [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--window-minutes N] [--limit N] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "ai ask-history",
         summary: "Search historical AI sessions and nearby system logs",
-        usage: &["cortex ai ask-history QUERY [--hostname HOST] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]"],
+        usage: &[
+            "cortex ai ask-history QUERY [--hostname HOST] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "ai incident-context",
         summary: "Build incident context from an explicit time window",
-        usage: &["cortex ai incident-context --from TIME --to TIME [--hostname HOST] [--app-name APP] [--query FTS] [--severity-min LEVEL] [--limit N] [--json]"],
+        usage: &[
+            "cortex ai incident-context --from TIME --to TIME [--hostname HOST] [--app-name APP] [--query FTS] [--severity-min LEVEL] [--limit N] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "db backup",
@@ -527,12 +569,16 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
     NestedCommandDoc {
         path: "compose status",
         summary: "Inspect the resolved Docker Compose runtime",
-        usage: &["cortex compose status [--compose-file PATH] [--project-dir DIR] [--project-name NAME] [--service NAME] [--container NAME] [--json]"],
+        usage: &[
+            "cortex compose status [--compose-file PATH] [--project-dir DIR] [--project-name NAME] [--service NAME] [--container NAME] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "compose doctor",
         summary: "Diagnose Docker Compose/listener ownership",
-        usage: &["cortex compose doctor [--compose-file PATH] [--project-dir DIR] [--project-name NAME] [--service NAME] [--container NAME] [--json]"],
+        usage: &[
+            "cortex compose doctor [--compose-file PATH] [--project-dir DIR] [--project-name NAME] [--service NAME] [--container NAME] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "compose pull",
@@ -632,7 +678,9 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
     NestedCommandDoc {
         path: "heartbeat agent",
         summary: "Run the host heartbeat agent",
-        usage: &["cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]"],
+        usage: &[
+            "cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]",
+        ],
     },
 ];
 

@@ -3,10 +3,10 @@
 //! Surface parity (2026-05-22): exposes the `clock_skew` MCP action and
 //! `GET /api/clock-skew` REST route as a top-level CLI subcommand.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use super::super::args::{CliCommand, ClockSkewArgs};
-use super::super::{parse_u32_flag, FlagCursor};
+use super::super::{FlagCursor, parse_u32_flag};
 
 pub(crate) fn parse_clock_skew(args: &[String]) -> Result<CliCommand> {
     let mut parsed = ClockSkewArgs::default();

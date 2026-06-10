@@ -5,8 +5,8 @@ use std::process::Command;
 use std::time::Instant;
 
 use super::{
-    check_file_phase, setup_report, EnvResult, PhaseTimer, SetupMode, SetupPhase, SetupReport,
-    SetupReportInput, SetupStatus,
+    EnvResult, PhaseTimer, SetupMode, SetupPhase, SetupReport, SetupReportInput, SetupStatus,
+    check_file_phase, setup_report,
 };
 
 pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {

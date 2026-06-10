@@ -1,3 +1,18 @@
+//! SQLite pool construction, schema, and migrations for the log intelligence
+//! core.
+//!
+//! Owns the full schema: the `logs` table + FTS5 index, AI/graph/heartbeat
+//! projections, and the **31 sequential migrations** tracked by
+//! `KNOWN_SCHEMA_VERSION`. Migrations run at startup; heavy ones log
+//! `Migration N: starting ...` lines, and the one-time
+//! `auto_vacuum=INCREMENTAL` conversion VACUUM is logged loudly (it can take
+//! minutes on large DBs).
+//!
+//! Invariants: SQLite allows a single writer — callers serialize writes via
+//! `write_lock()`, and the service layer issues only `pool_size - 1` read
+//! permits so the ingest batch writer can always reach a connection. WAL
+//! mode plus `synchronous=NORMAL` is the standing durability trade-off.
+
 use anyhow::Result;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -88,7 +103,24 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?;
         let page_count: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
         if page_count > 0 {
+            // One-time conversion: a full VACUUM rewrites the whole file with
+            // the write lock held — minutes on a multi-GB DB. Log loudly so a
+            // long first boot after this policy change is explainable and the
+            // compose healthcheck start_period can be tuned (full-review PM7).
+            let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+            let db_mb = (page_count * page_size) / (1024 * 1024);
+            tracing::info!(
+                db_size_mb = db_mb,
+                "Converting database to auto_vacuum=INCREMENTAL — one-time full \
+                 VACUUM; this can take minutes on large databases"
+            );
+            let vacuum_started = std::time::Instant::now();
             conn.execute_batch("VACUUM;")?;
+            tracing::info!(
+                db_size_mb = db_mb,
+                elapsed_ms = vacuum_started.elapsed().as_millis() as u64,
+                "auto_vacuum conversion VACUUM complete"
+            );
         }
     }
 
@@ -1121,7 +1153,9 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                  ON logs(severity, timestamp, id);
              INSERT OR IGNORE INTO schema_migrations (version) VALUES (29);",
         )?;
-        tracing::info!("Migration 29: added covering indexes for error_summary, tail_logs, and ai_session sort");
+        tracing::info!(
+            "Migration 29: added covering indexes for error_summary, tail_logs, and ai_session sort"
+        );
     }
 
     // Migration 30: widen graph vocabulary for homelab inventory topology.

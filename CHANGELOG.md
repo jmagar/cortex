@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-06-09
+
+### Security
+
+- Docker Compose now publishes the MCP/HTTP port 3100 on `127.0.0.1` by
+  default (`CORTEX_MCP_BIND` overrides the host interface). The Labby gateway
+  still reaches cortex over the Docker network at `http://cortex:3100`;
+  syslog 1514 remains published wide. Set `CORTEX_TOKEN` before exposing 3100.
+- The SSH inventory mount now defaults to a dedicated key directory
+  (`~/.cortex/ssh`, override via `CORTEX_SSH_VOLUME`) instead of encouraging a
+  `~/.ssh` mount. Documented least-privilege deploy-key provisioning and an
+  explicit "never mount ~/.ssh" warning in `docs/SECURITY.md`.
+- Documented the TrustedGatewayUnscoped mode (`CORTEX_NO_AUTH=true` +
+  `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true`): it disables both auth and the
+  read/admin scope gates, including the write actions
+  `ack_error`/`unack_error`/`notifications_test`, and must never be combined
+  with host-published ports.
+
+### Added
+
+- `ingest_silence` notification rule (`[notifications.evaluators]
+  ingest_silence = true`, `ingest_silence_threshold_secs = 900`): fires a
+  critical Apprise alert when the DB has logs but the newest row is older
+  than the threshold. An empty DB never fires.
+- Syslog listener supervision with restart + backoff; `/health` now returns
+  503 when a started listener has died, and per-listener liveness
+  (`syslog_udp_listener_state` / `syslog_tcp_listener_state`:
+  `not_started|alive|down`) appears in the `/health/full` ingest snapshot.
+- Migration-chain upgrade test coverage.
+- `config/systemd/cortex-backup.service` + `cortex-backup.timer` — daily
+  WAL-safe backup units (randomized delay) invoking `scripts/backup.sh` with
+  a configurable `BACKUP_DIR`, plus an install section in the deploy runbook.
+- Restore runbook (`docs/runbooks/deploy.md` "Restore"): stop → copy backup →
+  fix bind-mount ownership → `cortex db integrity` → restart → verify
+  `/health` and `ingest_rate`.
+
+### Fixed
+
+- Parser char-boundary panic that a LAN sender could trigger to kill a syslog
+  listener.
+- Command-log preview panic.
+- FTS search fast path no longer materializes unbounded match sets — capped
+  at the 200K most-recent matches; severity-only filtered searches use the
+  same capped candidate plan.
+- MCP tool errors are now typed (`invalid_params`, `retryable` for database
+  busy, `not_found`, `conflict`, `internal`) instead of a single opaque class.
+- MCP read permits are now `pool_size - 1`, reserving one pool connection for
+  the ingest writer so slow concurrent reads can no longer starve ingest.
+- `docker-compose.prod.yml` default image tag is kept in version canon
+  (currently 1.15.1).
+- Startup `auto_vacuum` conversion VACUUM now logs loudly before it runs.
+
+### Notes
+
+- Retroactive: the `auto_vacuum=INCREMENTAL` conversion (shipped in an
+  earlier release) runs a one-time full VACUUM at startup on pre-existing
+  databases. It can take minutes on large DBs — treat the first startup
+  after upgrading like a heavy migration (backup first).
+
+## [1.15.1] - 2026-06-08
+
+### Fixed
+
+- Allow the Labby gateway's `Host: cortex:3100` header via
+  `CORTEX_ALLOWED_HOSTS` in `docker-compose.yml`, so the gateway can proxy this
+  service over the docker network without RMCP Host validation rejecting calls
+  with "Host header is not allowed". Keeps the allowlist version-controlled
+  instead of living only in the gitignored `.env`.
+
 ## [1.15.0] - 2026-06-07
 
 ### Added

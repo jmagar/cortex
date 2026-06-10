@@ -1,7 +1,7 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use std::path::PathBuf;
 
-use super::parse_common::{value_after_equals, FlagCursor};
+use super::parse_common::{FlagCursor, value_after_equals};
 use super::{
     CliCommand, ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget,
     ConfigUnsetArgs,

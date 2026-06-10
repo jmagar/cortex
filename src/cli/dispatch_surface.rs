@@ -3,7 +3,7 @@ use super::dispatch::http_or_cancel;
 use super::output_common::print_json;
 use super::sparkline::sparkline;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cortex::app::{
     AckErrorRequest, IngestRateRequest, ListSourceIpsRequest, PatternsRequest, TimelineRequest,
     UnackErrorRequest, UnaddressedErrorsRequest,
@@ -201,7 +201,11 @@ pub(crate) async fn run_ingest_rate(mode: &CliMode, args: IngestRateArgs) -> Res
     let b = &response.buckets;
     println!(
         "{} ingest rate (per_sec): 1m={} 5m={} 15m={}  (counts 1m={} 5m={} 15m={}; write_blocked={})",
-        if response.write_blocked { warn("BLOCKED") } else { muted("ok") },
+        if response.write_blocked {
+            warn("BLOCKED")
+        } else {
+            muted("ok")
+        },
         cyan(&format!("{:.2}", b.per_sec_1m)),
         cyan(&format!("{:.2}", b.per_sec_5m)),
         cyan(&format!("{:.2}", b.per_sec_15m)),

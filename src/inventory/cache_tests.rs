@@ -1,7 +1,7 @@
 use super::*;
 use crate::inventory::config::InventoryConfig;
 use crate::inventory::schema::HomelabInventory;
-use crate::inventory::storage::{ensure_private_dir, write_json_private, InventoryPaths};
+use crate::inventory::storage::{InventoryPaths, ensure_private_dir, write_json_private};
 use chrono::Utc;
 use std::time::Duration as StdDuration;
 
@@ -149,8 +149,10 @@ fn status_reports_corrupt_cache() {
 
     let status = inventory_status(&cfg);
     assert_eq!(status.status, "corrupt");
-    assert!(status
-        .warnings
-        .iter()
-        .any(|warning| warning.contains("normalized cache unreadable")));
+    assert!(
+        status
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("normalized cache unreadable"))
+    );
 }

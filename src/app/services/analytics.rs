@@ -367,10 +367,34 @@ impl CortexService {
     }
 
     pub async fn compare(&self, req: CompareRequest) -> ServiceResult<CompareResponse> {
-        let a_from = rfc3339_z(parse_required_timestamp(&req.a_from, "a_from")?);
-        let a_to = rfc3339_z(parse_required_timestamp(&req.a_to, "a_to")?);
-        let b_from = rfc3339_z(parse_required_timestamp(&req.b_from, "b_from")?);
-        let b_to = rfc3339_z(parse_required_timestamp(&req.b_to, "b_to")?);
+        let a_from_ts = parse_required_timestamp(&req.a_from, "a_from")?;
+        let a_to_ts = parse_required_timestamp(&req.a_to, "a_to")?;
+        let b_from_ts = parse_required_timestamp(&req.b_from, "b_from")?;
+        let b_to_ts = parse_required_timestamp(&req.b_to, "b_to")?;
+
+        // Each range scans the timestamp partition; an uncapped width let a
+        // single compare call scan the whole table on retention-disabled DBs
+        // (full-review PM4). 92 days covers a quarter and exceeds the default
+        // 90-day retention window.
+        const MAX_COMPARE_RANGE_DAYS: i64 = 92;
+        for (label, from, to) in [("a", a_from_ts, a_to_ts), ("b", b_from_ts, b_to_ts)] {
+            if to < from {
+                return Err(crate::app::ServiceError::InvalidInput(format!(
+                    "{label}_to must not be earlier than {label}_from"
+                )));
+            }
+            if to - from > chrono::Duration::days(MAX_COMPARE_RANGE_DAYS) {
+                return Err(crate::app::ServiceError::InvalidInput(format!(
+                    "range {label} is wider than {MAX_COMPARE_RANGE_DAYS} days; \
+                     narrow the window"
+                )));
+            }
+        }
+
+        let a_from = rfc3339_z(a_from_ts);
+        let a_to = rfc3339_z(a_to_ts);
+        let b_from = rfc3339_z(b_from_ts);
+        let b_to = rfc3339_z(b_to_ts);
 
         let a_from_q = a_from.clone();
         let a_to_q = a_to.clone();

@@ -11,7 +11,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::db::{self, LogBatchEntry};
-use crate::enrich::{stamp_source_kind, SourceKind};
+use crate::enrich::{SourceKind, stamp_source_kind};
 use crate::ingest_metadata::bounded_metadata_json;
 use crate::receiver::enrichment::scrub_ai_message;
 
@@ -29,6 +29,18 @@ static COMMAND_SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     .map(|pattern| Regex::new(pattern).expect("static command secret regex"))
     .collect()
 });
+
+/// Truncate a string to at most `max` bytes, respecting UTF-8 char boundaries.
+fn truncate_utf8(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommandLogImportResult {
@@ -285,7 +297,7 @@ pub fn import_agent_command_spool(
                     line = result.scanned,
                     error_kind = "json",
                     error = %e,
-                    line_preview = %&line[..line.len().min(80)],
+                    line_preview = %truncate_utf8(&line, 80),
                     "failed to parse agent command spool record"
                 );
                 result.errors += 1;

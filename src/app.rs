@@ -13,7 +13,6 @@ pub use correlate::severity_at_or_above;
 pub use error::{ServiceError, ServiceResult};
 pub use incident_findings::{ContributingFactor, FailureMode, IncidentFindings, PreventionHint};
 pub use models::{
-    topology_findings,
     AbuseIncident,
     AbuseMatch,
     AbuseSearchRequest,
@@ -154,9 +153,13 @@ pub use models::{
     UsageBlock,
     UsageBlocksRequest,
     UsageBlocksResponse,
+    topology_findings,
 };
+// Transport-facing constants re-exported so surfaces (mcp/schemas.rs) never
+// import db:: directly — app/ is the only db consumer (full-review AL1).
+pub(crate) use crate::db::{PATTERN_SCAN_LIMIT_MAX, SEVERITY_LEVELS};
 pub use os_adapter::SystemOsAdapter;
-pub use services::{run_compose_status, run_service_logs, CortexService};
+pub use services::{CortexService, run_compose_status, run_service_logs};
 pub use time::parse_optional_timestamp;
 
 #[cfg(test)]

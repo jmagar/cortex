@@ -3,8 +3,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use super::{
-    check_file_phase, host_local_report_input, setup_path_value, setup_report, DebugComposeAction,
-    DebugWrapperAction, PhaseTimer, SetupPhase, SetupReport, SetupReportInput, SetupStatus,
+    DebugComposeAction, DebugWrapperAction, PhaseTimer, SetupPhase, SetupReport, SetupReportInput,
+    SetupStatus, check_file_phase, host_local_report_input, setup_path_value, setup_report,
 };
 
 pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<SetupReport> {

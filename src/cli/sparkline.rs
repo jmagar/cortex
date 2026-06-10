@@ -1,6 +1,6 @@
 //! Unicode sparkline renderer — one char per data point at 8 levels.
 
-use super::color::{ansi_colorize, color_enabled, CYAN_ANSI};
+use super::color::{CYAN_ANSI, ansi_colorize, color_enabled};
 
 #[cfg(test)]
 #[path = "sparkline_tests.rs"]

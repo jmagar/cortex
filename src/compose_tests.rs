@@ -33,11 +33,13 @@ impl EnvGuard {
     }
 
     fn set(&self, key: &str, value: &str) {
-        std::env::set_var(key, value);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(key, value) };
     }
 
     fn remove(&self, key: &str) {
-        std::env::remove_var(key);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var(key) };
     }
 }
 
@@ -45,8 +47,10 @@ impl Drop for EnvGuard {
     fn drop(&mut self) {
         for (key, value) in self.saved.drain(..) {
             match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
+                // TODO: Audit that the environment access only happens in single-threaded code.
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                // TODO: Audit that the environment access only happens in single-threaded code.
+                None => unsafe { std::env::remove_var(key) },
             }
         }
     }
@@ -327,14 +331,16 @@ fn inspect_json_extracts_compose_fields_ports_and_mounts() {
     assert_eq!(info.image_id.as_deref(), Some("sha256:image-id"));
     assert_eq!(info.mounts[0].target, "/data");
     assert_eq!(info.ports.len(), 2);
-    assert!(info
-        .ports
-        .iter()
-        .any(|port| port.private_port == 3100 && port.public_port == Some(3100)));
-    assert!(info
-        .ports
-        .iter()
-        .any(|port| port.private_port == 1514 && port.public_port.is_none()));
+    assert!(
+        info.ports
+            .iter()
+            .any(|port| port.private_port == 3100 && port.public_port == Some(3100))
+    );
+    assert!(
+        info.ports
+            .iter()
+            .any(|port| port.private_port == 1514 && port.public_port.is_none())
+    );
 }
 
 #[test]
@@ -777,9 +783,10 @@ fn mutation_refuses_unverified_systemd_or_listener_state() {
             &MutationOptions::default(),
         )
         .unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("could not verify systemd ownership"));
+    assert!(
+        err.to_string()
+            .contains("could not verify systemd ownership")
+    );
 
     let listener_service = ComposeService::new(
         FakeInspector {
@@ -1135,10 +1142,12 @@ fn compose_invocation_uses_syslog_env_file_for_substitution() {
 
     let invocation = service.compose_invocation(&target, ComposeMutation::Up);
 
-    assert!(invocation
-        .args
-        .windows(2)
-        .any(|args| { args[0] == "--env-file" && args[1] == env_file.display().to_string() }));
+    assert!(
+        invocation
+            .args
+            .windows(2)
+            .any(|args| { args[0] == "--env-file" && args[1] == env_file.display().to_string() })
+    );
     assert_eq!(
         invocation.env,
         vec![(
@@ -1187,10 +1196,12 @@ fn compose_invocation_uses_cortex_home_env_file_for_substitution_and_service_env
 
     let invocation = service.compose_invocation(&target, ComposeMutation::Up);
 
-    assert!(invocation
-        .args
-        .windows(2)
-        .any(|args| { args[0] == "--env-file" && args[1] == home_env.display().to_string() }));
+    assert!(
+        invocation
+            .args
+            .windows(2)
+            .any(|args| { args[0] == "--env-file" && args[1] == home_env.display().to_string() })
+    );
     assert_eq!(
         invocation.env,
         vec![(

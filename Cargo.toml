@@ -1,7 +1,7 @@
 [package]
 name = "cortex"
-version = "1.15.0"
-edition = "2021"
+version = "1.16.0"
+edition = "2024"
 rust-version = "1.86"
 license = "MIT"
 description = "Homelab intelligence platform — syslog/OTLP/Docker log aggregation, fleet awareness, and AI agent coordination over MCP, CLI, and HTTP"
@@ -13,14 +13,27 @@ path = "src/main.rs"
 
 [dependencies]
 # Async runtime
-tokio = { version = "1", features = ["full"] }
+# Explicit feature list instead of "full" — keeps the dependency surface
+# auditable (full-review BM5).
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "time",
+  "sync",
+  "signal",
+  "process",
+  "fs",
+  "io-util",
+  "io-std",
+] }
 tokio-util = { version = "0.7", features = ["rt"] }
 
 # HTTP / MCP transport
 axum = "0.8"
-# rmcp 1.6.0 is the supported lower bound for cortex's current API surface.
-# Cargo.lock may resolve a newer compatible 1.x release; see docs/RUST.md.
-rmcp = { version = "1.6.0", default-features = false, features = [
+# Declared bound matches what Cargo.lock actually resolves (1.7.x) so docs,
+# lockfile, and code agree (full-review BM2).
+rmcp = { version = "1.7", default-features = false, features = [
   "server",
   "macros",
   "transport-streamable-http-server",
@@ -70,7 +83,7 @@ lab-auth = { git = "https://github.com/jmagar/lab.git", rev = "87cec3241f9baef22
 url = "2"
 
 # Errors
-thiserror = "1"
+thiserror = "2"
 
 # Logging
 tracing = "0.1"
@@ -84,11 +97,11 @@ supports-hyperlinks = "3"
 anyhow = "1"
 libc = "0.2"
 lru = "0.16"
-rustix = { version = "0.38", features = ["fs"] }
+rustix = { version = "1", features = ["fs"] }
 tempfile = "3"
 regex = "1"
 sha2 = "0.10"
-getrandom = "0.3"
+getrandom = "0.4"
 
 futures-util = "0.3"
 
@@ -96,7 +109,7 @@ futures-util = "0.3"
 # NOTE: default-features=false omits gzip/brotli/deflate decompression — fine
 # for loopback `/api/*` calls. If the CLI ever points at a reverse proxy that
 # gzips responses, parsing will silently break; re-enable the relevant feature.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls", "stream"] }
 
 # CLI HTTP client: surfaces field path + preview when responses don't match
 # Response struct shape (bead 0p8r.5).
@@ -113,11 +126,21 @@ notify = "8.2.0"
 [features]
 test-support = []
 
+# Release profile for a deployed long-running daemon + the bundled plugin
+# binary (full-review BM4). `panic = "abort"` is deliberately NOT set:
+# run_db recovers DB-task panics via JoinError::is_panic.
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
 [dev-dependencies]
 cortex = { path = ".", features = ["test-support"] }
 serial_test = "3"
+# test-util enables tokio::test(start_paused) for the listener-supervision
+# tests so backoff sleeps advance instantly instead of in real time.
+tokio = { version = "1", features = ["test-util"] }
 tower = { version = "0.5", features = ["util"] }
-rmcp = { version = "1.6.0", default-features = false, features = [
+rmcp = { version = "1.7", default-features = false, features = [
   "client",
   "transport-child-process",
 ] }

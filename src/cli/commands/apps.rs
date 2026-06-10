@@ -3,10 +3,10 @@
 //! Surface parity (2026-05-22): exposes the `apps` MCP action and
 //! `GET /api/apps` REST route as a top-level CLI subcommand.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use super::super::args::{AppsArgs, CliCommand};
-use super::super::{parse_u32_flag, FlagCursor};
+use super::super::{FlagCursor, parse_u32_flag};
 
 pub(crate) fn parse_apps(args: &[String]) -> Result<CliCommand> {
     let mut parsed = AppsArgs::default();

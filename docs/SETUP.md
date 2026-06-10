@@ -58,11 +58,11 @@ Edit `.env` and set values as needed:
 CORTEX_RECEIVER_HOST=0.0.0.0
 CORTEX_RECEIVER_PORT=1514
 
-# MCP server
-CORTEX_HOST=0.0.0.0
+# MCP server (default bind is loopback; 0.0.0.0 requires CORTEX_TOKEN)
+CORTEX_HOST=127.0.0.1
 CORTEX_PORT=3100
 
-# Recommended for non-loopback binds: enable bearer auth on /mcp and OTLP endpoints
+# Required for non-loopback binds: bearer auth on /mcp and OTLP endpoints
 #   openssl rand -hex 32
 CORTEX_TOKEN=
 
@@ -89,7 +89,7 @@ Or directly:
 cargo run
 ```
 
-The server reads `config.toml` in the working directory. Syslog listens on `0.0.0.0:1514` (UDP+TCP) and MCP on `0.0.0.0:3100` (HTTP).
+The server reads `config.toml` in the working directory. Syslog listens on `0.0.0.0:1514` (UDP+TCP) and MCP on `127.0.0.1:3100` (HTTP) by default.
 
 ## 6. Start via Docker
 
@@ -145,13 +145,13 @@ Configure the plugin with your MCP URL and optional API token when prompted.
 
 ## 9. Configure syslog sources
 
-See [docs/](.) for per-host configuration:
+Per-host forwarder configuration (rsyslog, syslog-ng, WSL2, UniFi, routers/appliances, port-514 redirect, firewall rules) lives in the [README "Syslog Forwarder Setup" section](../README.md#syslog-forwarder-setup):
 
 - **Linux hosts**: rsyslog `/etc/rsyslog.d/99-remote.conf`
 - **WSL hosts**: rsyslog with Tailscale IP
 - **UniFi**: Settings > System > Advanced > Remote Syslog
-- **ATT BGW-320**: Diagnostics > Syslog > Remote Syslog
-- **Docker hosts**: optional docker-socket-proxy pull mode for container stdout/stderr logs
+- **Routers/appliances**: device syslog settings (Diagnostics > Syslog on ATT BGW-320)
+- **Docker hosts**: optional docker-socket-proxy pull mode for container stdout/stderr logs (below)
 
 ### Optional Docker host log ingest
 
@@ -188,12 +188,14 @@ For Docker ingest integration testing, keep the default smoke test focused on UD
 
 - Confirm the server is running: `docker compose ps` or `ps aux | grep cortex`
 - Verify `CORTEX_PORT` matches the port you are curling
-- If running in Docker, ensure port 3100 is published in `docker-compose.yml`
+- If running in Docker, remember port 3100 is published on `127.0.0.1` only by default — set `CORTEX_MCP_BIND=0.0.0.0` (plus `CORTEX_TOKEN`) to reach it from other hosts
 
 ### "401 Unauthorized" on tool calls
 
 - Verify `CORTEX_TOKEN` in `.env` matches the token configured in your MCP client
-- If behind a reverse proxy (SWAG), either bind `CORTEX_HOST` to loopback, keep `CORTEX_TOKEN` set, or explicitly set both `CORTEX_NO_AUTH=true` and `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true` only when the proxy enforces upstream auth before traffic reaches cortex.
+- If behind a reverse proxy (SWAG), fix the token mismatch — keep `CORTEX_TOKEN` set and pass it through the proxy.
+
+> **WARNING — do not "fix" a 401 by disabling auth.** Setting `CORTEX_NO_AUTH=true` + `CORTEX_TRUSTED_GATEWAY_NO_AUTH=true` (TrustedGatewayUnscoped) disables **both** authentication **and** the read/admin scope gates — including the write actions `ack_error`, `unack_error`, and `notifications_test`. Use it only when an upstream gateway enforces auth before traffic reaches cortex **and** port 3100 is not published beyond loopback (`CORTEX_MCP_BIND=127.0.0.1`, the default). Never combine it with host-published ports. See [docs/SECURITY.md](SECURITY.md).
 
 ### No syslog messages arriving
 

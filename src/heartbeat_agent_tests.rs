@@ -53,11 +53,13 @@ async fn failed_fake_probe_produces_partial_snapshot() {
     assert!(payload.sample.partial);
     assert!(payload.cpu.is_some());
     assert_eq!(payload.disks.len(), 1);
-    assert!(payload
-        .sample
-        .probe_errors
-        .iter()
-        .any(|error| error.contains("memory")));
+    assert!(
+        payload
+            .sample
+            .probe_errors
+            .iter()
+            .any(|error| error.contains("memory"))
+    );
 }
 
 #[tokio::test]
@@ -82,11 +84,13 @@ async fn probe_deadline_skips_slow_probe_but_keeps_completed_data() {
     assert!(payload.sample.partial);
     assert!(payload.cpu.is_some());
     assert!(payload.memory.is_none());
-    assert!(payload
-        .sample
-        .skipped_probes
-        .iter()
-        .any(|probe| probe == "memory"));
+    assert!(
+        payload
+            .sample
+            .skipped_probes
+            .iter()
+            .any(|probe| probe == "memory")
+    );
 }
 
 #[test]

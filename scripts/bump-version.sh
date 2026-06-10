@@ -18,6 +18,10 @@ VERSION_FILES=(
     "${REPO_ROOT}/pyproject.toml"
     "${REPO_ROOT}/gemini-extension.json"
     "${REPO_ROOT}/mcpb/manifest.json"
+    # prod compose pins a default image tag; keeping it in the canon prevents
+    # the stale-default deploy (frozen at 1.0.0 for 15 minor versions while
+    # forward-only migrations moved on — full-review OH1).
+    "${REPO_ROOT}/docker-compose.prod.yml"
 )
 
 current_version() {
@@ -53,6 +57,8 @@ for file in "${VERSION_FILES[@]}"; do
     sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW}\"/" "$file"
     sed -i "s/^version = \"${CURRENT}\"/version = \"${NEW}\"/" "$file"
     sed -i "s/cortex:v${CURRENT}/cortex:v${NEW}/g" "$file"
+    # prod compose default image tag: ghcr.io/jmagar/cortex:${CORTEX_VERSION:-X.Y.Z}
+    sed -i "s/CORTEX_VERSION:-${CURRENT}/CORTEX_VERSION:-${NEW}/" "$file"
     echo "  updated: ${file#"${REPO_ROOT}/"}"
 done
 

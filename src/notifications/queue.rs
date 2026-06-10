@@ -8,13 +8,13 @@ use anyhow::Result;
 // Re-export db::notifications types and functions for consumers that prefer
 // going through this module. Allowed dead_code because dispatcher imports
 // directly from db::notifications; these re-exports remain for future callers.
+use crate::db::DbPool;
 #[allow(unused_imports)]
 pub use crate::db::notifications::{
-    backoff_next_attempt_at, firings_insert, firings_recent, firings_recent_dedup_check,
-    outbox_claim_pending, outbox_insert, outbox_mark_dead, outbox_mark_dropped, outbox_mark_sent,
-    outbox_schedule_retry, FiringInsertParams, OutboxInsertParams, OutboxRow,
+    FiringInsertParams, OutboxInsertParams, OutboxRow, backoff_next_attempt_at, firings_insert,
+    firings_recent, firings_recent_dedup_check, outbox_claim_pending, outbox_insert,
+    outbox_mark_dead, outbox_mark_dropped, outbox_mark_sent, outbox_schedule_retry,
 };
-use crate::db::DbPool;
 
 /// Claim up to `limit` pending outbox rows from the pool.
 #[allow(dead_code)]

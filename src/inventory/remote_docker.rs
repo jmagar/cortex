@@ -9,7 +9,7 @@ use crate::inventory::docker::{extract_domainish, string_map};
 use crate::inventory::schema::{
     InventoryService, MountRef, NetworkSegment, PortMapping, Provenance, TrustLevel,
 };
-use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, SshContext};
+use crate::inventory::ssh::{SshContext, configured_hosts as resolve_ssh_hosts};
 
 pub async fn collect(
     ssh_config: Option<&Path>,

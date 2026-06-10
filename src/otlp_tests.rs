@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 
 use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest,
-    common::v1::{any_value::Value as AnyValueKind, AnyValue, KeyValue},
+    common::v1::{AnyValue, KeyValue, any_value::Value as AnyValueKind},
     logs::v1::{LogRecord, ResourceLogs, ScopeLogs},
     resource::v1::Resource,
 };

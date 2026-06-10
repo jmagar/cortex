@@ -203,7 +203,7 @@ pub(super) fn parse_syslog(raw: &str, source_ip: String) -> db::LogBatchEntry {
         };
         let cef = extract_cef_fields(&full_text);
         if cef.hostname.is_none() && cef.app_name.is_none() && cef.message.is_none() {
-            let preview = &full_text[..full_text.len().min(200)];
+            let preview = truncate(&full_text, 200);
             warn!(
                 msg = preview,
                 "CEF heuristic triggered but all fields are None — malformed CEF body, using raw fallback"

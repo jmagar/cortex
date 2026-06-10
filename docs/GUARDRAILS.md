@@ -25,12 +25,13 @@ credentials.*
 
 ### Hook enforcement
 
-Pre-commit hooks verify security invariants:
+Git hooks are managed by [lefthook](https://github.com/evilmartians/lefthook) (`lefthook.yml` at the repo root). The security-relevant pre-commit command is:
 
 | Hook | Purpose |
 | --- | --- |
-| `sync-env.sh` | Ensures `.env.example` documents all variables read by the server |
-| `fix-env-perms.sh` | Sets `.env` to `chmod 600` if present |
+| `scripts/block-env-commits.sh` (`env_guard`) | Blocks commits containing env-credential patterns (e.g. real token values) |
+
+The other pre-commit commands (`diff_check`, `yaml`, `lint`, `format`, `skills`) enforce hygiene, and pre-push runs the full test suite. `.env.example` is maintained by hand — treat it as the documentation template, not a generated guarantee that every variable the server reads is listed.
 
 
 ### Credential rotation

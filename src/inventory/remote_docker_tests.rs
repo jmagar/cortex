@@ -32,10 +32,12 @@ fn normalizes_remote_docker_inspect() {
     assert_eq!(service.status.as_deref(), Some("running (healthy)"));
     assert_eq!(service.env_keys, vec!["TOKEN", "RUST_LOG"]);
     assert_eq!(service.mounts[0].target, "/app");
-    assert!(service
-        .domains
-        .iter()
-        .any(|domain| domain == "axon.tootie.tv"));
+    assert!(
+        service
+            .domains
+            .iter()
+            .any(|domain| domain == "axon.tootie.tv")
+    );
     assert_eq!(out.networks[0].members, vec!["axon"]);
 }
 
@@ -53,8 +55,10 @@ fn normalizes_compact_inspect_lines() {
     assert_eq!(service.image.as_deref(), Some("linuxserver/swag"));
     assert_eq!(service.ports[0].host_port, Some(443));
     assert_eq!(service.env_keys, vec!["URL", "PUID"]);
-    assert!(service
-        .domains
-        .iter()
-        .any(|domain| domain == "swag.tootie.tv"));
+    assert!(
+        service
+            .domains
+            .iter()
+            .any(|domain| domain == "swag.tootie.tv")
+    );
 }

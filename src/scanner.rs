@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::config::StorageConfig;
-use crate::db::{enforce_storage_budget, insert_logs_batch_in_tx, DbPool, LogBatchEntry};
+use crate::db::{DbPool, LogBatchEntry, enforce_storage_budget, insert_logs_batch_in_tx};
 use crate::ingest_metadata::bounded_metadata_json;
 use crate::receiver::enrichment::{project_from_transcript_path, scrub_ai_message};
 

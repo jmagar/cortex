@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use super::ai_watch::systemctl_user_output;
-use super::setup::{read_env_value, setup_data_dir, SetupPhase, SetupStatus};
+use super::setup::{SetupPhase, SetupStatus, read_env_value, setup_data_dir};
 #[derive(Debug, Clone)]
 pub(crate) struct ContainerMountInfo {
     pub(crate) mount_type: Option<String>,

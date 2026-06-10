@@ -27,23 +27,34 @@ cortex compose logs --tail 20
 
 ## Rollback
 
+Which rollback path applies depends on the compose file in use:
+
+- **`docker-compose.yml` (default)** builds the image from source — rolling
+  back means checking out the previous commit/tag and rebuilding.
+- **`docker-compose.prod.yml`** pulls tagged images from ghcr.io — rolling
+  back means pinning `CORTEX_VERSION` to the previous tag.
+
 ```bash
-# Option 1: Revert to previous image (if tagged)
+# Option 1: prod compose — pin the previous image tag
+cortex compose down --yes
+CORTEX_VERSION=<previous-tag> docker compose -f docker-compose.prod.yml up -d
+
+# Option 2: default compose — rebuild from the previous commit/tag
 cortex compose down --yes
 git checkout <previous-tag>
-cortex compose pull
+docker compose build
 cortex compose up
-
-# Option 2: Revert to previous commit
-git log --oneline -5   # find the good commit
-git revert HEAD         # or git reset --hard <sha>
-cortex compose pull && cortex compose up
 ```
 
 ## Health Check
 
-The container includes a built-in healthcheck (`wget -q --spider http://localhost:3100/health`).
-Docker will mark the container unhealthy after 3 consecutive failures (30s interval, 5s timeout).
+The container includes a built-in healthcheck
+(`curl -sf http://localhost:3100/health || exit 1`). Docker will mark the
+container unhealthy after 3 consecutive failures (30s interval, 5s timeout).
+Note that `/health` returns 503 when a started syslog listener has died, so
+an unhealthy container can mean ingest is down even though HTTP is up —
+check `/health/full` (`syslog_udp_listener_state` /
+`syslog_tcp_listener_state`) to distinguish.
 
 ```bash
 # Check container health status
@@ -60,12 +71,21 @@ docker inspect --format='{{.State.Health.Status}}' cortex
 
 ## Database Backup Before Deploy
 
+The image does not ship a `sqlite3` binary — use the built-in `cortex db
+backup` command (WAL-safe, no downtime):
+
 ```bash
-# WAL-safe online backup (no downtime)
-docker compose exec cortex sqlite3 /data/cortex.db ".backup /data/syslog-pre-deploy.db"
+# Inside the container
+docker compose exec cortex cortex db backup --output /data/syslog-pre-deploy.db
+
+# Or from the host, when the DB path is reachable (bind mount)
+bash scripts/backup.sh             # writes ./backups/syslog-<timestamp>.db
+cortex db backup --output /path/to/backup.db
 ```
 
-The repo also includes `scripts/backup.sh`, which performs a WAL-safe checkpoint and SQLite backup from the host when the database path is reachable.
+`scripts/backup.sh` performs a WAL-safe checkpoint and SQLite `.backup` from
+the host and also captures `auth.db` / `auth-jwt.pem` when present. For
+scheduled backups, see "Automated backups (systemd timer)" below.
 
 ## Heavy SQLite Migration Upgrade
 
@@ -75,11 +95,10 @@ Use this path when release notes, startup logs, or `docs/CONFIG.md` indicate a h
 
 ```bash
 # 1. Confirm current database size and baseline counts.
-docker compose exec cortex sqlite3 /data/cortex.db \
-  "SELECT COUNT(*) FROM logs; PRAGMA page_count; PRAGMA page_size;"
+docker compose exec cortex cortex db status --json
 
-# 2. Take a WAL-safe backup.
-docker compose exec cortex sqlite3 /data/cortex.db ".backup /data/syslog-pre-heavy-migration.db"
+# 2. Take a WAL-safe backup (no sqlite3 in the image — use the built-in command).
+docker compose exec cortex cortex db backup --output /data/syslog-pre-heavy-migration.db
 
 # 3. Build or pull the new version, then start it.
 docker compose build
@@ -99,6 +118,9 @@ Expected operator signals:
 - Completion logs include the migration name and elapsed time.
 - `/health` may fail until the migration commits.
 - UDP senders can lose packets while the listener is unavailable; TCP senders may reconnect or buffer depending on their own config.
+- The first startup against a pre-existing database also runs a **one-time
+  `auto_vacuum=INCREMENTAL` conversion VACUUM**, logged loudly at startup. It
+  can take minutes on large databases; treat it like a heavy migration.
 
 Rollback while a migration is running is a restore operation, not a partial schema edit. Stop the new process, restore the WAL-safe backup to `/data/cortex.db`, then start the previous image or binary.
 
@@ -112,3 +134,64 @@ The default `scripts/smoke-test.sh` covers live UDP and TCP ingest plus MCP acti
 4. Verify `search` or `tail` returns the marker and that stream rows use `source_ip=docker://<host>/<container>/<stream>`.
 5. Restart or recreate the disposable container and verify lifecycle rows use `source_ip=docker-event://<host>/<container>/<action>` with `facility=docker`.
 5. Stop the fixture and confirm cortex logs reconnect/backoff without crashing.
+
+## Restore
+
+Restoring a backup is a stop-the-world operation — never copy a backup over a
+live WAL-mode database.
+
+```bash
+# 1. Stop the service.
+cortex compose down --yes        # or: docker compose down
+
+# 2. Copy the backup into place (data dir is the /data bind mount or volume).
+cp /path/to/backups/syslog-<timestamp>.db ~/.cortex/data/cortex.db
+rm -f ~/.cortex/data/cortex.db-wal ~/.cortex/data/cortex.db-shm
+
+# 3. Fix bind-mount ownership. The container runs as a non-root UID (1000 by
+#    default) and writes auth.db / auth-jwt.pem with that UID — a restore
+#    done as root or your login user leaves files the container cannot open.
+sudo chown 1000:1000 ~/.cortex/data/cortex.db
+#    (also restore + chown auth.db / auth-jwt.pem if you backed them up)
+
+# 4. Verify integrity before starting (direct SQLite — the HTTP API is down).
+( unset CORTEX_USE_HTTP; cortex db integrity )   # PRAGMA integrity_check
+
+# 5. Restart and verify.
+cortex compose up
+curl -sf http://localhost:3100/health          # 200 = HTTP up and listeners alive
+cortex stats --json                            # totals match the backup's era
+mcporter call --config config/mcporter.json cortex.cortex action=ingest_rate
+#    ingest_rate should show fresh writes within a minute once senders reconnect
+```
+
+If `cortex db integrity` reports errors, do not start the service — pick an
+older backup.
+
+## Automated backups (systemd timer)
+
+The repo ships ready-made user units in `config/systemd/`:
+`cortex-backup.service` and `cortex-backup.timer` (daily, with a randomized
+delay so fleet hosts don't all fire at once). They invoke `scripts/backup.sh`
+with a configurable `BACKUP_DIR`.
+
+```bash
+# User units (recommended for the ~/.cortex layout)
+mkdir -p ~/.config/systemd/user
+cp config/systemd/cortex-backup.{service,timer} ~/.config/systemd/user/
+# Edit WorkingDirectory / Environment=BACKUP_DIR / CORTEX_DB_PATH as needed
+systemctl --user daemon-reload
+systemctl --user enable --now cortex-backup.timer
+systemctl --user list-timers cortex-backup.timer
+
+# Or system-wide
+sudo cp config/systemd/cortex-backup.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cortex-backup.timer
+```
+
+Keep backups on a different disk or host than the live database — a full-disk
+or dead-drive event otherwise takes the backups with it. A simple pattern is
+an rsync step after the timer fires (e.g. `rsync -a ~/.cortex/backups/
+backup-host:/backups/cortex/`, in this homelab: replicate to `shart`), or
+point `BACKUP_DIR` at a mount that is itself replicated.

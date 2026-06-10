@@ -4,8 +4,8 @@ use crate::app::topology_findings as finding_const;
 use crate::app::topology_findings::reason as reason_const;
 use crate::inventory::schema::{CollectionError, HomelabInventory, InventoryService, MountRef};
 use crate::inventory::{
-    inventory_status, is_not_found_error, read_inventory_cache, InventoryCacheStatus,
-    InventoryConfig,
+    InventoryCacheStatus, InventoryConfig, inventory_status, is_not_found_error,
+    read_inventory_cache,
 };
 use std::collections::{BTreeMap, HashSet};
 

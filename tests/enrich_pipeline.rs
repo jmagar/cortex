@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use cortex::config::StorageConfig;
 use cortex::enrich::{EnrichmentPipeline, SourceKind};
-use cortex::testing::{init_pool, insert_logs_batch, DbPool, LogBatchEntry};
+use cortex::testing::{DbPool, LogBatchEntry, init_pool, insert_logs_batch};
 use tempfile::TempDir;
 
 /// Create an isolated SQLite pool backed by a temp directory.

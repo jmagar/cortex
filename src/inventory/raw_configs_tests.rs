@@ -14,10 +14,12 @@ services:
 "#,
     );
     assert_eq!(project.services, vec!["app"]);
-    assert!(project
-        .domains
-        .iter()
-        .any(|d| d.contains("app.example.test")));
+    assert!(
+        project
+            .domains
+            .iter()
+            .any(|d| d.contains("app.example.test"))
+    );
     assert_eq!(project.ports[0].host_port, Some(8080));
 }
 

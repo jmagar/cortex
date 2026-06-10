@@ -88,10 +88,12 @@ fn host_state_returns_latest_by_host_id() {
     assert_eq!(state.latest.as_ref().unwrap().heartbeat_id, latest);
     assert!(state.flags.collector_partial);
     assert_eq!(state.samples.len(), 2);
-    assert!(state
-        .samples
-        .iter()
-        .any(|sample| sample.heartbeat_id == older));
+    assert!(
+        state
+            .samples
+            .iter()
+            .any(|sample| sample.heartbeat_id == older)
+    );
     assert!(state.latest.as_ref().unwrap().cpu.is_some());
 }
 

@@ -4,7 +4,7 @@ use crate::config::{McpConfig, StorageConfig};
 use crate::db;
 use crate::mcp::{AppState, AuthPolicy};
 use axum::body::to_bytes;
-use axum::http::{header, Method, Request, StatusCode};
+use axum::http::{Method, Request, StatusCode, header};
 use std::sync::Arc;
 use tower::util::ServiceExt;
 
@@ -137,6 +137,70 @@ async fn integration_health_returns_200() {
     // /health is the minimal liveness probe — no ingest counters.
     assert_eq!(value["status"], "ok");
     assert!(value.get("ingest").is_none());
+}
+
+/// A started-then-dead syslog listener must fail /health so the Docker
+/// healthcheck turns unhealthy and the restart policy can recover ingestion
+/// (bead syslog-mcp-7f0y).
+#[tokio::test]
+async fn integration_health_returns_503_when_listener_down() {
+    let h = TestHarness::new();
+    h.state
+        .observability
+        .set_udp_listener_state(crate::observability::ListenerState::Down);
+    let app = router(h.state);
+    let request = Request::builder()
+        .method("GET")
+        .uri("/health")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["status"], "error");
+    assert_eq!(value["reason"], "syslog listener down");
+}
+
+/// TCP-only down (UDP stays NotStarted) must still fail /health with 503.
+#[tokio::test]
+async fn integration_health_returns_503_when_tcp_listener_down() {
+    let h = TestHarness::new();
+    h.state
+        .observability
+        .set_tcp_listener_state(crate::observability::ListenerState::Down);
+    let app = router(h.state);
+    let request = Request::builder()
+        .method("GET")
+        .uri("/health")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["status"], "error");
+    assert_eq!(value["reason"], "syslog listener down");
+}
+
+/// Alive listeners (the normal serve-mode state) keep /health at 200.
+#[tokio::test]
+async fn integration_health_returns_200_with_alive_listeners() {
+    let h = TestHarness::new();
+    h.state
+        .observability
+        .set_udp_listener_state(crate::observability::ListenerState::Alive);
+    h.state
+        .observability
+        .set_tcp_listener_state(crate::observability::ListenerState::Alive);
+    let app = router(h.state);
+    let request = Request::builder()
+        .method("GET")
+        .uri("/health")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

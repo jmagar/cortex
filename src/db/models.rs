@@ -414,17 +414,23 @@ pub struct SearchParams {
 
 impl SearchParams {
     /// True when a filter is set on a column backed by a `(col, timestamp)`
-    /// index (hostname, source_ip, severity, app_name, event_action,
-    /// ai_project). The FTS search uses this to choose the index-led intersect
-    /// plan — which leads with the filter's composite index and intersects the
-    /// FTS match set — instead of scanning the entire match set and filtering
-    /// post-hoc (the pathology that made `search <q> --hostname <h>` ~200s).
+    /// index AND whose partitions are small enough for the index-led plan
+    /// (hostname, source_ip, app_name, event_action, ai_project). The FTS
+    /// search uses this to choose the index-led intersect plan — which leads
+    /// with the filter's composite index and intersects the FTS match set —
+    /// instead of scanning the entire match set and filtering post-hoc (the
+    /// pathology that made `search <q> --hostname <h>` ~200s).
+    ///
+    /// `severity`/`severity_in` are deliberately EXCLUDED: a single severity
+    /// can be >90% of the table, so leading with `idx_logs_sev_time` for a
+    /// rare term walks nearly the entire partition before LIMIT fills
+    /// (full-review PH1). Severity-only searches take the capped-candidate
+    /// path instead; severity combined with a selective filter still uses the
+    /// fast path via the selective column's index.
     pub(crate) fn has_indexed_equality_filter(&self) -> bool {
         self.hostname.is_some()
             || self.source_ip.is_some()
             || self.source_ip_prefix.is_some()
-            || self.severity.is_some()
-            || self.severity_in.as_ref().is_some_and(|v| !v.is_empty())
             || self.app_name.is_some()
             || self.event_action.is_some()
             || self.ai_project.is_some()

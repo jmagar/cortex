@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use crate::app::os_adapter::OsAdapter;
 use crate::app::CortexService;
+use crate::app::os_adapter::OsAdapter;
 use crate::app::{ServiceError, ServiceResult};
 use crate::config::StorageConfig;
 use crate::db::init_pool;

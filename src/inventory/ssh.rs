@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures_util::future::BoxFuture;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
-use crate::inventory::process::{run_command, CommandOutput};
+use crate::inventory::process::{CommandOutput, run_command};
 
 const SSH_IGNORE_UNKNOWN_OPTIONS: &str = "IgnoreUnknown=WarnWeakCrypto";
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 4;

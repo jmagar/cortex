@@ -301,6 +301,61 @@ fn ai_watch_env_file_pins_db_and_disables_docker_ingest() {
 }
 
 #[test]
+fn cortex_home_dir_can_be_inferred_from_user_local_bin_binary() {
+    let exe = std::path::Path::new("/home/jmagar/.local/bin/cortex");
+
+    assert_eq!(
+        cortex_home_dir_from_exe_path(exe).as_deref(),
+        Some(std::path::Path::new("/home/jmagar/.cortex"))
+    );
+}
+
+#[test]
+fn cortex_home_dir_can_be_inferred_from_user_workspace_binary() {
+    let exe = std::path::Path::new("/home/jmagar/workspace/cortex/target/release/cortex");
+
+    assert_eq!(
+        cortex_home_dir_from_exe_path(exe).as_deref(),
+        Some(std::path::Path::new("/home/jmagar/.cortex"))
+    );
+}
+
+#[test]
+fn cortex_home_dir_is_not_inferred_from_non_home_binary() {
+    let exe = std::path::Path::new("/usr/local/bin/cortex");
+
+    assert_eq!(cortex_home_dir_from_exe_path(exe), None);
+}
+
+/// full-review QM6: only a filesystem-root `/home` (or `/var/home`)
+/// qualifies — nested directories merely NAMED `home` must not redirect
+/// config resolution.
+#[test]
+fn cortex_home_dir_is_not_inferred_from_nested_home_directories() {
+    for exe in [
+        "/opt/home/svc/bin/cortex",
+        "/tmp/home/evil/cortex",
+        "/build/home/ci/cortex",
+    ] {
+        assert_eq!(
+            cortex_home_dir_from_exe_path(std::path::Path::new(exe)),
+            None,
+            "nested home dir must not match: {exe}"
+        );
+    }
+}
+
+#[test]
+fn cortex_home_dir_is_inferred_from_ostree_var_home() {
+    let exe = std::path::Path::new("/var/home/jmagar/.local/bin/cortex");
+
+    assert_eq!(
+        cortex_home_dir_from_exe_path(exe).as_deref(),
+        Some(std::path::Path::new("/var/home/jmagar/.cortex"))
+    );
+}
+
+#[test]
 fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     let unit = ai_watch_service_unit(
         std::path::Path::new("/home/me/.local/bin/cortex"),
@@ -315,9 +370,13 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     assert!(unit.contains(
         "Environment=PATH=/home/me/.local/bin:/home/me/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
     ));
-    assert!(unit.contains("Environment=CARGO_TARGET_DIR=/home/me/.local/state/cortex/cargo-target"));
+    assert!(
+        unit.contains("Environment=CARGO_TARGET_DIR=/home/me/.local/state/cortex/cargo-target")
+    );
     assert!(unit.contains("WorkingDirectory=/"));
-    assert!(unit.contains("ExecStart=/home/me/.local/bin/cortex ai watch --no-initial-scan --json"));
+    assert!(
+        unit.contains("ExecStart=/home/me/.local/bin/cortex ai watch --no-initial-scan --json")
+    );
     assert!(unit.contains("Restart=on-failure"));
     assert!(unit.contains("StartLimitBurst=5"));
     assert!(unit.contains("UMask=0077"));
@@ -325,7 +384,9 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     assert!(unit.contains("PrivateTmp=true"));
     assert!(unit.contains("ProtectSystem=strict"));
     assert!(unit.contains("ProtectHome=read-only"));
-    assert!(unit.contains("BindReadOnlyPaths=-/home/me/.claude/projects -/home/me/.codex/sessions"));
+    assert!(
+        unit.contains("BindReadOnlyPaths=-/home/me/.claude/projects -/home/me/.codex/sessions")
+    );
     assert!(unit.contains("BindPaths=/home/me/.cortex/data /home/me/.local/state/cortex"));
     assert!(unit.contains("ReadWritePaths=/home/me/.cortex/data /home/me/.local/state/cortex"));
     assert!(unit.contains("WantedBy=default.target"));
@@ -365,9 +426,10 @@ fn db_path_from_setup_env_rejects_container_db_without_absolute_data_volume() {
     .unwrap();
 
     let err = db_path_from_setup_env(&env_path).unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("CORTEX_DATA_VOLUME is not absolute"));
+    assert!(
+        err.to_string()
+            .contains("CORTEX_DATA_VOLUME is not absolute")
+    );
 }
 
 #[test]
@@ -447,9 +509,11 @@ fn ai_watch_service_content_phase_detects_stale_unit() {
     );
 
     assert!(matches!(phase.status, SetupStatus::Error));
-    assert!(phase
-        .detail
-        .contains("does not match generated AI watch unit"));
+    assert!(
+        phase
+            .detail
+            .contains("does not match generated AI watch unit")
+    );
 }
 
 #[test]
@@ -474,9 +538,11 @@ fn debug_wrapper_content_phase_detects_stale_wrapper() {
     let phase = check_debug_wrapper_content_phase(&wrapper, dir.path());
 
     assert!(matches!(phase.status, SetupStatus::Error));
-    assert!(phase
-        .detail
-        .contains("does not match generated debug wrapper"));
+    assert!(
+        phase
+            .detail
+            .contains("does not match generated debug wrapper")
+    );
 }
 
 #[test]
@@ -498,9 +564,11 @@ fn debug_compose_content_phase_detects_stale_override() {
     let phase = check_debug_compose_content_phase(&override_path, dir.path());
 
     assert!(matches!(phase.status, SetupStatus::Error));
-    assert!(phase
-        .detail
-        .contains("does not match generated debug Compose override"));
+    assert!(
+        phase
+            .detail
+            .contains("does not match generated debug Compose override")
+    );
 }
 
 #[test]

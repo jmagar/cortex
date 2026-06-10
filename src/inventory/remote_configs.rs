@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::inventory::collectors::CollectorOutput;
 use crate::inventory::limits::MAX_RAW_ARTIFACT_BYTES;
 use crate::inventory::raw_configs::{collect_compose_body, collect_proxy_body};
-use crate::inventory::ssh::{configured_hosts as resolve_ssh_hosts, SshContext};
+use crate::inventory::ssh::{SshContext, configured_hosts as resolve_ssh_hosts};
 use crate::inventory::storage::InventoryPaths;
 
 pub async fn collect(
@@ -142,11 +142,15 @@ async fn remote_records(
 }
 
 fn compose_batch_command() -> String {
-    batch_command("for d in \"$HOME/compose\" \"$HOME/.cortex/compose\" \"$HOME/.axon/compose\" \"$HOME/workspace\" /mnt/appdata /mnt/cache/appdata /mnt/user/appdata /opt /srv; do [ -d \"$d\" ] && find \"$d\" -maxdepth 4 -type f \\( -name docker-compose.yml -o -name docker-compose.yaml -o -name compose.yml -o -name compose.yaml \\) -print 2>/dev/null; done | sort -u | head -200")
+    batch_command(
+        "for d in \"$HOME/compose\" \"$HOME/.cortex/compose\" \"$HOME/.axon/compose\" \"$HOME/workspace\" /mnt/appdata /mnt/cache/appdata /mnt/user/appdata /opt /srv; do [ -d \"$d\" ] && find \"$d\" -maxdepth 4 -type f \\( -name docker-compose.yml -o -name docker-compose.yaml -o -name compose.yml -o -name compose.yaml \\) -print 2>/dev/null; done | sort -u | head -200",
+    )
 }
 
 fn proxy_batch_command() -> String {
-    batch_command("for d in /mnt/appdata/swag/nginx/proxy-confs /mnt/cache/appdata/swag/nginx/proxy-confs /mnt/user/appdata/swag/nginx/proxy-confs \"$HOME/swag/nginx/proxy-confs\" \"$HOME/compose/swag/nginx/proxy-confs\"; do [ -d \"$d\" ] && find \"$d\" -maxdepth 1 -type f -name '*.conf' -print 2>/dev/null; done | sort -u | head -300")
+    batch_command(
+        "for d in /mnt/appdata/swag/nginx/proxy-confs /mnt/cache/appdata/swag/nginx/proxy-confs /mnt/user/appdata/swag/nginx/proxy-confs \"$HOME/swag/nginx/proxy-confs\" \"$HOME/compose/swag/nginx/proxy-confs\"; do [ -d \"$d\" ] && find \"$d\" -maxdepth 1 -type f -name '*.conf' -print 2>/dev/null; done | sort -u | head -300",
+    )
 }
 
 fn batch_command(find_command: &str) -> String {

@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cortex::app::{
     DbBackupResult, DbCheckpointResult, DbIntegrityJobStarted, DbIntegrityResult,
     DbMaintenanceStatus, DbVacuumResult, MaintenanceJobStatus,

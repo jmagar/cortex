@@ -1,5 +1,22 @@
+//! `RuntimeCore` — the composition root shared by every long-running mode.
+//!
+//! Owns config loading, the SQLite pool, the ingest writer, the resolved auth
+//! policy, and `spawn_maintenance_tasks`: retention purge (hourly), storage
+//! budget enforcement (`CORTEX_CLEANUP_INTERVAL_SECS`), error-signature scan,
+//! the three notification tasks (dispatcher / evaluator / digest), inventory
+//! refresh (5 min) and one-shot graph backfill, AI session rollup (300s),
+//! timeline rollup (60s), `PRAGMA optimize` (6h), and Docker ingest streams.
+//! Syslog listeners are started separately via `start_syslog` and supervised
+//! with restart + backoff; their liveness gates `/health`.
+//!
+//! Invariant: maintenance work serializes on a single `maintenance_permit`
+//! semaphore so background jobs never contend with each other for the write
+//! lock. Shutdown drains the ingest channel, then checkpoints the WAL.
+
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -8,7 +25,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::app::CortexService;
-use crate::config::{mcp_bind_is_loopback, validate_auth_config, AuthMode, Config};
+use crate::config::{AuthMode, Config, mcp_bind_is_loopback, validate_auth_config};
 use crate::db::{self, DbPool, StorageBudgetState};
 use crate::heartbeat::HeartbeatState;
 use crate::ingest::IngestTx;
@@ -57,6 +74,12 @@ pub struct MaintenanceHandles {
     session_rollup: Option<JoinHandle<()>>,
     timeline_rollup: Option<JoinHandle<()>>,
     optimize: Option<JoinHandle<()>>,
+    /// Monitors the two syslog supervisor JoinHandles (UDP + TCP). The
+    /// supervisors loop forever under normal operation; this task logs an error
+    /// if either exits unexpectedly (panic or abort) so silent ingest loss is
+    /// observable. Stored here so shutdown can join/abort it like the other
+    /// maintenance tasks.
+    syslog_monitor: Option<JoinHandle<()>>,
 }
 
 impl MaintenanceHandles {
@@ -107,6 +130,7 @@ impl MaintenanceHandles {
             self.session_rollup,
             self.timeline_rollup,
             self.optimize,
+            self.syslog_monitor,
         ]
         .into_iter()
         .flatten()
@@ -193,11 +217,10 @@ impl RuntimeCore {
             && (config.storage.max_db_size_mb > 0 || config.storage.min_free_disk_mb > 0)
         {
             let initial_outcome = db::enforce_storage_budget(&pool, &config.storage)?;
-            *storage_state.lock().expect("storage state mutex poisoned") =
-                Some(StorageBudgetState {
-                    metrics: initial_outcome.metrics.clone(),
-                    write_blocked: initial_outcome.write_blocked,
-                });
+            *storage_state.lock() = Some(StorageBudgetState {
+                metrics: initial_outcome.metrics.clone(),
+                write_blocked: initial_outcome.write_blocked,
+            });
             tracing::info!(
                 deleted_rows = initial_outcome.deleted_rows,
                 logical_db_size_bytes = initial_outcome.metrics.logical_db_size_bytes,
@@ -294,15 +317,66 @@ impl RuntimeCore {
     pub async fn shutdown(self, timeout: std::time::Duration) {
         let pool = Arc::clone(&self.pool);
         self.ingest.shutdown(timeout).await;
-        if let Err(e) = db::db_wal_checkpoint(&pool, "truncate") {
-            tracing::warn!(error = %e, "WAL checkpoint on shutdown failed (non-fatal)");
-        } else {
-            tracing::info!("WAL checkpoint completed on clean shutdown");
+        match db::db_wal_checkpoint(&pool, "truncate") {
+            Err(e) => {
+                tracing::warn!(error = %e, "WAL checkpoint on shutdown failed (non-fatal)");
+            }
+            _ => {
+                tracing::info!("WAL checkpoint completed on clean shutdown");
+            }
         }
     }
 
-    pub async fn start_syslog(&self) -> Result<()> {
-        receiver::start_listeners(self.config.receiver.clone(), self.ingest.clone()).await
+    /// Start the supervised syslog listeners and attach a monitoring task to
+    /// `handles`.
+    ///
+    /// The monitoring task awaits both supervisor `JoinHandle`s concurrently.
+    /// Supervisors loop forever under normal operation; if either exits
+    /// (unexpected panic or abort), the monitor logs a `tracing::error!` so
+    /// silent ingest loss surfaces in logs and metrics rather than being
+    /// invisible. The monitor handle is stored in
+    /// [`MaintenanceHandles::syslog_monitor`] so it participates in the
+    /// cooperative shutdown drain.
+    pub async fn start_syslog(&self, handles: &mut MaintenanceHandles) -> Result<()> {
+        let listener_handles = receiver::start_listeners(
+            self.config.receiver.clone(),
+            self.ingest.clone(),
+            Arc::clone(&self.observability),
+        )
+        .await?;
+
+        let monitor = tokio::spawn(async move {
+            tokio::select! {
+                res = listener_handles.udp => {
+                    match res {
+                        Ok(()) => tracing::error!(
+                            "syslog supervisor task (udp) exited unexpectedly — \
+                             listener will not restart"
+                        ),
+                        Err(e) => tracing::error!(
+                            error = %e,
+                            "syslog supervisor task (udp) exited unexpectedly — \
+                             listener will not restart: {}", e
+                        ),
+                    }
+                }
+                res = listener_handles.tcp => {
+                    match res {
+                        Ok(()) => tracing::error!(
+                            "syslog supervisor task (tcp) exited unexpectedly — \
+                             listener will not restart"
+                        ),
+                        Err(e) => tracing::error!(
+                            error = %e,
+                            "syslog supervisor task (tcp) exited unexpectedly — \
+                             listener will not restart: {}", e
+                        ),
+                    }
+                }
+            }
+        });
+        handles.syslog_monitor = Some(monitor);
+        Ok(())
     }
 
     pub fn spawn_maintenance_tasks(&self) -> MaintenanceHandles {
@@ -342,6 +416,7 @@ impl RuntimeCore {
             session_rollup,
             timeline_rollup,
             optimize,
+            syslog_monitor: None,
         }
     }
 
@@ -360,6 +435,7 @@ impl RuntimeCore {
     fn spawn_optimize_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let handle = tokio::spawn(async move {
             let mut interval =
                 background_interval(tokio::time::Duration::from_secs(OPTIMIZE_INTERVAL_SECS));
@@ -372,6 +448,7 @@ impl RuntimeCore {
                     }
                     _ = interval.tick() => {}
                 }
+                observability.record_task_tick("optimize"); // records loop scheduled (not completion)
                 let Ok(_permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("Maintenance limiter closed");
                     continue;
@@ -413,6 +490,7 @@ impl RuntimeCore {
     fn spawn_session_rollup_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let handle = tokio::spawn(async move {
             // Initial refresh after a short delay (lets startup settle), then on
             // a fixed interval. `background_interval` fires the first tick after
@@ -442,6 +520,7 @@ impl RuntimeCore {
                     }
                     eager = false;
                 }
+                observability.record_task_tick("session_rollup"); // records loop scheduled (not completion)
                 let Ok(permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("session_rollup: maintenance limiter closed");
                     continue;
@@ -492,6 +571,7 @@ impl RuntimeCore {
     fn spawn_timeline_rollup_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let handle = tokio::spawn(async move {
             let mut interval = background_interval(tokio::time::Duration::from_secs(
                 TIMELINE_ROLLUP_REFRESH_SECS,
@@ -518,6 +598,7 @@ impl RuntimeCore {
                     }
                     eager = false;
                 }
+                observability.record_task_tick("timeline_rollup"); // records loop scheduled (not completion)
                 let Ok(permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("timeline_rollup: maintenance limiter closed");
                     continue;
@@ -644,6 +725,7 @@ impl RuntimeCore {
         }
         let pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let interval_secs = cfg.scan_interval_secs.max(1);
         let handle = tokio::spawn(async move {
             let mut interval = background_interval(tokio::time::Duration::from_secs(interval_secs));
@@ -656,6 +738,7 @@ impl RuntimeCore {
                     }
                     _ = interval.tick() => {}
                 }
+                observability.record_task_tick("error_scan");
                 tracing::debug!("error_scan: scan cycle starting");
                 match crate::app::error_detection::run_error_scan(
                     Arc::clone(&pool),
@@ -679,6 +762,7 @@ impl RuntimeCore {
         }
         let purge_pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let fts_merge_pages = self.config.enrichment.fts_merge_pages;
         let cleanup_chunk_size = self.config.storage.cleanup_chunk_size;
         let handle = tokio::spawn(async move {
@@ -698,6 +782,7 @@ impl RuntimeCore {
                     continue;
                 };
                 let pool = Arc::clone(&purge_pool);
+                observability.record_task_tick("retention_purge");
                 tracing::debug!(retention_days, "Retention purge tick started");
                 // Tag-based purge runs FIRST so the global purge below scans
                 // a smaller working set and FTS merge work consolidates.
@@ -821,10 +906,10 @@ impl RuntimeCore {
                 // flapping at the trigger threshold (syslog-mcp-w4hh).
                 let prev_write_blocked = shared_storage_state
                     .lock()
-                    .expect("storage state mutex poisoned")
                     .as_ref()
                     .map(|s| s.write_blocked)
                     .unwrap_or(false);
+                observability.record_task_tick("storage_budget");
                 tracing::debug!(
                     cleanup_interval_secs = storage_config.cleanup_interval_secs,
                     "Storage budget enforcement tick started"
@@ -874,9 +959,7 @@ impl RuntimeCore {
                 {
                     Ok(outcome) => {
                         let previous_blocked = {
-                            let mut state = shared_storage_state
-                                .lock()
-                                .expect("storage state mutex poisoned");
+                            let mut state = shared_storage_state.lock();
                             let previous_blocked = state.as_ref().map(|s| s.write_blocked);
                             *state = Some(StorageBudgetState {
                                 metrics: outcome.metrics.clone(),

@@ -1,9 +1,9 @@
 use super::*;
 use crate::config::StorageConfig;
 use crate::db::{
-    insert_logs_batch, is_known_entity_type, is_known_evidence_source_kind, is_known_reason_code,
-    is_known_relationship_type, is_known_trust_level, LogBatchEntry, ENTITY_TYPES,
-    EVIDENCE_SOURCE_KINDS, REASON_CODES, RELATIONSHIP_TYPES, TRUST_LEVELS,
+    ENTITY_TYPES, EVIDENCE_SOURCE_KINDS, LogBatchEntry, REASON_CODES, RELATIONSHIP_TYPES,
+    TRUST_LEVELS, insert_logs_batch, is_known_entity_type, is_known_evidence_source_kind,
+    is_known_reason_code, is_known_relationship_type, is_known_trust_level,
 };
 
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {
@@ -1468,4 +1468,171 @@ fn init_pool_is_idempotent_when_run_twice() {
         )
         .unwrap();
     assert_eq!(m22_applied, 1);
+}
+
+/// Golden old-schema fixture: the exact v0.2.6 schema (pre-migration-framework
+/// — no schema_migrations table, no ai_* columns, no metadata_json). Frozen
+/// from `git show v0.2.6:src/db.rs`; do not "modernize" it — its purpose is to
+/// represent a real old installation.
+const V0_2_6_SCHEMA: &str = "
+    CREATE TABLE IF NOT EXISTS logs (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp   TEXT NOT NULL,
+        hostname    TEXT NOT NULL,
+        facility    TEXT,
+        severity    TEXT NOT NULL,
+        app_name    TEXT,
+        process_id  TEXT,
+        message     TEXT NOT NULL,
+        raw         TEXT NOT NULL,
+        received_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        source_ip   TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_logs_hostname  ON logs(hostname);
+    CREATE INDEX IF NOT EXISTS idx_logs_severity  ON logs(severity);
+    CREATE INDEX IF NOT EXISTS idx_logs_app_name  ON logs(app_name);
+    CREATE INDEX IF NOT EXISTS idx_logs_host_time ON logs(hostname, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_logs_sev_time ON logs(severity, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_logs_received_at ON logs(received_at);
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(
+        message,
+        content='logs',
+        content_rowid='id',
+        tokenize='porter unicode61'
+    );
+
+    CREATE TRIGGER IF NOT EXISTS logs_ai AFTER INSERT ON logs BEGIN
+        INSERT INTO logs_fts(rowid, message) VALUES (new.id, new.message);
+    END;
+
+    CREATE TABLE IF NOT EXISTS hosts (
+        hostname    TEXT PRIMARY KEY,
+        first_seen  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        last_seen   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        log_count   INTEGER NOT NULL DEFAULT 0
+    );
+";
+
+/// full-review TH2: every migration was previously tested only from CLEAN
+/// temp DBs, so a migration that works against `CREATE`-fresh state but
+/// breaks against populated old-shape tables would pass CI and brick real
+/// upgrades. This walks the ENTIRE chain against a populated v0.2.6 database
+/// and asserts: head version reached, pre-existing rows survive and remain
+/// FTS-searchable, and a second run is a no-op.
+#[test]
+fn full_migration_chain_upgrades_populated_v0_2_6_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("v0_2_6-upgrade.db");
+
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(V0_2_6_SCHEMA).unwrap();
+        for (ts, host, msg) in [
+            (
+                "2025-06-01T00:00:00Z",
+                "old-host-a",
+                "legacy kernel panic message",
+            ),
+            (
+                "2025-06-02T00:00:00Z",
+                "old-host-b",
+                "legacy nginx upstream error",
+            ),
+        ] {
+            conn.execute(
+                "INSERT INTO logs (timestamp, hostname, severity, message, raw, received_at, source_ip)
+                 VALUES (?1, ?2, 'err', ?3, ?3, ?1, '192.168.1.50:514')",
+                rusqlite::params![ts, host, msg],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO hosts (hostname, first_seen, last_seen, log_count)
+                 VALUES (?1, ?2, ?2, 1)
+                 ON CONFLICT(hostname) DO NOTHING",
+                rusqlite::params![host, ts],
+            )
+            .unwrap();
+        }
+    }
+
+    // Walk the full migration chain (plus the auto_vacuum conversion VACUUM).
+    let config = test_storage_config(db_path.clone());
+    let pool = init_pool(&config).expect("full migration chain must apply to a populated old DB");
+
+    let head_version: i64 = {
+        let conn = pool.get().unwrap();
+        conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| {
+            r.get(0)
+        })
+        .unwrap()
+    };
+    assert!(
+        head_version >= 31,
+        "expected migration head >= 31, got {head_version}"
+    );
+
+    // Pre-existing rows survived and the FTS index still finds them.
+    {
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2, "old rows must survive the migration chain");
+    }
+    let results = crate::db::search_logs(
+        &pool,
+        &crate::db::SearchParams {
+            query: Some("legacy".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(results.len(), 2, "migrated rows must stay FTS-searchable");
+
+    // New-schema columns are live: a current-shape insert works.
+    insert_logs_batch(
+        &pool,
+        &[LogBatchEntry {
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            hostname: "new-host".to_string(),
+            facility: None,
+            severity: "info".to_string(),
+            app_name: Some("upgrade-test".to_string()),
+            process_id: None,
+            message: "post-upgrade insert".to_string(),
+            raw: "post-upgrade insert".to_string(),
+            source_ip: "127.0.0.1:514".to_string(),
+            docker_checkpoint: None,
+            ai_tool: Some("claude-code".to_string()),
+            ai_project: Some("/tmp/project".to_string()),
+            ai_session_id: None,
+            ai_transcript_path: None,
+            metadata_json: None,
+            http_status: None,
+            auth_outcome: None,
+            dns_blocked: None,
+            event_action: None,
+            parse_error: None,
+        }],
+    )
+    .expect("current-shape insert must work after upgrade");
+
+    drop(pool);
+
+    // Idempotency: a second init on the upgraded DB is a clean no-op.
+    let pool2 = init_pool(&config).expect("re-running init on an upgraded DB must succeed");
+    let conn = pool2.get().unwrap();
+    let head_again: i64 = conn
+        .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(head_again, head_version);
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM logs", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 3);
 }

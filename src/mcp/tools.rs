@@ -1,6 +1,20 @@
+//! Handler implementations for the single action-dispatched `cortex` MCP tool
+//! (log intelligence core).
+//!
+//! The authoritative action registry is `ACTION_SPECS` in `actions.rs`; this
+//! module supplies the executable branch for each `ActionHandler`. Handlers
+//! parse the tool arguments into typed `src/app` request models and delegate
+//! to `CortexService` — business policy (limits, validation, correlation
+//! rules) lives in the service layer so MCP, REST, and CLI stay consistent.
+//!
+//! Invariants: scope gating (`cortex:read` / `cortex:admin`) happens before
+//! dispatch in `rmcp_server.rs`; unknown actions are denied fail-closed.
+//! Handlers return typed service errors that the server maps to MCP error
+//! classes (invalid_params / retryable / not_found / conflict / internal).
+
 use lab_auth::AuthContext;
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCorrelateRequest, AiIncidentRequest,
@@ -16,8 +30,8 @@ use crate::app::{
     UsageBlocksRequest,
 };
 
-use super::actions;
 use super::AppState;
+use super::actions;
 
 /// Execute a tool by name
 pub(super) async fn execute_tool(
@@ -37,13 +51,13 @@ async fn tool_cortex(
     args: Value,
     auth: Option<&AuthContext>,
 ) -> anyhow::Result<Value> {
-    let action =
-        string_arg(&args, "action").ok_or_else(|| anyhow::anyhow!("action is required"))?;
+    let action = string_arg(&args, "action")
+        .ok_or_else(|| invalid_input("action is required".to_string()))?;
     let Some(handler) = actions::handler_for(&action) else {
-        return Err(anyhow::anyhow!(
+        return Err(invalid_input(format!(
             "unknown cortex action: {action}; expected one of {}",
             actions::action_names().join(", ")
-        ));
+        )));
     };
     dispatch_cortex_action(handler, state, args, auth).await
 }
@@ -262,7 +276,9 @@ fn reject_compose_target_overrides(args: &Value) -> anyhow::Result<()> {
         "service",
     ] {
         if args.get(key).is_some() {
-            anyhow::bail!("compose MCP actions do not accept target override: {key}");
+            return Err(invalid_input(format!(
+                "compose MCP actions do not accept target override: {key}"
+            )));
         }
     }
     Ok(())
@@ -434,14 +450,22 @@ fn extract_actor(state: &AppState, auth: Option<&AuthContext>) -> RequestActor {
     }
 }
 
+/// Build a caller-input error that the MCP error classifier maps to
+/// `invalid_params` (full-review AH1). All argument-shape failures in this
+/// module MUST go through this so classification is type-driven, not
+/// string-matched.
+fn invalid_input(message: String) -> anyhow::Error {
+    anyhow::Error::from(crate::app::ServiceError::InvalidInput(message))
+}
+
 fn action_payload<T: DeserializeOwned>(args: Value, action: &str) -> anyhow::Result<T> {
     let mut object = args
         .as_object()
         .cloned()
-        .ok_or_else(|| anyhow::anyhow!("tool arguments must be a JSON object"))?;
+        .ok_or_else(|| invalid_input("tool arguments must be a JSON object".to_string()))?;
     object.remove("action");
     serde_json::from_value(Value::Object(object))
-        .map_err(|err| anyhow::anyhow!("invalid {action} arguments: {err}"))
+        .map_err(|err| invalid_input(format!("invalid {action} arguments: {err}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -523,9 +547,7 @@ const ADMIN_ACTION_HELP: &[AdminActionHelp] = &[
     AdminActionHelp {
         action: "notifications_test",
         description: "Send a test notification via the server-configured Apprise URLs. Rate-limited to 10 per minute per actor.\nCaller-supplied Apprise URLs are ignored for security; the server uses its own configured URLs.",
-        parameters: &[
-            "`body` (string, optional) — notification body text (default: test message)",
-        ],
+        parameters: &["`body` (string, optional) — notification body text (default: test message)"],
     },
 ];
 

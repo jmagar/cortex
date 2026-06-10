@@ -119,7 +119,7 @@ query 100× both ways. Direct (default-pre-v0.26 path):
 ```bash
 # direct SQLite — bypasses /api/*
 unset CORTEX_USE_HTTP
-time for i in $(seq 1 100); do syslog hosts > /dev/null; done
+time for i in $(seq 1 100); do cortex hosts > /dev/null; done
 ```
 
 HTTP:
@@ -128,7 +128,7 @@ HTTP:
 # REST transport — same call, with auth + transport overhead
 export CORTEX_USE_HTTP=true
 # CORTEX_URL + CORTEX_API_TOKEN must already be set in env
-time for i in $(seq 1 100); do syslog hosts > /dev/null; done
+time for i in $(seq 1 100); do cortex hosts > /dev/null; done
 ```
 
 The difference between the two `real` times divided by 100 is the
@@ -141,7 +141,7 @@ operators can opt out of HTTP transport for the duration of the script:
 
 ```bash
 ( unset CORTEX_USE_HTTP; \
-  for h in $(syslog hosts --json | jq -r '.hosts[].hostname'); do \
+  for h in $(cortex hosts --json | jq -r '.hosts[].hostname'); do \
     cortex tail --hostname "$h" --n 50; \
   done )
 ```
@@ -238,7 +238,7 @@ caveats:
   and run the vacuum through the service layer directly:
 
   ```bash
-  ( unset CORTEX_USE_HTTP && syslog db vacuum --full --force )
+  ( unset CORTEX_USE_HTTP && cortex db vacuum --full --force )
   ```
 
   The subshell scoping keeps `CORTEX_USE_HTTP` set for everything else.
@@ -257,7 +257,7 @@ reasons (no taxonomy):
   streaming bidirectional surface; the daemon is the writer for the
   same DB the container reads.
 - `cortex ai watch-status` — wraps `systemctl --user show
-  syslog-ai-watch.service` on the host. The container has no view of
+  cortex-ai-watch.service` on the host. The container has no view of
   the host systemd state.
 - `cortex ai index`, `cortex ai add`, `cortex ai doctor`,
   `cortex ai smoke-watch` — all touch the host filesystem (transcript

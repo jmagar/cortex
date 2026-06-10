@@ -1,8 +1,8 @@
 use super::*;
-use crate::inventory::limits::{cap_vec, MAP_SCHEMA};
+use crate::inventory::limits::{MAP_SCHEMA, cap_vec};
 use crate::inventory::schema::{CollectionError, InventoryNode};
 use crate::inventory::{
-    inventory_status, read_inventory_cache, InventoryCacheStatus, InventoryConfig,
+    InventoryCacheStatus, InventoryConfig, inventory_status, read_inventory_cache,
 };
 
 impl CortexService {

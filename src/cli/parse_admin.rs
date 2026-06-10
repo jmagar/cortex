@@ -1,7 +1,7 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use cortex::compose::ComposeTarget;
 
-use super::parse_common::{parse_output_args, parse_u32_flag, value_after_equals, FlagCursor};
+use super::parse_common::{FlagCursor, parse_output_args, parse_u32_flag, value_after_equals};
 use super::{
     CliCommand, ComposeArgs, ComposeCommand, ComposeLogsArgs, ComposeMutationArgs, DbBackupArgs,
     DbCheckpointArgs, DbCommand, DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs,

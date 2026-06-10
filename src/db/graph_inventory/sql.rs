@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::db::graph;
 use crate::inventory::schema::{InventoryService, TrustLevel};

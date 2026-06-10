@@ -307,7 +307,7 @@ mod tests {
     async fn make_mock_server(
         status_code: axum::http::StatusCode,
     ) -> (AppriseClient, tokio::task::JoinHandle<()>) {
-        use axum::{routing::post, Router};
+        use axum::{Router, routing::post};
         use tokio::net::TcpListener;
 
         let app = Router::new().route("/notify/", post(move || async move { status_code }));

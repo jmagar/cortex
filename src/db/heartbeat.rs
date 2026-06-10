@@ -1,5 +1,5 @@
-use anyhow::{anyhow, Result};
-use rusqlite::{params, OptionalExtension};
+use anyhow::{Result, anyhow};
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -362,10 +362,9 @@ pub fn heartbeat_window_summaries(
                AND h.received_at <= ?3
              GROUP BY h.host_id, h.hostname",
         )?;
-        let rows = stmt
-            .query_map(params![hid, from, to], row_from)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
+
+        stmt.query_map(params![hid, from, to], row_from)?
+            .collect::<rusqlite::Result<Vec<_>>>()?
     } else {
         let mut stmt = conn.prepare(
             "SELECT h.host_id, h.hostname,
@@ -391,10 +390,9 @@ pub fn heartbeat_window_summaries(
              GROUP BY h.host_id, h.hostname
              ORDER BY h.hostname ASC",
         )?;
-        let rows = stmt
-            .query_map(params![from, to], row_from)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
+
+        stmt.query_map(params![from, to], row_from)?
+            .collect::<rusqlite::Result<Vec<_>>>()?
     };
 
     Ok(rows
@@ -461,13 +459,12 @@ pub fn heartbeat_host_state(
              ORDER BY sampled_at DESC, id DESC
              LIMIT ?3",
         )?;
-        let rows = stmt
-            .query_map(
-                params![host_id, since, fetch_limit as i64],
-                map_heartbeat_row,
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
+
+        stmt.query_map(
+            params![host_id, since, fetch_limit as i64],
+            map_heartbeat_row,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?
     } else {
         let mut stmt = conn.prepare(
             "SELECT id, host_id, hostname, source_ip, sampled_at, received_at, boot_id,
@@ -478,10 +475,9 @@ pub fn heartbeat_host_state(
              ORDER BY sampled_at DESC, id DESC
              LIMIT ?2",
         )?;
-        let rows = stmt
-            .query_map(params![host_id, fetch_limit as i64], map_heartbeat_row)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
+
+        stmt.query_map(params![host_id, fetch_limit as i64], map_heartbeat_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?
     };
 
     if rows.is_empty() {

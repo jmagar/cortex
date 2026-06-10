@@ -13,9 +13,11 @@ fn flag_cursor_still_rejects_next_flag_as_missing_value() {
     let args = vec!["--json".to_string()];
     let mut cursor = FlagCursor::new(&args);
 
-    assert!(cursor
-        .value("--since")
-        .unwrap_err()
-        .to_string()
-        .contains("requires a value"));
+    assert!(
+        cursor
+            .value("--since")
+            .unwrap_err()
+            .to_string()
+            .contains("requires a value")
+    );
 }

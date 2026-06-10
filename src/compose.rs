@@ -24,16 +24,16 @@ pub use types::{
 // Test-only re-exports of private items accessed via `use super::*` in compose_tests.rs.
 #[cfg(test)]
 pub(crate) use docker::{
-    container_info_from_inspect, ss_output_has_listener, systemd_status_from_output,
-    DockerUnavailableError,
+    DockerUnavailableError, container_info_from_inspect, ss_output_has_listener,
+    systemd_status_from_output,
 };
 #[cfg(test)]
 #[allow(unused_imports)]
 pub(crate) use format::{status_from_target, unresolved_status};
 #[cfg(test)]
 pub(crate) use mutation::{
-    target_from_container, unresolved_code, DIAG_DOCKER_UNAVAILABLE, DIAG_SYSTEMD_CHECK_FAILED,
-    DIAG_TARGET_UNRESOLVED,
+    DIAG_DOCKER_UNAVAILABLE, DIAG_SYSTEMD_CHECK_FAILED, DIAG_TARGET_UNRESOLVED,
+    target_from_container, unresolved_code,
 };
 
 #[cfg(test)]

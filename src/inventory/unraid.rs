@@ -1,10 +1,10 @@
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::inventory::collectors::CollectorOutput;
-use crate::inventory::http::{api_key_header, HttpProbe};
+use crate::inventory::http::{HttpProbe, api_key_header};
 use crate::inventory::schema::{InventoryNode, Provenance, StorageSummary, TrustLevel};
 
 const SECTIONS: &[(&str, &str)] = &[

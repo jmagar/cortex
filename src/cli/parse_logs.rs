@@ -1,6 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
-use super::parse_common::{parse_output_args, parse_u32_flag, value_after_equals, FlagCursor};
+use super::parse_common::{FlagCursor, parse_output_args, parse_u32_flag, value_after_equals};
 use super::{
     CliCommand, CorrelateArgs, FilterArgs, IncidentArgs, IngestRateArgs, PatternsArgs, SearchArgs,
     SessionsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,

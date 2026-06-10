@@ -19,7 +19,8 @@ fn parse_required_timestamp_reports_field_name_and_expected_format() {
         .expect_err("invalid timestamp should fail");
 
     assert!(err.to_string().contains("Invalid reference_time"));
-    assert!(err
-        .to_string()
-        .contains("Expected ISO 8601 / RFC3339 format"));
+    assert!(
+        err.to_string()
+            .contains("Expected ISO 8601 / RFC3339 format")
+    );
 }

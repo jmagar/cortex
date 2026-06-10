@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::StorageConfig;
-use crate::db::{init_pool, insert_logs_batch, AiRelatedWindow, DbPool, LogBatchEntry};
+use crate::db::{AiRelatedWindow, DbPool, LogBatchEntry, init_pool, insert_logs_batch};
 
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {
     StorageConfig::for_test(db_path)
@@ -89,6 +89,49 @@ fn search_logs_fts_plan_uses_bounded_candidate_window() {
         plan.contains("SCAN logs_fts VIRTUAL TABLE"),
         "FTS search should remain FTS-driven; got:\n{plan}"
     );
+}
+
+#[test]
+fn tail_logs_severity_only_uses_per_severity_index_probes() {
+    // full-review PM6: severity-only tails previously walked
+    // idx_logs_timestamp newest-first and filtered — O(table) for rare
+    // severities. The fast path probes idx_logs_sev_time once per severity.
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_entry("2026-01-01T00:00:01Z", "host-a", "emerg", "kernel meltdown"),
+            make_entry("2026-01-01T00:00:02Z", "host-a", "info", "routine chatter"),
+            make_entry("2026-01-01T00:00:03Z", "host-b", "alert", "raid degraded"),
+        ],
+    )
+    .unwrap();
+
+    let levels = vec!["emerg".to_string(), "alert".to_string()];
+    let (sql, bindings) = tail_logs_sql(None, None, None, Some(&levels), 50);
+    assert!(
+        sql.contains("UNION ALL"),
+        "severity-only tail must use per-severity probes, got:\n{sql}"
+    );
+    let plan = query_plan(&pool, &sql, &bindings);
+    assert!(
+        plan.contains("idx_logs_sev_time"),
+        "each arm must probe the (severity, timestamp) index; got:\n{plan}"
+    );
+    assert!(
+        !plan.contains("SCAN logs USING INDEX idx_logs_timestamp"),
+        "severity-only tail must not walk the global timestamp index; got:\n{plan}"
+    );
+
+    // Behavior: newest-first across severities, info excluded.
+    let rows = tail_logs(&pool, None, None, None, Some(&levels), 50).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].severity, "alert");
+    assert_eq!(rows[1].severity, "emerg");
+
+    // A second filter still takes the generic plan.
+    let (sql, _) = tail_logs_sql(Some("host-a"), None, None, Some(&levels), 50);
+    assert!(!sql.contains("UNION ALL"));
 }
 
 #[test]
@@ -234,7 +277,9 @@ fn search_fts_plan_selection_branches_on_indexed_filter() {
     assert!(sql.contains("fts_candidates"), "unfiltered uses CTE plan");
     assert!(!sql.contains("l.id IN (SELECT rowid"));
 
-    // Indexed equality filter → index-led intersect plan (no candidate cap).
+    // Selective indexed equality filter → index-led intersect plan with a
+    // bounded match-set subquery (full-review PH1: the non-correlated IN
+    // subquery is materialized in full, so it must carry a cap).
     let filtered = SearchParams {
         hostname: Some("host-a".to_string()),
         ..plain.clone()
@@ -242,8 +287,14 @@ fn search_fts_plan_selection_branches_on_indexed_filter() {
     assert!(filtered.has_indexed_equality_filter());
     let (sql, _) = search_logs_fts_sql("disk", &filtered, 50);
     assert!(
-        sql.contains("l.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?1)"),
+        sql.contains("l.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?1"),
         "filtered search must use the intersect plan, got:\n{sql}"
+    );
+    assert!(
+        sql.contains(&format!(
+            "ORDER BY rowid DESC LIMIT {SEARCH_FTS_FAST_PATH_MATCH_CAP}"
+        )),
+        "intersect plan must bound the materialized match set, got:\n{sql}"
     );
     assert!(
         !sql.contains("fts_candidates"),
@@ -253,6 +304,42 @@ fn search_fts_plan_selection_branches_on_indexed_filter() {
         sql.contains("l.hostname = ?2"),
         "filter applied via append_filters"
     );
+}
+
+#[test]
+fn search_fts_severity_only_filter_uses_capped_candidate_plan() {
+    // Severity partitions are huge (a single severity can be >90% of the
+    // table); a rare term + severity-only filter previously walked the whole
+    // partition via the fast path (full-review PH1). Severity-only must take
+    // the capped-candidate plan.
+    let severity_only = SearchParams {
+        query: Some("disk".to_string()),
+        severity: Some("info".to_string()),
+        ..Default::default()
+    };
+    assert!(!severity_only.has_indexed_equality_filter());
+    let (sql, _) = search_logs_fts_sql("disk", &severity_only, 50);
+    assert!(
+        sql.contains("fts_candidates"),
+        "severity-only search must use the capped CTE plan, got:\n{sql}"
+    );
+
+    let severity_in_only = SearchParams {
+        query: Some("disk".to_string()),
+        severity_in: Some(vec!["emerg".to_string(), "alert".to_string()]),
+        ..Default::default()
+    };
+    assert!(!severity_in_only.has_indexed_equality_filter());
+
+    // Severity combined with a selective filter still gets the fast path
+    // (the selective column's index leads).
+    let combined = SearchParams {
+        query: Some("disk".to_string()),
+        severity: Some("info".to_string()),
+        hostname: Some("host-a".to_string()),
+        ..Default::default()
+    };
+    assert!(combined.has_indexed_equality_filter());
 }
 
 #[test]
@@ -593,9 +680,10 @@ fn tail_logs_filters_multiple_severities() {
 
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|row| row.hostname == "host-a"));
-    assert!(rows
-        .iter()
-        .all(|row| ["err", "warning"].contains(&row.severity.as_str())));
+    assert!(
+        rows.iter()
+            .all(|row| ["err", "warning"].contains(&row.severity.as_str()))
+    );
 }
 
 #[test]
@@ -746,9 +834,10 @@ fn search_logs_filters_by_source_ip_prefix_without_fts() {
     .unwrap();
 
     assert_eq!(rows.len(), 2);
-    assert!(rows
-        .iter()
-        .all(|row| row.source_ip.starts_with("docker://dookie/cortex/")));
+    assert!(
+        rows.iter()
+            .all(|row| row.source_ip.starts_with("docker://dookie/cortex/"))
+    );
 }
 
 #[test]
@@ -1278,10 +1367,12 @@ fn investigate_ai_incidents_exact_id_can_fetch_beyond_top_ten() {
         },
     )
     .unwrap();
-    assert!(!top_ten
-        .evidence
-        .iter()
-        .any(|bundle| bundle.incident.incident_id == target_id));
+    assert!(
+        !top_ten
+            .evidence
+            .iter()
+            .any(|bundle| bundle.incident.incident_id == target_id)
+    );
 
     let exact = investigate_ai_incidents(
         &pool,
@@ -1607,10 +1698,12 @@ fn rollup_status_reports_refresh_time() {
     seed_ai_sessions(&pool);
 
     // Never refreshed => no staleness timestamp.
-    assert!(ai_session_rollup_status(&pool)
-        .unwrap()
-        .refreshed_at
-        .is_none());
+    assert!(
+        ai_session_rollup_status(&pool)
+            .unwrap()
+            .refreshed_at
+            .is_none()
+    );
 
     refresh_ai_session_rollup(&pool).unwrap();
     let status = ai_session_rollup_status(&pool).unwrap();
@@ -2602,5 +2695,64 @@ fn bench_stats_and_sessions() {
          sessions_BEFORE_live_ms={sessions_live_ms:.1} \
          sessions_AFTER_rollup_ms={sessions_rollup_ms:.1} \
          refresh_ms={refresh_ms:.1} sessions_speedup={speedup:.1}x"
+    );
+}
+
+/// full-review QM2: the 15-column log projection is written inline at ~14
+/// sites across queries.rs / analytics.rs / ingest.rs, and `map_row` /
+/// `map_row_offset` / `map_row_with_raw` read columns BY ORDINAL POSITION —
+/// reordering or inserting a column at one site without updating the readers
+/// silently mis-maps fields with no compile error. This drift test extracts
+/// every projection that ends in `metadata_json` from the source text and
+/// asserts it carries the canonical column order. (`map_row_with_raw` selects
+/// `..., metadata_json, raw`; the canonical prefix still applies.)
+#[test]
+fn inline_log_projections_match_map_row_column_order() {
+    // Two canonical shapes exist: `map_row` (15 cols) and `map_row_with_raw`
+    // (16 cols, `raw` between `message` and `received_at`).
+    const CANON: &str = "id timestamp hostname facility severity app_name process_id message \
+         received_at source_ip ai_tool ai_project ai_session_id ai_transcript_path metadata_json";
+    const CANON_WITH_RAW: &str = "id timestamp hostname facility severity app_name process_id \
+         message raw received_at source_ip ai_tool ai_project ai_session_id ai_transcript_path \
+         metadata_json";
+    let canon_tokens: Vec<&str> = CANON.split_whitespace().collect();
+    let canon_raw_tokens: Vec<&str> = CANON_WITH_RAW.split_whitespace().collect();
+
+    let sources = [
+        ("queries.rs", include_str!("queries.rs")),
+        ("analytics.rs", include_str!("analytics.rs")),
+        ("ingest.rs", include_str!("ingest.rs")),
+    ];
+    let re = regex::Regex::new(
+        r"SELECT\s+((?:[a-zA-Z_][a-zA-Z_0-9]*\.)?id[\sa-zA-Z_0-9,.\\]*?metadata_json)",
+    )
+    .unwrap();
+
+    let mut checked = 0usize;
+    for (name, src) in sources {
+        for cap in re.captures_iter(src) {
+            let projection = &cap[1];
+            let tokens: Vec<String> = projection
+                .split([',', '\\'])
+                .map(|t| t.trim())
+                .filter(|t| !t.is_empty())
+                .map(|t| {
+                    // Strip any table alias prefix ("l.id" -> "id").
+                    t.rsplit('.').next().unwrap_or(t).to_string()
+                })
+                .collect();
+            assert!(
+                tokens == canon_tokens || tokens == canon_raw_tokens,
+                "{name}: inline log projection diverges from map_row / \
+                 map_row_with_raw column order — update the projection AND the \
+                 row readers together:\n{projection}\ngot: {tokens:?}"
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= 10,
+        "expected to find at least 10 inline projections; the extraction regex \
+         may have rotted (found {checked})"
     );
 }

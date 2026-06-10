@@ -33,19 +33,20 @@ retention_days = 90
 wal_mode = true
 max_db_size_mb = 1024
 recovery_db_size_mb = 900
-min_free_disk_mb = 512
-recovery_free_disk_mb = 768
+min_free_disk_mb = 0      # 0 = free-disk guard disabled (default)
+recovery_free_disk_mb = 0
 cleanup_interval_secs = 60
 
 [mcp]
-host = "0.0.0.0"
+host = "127.0.0.1"
 port = 3100
 server_name = "cortex"
 allowed_hosts = ["cortex.example.com", "cortex.example.com:443"]
 allowed_origins = ["https://cortex.example.com"]
 
 [api]
-enabled = false
+# Always-on REST API token — required at server startup.
+# api_token = "your-api-token"
 
 [docker_ingest]
 enabled = false
@@ -74,7 +75,7 @@ such as `https://cortex.example.com`.
 | `CORTEX_RECEIVER_HOST` | no | `0.0.0.0` | no | Listen host for UDP+TCP syslog (no port -- use separate setting) |
 | `CORTEX_RECEIVER_PORT` | no | `1514` | no | Listen port shared by UDP and TCP syslog listeners |
 | `CORTEX_MAX_MESSAGE_SIZE` | no | `8192` | no | Max bytes per UDP datagram or newline-delimited TCP frame. Oversized frames are dropped. |
-| `CORTEX_MAX_TCP_CONNECTIONS` | no | `1024` | no | Maximum simultaneous TCP syslog connections |
+| `CORTEX_MAX_TCP_CONNECTIONS` | no | `512` | no | Maximum simultaneous TCP syslog connections |
 | `CORTEX_TCP_IDLE_TIMEOUT_SECS` | no | `300` | no | Idle timeout per TCP read before closing inactive connections |
 | `CORTEX_BATCH_SIZE` | no | `100` | no | Entries per batch flush to SQLite |
 | `CORTEX_FLUSH_INTERVAL` | no | `500` | no | Batch flush interval in milliseconds |
@@ -119,7 +120,7 @@ Docker ingest is not included in the default smoke test because it requires a li
 
 | Variable | Required | Default | Sensitive | Description |
 | --- | --- | --- | --- | --- |
-| `CORTEX_HOST` | no | `0.0.0.0` | no | HTTP listen host for MCP endpoint |
+| `CORTEX_HOST` | no | `127.0.0.1` | no | HTTP listen host for MCP endpoint (loopback by default; non-loopback binds require `CORTEX_TOKEN`, OAuth, or the trusted-gateway pair) |
 | `CORTEX_PORT` | no | `3100` | no | HTTP listen port for MCP endpoint |
 | `CORTEX_TOKEN` | no | (none) | **yes** | Bearer token for `/mcp` auth. Generate: `openssl rand -hex 32`. When unset, auth is disabled. |
 | `CORTEX_ALLOWED_HOSTS` | no | (none) | no | Extra comma-separated Host header values for RMCP Host validation |
@@ -127,12 +128,11 @@ Docker ingest is not included in the default smoke test because it requires a li
 
 ### Non-MCP API (`CORTEX_API_*`)
 
-The plain JSON API is disabled by default. When enabled, it is mounted under `/api/*` on the same HTTP listener and requires its own bearer token.
+The plain JSON API is **always on**: it is mounted under `/api/*` on the same HTTP listener and requires its own bearer token. The server fails to start (on the `serve mcp` path) when no token is configured; `cortex setup repair` generates one if missing.
 
 | Variable | Required | Default | Sensitive | Description |
 | --- | --- | --- | --- | --- |
-| `CORTEX_API_ENABLED` | no | `false` | no | Enable the non-MCP JSON API |
-| `CORTEX_API_TOKEN` | yes, when enabled | (none) | **yes** | Bearer token for `/api/*` routes |
+| `CORTEX_API_TOKEN` | yes | (none) | **yes** | Bearer token for `/api/*` routes — required at startup |
 
 ### Headless Gemini assessment (`CORTEX_HEADLESS_*`, `CORTEX_LLM_*`)
 
@@ -161,12 +161,14 @@ HOME, disables MCP servers/hooks/context-file loading, and parses Gemini's
 
 | Variable | Required | Default | Sensitive | Description |
 | --- | --- | --- | --- | --- |
-| `CORTEX_MAX_DB_SIZE_MB` | no | `1024` | no | Soft limit for logical DB size in MB (0 = disable) |
+| `CORTEX_MAX_DB_SIZE_MB` | no | `1024` | no | Soft limit for logical DB size in MB; breach deletes oldest logs (0 = disable) |
 | `CORTEX_RECOVERY_DB_SIZE_MB` | no | `900` | no | Cleanup target after DB-size breach (must be < max) |
-| `CORTEX_MIN_FREE_DISK_MB` | no | `512` | no | Minimum free disk space in MB (0 = disable) |
-| `CORTEX_RECOVERY_FREE_DISK_MB` | no | `768` | no | Cleanup target after free-disk breach (must be > min) |
+| `CORTEX_MIN_FREE_DISK_MB` | no | `0` | no | Minimum free disk space in MB — **disabled by default**. A breach blocks writes; it does not delete data. |
+| `CORTEX_RECOVERY_FREE_DISK_MB` | no | `0` | no | Hysteresis target before writes resume after a free-disk breach (must be > min when enabled) |
 | `CORTEX_CLEANUP_INTERVAL_SECS` | no | `60` | no | Storage budget enforcement interval in seconds (minimum 5) |
 | `CORTEX_CLEANUP_CHUNK_SIZE` | no | `2000` | no | Rows deleted per chunk during enforcement (1 to 1,000,000) |
+| `CORTEX_ERR_FLOOR_WINDOW_HOURS` | no | `24` | no | err+ rows received within this window are protected from disk-pressure deletion (0 = disable floor) |
+| `CORTEX_ERR_FLOOR_PER_SOURCE_CAP` | no | `10000` | no | Max protected err+ rows per source IP within the floor window (0 = disable floor) |
 
 ### Logging
 
@@ -182,24 +184,29 @@ HOME, disables MCP servers/hooks/context-file loading, and parses Gemini's
 | `CORTEX_GID` | no | `1000` | no | Container group ID |
 | `CORTEX_RECEIVER_PORT` | no | `1514` | no | Host-side syslog port mapping |
 | `CORTEX_PORT` | no | `3100` | no | Host-side MCP port mapping |
+| `CORTEX_MCP_BIND` | no | `127.0.0.1` | no | Host interface the MCP port is published on (loopback by default; set `0.0.0.0` only with `CORTEX_TOKEN`) |
 | `CORTEX_DATA_VOLUME` | no | `cortex-data` | no | Named Docker volume for `/data` |
-| `CORTEX_CONFIG_VOLUME` | no | `./config` | no | Read-only config mount for optional files such as `docker-hosts.toml` |
+| `CORTEX_HOME_VOLUME` | no | `~/.cortex` | no | Shared cortex home (inventory cache, setup env) mounted at `/cortex-home` |
+| `CORTEX_SSH_VOLUME` | no | `~/.cortex/ssh` | no | Dedicated SSH key dir mounted read-only at `/home/cortex/.ssh` for inventory collection. Never point at `~/.ssh` — see `docs/SECURITY.md` |
+| `CORTEX_VERSION` | no | current release | no | Image tag pulled by `docker-compose.prod.yml` (kept in version canon) |
 | `DOCKER_NETWORK` | no | `cortex` | no | External Docker network name |
 
 ## Storage budget behavior
 
-The storage budget is a two-threshold system with hysteresis to prevent oscillation:
+The two guards behave differently:
 
-1. **Trigger threshold**: When logical DB size exceeds `max_db_size_mb` or free disk drops below `min_free_disk_mb`, enforcement begins.
-2. **Recovery target**: Oldest logs are deleted in chunks until logical DB size drops below `recovery_db_size_mb` and free disk rises above `recovery_free_disk_mb`.
-3. **Write blocking**: If cleanup cannot recover enough space (e.g., no more logs to delete), the batch writer blocks new writes until storage becomes healthy.
-4. **Enforcement interval**: Checked every `cleanup_interval_secs` seconds (default 60).
+1. **DB-size guard** (enabled by default): when logical DB size exceeds `max_db_size_mb`, the oldest logs are deleted in chunks until size drops below `recovery_db_size_mb`. err+ rows inside the floor (`err_floor_window_hours` × `err_floor_per_source_cap`) are excluded from the deletable set.
+2. **Free-disk guard** (disabled by default): low free disk is an external condition cortex cannot fix by deleting its own data, so a breach **blocks new writes** instead of self-trimming. Writes resume once free disk rises above `recovery_free_disk_mb` (hysteresis prevents oscillation).
+3. **Write blocking**: if DB-size cleanup cannot recover enough space (e.g. no more deletable logs), the batch writer also blocks new writes until storage becomes healthy.
+4. **Enforcement interval**: checked every `cleanup_interval_secs` seconds (default 60). The age-based retention purge is separate and runs hourly.
 
-Set both `max_db_size_mb` and `min_free_disk_mb` to 0 to disable all storage enforcement.
+Set both `max_db_size_mb` and `min_free_disk_mb` to 0 (with their recovery targets at 0) to disable all storage enforcement.
 
 ## SQLite migration upgrades
 
 Startup creates missing schema objects automatically. Small migrations are expected to complete quickly, but heavyweight migrations on a populated database can hold SQLite's write lock before syslog listeners and `/health` are ready. The server logs an operator-visible `Migration N: starting ...` message before such work and a completion message with elapsed time.
+
+**One-time `auto_vacuum` conversion VACUUM:** the first startup against a database that is not yet `auto_vacuum=INCREMENTAL` runs a full `VACUUM` to convert it. This is logged loudly at startup and can take minutes on large databases — treat it like a heavy migration (backup first, expect `/health` and the listeners to be unavailable until it completes). It runs once; subsequent startups skip it.
 
 For populated databases, treat heavy migrations as a planned upgrade step:
 
@@ -218,7 +225,8 @@ If a migration must be abandoned, stop the new process before changing files, re
 - `recovery_free_disk_mb` must be > 0 and > `min_free_disk_mb` when free-disk guard is enabled
 - `cleanup_interval_secs` must be >= 5
 - `cleanup_chunk_size` must be between 1 and 1,000,000
-- `CORTEX_API_TOKEN` is required when `CORTEX_API_ENABLED=true`
+- `err_floor_per_source_cap` must be > 0 when `err_floor_window_hours` is set
+- `CORTEX_API_TOKEN` is required for the server to start (`/api/*` is always mounted)
 - Bind host fields (`CORTEX_RECEIVER_HOST`, `CORTEX_HOST`) must not contain a colon (port is a separate setting)
 - `CORTEX_ALLOWED_HOSTS` values may include `host:port` to match reverse-proxy Host headers
 - `CORTEX_DOCKER_HOSTS` must contain at least one hostname when Docker ingest is enabled

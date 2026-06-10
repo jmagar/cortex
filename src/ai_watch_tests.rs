@@ -11,12 +11,14 @@ fn pending_files_deduplicate_and_requeue_with_cap() {
     assert!(pending.push(path.clone(), start + Duration::from_millis(25)));
 
     assert_eq!(pending.files.len(), 1);
-    assert!(pending
-        .debounced_paths(
-            start + Duration::from_millis(100),
-            Duration::from_millis(200)
-        )
-        .is_empty());
+    assert!(
+        pending
+            .debounced_paths(
+                start + Duration::from_millis(100),
+                Duration::from_millis(200)
+            )
+            .is_empty()
+    );
     assert_eq!(
         pending.debounced_paths(
             start + Duration::from_millis(300),

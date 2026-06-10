@@ -5,7 +5,7 @@ use std::io;
 
 use crate::inventory::config::InventoryConfig;
 use crate::inventory::schema::{CollectionState, HomelabInventory};
-use crate::inventory::storage::{read_json, InventoryPaths};
+use crate::inventory::storage::{InventoryPaths, read_json};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct InventoryCacheStatus {

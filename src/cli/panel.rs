@@ -9,7 +9,7 @@
 //! ```
 #![allow(dead_code)]
 
-use super::color::{ansi_colorize, color_enabled, CYAN_ANSI, MUTED_ANSI, PRIMARY_ANSI};
+use super::color::{CYAN_ANSI, MUTED_ANSI, PRIMARY_ANSI, ansi_colorize, color_enabled};
 
 #[cfg(test)]
 #[path = "panel_tests.rs"]

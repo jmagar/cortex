@@ -2,7 +2,7 @@
 //! borders, cyan headers, and a `--color=never`-friendly ASCII fallback.
 #![allow(dead_code)]
 
-use comfy_table::{modifiers, presets, Cell, Color, ContentArrangement, Table};
+use comfy_table::{Cell, Color, ContentArrangement, Table, modifiers, presets};
 
 use super::color::color_enabled;
 

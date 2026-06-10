@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use super::systemd::{systemctl_user_phase, systemctl_user_required_phase};
 use super::{
-    check_file_phase, host_local_report_input, setup_report, AiIndexTimerAction, PhaseTimer,
-    SetupPhase, SetupReport, SetupStatus,
+    AiIndexTimerAction, PhaseTimer, SetupPhase, SetupReport, SetupStatus, check_file_phase,
+    host_local_report_input, setup_report,
 };
 
 pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<SetupReport> {

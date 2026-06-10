@@ -3,10 +3,10 @@
 //! Surface parity (2026-05-22): exposes the `anomalies` MCP action and
 //! `GET /api/anomalies` REST route as a top-level CLI subcommand.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use super::super::args::{AnomaliesArgs, CliCommand};
-use super::super::{parse_u32_flag, FlagCursor};
+use super::super::{FlagCursor, parse_u32_flag};
 
 pub(crate) fn parse_anomalies(args: &[String]) -> Result<CliCommand> {
     let mut parsed = AnomaliesArgs::default();

@@ -6,7 +6,7 @@ use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
-use crate::enrich::{stamp_source_kind, SourceKind};
+use crate::enrich::{SourceKind, stamp_source_kind};
 use crate::ingest::IngestTx;
 
 use super::parser::parse_syslog;

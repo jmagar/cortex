@@ -1,12 +1,26 @@
+//! Always-on non-MCP REST API (`/api/*`) for the log intelligence core —
+//! the default transport for the CLI since v0.26 (`CORTEX_USE_HTTP=true`).
+//!
+//! 56 routes mirroring the MCP action surface one-for-one (see
+//! `docs/api.md` for the endpoint matrix). Every route requires the
+//! `CORTEX_API_TOKEN` bearer; route mounting fails at startup when the token
+//! is absent, so the surface is never silently open.
+//!
+//! Invariants: read routes acquire service `db_permits`; admin POST routes
+//! (vacuum, checkpoint, prune-checkpoints) single-flight on
+//! `MAINTENANCE_PERMIT` and audit-log the caller IP before the service call.
+//! Handlers clamp caller-supplied limits (REST response-size caps) as a
+//! second line of defence behind the service-layer clamps.
+
 use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 
 use axum::{
+    Router,
     extract::{ConnectInfo, Path, Query, State},
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
-    Router,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -29,8 +43,7 @@ use crate::app::{
     UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
-use crate::db::DbPool;
-use crate::mcp::{build_auth_layer, AuthPolicy};
+use crate::mcp::{AuthPolicy, build_auth_layer};
 
 /// Crate version cached at compile time (CARGO_PKG_VERSION).
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -155,10 +168,9 @@ impl ApiState {
         loopback_bind: bool,
         allowed_origins: Vec<String>,
         auth_policy: AuthPolicy,
-        pool: &DbPool,
         static_token_is_admin: bool,
     ) -> anyhow::Result<Self> {
-        let schema_version = read_schema_version(pool)?;
+        let schema_version = service.schema_version()?;
         let version_info = Arc::new(VersionInfo {
             version: CRATE_VERSION,
             git_sha: GIT_SHA.map(str::to_string),
@@ -198,10 +210,6 @@ impl ApiState {
         self.full_vacuum_size_guard_bytes = bytes;
         self
     }
-}
-
-fn read_schema_version(pool: &DbPool) -> anyhow::Result<i64> {
-    Ok(crate::db::read_schema_version_info(pool)?.version)
 }
 
 pub fn router(state: ApiState) -> anyhow::Result<Router> {
@@ -290,18 +298,21 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
             auth_state: auth_state.clone(),
         },
     };
-    let routes = if let Some(layer) = build_auth_layer(
+    let routes = match build_auth_layer(
         &forced_policy,
         state.config.api_token.as_deref().map(Arc::<str>::from),
         None,
         state.static_token_is_admin,
     ) {
-        routes.layer(layer)
-    } else {
-        // `forced_policy` is always `Mounted`, so `build_auth_layer` returns
-        // `Some(_)`. Reach here only if `build_auth_layer` ever changes its
-        // contract — fail loud rather than mount routes without auth.
-        anyhow::bail!("internal: auth layer construction returned None for /api/* (forced Mounted)")
+        Some(layer) => routes.layer(layer),
+        _ => {
+            // `forced_policy` is always `Mounted`, so `build_auth_layer` returns
+            // `Some(_)`. Reach here only if `build_auth_layer` ever changes its
+            // contract — fail loud rather than mount routes without auth.
+            anyhow::bail!(
+                "internal: auth layer construction returned None for /api/* (forced Mounted)"
+            )
+        }
     };
 
     let cors = cors_layer(state.cors_port, state.loopback_bind, &state.allowed_origins);

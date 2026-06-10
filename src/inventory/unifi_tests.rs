@@ -38,10 +38,11 @@ fn unifi_truncation_and_missing_device_ids_are_reported() {
         &mut out,
     );
     assert!(out.nodes.is_empty());
-    assert!(out
-        .errors
-        .iter()
-        .any(|error| error.message.contains("missing")));
+    assert!(
+        out.errors
+            .iter()
+            .any(|error| error.message.contains("missing"))
+    );
 }
 
 #[tokio::test]

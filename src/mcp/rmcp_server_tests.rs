@@ -1,24 +1,27 @@
 use std::sync::Arc;
 
 use axum::{
-    body::{to_bytes, Body},
-    extract::Request as AxumRequest,
-    http::{header, Request, StatusCode},
-    middleware::{self, Next},
     Router,
+    body::{Body, to_bytes},
+    extract::Request as AxumRequest,
+    http::{Request, StatusCode, header},
+    middleware::{self, Next},
 };
 use lab_auth::AuthContext;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 use crate::{
     app::CortexService,
     config::{McpConfig, StorageConfig},
     db::{self, DbPool, LogBatchEntry},
-    mcp::{streamable_http_config, streamable_http_service, AppState, AuthPolicy},
+    mcp::{AppState, AuthPolicy, streamable_http_config, streamable_http_service},
 };
 
-use super::{actions, allowed_hosts, allowed_origins, is_validation_error, required_scope_for};
+use super::{
+    ToolErrorClass, actions, allowed_hosts, allowed_origins, classify_tool_error,
+    required_scope_for,
+};
 
 fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -265,13 +268,77 @@ fn allowed_hosts_include_bracketed_ipv6_authority_variants() {
     assert!(!hosts.contains(&"[syslog.example.com:443]".to_string()));
 }
 
+/// Table-driven pin of the typed error classifier (full-review AH1/TM1):
+/// every ServiceError variant maps to its distinct class, and untyped anyhow
+/// errors — including ones whose MESSAGE looks like a validation error, which
+/// fooled the old string-matching classifier — are Internal.
 #[test]
-fn busy_errors_are_not_validation_errors() {
-    let error = anyhow::Error::new(crate::app::ServiceError::Busy(
-        "database worker limit reached".into(),
-    ));
+fn classify_tool_error_pins_every_variant() {
+    use crate::app::ServiceError as E;
 
-    assert!(!is_validation_error(&error));
+    let cases: Vec<(anyhow::Error, ToolErrorClass)> = vec![
+        (
+            anyhow::Error::new(E::InvalidInput("limit must be <= 1000".into())),
+            ToolErrorClass::InvalidParams,
+        ),
+        (
+            anyhow::Error::new(E::Busy("database worker limit reached".into())),
+            ToolErrorClass::Retryable,
+        ),
+        (
+            anyhow::Error::new(E::DatabaseTimeout),
+            ToolErrorClass::Retryable,
+        ),
+        (
+            anyhow::Error::new(E::NotFound("log id 42 not found".into())),
+            ToolErrorClass::NotFound,
+        ),
+        (anyhow::Error::new(E::RowNotFound), ToolErrorClass::NotFound),
+        (
+            anyhow::Error::new(E::ConstraintViolation {
+                message: "UNIQUE constraint failed".into(),
+            }),
+            ToolErrorClass::Conflict,
+        ),
+        (
+            anyhow::Error::new(E::Internal(anyhow::anyhow!("disk I/O error"))),
+            ToolErrorClass::Internal,
+        ),
+        // Untyped anyhow → Internal, even when the message resembles the old
+        // string-matched validation patterns.
+        (
+            anyhow::anyhow!("field x is required"),
+            ToolErrorClass::Internal,
+        ),
+        (
+            anyhow::anyhow!("value must be <= 7"),
+            ToolErrorClass::Internal,
+        ),
+        (anyhow::anyhow!("disk I/O error"), ToolErrorClass::Internal),
+    ];
+
+    for (error, expected) in cases {
+        assert_eq!(
+            classify_tool_error(&error),
+            expected,
+            "misclassified: {error}"
+        );
+    }
+}
+
+/// A typed ServiceError surviving an anyhow `?` chain (the tools.rs path)
+/// still classifies correctly via downcast.
+#[test]
+fn classify_tool_error_downcasts_through_anyhow_chain() {
+    fn service_call() -> Result<(), crate::app::ServiceError> {
+        Err(crate::app::ServiceError::Busy("pool exhausted".into()))
+    }
+    fn tool_fn() -> anyhow::Result<()> {
+        service_call()?;
+        Ok(())
+    }
+    let error = tool_fn().unwrap_err();
+    assert_eq!(classify_tool_error(&error), ToolErrorClass::Retryable);
 }
 
 #[tokio::test]
@@ -400,9 +467,11 @@ async fn rmcp_prompts_get_rejects_unknown_prompt() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(response["error"]["code"], -32602);
-    assert!(response["error"]["message"]
-        .as_str()
-        .is_some_and(|message| message.contains("unknown prompt")));
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown prompt"))
+    );
 }
 
 #[tokio::test]

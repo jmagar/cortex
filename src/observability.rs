@@ -1,11 +1,44 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 use chrono::Utc;
 use serde::Serialize;
 
+/// Lifecycle state of a syslog listener task, stored as an `AtomicU8`.
+///
+/// `NotStarted` (the default) covers stdio/query-only mode and tests where the
+/// listeners never run — health checks must NOT treat it as a failure.
+/// `Down` means the listener future exited (error or panic) and ingestion on
+/// that transport is not currently receiving.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListenerState {
+    NotStarted = 0,
+    Alive = 1,
+    Down = 2,
+}
+
+impl ListenerState {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Alive,
+            2 => Self::Down,
+            _ => Self::NotStarted,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotStarted => "not_started",
+            Self::Alive => "alive",
+            Self::Down => "down",
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct RuntimeObservability {
+    syslog_udp_listener_state: AtomicU8,
+    syslog_tcp_listener_state: AtomicU8,
     syslog_udp_packets_received: AtomicU64,
     syslog_udp_bytes_received: AtomicU64,
     syslog_tcp_connections_accepted: AtomicU64,
@@ -45,10 +78,17 @@ pub struct RuntimeObservability {
     last_docker_ingest_error_at: Mutex<Option<String>>,
     last_remote_docker_event_stream_error_at: Mutex<Option<String>>,
     last_remote_docker_event_stream_error: Mutex<Option<String>>,
+    /// Last-tick timestamps for the ~12 background maintenance tasks, keyed
+    /// by task name. Surfaced via /health/full so operators can see which
+    /// loops are actually running instead of inferring from log archaeology
+    /// (full-review AM5).
+    maintenance_task_ticks: Mutex<std::collections::BTreeMap<&'static str, String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeObservabilitySnapshot {
+    pub syslog_udp_listener_state: &'static str,
+    pub syslog_tcp_listener_state: &'static str,
     pub syslog_udp_packets_received: u64,
     pub syslog_udp_bytes_received: u64,
     pub syslog_tcp_connections_accepted: u64,
@@ -89,9 +129,38 @@ pub struct RuntimeObservabilitySnapshot {
     pub last_docker_ingest_error_at: Option<String>,
     pub last_remote_docker_event_stream_error_at: Option<String>,
     pub last_remote_docker_event_stream_error: Option<String>,
+    /// Background task name → last tick timestamp (RFC3339).
+    pub maintenance_task_ticks: std::collections::BTreeMap<&'static str, String>,
 }
 
 impl RuntimeObservability {
+    pub fn set_udp_listener_state(&self, state: ListenerState) {
+        self.syslog_udp_listener_state
+            .store(state as u8, Ordering::Relaxed);
+    }
+
+    pub fn set_tcp_listener_state(&self, state: ListenerState) {
+        self.syslog_tcp_listener_state
+            .store(state as u8, Ordering::Relaxed);
+    }
+
+    pub fn udp_listener_state(&self) -> ListenerState {
+        ListenerState::from_u8(self.syslog_udp_listener_state.load(Ordering::Relaxed))
+    }
+
+    pub fn tcp_listener_state(&self) -> ListenerState {
+        ListenerState::from_u8(self.syslog_tcp_listener_state.load(Ordering::Relaxed))
+    }
+
+    /// True when any syslog listener that was started has since died. Used by
+    /// the /health probe so a dead listener turns the container unhealthy and
+    /// Docker's restart policy can recover it. `NotStarted` (stdio/query-only
+    /// mode, tests) never counts as down.
+    pub fn any_listener_down(&self) -> bool {
+        self.udp_listener_state() == ListenerState::Down
+            || self.tcp_listener_state() == ListenerState::Down
+    }
+
     pub fn set_queue_capacity(&self, capacity: usize) {
         self.ingest_queue_capacity
             .store(capacity, Ordering::Relaxed);
@@ -296,6 +365,8 @@ impl RuntimeObservability {
             (queue_depth as f64 / queue_capacity as f64) * 100.0
         };
         RuntimeObservabilitySnapshot {
+            syslog_udp_listener_state: self.udp_listener_state().as_str(),
+            syslog_tcp_listener_state: self.tcp_listener_state().as_str(),
             syslog_udp_packets_received: self.syslog_udp_packets_received.load(Ordering::Relaxed),
             syslog_udp_bytes_received: self.syslog_udp_bytes_received.load(Ordering::Relaxed),
             syslog_tcp_connections_accepted: self
@@ -398,7 +469,20 @@ impl RuntimeObservability {
                 .lock()
                 .expect("last_remote_docker_event_stream_error mutex poisoned")
                 .clone(),
+            maintenance_task_ticks: self
+                .maintenance_task_ticks
+                .lock()
+                .expect("maintenance_task_ticks mutex poisoned")
+                .clone(),
         }
+    }
+
+    /// Record that a named background task completed a loop iteration.
+    pub fn record_task_tick(&self, task: &'static str) {
+        self.maintenance_task_ticks
+            .lock()
+            .expect("maintenance_task_ticks mutex poisoned")
+            .insert(task, now_iso());
     }
 
     fn touch_ingest(&self) {

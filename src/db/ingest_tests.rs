@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::StorageConfig;
-use crate::db::{init_pool, list_hosts, tail_logs, DbPool, LogBatchEntry};
+use crate::db::{DbPool, LogBatchEntry, init_pool, list_hosts, tail_logs};
 
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {
     StorageConfig::for_test(db_path)

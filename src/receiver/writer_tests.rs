@@ -2,7 +2,9 @@ use super::*;
 use crate::config::StorageConfig;
 use crate::db::{self, DbPool};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 fn test_storage_config(db_path: std::path::PathBuf) -> StorageConfig {
     StorageConfig::for_test(db_path)
@@ -51,7 +53,7 @@ fn make_entry_for_sender(hostname: &str, source_ip: &str, message: &str) -> db::
 #[tokio::test]
 async fn flush_batch_retains_entries_while_storage_is_write_blocked() {
     let (pool, mut storage, _dir) = test_pool();
-    let storage_state = Arc::new(Mutex::new(None));
+    let storage_state: Arc<Mutex<Option<db::StorageBudgetState>>> = Arc::new(Mutex::new(None));
     let free_disk_mb = db::get_storage_metrics(&pool, &storage)
         .unwrap()
         .free_disk_bytes
@@ -59,7 +61,7 @@ async fn flush_batch_retains_entries_while_storage_is_write_blocked() {
         / 1_048_576;
     storage.min_free_disk_mb = free_disk_mb + 1024;
     storage.recovery_free_disk_mb = free_disk_mb + 2048;
-    *storage_state.lock().unwrap() = Some(db::StorageBudgetState {
+    *storage_state.lock() = Some(db::StorageBudgetState {
         metrics: db::get_storage_metrics(&pool, &storage).unwrap(),
         write_blocked: true,
     });

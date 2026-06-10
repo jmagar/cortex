@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use super::docker::DockerUnavailableError;
 use super::format::{is_stopped_status, status_from_target, unresolved_status};

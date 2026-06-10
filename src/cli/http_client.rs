@@ -52,8 +52,8 @@
 use std::env;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context, Result};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use anyhow::{Context, Result, anyhow, bail};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use reqwest::{Method, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

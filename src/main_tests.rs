@@ -1,4 +1,4 @@
-use super::{cli, Mode};
+use super::{Mode, cli};
 
 #[test]
 fn mode_parse_accepts_single_binary_transport_commands() {
@@ -363,9 +363,10 @@ fn mode_parse_rejects_remote_deploy_with_multiple_hosts() {
         "host-b".into(),
     ])
     .unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("deploy remote accepts exactly one host"));
+    assert!(
+        err.to_string()
+            .contains("deploy remote accepts exactly one host")
+    );
 }
 
 #[test]
@@ -378,9 +379,10 @@ fn mode_parse_rejects_duplicate_ai_watch_service_actions() {
     ])
     .unwrap_err();
 
-    assert!(err
-        .to_string()
-        .contains("ai-watch-service action specified more than once"));
+    assert!(
+        err.to_string()
+            .contains("ai-watch-service action specified more than once")
+    );
 }
 
 #[test]
@@ -405,7 +407,8 @@ struct EnvVarGuard {
 impl EnvVarGuard {
     fn unset(name: &'static str) -> Self {
         let previous = std::env::var(name).ok();
-        std::env::remove_var(name);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var(name) };
         Self { name, previous }
     }
 }
@@ -413,8 +416,10 @@ impl EnvVarGuard {
 impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         match &self.previous {
-            Some(v) => std::env::set_var(self.name, v),
-            None => std::env::remove_var(self.name),
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var(self.name, v) },
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var(self.name) },
         }
     }
 }

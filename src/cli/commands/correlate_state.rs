@@ -3,10 +3,10 @@
 //! Surface parity (cxih.4): exposes the `correlate_state` MCP action and
 //! `GET /api/correlate-state` REST route as a top-level CLI subcommand.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use super::super::args::{CliCommand, CorrelateStateArgs};
-use super::super::{parse_u32_flag, FlagCursor};
+use super::super::{FlagCursor, parse_u32_flag};
 
 pub(crate) fn parse_correlate_state(args: &[String]) -> Result<CliCommand> {
     let mut parsed = CorrelateStateArgs::default();

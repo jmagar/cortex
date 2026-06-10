@@ -1,20 +1,20 @@
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use axum::{
+    Router,
     extract::State,
-    http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
+    http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header},
     response::{IntoResponse, Json},
     routing::get,
-    Router,
 };
 use serde_json::json;
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
 
 use super::rmcp_server::allowed_origins;
-use super::{build_auth_layer, streamable_http_config, streamable_http_service};
 use super::{AppState, AuthPolicy};
+use super::{build_auth_layer, streamable_http_config, streamable_http_service};
 
 const MCP_BODY_LIMIT_BYTES: u64 = 65_536;
 const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
@@ -41,15 +41,14 @@ pub fn router(state: AppState) -> Router {
             .map(|u| Arc::<str>::from(format!("{}/mcp", u.trim_end_matches('/')))),
         AuthPolicy::LoopbackDev | AuthPolicy::TrustedGatewayUnscoped => None,
     };
-    let authenticated = if let Some(layer) = build_auth_layer(
+    let authenticated = match build_auth_layer(
         &state.auth_policy,
         state.config.api_token.as_deref().map(Arc::<str>::from),
         resource_url,
         state.config.static_token_is_admin,
     ) {
-        mcp_service.layer(layer)
-    } else {
-        mcp_service
+        Some(layer) => mcp_service.layer(layer),
+        _ => mcp_service,
     };
 
     // Build the OAuth router (Router<()> — state already baked in) when
@@ -156,9 +155,26 @@ fn cors_layer(config: &crate::config::McpConfig) -> CorsLayer {
 }
 
 /// Minimal liveness probe — unauthenticated, safe for Docker HEALTHCHECK and
-/// Compose health gates. Returns 200 when DB is reachable, 503 otherwise.
-/// Does not expose counters or ingest metrics.
+/// Compose health gates. Returns 200 when the DB is reachable AND no started
+/// syslog listener has died; 503 otherwise. A dead listener must fail this
+/// probe so Docker's restart policy can recover ingestion (bead
+/// syslog-mcp-7f0y) — previously a dead listener left the container "healthy"
+/// while the core function was down. Does not expose counters or ingest
+/// metrics. Listeners that were never started (stdio/query-only mode, tests)
+/// do not count as dead.
 async fn health_minimal(State(state): State<AppState>) -> impl IntoResponse {
+    if state.observability.any_listener_down() {
+        tracing::error!(
+            udp_listener = state.observability.udp_listener_state().as_str(),
+            tcp_listener = state.observability.tcp_listener_state().as_str(),
+            "Health check failed: syslog listener down"
+        );
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"status": "error", "reason": "syslog listener down"})),
+        )
+            .into_response();
+    }
     match state.service.health_check().await {
         Ok(()) => Json(json!({"status": "ok"})).into_response(),
         Err(e) => {

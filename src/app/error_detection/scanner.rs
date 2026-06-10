@@ -15,12 +15,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::Semaphore;
 
-use super::normalize::{normalize_template, signature_hash, NORMALIZER_VERSION};
+use super::normalize::{NORMALIZER_VERSION, normalize_template, signature_hash};
 use crate::config::ErrorDetectionConfig;
-use crate::db::error_signatures::{
-    cursor_advance, cursor_get, insert_window, upsert_signature, UpsertSignatureParams,
-};
 use crate::db::DbPool;
+use crate::db::error_signatures::{
+    UpsertSignatureParams, cursor_advance, cursor_get, insert_window, upsert_signature,
+};
 use crate::receiver::enrichment::scrub_ai_message;
 
 /// A minimal log row fetched for scanning.
@@ -114,19 +114,18 @@ pub(crate) fn process_chunk(
              ORDER BY id ASC
              LIMIT ?2",
         )?;
-        let collected = stmt
-            .query_map(rusqlite::params![last_id, chunk_size], |row| {
-                Ok(ScanRow {
-                    id: row.get(0)?,
-                    severity: row.get(1)?,
-                    message: row.get(2)?,
-                    timestamp: row.get(3)?,
-                    hostname: row.get(4)?,
-                    app_name: row.get(5)?,
-                })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        collected
+
+        stmt.query_map(rusqlite::params![last_id, chunk_size], |row| {
+            Ok(ScanRow {
+                id: row.get(0)?,
+                severity: row.get(1)?,
+                message: row.get(2)?,
+                timestamp: row.get(3)?,
+                hostname: row.get(4)?,
+                app_name: row.get(5)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?
     };
 
     if rows.is_empty() {
