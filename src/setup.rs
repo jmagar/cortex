@@ -398,6 +398,18 @@ pub(crate) struct EnvResult {
     pub(crate) values: BTreeMap<String, String>,
 }
 
+fn cortex_home_dir_from_exe_path(exe: &Path) -> Option<PathBuf> {
+    for ancestor in exe.ancestors() {
+        let Some(parent) = ancestor.parent() else {
+            continue;
+        };
+        if parent.file_name().and_then(|name| name.to_str()) == Some("home") {
+            return Some(ancestor.join(".cortex"));
+        }
+    }
+    None
+}
+
 pub fn cortex_home_dir() -> io::Result<PathBuf> {
     if let Ok(value) = std::env::var("CORTEX_HOME") {
         let trimmed = value.trim();
@@ -407,7 +419,18 @@ pub fn cortex_home_dir() -> io::Result<PathBuf> {
     }
     let home =
         std::env::var("HOME").map_err(|_| io::Error::new(ErrorKind::NotFound, "HOME is unset"))?;
-    validate_absolute_home(PathBuf::from(home).join(".cortex"))
+    let home_candidate = PathBuf::from(home).join(".cortex");
+    if home_candidate.join(".env").is_file() || home_candidate.is_dir() {
+        return validate_absolute_home(home_candidate);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_candidate) = cortex_home_dir_from_exe_path(&exe) {
+            if exe_candidate.join(".env").is_file() || exe_candidate.is_dir() {
+                return validate_absolute_home(exe_candidate);
+            }
+        }
+    }
+    validate_absolute_home(home_candidate)
 }
 
 fn user_home_dir() -> io::Result<PathBuf> {

@@ -301,6 +301,33 @@ fn ai_watch_env_file_pins_db_and_disables_docker_ingest() {
 }
 
 #[test]
+fn cortex_home_dir_can_be_inferred_from_user_local_bin_binary() {
+    let exe = std::path::Path::new("/home/jmagar/.local/bin/cortex");
+
+    assert_eq!(
+        cortex_home_dir_from_exe_path(exe).as_deref(),
+        Some(std::path::Path::new("/home/jmagar/.cortex"))
+    );
+}
+
+#[test]
+fn cortex_home_dir_can_be_inferred_from_user_workspace_binary() {
+    let exe = std::path::Path::new("/home/jmagar/workspace/cortex/target/release/cortex");
+
+    assert_eq!(
+        cortex_home_dir_from_exe_path(exe).as_deref(),
+        Some(std::path::Path::new("/home/jmagar/.cortex"))
+    );
+}
+
+#[test]
+fn cortex_home_dir_is_not_inferred_from_non_home_binary() {
+    let exe = std::path::Path::new("/usr/local/bin/cortex");
+
+    assert_eq!(cortex_home_dir_from_exe_path(exe), None);
+}
+
+#[test]
 fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     let unit = ai_watch_service_unit(
         std::path::Path::new("/home/me/.local/bin/cortex"),
