@@ -85,10 +85,8 @@ fi
 # Deploy side effect: keep ~/.local/bin/cortex fresh after RELEASE builds only.
 # - Debug and test builds never deploy: `cargo test` enables the test-support
 #   feature via unification, and that binary must never land on PATH.
-# - The git-tracked plugin bundle (plugins/cortex/bin/cortex) is owned by
-#   `just build-plugin` and is intentionally never written here.
-# - The install is atomic (mktemp + mv). mv replaces a `just link-bin` symlink
-#   itself rather than writing through it into Cargo's release artifact.
+# - The install is atomic (mktemp + mv). mv replaces any existing binary or
+#   symlink rather than writing through it into Cargo's release artifact.
 # - A failed install warns but never fails the compilation.
 if [ "$crate_name" != "cortex" ] || [ "$crate_type" != "bin" ] || [ "$is_test" -eq 1 ] || [ -z "$out" ] || [ ! -x "$out" ]; then
   exit 0

@@ -18,7 +18,7 @@ If the user asked for a dry run only, stop after describing what would happen.
 1. Run:
 
    ```bash
-   ${CLAUDE_PLUGIN_ROOT}/bin/cortex setup plugin-hook
+   ${CLAUDE_PLUGIN_ROOT}/scripts/plugin-setup.sh
    ```
 
    Capture stdout, stderr, and exit code.

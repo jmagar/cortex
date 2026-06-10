@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.1] - 2026-06-10
+
+### Changed
+
+- Plugin installer pattern: the bundled `plugins/cortex/bin/cortex` binary has
+  been removed. The plugin now installs the `cortex` binary from GitHub Releases
+  via `install.sh` / `install.ps1` on first use. `plugin-setup.sh` falls back
+  to running `install.sh` (or fetching it from GitHub) when `cortex` is not
+  already on PATH. The `hooks.json` SessionStart/ConfigChange hooks now call
+  `plugin-setup.sh` directly rather than the (now-absent) bundled binary.
+- Added `install.sh` (Linux/macOS one-liner bootstrap) and `install.ps1`
+  (Windows PowerShell mirror) at the repository root.
+- Added `.github/workflows/release.yml` — publishes `cortex-linux-x86_64.tar.gz`
+  and `cortex-windows-x86_64.zip` with SHA256 checksums as GitHub Release assets
+  on every `v*` tag push.
+
 ## [1.16.0] - 2026-06-09
 
 ### Security

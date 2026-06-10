@@ -28,15 +28,22 @@ ensure_cortex_binary() {
     return 0
   fi
 
-  local bundled="${CLAUDE_PLUGIN_ROOT}/bin/cortex"
-  if [[ -x "${bundled}" ]]; then
-    mkdir -p "${HOME}/.local/bin"
-    ln -sf "${bundled}" "${HOME}/.local/bin/cortex"
+  # Binary not on PATH — install it from GitHub Releases.
+  local install_sh="${CLAUDE_PLUGIN_ROOT}/../../install.sh"
+  if [[ -f "${install_sh}" ]]; then
+    printf 'cortex plugin setup: installing cortex binary via install.sh\n' >&2
+    CORTEX_INSTALL_SKIP_SETUP=1 sh "${install_sh}"
+    export PATH="${HOME}/.local/bin:${PATH}"
+  elif command -v curl >/dev/null 2>&1; then
+    printf 'cortex plugin setup: installing cortex binary from GitHub Releases\n' >&2
+    CORTEX_INSTALL_SKIP_SETUP=1 sh -c \
+      "$(curl -fsSL https://raw.githubusercontent.com/jmagar/cortex/main/install.sh)"
     export PATH="${HOME}/.local/bin:${PATH}"
   fi
 
   command -v cortex >/dev/null 2>&1 || {
-    printf 'cortex plugin setup: cortex binary not found on PATH or at %s\n' "${bundled}" >&2
+    printf 'cortex plugin setup: cortex binary not found on PATH and install failed.\n' >&2
+    printf 'Install manually: curl -fsSL https://raw.githubusercontent.com/jmagar/cortex/main/install.sh | sh\n' >&2
     exit 1
   }
 }

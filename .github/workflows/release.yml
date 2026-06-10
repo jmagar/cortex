@@ -1,0 +1,114 @@
+name: release
+
+# Triggered when you push a version tag (e.g. `git tag v1.16.1 && git push origin v1.16.1`).
+# Builds cortex for Linux + Windows, packages with SHA256 checksums, and
+# publishes a GitHub Release with all artifacts attached.
+#
+# Manual dry-run via workflow_dispatch builds everything but skips the Release
+# creation (artifacts are still uploaded to the workflow run for inspection).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # required to create releases
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cortex-linux:
+    name: build cortex (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: release-cortex-linux
+
+      - name: cargo build --release --bin cortex
+        run: cargo build --release --locked --bin cortex
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          cd target/release
+          tar -czf cortex-linux-x86_64.tar.gz cortex
+          sha256sum cortex-linux-x86_64.tar.gz > cortex-linux-x86_64.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cortex-linux-x86_64
+          path: |
+            target/release/cortex-linux-x86_64.tar.gz
+            target/release/cortex-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+
+  cortex-windows:
+    name: build cortex (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: release-cortex-windows
+
+      - name: cargo build --release --bin cortex
+        run: cargo build --release --locked --bin cortex
+        env:
+          # Disable sccache wrapper on Windows — bash rustc-wrapper scripts
+          # don't run as Win32 applications.
+          CARGO_BUILD_RUSTC_WRAPPER: ""
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location target/release
+          Compress-Archive -Path cortex.exe -DestinationPath cortex-windows-x86_64.zip -Force
+          $hash = (Get-FileHash cortex-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  cortex-windows-x86_64.zip" | Out-File -Encoding ascii cortex-windows-x86_64.zip.sha256
+          Pop-Location
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cortex-windows-x86_64
+          path: |
+            target/release/cortex-windows-x86_64.zip
+            target/release/cortex-windows-x86_64.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    name: publish github release
+    needs: [cortex-linux, cortex-windows]
+    runs-on: ubuntu-latest
+    # Only create a release on real tag pushes; workflow_dispatch is dry-run.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/cortex-linux-x86_64.tar.gz
+            dist/cortex-linux-x86_64.tar.gz.sha256
+            dist/cortex-windows-x86_64.zip
+            dist/cortex-windows-x86_64.zip.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true
