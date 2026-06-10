@@ -245,6 +245,15 @@ pub(super) async fn flush_batch(
                 context
                     .observability
                     .record_writer_retained(outcome.retained_entries.len(), false);
+                if !*storage_blocked && is_disk_full_error(&e) {
+                    error!(
+                        error = %e,
+                        count,
+                        retained_rows = outcome.retained_entries.len(),
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "SQLite disk full — retaining batch until space recovers"
+                    );
+                }
                 error!(
                     error = %e,
                     count,
@@ -345,6 +354,14 @@ fn retry_failed_chunk(
 fn retain_or_discard_entries(outcome: &mut FailedBatchOutcome, entries: Vec<db::LogBatchEntry>) {
     let retain_remaining = FAILED_BATCH_RETAIN_LIMIT.saturating_sub(outcome.retained_entries.len());
     if retain_remaining == 0 {
+        for entry in &entries {
+            tracing::warn!(
+                hostname = %entry.hostname,
+                severity = %entry.severity,
+                timestamp = %entry.timestamp,
+                "Discarding log entry: retain limit reached"
+            );
+        }
         outcome.discarded_count += entries.len();
         outcome.discarded_chunks += 1;
         return;
@@ -357,10 +374,19 @@ fn retain_or_discard_entries(outcome: &mut FailedBatchOutcome, entries: Vec<db::
     }
 
     let discarded = entries.len() - retain_remaining;
+    let mut iter = entries.into_iter();
     outcome
         .retained_entries
-        .extend(entries.into_iter().take(retain_remaining));
+        .extend(iter.by_ref().take(retain_remaining));
     outcome.retained_chunks += 1;
+    for entry in iter {
+        tracing::warn!(
+            hostname = %entry.hostname,
+            severity = %entry.severity,
+            timestamp = %entry.timestamp,
+            "Discarding log entry: retain limit reached"
+        );
+    }
     outcome.discarded_count += discarded;
     outcome.discarded_chunks += 1;
 }
@@ -374,6 +400,16 @@ fn is_retryable_sqlite_error(err: &anyhow::Error) -> bool {
                     sql_err.code,
                     ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked | ErrorCode::DiskFull
                 )
+        )
+    })
+}
+
+fn is_disk_full_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<SqliteError>(),
+            Some(SqliteError::SqliteFailure(sql_err, _))
+                if sql_err.code == ErrorCode::DiskFull
         )
     })
 }

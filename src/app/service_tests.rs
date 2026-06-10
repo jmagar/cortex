@@ -1440,6 +1440,46 @@ async fn timeline_applies_default_lookback_only_when_from_and_to_both_absent() {
     );
 }
 
+#[tokio::test]
+async fn run_db_preserves_typed_service_error_through_anyhow_chain() {
+    let (service, _pool, _dir) = test_service();
+
+    let err = service
+        .run_db("test.invalid_input", |_pool| {
+            Err::<(), _>(anyhow::Error::new(ServiceError::InvalidInput(
+                "bad limit".into(),
+            )))
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ServiceError::InvalidInput(_)),
+        "expected InvalidInput, got {err:?}"
+    );
+
+    let err = service
+        .run_db("test.not_found", |_pool| {
+            Err::<(), _>(anyhow::Error::new(ServiceError::NotFound("row 42".into())))
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ServiceError::NotFound(_)),
+        "expected NotFound, got {err:?}"
+    );
+
+    let err = service
+        .run_db("test.internal", |_pool| {
+            Err::<(), _>(anyhow::anyhow!("disk I/O error"))
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ServiceError::Internal(_)),
+        "expected Internal, got {err:?}"
+    );
+}
+
 #[test]
 fn read_permits_reserve_a_writer_connection() {
     // full-review PH3: one pooled connection stays reachable by writers.

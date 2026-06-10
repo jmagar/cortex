@@ -64,14 +64,18 @@ fn push_bound_limit(
 /// Returns a user-friendly error; the caller logs the details server-side.
 pub fn validate_fts_query(query: &str) -> Result<()> {
     if query.len() > 512 {
-        anyhow::bail!(
-            "Search query too long ({} chars); maximum is 512 characters",
-            query.len()
-        );
+        return Err(anyhow::Error::new(crate::app::ServiceError::InvalidInput(
+            format!(
+                "Search query too long ({} chars); maximum is 512 characters",
+                query.len()
+            ),
+        )));
     }
     let term_count = query.split_whitespace().count();
     if term_count > 16 {
-        anyhow::bail!("Search query has too many terms ({term_count}); maximum is 16 terms");
+        return Err(anyhow::Error::new(crate::app::ServiceError::InvalidInput(
+            format!("Search query has too many terms ({term_count}); maximum is 16 terms"),
+        )));
     }
     Ok(())
 }

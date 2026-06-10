@@ -327,8 +327,8 @@ async fn serve_mcp() -> Result<()> {
         "Configuration loaded"
     );
 
-    runtime.start_syslog().await?;
-    let maintenance = runtime.spawn_maintenance_tasks();
+    let mut maintenance = runtime.spawn_maintenance_tasks();
+    runtime.start_syslog(&mut maintenance).await?;
 
     let mut app: Router = mcp::router(runtime.mcp_state());
     // /api/* is always-on. The container fails to start without

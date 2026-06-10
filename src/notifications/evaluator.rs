@@ -81,8 +81,10 @@ pub(crate) async fn run_evaluation_cycle(
             // all). MAX(received_at) is an O(1) reverse index probe.
             if cfg.evaluators.ingest_silence {
                 let newest_row_age_secs = newest_row_age_secs(&conn)?;
-                let hostname =
-                    std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| {
+                    tracing::warn!("HOSTNAME env var not set; using 'localhost' for notification dedup keys — multi-host deployments may suppress alerts");
+                    "localhost".to_string()
+                });
                 out.extend(evaluate_ingest_silence(
                     &hostname,
                     newest_row_age_secs,
@@ -172,7 +174,10 @@ pub(crate) async fn run_evaluation_cycle(
 }
 
 fn build_urls_json(cfg: &NotificationsConfig) -> String {
-    serde_json::to_string(&cfg.apprise_urls).unwrap_or_else(|_| "[]".to_string())
+    serde_json::to_string(&cfg.apprise_urls).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "failed to serialize apprise_urls — notifications will be dropped");
+        "[]".to_string()
+    })
 }
 
 /// Age in seconds of the newest row in `logs`, or `None` when the table is

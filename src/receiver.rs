@@ -47,7 +47,9 @@ pub async fn start_with_storage_state(
         crate::receiver::enrichment::EnrichmentConfig::default(),
         Arc::clone(&observability),
     );
-    start_listeners(config, ingest_tx, observability).await
+    start_listeners(config, ingest_tx, observability)
+        .await
+        .map(|_handles| ())
 }
 
 /// Run one listener under supervision: restart on error or panic with
@@ -99,20 +101,39 @@ async fn supervise_listener<F, Fut>(
         );
         tokio::time::sleep(backoff).await;
         backoff = (backoff * 2).min(LISTENER_BACKOFF_MAX);
+        if backoff == LISTENER_BACKOFF_MAX {
+            error!(
+                listener = name,
+                backoff_secs = backoff.as_secs(),
+                "listener is in a sustained crash-loop; backoff ceiling reached"
+            );
+        }
     }
+}
+
+/// Supervisor `JoinHandle` pair returned by [`start_listeners`].
+///
+/// Both handles wrap the `supervise_listener` loop for a single protocol.
+/// They never exit under normal operation; an unexpected exit means the
+/// supervisor itself panicked or was aborted. Pass them to
+/// [`RuntimeCore::start_syslog`] which spawns a monitoring task and stores the
+/// monitor handle in [`MaintenanceHandles`].
+pub(crate) struct ListenerHandles {
+    pub udp: tokio::task::JoinHandle<()>,
+    pub tcp: tokio::task::JoinHandle<()>,
 }
 
 pub(crate) async fn start_listeners(
     config: ReceiverConfig,
     ingest: ingest::IngestTx,
     observability: Arc<RuntimeObservability>,
-) -> Result<()> {
+) -> Result<ListenerHandles> {
     let bind_addr = config.bind_addr();
 
     let udp_ingest = ingest.clone();
     let udp_bind = bind_addr.clone();
     let max_size = config.max_message_size;
-    tokio::spawn(supervise_listener(
+    let udp_handle = tokio::spawn(supervise_listener(
         "udp_syslog",
         Arc::clone(&observability),
         |obs, state| obs.set_udp_listener_state(state),
@@ -127,7 +148,7 @@ pub(crate) async fn start_listeners(
     let tcp_bind = bind_addr.clone();
     let max_tcp_connections = config.max_tcp_connections;
     let tcp_idle_timeout_secs = config.tcp_idle_timeout_secs;
-    tokio::spawn(supervise_listener(
+    let tcp_handle = tokio::spawn(supervise_listener(
         "tcp_syslog",
         Arc::clone(&observability),
         |obs, state| obs.set_tcp_listener_state(state),
@@ -156,5 +177,8 @@ pub(crate) async fn start_listeners(
         "Syslog listeners started (supervised)"
     );
 
-    Ok(())
+    Ok(ListenerHandles {
+        udp: udp_handle,
+        tcp: tcp_handle,
+    })
 }

@@ -195,7 +195,10 @@ impl CortexService {
             // distinct client-visible error class (full-review AH1).
             Ok(r) => r.map_err(|e| match e.downcast::<ServiceError>() {
                 Ok(svc) => svc,
-                Err(e) => ServiceError::Internal(e),
+                Err(e) => {
+                    tracing::debug!(error = %e, "anyhow error not a ServiceError, classifying as Internal");
+                    ServiceError::Internal(e)
+                }
             }),
         };
 

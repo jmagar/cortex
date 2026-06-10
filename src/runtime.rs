@@ -74,6 +74,12 @@ pub struct MaintenanceHandles {
     session_rollup: Option<JoinHandle<()>>,
     timeline_rollup: Option<JoinHandle<()>>,
     optimize: Option<JoinHandle<()>>,
+    /// Monitors the two syslog supervisor JoinHandles (UDP + TCP). The
+    /// supervisors loop forever under normal operation; this task logs an error
+    /// if either exits unexpectedly (panic or abort) so silent ingest loss is
+    /// observable. Stored here so shutdown can join/abort it like the other
+    /// maintenance tasks.
+    syslog_monitor: Option<JoinHandle<()>>,
 }
 
 impl MaintenanceHandles {
@@ -124,6 +130,7 @@ impl MaintenanceHandles {
             self.session_rollup,
             self.timeline_rollup,
             self.optimize,
+            self.syslog_monitor,
         ]
         .into_iter()
         .flatten()
@@ -320,13 +327,56 @@ impl RuntimeCore {
         }
     }
 
-    pub async fn start_syslog(&self) -> Result<()> {
-        receiver::start_listeners(
+    /// Start the supervised syslog listeners and attach a monitoring task to
+    /// `handles`.
+    ///
+    /// The monitoring task awaits both supervisor `JoinHandle`s concurrently.
+    /// Supervisors loop forever under normal operation; if either exits
+    /// (unexpected panic or abort), the monitor logs a `tracing::error!` so
+    /// silent ingest loss surfaces in logs and metrics rather than being
+    /// invisible. The monitor handle is stored in
+    /// [`MaintenanceHandles::syslog_monitor`] so it participates in the
+    /// cooperative shutdown drain.
+    pub async fn start_syslog(&self, handles: &mut MaintenanceHandles) -> Result<()> {
+        let listener_handles = receiver::start_listeners(
             self.config.receiver.clone(),
             self.ingest.clone(),
             Arc::clone(&self.observability),
         )
-        .await
+        .await?;
+
+        let monitor = tokio::spawn(async move {
+            tokio::select! {
+                res = listener_handles.udp => {
+                    match res {
+                        Ok(()) => tracing::error!(
+                            "syslog supervisor task (udp) exited unexpectedly — \
+                             listener will not restart"
+                        ),
+                        Err(e) => tracing::error!(
+                            error = %e,
+                            "syslog supervisor task (udp) exited unexpectedly — \
+                             listener will not restart: {}", e
+                        ),
+                    }
+                }
+                res = listener_handles.tcp => {
+                    match res {
+                        Ok(()) => tracing::error!(
+                            "syslog supervisor task (tcp) exited unexpectedly — \
+                             listener will not restart"
+                        ),
+                        Err(e) => tracing::error!(
+                            error = %e,
+                            "syslog supervisor task (tcp) exited unexpectedly — \
+                             listener will not restart: {}", e
+                        ),
+                    }
+                }
+            }
+        });
+        handles.syslog_monitor = Some(monitor);
+        Ok(())
     }
 
     pub fn spawn_maintenance_tasks(&self) -> MaintenanceHandles {
@@ -366,6 +416,7 @@ impl RuntimeCore {
             session_rollup,
             timeline_rollup,
             optimize,
+            syslog_monitor: None,
         }
     }
 
@@ -397,7 +448,7 @@ impl RuntimeCore {
                     }
                     _ = interval.tick() => {}
                 }
-                observability.record_task_tick("optimize");
+                observability.record_task_tick("optimize"); // records loop scheduled (not completion)
                 let Ok(_permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("Maintenance limiter closed");
                     continue;
@@ -469,7 +520,7 @@ impl RuntimeCore {
                     }
                     eager = false;
                 }
-                observability.record_task_tick("session_rollup");
+                observability.record_task_tick("session_rollup"); // records loop scheduled (not completion)
                 let Ok(permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("session_rollup: maintenance limiter closed");
                     continue;
@@ -547,7 +598,7 @@ impl RuntimeCore {
                     }
                     eager = false;
                 }
-                observability.record_task_tick("timeline_rollup");
+                observability.record_task_tick("timeline_rollup"); // records loop scheduled (not completion)
                 let Ok(permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("timeline_rollup: maintenance limiter closed");
                     continue;

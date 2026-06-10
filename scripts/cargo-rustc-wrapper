@@ -66,10 +66,13 @@ done
 
 if [ -n "${CORTEX_RUSTC_WRAPPER_DELEGATE:-}" ]; then
   delegate=("$CORTEX_RUSTC_WRAPPER_DELEGATE" "$rustc")
-elif [ "${CORTEX_RUSTC_WRAPPER_NO_SCCACHE:-0}" != "1" ] \
-  && command -v sccache >/dev/null 2>&1 \
-  && sccache --version >/dev/null 2>&1; then
-  delegate=(sccache "$rustc")
+elif [ "${CORTEX_RUSTC_WRAPPER_NO_SCCACHE:-0}" != "1" ] && command -v sccache >/dev/null 2>&1; then
+  if sccache --version >/dev/null 2>&1; then
+    delegate=(sccache "$rustc")
+  else
+    echo "cargo-rustc-wrapper: warning: sccache found but --version check failed; falling back to plain rustc (cache disabled)" >&2
+    delegate=("$rustc")
+  fi
 else
   delegate=("$rustc")
 fi
@@ -93,7 +96,10 @@ fi
 
 case "$out" in
   target/release/deps/cortex-*|*/target/release/deps/cortex-*|.cache/cargo/release/deps/cortex-*|*/.cache/cargo/release/deps/cortex-*) ;;
-  *) exit 0 ;;
+  *)
+    echo "cargo-rustc-wrapper: warning: cortex bin built at unexpected path '$out'; skipping local install" >&2
+    exit 0
+    ;;
 esac
 
 local_bin="${CORTEX_RUSTC_WRAPPER_LOCAL_BIN:-$HOME/.local/bin/cortex}"

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use tokio::task::JoinHandle;
 
 use crate::config::{DockerHostConfig, DockerIngestConfig};
@@ -69,6 +69,13 @@ async fn run_host_forever(
                 Ok(()) => {
                     tracing::warn!(host = %host.name, "Docker ingest host stream ended; reconnecting");
                     StreamEnd::Clean
+                }
+                Err(ref e) if is_expected_disconnect(e) => {
+                    tracing::debug!(
+                        host = %host.name,
+                        "Docker ingest host stream closed by daemon; reconnecting"
+                    );
+                    StreamEnd::ExpectedDisconnect
                 }
                 Err(e) => {
                     observability.record_docker_ingest_stream_failure();
@@ -238,7 +245,17 @@ async fn follow_container_events(
 }
 
 fn prune_finished_tasks(tasks: &mut HashMap<String, JoinHandle<()>>) {
-    tasks.retain(|_, handle| !handle.is_finished());
+    tasks.retain(|container_id, handle| {
+        if !handle.is_finished() {
+            return true;
+        }
+        if let Some(Err(ref e)) = handle.now_or_never() {
+            if e.is_panic() {
+                tracing::error!(container_id = %container_id, "container log task panicked");
+            }
+        }
+        false
+    });
 }
 
 fn is_expected_disconnect(e: &anyhow::Error) -> bool {

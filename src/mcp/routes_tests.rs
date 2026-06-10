@@ -162,6 +162,27 @@ async fn integration_health_returns_503_when_listener_down() {
     assert_eq!(value["reason"], "syslog listener down");
 }
 
+/// TCP-only down (UDP stays NotStarted) must still fail /health with 503.
+#[tokio::test]
+async fn integration_health_returns_503_when_tcp_listener_down() {
+    let h = TestHarness::new();
+    h.state
+        .observability
+        .set_tcp_listener_state(crate::observability::ListenerState::Down);
+    let app = router(h.state);
+    let request = Request::builder()
+        .method("GET")
+        .uri("/health")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["status"], "error");
+    assert_eq!(value["reason"], "syslog listener down");
+}
+
 /// Alive listeners (the normal serve-mode state) keep /health at 200.
 #[tokio::test]
 async fn integration_health_returns_200_with_alive_listeners() {
