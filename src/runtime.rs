@@ -1,3 +1,18 @@
+//! `RuntimeCore` — the composition root shared by every long-running mode.
+//!
+//! Owns config loading, the SQLite pool, the ingest writer, the resolved auth
+//! policy, and `spawn_maintenance_tasks`: retention purge (hourly), storage
+//! budget enforcement (`CORTEX_CLEANUP_INTERVAL_SECS`), error-signature scan,
+//! the three notification tasks (dispatcher / evaluator / digest), inventory
+//! refresh (5 min) and one-shot graph backfill, AI session rollup (300s),
+//! timeline rollup (60s), `PRAGMA optimize` (6h), and Docker ingest streams.
+//! Syslog listeners are started separately via `start_syslog` and supervised
+//! with restart + backoff; their liveness gates `/health`.
+//!
+//! Invariant: maintenance work serializes on a single `maintenance_permit`
+//! semaphore so background jobs never contend with each other for the write
+//! lock. Shutdown drains the ingest channel, then checkpoints the WAL.
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -365,6 +380,7 @@ impl RuntimeCore {
     fn spawn_optimize_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let handle = tokio::spawn(async move {
             let mut interval =
                 background_interval(tokio::time::Duration::from_secs(OPTIMIZE_INTERVAL_SECS));
@@ -377,6 +393,7 @@ impl RuntimeCore {
                     }
                     _ = interval.tick() => {}
                 }
+                observability.record_task_tick("optimize");
                 let Ok(_permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("Maintenance limiter closed");
                     continue;
@@ -418,6 +435,7 @@ impl RuntimeCore {
     fn spawn_session_rollup_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let handle = tokio::spawn(async move {
             // Initial refresh after a short delay (lets startup settle), then on
             // a fixed interval. `background_interval` fires the first tick after
@@ -447,6 +465,7 @@ impl RuntimeCore {
                     }
                     eager = false;
                 }
+                observability.record_task_tick("session_rollup");
                 let Ok(permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("session_rollup: maintenance limiter closed");
                     continue;
@@ -497,6 +516,7 @@ impl RuntimeCore {
     fn spawn_timeline_rollup_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
         let pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let handle = tokio::spawn(async move {
             let mut interval = background_interval(tokio::time::Duration::from_secs(
                 TIMELINE_ROLLUP_REFRESH_SECS,
@@ -523,6 +543,7 @@ impl RuntimeCore {
                     }
                     eager = false;
                 }
+                observability.record_task_tick("timeline_rollup");
                 let Ok(permit) = Arc::clone(&limiter).acquire_owned().await else {
                     tracing::error!("timeline_rollup: maintenance limiter closed");
                     continue;
@@ -649,6 +670,7 @@ impl RuntimeCore {
         }
         let pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let interval_secs = cfg.scan_interval_secs.max(1);
         let handle = tokio::spawn(async move {
             let mut interval = background_interval(tokio::time::Duration::from_secs(interval_secs));
@@ -661,6 +683,7 @@ impl RuntimeCore {
                     }
                     _ = interval.tick() => {}
                 }
+                observability.record_task_tick("error_scan");
                 tracing::debug!("error_scan: scan cycle starting");
                 match crate::app::error_detection::run_error_scan(
                     Arc::clone(&pool),
@@ -684,6 +707,7 @@ impl RuntimeCore {
         }
         let purge_pool = Arc::clone(&self.pool);
         let limiter = Arc::clone(&self.maintenance_permit);
+        let observability = Arc::clone(&self.observability);
         let fts_merge_pages = self.config.enrichment.fts_merge_pages;
         let cleanup_chunk_size = self.config.storage.cleanup_chunk_size;
         let handle = tokio::spawn(async move {
@@ -703,6 +727,7 @@ impl RuntimeCore {
                     continue;
                 };
                 let pool = Arc::clone(&purge_pool);
+                observability.record_task_tick("retention_purge");
                 tracing::debug!(retention_days, "Retention purge tick started");
                 // Tag-based purge runs FIRST so the global purge below scans
                 // a smaller working set and FTS merge work consolidates.
@@ -830,6 +855,7 @@ impl RuntimeCore {
                     .as_ref()
                     .map(|s| s.write_blocked)
                     .unwrap_or(false);
+                observability.record_task_tick("storage_budget");
                 tracing::debug!(
                     cleanup_interval_secs = storage_config.cleanup_interval_secs,
                     "Storage budget enforcement tick started"

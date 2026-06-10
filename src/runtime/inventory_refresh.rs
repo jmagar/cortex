@@ -100,6 +100,7 @@ pub fn spawn(
                     _ = interval.tick() => {}
                 }
             }
+            observability.record_task_tick("inventory_refresh");
             refresh_and_project(&pool, &maintenance_limiter).await;
             last_refresh = Some(Instant::now());
         }

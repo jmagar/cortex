@@ -1,3 +1,18 @@
+//! SQLite pool construction, schema, and migrations for the log intelligence
+//! core.
+//!
+//! Owns the full schema: the `logs` table + FTS5 index, AI/graph/heartbeat
+//! projections, and the **31 sequential migrations** tracked by
+//! `KNOWN_SCHEMA_VERSION`. Migrations run at startup; heavy ones log
+//! `Migration N: starting ...` lines, and the one-time
+//! `auto_vacuum=INCREMENTAL` conversion VACUUM is logged loudly (it can take
+//! minutes on large DBs).
+//!
+//! Invariants: SQLite allows a single writer — callers serialize writes via
+//! `write_lock()`, and the service layer issues only `pool_size - 1` read
+//! permits so the ingest batch writer can always reach a connection. WAL
+//! mode plus `synchronous=NORMAL` is the standing durability trade-off.
+
 use anyhow::Result;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;

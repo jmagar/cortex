@@ -1,3 +1,18 @@
+//! All read-path SQL for the log intelligence core lives here — every SELECT
+//! behind the MCP actions, `/api/*` routes, and direct CLI queries.
+//!
+//! Key invariants:
+//! - **All query SQL lives in this module** (deletes live in `maintenance.rs`,
+//!   schema in `pool.rs`). Handlers never build SQL strings.
+//! - Every query uses parameterized bindings — no user input is interpolated.
+//! - FTS5 searches JOIN `logs_fts` back to `logs`, which prunes phantom rows
+//!   left behind by retention/storage deletes at query time.
+//! - The FTS fast path caps match-set materialization at the 200K most-recent
+//!   matches (`SEARCH_FTS_FAST_PATH_MATCH_CAP`); severity-only filtered
+//!   searches use the same capped candidate plan.
+//! - Unbounded `sessions` reads are served from the `ai_session_rollup`
+//!   materialization; time-windowed reads run live against `logs`.
+
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
 
@@ -1665,11 +1680,17 @@ pub fn search_ai_incidents(pool: &DbPool, params: &AiIncidentParams) -> Result<A
                 let term_variety = found_terms.len() as f64;
                 let priority_score = abuse_count as f64 * 10.0 + density * 2.0 + term_variety;
 
-                let priority_label = match priority_score as u64 {
-                    0..=14 => "low",
-                    15..=29 => "medium",
-                    30..=49 => "high",
-                    _ => "critical",
+                // Compare the f64 directly: `as u64` truncates and maps NaN
+                // to 0, which would mislabel a pathological score as "low"
+                // (full-review QL2).
+                let priority_label = if priority_score < 15.0 {
+                    "low"
+                } else if priority_score < 30.0 {
+                    "medium"
+                } else if priority_score < 50.0 {
+                    "high"
+                } else {
+                    "critical"
                 }
                 .to_string();
 
@@ -1709,10 +1730,12 @@ pub fn search_ai_incidents(pool: &DbPool, params: &AiIncidentParams) -> Result<A
         .collect();
 
     // Sort by priority_score descending, then last_seen descending.
+    // total_cmp is a total order (NaN sorts deterministically) — the
+    // partial_cmp/unwrap_or(Equal) idiom can produce a non-total order if a
+    // NaN ever sneaks into a score (full-review QL3).
     incidents.sort_by(|a, b| {
         b.priority_score
-            .partial_cmp(&a.priority_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .total_cmp(&a.priority_score)
             .then_with(|| b.last_seen.cmp(&a.last_seen))
     });
 

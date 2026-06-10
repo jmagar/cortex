@@ -2691,3 +2691,62 @@ fn bench_stats_and_sessions() {
          refresh_ms={refresh_ms:.1} sessions_speedup={speedup:.1}x"
     );
 }
+
+/// full-review QM2: the 15-column log projection is written inline at ~14
+/// sites across queries.rs / analytics.rs / ingest.rs, and `map_row` /
+/// `map_row_offset` / `map_row_with_raw` read columns BY ORDINAL POSITION —
+/// reordering or inserting a column at one site without updating the readers
+/// silently mis-maps fields with no compile error. This drift test extracts
+/// every projection that ends in `metadata_json` from the source text and
+/// asserts it carries the canonical column order. (`map_row_with_raw` selects
+/// `..., metadata_json, raw`; the canonical prefix still applies.)
+#[test]
+fn inline_log_projections_match_map_row_column_order() {
+    // Two canonical shapes exist: `map_row` (15 cols) and `map_row_with_raw`
+    // (16 cols, `raw` between `message` and `received_at`).
+    const CANON: &str = "id timestamp hostname facility severity app_name process_id message \
+         received_at source_ip ai_tool ai_project ai_session_id ai_transcript_path metadata_json";
+    const CANON_WITH_RAW: &str = "id timestamp hostname facility severity app_name process_id \
+         message raw received_at source_ip ai_tool ai_project ai_session_id ai_transcript_path \
+         metadata_json";
+    let canon_tokens: Vec<&str> = CANON.split_whitespace().collect();
+    let canon_raw_tokens: Vec<&str> = CANON_WITH_RAW.split_whitespace().collect();
+
+    let sources = [
+        ("queries.rs", include_str!("queries.rs")),
+        ("analytics.rs", include_str!("analytics.rs")),
+        ("ingest.rs", include_str!("ingest.rs")),
+    ];
+    let re = regex::Regex::new(
+        r"SELECT\s+((?:[a-zA-Z_][a-zA-Z_0-9]*\.)?id[\sa-zA-Z_0-9,.\\]*?metadata_json)",
+    )
+    .unwrap();
+
+    let mut checked = 0usize;
+    for (name, src) in sources {
+        for cap in re.captures_iter(src) {
+            let projection = &cap[1];
+            let tokens: Vec<String> = projection
+                .split([',', '\\'])
+                .map(|t| t.trim())
+                .filter(|t| !t.is_empty())
+                .map(|t| {
+                    // Strip any table alias prefix ("l.id" -> "id").
+                    t.rsplit('.').next().unwrap_or(t).to_string()
+                })
+                .collect();
+            assert!(
+                tokens == canon_tokens || tokens == canon_raw_tokens,
+                "{name}: inline log projection diverges from map_row / \
+                 map_row_with_raw column order — update the projection AND the \
+                 row readers together:\n{projection}\ngot: {tokens:?}"
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= 10,
+        "expected to find at least 10 inline projections; the extraction regex \
+         may have rotted (found {checked})"
+    );
+}

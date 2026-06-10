@@ -136,6 +136,14 @@ impl CortexService {
         }
     }
 
+    /// One-shot SQLite schema-version probe. Sync because callers run during
+    /// startup construction (e.g. `ApiState::new` caches it for /api/version)
+    /// before the runtime serves requests. Exists so transport layers never
+    /// reach into `db::` directly (full-review AL1).
+    pub fn schema_version(&self) -> anyhow::Result<i64> {
+        Ok(crate::db::read_schema_version_info(&self.pool)?.version)
+    }
+
     async fn run_db<F, T>(&self, op: &'static str, f: F) -> ServiceResult<T>
     where
         F: FnOnce(&DbPool) -> anyhow::Result<T> + Send + 'static,

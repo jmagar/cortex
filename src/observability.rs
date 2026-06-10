@@ -78,6 +78,11 @@ pub struct RuntimeObservability {
     last_docker_ingest_error_at: Mutex<Option<String>>,
     last_remote_docker_event_stream_error_at: Mutex<Option<String>>,
     last_remote_docker_event_stream_error: Mutex<Option<String>>,
+    /// Last-tick timestamps for the ~12 background maintenance tasks, keyed
+    /// by task name. Surfaced via /health/full so operators can see which
+    /// loops are actually running instead of inferring from log archaeology
+    /// (full-review AM5).
+    maintenance_task_ticks: Mutex<std::collections::BTreeMap<&'static str, String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,6 +129,8 @@ pub struct RuntimeObservabilitySnapshot {
     pub last_docker_ingest_error_at: Option<String>,
     pub last_remote_docker_event_stream_error_at: Option<String>,
     pub last_remote_docker_event_stream_error: Option<String>,
+    /// Background task name → last tick timestamp (RFC3339).
+    pub maintenance_task_ticks: std::collections::BTreeMap<&'static str, String>,
 }
 
 impl RuntimeObservability {
@@ -462,7 +469,20 @@ impl RuntimeObservability {
                 .lock()
                 .expect("last_remote_docker_event_stream_error mutex poisoned")
                 .clone(),
+            maintenance_task_ticks: self
+                .maintenance_task_ticks
+                .lock()
+                .expect("maintenance_task_ticks mutex poisoned")
+                .clone(),
         }
+    }
+
+    /// Record that a named background task completed a loop iteration.
+    pub fn record_task_tick(&self, task: &'static str) {
+        self.maintenance_task_ticks
+            .lock()
+            .expect("maintenance_task_ticks mutex poisoned")
+            .insert(task, now_iso());
     }
 
     fn touch_ingest(&self) {

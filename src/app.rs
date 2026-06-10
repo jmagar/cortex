@@ -155,6 +155,9 @@ pub use models::{
     UsageBlocksRequest,
     UsageBlocksResponse,
 };
+// Transport-facing constants re-exported so surfaces (mcp/schemas.rs) never
+// import db:: directly — app/ is the only db consumer (full-review AL1).
+pub(crate) use crate::db::{PATTERN_SCAN_LIMIT_MAX, SEVERITY_LEVELS};
 pub use os_adapter::SystemOsAdapter;
 pub use services::{run_compose_status, run_service_logs, CortexService};
 pub use time::parse_optional_timestamp;

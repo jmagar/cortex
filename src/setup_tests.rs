@@ -327,6 +327,34 @@ fn cortex_home_dir_is_not_inferred_from_non_home_binary() {
     assert_eq!(cortex_home_dir_from_exe_path(exe), None);
 }
 
+/// full-review QM6: only a filesystem-root `/home` (or `/var/home`)
+/// qualifies — nested directories merely NAMED `home` must not redirect
+/// config resolution.
+#[test]
+fn cortex_home_dir_is_not_inferred_from_nested_home_directories() {
+    for exe in [
+        "/opt/home/svc/bin/cortex",
+        "/tmp/home/evil/cortex",
+        "/build/home/ci/cortex",
+    ] {
+        assert_eq!(
+            cortex_home_dir_from_exe_path(std::path::Path::new(exe)),
+            None,
+            "nested home dir must not match: {exe}"
+        );
+    }
+}
+
+#[test]
+fn cortex_home_dir_is_inferred_from_ostree_var_home() {
+    let exe = std::path::Path::new("/var/home/jmagar/.local/bin/cortex");
+
+    assert_eq!(
+        cortex_home_dir_from_exe_path(exe).as_deref(),
+        Some(std::path::Path::new("/var/home/jmagar/.cortex"))
+    );
+}
+
 #[test]
 fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     let unit = ai_watch_service_unit(

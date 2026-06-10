@@ -398,12 +398,19 @@ pub(crate) struct EnvResult {
     pub(crate) values: BTreeMap<String, String>,
 }
 
+/// Infer `<user>/.cortex` from the executable path when the binary lives
+/// under `/home/<user>/...` but `$HOME` points elsewhere (sudo, systemd).
+///
+/// Only a filesystem-root `/home` (or ostree-style `/var/home`) qualifies —
+/// matching ANY ancestor literally named `home` also captured layouts like
+/// `/opt/home/svc/bin` or `/tmp/home/x` and silently redirected config
+/// resolution (full-review QM6).
 fn cortex_home_dir_from_exe_path(exe: &Path) -> Option<PathBuf> {
     for ancestor in exe.ancestors() {
         let Some(parent) = ancestor.parent() else {
             continue;
         };
-        if parent.file_name().and_then(|name| name.to_str()) == Some("home") {
+        if parent == Path::new("/home") || parent == Path::new("/var/home") {
             return Some(ancestor.join(".cortex"));
         }
     }
@@ -426,6 +433,10 @@ pub fn cortex_home_dir() -> io::Result<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_candidate) = cortex_home_dir_from_exe_path(&exe) {
             if exe_candidate.join(".env").is_file() || exe_candidate.is_dir() {
+                tracing::debug!(
+                    candidate = %exe_candidate.display(),
+                    "cortex_home_dir: using exe-derived home (HOME candidate absent)"
+                );
                 return validate_absolute_home(exe_candidate);
             }
         }

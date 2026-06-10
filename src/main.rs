@@ -342,7 +342,6 @@ async fn serve_mcp() -> Result<()> {
             cortex::config::mcp_bind_is_loopback(&runtime.config),
             runtime.config.mcp.allowed_origins.clone(),
             runtime.auth_policy().clone(),
-            runtime.pool(),
             runtime.config.mcp.static_token_is_admin,
         )?;
         app = app.merge(api::router(api_state)?);

@@ -1,3 +1,17 @@
+//! Handler implementations for the single action-dispatched `cortex` MCP tool
+//! (log intelligence core).
+//!
+//! The authoritative action registry is `ACTION_SPECS` in `actions.rs`; this
+//! module supplies the executable branch for each `ActionHandler`. Handlers
+//! parse the tool arguments into typed `src/app` request models and delegate
+//! to `CortexService` — business policy (limits, validation, correlation
+//! rules) lives in the service layer so MCP, REST, and CLI stay consistent.
+//!
+//! Invariants: scope gating (`cortex:read` / `cortex:admin`) happens before
+//! dispatch in `rmcp_server.rs`; unknown actions are denied fail-closed.
+//! Handlers return typed service errors that the server maps to MCP error
+//! classes (invalid_params / retryable / not_found / conflict / internal).
+
 use lab_auth::AuthContext;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};

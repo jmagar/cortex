@@ -1,3 +1,15 @@
+//! Heartbeat telemetry ingest (`POST /v1/heartbeats`) — server side of the
+//! fleet inventory/graph sub-product's host-state pipeline.
+//!
+//! Receives bounded JSON snapshots (load, memory, disk, top processes) from
+//! the host-local agent in `heartbeat_agent.rs`, mounted on the shared HTTP
+//! listener (port 3100) next to MCP and OTLP. Rows back the `host_state`,
+//! `fleet_state`, and `correlate_state` actions and are retained 14 days.
+//!
+//! Invariants: request bodies are capped at 256 KiB; auth mirrors MCP — the
+//! static `CORTEX_TOKEN` bearer when configured, with non-loopback
+//! unauthenticated exposure rejected at startup by config validation.
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;

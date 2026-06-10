@@ -964,7 +964,7 @@ pub(crate) fn cluster_pattern_rows(
             hostname,
             message,
         } = row;
-        let template = crate::app::error_detection::normalize::normalize_template(&message);
+        let template = crate::normalize::normalize_template(&message);
         let entry = by_template.entry(template).or_insert_with(|| Acc {
             count: 0,
             sample: message.clone(),
