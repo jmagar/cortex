@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: cargo-rustc-wrapper <rustc> [rustc-args...]" >&2
+  exit 2
+fi
+
+repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+rustc="$1"
+shift
+if [ "$rustc" = "rustc" ] && command -v rustup >/dev/null 2>&1; then
+  rustc="$(cd "$repo" && rustup which rustc 2>/dev/null || printf '%s' "$rustc")"
+fi
+
+crate_name=""
+crate_type=""
+out=""
+out_dir=""
+extra_filename=""
+is_test=0
+args=("$@")
+
+i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  arg="${args[$i]}"
+  case "$arg" in
+    --crate-name)
+      i=$((i + 1))
+      crate_name="${args[$i]:-}"
+      ;;
+    --crate-name=*)
+      crate_name="${arg#--crate-name=}"
+      ;;
+    --crate-type)
+      i=$((i + 1))
+      crate_type="${args[$i]:-}"
+      ;;
+    --crate-type=*)
+      crate_type="${arg#--crate-type=}"
+      ;;
+    -o)
+      i=$((i + 1))
+      out="${args[$i]:-}"
+      ;;
+    --out-dir)
+      i=$((i + 1))
+      out_dir="${args[$i]:-}"
+      ;;
+    -C)
+      i=$((i + 1))
+      codegen_opt="${args[$i]:-}"
+      case "$codegen_opt" in
+        extra-filename=*) extra_filename="${codegen_opt#extra-filename=}" ;;
+      esac
+      ;;
+    -Cextra-filename=*)
+      extra_filename="${arg#-Cextra-filename=}"
+      ;;
+    --test)
+      is_test=1
+      ;;
+  esac
+  i=$((i + 1))
+done
+
+if [ -n "${CORTEX_RUSTC_WRAPPER_DELEGATE:-}" ]; then
+  delegate=("$CORTEX_RUSTC_WRAPPER_DELEGATE" "$rustc")
+elif [ "${CORTEX_RUSTC_WRAPPER_NO_SCCACHE:-0}" != "1" ] \
+  && command -v sccache >/dev/null 2>&1 \
+  && sccache --version >/dev/null 2>&1; then
+  delegate=(sccache "$rustc")
+else
+  delegate=("$rustc")
+fi
+"${delegate[@]}" "${args[@]}"
+
+if [ -z "$out" ] && [ -n "$out_dir" ] && [ -n "$extra_filename" ]; then
+  out="$out_dir/$crate_name$extra_filename"
+fi
+
+# Deploy side effect: keep ~/.local/bin/cortex fresh after RELEASE builds only.
+# - Debug and test builds never deploy: `cargo test` enables the test-support
+#   feature via unification, and that binary must never land on PATH.
+# - The git-tracked plugin bundle (plugins/cortex/bin/cortex) is owned by
+#   `just build-plugin` and is intentionally never written here.
+# - The install is atomic (mktemp + mv). mv replaces a `just link-bin` symlink
+#   itself rather than writing through it into Cargo's release artifact.
+# - A failed install warns but never fails the compilation.
+if [ "$crate_name" != "cortex" ] || [ "$crate_type" != "bin" ] || [ "$is_test" -eq 1 ] || [ -z "$out" ] || [ ! -x "$out" ]; then
+  exit 0
+fi
+
+case "$out" in
+  target/release/deps/cortex-*|*/target/release/deps/cortex-*|.cache/cargo/release/deps/cortex-*|*/.cache/cargo/release/deps/cortex-*) ;;
+  *) exit 0 ;;
+esac
+
+local_bin="${CORTEX_RUSTC_WRAPPER_LOCAL_BIN:-$HOME/.local/bin/cortex}"
+
+deploy_local_bin() {
+  local bin_dir tmp_bin
+  bin_dir="$(dirname "$local_bin")" || return 1
+  mkdir -p "$bin_dir" || return 1
+  tmp_bin="$(mktemp "$bin_dir/.cortex-install.XXXXXX")" || return 1
+  if cp "$out" "$tmp_bin" && chmod 755 "$tmp_bin" && mv -f "$tmp_bin" "$local_bin"; then
+    return 0
+  fi
+  rm -f "$tmp_bin"
+  return 1
+}
+
+deploy_local_bin \
+  || echo "cargo-rustc-wrapper: warning: failed to install $out to $local_bin (build unaffected)" >&2
+exit 0

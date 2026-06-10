@@ -398,6 +398,44 @@ fn imports_agent_spool_as_agent_command_rows() {
 }
 
 #[test]
+fn agent_spool_malformed_line_with_multibyte_at_preview_boundary_no_panic() {
+    // Regression (bead syslog-mcp-8ouq): the JSON-parse error branch logs an
+    // 80-byte preview of the offending line. The original code byte-sliced at
+    // index 80, panicking when a multi-byte UTF-8 character straddled that
+    // boundary. Sweep pad lengths so the 4-byte emoji covers every alignment
+    // around byte 80, including mid-character offsets.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("cortex.db");
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let spool_dir = dir.path().join("private-state");
+    std::fs::create_dir(&spool_dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spool_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let spool = spool_dir.join("claude-commands.jsonl");
+    let mut file = std::fs::File::create(&spool).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spool, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let mut expected_errors = 0;
+    for pad in 60..=80 {
+        // Not valid JSON, longer than 80 bytes, multibyte char near byte 80.
+        writeln!(file, "{}\u{1F600}tail-not-json", "a".repeat(pad)).unwrap();
+        expected_errors += 1;
+    }
+    drop(file);
+
+    let result = import_agent_command_spool(&pool, &spool).unwrap();
+
+    assert_eq!(result.errors, expected_errors);
+    assert_eq!(result.imported, 0);
+}
+
+#[test]
 #[serial]
 fn wrapper_preserves_command_exit_when_spool_append_fails() {
     // `["true"]` is a single token, so the wrapper runs it via `$SHELL -c true`

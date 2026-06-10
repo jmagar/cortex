@@ -169,6 +169,22 @@ fn test_parse_syslog_cef_all_none_no_panic() {
     assert!(!parsed.hostname.is_empty());
 }
 
+#[test]
+fn test_parse_syslog_cef_all_none_multibyte_at_preview_boundary_no_panic() {
+    // Regression (bead syslog-mcp-7f0y): the malformed-CEF warn branch builds a
+    // 200-byte preview of `full_text` ("{app} {message}"). The original code
+    // byte-sliced at index 200, which panics when a multi-byte UTF-8 character
+    // straddles that boundary — a single crafted LAN datagram could kill the
+    // UDP listener. Sweep pad lengths so the 4-byte emoji lands on every
+    // alignment around byte 200 of full_text, including mid-character offsets.
+    for pad in 180..=200 {
+        let body = format!("CEF:{}\u{1F600}tail-with-no-pipes", "a".repeat(pad));
+        let raw = format!("<14>1 2026-01-01T00:00:00Z 2026-01-01T00:00:00Z App - - - {body}");
+        let parsed = parse_syslog(&raw, "192.168.1.1:514".to_string());
+        assert!(!parsed.hostname.is_empty(), "pad={pad}");
+    }
+}
+
 // ------------------------------------------------------------------ //
 // parse_syslog() — new comprehensive tests (bead cortex-8g4)     //
 // ------------------------------------------------------------------ //

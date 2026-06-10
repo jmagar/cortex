@@ -116,6 +116,9 @@ test-support = []
 [dev-dependencies]
 cortex = { path = ".", features = ["test-support"] }
 serial_test = "3"
+# test-util enables tokio::test(start_paused) for the listener-supervision
+# tests so backoff sleeps advance instantly instead of in real time.
+tokio = { version = "1", features = ["test-util"] }
 tower = { version = "0.5", features = ["util"] }
 rmcp = { version = "1.6.0", default-features = false, features = [
   "client",

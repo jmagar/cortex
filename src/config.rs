@@ -134,6 +134,15 @@ pub struct NotificationEvaluatorsConfig {
     pub disk_fill: bool,
     /// Enable ingest queue pressure detection. Default: true.
     pub ingest_queue_pressure: bool,
+    /// Enable ingest-silence detection: fire when the DB has logs but the
+    /// newest row is older than `ingest_silence_threshold_secs`. This is the
+    /// push-path complement to the pull-only `silent_hosts`/`ingest_rate`
+    /// actions — a dead listener or broken forwarding chain otherwise goes
+    /// unnoticed until someone asks (bead syslog-mcp-7f0y). Default: true.
+    pub ingest_silence: bool,
+    /// Age of the newest ingested row (seconds) after which ingest is
+    /// considered silent. Default: 900 (15 minutes).
+    pub ingest_silence_threshold_secs: u64,
     /// How often to run evaluation (seconds). Default: 300 (5 minutes).
     pub evaluator_interval_secs: u64,
 }
@@ -147,6 +156,8 @@ impl Default for NotificationEvaluatorsConfig {
             authelia_mfa_fail: true,
             disk_fill: true,
             ingest_queue_pressure: true,
+            ingest_silence: true,
+            ingest_silence_threshold_secs: 900,
             evaluator_interval_secs: 300,
         }
     }
@@ -1459,6 +1470,12 @@ fn validate_notifications_config(cfg: &NotificationsConfig) -> anyhow::Result<()
     }
     if cfg.evaluators.evaluator_interval_secs == 0 {
         anyhow::bail!("[notifications] evaluator_interval_secs must be > 0");
+    }
+    if cfg.evaluators.ingest_silence && cfg.evaluators.ingest_silence_threshold_secs == 0 {
+        anyhow::bail!(
+            "[notifications] ingest_silence_threshold_secs must be > 0 when \
+             ingest_silence is enabled"
+        );
     }
     // Trim whitespace before checking emptiness to catch " " entries.
     let has_apprise_url = !cfg.apprise_url.trim().is_empty();

@@ -254,6 +254,54 @@ pub fn evaluate_ingest_queue_pressure(
     })
 }
 
+/// Evaluate ingest silence — the push-path complement to a dead listener.
+///
+/// This is NOT a log-scan rule — like `evaluate_disk_fill` it takes a metric:
+/// the age in seconds of the newest ingested row. The evaluator computes it
+/// from `MAX(received_at)` each cycle.
+///
+/// Fires when the DB has logs but the newest row is older than
+/// `threshold_secs`. A database with no rows at all does NOT fire — that is
+/// "ingest never started" (fresh install, no forwarders yet), not "ingest
+/// stopped", and alerting on it would page every fresh deployment.
+///
+/// `ingest_queue_pressure` covers the opposite failure mode (queue full);
+/// this rule covers the queue staying empty because listeners are dead or the
+/// forwarding chain broke (bead syslog-mcp-7f0y).
+pub fn evaluate_ingest_silence(
+    hostname: &str,
+    newest_row_age_secs: Option<u64>,
+    threshold_secs: u64,
+    apprise_urls_json: &str,
+) -> Option<OutboxInsertParams> {
+    let age_secs = newest_row_age_secs?;
+    if threshold_secs == 0 || age_secs < threshold_secs {
+        return None;
+    }
+    let age_mins = age_secs / 60;
+    let title = escape_for_notification(&format!(
+        "[CRITICAL] cortex ingest silent on {hostname}: no logs for {age_mins} min"
+    ));
+    let body = escape_for_notification(&format!(
+        "cortex on **{hostname}** has not ingested any log rows for {age_mins} minutes \
+         (threshold: {} min).\n\n\
+         Likely causes: dead syslog listener, broken rsyslog forwarding, or a \
+         write-blocked database. Check `/health`, `cortex action=ingest_rate`, \
+         and `cortex action=silent_hosts`.",
+        threshold_secs / 60
+    ));
+    Some(OutboxInsertParams {
+        dedup_key: format!("ingest_silence:{hostname}"),
+        rule_id: "ingest_silence".to_string(),
+        severity: "critical".to_string(),
+        hostname: hostname.to_string(),
+        title,
+        body,
+        apprise_urls_json: apprise_urls_json.to_string(),
+        next_attempt_at: backoff_next_attempt_at(0),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,5 +571,31 @@ mod tests {
     fn ingest_queue_pressure_ok_does_not_fire() {
         let result = evaluate_ingest_queue_pressure("dookie", 0, 0, 0, 0, 100, "[]");
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn ingest_silence_fires_when_newest_row_exceeds_threshold() {
+        let result = evaluate_ingest_silence("dookie", Some(1800), 900, "[]");
+        let params = result.expect("silence should fire");
+        assert_eq!(params.rule_id, "ingest_silence");
+        assert_eq!(params.severity, "critical");
+        assert_eq!(params.dedup_key, "ingest_silence:dookie");
+        assert!(params.body.contains("30 minutes"));
+    }
+
+    #[test]
+    fn ingest_silence_recent_rows_do_not_fire() {
+        assert!(evaluate_ingest_silence("dookie", Some(60), 900, "[]").is_none());
+    }
+
+    #[test]
+    fn ingest_silence_empty_db_does_not_fire() {
+        // No rows ever = fresh install, not an outage.
+        assert!(evaluate_ingest_silence("dookie", None, 900, "[]").is_none());
+    }
+
+    #[test]
+    fn ingest_silence_zero_threshold_does_not_fire() {
+        assert!(evaluate_ingest_silence("dookie", Some(10_000), 0, "[]").is_none());
     }
 }

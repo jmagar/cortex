@@ -302,7 +302,12 @@ impl RuntimeCore {
     }
 
     pub async fn start_syslog(&self) -> Result<()> {
-        receiver::start_listeners(self.config.receiver.clone(), self.ingest.clone()).await
+        receiver::start_listeners(
+            self.config.receiver.clone(),
+            self.ingest.clone(),
+            Arc::clone(&self.observability),
+        )
+        .await
     }
 
     pub fn spawn_maintenance_tasks(&self) -> MaintenanceHandles {
