@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Weekly run so new RUSTSEC advisories surface via cargo-deny even when no
+  # commits land (full-review OL3). Off-peak minute per fleet guidance.
+  schedule:
+    - cron: "43 6 * * 1"
+
 
 env:
   CARGO_TERM_COLOR: always
@@ -27,6 +32,9 @@ jobs:
 
       - name: Check public identity strings
         run: bash scripts/check-public-identity.sh
+
+      - name: Check Rust module sizes
+        run: bash scripts/check-rust-module-size.sh --limit 500 src/cli.rs src/cli
 
   fmt:
     name: Formatting
@@ -67,7 +75,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Run tests
-        run: cargo test
+        # --locked: CI must never silently re-resolve Cargo.lock (full-review
+        # BM8 — an unlocked run is how rmcp drifted to 1.7 unnoticed).
+        run: cargo test --locked
 
   deny:
     name: Dependency Check (cargo-deny)

@@ -42,7 +42,7 @@ test-doc:
     cargo test --doc
 
 docker-build:
-    docker build -t cortex .
+    docker build -f config/Dockerfile -t cortex .
 
 up:
     docker compose up -d
