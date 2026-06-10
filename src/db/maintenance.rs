@@ -32,7 +32,7 @@ fn free_bytes_impl(path: &Path) -> Result<u64> {
     use std::os::windows::ffi::OsStrExt;
 
     // Declare GetDiskFreeSpaceExW inline — avoids adding a windows-sys dep.
-    extern "system" {
+    unsafe extern "system" {
         fn GetDiskFreeSpaceExW(
             lpDirectoryName: *const u16,
             lpFreeBytesAvailableToCaller: *mut u64,
