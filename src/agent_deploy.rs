@@ -265,7 +265,27 @@ pub fn deploy_agent_to_host(
     }
 }
 
+fn is_unraid(host: &str) -> bool {
+    let out = Command::new("ssh")
+        .args([
+            "-o",
+            &format!("ConnectTimeout={PROBE_TIMEOUT_SECS}"),
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "LogLevel=ERROR",
+            host,
+            "test -f /etc/unraid-version && echo yes || echo no",
+        ])
+        .output();
+    matches!(out, Ok(o) if String::from_utf8_lossy(&o.stdout).trim() == "yes")
+}
+
 fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io::Result<()> {
+    if is_unraid(host) {
+        return run_deploy_unraid(host, local_binary, config);
+    }
+
     ssh_run(host, "mkdir -p ~/.local/bin")?;
     // scp to a temp path then mv atomically — avoids ETXTBSY if the binary is
     // currently running as a service on the remote host.
@@ -296,6 +316,93 @@ fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io
     ssh_run(
         host,
         &format!("{prefix}~/.local/bin/cortex setup heartbeat-agent install"),
+    )
+}
+
+// Unraid: root fs is a RAM disk — nothing in /root survives reboot.
+// Put everything in /mnt/user/appdata/cortex (array, persistent), then
+// use `docker run --restart unless-stopped` so Docker itself persists the
+// container definition across reboots without any file on disk.
+const UNRAID_APPDATA: &str = "/mnt/user/appdata/cortex";
+const UNRAID_BIN: &str = "/mnt/user/appdata/cortex/bin/cortex";
+const UNRAID_BIN_TMP: &str = "/mnt/user/appdata/cortex/bin/cortex.new";
+const UNRAID_ENV: &str = "/mnt/user/appdata/cortex/heartbeat-agent.env";
+const UNRAID_HOST_ID: &str = "/mnt/user/appdata/cortex/heartbeat-host-id";
+const UNRAID_CONTAINER: &str = "cortex-heartbeat-agent";
+
+fn run_deploy_unraid(
+    host: &str,
+    local_binary: &Path,
+    config: &AgentDeployConfig,
+) -> io::Result<()> {
+    ssh_run(host, &format!("mkdir -p {UNRAID_APPDATA}/bin"))?;
+    scp_file(local_binary, host, UNRAID_BIN_TMP)?;
+    ssh_run(
+        host,
+        &format!("chmod +x {UNRAID_BIN_TMP} && mv -f {UNRAID_BIN_TMP} {UNRAID_BIN}"),
+    )?;
+
+    // Build env key=value pairs for both the persistent env file and the -e flags
+    // passed directly to docker run. We use -e flags (not --env-file) to avoid
+    // any shell-quoting or whitespace ambiguity that arises when writing values
+    // via `echo` over SSH and then reading them back with Docker's env-file parser.
+    let target = config
+        .target
+        .as_deref()
+        .unwrap_or(crate::heartbeat_agent::DEFAULT_TARGET);
+    let mut env_pairs: Vec<(String, String)> = vec![
+        ("CORTEX_HEARTBEAT_TARGET".into(), target.to_string()),
+        ("RUST_LOG".into(), "warn".into()),
+        (
+            "CORTEX_AGENT_DOCKER".into(),
+            if config.docker { "true" } else { "false" }.into(),
+        ),
+        // journald has no meaning inside a container — suppress it for Unraid.
+        ("CORTEX_AGENT_JOURNALD".into(), "false".into()),
+    ];
+    if let Some(t) = &config.token {
+        env_pairs.push(("CORTEX_HEARTBEAT_TOKEN".into(), t.clone()));
+    }
+
+    // Write a persistent env file for reference / manual restarts, then chmod 600.
+    let mut write_cmd = format!("rm -f {UNRAID_ENV}");
+    for (k, v) in &env_pairs {
+        write_cmd.push_str(&format!(
+            " && echo {}={} >> {UNRAID_ENV}",
+            k,
+            shell_quote(v)
+        ));
+    }
+    write_cmd.push_str(&format!(" && chmod 600 {UNRAID_ENV}"));
+    ssh_run(host, &write_cmd)?;
+
+    // Build explicit -e KEY=VALUE flags for docker run so values are passed
+    // verbatim without any env-file parsing.
+    let e_flags: String = env_pairs
+        .iter()
+        .map(|(k, v)| format!("-e {}={} ", k, shell_quote(v)))
+        .collect();
+
+    // Remove any previous container then start fresh with docker run.
+    // --restart unless-stopped is stored in Docker's state (not a file),
+    // so it survives the Unraid RAM-disk wipe on reboot.
+    // Mount host CA certs so TLS works without installing ca-certificates.
+    ssh_run(
+        host,
+        &format!(
+            "docker rm -f {UNRAID_CONTAINER} 2>/dev/null; \
+             docker run -d \
+               --name {UNRAID_CONTAINER} \
+               --restart unless-stopped \
+               --network host \
+               {e_flags}\
+               -v {UNRAID_BIN}:/usr/local/bin/cortex:ro \
+               -v {UNRAID_APPDATA}:{UNRAID_APPDATA} \
+               -v /etc/ssl/certs:/etc/ssl/certs:ro \
+               ubuntu:24.04 \
+               /usr/local/bin/cortex heartbeat agent \
+                 --host-id-path {UNRAID_HOST_ID}"
+        ),
     )
 }
 
