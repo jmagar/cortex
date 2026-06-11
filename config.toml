@@ -82,6 +82,10 @@ enabled = false
 reconnect_initial_ms = 1000
 reconnect_max_ms = 30000
 
+# Managed file-tail sources are runtime-managed in data/file-tails.json
+# (parent directory of [storage].db_path). Configure with:
+#   cortex file-tail add --id swag-access --path /path/access.log --tag swag-access
+
 [notifications]
 enabled = true
 apprise_url = "http://100.120.242.29:8766"

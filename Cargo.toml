@@ -1,6 +1,6 @@
 [package]
 name = "cortex"
-version = "1.19.0"
+version = "1.20.0"
 edition = "2024"
 rust-version = "1.86"
 license = "MIT"

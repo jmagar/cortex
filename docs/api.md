@@ -15,7 +15,7 @@
 
 ## Endpoint matrix
 
-56 routes total. Scope is `read` (mounted via `axum::routing::get`,
+57 routes total. Scope is `read` (mounted via `axum::routing::get`,
 hits read-side `db_permits`) or `admin` (POST + `MAINTENANCE_PERMIT`
 single-flight, audited via `tracing::warn!` before the service call).
 All responses are JSON; error bodies are `{"error": "<message>"}`
@@ -59,6 +59,12 @@ to them by default.
 | GET | `/api/ai/errors` | read | query: `limit?`. `deny_unknown_fields`. | service-shaped (list of recent transcript parse errors) | 200, 400, 401, 503, 500 | Y | Surfaces parse failures from the AI indexer. |
 | POST | `/api/ai/prune-checkpoints` | **admin** | body: `{ "dry_run": bool (REQUIRED), "missing_only"?: bool, "limit"?: u32 }`. `deny_unknown_fields`. | service-shaped (count of pruned/would-prune rows) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention with `/api/db/vacuum` or `/api/db/checkpoint`. `dry_run` is **REQUIRED and explicit** — a missing key returns 400 (defends against `POST {}` mass-delete, eng-review C3). `caller_ip` audit-logged via `tracing::warn!` BEFORE the service call. |
 
+### File-tail admin (1)
+
+| Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| POST | `/api/file-tails` | **admin** | body: `{ "op": "list" \| "add" \| "remove" \| "enable" \| "disable" \| "status", "id"?: string, "path"?: string, "tag"?: string, "hostname"?: string, "facility"?: string, "severity"?: string, "start_at_end"?: bool }`. `add` requires `id`, `path`, and `tag`; remove/enable/disable require `id`. | `FileTailResponse { sources: [FileTailSource], statuses: [FileTailStatus] }` | 200, 400, 401, 500 | mixed | Manages Cortex-owned local file-tail ingest sources stored in `<data-dir>/file-tails.json`. CLI command: `cortex file-tail ...`; MCP action: `file_tails`. |
+
 ### DB ops (4) — bead `.4`
 
 | Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
@@ -84,7 +90,7 @@ to them by default.
 | GET | `/api/graph/explain` | read | query: entity selector, `depth?` (clamped to 3), `beam_width?`, `max_chains?`, `evidence_sample_limit?`, `payload_budget?` | `GraphExplainResponse { resolved_entity, chains, narrative, open_questions, missing_evidence, next_queries, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Deterministic evidence-backed explanation; weak evidence becomes open questions, not causal claims. |
 | GET | `/api/graph/evidence` | read | query: `evidence_id` (REQUIRED, minimum 1), `payload_budget?` | `GraphEvidenceLookupResponse { evidence, relationship, src_entity, dst_entity, source_log_summary?, missing_source_reason?, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Proof lookup for one evidence row. Source summaries are redacted/truncated and exclude raw frames and raw metadata. |
 
-**Total: 56 routes** (current `src/api.rs` router surface, including syslog,
+**Total: 57 routes** (current `src/api.rs` router surface, including syslog,
 surface-parity, AI, graph, compose, notification, error-ack, and DB routes).
 
 ---

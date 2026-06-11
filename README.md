@@ -769,6 +769,34 @@ The docker-socket-proxy side only needs read access to containers, events, ping,
 
 Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `cortex search` or `mcporter call ... action=search`. Container stdout/stderr rows use `source_ip=docker://<host>/<container>/<stream>`. Container lifecycle rows for actions such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, `oom`, and `health_status:*` use `source_ip=docker-event://<host>/<container>/<sanitized-action>`, `facility=docker`, and preserve the raw Docker event JSON.
 
+#### Managed file-tail ingest
+
+Cortex can tail local files directly without rsyslog `imfile` drop-ins. Sources
+are stored next to the SQLite database in `file-tails.json`, managed through
+`cortex file-tail ...`, REST `POST /api/file-tails`, or MCP action
+`file_tails`, and emitted as `source_kind="file-tail"` rows.
+
+```bash
+cortex file-tail add --id swag-access \
+  --path /mnt/appdata/swag/log/nginx/access.log \
+  --tag swag-access --hostname squirts --facility local4
+cortex file-tail add --id swag-error \
+  --path /mnt/appdata/swag/log/nginx/error.log \
+  --tag swag-error --hostname squirts --facility local4 --severity warning
+cortex file-tail add --id fail2ban \
+  --path /mnt/appdata/swag/log/fail2ban/fail2ban.log \
+  --tag fail2ban --hostname squirts --facility local5
+cortex file-tail add --id authelia \
+  --path /mnt/appdata/authelia/logs/authelia.log \
+  --tag authelia --hostname squirts --facility local5
+cortex file-tail add --id adguard-query \
+  --path /mnt/appdata/adguard/var/data/querylog.json \
+  --tag adguard-query --hostname squirts --facility local6
+```
+
+The default starts at EOF. Add `--from-start` only when you intentionally want
+to backfill the current file contents.
+
 #### Storage
 
 | Variable | Required | Default | Description |

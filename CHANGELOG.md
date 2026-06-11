@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-06-11
+
+### Added
+
+- Added managed file-tail ingest sources with CLI, REST API, and MCP control.
+- Added `file-tail` source kind for rows ingested from local log files.
+- Documented SWAG, fail2ban, Authelia, and AdGuard file-tail recipes for replacing rsyslog `imfile` drop-ins.
+
 ## [1.19.0] - 2026-06-11
 
 ### Added

@@ -80,6 +80,7 @@ no-match, §7). Renaming an existing value is a major version bump.
 | `adguard-api` | AdGuard poller (epic C `cortex-awvr`) | AdGuard Home `/control/querylog` poller |
 | `shell-history` | `src/command_log.rs` | Local shell history backfill, currently zsh extended history |
 | `agent-command` | `src/command_log.rs` | AI agent-launched shell commands imported from a private JSONL spool |
+| `file-tail` | `src/file_tail/supervisor.rs` | Cortex-managed local file tails configured in `file-tails.json` |
 
 **Removed / renamed during reconciliation:**
 
@@ -117,6 +118,7 @@ percent-encoded as required.
 | `adguard-api` | `adguard://<adguard_host>/` | `adguard://adguard.lan/` |
 | `shell-history` | `shell-history://<hostname>/<user>/<shell>` | `shell-history://dookie/jmagar/zsh` |
 | `agent-command` | `agent-command://<hostname>/<agent>/<session_id>` | `agent-command://dookie/claude-code/019e588f` |
+| `file-tail` | `file-tail://<hostname>/<source_id>` | `file-tail://squirts/swag-access` |
 
 ### Notes on the `agent://` authority
 
@@ -168,6 +170,8 @@ scheme reconstruction):
      `app_name="adguard-query"`).
    - `unifi-api` → no parser in V1 (poller writes structured rows
      directly under `metadata_json.unifi`).
+   - `file-tail` → parser chosen by `app_name`/tag; metadata includes
+     `file_tail_id`, `path`, and `tag`.
    - `otlp` → `app_name` (= OTLP `service.name`).
    - `agent` → `app_name` exact match, same path as syslog.
    - `shell-history` / `agent-command` → no parser in V1; the importer

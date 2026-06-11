@@ -116,6 +116,60 @@ POST=0
 
 Docker ingest is not included in the default smoke test because it requires a live docker-socket-proxy-compatible endpoint. For integration coverage, run a disposable docker-socket-proxy or mocked Docker HTTP fixture, set `CORTEX_DOCKER_INGEST_ENABLED=true`, emit a unique container stdout/stderr line, and verify it with `search` or `tail`. Container stream rows identify their source as `docker://<host>/<container>/<stream>`. Container lifecycle events such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, and `oom` identify their source as `docker-event://<host>/<container>/<action>` and use `facility=docker`.
 
+## Managed File-Tail Sources
+
+Cortex can tail local log files directly and ingest appended lines through the
+same writer/enrichment path as syslog, Docker, and OTLP. Sources are stored in
+`<data-dir>/file-tails.json`, where `<data-dir>` is the parent directory of
+`CORTEX_DB_PATH`.
+
+Use this for logs that do not naturally reach journald or container stdout,
+such as SWAG nginx access/error logs, SWAG fail2ban logs, Authelia file logs,
+and AdGuard query logs.
+
+```bash
+cortex file-tail add \
+  --id swag-access \
+  --path /mnt/appdata/swag/log/nginx/access.log \
+  --tag swag-access \
+  --hostname squirts \
+  --facility local4
+
+cortex file-tail add \
+  --id swag-error \
+  --path /mnt/appdata/swag/log/nginx/error.log \
+  --tag swag-error \
+  --hostname squirts \
+  --facility local4 \
+  --severity warning
+
+cortex file-tail add \
+  --id fail2ban \
+  --path /mnt/appdata/swag/log/fail2ban/fail2ban.log \
+  --tag fail2ban \
+  --hostname squirts \
+  --facility local5
+
+cortex file-tail add \
+  --id authelia \
+  --path /mnt/appdata/authelia/logs/authelia.log \
+  --tag authelia \
+  --hostname squirts \
+  --facility local5
+
+cortex file-tail add \
+  --id adguard-query \
+  --path /mnt/appdata/adguard/var/data/querylog.json \
+  --tag adguard-query \
+  --hostname squirts \
+  --facility local6
+```
+
+`--from-start` ingests existing file contents. The default starts at EOF so
+adding a source does not backfill a large historic log unexpectedly. The
+runtime reconciles enabled sources periodically and after CLI/REST/MCP
+mutations.
+
 ### MCP server (`CORTEX_*`)
 
 | Variable | Required | Default | Sensitive | Description |
