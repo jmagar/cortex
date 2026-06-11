@@ -286,7 +286,7 @@ fn heartbeat_agent_compose(
     let host_id_path = setup_path_value(host_id_path)?;
     let data_dir = setup_path_value(data_dir)?;
     Ok(format!(
-        "services:\n  cortex-heartbeat-agent:\n    image: debian:bookworm-slim\n    restart: unless-stopped\n    network_mode: host\n    env_file: {env_path}\n    volumes:\n      - {cortex_bin}:/usr/local/bin/cortex:ro\n      - {data_dir}:{data_dir}\n    command:\n      - /usr/local/bin/cortex\n      - heartbeat\n      - agent\n      - --host-id-path\n      - {host_id_path}\n"
+        "services:\n  cortex-heartbeat-agent:\n    image: ubuntu:24.04\n    restart: unless-stopped\n    network_mode: host\n    env_file: {env_path}\n    volumes:\n      - {cortex_bin}:/usr/local/bin/cortex:ro\n      - {data_dir}:{data_dir}\n    command:\n      - /usr/local/bin/cortex\n      - heartbeat\n      - agent\n      - --host-id-path\n      - {host_id_path}\n"
     ))
 }
 
