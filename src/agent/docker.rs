@@ -159,6 +159,11 @@ async fn list_containers(docker: &Docker) -> Result<Vec<ContainerInfo>> {
 }
 
 fn connect(docker_url: &str) -> Result<Docker> {
+    if docker_url.starts_with("unix://") || docker_url.starts_with("npipe://") {
+        return Docker::connect_with_socket(docker_url, 120, bollard::API_DEFAULT_VERSION)
+            .context("bollard socket connect");
+    }
+
     use hyper_util::client::legacy::Client;
     use hyper_util::client::legacy::connect::HttpConnector;
     use hyper_util::rt::TokioExecutor;

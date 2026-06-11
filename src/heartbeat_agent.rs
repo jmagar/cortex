@@ -21,7 +21,7 @@ pub const DEFAULT_PROBE_DEADLINE_MS: u64 = 2_000;
 pub const DEFAULT_COLLECTION_DEADLINE_MS: u64 = 5_000;
 pub const DEFAULT_RETRY_BUFFER_LIMIT: usize = 32;
 pub const DEFAULT_TARGET: &str = "http://127.0.0.1:3100";
-pub const DEFAULT_DOCKER_URL: &str = "http://127.0.0.1:2375";
+pub const DEFAULT_DOCKER_URL: &str = "unix:///var/run/docker.sock";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeartbeatAgentConfig {
@@ -41,6 +41,8 @@ pub struct HeartbeatAgentConfig {
     pub docker_url: String,
     /// Forward journald entries to cortex syslog receiver.
     pub journald: bool,
+    /// Tail a host syslog file and forward new lines to cortex syslog receiver.
+    pub syslog_file: Option<PathBuf>,
     /// Override TCP syslog target (`host:port`).  Derived from `target` when absent.
     pub syslog_target: Option<String>,
 }
@@ -64,6 +66,10 @@ impl HeartbeatAgentConfig {
             .ok()
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
             .unwrap_or(false);
+        let syslog_file = std::env::var("CORTEX_AGENT_SYSLOG_FILE")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(PathBuf::from);
         let syslog_target = std::env::var("CORTEX_SYSLOG_TARGET").ok();
         Self {
             target,
@@ -79,6 +85,7 @@ impl HeartbeatAgentConfig {
             docker,
             docker_url,
             journald,
+            syslog_file,
             syslog_target,
         }
     }
@@ -1177,7 +1184,7 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
     let host_id = load_or_create_host_id(&config.host_id_path)?;
 
     // Spawn Docker / journald forwarding streams as a background task.
-    if config.docker || config.journald {
+    if config.docker || config.journald || config.syslog_file.is_some() {
         let syslog_target = config
             .syslog_target
             .clone()
@@ -1192,6 +1199,7 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
             docker: config.docker,
             docker_url: config.docker_url.clone(),
             journald: config.journald,
+            syslog_file: config.syslog_file.clone(),
             syslog_target,
             hostname: hostname(),
         };

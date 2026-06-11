@@ -126,12 +126,30 @@ fn write_heartbeat_agent_env(env_path: &Path) -> io::Result<SetupPhase> {
     let journald = std::env::var("CORTEX_AGENT_JOURNALD")
         .ok()
         .unwrap_or_else(|| "false".to_string());
+    let docker_url = std::env::var("CORTEX_AGENT_DOCKER_URL")
+        .ok()
+        .unwrap_or_else(|| heartbeat_agent::DEFAULT_DOCKER_URL.to_string());
+    let syslog_file = std::env::var("CORTEX_AGENT_SYSLOG_FILE").ok();
+    let syslog_target = std::env::var("CORTEX_SYSLOG_TARGET").ok();
     let mut body = format!(
-        "CORTEX_HEARTBEAT_TARGET={}\nRUST_LOG=warn\nCORTEX_AGENT_DOCKER={}\nCORTEX_AGENT_JOURNALD={}\n",
+        "CORTEX_HEARTBEAT_TARGET={}\nRUST_LOG=warn\nCORTEX_AGENT_DOCKER={}\nCORTEX_AGENT_DOCKER_URL={}\nCORTEX_AGENT_JOURNALD={}\n",
         shell_safe_value(&target)?,
         shell_safe_value(&docker)?,
+        shell_safe_value(&docker_url)?,
         shell_safe_value(&journald)?,
     );
+    if let Some(syslog_file) = syslog_file.filter(|value| !value.trim().is_empty()) {
+        body.push_str(&format!(
+            "CORTEX_AGENT_SYSLOG_FILE={}\n",
+            shell_safe_value(&syslog_file)?
+        ));
+    }
+    if let Some(syslog_target) = syslog_target.filter(|value| !value.trim().is_empty()) {
+        body.push_str(&format!(
+            "CORTEX_SYSLOG_TARGET={}\n",
+            shell_safe_value(&syslog_target)?
+        ));
+    }
     if let Some(token) = token.filter(|value| !value.trim().is_empty()) {
         body.push_str(&format!(
             "CORTEX_HEARTBEAT_TOKEN={}\n",

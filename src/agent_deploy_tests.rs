@@ -52,3 +52,20 @@ fn host_probe_label_formats_unreachable() {
     let label = probe.display_label();
     assert!(label.contains("✗"));
 }
+
+#[test]
+fn unraid_constants_wire_socket_and_host_syslog() {
+    assert_eq!(UNRAID_CONTAINER_SYSLOG, "/host/var/log/syslog");
+    assert_eq!(
+        crate::heartbeat_agent::DEFAULT_DOCKER_URL,
+        "unix:///var/run/docker.sock"
+    );
+}
+
+#[test]
+fn deploy_syslog_target_derives_from_heartbeat_url() {
+    assert_eq!(
+        deploy_syslog_target(Some("https://cortex.example.test:3100")),
+        Some("cortex.example.test:1514".to_string())
+    );
+}

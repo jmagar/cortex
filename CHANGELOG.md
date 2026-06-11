@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-06-11
+
+### Added
+
+- Heartbeat agents can now tail a host syslog file via `CORTEX_AGENT_SYSLOG_FILE`, wrapping new RFC 3164-style lines as RFC 5424 for Cortex without replaying historical backlog on startup.
+- Unraid heartbeat-agent deployment now mounts `/var/log/syslog` and `/var/run/docker.sock`, sets `CORTEX_AGENT_SYSLOG_FILE=/host/var/log/syslog`, and uses the Docker unix socket for container log streaming.
+
+### Changed
+
+- `CORTEX_AGENT_DOCKER_URL` now defaults to `unix:///var/run/docker.sock`, matching the local Linux agent behavior instead of requiring a Docker socket proxy by default.
+- Agent deployment writes `CORTEX_SYSLOG_TARGET` when supplied so heartbeat HTTPS and raw syslog TCP can use different routes.
+
 ## [1.18.0] - 2026-06-11
 
 ### Added

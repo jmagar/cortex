@@ -1,7 +1,9 @@
 pub mod docker;
 pub mod journald;
+pub mod syslog_file;
 pub mod syslog_sender;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,6 +22,9 @@ pub struct AgentStreamsConfig {
     /// HTTP endpoints like `http://localhost:2375` are also accepted.
     pub docker_url: String,
     pub journald: bool,
+    /// Optional host syslog file to tail and forward.  Used by containerized
+    /// agents that cannot read the host journal directly.
+    pub syslog_file: Option<PathBuf>,
     /// TCP syslog target in `host:port` form.  Derived from the heartbeat
     /// target when not set explicitly.
     pub syslog_target: String,
@@ -47,7 +52,7 @@ impl AgentStreamsConfig {
 /// automatically on failure.  Returns when all tasks exit (i.e. only on
 /// shutdown / panic).
 pub async fn run_agent_streams(config: AgentStreamsConfig) -> Result<()> {
-    if !config.docker && !config.journald {
+    if !config.docker && !config.journald && config.syslog_file.is_none() {
         return Ok(());
     }
 
@@ -82,6 +87,28 @@ pub async fn run_agent_streams(config: AgentStreamsConfig) -> Result<()> {
                     Ok(()) => return,
                     Err(e) => {
                         tracing::warn!(error = %e, "journald forwarder exited; restarting");
+                        sleep(Duration::from_secs(RESTART_DELAY_SECS)).await;
+                    }
+                }
+            }
+        });
+    }
+
+    if let Some(path) = config.syslog_file {
+        let hostname = config.hostname.clone();
+        let sender = Arc::clone(&sender);
+        tasks.spawn(async move {
+            loop {
+                match syslog_file::run_syslog_file_forwarder(&path, &hostname, Arc::clone(&sender))
+                    .await
+                {
+                    Ok(()) => return,
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            error = %e,
+                            "syslog file forwarder exited; restarting"
+                        );
                         sleep(Duration::from_secs(RESTART_DELAY_SECS)).await;
                     }
                 }

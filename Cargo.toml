@@ -1,6 +1,6 @@
 [package]
 name = "cortex"
-version = "1.18.0"
+version = "1.19.0"
 edition = "2024"
 rust-version = "1.86"
 license = "MIT"
@@ -54,6 +54,7 @@ syslog_loose = "0.21"
 # Docker Engine API client for optional docker-socket-proxy ingestion
 bollard = { version = "0.19", default-features = false, features = [
   "http",
+  "pipe",
   "chrono",
 ] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }

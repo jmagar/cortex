@@ -308,6 +308,12 @@ fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io
     if config.journald {
         env_pairs.push("CORTEX_AGENT_JOURNALD=true".to_string());
     }
+    if let Some(syslog_target) = deploy_syslog_target(config.target.as_deref()) {
+        env_pairs.push(format!(
+            "CORTEX_SYSLOG_TARGET={}",
+            shell_quote(&syslog_target)
+        ));
+    }
     let prefix = if env_pairs.is_empty() {
         String::new()
     } else {
@@ -329,6 +335,8 @@ const UNRAID_BIN_TMP: &str = "/mnt/user/appdata/cortex/bin/cortex.new";
 const UNRAID_ENV: &str = "/mnt/user/appdata/cortex/heartbeat-agent.env";
 const UNRAID_HOST_ID: &str = "/mnt/user/appdata/cortex/heartbeat-host-id";
 const UNRAID_CONTAINER: &str = "cortex-heartbeat-agent";
+const UNRAID_HOST_SYSLOG: &str = "/var/log/syslog";
+const UNRAID_CONTAINER_SYSLOG: &str = "/host/var/log/syslog";
 
 fn run_deploy_unraid(
     host: &str,
@@ -354,11 +362,23 @@ fn run_deploy_unraid(
         ("CORTEX_HEARTBEAT_TARGET".into(), target.to_string()),
         ("RUST_LOG".into(), "warn".into()),
         (
+            "CORTEX_SYSLOG_TARGET".into(),
+            deploy_syslog_target(Some(target)).unwrap_or_else(|| "127.0.0.1:1514".into()),
+        ),
+        (
             "CORTEX_AGENT_DOCKER".into(),
             if config.docker { "true" } else { "false" }.into(),
         ),
+        (
+            "CORTEX_AGENT_DOCKER_URL".into(),
+            crate::heartbeat_agent::DEFAULT_DOCKER_URL.into(),
+        ),
         // journald has no meaning inside a container — suppress it for Unraid.
         ("CORTEX_AGENT_JOURNALD".into(), "false".into()),
+        (
+            "CORTEX_AGENT_SYSLOG_FILE".into(),
+            UNRAID_CONTAINER_SYSLOG.into(),
+        ),
     ];
     if let Some(t) = &config.token {
         env_pairs.push(("CORTEX_HEARTBEAT_TOKEN".into(), t.clone()));
@@ -398,12 +418,24 @@ fn run_deploy_unraid(
                {e_flags}\
                -v {UNRAID_BIN}:/usr/local/bin/cortex:ro \
                -v {UNRAID_APPDATA}:{UNRAID_APPDATA} \
+               -v /var/run/docker.sock:/var/run/docker.sock \
+               -v {UNRAID_HOST_SYSLOG}:{UNRAID_CONTAINER_SYSLOG}:ro \
                -v /etc/ssl/certs:/etc/ssl/certs:ro \
                ubuntu:24.04 \
                /usr/local/bin/cortex heartbeat agent \
                  --host-id-path {UNRAID_HOST_ID}"
         ),
     )
+}
+
+fn deploy_syslog_target(heartbeat_target: Option<&str>) -> Option<String> {
+    std::env::var("CORTEX_SYSLOG_TARGET")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            heartbeat_target
+                .and_then(crate::agent::AgentStreamsConfig::syslog_target_from_heartbeat)
+        })
 }
 
 fn ssh_run(host: &str, cmd: &str) -> io::Result<()> {
