@@ -30,22 +30,35 @@ pub async fn run_heartbeat_agent_setup(action: HeartbeatAgentAction) -> io::Resu
     match action {
         HeartbeatAgentAction::Install => {
             let cortex_bin = super::resolve_cortex_binary()?;
-            std::fs::create_dir_all(&unit_dir)?;
             phases.push(write_heartbeat_agent_env(&env_path)?);
-            phases.push(write_heartbeat_agent_unit(
-                &unit_path,
-                &cortex_bin,
-                &env_path,
-                &host_id_path,
-            )?);
-            phases.push(systemctl_user_named_phase(
-                "heartbeat-agent-daemon-reload",
-                &["daemon-reload"],
-            ));
-            phases.push(systemctl_user_named_phase(
-                "heartbeat-agent-enabled",
-                &["enable", "--now", UNIT_NAME],
-            ));
+            if has_systemd() {
+                std::fs::create_dir_all(&unit_dir)?;
+                phases.push(write_heartbeat_agent_unit(
+                    &unit_path,
+                    &cortex_bin,
+                    &env_path,
+                    &host_id_path,
+                )?);
+                phases.push(systemctl_user_named_phase(
+                    "heartbeat-agent-daemon-reload",
+                    &["daemon-reload"],
+                ));
+                phases.push(systemctl_user_named_phase(
+                    "heartbeat-agent-enabled",
+                    &["enable", "--now", UNIT_NAME],
+                ));
+            } else {
+                // No systemd (e.g. Unraid) — install as a Docker Compose service.
+                let compose_dir = home.join("compose");
+                std::fs::create_dir_all(&compose_dir)?;
+                phases.push(write_heartbeat_agent_compose(
+                    &compose_dir,
+                    &cortex_bin,
+                    &env_path,
+                    &host_id_path,
+                )?);
+                phases.push(docker_compose_up_phase(&compose_dir));
+            }
         }
         HeartbeatAgentAction::Remove => {
             phases.push(systemctl_user_named_phase(
@@ -215,6 +228,65 @@ fn heartbeat_agent_unit(
     Ok(format!(
         "[Unit]\nDescription=cortex heartbeat agent\nDocumentation=https://github.com/jmagar/cortex\nAfter=network-online.target\nWants=network-online.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nExecStart={cortex_bin} heartbeat agent --host-id-path {host_id_path}\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nReadWritePaths={}\n\n[Install]\nWantedBy=default.target\n",
         read_write_dir
+    ))
+}
+
+/// Returns true when systemd --user is available on this host.
+fn has_systemd() -> bool {
+    std::process::Command::new("systemctl")
+        .args(["--user", "--no-pager", "status"])
+        .output()
+        .map(|o| o.status.code() != Some(127))
+        .unwrap_or(false)
+}
+
+fn write_heartbeat_agent_compose(
+    compose_dir: &Path,
+    cortex_bin: &Path,
+    env_path: &Path,
+    host_id_path: &Path,
+) -> io::Result<SetupPhase> {
+    let timer = PhaseTimer::start("heartbeat-agent-compose");
+    let compose_path = compose_dir.join("docker-compose.yml");
+    let content = heartbeat_agent_compose(cortex_bin, env_path, host_id_path)?;
+    std::fs::write(&compose_path, &content)?;
+    Ok(timer.finish(SetupStatus::Ok, format!("wrote {}", compose_path.display())))
+}
+
+fn docker_compose_up_phase(compose_dir: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("heartbeat-agent-docker-up");
+    let result = std::process::Command::new("docker")
+        .args(["compose", "up", "-d", "--remove-orphans"])
+        .current_dir(compose_dir)
+        .output();
+    match result {
+        Ok(out) if out.status.success() => timer.finish(SetupStatus::Ok, "container started"),
+        Ok(out) => timer.finish(
+            SetupStatus::Warn,
+            String::from_utf8_lossy(&out.stderr)
+                .lines()
+                .next()
+                .unwrap_or("docker compose up failed")
+                .to_string(),
+        ),
+        Err(e) => timer.finish(SetupStatus::Warn, e.to_string()),
+    }
+}
+
+fn heartbeat_agent_compose(
+    cortex_bin: &Path,
+    env_path: &Path,
+    host_id_path: &Path,
+) -> io::Result<String> {
+    let data_dir = host_id_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("/"));
+    let cortex_bin = setup_path_value(cortex_bin)?;
+    let env_path = setup_path_value(env_path)?;
+    let host_id_path = setup_path_value(host_id_path)?;
+    let data_dir = setup_path_value(data_dir)?;
+    Ok(format!(
+        "services:\n  cortex-heartbeat-agent:\n    image: debian:bookworm-slim\n    restart: unless-stopped\n    network_mode: host\n    env_file: {env_path}\n    volumes:\n      - {cortex_bin}:/usr/local/bin/cortex:ro\n      - {data_dir}:{data_dir}\n    command:\n      - /usr/local/bin/cortex\n      - heartbeat\n      - agent\n      - --host-id-path\n      - {host_id_path}\n"
     ))
 }
 

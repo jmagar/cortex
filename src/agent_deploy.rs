@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 const PROBE_TIMEOUT_SECS: u64 = 5;
-const REMOTE_BIN: &str = ".local/bin/cortex";
+const REMOTE_BIN_TMP: &str = ".local/bin/cortex.new";
 
 // ── public types ─────────────────────────────────────────────────────────────
 
@@ -267,8 +267,13 @@ pub fn deploy_agent_to_host(
 
 fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io::Result<()> {
     ssh_run(host, "mkdir -p ~/.local/bin")?;
-    scp_file(local_binary, host, REMOTE_BIN)?;
-    ssh_run(host, "chmod +x ~/.local/bin/cortex")?;
+    // scp to a temp path then mv atomically — avoids ETXTBSY if the binary is
+    // currently running as a service on the remote host.
+    scp_file(local_binary, host, REMOTE_BIN_TMP)?;
+    ssh_run(
+        host,
+        "chmod +x ~/.local/bin/cortex.new && mv -f ~/.local/bin/cortex.new ~/.local/bin/cortex",
+    )?;
 
     let mut env_pairs: Vec<String> = Vec::new();
     if let Some(t) = &config.target {

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-06-11
+
+### Added
+
+- `cortex deploy agent` — SSH-based fleet deployment subcommand. Reads `~/.ssh/config`, probes all concrete host aliases in parallel (SSH BatchMode, 5 s timeout), presents an `inquire::MultiSelect` TUI picker, then scp's the local cortex binary and runs `cortex setup heartbeat-agent install` on each selected host. Flags: `--hosts` (comma-separated override), `--target`, `--heartbeat-token`, `--docker`, `--journald`, `--binary`.
+- `cortex setup heartbeat-agent install` auto-detects when systemd is absent (Unraid, etc.) and falls back to writing a Docker Compose service (`~/.cortex/compose/docker-compose.yml`) backed by `debian:bookworm-slim` with the binary bind-mounted, then runs `docker compose up -d`.
+- Atomic binary update on deploy: scp to `cortex.new` then `mv -f` so the running service is never interrupted mid-write.
+
 ## [1.17.0] - 2026-06-10
 
 ### Added
