@@ -300,7 +300,7 @@ fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io
         env_pairs.push(format!("CORTEX_HEARTBEAT_TARGET={}", shell_quote(t)));
     }
     if let Some(t) = &config.token {
-        env_pairs.push(format!("CORTEX_TOKEN={}", shell_quote(t)));
+        env_pairs.push(format!("CORTEX_HEARTBEAT_TOKEN={}", shell_quote(t)));
     }
     if config.docker {
         env_pairs.push("CORTEX_AGENT_DOCKER=true".to_string());
