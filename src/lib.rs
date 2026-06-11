@@ -13,6 +13,7 @@ pub mod config;
 pub mod deploy;
 pub mod doctor;
 pub mod enrich;
+pub mod file_tail;
 pub mod heartbeat;
 pub mod heartbeat_agent;
 pub mod inventory;
