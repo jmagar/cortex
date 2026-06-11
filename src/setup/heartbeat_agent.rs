@@ -107,9 +107,17 @@ fn write_heartbeat_agent_env(env_path: &Path) -> io::Result<SetupPhase> {
         .ok()
         .or_else(|| read_setup_env_value("CORTEX_TOKEN"))
         .or_else(|| read_setup_env_value("CORTEX_HEARTBEAT_TOKEN"));
+    let docker = std::env::var("CORTEX_AGENT_DOCKER")
+        .ok()
+        .unwrap_or_else(|| "false".to_string());
+    let journald = std::env::var("CORTEX_AGENT_JOURNALD")
+        .ok()
+        .unwrap_or_else(|| "false".to_string());
     let mut body = format!(
-        "CORTEX_HEARTBEAT_TARGET={}\nRUST_LOG=warn\n",
-        shell_safe_value(&target)?
+        "CORTEX_HEARTBEAT_TARGET={}\nRUST_LOG=warn\nCORTEX_AGENT_DOCKER={}\nCORTEX_AGENT_JOURNALD={}\n",
+        shell_safe_value(&target)?,
+        shell_safe_value(&docker)?,
+        shell_safe_value(&journald)?,
     );
     if let Some(token) = token.filter(|value| !value.trim().is_empty()) {
         body.push_str(&format!(

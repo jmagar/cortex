@@ -32,6 +32,18 @@ impl HeartbeatAgentArgs {
         config.once = self.once;
         config.emit = self.emit;
         config.json = self.json;
+        if self.docker {
+            config.docker = true;
+        }
+        if let Some(url) = self.docker_url {
+            config.docker_url = url;
+        }
+        if self.journald {
+            config.journald = true;
+        }
+        if let Some(target) = self.syslog_target {
+            config.syslog_target = Some(target);
+        }
         Ok(config)
     }
 }

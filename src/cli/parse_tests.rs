@@ -26,6 +26,10 @@ fn parse_routes_heartbeat_agent_defaults() {
             emit: false,
             json: false,
             host_id_path: None,
+            docker: false,
+            docker_url: None,
+            journald: false,
+            syslog_target: None,
         }))
     );
 }
@@ -65,6 +69,10 @@ fn parse_routes_heartbeat_agent_flags() {
             emit: false,
             json: true,
             host_id_path: Some("/tmp/host-id".to_string()),
+            docker: false,
+            docker_url: None,
+            journald: false,
+            syslog_target: None,
         }))
     );
 }

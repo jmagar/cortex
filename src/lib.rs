@@ -1,5 +1,6 @@
 #![recursion_limit = "512"]
 
+pub mod agent;
 pub mod ai_watch;
 pub mod api;
 pub mod app;

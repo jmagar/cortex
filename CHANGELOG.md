@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-06-10
+
+### Added
+
+- `cortex heartbeat agent` now accepts `--docker` and `--journald` flags (and env vars `CORTEX_AGENT_DOCKER`, `CORTEX_AGENT_JOURNALD`) to stream local Docker container logs and journald entries as RFC 5424 syslog to the cortex receiver, enabling single-binary host onboarding without separate rsyslog/forwarder setup.
+- `--docker-url` / `CORTEX_AGENT_DOCKER_URL` — Docker HTTP endpoint (default `http://127.0.0.1:2375`).
+- `--syslog-target` / `CORTEX_SYSLOG_TARGET` — override the TCP syslog target; derived from `--target` host when not set.
+- `cortex setup heartbeat-agent install` writes `CORTEX_AGENT_DOCKER` and `CORTEX_AGENT_JOURNALD` to the generated `heartbeat-agent.env`.
+
 ## [1.16.5] - 2026-06-10
 
 ### Changed

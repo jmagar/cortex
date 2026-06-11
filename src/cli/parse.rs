@@ -155,6 +155,10 @@ fn parse_heartbeat_agent(args: &[String]) -> Result<CliCommand> {
         emit: false,
         json: false,
         host_id_path: None,
+        docker: false,
+        docker_url: None,
+        journald: false,
+        syslog_target: None,
     };
     let mut i = 0usize;
     while i < args.len() {
@@ -187,9 +191,19 @@ fn parse_heartbeat_agent(args: &[String]) -> Result<CliCommand> {
                 i += 1;
                 out.host_id_path = Some(required_value(args, i, "--host-id-path")?);
             }
+            "--docker-url" => {
+                i += 1;
+                out.docker_url = Some(required_value(args, i, "--docker-url")?);
+            }
+            "--syslog-target" => {
+                i += 1;
+                out.syslog_target = Some(required_value(args, i, "--syslog-target")?);
+            }
             "--once" => out.once = true,
             "--emit" => out.emit = true,
             "--json" => out.json = true,
+            "--docker" => out.docker = true,
+            "--journald" => out.journald = true,
             other => bail!(
                 "{}",
                 suggest::unknown_option(
@@ -203,6 +217,10 @@ fn parse_heartbeat_agent(args: &[String]) -> Result<CliCommand> {
                         "--collection-deadline-ms",
                         "--retry-buffer",
                         "--host-id-path",
+                        "--docker",
+                        "--docker-url",
+                        "--journald",
+                        "--syslog-target",
                         "--once",
                         "--emit",
                         "--json",

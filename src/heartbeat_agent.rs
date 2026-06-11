@@ -21,6 +21,7 @@ pub const DEFAULT_PROBE_DEADLINE_MS: u64 = 2_000;
 pub const DEFAULT_COLLECTION_DEADLINE_MS: u64 = 5_000;
 pub const DEFAULT_RETRY_BUFFER_LIMIT: usize = 32;
 pub const DEFAULT_TARGET: &str = "http://127.0.0.1:3100";
+pub const DEFAULT_DOCKER_URL: &str = "http://127.0.0.1:2375";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeartbeatAgentConfig {
@@ -34,6 +35,14 @@ pub struct HeartbeatAgentConfig {
     pub emit: bool,
     pub json: bool,
     pub host_id_path: PathBuf,
+    /// Forward local Docker container logs to cortex syslog receiver.
+    pub docker: bool,
+    /// Docker endpoint URL (unix socket or HTTP).
+    pub docker_url: String,
+    /// Forward journald entries to cortex syslog receiver.
+    pub journald: bool,
+    /// Override TCP syslog target (`host:port`).  Derived from `target` when absent.
+    pub syslog_target: Option<String>,
 }
 
 impl HeartbeatAgentConfig {
@@ -45,6 +54,17 @@ impl HeartbeatAgentConfig {
         let token = std::env::var("CORTEX_HEARTBEAT_TOKEN")
             .ok()
             .or_else(|| std::env::var("CORTEX_TOKEN").ok());
+        let docker = std::env::var("CORTEX_AGENT_DOCKER")
+            .ok()
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+        let docker_url = std::env::var("CORTEX_AGENT_DOCKER_URL")
+            .unwrap_or_else(|_| DEFAULT_DOCKER_URL.to_string());
+        let journald = std::env::var("CORTEX_AGENT_JOURNALD")
+            .ok()
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+        let syslog_target = std::env::var("CORTEX_SYSLOG_TARGET").ok();
         Self {
             target,
             token,
@@ -56,6 +76,10 @@ impl HeartbeatAgentConfig {
             emit: false,
             json: false,
             host_id_path,
+            docker,
+            docker_url,
+            journald,
+            syslog_target,
         }
     }
 }
@@ -1151,6 +1175,29 @@ pub fn backoff_duration(attempt: u32) -> Duration {
 
 pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
     let host_id = load_or_create_host_id(&config.host_id_path)?;
+
+    // Spawn Docker / journald forwarding streams as a background task.
+    if config.docker || config.journald {
+        let syslog_target = config
+            .syslog_target
+            .clone()
+            .or_else(|| {
+                config
+                    .target
+                    .as_deref()
+                    .and_then(crate::agent::AgentStreamsConfig::syslog_target_from_heartbeat)
+            })
+            .unwrap_or_else(|| "127.0.0.1:1514".to_string());
+        let streams = crate::agent::AgentStreamsConfig {
+            docker: config.docker,
+            docker_url: config.docker_url.clone(),
+            journald: config.journald,
+            syslog_target,
+            hostname: hostname(),
+        };
+        tokio::spawn(crate::agent::run_agent_streams(streams));
+    }
+
     let collector = HeartbeatCollector::linux();
     let client = reqwest::Client::new();
     let mut retry = RetryBuffer::new(config.retry_buffer_limit);

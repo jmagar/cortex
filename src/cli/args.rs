@@ -141,6 +141,10 @@ pub(crate) struct HeartbeatAgentArgs {
     pub emit: bool,
     pub json: bool,
     pub host_id_path: Option<String>,
+    pub docker: bool,
+    pub docker_url: Option<String>,
+    pub journald: bool,
+    pub syslog_target: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
