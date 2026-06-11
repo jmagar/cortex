@@ -51,6 +51,7 @@ A single MCP tool, `mcp__cortex__cortex`, dispatches on a required `action` argu
 | `unaddressed_errors` | List unacknowledged repeating error signatures |
 | `ack_error` | Acknowledge an error signature |
 | `unack_error` | Revoke an existing acknowledgement |
+| `file_tails` | Manage Cortex-owned file-tail ingest sources |
 | `notifications_recent` | List recent notification firings |
 | `notifications_test` | Send a test notification via Apprise |
 | `similar_incidents` | FTS5 cluster search over historical system logs matching a query |

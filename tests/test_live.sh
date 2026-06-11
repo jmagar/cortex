@@ -25,7 +25,7 @@
 #   cortex get, cortex ingest_rate, cortex silent_hosts, cortex clock_skew,
 #   cortex anomalies, cortex compare, cortex compose_status,
 #   cortex compose_doctor, cortex unaddressed_errors, cortex ack_error,
-#   cortex unack_error, cortex notifications_recent, cortex notifications_test,
+#   cortex unack_error, cortex notifications_recent, cortex file_tails, cortex notifications_test,
 #   cortex similar_incidents, cortex ask_history, cortex incident_context, cortex graph,
 #   cortex help
 #
@@ -473,6 +473,13 @@ phase_tools() {
   assert_jq "cortex stats — write_blocked field present"      "${stats_result}" '.write_blocked != null'
   assert_jq "cortex stats — total_logs is a number >= 0"      "${stats_result}" '.total_logs >= 0'
   assert_jq "cortex stats — total_hosts is a number >= 0"     "${stats_result}" '.total_hosts >= 0'
+
+  # --- cortex file_tails ---
+  section "  cortex file_tails"
+  local file_tails_result
+  file_tails_result="$(call_tool cortex '{"action":"file_tails","op":"status"}')" || file_tails_result=""
+  assert_jq "cortex file_tails — sources array present"       "${file_tails_result}" '.sources | type == "array"'
+  assert_jq "cortex file_tails — statuses array present"      "${file_tails_result}" '.statuses | type == "array"'
 
   # --- compose diagnostics ---
   section "  cortex compose diagnostics"

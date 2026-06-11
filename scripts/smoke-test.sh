@@ -19,7 +19,7 @@
 #   mcp_call clock_skew, mcp_call anomalies, mcp_call compare,
 #   mcp_call compose_status, mcp_call compose_doctor,
 #   mcp_call unaddressed_errors, mcp_call ack_error, mcp_call unack_error,
-#   mcp_call notifications_recent, mcp_call notifications_test,
+#   mcp_call notifications_recent, mcp_call file_tails, mcp_call notifications_test,
 #   mcp_call similar_incidents, mcp_call ask_history, mcp_call incident_context, mcp_call graph,
 #   mcp_call help
 
@@ -345,6 +345,20 @@ assert_eq "status: db_ok is true" "$STATUS_DB_OK" "True"
 [[ -n "$STATUS_OTLP" ]] \
     && pass "status: otlp counters present" \
     || fail "status: otlp counters missing"
+
+# ── file_tails ────────────────────────────────────────────────────────────────
+echo ""
+echo "Action: file_tails"
+FILE_TAILS=$(mcp_call file_tails "op=status" 2>&1)
+assert_no_error "file_tails: status no error" "$FILE_TAILS"
+FILE_TAILS_SOURCES=$(json_get "$FILE_TAILS" "['sources']")
+FILE_TAILS_STATUSES=$(json_get "$FILE_TAILS" "['statuses']")
+[[ -n "$FILE_TAILS_SOURCES" ]] \
+    && pass "file_tails: sources present" \
+    || fail "file_tails: sources missing"
+[[ -n "$FILE_TAILS_STATUSES" ]] \
+    && pass "file_tails: statuses present" \
+    || fail "file_tails: statuses missing"
 
 # ── stats ─────────────────────────────────────────────────────────────────────
 echo ""

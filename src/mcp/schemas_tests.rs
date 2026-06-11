@@ -66,6 +66,21 @@ fn schema_source_ips_exposes_pagination() {
 }
 
 #[test]
+fn schema_includes_file_tails_action() {
+    let tool = tool_definitions()
+        .into_iter()
+        .find(|tool| tool["name"] == "cortex")
+        .expect("cortex tool");
+    let schema = serde_json::to_value(tool["inputSchema"].clone()).unwrap();
+    assert!(schema.to_string().contains("file_tails"));
+    assert!(
+        schema
+            .to_string()
+            .contains("op=list|add|remove|enable|disable|status")
+    );
+}
+
+#[test]
 fn schema_apps_exposes_pagination_and_total() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];

@@ -45,6 +45,7 @@ cortex exposes one MCP tool named `cortex`. The required
 | `unaddressed_errors` | List unacknowledged repeating error signatures |
 | `ack_error` | Acknowledge an error signature to suppress it from future reports |
 | `unack_error` | Revoke an acknowledgement so a signature reappears in reports |
+| `file_tails` | Manage Cortex-owned file-tail ingest sources |
 | `notifications_recent` | List recent notification firings |
 | `notifications_test` | Send a test notification via Apprise |
 | `similar_incidents` | FTS5 cluster search — find historical incidents similar to a query |

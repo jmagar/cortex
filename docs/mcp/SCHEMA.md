@@ -67,6 +67,7 @@ selects one of these 44 actions:
 | `graph` | `cortex:read` | moderate | Entity lookup and one-hop graph neighborhoods |
 | `ack_error` | `cortex:admin` | write | Acknowledge an error signature |
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
+| `file_tails` | `cortex:admin` | write | Manage Cortex-owned file-tail ingest sources |
 | `notifications_test` | `cortex:admin` | write | Send a test Apprise notification |
 | `help` | none | cheap | Markdown action reference |
 
@@ -149,6 +150,7 @@ See [CORRELATION.md](CORRELATION.md) for the full behavior matrix.
 | `ask_history` | `query`, `hostname`, `app_name`, `from`, `to`, `limit` |
 | `incident_context` | `from`, `to`, `hostname`, `app_name`, `severity_min`, `limit`; `query` is accepted by the request shape but intentionally ignored in v1 |
 | `graph` | `mode=entity|around|explain|evidence`; entity/around/explain require exactly one target lookup strategy (`entity_id`, `entity_type` + `key`, or `alias_type` + `alias_key`); `around` accepts `depth=1` only; `explain` accepts `depth=1..3`; `evidence` requires `evidence_id`; optional `limit`, `evidence_sample_limit`, `payload_budget` |
+| `file_tails` | `op=list|add|remove|enable|disable|status`; add requires `id`, `path`, and `tag`; remove/enable/disable require `id`; optional `hostname`, `facility`, `severity`, `start_at_end` |
 
 ## Validation
 

@@ -16,9 +16,13 @@ fn test_state_with_token(token: Option<String>) -> (AppState, Arc<db::DbPool>, t
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("mcp-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
+    let file_tail_registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        dir.path().join("file-tails.json"),
+    ));
     (
         AppState {
-            service: CortexService::new(Arc::clone(&pool), storage.clone()),
+            service: CortexService::new(Arc::clone(&pool), storage.clone())
+                .with_file_tail_registry(file_tail_registry),
             config: McpConfig {
                 host: "127.0.0.1".into(),
                 port: 3100,
@@ -194,6 +198,16 @@ fn graph_inventory_without_route_target_fixture() -> HomelabInventory {
     });
     inventory.recompute_summary();
     inventory
+}
+
+#[tokio::test]
+async fn file_tails_action_requires_admin_scope() {
+    let spec = crate::mcp::actions::ACTION_SPECS
+        .iter()
+        .find(|spec| spec.name == "file_tails")
+        .expect("file_tails registered");
+    assert_eq!(spec.scope, crate::mcp::actions::Scope::Admin);
+    assert_eq!(spec.cost.as_str(), "write");
 }
 
 fn project_graph_fixture(pool: &db::DbPool) {
@@ -1096,6 +1110,7 @@ fn sample_args_for_action(action: &str) -> Option<serde_json::Value> {
         "incident_context" => {
             json!({"action": action, "from": "2026-01-01T00:00:00Z", "to": "2026-01-01T01:00:00Z"})
         }
+        "file_tails" => json!({"action": action, "op": "status"}),
         "filter" => json!({"action": action, "hostname": "schema-test-host"}),
         "map" => json!({"action": action, "mode": "snapshot"}),
         "abuse" => json!({"action": action, "terms": ["schema"]}),

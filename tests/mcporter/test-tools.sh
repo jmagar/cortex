@@ -11,7 +11,7 @@
 #   cortex get, cortex ingest_rate, cortex silent_hosts, cortex clock_skew,
 #   cortex anomalies, cortex compare, cortex compose_status,
 #   cortex compose_doctor, cortex unaddressed_errors, cortex ack_error,
-#   cortex unack_error, cortex notifications_recent, cortex notifications_test,
+#   cortex unack_error, cortex notifications_recent, cortex file_tails, cortex notifications_test,
 #   cortex similar_incidents, cortex ask_history, cortex incident_context, cortex graph,
 #   cortex help
 #
@@ -488,6 +488,7 @@ suite_meta() {
   run_test "cortex stats: returns database statistics" cortex stats   '{}' "total_logs"
   run_test "cortex stats: write_blocked field present" cortex stats   '{}' "write_blocked"
   run_test "cortex stats: free_disk_mb field present"  cortex stats   '{}' "free_disk_mb"
+  run_test "cortex file_tails: returns registry status" cortex file_tails '{"op":"status"}' "sources"
   run_test "cortex compose_status: redacted diagnostics" cortex compose_status '{}' "runtime_state"
 
   local compose_status compose_runtime compose_ownership

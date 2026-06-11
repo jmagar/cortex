@@ -89,6 +89,7 @@ pub(super) enum ActionHandler {
     AckError,
     UnackError,
     NotificationsRecent,
+    FileTails,
     NotificationsTest,
     SimilarIncidents,
     AskHistory,
@@ -427,6 +428,13 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "Revoke an error signature acknowledgement",
         Write,
         UnackError
+    ),
+    action_spec!(
+        "file_tails",
+        Admin,
+        "Manage Cortex-owned file-tail ingest sources",
+        Write,
+        FileTails
     ),
     action_spec!(
         "notifications_test",
