@@ -204,6 +204,17 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
             }
             return Ok(());
         }
+        DeployCommandKind::Agent {
+            hosts,
+            target,
+            token,
+            docker,
+            journald,
+            binary,
+        } => {
+            run_deploy_agent(hosts, target, token, docker, journald, binary)?;
+            return Ok(());
+        }
     };
     let report = cortex::setup::run_setup(mode).await?;
     if command.json {
@@ -226,6 +237,72 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
     }
     if report.has_errors {
         anyhow::bail!("cortex deploy {label} completed with failed phases");
+    }
+    Ok(())
+}
+
+fn run_deploy_agent(
+    explicit_hosts: Vec<String>,
+    target: Option<String>,
+    token: Option<String>,
+    docker: bool,
+    journald: bool,
+    binary: Option<String>,
+) -> Result<()> {
+    use cortex::agent_deploy::{
+        AgentDeployConfig, deploy_agent_to_host, find_local_binary, probe_hosts,
+        select_hosts_interactive, ssh_config_hosts,
+    };
+
+    // Resolve the binary to deploy.
+    let local_binary = match binary.as_deref() {
+        Some(p) => std::path::PathBuf::from(p),
+        None => find_local_binary()
+            .ok_or_else(|| anyhow::anyhow!("could not find cortex binary; use --binary"))?,
+    };
+    eprintln!("  binary  {}", local_binary.display());
+
+    // Determine target hosts (explicit list or discover + interactive select).
+    let selected = if !explicit_hosts.is_empty() {
+        explicit_hosts
+    } else {
+        let all_hosts = ssh_config_hosts();
+        if all_hosts.is_empty() {
+            anyhow::bail!("no hosts found in ~/.ssh/config");
+        }
+        eprintln!(
+            "  discovering {} host(s) from ~/.ssh/config …",
+            all_hosts.len()
+        );
+        let probes = probe_hosts(all_hosts);
+        select_hosts_interactive(&probes)?
+    };
+
+    if selected.is_empty() {
+        eprintln!("  no hosts selected");
+        return Ok(());
+    }
+
+    let config = AgentDeployConfig {
+        target,
+        token,
+        docker,
+        journald,
+    };
+    let mut failed = false;
+    for host in &selected {
+        eprint!("  deploying → {host} … ");
+        let _ = std::io::Write::flush(&mut std::io::stderr());
+        let result = deploy_agent_to_host(host, &local_binary, &config);
+        if result.ok {
+            eprintln!("✓  ({}ms)", result.elapsed_ms);
+        } else {
+            eprintln!("✗  {}", result.detail);
+            failed = true;
+        }
+    }
+    if failed {
+        anyhow::bail!("one or more agent deployments failed");
     }
     Ok(())
 }
@@ -440,8 +517,22 @@ struct DeployCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DeployCommandKind {
     Preflight,
-    Local { dry_run: bool },
-    Remote { host: String, dry_run: bool },
+    Local {
+        dry_run: bool,
+    },
+    Remote {
+        host: String,
+        dry_run: bool,
+    },
+    Agent {
+        /// Explicit host list; if empty, run interactive discovery.
+        hosts: Vec<String>,
+        target: Option<String>,
+        token: Option<String>,
+        docker: bool,
+        journald: bool,
+        binary: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -735,19 +826,60 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
 
 fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
     let (subcommand, rest) = args.split_first().ok_or_else(|| {
-        anyhow::anyhow!("deploy requires a subcommand: preflight, local, or remote")
+        anyhow::anyhow!("deploy requires a subcommand: preflight, local, remote, or agent")
     })?;
     let mut json = false;
     let mut dry_run = false;
     let mut host: Option<String> = None;
-    for arg in rest {
-        match arg.as_str() {
+    // agent-specific
+    let mut agent_hosts: Vec<String> = Vec::new();
+    let mut agent_target: Option<String> = None;
+    let mut agent_token: Option<String> = None;
+    let mut agent_docker = false;
+    let mut agent_journald = false;
+    let mut agent_binary: Option<String> = None;
+    let mut i = 0usize;
+    while i < rest.len() {
+        match rest[i].as_str() {
             "--json" => json = true,
             "--dry-run" if matches!(subcommand.as_str(), "local" | "remote") => dry_run = true,
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
             }
+            "--hosts" if subcommand == "agent" => {
+                i += 1;
+                let val = rest
+                    .get(i)
+                    .ok_or_else(|| anyhow::anyhow!("--hosts requires a value"))?;
+                agent_hosts = val.split(',').map(str::trim).map(str::to_string).collect();
+            }
+            "--target" if subcommand == "agent" => {
+                i += 1;
+                agent_target = Some(
+                    rest.get(i)
+                        .ok_or_else(|| anyhow::anyhow!("--target requires a value"))?
+                        .clone(),
+                );
+            }
+            "--heartbeat-token" if subcommand == "agent" => {
+                i += 1;
+                agent_token = Some(
+                    rest.get(i)
+                        .ok_or_else(|| anyhow::anyhow!("--heartbeat-token requires a value"))?
+                        .clone(),
+                );
+            }
+            "--binary" if subcommand == "agent" => {
+                i += 1;
+                agent_binary = Some(
+                    rest.get(i)
+                        .ok_or_else(|| anyhow::anyhow!("--binary requires a value"))?
+                        .clone(),
+                );
+            }
+            "--docker" if subcommand == "agent" => agent_docker = true,
+            "--journald" if subcommand == "agent" => agent_journald = true,
             other if subcommand == "remote" && !other.starts_with('-') => {
                 if host.replace(other.to_string()).is_some() {
                     anyhow::bail!("deploy remote accepts exactly one host");
@@ -755,6 +887,7 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
             }
             other => anyhow::bail!("unknown deploy {subcommand} argument: {other}"),
         }
+        i += 1;
     }
     let kind = match subcommand.as_str() {
         "preflight" => DeployCommandKind::Preflight,
@@ -762,6 +895,14 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
         "remote" => DeployCommandKind::Remote {
             host: host.ok_or_else(|| anyhow::anyhow!("deploy remote requires a host"))?,
             dry_run,
+        },
+        "agent" => DeployCommandKind::Agent {
+            hosts: agent_hosts,
+            target: agent_target,
+            token: agent_token,
+            docker: agent_docker,
+            journald: agent_journald,
+            binary: agent_binary,
         },
         other => anyhow::bail!("unknown deploy subcommand: {other}"),
     };

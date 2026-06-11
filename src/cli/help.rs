@@ -382,6 +382,7 @@ const CATALOG: &[CommandDoc] = &[
             "cortex deploy preflight [--json]",
             "cortex deploy local [--dry-run] [--json]",
             "cortex deploy remote HOST [--dry-run] [--json]",
+            "cortex deploy agent [--hosts h1,h2] [--target URL] [--heartbeat-token TOKEN] [--docker] [--journald] [--binary PATH]",
         ],
     },
     CommandDoc {
