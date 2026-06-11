@@ -55,6 +55,7 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::Correlate(args) => dispatch::run_correlate(&mode, args).await,
         CliCommand::Stats(args) => dispatch::run_stats(&mode, args).await,
         CliCommand::Sessions(args) => dispatch::run_sessions(&mode, args).await,
+        CliCommand::FileTail(command) => dispatch::run_file_tail(&mode, command).await,
         // AI commands (bead 0p8r.8). 10 are HTTP-capable; 6 are LOCAL-only
         // and bail in HTTP mode with a per-command inline message.
         CliCommand::Ai(ai) => match ai {

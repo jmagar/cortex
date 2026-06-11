@@ -55,7 +55,11 @@ fn test_state_full(
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("api-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
-    let service = crate::app::CortexService::new(Arc::clone(&pool), storage);
+    let file_tail_registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        dir.path().join("file-tails.json"),
+    ));
+    let service = crate::app::CortexService::new(Arc::clone(&pool), storage)
+        .with_file_tail_registry(file_tail_registry);
     // Every test gets a fresh per-state maintenance permit so parallel tests
     // never contend on the process-wide `SHARED_MAINTENANCE_PERMIT` — see
     // `ApiState::with_isolated_maintenance_permit` docs.
@@ -145,6 +149,43 @@ async fn stats_route_requires_bearer_token() {
     let (status, value) = get_json(app, "/api/stats", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(value.get("total_logs").is_some());
+}
+
+#[tokio::test]
+async fn file_tails_route_adds_and_lists_sources() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+
+    let (status, value) = post_json(
+        app.clone(),
+        "/api/file-tails",
+        serde_json::json!({
+            "op": "add",
+            "id": "swag-access",
+            "path": "/tmp/access.log",
+            "tag": "swag-access",
+            "hostname": "squirts",
+            "facility": "local4",
+            "severity": "info",
+            "start_at_end": true
+        }),
+        Some("secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK, "response: {value}");
+    assert_eq!(value["sources"][0]["id"], "swag-access");
+
+    let (status, value) = post_json(
+        app,
+        "/api/file-tails",
+        serde_json::json!({ "op": "list" }),
+        Some("secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK, "response: {value}");
+    assert_eq!(value["sources"][0]["tag"], "swag-access");
 }
 
 #[tokio::test]

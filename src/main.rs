@@ -645,6 +645,7 @@ impl Mode {
                         | "host-state"
                         | "fleet-state"
                         | "correlate-state"
+                        | "file-tail"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
@@ -662,7 +663,7 @@ impl Mode {
                 // ignored for `serve mcp`, `setup`, etc.
                 anyhow::bail!(
                     "--http / --server / --token only apply to CLI query commands \
-                     (search, tail, errors, hosts, sessions, incident, entity, graph, ai, shell, agent-command, heartbeat, correlate, stats, db); \
+                     (search, tail, errors, hosts, sessions, incident, entity, graph, ai, shell, agent-command, heartbeat, correlate, stats, db, file-tail); \
                      compose, service, setup, inventory, and deploy are local-only and reject HTTP flags; \
                      got: {}",
                     args.join(" ")

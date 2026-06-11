@@ -1,5 +1,6 @@
 use super::super::{
-    HeartbeatAgentArgs, HeartbeatCommand, InventoryArgs, InventoryCommand, OutputArgs,
+    FileTailAddArgs, FileTailCommand, FileTailListArgs, HeartbeatAgentArgs, HeartbeatCommand,
+    InventoryArgs, InventoryCommand, OutputArgs,
 };
 use super::*;
 
@@ -8,6 +9,52 @@ fn parse_routes_stats() {
     assert_eq!(
         parse_command(vec!["stats".to_string()]).unwrap(),
         CliCommand::Stats(OutputArgs::default())
+    );
+}
+
+#[test]
+fn parses_file_tail_add() {
+    let command = parse_command(vec![
+        "file-tail".into(),
+        "add".into(),
+        "--id".into(),
+        "swag-access".into(),
+        "--path".into(),
+        "/mnt/appdata/swag/log/nginx/access.log".into(),
+        "--tag".into(),
+        "swag-access".into(),
+        "--hostname".into(),
+        "squirts".into(),
+        "--facility".into(),
+        "local4".into(),
+        "--severity".into(),
+        "info".into(),
+        "--from-start".into(),
+        "--json".into(),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        command,
+        CliCommand::FileTail(FileTailCommand::Add(FileTailAddArgs {
+            id: "swag-access".into(),
+            path: "/mnt/appdata/swag/log/nginx/access.log".into(),
+            tag: "swag-access".into(),
+            hostname: Some("squirts".into()),
+            facility: Some("local4".into()),
+            severity: Some("info".into()),
+            start_at_end: false,
+            json: true,
+        }))
+    );
+}
+
+#[test]
+fn parses_file_tail_list() {
+    let command = parse_command(vec!["file-tail".into(), "list".into(), "--json".into()]).unwrap();
+    assert_eq!(
+        command,
+        CliCommand::FileTail(FileTailCommand::List(FileTailListArgs { json: true }))
     );
 }
 

@@ -1,7 +1,7 @@
 //! Always-on non-MCP REST API (`/api/*`) for the log intelligence core —
 //! the default transport for the CLI since v0.26 (`CORTEX_USE_HTTP=true`).
 //!
-//! 56 routes mirroring the MCP action surface one-for-one (see
+//! 57 routes mirroring the MCP action surface one-for-one (see
 //! `docs/api.md` for the endpoint matrix). Every route requires the
 //! `CORTEX_API_TOKEN` bearer; route mounting fails at startup when the token
 //! is absent, so the surface is never silently open.
@@ -33,12 +33,12 @@ use crate::app::{
     AiParseErrorsRequest, AiPruneCheckpointsRequest, AnomaliesRequest, AskHistoryRequest,
     ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
     CorrelateStateRequest, CortexService, DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest,
-    DbVacuumRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest,
-    GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest, GraphExplainRequest,
-    HostStateRequest, IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest,
-    ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
-    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
-    SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
+    DbVacuumRequest, FileTailRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest,
+    GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest,
+    GraphExplainRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
+    ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
+    RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
     SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UnackErrorRequest,
     UnaddressedErrorsRequest, UsageBlocksRequest,
 };
@@ -244,6 +244,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/errors/unack", post(unack_error))
         .route("/api/notifications/recent", get(notifications_recent))
         .route("/api/notifications/test", post(notifications_test))
+        .route("/api/file-tails", post(file_tails))
         // --- surface parity gap closure (12 new routes) ---
         .route("/api/silent-hosts", get(silent_hosts))
         .route("/api/clock-skew", get(clock_skew))
@@ -318,6 +319,13 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
     let cors = cors_layer(state.cors_port, state.loopback_bind, &state.allowed_origins);
     let routes = routes.layer(cors).with_state(state);
     Ok(routes)
+}
+
+async fn file_tails(
+    State(state): State<ApiState>,
+    Json(req): Json<FileTailRequest>,
+) -> impl IntoResponse {
+    respond(state.service.file_tails(req).await)
 }
 
 #[derive(Debug, Deserialize)]

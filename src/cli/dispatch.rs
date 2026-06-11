@@ -20,8 +20,8 @@
 
 use anyhow::{Result, bail};
 use cortex::app::{
-    CorrelateEventsRequest, FilterLogsRequest, GetErrorsRequest, IncidentRequest,
-    ListSessionsRequest, SearchLogsRequest, TailLogsRequest,
+    CorrelateEventsRequest, FileTailOp, FileTailRequest, FilterLogsRequest, GetErrorsRequest,
+    IncidentRequest, ListSessionsRequest, SearchLogsRequest, TailLogsRequest,
 };
 use std::future::Future;
 
@@ -31,8 +31,8 @@ use super::output_logs::{
     print_sessions_response, print_stats_response,
 };
 use super::{
-    CliMode, CorrelateArgs, FilterArgs, IncidentArgs, SearchArgs, SessionsArgs, TailArgs,
-    TimeRangeArgs,
+    CliMode, CorrelateArgs, FileTailCommand, FileTailIdArgs, FilterArgs, IncidentArgs, SearchArgs,
+    SessionsArgs, TailArgs, TimeRangeArgs,
 };
 
 // ─── Arg → Request conversions ──────────────────────────────────────────────
@@ -275,6 +275,96 @@ pub(crate) async fn run_sessions(mode: &CliMode, args: SessionsArgs) -> Result<(
         CliMode::Http(client) => http_or_cancel(client.sessions(&req)).await?,
     };
     print_sessions_response(&response, json)
+}
+
+pub(crate) async fn run_file_tail(mode: &CliMode, command: FileTailCommand) -> Result<()> {
+    let (req, json) = match command {
+        FileTailCommand::List(args) => (
+            FileTailRequest {
+                op: FileTailOp::List,
+                id: None,
+                path: None,
+                tag: None,
+                hostname: None,
+                facility: None,
+                severity: None,
+                start_at_end: None,
+            },
+            args.json,
+        ),
+        FileTailCommand::Status(args) => (
+            FileTailRequest {
+                op: FileTailOp::Status,
+                id: None,
+                path: None,
+                tag: None,
+                hostname: None,
+                facility: None,
+                severity: None,
+                start_at_end: None,
+            },
+            args.json,
+        ),
+        FileTailCommand::Add(args) => (
+            FileTailRequest {
+                op: FileTailOp::Add,
+                id: Some(args.id),
+                path: Some(args.path),
+                tag: Some(args.tag),
+                hostname: args.hostname,
+                facility: args.facility,
+                severity: args.severity,
+                start_at_end: Some(args.start_at_end),
+            },
+            args.json,
+        ),
+        FileTailCommand::Remove(args) => id_request(FileTailOp::Remove, args),
+        FileTailCommand::Enable(args) => id_request(FileTailOp::Enable, args),
+        FileTailCommand::Disable(args) => id_request(FileTailOp::Disable, args),
+    };
+    let response = match mode {
+        CliMode::Local(service) => service.file_tails(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.file_tails(&req)).await?,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else {
+        for source in response.sources {
+            println!(
+                "{}\t{}\t{}\t{}",
+                source.id,
+                if source.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                source.tag,
+                source.path
+            );
+        }
+        for status in response.statuses {
+            if let Some(err) = status.last_error {
+                println!("{}\t{}\t{}", status.id, status.running, err);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn id_request(op: FileTailOp, args: FileTailIdArgs) -> (FileTailRequest, bool) {
+    (
+        FileTailRequest {
+            op,
+            id: Some(args.id),
+            path: None,
+            tag: None,
+            hostname: None,
+            facility: None,
+            severity: None,
+            start_at_end: None,
+        },
+        args.json,
+    )
 }
 
 pub(crate) use super::dispatch_ai::{

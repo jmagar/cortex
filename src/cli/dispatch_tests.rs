@@ -19,17 +19,18 @@ use super::{
     run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_index, run_ai_projects,
     run_ai_prune_checkpoints, run_ai_search, run_ai_smoke_watch, run_ai_tools, run_ai_watch,
     run_ai_watch_status, run_correlate, run_db_backup, run_db_checkpoint, run_db_integrity,
-    run_db_status, run_db_vacuum, run_errors, run_hosts, run_search, run_sessions, run_stats,
-    run_tail,
+    run_db_status, run_db_vacuum, run_errors, run_file_tail, run_hosts, run_search, run_sessions,
+    run_stats, run_tail,
 };
 use crate::cli::http_client::HttpClient;
 use crate::cli::{
     AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
     AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
     AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs,
-    DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs, GraphAroundArgs, GraphEvidenceArgs,
-    GraphExplainArgs, IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs, SessionsArgs,
-    SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    DbStatusArgs, DbVacuumArgs, EntityArgs, FileTailCommand, FileTailListArgs, FilterArgs,
+    GraphAroundArgs, GraphEvidenceArgs, GraphExplainArgs, IngestRateArgs, OutputArgs, PatternsArgs,
+    SearchArgs, SessionsArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs,
+    TimeRangeArgs, TimelineArgs,
 };
 use anyhow::{Result, bail};
 use std::time::Duration;
@@ -376,6 +377,27 @@ async fn run_sessions_http_sends_exactly_one_request() {
     )
     .await
     .expect("sessions ok");
+}
+
+#[tokio::test]
+async fn run_file_tail_http_sends_exactly_one_request() {
+    let (server, mode) = http_mode().await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-tails"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "sources": [],
+            "statuses": [],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    run_file_tail(
+        &mode,
+        FileTailCommand::List(FileTailListArgs { json: true }),
+    )
+    .await
+    .expect("file-tail ok");
 }
 
 #[tokio::test]

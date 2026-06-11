@@ -43,6 +43,7 @@ const TOP_LEVEL_COMMANDS: &[&str] = &[
     "host-state",
     "fleet-state",
     "correlate-state",
+    "file-tail",
 ];
 
 pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
@@ -87,6 +88,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "host-state" => commands::host_state::parse_host_state(rest),
         "fleet-state" => commands::fleet_state::parse_fleet_state(rest),
         "correlate-state" => commands::correlate_state::parse_correlate_state(rest),
+        "file-tail" => commands::file_tails::parse_file_tail(rest),
         _ => bail!(
             "{}",
             suggest::unknown_command("CLI command", command, TOP_LEVEL_COMMANDS)

@@ -69,19 +69,19 @@ use cortex::app::{
     CorrelateEventsRequest, CorrelateEventsResponse, CorrelateStateRequest, CorrelateStateResponse,
     DbBackupRequest, DbBackupResult, DbCheckpointRequest, DbCheckpointResult,
     DbIntegrityJobStarted, DbIntegrityRequest, DbIntegrityResult, DbMaintenanceStatus, DbStats,
-    DbVacuumRequest, DbVacuumResult, FilterLogsRequest, FleetStateRequest, FleetStateResponse,
-    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, GraphAroundRequest,
-    GraphAroundResponse, GraphEntityLookupRequest, GraphEntityLookupResponse,
-    GraphEvidenceLookupRequest, GraphEvidenceLookupResponse, GraphExplainRequest,
-    GraphExplainResponse, HostStateRequest, HostStateResponse, IncidentContextRequest,
-    IncidentContextResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
-    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
-    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSourceIpsRequest, ListSourceIpsResponse, MaintenanceJobStatus, PatternsRequest,
-    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
-    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
-    SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest,
-    TimelineRequest, TimelineResponse, UnackErrorRequest, UnackErrorResponse,
+    DbVacuumRequest, DbVacuumResult, FileTailRequest, FileTailResponse, FilterLogsRequest,
+    FleetStateRequest, FleetStateResponse, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
+    GetLogResponse, GraphAroundRequest, GraphAroundResponse, GraphEntityLookupRequest,
+    GraphEntityLookupResponse, GraphEvidenceLookupRequest, GraphEvidenceLookupResponse,
+    GraphExplainRequest, GraphExplainResponse, HostStateRequest, HostStateResponse,
+    IncidentContextRequest, IncidentContextResponse, IngestRateRequest, IngestRateResponse,
+    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
+    ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, MaintenanceJobStatus,
+    PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse,
+    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
+    SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse,
+    TailLogsRequest, TimelineRequest, TimelineResponse, UnackErrorRequest, UnackErrorResponse,
     UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use cortex::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
@@ -513,6 +513,10 @@ impl HttpClient {
         req: &AiPruneCheckpointsRequest,
     ) -> Result<PruneCheckpointsResult> {
         self.post_json("/api/ai/prune-checkpoints", req).await
+    }
+
+    pub async fn file_tails(&self, req: &FileTailRequest) -> Result<FileTailResponse> {
+        self.post_json("/api/file-tails", req).await
     }
 
     // ─── REST surface: bead 0p8r.4 (DB ops) ─────────────────────────────────
