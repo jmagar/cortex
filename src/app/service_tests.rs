@@ -1554,3 +1554,89 @@ async fn batch_writer_completes_under_saturated_read_permits() {
             .expect("slow read should succeed");
     }
 }
+
+#[tokio::test]
+async fn file_tails_add_list_disable_enable_remove_round_trip() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_registry(registry);
+
+    let add = service
+        .file_tails(crate::app::FileTailRequest {
+            op: crate::app::FileTailOp::Add,
+            id: Some("swag-access".into()),
+            path: Some("/tmp/access.log".into()),
+            tag: Some("swag-access".into()),
+            hostname: Some("squirts".into()),
+            facility: Some("local4".into()),
+            severity: Some("info".into()),
+            start_at_end: Some(true),
+        })
+        .await
+        .unwrap();
+    assert_eq!(add.sources[0].id, "swag-access");
+
+    let disabled = service
+        .file_tails(crate::app::FileTailRequest {
+            op: crate::app::FileTailOp::Disable,
+            id: Some("swag-access".into()),
+            path: None,
+            tag: None,
+            hostname: None,
+            facility: None,
+            severity: None,
+            start_at_end: None,
+        })
+        .await
+        .unwrap();
+    assert!(!disabled.sources[0].enabled);
+
+    let enabled = service
+        .file_tails(crate::app::FileTailRequest {
+            op: crate::app::FileTailOp::Enable,
+            id: Some("swag-access".into()),
+            path: None,
+            tag: None,
+            hostname: None,
+            facility: None,
+            severity: None,
+            start_at_end: None,
+        })
+        .await
+        .unwrap();
+    assert!(enabled.sources[0].enabled);
+
+    let listed = service
+        .file_tails(crate::app::FileTailRequest {
+            op: crate::app::FileTailOp::List,
+            id: None,
+            path: None,
+            tag: None,
+            hostname: None,
+            facility: None,
+            severity: None,
+            start_at_end: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(listed.sources.len(), 1);
+
+    let removed = service
+        .file_tails(crate::app::FileTailRequest {
+            op: crate::app::FileTailOp::Remove,
+            id: Some("swag-access".into()),
+            path: None,
+            tag: None,
+            hostname: None,
+            facility: None,
+            severity: None,
+            start_at_end: None,
+        })
+        .await
+        .unwrap();
+    assert!(removed.sources.is_empty());
+}

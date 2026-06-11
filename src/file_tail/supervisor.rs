@@ -54,6 +54,15 @@ impl FileTailSupervisor {
         out
     }
 
+    pub(crate) fn shutdown(&self) {
+        self.token.cancel();
+        let mut tasks = self.tasks.lock();
+        for (_, task) in tasks.drain() {
+            task.status.lock().running = false;
+            task.handle.abort();
+        }
+    }
+
     pub(crate) fn reconcile(&self) -> Result<()> {
         let sources = self.registry.list()?;
         let enabled: HashSet<String> = sources

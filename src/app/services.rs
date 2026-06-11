@@ -50,6 +50,7 @@ use crate::assessment::{GeminiAssessConfig, build_assessment_prompt, run_gemini_
 use crate::command_log::{self, CommandLogImportResult};
 use crate::config::StorageConfig;
 use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy};
+use crate::file_tail::{FileTailRegistry, FileTailStatus};
 use crate::scanner;
 
 mod ai;
@@ -58,6 +59,7 @@ mod analytics;
 mod assessment;
 mod compose;
 mod error_detection;
+mod file_tails;
 mod filters;
 mod graph;
 mod graph_limits;
@@ -91,6 +93,9 @@ pub struct CortexService {
     acquire_timeout: Duration,
     /// OS-level adapter for journalctl / systemd shell-outs.
     pub(super) os: Arc<dyn OsAdapter + Send + Sync>,
+    file_tail_registry: Option<Arc<FileTailRegistry>>,
+    file_tail_reconcile: Option<Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>>,
+    file_tail_statuses: Option<Arc<dyn Fn() -> Vec<FileTailStatus> + Send + Sync>>,
 }
 
 /// Number of read permits issued for a given r2d2 pool size.
@@ -115,6 +120,9 @@ impl CortexService {
             db_permits: Arc::new(Semaphore::new(permits)),
             acquire_timeout: DB_ACQUIRE_TIMEOUT,
             os: Arc::new(SystemOsAdapter),
+            file_tail_registry: None,
+            file_tail_reconcile: None,
+            file_tail_statuses: None,
         }
     }
 
@@ -133,7 +141,28 @@ impl CortexService {
             db_permits: Arc::new(Semaphore::new(permits)),
             acquire_timeout: DB_ACQUIRE_TIMEOUT,
             os,
+            file_tail_registry: None,
+            file_tail_reconcile: None,
+            file_tail_statuses: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_file_tail_registry(mut self, registry: Arc<FileTailRegistry>) -> Self {
+        self.file_tail_registry = Some(registry);
+        self
+    }
+
+    pub(crate) fn with_file_tail_control(
+        mut self,
+        registry: Arc<FileTailRegistry>,
+        reconcile: Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>,
+        statuses: Arc<dyn Fn() -> Vec<FileTailStatus> + Send + Sync>,
+    ) -> Self {
+        self.file_tail_registry = Some(registry);
+        self.file_tail_reconcile = Some(reconcile);
+        self.file_tail_statuses = Some(statuses);
+        self
     }
 
     /// One-shot SQLite schema-version probe. Sync because callers run during

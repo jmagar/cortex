@@ -2,7 +2,7 @@ pub(crate) mod models;
 pub(crate) mod registry;
 pub(crate) mod supervisor;
 
-pub(crate) use models::{
+pub use models::{
     FileTailAddRequest, FileTailOp, FileTailRequest, FileTailResponse, FileTailSource,
     FileTailStatus,
 };

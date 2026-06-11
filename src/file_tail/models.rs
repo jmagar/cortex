@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct FileTailSource {
+pub struct FileTailSource {
     pub id: String,
     pub path: String,
     pub tag: String,
@@ -17,7 +17,7 @@ pub(crate) struct FileTailSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum FileTailOp {
+pub enum FileTailOp {
     List,
     Add,
     Remove,
@@ -28,7 +28,7 @@ pub(crate) enum FileTailOp {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct FileTailRequest {
+pub struct FileTailRequest {
     pub op: FileTailOp,
     pub id: Option<String>,
     pub path: Option<String>,
@@ -41,7 +41,7 @@ pub(crate) struct FileTailRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct FileTailAddRequest {
+pub struct FileTailAddRequest {
     pub id: String,
     pub path: String,
     pub tag: String,
@@ -52,7 +52,7 @@ pub(crate) struct FileTailAddRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct FileTailStatus {
+pub struct FileTailStatus {
     pub id: String,
     pub running: bool,
     pub last_line_at: Option<String>,
@@ -60,7 +60,7 @@ pub(crate) struct FileTailStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct FileTailResponse {
+pub struct FileTailResponse {
     pub sources: Vec<FileTailSource>,
     pub statuses: Vec<FileTailStatus>,
 }
