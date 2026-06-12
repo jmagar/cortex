@@ -132,7 +132,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "source_kind": {
                     "type": "string",
-                    "enum": ["docker-stream", "docker-event", "agent-command", "shell-history", "transcript", "claude", "codex", "gemini"],
+                    "enum": ["docker-stream", "docker-event", "file-tail", "agent-command", "shell-history", "transcript", "claude", "codex", "gemini"],
                     "description": "For action=filter: structured source alias. syslog-udp, syslog-tcp, and otlp are rejected in v1 because transport is not indexed separately."
                 },
                 "severity": {
@@ -320,7 +320,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                         {"type": "integer"},
                         {"type": "string"}
                     ],
-                    "description": "For action=get: integer log id to fetch. For action=file_tails: source id for op=add|remove|enable|disable."
+                    "description": "For action=get: integer log id to fetch. For action=file_tails: string source id for op=add|remove|enable|disable."
                 },
                 "op": {
                     "type": "string",
@@ -506,6 +506,32 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                             "mode": {
                                 "enum": ["snapshot", "host_services", "domain_routes", "service_dependencies", "findings"]
                             }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "action": { "const": "get" }
+                        },
+                        "required": ["action"]
+                    },
+                    "then": {
+                        "properties": {
+                            "id": { "type": "integer" }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "action": { "const": "file_tails" }
+                        },
+                        "required": ["action"]
+                    },
+                    "then": {
+                        "properties": {
+                            "id": { "type": "string" }
                         }
                     }
                 }

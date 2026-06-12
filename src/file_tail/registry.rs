@@ -31,6 +31,14 @@ impl FileTailRegistry {
         self.read_locked()
     }
 
+    pub(crate) fn get(&self, id: &str) -> Result<Option<FileTailSource>> {
+        let _guard = self.lock.lock();
+        Ok(self
+            .read_locked()?
+            .into_iter()
+            .find(|source| source.id == id))
+    }
+
     pub(crate) fn upsert(&self, source: FileTailSource) -> Result<()> {
         let _guard = self.lock.lock();
         let mut sources = self.read_locked()?;
@@ -43,7 +51,11 @@ impl FileTailRegistry {
     pub(crate) fn remove(&self, id: &str) -> Result<()> {
         let _guard = self.lock.lock();
         let mut sources = self.read_locked()?;
+        let before = sources.len();
         sources.retain(|existing| existing.id != id);
+        if sources.len() == before {
+            anyhow::bail!("file tail source not found: {id}");
+        }
         self.write_locked(&sources)
     }
 

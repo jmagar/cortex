@@ -65,7 +65,7 @@ Tests: unit tests live in sidecar files beside their source modules (e.g. `src/d
 
 One MCP tool: **`cortex`** — dispatches by `action` argument. 46 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
 
-Scope taxonomy: every action requires `cortex:read` except the three **admin** actions `ack_error`, `unack_error`, and `notifications_test`, which require `cortex:admin` (static bearer tokens get read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true`); `help` is info-only (no scope gate).
+Scope taxonomy: every action requires `cortex:read` except the four **admin** actions `ack_error`, `unack_error`, `file_tails`, and `notifications_test`, which require `cortex:admin` (static bearer tokens get read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true`); `help` is info-only (no scope gate).
 
 | Action | Description |
 |--------|-------------|

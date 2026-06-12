@@ -25,6 +25,7 @@ These fields match `search` without `query` and use the same timestamp parsing, 
 
 - `source_kind=docker-stream`: filters `source_ip` by the `docker://` prefix.
 - `source_kind=docker-event`: filters `source_ip` by the `docker-event://` prefix.
+- `source_kind=file-tail`: filters `source_ip` by the `file-tail://` prefix.
 - `source_kind=agent-command`: filters `source_ip` by the `agent-command://` prefix.
 - `source_kind=shell-history`: filters `source_ip` by the `shell-history://` prefix.
 - `source_kind=transcript`: filters transcript rows when combined with `tool`, `project`, or `session_id`.

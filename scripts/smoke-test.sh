@@ -95,6 +95,12 @@ mcp_call() {
     mcporter call --config "$MCPORTER_CONFIG" "cortex.cortex" "action=${action}" "$@" 2>&1
 }
 
+mcp_admin_scope_available() {
+    [[ -z "${CORTEX_TOKEN:-}" \
+        || "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
+        || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ]]
+}
+
 mcp_jsonrpc() {
     local payload="$1"
     local auth_args=()
@@ -349,16 +355,20 @@ assert_eq "status: db_ok is true" "$STATUS_DB_OK" "True"
 # ── file_tails ────────────────────────────────────────────────────────────────
 echo ""
 echo "Action: file_tails"
-FILE_TAILS=$(mcp_call file_tails "op=status" 2>&1)
-assert_no_error "file_tails: status no error" "$FILE_TAILS"
-FILE_TAILS_SOURCES=$(json_get "$FILE_TAILS" "['sources']")
-FILE_TAILS_STATUSES=$(json_get "$FILE_TAILS" "['statuses']")
-[[ -n "$FILE_TAILS_SOURCES" ]] \
-    && pass "file_tails: sources present" \
-    || fail "file_tails: sources missing"
-[[ -n "$FILE_TAILS_STATUSES" ]] \
-    && pass "file_tails: statuses present" \
-    || fail "file_tails: statuses missing"
+if mcp_admin_scope_available; then
+    FILE_TAILS=$(mcp_call file_tails "op=status" 2>&1)
+    assert_no_error "file_tails: status no error" "$FILE_TAILS"
+    FILE_TAILS_SOURCES=$(json_get "$FILE_TAILS" "['sources']")
+    FILE_TAILS_STATUSES=$(json_get "$FILE_TAILS" "['statuses']")
+    [[ -n "$FILE_TAILS_SOURCES" ]] \
+        && pass "file_tails: sources present" \
+        || fail "file_tails: sources missing"
+    [[ -n "$FILE_TAILS_STATUSES" ]] \
+        && pass "file_tails: statuses present" \
+        || fail "file_tails: statuses missing"
+else
+    skip "file_tails: status requires cortex:admin (set CORTEX_STATIC_TOKEN_ADMIN=true or CORTEX_SMOKE_ADMIN=true)"
+fi
 
 # ── stats ─────────────────────────────────────────────────────────────────────
 echo ""

@@ -20,7 +20,7 @@ wins.
 ## Current Actions
 
 cortex exposes one MCP tool named `cortex`. The required `action` argument
-selects one of these 44 actions:
+selects one of these 46 actions:
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
@@ -122,7 +122,7 @@ handler and service layers.
 | `host` | Optional host_id-or-hostname filter for `correlate_state` |
 | `reference_time` | Required window center for `correlate` and `correlate_state` |
 | `source_ip` | `search`, `filter`, `tail`, `correlate`, `ai_correlate` |
-| `source_kind` | `filter` only; aliases Docker, command-history, shell-history, transcript, and AI-tool rows |
+| `source_kind` | `filter` only; aliases Docker, file-tail, command-history, shell-history, transcript, and AI-tool rows |
 | `project` | `filter`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools` |
 | `tool` | `filter`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_projects` |
 | `session_id` | `filter`, `ai_correlate` |

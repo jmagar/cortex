@@ -72,12 +72,25 @@ fn schema_includes_file_tails_action() {
         .find(|tool| tool["name"] == "cortex")
         .expect("cortex tool");
     let schema = serde_json::to_value(tool["inputSchema"].clone()).unwrap();
-    assert!(schema.to_string().contains("file_tails"));
-    assert!(
-        schema
-            .to_string()
-            .contains("op=list|add|remove|enable|disable|status")
+    let properties = &schema["properties"];
+    let action_enum = properties["action"]["enum"].as_array().unwrap();
+    assert!(action_enum.iter().any(|value| value == "file_tails"));
+    assert_eq!(
+        properties["op"]["description"],
+        "For action=file_tails: op=list|add|remove|enable|disable|status."
     );
+    let source_kind_enum = properties["source_kind"]["enum"].as_array().unwrap();
+    assert!(source_kind_enum.iter().any(|value| value == "file-tail"));
+
+    let all_of = schema["allOf"].as_array().unwrap();
+    assert!(all_of.iter().any(|rule| {
+        rule["if"]["properties"]["action"]["const"] == "get"
+            && rule["then"]["properties"]["id"]["type"] == "integer"
+    }));
+    assert!(all_of.iter().any(|rule| {
+        rule["if"]["properties"]["action"]["const"] == "file_tails"
+            && rule["then"]["properties"]["id"]["type"] == "string"
+    }));
 }
 
 #[test]

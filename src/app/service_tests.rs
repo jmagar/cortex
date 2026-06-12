@@ -1604,79 +1604,73 @@ async fn file_tails_add_list_disable_enable_remove_round_trip() {
     std::fs::write(&log_path, "seed\n").unwrap();
 
     let add = service
-        .file_tails(crate::app::FileTailRequest {
-            op: crate::app::FileTailOp::Add,
-            id: Some("swag-access".into()),
-            path: Some(log_path.to_string_lossy().into_owned()),
-            tag: Some("swag-access".into()),
-            hostname: Some("squirts".into()),
-            facility: Some("local4".into()),
-            severity: Some("info".into()),
-            start_at_end: Some(true),
-        })
+        .file_tails(crate::app::FileTailRequest::add(
+            crate::app::FileTailAddRequest {
+                id: "swag-access".into(),
+                path: log_path.to_string_lossy().into_owned(),
+                tag: "swag-access".into(),
+                hostname: Some("squirts".into()),
+                facility: Some("local4".into()),
+                severity: Some("info".into()),
+                start_at_end: Some(true),
+            },
+        ))
         .await
         .unwrap();
+    assert_eq!(add.sources.len(), 1);
     assert_eq!(add.sources[0].id, "swag-access");
 
     let disabled = service
-        .file_tails(crate::app::FileTailRequest {
-            op: crate::app::FileTailOp::Disable,
-            id: Some("swag-access".into()),
-            path: None,
-            tag: None,
-            hostname: None,
-            facility: None,
-            severity: None,
-            start_at_end: None,
-        })
+        .file_tails(crate::app::FileTailRequest::id_op(
+            crate::app::FileTailOp::Disable,
+            "swag-access".into(),
+        ))
         .await
         .unwrap();
+    assert_eq!(disabled.sources.len(), 1);
     assert!(!disabled.sources[0].enabled);
 
     let enabled = service
-        .file_tails(crate::app::FileTailRequest {
-            op: crate::app::FileTailOp::Enable,
-            id: Some("swag-access".into()),
-            path: None,
-            tag: None,
-            hostname: None,
-            facility: None,
-            severity: None,
-            start_at_end: None,
-        })
+        .file_tails(crate::app::FileTailRequest::id_op(
+            crate::app::FileTailOp::Enable,
+            "swag-access".into(),
+        ))
         .await
         .unwrap();
+    assert_eq!(enabled.sources.len(), 1);
     assert!(enabled.sources[0].enabled);
 
     let listed = service
-        .file_tails(crate::app::FileTailRequest {
-            op: crate::app::FileTailOp::List,
-            id: None,
-            path: None,
-            tag: None,
-            hostname: None,
-            facility: None,
-            severity: None,
-            start_at_end: None,
-        })
+        .file_tails(crate::app::FileTailRequest::list())
         .await
         .unwrap();
     assert_eq!(listed.sources.len(), 1);
 
     let removed = service
-        .file_tails(crate::app::FileTailRequest {
-            op: crate::app::FileTailOp::Remove,
-            id: Some("swag-access".into()),
-            path: None,
-            tag: None,
-            hostname: None,
-            facility: None,
-            severity: None,
-            start_at_end: None,
-        })
+        .file_tails(crate::app::FileTailRequest::id_op(
+            crate::app::FileTailOp::Remove,
+            "swag-access".into(),
+        ))
         .await
         .unwrap();
     assert!(removed.sources.is_empty());
+}
+
+fn add_file_tail_request(
+    id: &str,
+    path: impl Into<String>,
+    facility: Option<&str>,
+    severity: Option<&str>,
+) -> crate::app::FileTailRequest {
+    crate::app::FileTailRequest::add(crate::app::FileTailAddRequest {
+        id: id.into(),
+        path: path.into(),
+        tag: id.into(),
+        hostname: None,
+        facility: facility.map(str::to_string),
+        severity: severity.map(str::to_string),
+        start_at_end: Some(true),
+    })
 }
 
 #[tokio::test]
@@ -1692,46 +1686,34 @@ async fn file_tails_rejects_invalid_facility_severity_and_disallowed_paths() {
     std::fs::write(&log_path, "seed\n").unwrap();
 
     let invalid_severity = service
-        .file_tails(crate::app::FileTailRequest {
-            op: crate::app::FileTailOp::Add,
-            id: Some("bad-sev".into()),
-            path: Some(log_path.to_string_lossy().into_owned()),
-            tag: Some("bad-sev".into()),
-            hostname: None,
-            facility: Some("local4".into()),
-            severity: Some("bogus".into()),
-            start_at_end: Some(true),
-        })
+        .file_tails(add_file_tail_request(
+            "bad-sev",
+            log_path.to_string_lossy().into_owned(),
+            Some("local4"),
+            Some("bogus"),
+        ))
         .await
         .unwrap_err();
     assert!(invalid_severity.to_string().contains("severity"));
 
     let invalid_facility = service
-        .file_tails(crate::app::FileTailRequest {
-            op: crate::app::FileTailOp::Add,
-            id: Some("bad-facility".into()),
-            path: Some(log_path.to_string_lossy().into_owned()),
-            tag: Some("bad-facility".into()),
-            hostname: None,
-            facility: Some("notafacility".into()),
-            severity: Some("info".into()),
-            start_at_end: Some(true),
-        })
+        .file_tails(add_file_tail_request(
+            "bad-facility",
+            log_path.to_string_lossy().into_owned(),
+            Some("notafacility"),
+            Some("info"),
+        ))
         .await
         .unwrap_err();
     assert!(invalid_facility.to_string().contains("facility"));
 
     let disallowed = service
-        .file_tails(crate::app::FileTailRequest {
-            op: crate::app::FileTailOp::Add,
-            id: Some("hosts".into()),
-            path: Some("/etc/hosts".into()),
-            tag: Some("hosts".into()),
-            hostname: None,
-            facility: Some("local4".into()),
-            severity: Some("info".into()),
-            start_at_end: Some(true),
-        })
+        .file_tails(add_file_tail_request(
+            "hosts",
+            "/etc/hosts",
+            Some("local4"),
+            Some("info"),
+        ))
         .await
         .unwrap_err();
     assert!(disallowed.to_string().contains("allowed roots"));

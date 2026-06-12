@@ -452,9 +452,9 @@ pub struct ApiConfig {
     /// Provisioned by `cortex setup repair`. The server fails to start without it.
     #[serde(default)]
     pub api_token: Secret,
-    /// Optional stronger bearer token for REST routes that mutate runtime state.
-    /// File-tail add/remove/enable/disable require this token when called over
-    /// `/api/*`; list/status remain available with `api_token`.
+    /// Optional stronger token for REST file-tail management.
+    /// All `/api/file-tails` operations require this token because list/status
+    /// expose configured filesystem paths.
     #[serde(default)]
     pub admin_token: Secret,
 }

@@ -170,6 +170,12 @@ _skip() {
   SKIP_COUNT=$(( SKIP_COUNT + 1 ))
 }
 
+mcp_admin_scope_available() {
+  [[ -z "${TOKEN:-}" \
+    || "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
+    || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ]]
+}
+
 section() {
   printf '\n%b=== %s ===%b\n' "${C_BOLD}" "$*" "${C_RESET}"
 }
@@ -476,10 +482,14 @@ phase_tools() {
 
   # --- cortex file_tails ---
   section "  cortex file_tails"
-  local file_tails_result
-  file_tails_result="$(call_tool cortex '{"action":"file_tails","op":"status"}')" || file_tails_result=""
-  assert_jq "cortex file_tails — sources array present"       "${file_tails_result}" '.sources | type == "array"'
-  assert_jq "cortex file_tails — statuses array present"      "${file_tails_result}" '.statuses | type == "array"'
+  if mcp_admin_scope_available; then
+    local file_tails_result
+    file_tails_result="$(call_tool cortex '{"action":"file_tails","op":"status"}')" || file_tails_result=""
+    assert_jq "cortex file_tails — sources array present"       "${file_tails_result}" '.sources | type == "array"'
+    assert_jq "cortex file_tails — statuses array present"      "${file_tails_result}" '.statuses | type == "array"'
+  else
+    _skip "cortex file_tails — registry status" "requires cortex:admin (set CORTEX_STATIC_TOKEN_ADMIN=true or CORTEX_SMOKE_ADMIN=true)"
+  fi
 
   # --- compose diagnostics ---
   section "  cortex compose diagnostics"
@@ -751,6 +761,8 @@ run_docker_mode() {
   docker_args+=("-e" "CORTEX_HOST=0.0.0.0")
   docker_args+=("-e" "CORTEX_TOKEN=${TOKEN}")
   docker_args+=("-e" "CORTEX_API_TOKEN=${TOKEN}")
+  docker_args+=("-e" "CORTEX_STATIC_TOKEN_ADMIN=true")
+  CORTEX_STATIC_TOKEN_ADMIN=true
 
   # Remove storage budget env vars that conflict with tmpfs size limits
   docker_args+=(

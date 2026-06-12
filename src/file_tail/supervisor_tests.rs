@@ -44,20 +44,12 @@ fn file_tail_line_to_entry_sets_expected_envelope() {
     assert_eq!(entry.message, "GET / HTTP/1.1\" 401");
     assert_eq!(entry.raw, "GET / HTTP/1.1\" 401");
     assert_eq!(entry.source_ip, "file-tail://squirts/swag-access");
-    assert!(
-        entry
-            .metadata_json
-            .as_deref()
-            .unwrap()
-            .contains("\"source_kind\":\"file-tail\"")
-    );
-    assert!(
-        entry
-            .metadata_json
-            .as_deref()
-            .unwrap()
-            .contains("\"path_basename\":\"access.log\"")
-    );
+    let metadata: serde_json::Value =
+        serde_json::from_str(entry.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_kind"], "file-tail");
+    assert_eq!(metadata["file_tail_id"], "swag-access");
+    assert_eq!(metadata["tag"], "swag-access");
+    assert_eq!(metadata["path_basename"], "access.log");
 }
 
 #[tokio::test]
@@ -73,8 +65,17 @@ async fn reconcile_restarts_task_when_source_definition_changes() {
         8192,
     );
 
+    let first_path = temp.path().join("one.log");
+    let second_path = temp.path().join("two.log");
+    tokio::fs::write(&first_path, b"one\n").await.unwrap();
+    tokio::fs::write(&second_path, b"two\n").await.unwrap();
+
     registry
-        .upsert(source("swag-access", "/tmp/one.log", "swag-access"))
+        .upsert(source(
+            "swag-access",
+            &first_path.to_string_lossy(),
+            "swag-access",
+        ))
         .unwrap();
     supervisor.reconcile().unwrap();
     assert_eq!(
@@ -82,11 +83,15 @@ async fn reconcile_restarts_task_when_source_definition_changes() {
             .running_source_for_test("swag-access")
             .unwrap()
             .path,
-        "/tmp/one.log"
+        first_path.to_string_lossy()
     );
 
     registry
-        .upsert(source("swag-access", "/tmp/two.log", "swag-access"))
+        .upsert(source(
+            "swag-access",
+            &second_path.to_string_lossy(),
+            "swag-access",
+        ))
         .unwrap();
     supervisor.reconcile().unwrap();
     assert_eq!(
@@ -94,7 +99,7 @@ async fn reconcile_restarts_task_when_source_definition_changes() {
             .running_source_for_test("swag-access")
             .unwrap()
             .path,
-        "/tmp/two.log"
+        second_path.to_string_lossy()
     );
     supervisor.shutdown();
 }
@@ -112,8 +117,15 @@ async fn reconcile_does_not_restart_task_for_checkpoint_updates() {
         8192,
     );
 
+    let log_path = temp.path().join("one.log");
+    tokio::fs::write(&log_path, b"one\n").await.unwrap();
+
     registry
-        .upsert(source("swag-access", "/tmp/one.log", "swag-access"))
+        .upsert(source(
+            "swag-access",
+            &log_path.to_string_lossy(),
+            "swag-access",
+        ))
         .unwrap();
     supervisor.reconcile().unwrap();
     registry
@@ -125,8 +137,53 @@ async fn reconcile_does_not_restart_task_for_checkpoint_updates() {
             .running_source_for_test("swag-access")
             .unwrap()
             .path,
-        "/tmp/one.log"
+        log_path.to_string_lossy()
     );
+    supervisor.shutdown();
+}
+
+#[tokio::test]
+async fn supervisor_ingests_appended_line_and_updates_checkpoint() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = std::sync::Arc::new(FileTailRegistry::new(temp.path().join("file-tails.json")));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<LogBatchEntry>(4);
+    let ingest = IngestTx::from_sender_for_test(tx);
+    let token = tokio_util::sync::CancellationToken::new();
+    let supervisor = FileTailSupervisor::new(
+        std::sync::Arc::clone(&registry),
+        ingest,
+        token.clone(),
+        8192,
+    );
+    let log_path = temp.path().join("loop.log");
+    tokio::fs::write(&log_path, b"").await.unwrap();
+
+    let mut source = source("loop", &log_path.to_string_lossy(), "loop");
+    source.start_at_end = false;
+    registry.upsert(source).unwrap();
+    supervisor.reconcile().unwrap();
+
+    let mut writer = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(&log_path)
+        .await
+        .unwrap();
+    writer.write_all(b"hello from loop\n").await.unwrap();
+    writer.flush().await.unwrap();
+
+    let entry = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(entry.message, "hello from loop");
+
+    let stored = registry.get("loop").unwrap().unwrap();
+    assert!(stored.checkpoint_offset.unwrap_or_default() > 0);
+    let statuses = supervisor.statuses();
+    assert_eq!(statuses.len(), 1);
+    assert!(statuses[0].last_line_at.is_some());
+
+    token.cancel();
     supervisor.shutdown();
 }
 
@@ -147,6 +204,20 @@ async fn open_tail_file_resumes_matching_checkpoint_before_start_at_end() {
     let mut rest = String::new();
     opened.file.read_to_string(&mut rest).await.unwrap();
     assert_eq!(rest, "new\n");
+}
+
+#[tokio::test]
+async fn open_tail_file_rejects_symlink_paths() {
+    let temp = tempfile::tempdir().unwrap();
+    let target_path = temp.path().join("target.log");
+    let symlink_path = temp.path().join("link.log");
+    tokio::fs::write(&target_path, b"secret\n").await.unwrap();
+    std::os::unix::fs::symlink(&target_path, &symlink_path).unwrap();
+    let src = source("app", &symlink_path.to_string_lossy(), "app");
+
+    let err = open_tail_file(&src, false).await.unwrap_err();
+
+    assert!(err.to_string().contains("must not be a symlink"));
 }
 
 #[tokio::test]
@@ -190,6 +261,22 @@ async fn reopen_if_rotated_or_truncated_detects_copytruncate() {
 }
 
 #[tokio::test]
+async fn reopen_if_rotated_or_truncated_errors_when_file_disappears() {
+    let temp = tempfile::tempdir().unwrap();
+    let file_path = temp.path().join("app.log");
+    tokio::fs::write(&file_path, b"old\n").await.unwrap();
+    let src = source("app", &file_path.to_string_lossy(), "app");
+    let old = open_tail_file(&src, false).await.unwrap();
+    tokio::fs::remove_file(&file_path).await.unwrap();
+
+    let err = reopen_if_rotated_or_truncated(&src, old.identity, old.position)
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("disappeared"));
+}
+
+#[tokio::test]
 async fn read_bounded_line_truncates_oversized_records() {
     let cursor = std::io::Cursor::new(b"abcdef\nnext\n".to_vec());
     let mut reader = BufReader::new(cursor);
@@ -198,13 +285,47 @@ async fn read_bounded_line_truncates_oversized_records() {
     let first = read_bounded_line(&mut reader, &mut out, 3).await.unwrap();
     assert_eq!(first.bytes_read, 7);
     assert!(first.truncated);
+    assert!(first.complete);
     assert_eq!(out, b"abc");
 
     out.clear();
     let second = read_bounded_line(&mut reader, &mut out, 3).await.unwrap();
     assert_eq!(second.bytes_read, 5);
     assert!(second.truncated);
+    assert!(second.complete);
     assert_eq!(out, b"nex");
+}
+
+#[tokio::test]
+async fn read_bounded_line_buffers_partial_eof_until_newline() {
+    let temp = tempfile::tempdir().unwrap();
+    let file_path = temp.path().join("app.log");
+    tokio::fs::write(&file_path, b"abc").await.unwrap();
+    let file = tokio::fs::File::open(&file_path).await.unwrap();
+    let mut reader = BufReader::new(file);
+    let mut out = Vec::new();
+
+    let partial = read_bounded_line(&mut reader, &mut out, 8192)
+        .await
+        .unwrap();
+    assert_eq!(partial.bytes_read, 3);
+    assert!(!partial.complete);
+    assert_eq!(out, b"abc");
+
+    let mut writer = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(&file_path)
+        .await
+        .unwrap();
+    writer.write_all(b"def\n").await.unwrap();
+    writer.flush().await.unwrap();
+
+    let complete = read_bounded_line(&mut reader, &mut out, 8192)
+        .await
+        .unwrap();
+    assert_eq!(complete.bytes_read, 4);
+    assert!(complete.complete);
+    assert_eq!(out, b"abcdef\n");
 }
 
 #[tokio::test]

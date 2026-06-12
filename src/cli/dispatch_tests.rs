@@ -43,6 +43,10 @@ async fn http_mode() -> (MockServer, CliMode) {
     let server = MockServer::start().await;
     let client =
         HttpClient::discover(Some(server.uri()), Some("test-token".into())).expect("discover ok");
+    http_mode_with_client(server, client).await
+}
+
+async fn http_mode_with_client(server: MockServer, client: HttpClient) -> (MockServer, CliMode) {
     // Catch-all guard: any request that doesn't match a per-test
     // mock returns 404 and counts against `expect(0)`. Combined with the
     // per-test `expect(1)` on the actual endpoint, this asserts EXACTLY
@@ -57,6 +61,14 @@ async fn http_mode() -> (MockServer, CliMode) {
         .mount(&server)
         .await;
     (server, CliMode::Http(client))
+}
+
+async fn http_mode_with_admin_token(admin_token: &str) -> (MockServer, CliMode) {
+    let server = MockServer::start().await;
+    let client = HttpClient::discover(Some(server.uri()), Some("test-token".into()))
+        .expect("discover ok")
+        .with_api_admin_token_for_test(admin_token);
+    http_mode_with_client(server, client).await
 }
 
 fn empty_search_logs_body() -> serde_json::Value {
@@ -381,17 +393,7 @@ async fn run_sessions_http_sends_exactly_one_request() {
 
 #[tokio::test]
 async fn run_file_tail_http_sends_exactly_one_request() {
-    let server = MockServer::start().await;
-    let client = HttpClient::discover(Some(server.uri()), Some("test-token".into()))
-        .expect("discover ok")
-        .with_api_admin_token_for_test("admin-token");
-    Mock::given(wiremock::matchers::any())
-        .respond_with(ResponseTemplate::new(404))
-        .with_priority(255)
-        .expect(0)
-        .mount(&server)
-        .await;
-    let mode = CliMode::Http(client);
+    let (server, mode) = http_mode_with_admin_token("admin-token").await;
     Mock::given(method("POST"))
         .and(path("/api/file-tails"))
         .and(header("x-cortex-admin-token", "admin-token"))

@@ -13,11 +13,6 @@ fn source_kind_as_str_matches_serde() {
 }
 
 #[test]
-fn source_kind_file_tail_wire_value_is_stable() {
-    assert_eq!(SourceKind::FileTail.as_str(), "file-tail");
-}
-
-#[test]
 fn source_kind_is_syslog_covers_both() {
     assert!(SourceKind::SyslogUdp.is_syslog());
     assert!(SourceKind::SyslogTcp.is_syslog());

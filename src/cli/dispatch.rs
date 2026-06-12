@@ -20,8 +20,8 @@
 
 use anyhow::{Result, bail};
 use cortex::app::{
-    CorrelateEventsRequest, FileTailOp, FileTailRequest, FilterLogsRequest, GetErrorsRequest,
-    IncidentRequest, ListSessionsRequest, SearchLogsRequest, TailLogsRequest,
+    CorrelateEventsRequest, FileTailAddRequest, FileTailOp, FileTailRequest, FilterLogsRequest,
+    GetErrorsRequest, IncidentRequest, ListSessionsRequest, SearchLogsRequest, TailLogsRequest,
 };
 use std::future::Future;
 
@@ -279,43 +279,18 @@ pub(crate) async fn run_sessions(mode: &CliMode, args: SessionsArgs) -> Result<(
 
 pub(crate) async fn run_file_tail(mode: &CliMode, command: FileTailCommand) -> Result<()> {
     let (req, json) = match command {
-        FileTailCommand::List(args) => (
-            FileTailRequest {
-                op: FileTailOp::List,
-                id: None,
-                path: None,
-                tag: None,
-                hostname: None,
-                facility: None,
-                severity: None,
-                start_at_end: None,
-            },
-            args.json,
-        ),
-        FileTailCommand::Status(args) => (
-            FileTailRequest {
-                op: FileTailOp::Status,
-                id: None,
-                path: None,
-                tag: None,
-                hostname: None,
-                facility: None,
-                severity: None,
-                start_at_end: None,
-            },
-            args.json,
-        ),
+        FileTailCommand::List(args) => (FileTailRequest::list(), args.json),
+        FileTailCommand::Status(args) => (FileTailRequest::status(), args.json),
         FileTailCommand::Add(args) => (
-            FileTailRequest {
-                op: FileTailOp::Add,
-                id: Some(args.id),
-                path: Some(args.path),
-                tag: Some(args.tag),
+            FileTailRequest::add(FileTailAddRequest {
+                id: args.id,
+                path: args.path,
+                tag: args.tag,
                 hostname: args.hostname,
                 facility: args.facility,
                 severity: args.severity,
                 start_at_end: Some(args.start_at_end),
-            },
+            }),
             args.json,
         ),
         FileTailCommand::Remove(args) => id_request(FileTailOp::Remove, args),
@@ -352,19 +327,7 @@ pub(crate) async fn run_file_tail(mode: &CliMode, command: FileTailCommand) -> R
 }
 
 fn id_request(op: FileTailOp, args: FileTailIdArgs) -> (FileTailRequest, bool) {
-    (
-        FileTailRequest {
-            op,
-            id: Some(args.id),
-            path: None,
-            tag: None,
-            hostname: None,
-            facility: None,
-            severity: None,
-            start_at_end: None,
-        },
-        args.json,
-    )
+    (FileTailRequest::id_op(op, args.id), args.json)
 }
 
 pub(crate) use super::dispatch_ai::{

@@ -12,7 +12,7 @@ fn add_request_builds_enabled_source_with_defaults() {
         start_at_end: None,
     };
 
-    let source = FileTailSource::from_add(req, "2026-06-11T20:00:00Z");
+    let source = FileTailSource::from_add(req, "2026-06-11T20:00:00Z").unwrap();
 
     assert_eq!(source.id, "swag-access");
     assert_eq!(source.path, "/mnt/appdata/swag/log/nginx/access.log");
@@ -40,7 +40,7 @@ fn file_tail_request_rejects_missing_fields_for_add() {
     };
 
     assert_eq!(
-        req.validate().unwrap_err(),
+        req.into_add().unwrap_err(),
         "file_tails op=add requires id, path, and tag"
     );
 }
@@ -59,7 +59,29 @@ fn file_tail_request_rejects_path_traversal_ids() {
     };
 
     assert_eq!(
-        req.validate().unwrap_err(),
+        req.required_id().unwrap_err(),
         "file_tails id must contain only ASCII letters, digits, dot, underscore, or dash"
+    );
+}
+
+#[test]
+fn file_tail_request_rejects_extra_fields_for_id_ops() {
+    let mut req = FileTailRequest::id_op(FileTailOp::Remove, "swag".into());
+    req.path = Some("/tmp/access.log".into());
+
+    assert_eq!(
+        req.validate_shape().unwrap_err(),
+        "file_tails op=remove accepts only id"
+    );
+}
+
+#[test]
+fn file_tail_request_rejects_extra_fields_for_list_ops() {
+    let mut req = FileTailRequest::list();
+    req.tag = Some("swag".into());
+
+    assert_eq!(
+        req.validate_shape().unwrap_err(),
+        "file_tails op=list does not accept source fields"
     );
 }

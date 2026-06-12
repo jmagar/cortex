@@ -99,15 +99,32 @@ pub struct FileTailResponse {
 }
 
 impl FileTailSource {
-    pub(crate) fn from_add(req: FileTailAddRequest, now: &str) -> Self {
-        Self {
+    pub(crate) fn from_add(req: FileTailAddRequest, now: &str) -> Result<Self, String> {
+        validate_id(&req.id)?;
+        if req.path.is_empty() || req.tag.is_empty() {
+            return Err("file_tails op=add requires id, path, and tag".into());
+        }
+        if let Some(facility) = req.facility.as_deref() {
+            validate_facility(facility)?;
+        }
+        let severity = req
+            .severity
+            .as_deref()
+            .map(|severity| {
+                normalize_severity(Some(severity)).ok_or_else(|| {
+                    "file_tails severity must be one of emerg, alert, crit, err, warning, notice, info, debug".to_string()
+                })
+            })
+            .transpose()?
+            .unwrap_or_else(|| "info".to_string());
+
+        Ok(Self {
             id: req.id,
             path: req.path,
             tag: req.tag,
             hostname: req.hostname,
             facility: Some(req.facility.unwrap_or_else(|| "local7".to_string())),
-            severity: normalize_severity(req.severity.as_deref())
-                .unwrap_or_else(|| "info".to_string()),
+            severity,
             start_at_end: req.start_at_end.unwrap_or(true),
             enabled: true,
             checkpoint_dev: None,
@@ -115,7 +132,7 @@ impl FileTailSource {
             checkpoint_offset: None,
             created_at: now.to_string(),
             updated_at: now.to_string(),
-        }
+        })
     }
 
     pub(crate) fn same_definition(&self, other: &Self) -> bool {
@@ -131,44 +148,116 @@ impl FileTailSource {
 }
 
 impl FileTailRequest {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn list() -> Self {
+        Self {
+            op: FileTailOp::List,
+            id: None,
+            path: None,
+            tag: None,
+            hostname: None,
+            facility: None,
+            severity: None,
+            start_at_end: None,
+        }
+    }
+
+    pub fn status() -> Self {
+        Self {
+            op: FileTailOp::Status,
+            ..Self::list()
+        }
+    }
+
+    pub fn id_op(op: FileTailOp, id: String) -> Self {
+        Self {
+            op,
+            id: Some(id),
+            path: None,
+            tag: None,
+            hostname: None,
+            facility: None,
+            severity: None,
+            start_at_end: None,
+        }
+    }
+
+    pub fn add(add: FileTailAddRequest) -> Self {
+        Self {
+            op: FileTailOp::Add,
+            id: Some(add.id),
+            path: Some(add.path),
+            tag: Some(add.tag),
+            hostname: add.hostname,
+            facility: add.facility,
+            severity: add.severity,
+            start_at_end: add.start_at_end,
+        }
+    }
+
+    pub(crate) fn required_id(&self) -> Result<&str, String> {
+        let id = self
+            .id
+            .as_deref()
+            .ok_or_else(|| format!("file_tails op={:?} requires id", self.op).to_lowercase())?;
+        validate_id(id)?;
+        Ok(id)
+    }
+
+    pub(crate) fn validate_shape(&self) -> Result<(), String> {
         match self.op {
-            FileTailOp::List | FileTailOp::Status => Ok(()),
-            FileTailOp::Add => {
-                let Some(id) = self.id.as_deref() else {
-                    return Err("file_tails op=add requires id, path, and tag".into());
-                };
-                validate_id(id)?;
-                if self.path.as_deref().is_none_or(str::is_empty)
-                    || self.tag.as_deref().is_none_or(str::is_empty)
+            FileTailOp::List | FileTailOp::Status => {
+                if self.id.is_some()
+                    || self.path.is_some()
+                    || self.tag.is_some()
+                    || self.hostname.is_some()
+                    || self.facility.is_some()
+                    || self.severity.is_some()
+                    || self.start_at_end.is_some()
                 {
-                    return Err("file_tails op=add requires id, path, and tag".into());
-                }
-                if let Some(severity) = self.severity.as_deref() {
-                    normalize_severity(Some(severity)).ok_or_else(|| {
-                        "file_tails severity must be one of emerg, alert, crit, err, warning, notice, info, debug".to_string()
-                    })?;
-                }
-                if let Some(facility) = self.facility.as_deref() {
-                    validate_facility(facility)?;
+                    return Err(format!(
+                        "file_tails op={:?} does not accept source fields",
+                        self.op
+                    )
+                    .to_lowercase());
                 }
                 Ok(())
             }
+            FileTailOp::Add => Ok(()),
             FileTailOp::Remove | FileTailOp::Enable | FileTailOp::Disable => {
-                let Some(id) = self.id.as_deref() else {
-                    return Err(format!("file_tails op={:?} requires id", self.op).to_lowercase());
-                };
-                validate_id(id)
+                if self.path.is_some()
+                    || self.tag.is_some()
+                    || self.hostname.is_some()
+                    || self.facility.is_some()
+                    || self.severity.is_some()
+                    || self.start_at_end.is_some()
+                {
+                    return Err(
+                        format!("file_tails op={:?} accepts only id", self.op).to_lowercase()
+                    );
+                }
+                Ok(())
             }
         }
     }
 
     pub(crate) fn into_add(self) -> Result<FileTailAddRequest, String> {
-        self.validate()?;
+        let id = self
+            .id
+            .ok_or_else(|| "file_tails op=add requires id, path, and tag".to_string())?;
+        validate_id(&id)?;
+        let path = self
+            .path
+            .ok_or_else(|| "file_tails op=add requires id, path, and tag".to_string())?;
+        let tag = self
+            .tag
+            .ok_or_else(|| "file_tails op=add requires id, path, and tag".to_string())?;
+        if path.is_empty() || tag.is_empty() {
+            return Err("file_tails op=add requires id, path, and tag".into());
+        }
         Ok(FileTailAddRequest {
-            id: self.id.expect("validated id"),
-            path: self.path.expect("validated path"),
-            tag: self.tag.expect("validated tag"),
+            id,
+            path,
+            tag,
             hostname: self.hostname,
             facility: self.facility,
             severity: self.severity,

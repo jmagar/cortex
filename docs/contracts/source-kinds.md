@@ -171,7 +171,8 @@ scheme reconstruction):
    - `unifi-api` → no parser in V1 (poller writes structured rows
      directly under `metadata_json.unifi`).
    - `file-tail` → parser chosen by `app_name`/tag; metadata includes
-     `file_tail_id`, `path`, and `tag`.
+     `file_tail_id`, `tag`, and `path_basename` (full paths stay on the
+     admin-only management surface).
    - `otlp` → `app_name` (= OTLP `service.name`).
    - `agent` → `app_name` exact match, same path as syslog.
    - `shell-history` / `agent-command` → no parser in V1; the importer

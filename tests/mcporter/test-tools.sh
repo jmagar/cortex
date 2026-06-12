@@ -415,6 +415,12 @@ skip_test() {
   SKIP_COUNT=$(( SKIP_COUNT + 1 ))
 }
 
+mcp_admin_scope_available() {
+  [[ -z "${CORTEX_TOKEN:-${CORTEX_API_TOKEN:-}}" \
+    || "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
+    || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ]]
+}
+
 # ---------------------------------------------------------------------------
 # Safe JSON payload builder
 #   Usage: _json_payload '<jq-template>' key1=value1 key2=value2 ...
@@ -488,7 +494,11 @@ suite_meta() {
   run_test "cortex stats: returns database statistics" cortex stats   '{}' "total_logs"
   run_test "cortex stats: write_blocked field present" cortex stats   '{}' "write_blocked"
   run_test "cortex stats: free_disk_mb field present"  cortex stats   '{}' "free_disk_mb"
-  run_test "cortex file_tails: returns registry status" cortex file_tails '{"op":"status"}' "sources"
+  if mcp_admin_scope_available; then
+    run_test "cortex file_tails: returns registry status" cortex file_tails '{"op":"status"}' "sources"
+  else
+    skip_test "cortex file_tails: returns registry status" "requires cortex:admin (set CORTEX_STATIC_TOKEN_ADMIN=true or CORTEX_SMOKE_ADMIN=true)"
+  fi
   run_test "cortex compose_status: redacted diagnostics" cortex compose_status '{}' "runtime_state"
 
   local compose_status compose_runtime compose_ownership

@@ -196,6 +196,7 @@ Structured filter-only retrieval for correlation workflows. This action rejects 
 Common filters match `search`: `hostname`, `source_ip`, `severity`, `app_name`, `facility`, `exclude_facility`, `process_id`, `from`, `to`, `received_from`, `received_to`, and `limit`.
 
 Correlation aliases include `source_kind` (`docker-stream`, `docker-event`, `agent-command`, `shell-history`, `transcript`, `claude`, `codex`, `gemini`), plus `tool`, `project`, `session_id`, `container`, `docker_host`, `stream`, and `event_action`.
+`source_kind=file-tail` filters managed file-tail rows (`source_ip` prefix `file-tail://`).
 
 ---
 
@@ -776,6 +777,7 @@ Docker, mount the host log tree read-only at `/file-tail-root` with
 `CORTEX_FILE_TAIL_LOG_VOLUME` and register paths inside that mount. Sources are
 stored next to the SQLite database in `file-tails.json`, managed through
 `cortex file-tail ...`, REST `POST /api/file-tails` (requires
+`Authorization: Bearer $CORTEX_API_TOKEN` plus
 `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`), or MCP action `file_tails`,
 and emitted as `source_kind="file-tail"` rows. Row metadata includes
 `file_tail_id`, `tag`, and `path_basename`, not the full filesystem path.

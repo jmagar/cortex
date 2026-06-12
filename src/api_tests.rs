@@ -184,6 +184,7 @@ async fn file_tails_route_adds_and_lists_sources() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "response: {value}");
+    assert_eq!(value["sources"].as_array().unwrap().len(), 1);
     assert_eq!(value["sources"][0]["id"], "swag-access");
 
     let (status, value) = post_json_with_admin(
@@ -196,7 +197,51 @@ async fn file_tails_route_adds_and_lists_sources() {
     .await;
 
     assert_eq!(status, axum::http::StatusCode::OK, "response: {value}");
+    assert_eq!(value["sources"].as_array().unwrap().len(), 1);
     assert_eq!(value["sources"][0]["tag"], "swag-access");
+}
+
+#[tokio::test]
+async fn file_tails_route_rejects_when_server_admin_token_unconfigured() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = router(state).unwrap();
+
+    let (status, value) = post_json_with_admin(
+        app,
+        "/api/file-tails",
+        serde_json::json!({ "op": "status" }),
+        Some("secret"),
+        Some("admin-secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(
+        value["error"],
+        "CORTEX_API_ADMIN_TOKEN required for file-tail management"
+    );
+}
+
+#[tokio::test]
+async fn file_tails_route_rejects_wrong_admin_token() {
+    let (mut state, _pool, _dir) = test_state(Some("secret".into()));
+    state.config.admin_token = crate::config::Secret(Some("admin-secret".into()));
+    let app = router(state).unwrap();
+
+    let (status, value) = post_json_with_admin(
+        app,
+        "/api/file-tails",
+        serde_json::json!({ "op": "status" }),
+        Some("secret"),
+        Some("wrong-secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(
+        value["error"],
+        "X-Cortex-Admin-Token required for file-tail management"
+    );
 }
 
 #[tokio::test]
