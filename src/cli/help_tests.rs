@@ -40,6 +40,7 @@ const PARSER_TOKENS: &[&str] = &[
     "host-state",
     "fleet-state",
     "correlate-state",
+    "file-tail",
     // Mode-level (src/main.rs)
     "serve",
     "mcp",
@@ -93,6 +94,7 @@ fn top_level_help_plain_lists_sections_and_commands() {
     assert!(out.contains("Commands"));
     assert!(out.contains("Search & Logs"));
     assert!(out.contains("source-ips"));
+    assert!(out.contains("file-tail"));
     assert!(out.contains("→ Run cortex <command> --help"));
 }
 
@@ -134,6 +136,10 @@ fn nested_help_shows_subcommand_specific_usage() {
         out.contains("cortex inventory status [--json]"),
         "got: {out}"
     );
+
+    let out = render_command("file-tail add", false).expect("file-tail add is known");
+    assert!(out.contains("cortex file-tail add --id ID"), "got: {out}");
+    assert!(out.contains("--from-start"), "got: {out}");
 }
 
 #[test]

@@ -53,7 +53,7 @@ use std::env;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Method, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -69,19 +69,19 @@ use cortex::app::{
     CorrelateEventsRequest, CorrelateEventsResponse, CorrelateStateRequest, CorrelateStateResponse,
     DbBackupRequest, DbBackupResult, DbCheckpointRequest, DbCheckpointResult,
     DbIntegrityJobStarted, DbIntegrityRequest, DbIntegrityResult, DbMaintenanceStatus, DbStats,
-    DbVacuumRequest, DbVacuumResult, FilterLogsRequest, FleetStateRequest, FleetStateResponse,
-    GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse, GraphAroundRequest,
-    GraphAroundResponse, GraphEntityLookupRequest, GraphEntityLookupResponse,
-    GraphEvidenceLookupRequest, GraphEvidenceLookupResponse, GraphExplainRequest,
-    GraphExplainResponse, HostStateRequest, HostStateResponse, IncidentContextRequest,
-    IncidentContextResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
-    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
-    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSourceIpsRequest, ListSourceIpsResponse, MaintenanceJobStatus, PatternsRequest,
-    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
-    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
-    SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest,
-    TimelineRequest, TimelineResponse, UnackErrorRequest, UnackErrorResponse,
+    DbVacuumRequest, DbVacuumResult, FileTailRequest, FileTailResponse, FilterLogsRequest,
+    FleetStateRequest, FleetStateResponse, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
+    GetLogResponse, GraphAroundRequest, GraphAroundResponse, GraphEntityLookupRequest,
+    GraphEntityLookupResponse, GraphEvidenceLookupRequest, GraphEvidenceLookupResponse,
+    GraphExplainRequest, GraphExplainResponse, HostStateRequest, HostStateResponse,
+    IncidentContextRequest, IncidentContextResponse, IngestRateRequest, IngestRateResponse,
+    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
+    ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, MaintenanceJobStatus,
+    PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse,
+    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
+    SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse,
+    TailLogsRequest, TimelineRequest, TimelineResponse, UnackErrorRequest, UnackErrorResponse,
     UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use cortex::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
@@ -127,10 +127,10 @@ pub struct ServerVersion {
 /// see the populated value or race the init future fairly). The dispatch layer
 /// (bead 0p8r.7) is responsible for wrapping these in `tokio::select!` against
 /// `tokio::signal::ctrl_c()`.
-#[derive(Debug)]
 pub struct HttpClient {
     base_url: Url,
     inner: reqwest::Client,
+    api_admin_token: Option<String>,
     /// **LAZY ON 404 ONLY. Do NOT pre-populate or refresh after success.** The
     /// whole point of `/api/version` is detecting upgrades after a deploy;
     /// caching beyond 404 enrichment defeats it (eng-review #A33). Populated
@@ -144,6 +144,23 @@ pub struct HttpClient {
     /// requires; the in-invocation cache is intentional (we don't re-probe
     /// `/api/version` on every 404 in the same run).
     server_version_cache: OnceCell<Option<ServerVersion>>,
+}
+
+impl std::fmt::Debug for HttpClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpClient")
+            .field("base_url", &self.base_url)
+            .field("inner", &self.inner)
+            .field(
+                "api_admin_token",
+                &self
+                    .api_admin_token
+                    .as_ref()
+                    .map(|_| "<redacted admin token>"),
+            )
+            .field("server_version_cache", &self.server_version_cache)
+            .finish()
+    }
 }
 
 impl HttpClient {
@@ -178,8 +195,18 @@ impl HttpClient {
         Ok(Self {
             base_url,
             inner,
+            api_admin_token: env::var("CORTEX_API_ADMIN_TOKEN")
+                .ok()
+                .filter(|token| !token.trim().is_empty()),
             server_version_cache: OnceCell::new(),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_api_admin_token_for_test(mut self, token: impl Into<String>) -> Self {
+        let token = token.into();
+        self.api_admin_token = (!token.trim().is_empty()).then_some(token);
+        self
     }
 
     // ─── HTTP plumbing ──────────────────────────────────────────────────────
@@ -248,6 +275,43 @@ impl HttpClient {
                 .await
         };
         self.execute_with_retry(send, path).await
+    }
+
+    async fn post_json_with_admin_no_retry<Req, Resp>(&self, path: &str, body: &Req) -> Result<Resp>
+    where
+        Req: Serialize + ?Sized,
+        Resp: DeserializeOwned,
+    {
+        let token = self.api_admin_token.as_deref().ok_or_else(|| {
+            anyhow!("CORTEX_API_ADMIN_TOKEN is required for this HTTP API mutation")
+        })?;
+        let mut admin_value =
+            HeaderValue::from_str(token).context("failed to construct admin token header")?;
+        admin_value.set_sensitive(true);
+        let admin_header = HeaderName::from_static("x-cortex-admin-token");
+        let url = self.url(path)?;
+        let send = || async {
+            self.inner
+                .request(Method::POST, url.clone())
+                .header(admin_header.clone(), admin_value.clone())
+                .json(body)
+                .send()
+                .await
+        };
+        self.execute_once(send, path).await
+    }
+
+    async fn execute_once<F, Fut, Resp>(&self, send: F, path: &str) -> Result<Resp>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = reqwest::Result<Response>>,
+        Resp: DeserializeOwned,
+    {
+        let resp = match send().await {
+            Ok(r) => r,
+            Err(err) => return Err(map_send_error(err, &self.base_url)),
+        };
+        self.handle_response(resp, path).await
     }
 
     /// Send a request, handling the 503 retry and final response classification.
@@ -513,6 +577,11 @@ impl HttpClient {
         req: &AiPruneCheckpointsRequest,
     ) -> Result<PruneCheckpointsResult> {
         self.post_json("/api/ai/prune-checkpoints", req).await
+    }
+
+    pub async fn file_tails(&self, req: &FileTailRequest) -> Result<FileTailResponse> {
+        self.post_json_with_admin_no_retry("/api/file-tails", req)
+            .await
     }
 
     // ─── REST surface: bead 0p8r.4 (DB ops) ─────────────────────────────────

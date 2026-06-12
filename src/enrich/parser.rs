@@ -27,6 +27,7 @@ use thiserror::Error;
 /// - `Agent` → `"agent"` (per-host agent WebSocket)
 /// - `ShellHistory` → `"shell-history"` (local shell history backfill)
 /// - `AgentCommand` → `"agent-command"` (AI agent-launched shell command spool)
+/// - `FileTail` → `"file-tail"` (Cortex-managed local file-tail ingest)
 ///
 /// **History:** prior versions of this contract used `snake_case` with a
 /// bare `Syslog` variant. Both were corrected during the cross-cutting audit
@@ -45,6 +46,7 @@ pub enum SourceKind {
     Agent,
     ShellHistory,
     AgentCommand,
+    FileTail,
 }
 
 impl SourceKind {
@@ -63,6 +65,7 @@ impl SourceKind {
             SourceKind::Agent => "agent",
             SourceKind::ShellHistory => "shell-history",
             SourceKind::AgentCommand => "agent-command",
+            SourceKind::FileTail => "file-tail",
         }
     }
 

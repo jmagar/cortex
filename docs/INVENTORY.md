@@ -60,10 +60,11 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations | no |
 | `ack_error` | Acknowledge an error signature | yes |
 | `unack_error` | Revoke an error acknowledgement | yes |
+| `file_tails` | Manage Cortex-owned file-tail ingest sources | yes |
 | `notifications_test` | Send a test Apprise notification | yes |
 | `help` | Returns markdown documentation for all actions | no |
 
-Most MCP actions are read-only. `ack_error`, `unack_error`, and
+Most MCP actions are read-only. `ack_error`, `unack_error`, `file_tails`, and
 `notifications_test` require `cortex:admin`; they mutate acknowledgement/audit
 or notification state through service-owned actor and safety policy.
 

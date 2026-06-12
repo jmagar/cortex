@@ -132,13 +132,13 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "source_kind": {
                     "type": "string",
-                    "enum": ["docker-stream", "docker-event", "agent-command", "shell-history", "transcript", "claude", "codex", "gemini"],
+                    "enum": ["docker-stream", "docker-event", "file-tail", "agent-command", "shell-history", "transcript", "claude", "codex", "gemini"],
                     "description": "For action=filter: structured source alias. syslog-udp, syslog-tcp, and otlp are rejected in v1 because transport is not indexed separately."
                 },
                 "severity": {
                     "type": "string",
                     "enum": SEVERITY_LEVELS,
-                    "description": "For action=search or filter: syslog severity filter."
+                    "description": "For action=search or filter: syslog severity filter. For action=file_tails op=add: severity assigned to tailed lines."
                 },
                 "severity_min": {
                     "type": "string",
@@ -163,7 +163,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "facility": {
                     "type": "string",
-                    "description": "For action=search or filter: syslog facility filter, e.g. kern, auth, daemon, clockd."
+                    "description": "For action=search or filter: syslog facility filter, e.g. kern, auth, daemon, clockd. For action=file_tails op=add: facility assigned to tailed lines."
                 },
                 "exclude_facility": {
                     "type": "string",
@@ -316,8 +316,32 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "description": "For action=ai_correlate: max non-AI related log events per AI anchor, default 25, max 200."
                 },
                 "id": {
-                    "type": "integer",
-                    "description": "For action=get: log id to fetch."
+                    "oneOf": [
+                        {"type": "integer"},
+                        {"type": "string"}
+                    ],
+                    "description": "For action=get: integer log id to fetch. For action=file_tails: string source id for op=add|remove|enable|disable."
+                },
+                "op": {
+                    "type": "string",
+                    "enum": ["list", "add", "remove", "enable", "disable", "status"],
+                    "description": "For action=file_tails: required operation, one of list, add, remove, enable, disable, or status."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "For action=file_tails op=add: local log file path to tail."
+                },
+                "tag": {
+                    "type": "string",
+                    "description": "For action=file_tails op=add: app/tag stored as app_name for tailed lines."
+                },
+                "hostname": {
+                    "type": "string",
+                    "description": "For action=file_tails op=add: required source hostname assigned to tailed lines."
+                },
+                "start_at_end": {
+                    "type": "boolean",
+                    "description": "For action=file_tails op=add: true starts at EOF, false backfills existing file content."
                 },
                 "by_host": {
                     "type": "boolean",
@@ -488,6 +512,59 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                                 "enum": ["snapshot", "host_services", "domain_routes", "service_dependencies", "findings"]
                             }
                         }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "action": { "const": "get" }
+                        },
+                        "required": ["action"]
+                    },
+                    "then": {
+                        "properties": {
+                            "id": { "type": "integer" }
+                        },
+                        "required": ["id"]
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "action": { "const": "file_tails" }
+                        },
+                        "required": ["action"]
+                    },
+                    "then": {
+                        "properties": {
+                            "id": { "type": "string" },
+                            "op": { "enum": ["list", "add", "remove", "enable", "disable", "status"] }
+                        },
+                        "required": ["op"],
+                        "allOf": [
+                            {
+                                "if": {
+                                    "properties": {
+                                        "op": { "const": "add" }
+                                    },
+                                    "required": ["op"]
+                                },
+                                "then": {
+                                    "required": ["id", "path", "tag", "hostname"]
+                                }
+                            },
+                            {
+                                "if": {
+                                    "properties": {
+                                        "op": { "enum": ["remove", "enable", "disable"] }
+                                    },
+                                    "required": ["op"]
+                                },
+                                "then": {
+                                    "required": ["id"]
+                                }
+                            }
+                        ]
                     }
                 }
             ]

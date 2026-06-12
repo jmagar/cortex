@@ -55,7 +55,11 @@ fn test_state_full(
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("api-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
-    let service = crate::app::CortexService::new(Arc::clone(&pool), storage);
+    let file_tail_registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        dir.path().join("file-tails.json"),
+    ));
+    let service = crate::app::CortexService::new(Arc::clone(&pool), storage)
+        .with_file_tail_control(file_tail_registry, Arc::new(|| Ok(())), Arc::new(Vec::new));
     // Every test gets a fresh per-state maintenance permit so parallel tests
     // never contend on the process-wide `SHARED_MAINTENANCE_PERMIT` — see
     // `ApiState::with_isolated_maintenance_permit` docs.
@@ -63,6 +67,7 @@ fn test_state_full(
         service,
         ApiConfig {
             api_token: crate::config::Secret(token),
+            admin_token: crate::config::Secret(None),
         },
         3100,
         true,
@@ -137,7 +142,7 @@ fn router_requires_token() {
 #[tokio::test]
 async fn stats_route_requires_bearer_token() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
-    let app = router(state).unwrap();
+    let app = test_router(state);
 
     let (status, _) = get_json(app.clone(), "/api/stats", None).await;
     assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
@@ -145,6 +150,120 @@ async fn stats_route_requires_bearer_token() {
     let (status, value) = get_json(app, "/api/stats", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(value.get("total_logs").is_some());
+}
+
+#[tokio::test]
+async fn file_tails_route_adds_and_lists_sources() {
+    let (mut state, _pool, dir) = test_state(Some("secret".into()));
+    state.config.admin_token = crate::config::Secret(Some("admin-secret".into()));
+    let app = test_router(state);
+    let log_path = dir.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    let body = serde_json::json!({
+        "op": "add",
+        "id": "swag-access",
+        "path": log_path,
+        "tag": "swag-access",
+        "hostname": "squirts",
+        "facility": "local4",
+        "severity": "info",
+        "start_at_end": true
+    });
+
+    let (status, _value) =
+        post_json(app.clone(), "/api/file-tails", body.clone(), Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+
+    let (status, value) = post_json_with_admin(
+        app.clone(),
+        "/api/file-tails",
+        body,
+        Some("secret"),
+        Some("admin-secret"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "response: {value}");
+    assert_eq!(value["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(value["sources"][0]["id"], "swag-access");
+
+    let (status, value) = post_json_with_admin(
+        app,
+        "/api/file-tails",
+        serde_json::json!({ "op": "list" }),
+        Some("secret"),
+        Some("admin-secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK, "response: {value}");
+    assert_eq!(value["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(value["sources"][0]["tag"], "swag-access");
+}
+
+#[tokio::test]
+async fn file_tails_route_rejects_when_server_admin_token_unconfigured() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+
+    let (status, value) = post_json_with_admin(
+        app,
+        "/api/file-tails",
+        serde_json::json!({ "op": "status" }),
+        Some("secret"),
+        Some("admin-secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(
+        value["error"],
+        "CORTEX_API_ADMIN_TOKEN required for file-tail management"
+    );
+}
+
+#[tokio::test]
+async fn file_tails_route_rejects_blank_server_admin_token() {
+    let (mut state, _pool, _dir) = test_state(Some("secret".into()));
+    state.config.admin_token = crate::config::Secret(Some("   ".into()));
+    let app = test_router(state);
+
+    let (status, value) = post_json_with_admin(
+        app,
+        "/api/file-tails",
+        serde_json::json!({ "op": "status" }),
+        Some("secret"),
+        Some(""),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(
+        value["error"],
+        "CORTEX_API_ADMIN_TOKEN required for file-tail management"
+    );
+}
+
+#[tokio::test]
+async fn file_tails_route_rejects_wrong_admin_token() {
+    let (mut state, _pool, _dir) = test_state(Some("secret".into()));
+    state.config.admin_token = crate::config::Secret(Some("admin-secret".into()));
+    let app = test_router(state);
+
+    let (status, value) = post_json_with_admin(
+        app,
+        "/api/file-tails",
+        serde_json::json!({ "op": "status" }),
+        Some("secret"),
+        Some("wrong-secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(
+        value["error"],
+        "X-Cortex-Admin-Token required for file-tail management"
+    );
 }
 
 #[tokio::test]
@@ -195,7 +314,7 @@ async fn api_cors_preflight_allows_only_required_request_headers() {
         .header("Access-Control-Request-Method", "GET")
         .header(
             "Access-Control-Request-Headers",
-            "authorization,accept,x-unexpected-header",
+            "authorization,accept,x-cortex-admin-token,x-unexpected-header",
         )
         .body(axum::body::Body::empty())
         .unwrap();
@@ -211,6 +330,7 @@ async fn api_cors_preflight_allows_only_required_request_headers() {
         .to_ascii_lowercase();
     assert!(allowed.contains("authorization"));
     assert!(allowed.contains("accept"));
+    assert!(allowed.contains("x-cortex-admin-token"));
     assert!(
         !allowed.contains("x-unexpected-header"),
         "CORS allow-headers must not reflect arbitrary request headers: {allowed}"
@@ -806,6 +926,7 @@ async fn cors_localhost_defaults_suppressed_on_external_bind() {
         service,
         ApiConfig {
             api_token: crate::config::Secret(Some("secret".into())),
+            admin_token: crate::config::Secret(None),
         },
         3100,
         // External bind — defaults must be dropped.
@@ -891,12 +1012,25 @@ async fn post_json(
     body: serde_json::Value,
     token: Option<&str>,
 ) -> (axum::http::StatusCode, serde_json::Value) {
+    post_json_with_admin(app, uri, body, token, None).await
+}
+
+async fn post_json_with_admin(
+    app: axum::Router,
+    uri: &str,
+    body: serde_json::Value,
+    token: Option<&str>,
+    admin_token: Option<&str>,
+) -> (axum::http::StatusCode, serde_json::Value) {
     let mut builder = Request::builder()
         .method("POST")
         .uri(uri)
         .header("Content-Type", "application/json");
     if let Some(token) = token {
         builder = builder.header("Authorization", format!("Bearer {token}"));
+    }
+    if let Some(admin_token) = admin_token {
+        builder = builder.header("X-Cortex-Admin-Token", admin_token);
     }
     let response = app
         .oneshot(
@@ -1128,7 +1262,7 @@ async fn cors_preflight_for_post_includes_post_in_allow_methods() {
         .header("Access-Control-Request-Method", "POST")
         .header(
             "Access-Control-Request-Headers",
-            "authorization,content-type",
+            "authorization,content-type,x-cortex-admin-token",
         )
         .body(axum::body::Body::empty())
         .unwrap();
@@ -1170,6 +1304,10 @@ async fn cors_preflight_for_post_includes_post_in_allow_methods() {
     assert!(
         allow_headers.contains("content-type"),
         "Access-Control-Allow-Headers must include content-type, got: {allow_headers}"
+    );
+    assert!(
+        allow_headers.contains("x-cortex-admin-token"),
+        "Access-Control-Allow-Headers must include x-cortex-admin-token for /api/file-tails, got: {allow_headers}"
     );
     assert!(
         !allow_headers.contains('*'),

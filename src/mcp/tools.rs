@@ -110,6 +110,7 @@ async fn dispatch_cortex_action(
         H::AckError => tool_ack_error(state, args, auth).await,
         H::UnackError => tool_unack_error(state, args, auth).await,
         H::NotificationsRecent => tool_notifications_recent(state, args).await,
+        H::FileTails => tool_file_tails(state, args).await,
         H::NotificationsTest => tool_notifications_test(state, args, auth).await,
         H::SimilarIncidents => tool_similar_incidents(state, args).await,
         H::AskHistory => tool_ask_history(state, args).await,
@@ -408,10 +409,24 @@ pub(super) async fn tool_get_stats(state: &AppState, _args: Value) -> anyhow::Re
 pub(super) async fn tool_get_status(state: &AppState, _args: Value) -> anyhow::Result<Value> {
     let db_ok = state.service.health_check().await.is_ok();
     let db_maintenance = state.service.db_status().await.ok();
+    let file_tail_statuses = state.service.file_tail_statuses_snapshot();
+    let file_tail_blocked_count = file_tail_statuses
+        .iter()
+        .filter(|status| status.blocked_on_writer_since.is_some())
+        .count();
+    let degraded = db_ok && file_tail_blocked_count > 0;
     Ok(json!({
-        "status": if db_ok { "ok" } else { "error" },
+        "status": if db_ok {
+            if degraded { "degraded" } else { "ok" }
+        } else {
+            "error"
+        },
         "db_ok": db_ok,
         "db_maintenance": db_maintenance,
+        "file_tails": {
+            "blocked_count": file_tail_blocked_count,
+            "statuses": file_tail_statuses,
+        },
         "runtime_observability": state.observability.snapshot(),
         "otlp": {
             "logs_received": state.otlp_counters.logs_received.load(std::sync::atomic::Ordering::Relaxed),
@@ -505,6 +520,12 @@ async fn tool_notifications_recent(state: &AppState, args: Value) -> anyhow::Res
     Ok(serde_json::to_value(firings)?)
 }
 
+async fn tool_file_tails(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: crate::app::FileTailRequest = action_payload(args, "file_tails")?;
+    let resp = state.service.file_tails(req).await?;
+    Ok(serde_json::to_value(resp)?)
+}
+
 async fn tool_notifications_test(
     state: &AppState,
     args: Value,
@@ -542,6 +563,17 @@ const ADMIN_ACTION_HELP: &[AdminActionHelp] = &[
         parameters: &[
             "`signature_hash` (string, **required**) — the SHA-256 hash of the signature",
             "`reason` (string, optional) — reason for removing the acknowledgement (max 4096 chars)",
+        ],
+    },
+    AdminActionHelp {
+        action: "file_tails",
+        description: "Manage Cortex-owned file-tail ingest sources. Sources are stored in the local file-tail registry and reconciled by the runtime supervisor.",
+        parameters: &[
+            "`op` (string, **required**) — list, add, remove, enable, disable, or status",
+            "`id` (string, required for add/remove/enable/disable) — stable file-tail source id",
+            "`path` (string, required for add) — local log file path",
+            "`tag` (string, required for add) — app/tag stored on ingested rows",
+            "`hostname`, `facility`, `severity`, `start_at_end` (optional) — row envelope defaults",
         ],
     },
     AdminActionHelp {

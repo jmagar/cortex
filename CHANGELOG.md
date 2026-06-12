@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.1] - 2026-06-12
+
+### Changed
+
+- Require an explicit `hostname` when adding managed file-tail sources so rows are attributed to the intended host instead of falling back to the Cortex container identity.
+- Report file-tail durable-writer backpressure in the `status` action and mark overall status as `degraded` when tailers are blocked on writer ack.
+
+### Fixed
+
+- Prevent duplicate file-tail `add` calls from resetting checkpoints, avoid retrying stateful HTTP file-tail mutations after 503 responses, and make committed-but-reconcile-failed mutations explicit.
+- Harden file-tail resume and rotation handling: stale checkpoints now restart replacement files from the beginning, same-inode copytruncate/regrow is detected by prefix fingerprint, and rename-create rotation gets a short old-file drain window before switching.
+- Fix file-tail live smoke harness permissions so non-root containers can read the mounted smoke log, and tighten admin-scope predicates across smoke scripts.
+- Canonicalize configured file-tail allowed roots so symlinked operational roots validate against canonical file paths.
+
+## [1.20.0] - 2026-06-11
+
+### Added
+
+- Added managed file-tail ingest sources with CLI, REST API, and MCP control.
+- Added `file-tail` source kind for rows ingested from local log files.
+- Documented SWAG, fail2ban, Authelia, and AdGuard file-tail recipes for replacing rsyslog `imfile` drop-ins.
+
 ## [1.19.0] - 2026-06-11
 
 ### Added
@@ -2268,7 +2290,8 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.20.0...HEAD
+[1.20.0]: https://github.com/jmagar/cortex/compare/v1.19.0...v1.20.0
 [1.14.0]: https://github.com/jmagar/cortex/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/jmagar/cortex/compare/v1.13.2...v1.13.3
 [1.13.2]: https://github.com/jmagar/cortex/compare/v1.13.1...v1.13.2

@@ -23,7 +23,7 @@ services:
     # Default tag is kept in sync by scripts/bump-version.sh (version canon);
     # previously this was frozen at 1.0.0 while migrations moved forward —
     # a stale binary against a newer schema (full-review OH1).
-    image: ghcr.io/jmagar/cortex:${CORTEX_VERSION:-1.19.0}
+    image: ghcr.io/jmagar/cortex:${CORTEX_VERSION:-1.20.1}
     container_name: cortex
     user: "${CORTEX_UID:-1000}:${CORTEX_GID:-1000}"
     env_file:
@@ -49,6 +49,10 @@ services:
       - ${CORTEX_SSH_VOLUME:-${HOME}/.cortex/ssh}:/home/cortex/.ssh:ro
       - ${CORTEX_WORKSPACE_VOLUME:-${HOME}/workspace}:/home/cortex/workspace:ro
       - ${CORTEX_DATA_VOLUME:-cortex-data}:/data
+      # Managed file-tail ingest can only read paths mounted under this root.
+      # Point CORTEX_FILE_TAIL_LOG_VOLUME at /var/log, /mnt/user/appdata, or a
+      # narrower log directory. Keep it read-only.
+      - ${CORTEX_FILE_TAIL_LOG_VOLUME:-/var/log}:/file-tail-root:ro
     # The container listens on CORTEX_RECEIVER_PORT (default 1514). To serve host port
     # 514, set CORTEX_RECEIVER_HOST_PORT=514 while leaving CORTEX_RECEIVER_PORT at 1514, or add
     # host-level firewall/NAT redirects from 514 to 1514.

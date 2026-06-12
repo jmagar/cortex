@@ -26,6 +26,7 @@ pub(crate) mod apps;
 pub(crate) mod clock_skew;
 pub(crate) mod compare;
 pub(crate) mod correlate_state;
+pub(crate) mod file_tails;
 pub(crate) mod fleet_state;
 pub(crate) mod graph;
 pub(crate) mod host_state;

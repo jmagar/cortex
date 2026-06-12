@@ -196,6 +196,7 @@ Structured filter-only retrieval for correlation workflows. This action rejects 
 Common filters match `search`: `hostname`, `source_ip`, `severity`, `app_name`, `facility`, `exclude_facility`, `process_id`, `from`, `to`, `received_from`, `received_to`, and `limit`.
 
 Correlation aliases include `source_kind` (`docker-stream`, `docker-event`, `agent-command`, `shell-history`, `transcript`, `claude`, `codex`, `gemini`), plus `tool`, `project`, `session_id`, `container`, `docker_host`, `stream`, and `event_action`.
+`source_kind=file-tail` filters managed file-tail rows (`source_ip` prefix `file-tail://`).
 
 ---
 
@@ -768,6 +769,45 @@ allow_insecure_http = true
 The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to cortex, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
 
 Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `cortex search` or `mcporter call ... action=search`. Container stdout/stderr rows use `source_ip=docker://<host>/<container>/<stream>`. Container lifecycle rows for actions such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, `oom`, and `health_status:*` use `source_ip=docker-event://<host>/<container>/<sanitized-action>`, `facility=docker`, and preserve the raw Docker event JSON.
+
+#### Managed file-tail ingest
+
+Cortex can tail local files directly without rsyslog `imfile` drop-ins. In
+Docker, mount the host log tree read-only at `/file-tail-root` with
+`CORTEX_FILE_TAIL_LOG_VOLUME` and register paths inside that mount. Sources are
+stored next to the SQLite database in `file-tails.json`, managed through
+`cortex file-tail ...`, REST `POST /api/file-tails` (requires
+`Authorization: Bearer $CORTEX_API_TOKEN` plus
+`X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`), or MCP action `file_tails`,
+and emitted as `source_kind="file-tail"` rows. Row metadata includes
+`file_tail_id`, `tag`, and `path_basename`, not the full filesystem path.
+The documented safe default is to keep managed tails inside `/file-tail-root`.
+Set `CORTEX_FILE_TAIL_ALLOWED_ROOTS` explicitly only when an operator has
+mounted and reviewed broader read-only roots such as `/var/log` or `/logs`.
+
+```bash
+cortex file-tail add --id swag-access \
+  --path /file-tail-root/swag/log/nginx/access.log \
+  --tag swag-access --hostname squirts --facility local4
+cortex file-tail add --id swag-error \
+  --path /file-tail-root/swag/log/nginx/error.log \
+  --tag swag-error --hostname squirts --facility local4 --severity warning
+cortex file-tail add --id fail2ban \
+  --path /file-tail-root/swag/log/fail2ban/fail2ban.log \
+  --tag fail2ban --hostname squirts --facility local5
+cortex file-tail add --id authelia \
+  --path /file-tail-root/authelia/logs/authelia.log \
+  --tag authelia --hostname squirts --facility local5
+cortex file-tail add --id adguard-query \
+  --path /file-tail-root/adguard/var/data/querylog.json \
+  --tag adguard-query --hostname squirts --facility local6
+```
+
+The default starts at EOF. Add `--from-start` only when you intentionally want
+to backfill the current file contents. After startup, Cortex checkpoints
+`dev`/`inode`/offset in `file-tails.json`, resumes from that cursor, and
+reopens files on rename/create rotation or truncation. Lines are bounded by
+`CORTEX_MAX_MESSAGE_SIZE`; oversized records are truncated before enqueue.
 
 #### Storage
 

@@ -1192,6 +1192,42 @@ async fn filter_logs_rejects_queryless_json_only_source_kind() {
 }
 
 #[tokio::test]
+async fn filter_logs_file_tail_source_kind_uses_source_prefix() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry(
+                "2026-01-01T00:00:00Z",
+                "squirts",
+                "info",
+                "file-tail row",
+                "file-tail://squirts/swag-access",
+            ),
+            entry(
+                "2026-01-01T00:00:01Z",
+                "squirts",
+                "info",
+                "normal row",
+                "10.0.0.5:1514",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let response = service
+        .filter_logs(FilterLogsRequest {
+            source_kind: Some("file-tail".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.count, 1);
+    assert_eq!(response.logs[0].message, "file-tail row");
+}
+
+#[tokio::test]
 async fn filter_logs_rejects_conflicting_source_kind_tool_alias() {
     let (service, _pool, _dir) = test_service();
 
@@ -1553,4 +1589,330 @@ async fn batch_writer_completes_under_saturated_read_permits() {
             .expect("reader join")
             .expect("slow read should succeed");
     }
+}
+
+#[tokio::test]
+async fn file_tails_add_list_disable_enable_remove_round_trip() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        registry,
+        Arc::new(|| Ok(())),
+        Arc::new(Vec::new),
+    );
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    let add = service
+        .file_tails(crate::app::FileTailRequest::add(
+            crate::app::FileTailAddRequest {
+                id: "swag-access".into(),
+                path: log_path.to_string_lossy().into_owned(),
+                tag: "swag-access".into(),
+                hostname: Some("squirts".into()),
+                facility: Some("local4".into()),
+                severity: Some("info".into()),
+                start_at_end: Some(true),
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(add.sources.len(), 1);
+    assert_eq!(add.sources[0].id, "swag-access");
+
+    let disabled = service
+        .file_tails(crate::app::FileTailRequest::id_op(
+            crate::app::FileTailOp::Disable,
+            "swag-access".into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(disabled.sources.len(), 1);
+    assert!(!disabled.sources[0].enabled);
+
+    let enabled = service
+        .file_tails(crate::app::FileTailRequest::id_op(
+            crate::app::FileTailOp::Enable,
+            "swag-access".into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(enabled.sources.len(), 1);
+    assert!(enabled.sources[0].enabled);
+
+    let listed = service
+        .file_tails(crate::app::FileTailRequest::list())
+        .await
+        .unwrap();
+    assert_eq!(listed.sources.len(), 1);
+
+    let removed = service
+        .file_tails(crate::app::FileTailRequest::id_op(
+            crate::app::FileTailOp::Remove,
+            "swag-access".into(),
+        ))
+        .await
+        .unwrap();
+    assert!(removed.sources.is_empty());
+}
+
+#[tokio::test]
+async fn file_tails_list_and_status_do_not_reconcile() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let reconcile_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        Arc::clone(&registry),
+        {
+            let reconcile_count = Arc::clone(&reconcile_count);
+            Arc::new(move || {
+                reconcile_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            })
+        },
+        Arc::new(Vec::new),
+    );
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    service
+        .file_tails(crate::app::FileTailRequest::add(
+            crate::app::FileTailAddRequest {
+                id: "swag-access".into(),
+                path: log_path.to_string_lossy().into_owned(),
+                tag: "swag-access".into(),
+                hostname: Some("squirts".into()),
+                facility: Some("local4".into()),
+                severity: Some("info".into()),
+                start_at_end: Some(true),
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(reconcile_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    service
+        .file_tails(crate::app::FileTailRequest::list())
+        .await
+        .unwrap();
+    service
+        .file_tails(crate::app::FileTailRequest::status())
+        .await
+        .unwrap();
+    assert_eq!(reconcile_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn file_tails_duplicate_add_is_rejected_without_resetting_checkpoint() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        Arc::clone(&registry),
+        Arc::new(|| Ok(())),
+        Arc::new(Vec::new),
+    );
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    let request = crate::app::FileTailRequest::add(crate::app::FileTailAddRequest {
+        id: "swag-access".into(),
+        path: log_path.to_string_lossy().into_owned(),
+        tag: "swag-access".into(),
+        hostname: Some("squirts".into()),
+        facility: Some("local4".into()),
+        severity: Some("info".into()),
+        start_at_end: Some(true),
+    });
+    service.file_tails(request.clone()).await.unwrap();
+    registry
+        .update_checkpoint("swag-access", 11, 22, 33, "2026-06-11T20:01:00Z")
+        .unwrap();
+
+    let err = service.file_tails(request).await.unwrap_err();
+    assert!(
+        err.to_string().contains("already exists"),
+        "unexpected error: {err}"
+    );
+    let stored = registry.get("swag-access").unwrap().unwrap();
+    assert_eq!(stored.checkpoint_dev, Some(11));
+    assert_eq!(stored.checkpoint_ino, Some(22));
+    assert_eq!(stored.checkpoint_offset, Some(33));
+}
+
+#[tokio::test]
+async fn file_tails_reconcile_failure_reports_committed_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        Arc::clone(&registry),
+        Arc::new(|| Err(anyhow::anyhow!("boom"))),
+        Arc::new(Vec::new),
+    );
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    let err = service
+        .file_tails(crate::app::FileTailRequest::add(
+            crate::app::FileTailAddRequest {
+                id: "swag-access".into(),
+                path: log_path.to_string_lossy().into_owned(),
+                tag: "swag-access".into(),
+                hostname: Some("squirts".into()),
+                facility: Some("local4".into()),
+                severity: Some("info".into()),
+                start_at_end: Some(true),
+            },
+        ))
+        .await
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("mutation was committed"),
+        "unexpected error: {err}"
+    );
+    assert!(registry.get("swag-access").unwrap().is_some());
+}
+
+#[tokio::test]
+async fn file_tails_mutations_reject_registry_only_query_mode() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_registry(registry);
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    let err = service
+        .file_tails(crate::app::FileTailRequest::add(
+            crate::app::FileTailAddRequest {
+                id: "swag-access".into(),
+                path: log_path.to_string_lossy().into_owned(),
+                tag: "swag-access".into(),
+                hostname: Some("squirts".into()),
+                facility: Some("local4".into()),
+                severity: Some("info".into()),
+                start_at_end: Some(true),
+            },
+        ))
+        .await
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("query-only mode"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn file_tails_missing_source_maps_to_not_found() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        registry,
+        Arc::new(|| Ok(())),
+        Arc::new(Vec::new),
+    );
+
+    let err = service
+        .file_tails(crate::app::FileTailRequest::id_op(
+            crate::app::FileTailOp::Disable,
+            "missing-source".into(),
+        ))
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, ServiceError::NotFound(_)),
+        "missing source should be NotFound, got {err:?}"
+    );
+}
+
+fn add_file_tail_request(
+    id: &str,
+    path: impl Into<String>,
+    facility: Option<&str>,
+    severity: Option<&str>,
+) -> crate::app::FileTailRequest {
+    crate::app::FileTailRequest::add(crate::app::FileTailAddRequest {
+        id: id.into(),
+        path: path.into(),
+        tag: id.into(),
+        hostname: Some("squirts".into()),
+        facility: facility.map(str::to_string),
+        severity: severity.map(str::to_string),
+        start_at_end: Some(true),
+    })
+}
+
+#[tokio::test]
+async fn file_tails_rejects_invalid_facility_severity_and_disallowed_paths() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        registry,
+        Arc::new(|| Ok(())),
+        Arc::new(Vec::new),
+    );
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    let invalid_severity = service
+        .file_tails(add_file_tail_request(
+            "bad-sev",
+            log_path.to_string_lossy().into_owned(),
+            Some("local4"),
+            Some("bogus"),
+        ))
+        .await
+        .unwrap_err();
+    assert!(invalid_severity.to_string().contains("severity"));
+
+    let invalid_facility = service
+        .file_tails(add_file_tail_request(
+            "bad-facility",
+            log_path.to_string_lossy().into_owned(),
+            Some("notafacility"),
+            Some("info"),
+        ))
+        .await
+        .unwrap_err();
+    assert!(invalid_facility.to_string().contains("facility"));
+
+    let disallowed = service
+        .file_tails(add_file_tail_request(
+            "hosts",
+            "/etc/hosts",
+            Some("local4"),
+            Some("info"),
+        ))
+        .await
+        .unwrap_err();
+    assert!(disallowed.to_string().contains("allowed roots"));
 }

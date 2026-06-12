@@ -15,25 +15,26 @@
 //!   #A29).
 
 use super::{
-    http_or_cancel_with, run_ai_abuse, run_ai_add, run_ai_blocks, run_ai_checkpoints,
-    run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_index, run_ai_projects,
-    run_ai_prune_checkpoints, run_ai_search, run_ai_smoke_watch, run_ai_tools, run_ai_watch,
-    run_ai_watch_status, run_correlate, run_db_backup, run_db_checkpoint, run_db_integrity,
-    run_db_status, run_db_vacuum, run_errors, run_hosts, run_search, run_sessions, run_stats,
-    run_tail,
+    format_file_tail_response, http_or_cancel_with, run_ai_abuse, run_ai_add, run_ai_blocks,
+    run_ai_checkpoints, run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors,
+    run_ai_index, run_ai_projects, run_ai_prune_checkpoints, run_ai_search, run_ai_smoke_watch,
+    run_ai_tools, run_ai_watch, run_ai_watch_status, run_correlate, run_db_backup,
+    run_db_checkpoint, run_db_integrity, run_db_status, run_db_vacuum, run_errors, run_file_tail,
+    run_hosts, run_search, run_sessions, run_stats, run_tail,
 };
 use crate::cli::http_client::HttpClient;
 use crate::cli::{
     AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
     AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
     AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs,
-    DbStatusArgs, DbVacuumArgs, EntityArgs, FilterArgs, GraphAroundArgs, GraphEvidenceArgs,
-    GraphExplainArgs, IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs, SessionsArgs,
-    SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    DbStatusArgs, DbVacuumArgs, EntityArgs, FileTailCommand, FileTailListArgs, FilterArgs,
+    GraphAroundArgs, GraphEvidenceArgs, GraphExplainArgs, IngestRateArgs, OutputArgs, PatternsArgs,
+    SearchArgs, SessionsArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs,
+    TimeRangeArgs, TimelineArgs,
 };
 use anyhow::{Result, bail};
 use std::time::Duration;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -42,6 +43,10 @@ async fn http_mode() -> (MockServer, CliMode) {
     let server = MockServer::start().await;
     let client =
         HttpClient::discover(Some(server.uri()), Some("test-token".into())).expect("discover ok");
+    http_mode_with_client(server, client).await
+}
+
+async fn http_mode_with_client(server: MockServer, client: HttpClient) -> (MockServer, CliMode) {
     // Catch-all guard: any request that doesn't match a per-test
     // mock returns 404 and counts against `expect(0)`. Combined with the
     // per-test `expect(1)` on the actual endpoint, this asserts EXACTLY
@@ -56,6 +61,14 @@ async fn http_mode() -> (MockServer, CliMode) {
         .mount(&server)
         .await;
     (server, CliMode::Http(client))
+}
+
+async fn http_mode_with_admin_token(admin_token: &str) -> (MockServer, CliMode) {
+    let server = MockServer::start().await;
+    let client = HttpClient::discover(Some(server.uri()), Some("test-token".into()))
+        .expect("discover ok")
+        .with_api_admin_token_for_test(admin_token);
+    http_mode_with_client(server, client).await
 }
 
 fn empty_search_logs_body() -> serde_json::Value {
@@ -376,6 +389,50 @@ async fn run_sessions_http_sends_exactly_one_request() {
     )
     .await
     .expect("sessions ok");
+}
+
+#[tokio::test]
+async fn run_file_tail_http_sends_exactly_one_request() {
+    let (server, mode) = http_mode_with_admin_token("admin-token").await;
+    Mock::given(method("POST"))
+        .and(path("/api/file-tails"))
+        .and(header("x-cortex-admin-token", "admin-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "sources": [],
+            "statuses": [],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    run_file_tail(
+        &mode,
+        FileTailCommand::List(FileTailListArgs { json: true }),
+    )
+    .await
+    .expect("file-tail ok");
+}
+
+#[test]
+fn file_tail_status_text_includes_healthy_statuses() {
+    let response = cortex::app::FileTailResponse {
+        sources: vec![],
+        statuses: vec![cortex::app::FileTailStatus {
+            id: "swag-access".into(),
+            running: true,
+            last_line_at: None,
+            last_read_at: None,
+            last_checkpoint_at: None,
+            blocked_on_writer_since: None,
+            last_error: None,
+        }],
+    };
+
+    let out = format_file_tail_response(&response);
+    assert!(
+        out.contains("swag-access\ttrue\t-"),
+        "healthy status should be visible even without last_error: {out}"
+    );
 }
 
 #[tokio::test]

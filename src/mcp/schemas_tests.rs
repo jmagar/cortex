@@ -66,6 +66,76 @@ fn schema_source_ips_exposes_pagination() {
 }
 
 #[test]
+fn schema_includes_file_tails_action() {
+    let tool = tool_definitions()
+        .into_iter()
+        .find(|tool| tool["name"] == "cortex")
+        .expect("cortex tool");
+    let schema = serde_json::to_value(tool["inputSchema"].clone()).unwrap();
+    let properties = &schema["properties"];
+    let action_enum = properties["action"]["enum"].as_array().unwrap();
+    assert!(action_enum.iter().any(|value| value == "file_tails"));
+    assert_eq!(
+        properties["op"]["description"],
+        "For action=file_tails: required operation, one of list, add, remove, enable, disable, or status."
+    );
+    assert_eq!(
+        properties["op"]["enum"],
+        serde_json::json!(["list", "add", "remove", "enable", "disable", "status"])
+    );
+    let source_kind_enum = properties["source_kind"]["enum"].as_array().unwrap();
+    assert!(source_kind_enum.iter().any(|value| value == "file-tail"));
+
+    let all_of = schema["allOf"].as_array().unwrap();
+    assert!(all_of.iter().any(|rule| {
+        rule["if"]["properties"]["action"]["const"] == "get"
+            && rule["then"]["properties"]["id"]["type"] == "integer"
+            && rule["then"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "id")
+    }));
+    let file_tails_rule = all_of
+        .iter()
+        .find(|rule| rule["if"]["properties"]["action"]["const"] == "file_tails")
+        .expect("file_tails conditional");
+    assert_eq!(
+        file_tails_rule["then"]["properties"]["id"]["type"],
+        "string"
+    );
+    assert_eq!(
+        file_tails_rule["then"]["properties"]["op"]["enum"],
+        serde_json::json!(["list", "add", "remove", "enable", "disable", "status"])
+    );
+    assert!(
+        file_tails_rule["then"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "op")
+    );
+    let nested = file_tails_rule["then"]["allOf"].as_array().unwrap();
+    assert!(nested.iter().any(|rule| {
+        let required = rule["then"]["required"].as_array().unwrap();
+        rule["if"]["properties"]["op"]["const"] == "add"
+            && ["id", "path", "tag", "hostname"]
+                .iter()
+                .all(|name| required.iter().any(|value| value == name))
+    }));
+    assert!(nested.iter().any(|rule| {
+        rule["if"]["properties"]["op"]["enum"]
+            .as_array()
+            .is_some_and(|values| values.iter().any(|value| value == "remove"))
+            && rule["then"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "id")
+    }));
+}
+
+#[test]
 fn schema_apps_exposes_pagination_and_total() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];

@@ -20,7 +20,7 @@ wins.
 ## Current Actions
 
 cortex exposes one MCP tool named `cortex`. The required `action` argument
-selects one of these 44 actions:
+selects one of these 46 actions:
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
@@ -67,6 +67,7 @@ selects one of these 44 actions:
 | `graph` | `cortex:read` | moderate | Entity lookup and one-hop graph neighborhoods |
 | `ack_error` | `cortex:admin` | write | Acknowledge an error signature |
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
+| `file_tails` | `cortex:admin` | write | Manage Cortex-owned file-tail ingest sources |
 | `notifications_test` | `cortex:admin` | write | Send a test Apprise notification |
 | `help` | none | cheap | Markdown action reference |
 
@@ -121,7 +122,7 @@ handler and service layers.
 | `host` | Optional host_id-or-hostname filter for `correlate_state` |
 | `reference_time` | Required window center for `correlate` and `correlate_state` |
 | `source_ip` | `search`, `filter`, `tail`, `correlate`, `ai_correlate` |
-| `source_kind` | `filter` only; aliases Docker, command-history, shell-history, transcript, and AI-tool rows |
+| `source_kind` | `filter` only; aliases Docker, file-tail, command-history, shell-history, transcript, and AI-tool rows |
 | `project` | `filter`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools` |
 | `tool` | `filter`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_projects` |
 | `session_id` | `filter`, `ai_correlate` |
@@ -149,6 +150,7 @@ See [CORRELATION.md](CORRELATION.md) for the full behavior matrix.
 | `ask_history` | `query`, `hostname`, `app_name`, `from`, `to`, `limit` |
 | `incident_context` | `from`, `to`, `hostname`, `app_name`, `severity_min`, `limit`; `query` is accepted by the request shape but intentionally ignored in v1 |
 | `graph` | `mode=entity|around|explain|evidence`; entity/around/explain require exactly one target lookup strategy (`entity_id`, `entity_type` + `key`, or `alias_type` + `alias_key`); `around` accepts `depth=1` only; `explain` accepts `depth=1..3`; `evidence` requires `evidence_id`; optional `limit`, `evidence_sample_limit`, `payload_budget` |
+| `file_tails` | `op` is required and enumerated as `list`, `add`, `remove`, `enable`, `disable`, or `status`; add requires `id`, `path`, `tag`, and `hostname`; remove/enable/disable require `id`; optional `facility`, `severity`, `start_at_end` |
 
 ## Validation
 

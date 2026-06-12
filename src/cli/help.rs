@@ -75,7 +75,13 @@ const SECTIONS: &[(&str, &[&str])] = &[
     ("Signals & Alerts", &["sig", "notify"]),
     (
         "Ingestion",
-        &["shell", "agent-command", "heartbeat", "inventory"],
+        &[
+            "shell",
+            "agent-command",
+            "heartbeat",
+            "inventory",
+            "file-tail",
+        ],
     ),
     (
         "Runtime & Setup",
@@ -315,6 +321,18 @@ const CATALOG: &[CommandDoc] = &[
         usage: &[
             "cortex inventory refresh [--json]",
             "cortex inventory status [--json]",
+        ],
+    },
+    CommandDoc {
+        name: "file-tail",
+        summary: "Manage file-tail log ingest sources",
+        usage: &[
+            "cortex file-tail list [--json]",
+            "cortex file-tail status [--json]",
+            "cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
+            "cortex file-tail remove --id ID [--json]",
+            "cortex file-tail enable --id ID [--json]",
+            "cortex file-tail disable --id ID [--json]",
         ],
     },
     // ── Runtime & Setup ────────────────────────────────────────────────────
@@ -682,6 +700,38 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         usage: &[
             "cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]",
         ],
+    },
+    NestedCommandDoc {
+        path: "file-tail list",
+        summary: "List configured file-tail sources",
+        usage: &["cortex file-tail list [--json]"],
+    },
+    NestedCommandDoc {
+        path: "file-tail status",
+        summary: "List configured file-tail sources with runtime state",
+        usage: &["cortex file-tail status [--json]"],
+    },
+    NestedCommandDoc {
+        path: "file-tail add",
+        summary: "Add or update a managed file-tail source",
+        usage: &[
+            "cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "file-tail remove",
+        summary: "Remove a managed file-tail source",
+        usage: &["cortex file-tail remove --id ID [--json]"],
+    },
+    NestedCommandDoc {
+        path: "file-tail enable",
+        summary: "Enable a managed file-tail source",
+        usage: &["cortex file-tail enable --id ID [--json]"],
+    },
+    NestedCommandDoc {
+        path: "file-tail disable",
+        summary: "Disable a managed file-tail source",
+        usage: &["cortex file-tail disable --id ID [--json]"],
     },
 ];
 

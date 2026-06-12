@@ -141,6 +141,9 @@ fn apply_log_filter_aliases(
         Some("shell-history") => {
             params.source_ip_prefix = Some("shell-history://".to_string());
         }
+        Some("file-tail") => {
+            params.source_ip_prefix = Some("file-tail://".to_string());
+        }
         Some("claude") | Some("claude-transcript") => {
             apply_source_kind_tool_alias(params, "claude")?;
         }
@@ -161,7 +164,7 @@ fn apply_log_filter_aliases(
         }
         Some(other) => {
             return Err(ServiceError::InvalidInput(format!(
-                "unsupported source_kind '{other}'. Supported: docker-stream, docker-event, agent-command, shell-history, transcript, claude, codex, gemini"
+                "unsupported source_kind '{other}'. Supported: docker-stream, docker-event, agent-command, shell-history, file-tail, transcript, claude, codex, gemini"
             )));
         }
     }

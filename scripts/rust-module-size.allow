@@ -1,0 +1,3 @@
+src/cli/help.rs
+src/cli/http_client.rs
+src/cli/parse_ai.rs

@@ -176,6 +176,7 @@ fn to_source_kind(raw: Option<&str>) -> SourceKind {
         Some("agent") => SourceKind::Agent,
         Some("shell-history") => SourceKind::ShellHistory,
         Some("agent-command") => SourceKind::AgentCommand,
+        Some("file-tail") => SourceKind::FileTail,
         _ => SourceKind::SyslogTcp,
     }
 }

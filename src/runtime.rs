@@ -27,6 +27,7 @@ use tokio_util::sync::CancellationToken;
 use crate::app::CortexService;
 use crate::config::{AuthMode, Config, mcp_bind_is_loopback, validate_auth_config};
 use crate::db::{self, DbPool, StorageBudgetState};
+use crate::file_tail::{FileTailRegistry, FileTailSupervisor};
 use crate::heartbeat::HeartbeatState;
 use crate::ingest::IngestTx;
 use crate::mcp::AuthPolicy;
@@ -50,6 +51,7 @@ pub struct RuntimeCore {
     /// HTTP back-pressure from starving the DB maintenance tasks.
     dispatcher_permit: Arc<Semaphore>,
     ingest: IngestTx,
+    file_tail_supervisor: FileTailSupervisor,
     otlp_counters: Arc<OtlpCounters>,
     auth_policy: AuthPolicy,
     observability: Arc<RuntimeObservability>,
@@ -65,6 +67,7 @@ pub struct MaintenanceHandles {
     purge: Option<JoinHandle<()>>,
     storage: Option<JoinHandle<()>>,
     docker_ingest: Vec<JoinHandle<()>>,
+    file_tail: Option<JoinHandle<()>>,
     error_scan: Option<JoinHandle<()>>,
     notification_dispatcher: Option<JoinHandle<()>>,
     notification_evaluator: Option<JoinHandle<()>>,
@@ -131,6 +134,7 @@ impl MaintenanceHandles {
             self.timeline_rollup,
             self.optimize,
             self.syslog_monitor,
+            self.file_tail,
         ]
         .into_iter()
         .flatten()
@@ -230,7 +234,6 @@ impl RuntimeCore {
                 "Initial storage budget check completed"
             );
         }
-        let service = CortexService::new(Arc::clone(&pool), config.storage.clone());
         let enrichment = EnrichmentConfig {
             authelia_source_ip: config.enrichment.authelia_source_ip.clone(),
             adguard_source_ip: config.enrichment.adguard_source_ip.clone(),
@@ -246,6 +249,27 @@ impl RuntimeCore {
             enrichment,
             Arc::clone(&observability),
         );
+        let file_tail_registry = Arc::new(FileTailRegistry::new(
+            FileTailRegistry::path_from_storage_db(&config.storage.db_path),
+        ));
+        let file_tail_supervisor = FileTailSupervisor::new(
+            Arc::clone(&file_tail_registry),
+            ingest.clone(),
+            CancellationToken::new(),
+            config.receiver.max_message_size,
+        );
+        let mut service = CortexService::new(Arc::clone(&pool), config.storage.clone());
+        if is_stdio {
+            service = service.with_file_tail_registry(file_tail_registry);
+        } else {
+            let reconcile_supervisor = file_tail_supervisor.clone();
+            let status_supervisor = file_tail_supervisor.clone();
+            service = service.with_file_tail_control(
+                file_tail_registry,
+                Arc::new(move || reconcile_supervisor.reconcile()),
+                Arc::new(move || status_supervisor.statuses()),
+            );
+        }
 
         let auth_policy = build_auth_policy(&config, is_stdio).await?;
 
@@ -257,6 +281,7 @@ impl RuntimeCore {
             maintenance_permit: Arc::new(Semaphore::new(1)),
             dispatcher_permit: Arc::new(Semaphore::new(1)),
             ingest,
+            file_tail_supervisor,
             otlp_counters: Arc::new(OtlpCounters::default()),
             auth_policy,
             observability,
@@ -402,11 +427,13 @@ impl RuntimeCore {
         let session_rollup = self.spawn_session_rollup_task(token.clone());
         let timeline_rollup = self.spawn_timeline_rollup_task(token.clone());
         let optimize = self.spawn_optimize_task(token.clone());
+        let file_tail = self.spawn_file_tail_task(token.clone());
         MaintenanceHandles {
             token,
             purge,
             storage,
             docker_ingest,
+            file_tail,
             error_scan,
             notification_dispatcher,
             notification_evaluator,
@@ -418,6 +445,31 @@ impl RuntimeCore {
             optimize,
             syslog_monitor: None,
         }
+    }
+
+    fn spawn_file_tail_task(&self, token: CancellationToken) -> Option<JoinHandle<()>> {
+        let supervisor = self.file_tail_supervisor.clone();
+        Some(tokio::spawn(async move {
+            if let Err(err) = supervisor.reconcile() {
+                tracing::warn!(error = %err, "initial file-tail reconcile failed");
+            }
+            let mut interval = background_interval(tokio::time::Duration::from_secs(30));
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        supervisor.shutdown();
+                        tracing::debug!("file_tail: cooperative shutdown");
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        if let Err(err) = supervisor.reconcile() {
+                            tracing::warn!(error = %err, "file-tail reconcile failed");
+                        }
+                    }
+                }
+            }
+        }))
     }
 
     /// Periodically run `PRAGMA optimize` so the query planner keeps fresh

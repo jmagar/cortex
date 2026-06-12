@@ -1,5 +1,10 @@
 use super::*;
 
+pub use crate::file_tail::{
+    FileTailAddRequest, FileTailOp, FileTailRequest, FileTailResponse, FileTailSource,
+    FileTailStatus,
+};
+
 // ---------------------------------------------------------------------------
 // Error Detection models
 // ---------------------------------------------------------------------------

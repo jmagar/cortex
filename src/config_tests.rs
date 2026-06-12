@@ -41,6 +41,19 @@ fn api_token_env_sets_api_token_not_mcp_token() {
 
 #[test]
 #[serial]
+fn api_admin_token_env_sets_admin_token() {
+    unsafe { std::env::set_var("CORTEX_HOST", "127.0.0.1") };
+    unsafe { std::env::set_var("CORTEX_API_ADMIN_TOKEN", "api-admin-token") };
+    let result = Config::load();
+    unsafe { std::env::remove_var("CORTEX_API_ADMIN_TOKEN") };
+    unsafe { std::env::remove_var("CORTEX_HOST") };
+
+    let cfg = result.expect("Config::load() should succeed");
+    assert_eq!(cfg.api.admin_token, Some("api-admin-token".into()));
+}
+
+#[test]
+#[serial]
 fn env_var_overrides_mcp_port() {
     // TODO: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("CORTEX_HOST", "127.0.0.1") };
@@ -337,6 +350,14 @@ fn auth_validation_rejects_blank_api_token() {
 
     let err = validate_auth_config(&cfg, true).unwrap_err();
     assert!(err.to_string().contains("api.api_token"));
+}
+
+#[test]
+fn auth_validation_rejects_blank_api_admin_token() {
+    let mut cfg = Config::default();
+    cfg.api.admin_token = Some(" ".into()).into();
+    let err = validate_auth_config(&cfg, true).unwrap_err();
+    assert!(err.to_string().contains("api.admin_token"));
 }
 
 #[test]

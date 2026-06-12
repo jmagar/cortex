@@ -52,6 +52,40 @@ pub(crate) enum CliCommand {
     CorrelateState(CorrelateStateArgs),
     Entity(EntityArgs),
     Graph(GraphCommand),
+    FileTail(FileTailCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FileTailCommand {
+    List(FileTailListArgs),
+    Status(FileTailListArgs),
+    Add(FileTailAddArgs),
+    Remove(FileTailIdArgs),
+    Enable(FileTailIdArgs),
+    Disable(FileTailIdArgs),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct FileTailListArgs {
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileTailIdArgs {
+    pub id: String,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileTailAddArgs {
+    pub id: String,
+    pub path: String,
+    pub tag: String,
+    pub hostname: Option<String>,
+    pub facility: Option<String>,
+    pub severity: Option<String>,
+    pub start_at_end: bool,
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

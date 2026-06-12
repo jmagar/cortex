@@ -26,6 +26,28 @@ CORTEX_DB_PATH=/data/cortex.db
 `CORTEX_TOKEN` is not used by direct CLI mode because it is local database
 access, not HTTP access.
 
+## `cortex file-tail`
+
+Manage Cortex-owned file-tail ingest sources. Sources are persisted beside the
+configured database in `file-tails.json` and reconciled by the running
+`cortex serve mcp` process.
+
+```bash
+cortex file-tail list [--json]
+cortex file-tail status [--json]
+cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
+cortex file-tail remove --id ID [--json]
+cortex file-tail enable --id ID [--json]
+cortex file-tail disable --id ID [--json]
+```
+
+The command maps to MCP action `file_tails` and REST `POST /api/file-tails`.
+When `--http` or `CORTEX_USE_HTTP=true` is used, set both `CORTEX_API_TOKEN`
+and `CORTEX_API_ADMIN_TOKEN`; the client sends the latter as
+`X-Cortex-Admin-Token`.
+By default `add` starts tailing at EOF; pass `--from-start` to ingest existing
+file contents.
+
 ## Output
 
 All commands print compact human-readable output by default. Add `--json` to

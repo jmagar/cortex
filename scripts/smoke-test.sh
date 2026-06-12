@@ -19,7 +19,7 @@
 #   mcp_call clock_skew, mcp_call anomalies, mcp_call compare,
 #   mcp_call compose_status, mcp_call compose_doctor,
 #   mcp_call unaddressed_errors, mcp_call ack_error, mcp_call unack_error,
-#   mcp_call notifications_recent, mcp_call notifications_test,
+#   mcp_call notifications_recent, mcp_call file_tails, mcp_call notifications_test,
 #   mcp_call similar_incidents, mcp_call ask_history, mcp_call incident_context, mcp_call graph,
 #   mcp_call help
 
@@ -93,6 +93,18 @@ skip() { echo "SKIP  $1"; (( SKIP++ )) || true; }
 mcp_call() {
     local action="$1"; shift
     mcporter call --config "$MCPORTER_CONFIG" "cortex.cortex" "action=${action}" "$@" 2>&1
+}
+
+mcp_admin_scope_available() {
+    local token="${CORTEX_TOKEN:-}"
+    token="${token//[[:space:]]/}"
+    [[ -n "${token}" \
+        && ( "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
+          || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ) ]]
+}
+
+file_tail_smoke_available() {
+    [[ -n "${CORTEX_FILE_TAIL_SMOKE_PATH:-}" && -n "${CORTEX_FILE_TAIL_SMOKE_WRITE_PATH:-${CORTEX_FILE_TAIL_SMOKE_PATH:-}}" ]]
 }
 
 mcp_jsonrpc() {
@@ -345,6 +357,70 @@ assert_eq "status: db_ok is true" "$STATUS_DB_OK" "True"
 [[ -n "$STATUS_OTLP" ]] \
     && pass "status: otlp counters present" \
     || fail "status: otlp counters missing"
+
+# ── file_tails ────────────────────────────────────────────────────────────────
+echo ""
+echo "Action: file_tails"
+if mcp_admin_scope_available; then
+    FILE_TAILS=$(mcp_call file_tails "op=status" 2>&1)
+    assert_no_error "file_tails: status no error" "$FILE_TAILS"
+    FILE_TAILS_SOURCES=$(json_get "$FILE_TAILS" "['sources']")
+    FILE_TAILS_STATUSES=$(json_get "$FILE_TAILS" "['statuses']")
+    [[ -n "$FILE_TAILS_SOURCES" ]] \
+        && pass "file_tails: sources present" \
+        || fail "file_tails: sources missing"
+    [[ -n "$FILE_TAILS_STATUSES" ]] \
+        && pass "file_tails: statuses present" \
+        || fail "file_tails: statuses missing"
+    if FILE_TAILS_OP_REQUIRED=$(mcp_call file_tails 2>&1); then
+        fail "file_tails: missing op should be rejected"
+    elif [[ "$FILE_TAILS_OP_REQUIRED" == *"op"* || "$FILE_TAILS_OP_REQUIRED" == *"missing"* || "$FILE_TAILS_OP_REQUIRED" == *"required"* ]]; then
+        pass "file_tails: missing op is rejected"
+    else
+        fail "file_tails: missing op rejection should mention op"
+    fi
+    if file_tail_smoke_available; then
+        FILE_TAIL_SMOKE_SERVER_PATH="${CORTEX_FILE_TAIL_SMOKE_PATH}"
+        FILE_TAIL_SMOKE_WRITE_PATH="${CORTEX_FILE_TAIL_SMOKE_WRITE_PATH:-$FILE_TAIL_SMOKE_SERVER_PATH}"
+        FILE_TAIL_SMOKE_ID="smoke-${RUN_ID}"
+        FILE_TAIL_SMOKE_TAG="file-tail-smoke"
+        FILE_TAIL_SMOKE_MARKER="file-tail-smoke-${RUN_ID}"
+        touch "$FILE_TAIL_SMOKE_WRITE_PATH" || fail "file_tails: smoke file writable"
+        FILE_TAIL_ADD=$(mcp_call file_tails \
+            "op=add" \
+            "id=${FILE_TAIL_SMOKE_ID}" \
+            "path=${FILE_TAIL_SMOKE_SERVER_PATH}" \
+            "tag=${FILE_TAIL_SMOKE_TAG}" \
+            "hostname=${SEED_HOST}" \
+            "facility=local7" \
+            "severity=info" \
+            "start_at_end=true" 2>&1)
+        assert_no_error "file_tails: add smoke source" "$FILE_TAIL_ADD"
+        printf '%s\n' "$FILE_TAIL_SMOKE_MARKER" >> "$FILE_TAIL_SMOKE_WRITE_PATH"
+        FILE_TAIL_FOUND=0
+        for _ in {1..20}; do
+            FILE_TAIL_SEARCH=$(mcp_call search \
+                "query=\"${FILE_TAIL_SMOKE_MARKER}\"" \
+                "source_kind=file-tail" \
+                "app_name=${FILE_TAIL_SMOKE_TAG}" \
+                "limit=5" 2>&1 || true)
+            FILE_TAIL_COUNT=$(json_get "$FILE_TAIL_SEARCH" "['count']" || true)
+            if [[ "${FILE_TAIL_COUNT:-0}" -ge 1 ]]; then
+                FILE_TAIL_FOUND=1
+                break
+            fi
+            sleep 0.5
+        done
+        [[ "$FILE_TAIL_FOUND" == "1" ]] \
+            && pass "file_tails: add append query ingest" \
+            || fail "file_tails: appended smoke line was not queryable"
+        mcp_call file_tails "op=remove" "id=${FILE_TAIL_SMOKE_ID}" >/dev/null 2>&1 || true
+    else
+        skip "file_tails: add append query ingest requires CORTEX_FILE_TAIL_SMOKE_PATH"
+    fi
+else
+    skip "file_tails: status requires cortex:admin (set CORTEX_STATIC_TOKEN_ADMIN=true or CORTEX_SMOKE_ADMIN=true)"
+fi
 
 # ── stats ─────────────────────────────────────────────────────────────────────
 echo ""

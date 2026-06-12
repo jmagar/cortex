@@ -63,9 +63,9 @@ Tests: unit tests live in sidecar files beside their source modules (e.g. `src/d
 
 ## MCP Tools
 
-One MCP tool: **`cortex`** — dispatches by `action` argument. 45 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
+One MCP tool: **`cortex`** — dispatches by `action` argument. 46 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
 
-Scope taxonomy: every action requires `cortex:read` except the three **admin** actions `ack_error`, `unack_error`, and `notifications_test`, which require `cortex:admin` (static bearer tokens get read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true`); `help` is info-only (no scope gate).
+Scope taxonomy: every action requires `cortex:read` except the four **admin** actions `ack_error`, `unack_error`, `file_tails`, and `notifications_test`, which require `cortex:admin` (static bearer tokens get read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true`); `help` is info-only (no scope gate).
 
 | Action | Description |
 |--------|-------------|
@@ -110,6 +110,7 @@ Scope taxonomy: every action requires `cortex:read` except the three **admin** a
 | `ask_history` | Query AI transcript history |
 | `incident_context` | Full context for an incident |
 | `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations |
+| `file_tails` | **(admin)** Manage Cortex-owned file-tail ingest sources |
 | `ack_error` | **(admin)** Acknowledge an error signature |
 | `unack_error` | **(admin)** Revoke an error signature acknowledgement |
 | `notifications_test` | **(admin)** Send a test notification via Apprise |
@@ -164,6 +165,10 @@ CORTEX_GOOGLE_CLIENT_SECRET=...     # required when CORTEX_AUTH_MODE=oauth
 # Non-MCP REST API (always on; gated by its token)
 CORTEX_API_TOKEN=your-api-token         # REQUIRED at startup — /api/* is always mounted
 
+# Managed file-tail sources
+# Stored in the parent directory of CORTEX_DB_PATH as file-tails.json.
+# Manage with: cortex file-tail list|status|add|remove|enable|disable
+
 # Docker container log ingestion (disabled by default)
 CORTEX_DOCKER_INGEST_ENABLED=false      # set true to ingest from docker-socket-proxy hosts
 CORTEX_DOCKER_HOSTS=host-a,host-b      # comma-separated hostnames → http://<host>:2375
@@ -182,7 +187,7 @@ RUST_LOG=info
 | `docker-compose.yml` | Production deployment (ports 1514, 3100) |
 | `docs/SETUP.md` | Setup guide (clone, build, configure, deploy, verify); per-host forwarder configs (rsyslog, UniFi, ATT router, WSL) live in README "Syslog Forwarder Setup" |
 | `src/db/queries.rs` | All SQL queries and FTS5 search implementation |
-| `src/mcp/actions.rs` | `ACTION_SPECS` — authoritative registry of all 45 MCP actions and their scopes |
+| `src/mcp/actions.rs` | `ACTION_SPECS` — authoritative registry of all 46 MCP actions and their scopes |
 | `src/mcp/tools.rs` | Single `cortex` tool with action dispatch |
 | `config/mcporter.json` | mcporter config (HTTP transport to localhost:3100) |
 | `config/systemd/` | `cortex-backup.service` / `.timer` — daily WAL-safe backup units |

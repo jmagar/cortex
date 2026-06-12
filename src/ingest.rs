@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
 use crate::config::{ReceiverConfig, StorageConfig};
@@ -22,7 +22,7 @@ pub(crate) enum TrySendErr {
 
 #[derive(Clone)]
 pub(crate) struct IngestTx {
-    tx: mpsc::Sender<db::LogBatchEntry>,
+    tx: mpsc::Sender<IngestEnvelope>,
     observability: Arc<RuntimeObservability>,
     channel_capacity: usize,
     /// Shutdown signal. Sending `true` tells the batch writer to drain and
@@ -33,6 +33,49 @@ pub(crate) struct IngestTx {
     /// Handle for the batch writer task. Stored so `shutdown` can await the
     /// writer's actual completion rather than sleeping a fixed duration.
     writer_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
+
+pub(crate) type DurableAckResult = Result<(), String>;
+
+pub(crate) struct IngestEnvelope {
+    pub(crate) entry: db::LogBatchEntry,
+    durable_ack: Option<oneshot::Sender<DurableAckResult>>,
+}
+
+impl IngestEnvelope {
+    pub(crate) fn best_effort(entry: db::LogBatchEntry) -> Self {
+        Self {
+            entry,
+            durable_ack: None,
+        }
+    }
+
+    fn durable(entry: db::LogBatchEntry) -> (Self, oneshot::Receiver<DurableAckResult>) {
+        let (tx, rx) = oneshot::channel();
+        (
+            Self {
+                entry,
+                durable_ack: Some(tx),
+            },
+            rx,
+        )
+    }
+
+    pub(crate) fn ack_success(self) {
+        if let Some(ack) = self.durable_ack {
+            let _ = ack.send(Ok(()));
+        }
+    }
+
+    pub(crate) fn ack_failure(self, error: impl Into<String>) {
+        if let Some(ack) = self.durable_ack {
+            let _ = ack.send(Err(error.into()));
+        }
+    }
+
+    pub(crate) fn requires_durable_ack(&self) -> bool {
+        self.durable_ack.is_some()
+    }
 }
 
 struct WriterTuning {
@@ -55,8 +98,8 @@ impl IngestTx {
     pub(crate) async fn send(
         &self,
         entry: db::LogBatchEntry,
-    ) -> Result<(), mpsc::error::SendError<db::LogBatchEntry>> {
-        let result = self.tx.send(entry).await;
+    ) -> Result<(), mpsc::error::SendError<IngestEnvelope>> {
+        let result = self.tx.send(IngestEnvelope::best_effort(entry)).await;
         let depth = self.queue_depth();
         match &result {
             Ok(()) => self.observability.record_enqueue_ok(depth),
@@ -65,12 +108,24 @@ impl IngestTx {
         result
     }
 
+    pub(crate) async fn send_durable(&self, entry: db::LogBatchEntry) -> anyhow::Result<()> {
+        let (envelope, ack) = IngestEnvelope::durable(entry);
+        self.tx
+            .send(envelope)
+            .await
+            .map_err(|_| anyhow::anyhow!("ingest writer is closed"))?;
+        self.observability.record_enqueue_ok(self.queue_depth());
+        ack.await
+            .map_err(|_| anyhow::anyhow!("ingest writer dropped durable acknowledgement"))?
+            .map_err(anyhow::Error::msg)
+    }
+
     /// Non-blocking send. Returns `Err(TrySendErr::Full)` when the channel is
     /// at capacity so the OTLP HTTP handler can return 503 instead of awaiting
     /// and holding the connection open. The dropped entry is not returned —
     /// the caller's contract is "best effort, drop on backpressure."
     pub(crate) fn try_send(&self, entry: db::LogBatchEntry) -> Result<(), TrySendErr> {
-        match self.tx.try_send(entry) {
+        match self.tx.try_send(IngestEnvelope::best_effort(entry)) {
             Ok(()) => {
                 self.observability.record_enqueue_ok(self.queue_depth());
                 Ok(())
@@ -126,6 +181,39 @@ impl IngestTx {
     /// don't have to spawn a real batch writer.
     #[cfg(test)]
     pub(crate) fn from_sender_for_test(tx: mpsc::Sender<db::LogBatchEntry>) -> Self {
+        let channel_capacity = tx.max_capacity();
+        let (envelope_tx, mut envelope_rx) = mpsc::channel::<IngestEnvelope>(channel_capacity);
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("test ingest bridge runtime");
+            runtime.block_on(async move {
+                while let Some(envelope) = envelope_rx.recv().await {
+                    match tx.send(envelope.entry.clone()).await {
+                        Ok(()) => envelope.ack_success(),
+                        Err(_) => {
+                            envelope.ack_failure("test ingest receiver is closed");
+                            break;
+                        }
+                    }
+                }
+            });
+        });
+        let observability = Arc::new(RuntimeObservability::default());
+        observability.set_queue_capacity(channel_capacity);
+        let (shutdown_tx, _) = watch::channel(false);
+        Self {
+            tx: envelope_tx,
+            observability,
+            channel_capacity,
+            shutdown_tx: Arc::new(shutdown_tx),
+            writer_handle: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_envelope_sender_for_test(tx: mpsc::Sender<IngestEnvelope>) -> Self {
         let observability = Arc::new(RuntimeObservability::default());
         let channel_capacity = tx.max_capacity();
         observability.set_queue_capacity(channel_capacity);
@@ -153,7 +241,7 @@ fn start_writer(
         flush_interval_ms,
         channel_capacity,
     } = tuning;
-    let (tx, rx) = mpsc::channel::<db::LogBatchEntry>(channel_capacity);
+    let (tx, rx) = mpsc::channel::<IngestEnvelope>(channel_capacity);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     observability.set_queue_capacity(channel_capacity);
     let writer_observability = Arc::clone(&observability);

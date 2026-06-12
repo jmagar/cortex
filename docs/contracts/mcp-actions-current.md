@@ -22,13 +22,13 @@ response keys are stable. Renaming, removing, or tightening them is a breaking
 change. Adding optional parameters or optional response fields is non-breaking.
 
 Most actions require `cortex:read` when auth is mounted. `ack_error`,
-`unack_error`, and `notifications_test` require `cortex:admin`. `help` has no
-action-level scope requirement, though the protected endpoint still requires
-transport auth when configured.
+`unack_error`, `file_tails`, and `notifications_test` require
+`cortex:admin`. `help` has no action-level scope requirement, though the
+protected endpoint still requires transport auth when configured.
 
 ## Current Action Index
 
-The live registry currently contains 44 actions:
+The live registry currently contains 46 actions:
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
@@ -75,6 +75,7 @@ The live registry currently contains 44 actions:
 | `graph` | `cortex:read` | moderate | Entity lookup and one-hop graph neighborhoods |
 | `ack_error` | `cortex:admin` | write | Acknowledge an error signature |
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
+| `file_tails` | `cortex:admin` | write | Manage local file-tail ingest sources |
 | `notifications_test` | `cortex:admin` | write | Send a test Apprise notification |
 | `help` | none | cheap | Markdown action reference |
 

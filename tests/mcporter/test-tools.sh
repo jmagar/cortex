@@ -11,7 +11,7 @@
 #   cortex get, cortex ingest_rate, cortex silent_hosts, cortex clock_skew,
 #   cortex anomalies, cortex compare, cortex compose_status,
 #   cortex compose_doctor, cortex unaddressed_errors, cortex ack_error,
-#   cortex unack_error, cortex notifications_recent, cortex notifications_test,
+#   cortex unack_error, cortex notifications_recent, cortex file_tails, cortex notifications_test,
 #   cortex similar_incidents, cortex ask_history, cortex incident_context, cortex graph,
 #   cortex help
 #
@@ -405,6 +405,21 @@ except Exception as e:
   return 0
 }
 
+pass_test() {
+  local label="${1:?label required}"
+  printf "${C_GREEN}[PASS]${C_RESET} %-60s\n" "${label}" | tee -a "${LOG_FILE}"
+  PASS_COUNT=$(( PASS_COUNT + 1 ))
+}
+
+fail_test() {
+  local label="${1:?label required}"
+  local reason="${2:-check failed}"
+  printf "${C_RED}[FAIL]${C_RESET} %-60s\n" "${label}" | tee -a "${LOG_FILE}"
+  printf '       %s\n' "${reason}" | tee -a "${LOG_FILE}"
+  FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+  FAIL_NAMES+=("${label}")
+}
+
 # ---------------------------------------------------------------------------
 # Skip helper
 # ---------------------------------------------------------------------------
@@ -413,6 +428,18 @@ skip_test() {
   local reason="${2:-prerequisite returned empty}"
   printf "${C_YELLOW}[SKIP]${C_RESET} %-60s %s\n" "${label}" "${reason}" | tee -a "${LOG_FILE}"
   SKIP_COUNT=$(( SKIP_COUNT + 1 ))
+}
+
+mcp_admin_scope_available() {
+  local token="${CORTEX_TOKEN:-${CORTEX_API_TOKEN:-}}"
+  token="${token//[[:space:]]/}"
+  [[ -n "${token}" \
+    && ( "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
+      || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ) ]]
+}
+
+file_tail_smoke_available() {
+  [[ -n "${CORTEX_FILE_TAIL_SMOKE_PATH:-}" && -n "${CORTEX_FILE_TAIL_SMOKE_WRITE_PATH:-${CORTEX_FILE_TAIL_SMOKE_PATH:-}}" ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -488,6 +515,57 @@ suite_meta() {
   run_test "cortex stats: returns database statistics" cortex stats   '{}' "total_logs"
   run_test "cortex stats: write_blocked field present" cortex stats   '{}' "write_blocked"
   run_test "cortex stats: free_disk_mb field present"  cortex stats   '{}' "free_disk_mb"
+  if mcp_admin_scope_available; then
+    run_test "cortex file_tails: returns registry status" cortex file_tails '{"op":"status"}' "sources"
+    local missing_op
+    if missing_op="$(mcporter_call cortex file_tails '{}' 2>&1)"; then
+      fail_test "cortex file_tails: missing op rejected" "request unexpectedly succeeded: ${missing_op}"
+    elif [[ "${missing_op}" == *"op"* || "${missing_op}" == *"missing"* || "${missing_op}" == *"required"* ]]; then
+      pass_test "cortex file_tails: missing op rejected"
+    else
+      fail_test "cortex file_tails: missing op rejected" "response did not mention op: ${missing_op}"
+    fi
+    if file_tail_smoke_available; then
+      local server_path write_path source_id tag marker add_output search_output count attempt
+      server_path="${CORTEX_FILE_TAIL_SMOKE_PATH}"
+      write_path="${CORTEX_FILE_TAIL_SMOKE_WRITE_PATH:-${server_path}}"
+      source_id="smoke-$(date +%s)-$$"
+      tag="file-tail-smoke"
+      marker="file-tail-smoke-${source_id}"
+      touch "${write_path}" || fail_test "cortex file_tails: smoke file writable" "could not write ${write_path}"
+      add_output="$(mcporter_call cortex file_tails "$(jq -nc \
+        --arg id "${source_id}" \
+        --arg path "${server_path}" \
+        --arg tag "${tag}" \
+        '{"op":"add","id":$id,"path":$path,"tag":$tag,"hostname":"mcporter-smoke","facility":"local7","severity":"info","start_at_end":true}')")" || add_output=""
+      if printf '%s' "${add_output}" | jq -e '.sources | type == "array"' >/dev/null 2>&1; then
+        pass_test "cortex file_tails: add smoke source"
+      else
+        fail_test "cortex file_tails: add smoke source" "${add_output}"
+      fi
+      printf '%s\n' "${marker}" >> "${write_path}"
+      count=0
+      for attempt in {1..20}; do
+        search_output="$(mcporter_call cortex search "$(jq -nc \
+          --arg q "\"${marker}\"" \
+          --arg tag "${tag}" \
+          '{"query":$q,"source_kind":"file-tail","app_name":$tag,"limit":5}')")" || search_output=""
+        count="$(printf '%s' "${search_output}" | jq -r '.count // 0' 2>/dev/null)" || count=0
+        [[ "${count}" -ge 1 ]] && break
+        sleep 0.5
+      done
+      if [[ "${count}" -ge 1 ]]; then
+        pass_test "cortex file_tails: add append query ingest"
+      else
+        fail_test "cortex file_tails: add append query ingest" "marker was not queryable"
+      fi
+      mcporter_call cortex file_tails "$(jq -nc --arg id "${source_id}" '{"op":"remove","id":$id}')" >/dev/null 2>&1 || true
+    else
+      skip_test "cortex file_tails: add append query ingest" "requires CORTEX_FILE_TAIL_SMOKE_PATH"
+    fi
+  else
+    skip_test "cortex file_tails: returns registry status" "requires cortex:admin (set CORTEX_STATIC_TOKEN_ADMIN=true or CORTEX_SMOKE_ADMIN=true)"
+  fi
   run_test "cortex compose_status: redacted diagnostics" cortex compose_status '{}' "runtime_state"
 
   local compose_status compose_runtime compose_ownership
