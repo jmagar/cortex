@@ -323,13 +323,14 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
 
 async fn file_tails(
     State(state): State<ApiState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(req): Json<FileTailRequest>,
 ) -> impl IntoResponse {
     if let Some(resp) = require_api_admin_token(&state, &headers) {
         return resp;
     }
-    tracing::warn!(action = ?req.op, "admin: file_tails invoked");
+    tracing::warn!(caller_ip = %peer.ip(), action = ?req.op, "admin: file_tails invoked");
     respond(state.service.file_tails(req).await)
 }
 

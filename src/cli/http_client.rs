@@ -127,7 +127,6 @@ pub struct ServerVersion {
 /// see the populated value or race the init future fairly). The dispatch layer
 /// (bead 0p8r.7) is responsible for wrapping these in `tokio::select!` against
 /// `tokio::signal::ctrl_c()`.
-#[derive(Debug)]
 pub struct HttpClient {
     base_url: Url,
     inner: reqwest::Client,
@@ -145,6 +144,23 @@ pub struct HttpClient {
     /// requires; the in-invocation cache is intentional (we don't re-probe
     /// `/api/version` on every 404 in the same run).
     server_version_cache: OnceCell<Option<ServerVersion>>,
+}
+
+impl std::fmt::Debug for HttpClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpClient")
+            .field("base_url", &self.base_url)
+            .field("inner", &self.inner)
+            .field(
+                "api_admin_token",
+                &self
+                    .api_admin_token
+                    .as_ref()
+                    .map(|_| "<redacted admin token>"),
+            )
+            .field("server_version_cache", &self.server_version_cache)
+            .finish()
+    }
 }
 
 impl HttpClient {
@@ -261,7 +277,7 @@ impl HttpClient {
         self.execute_with_retry(send, path).await
     }
 
-    async fn post_json_with_admin<Req, Resp>(&self, path: &str, body: &Req) -> Result<Resp>
+    async fn post_json_with_admin_no_retry<Req, Resp>(&self, path: &str, body: &Req) -> Result<Resp>
     where
         Req: Serialize + ?Sized,
         Resp: DeserializeOwned,
@@ -282,7 +298,20 @@ impl HttpClient {
                 .send()
                 .await
         };
-        self.execute_with_retry(send, path).await
+        self.execute_once(send, path).await
+    }
+
+    async fn execute_once<F, Fut, Resp>(&self, send: F, path: &str) -> Result<Resp>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = reqwest::Result<Response>>,
+        Resp: DeserializeOwned,
+    {
+        let resp = match send().await {
+            Ok(r) => r,
+            Err(err) => return Err(map_send_error(err, &self.base_url)),
+        };
+        self.handle_response(resp, path).await
     }
 
     /// Send a request, handling the 503 retry and final response classification.
@@ -551,7 +580,8 @@ impl HttpClient {
     }
 
     pub async fn file_tails(&self, req: &FileTailRequest) -> Result<FileTailResponse> {
-        self.post_json_with_admin("/api/file-tails", req).await
+        self.post_json_with_admin_no_retry("/api/file-tails", req)
+            .await
     }
 
     // ─── REST surface: bead 0p8r.4 (DB ops) ─────────────────────────────────

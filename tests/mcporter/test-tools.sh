@@ -433,9 +433,9 @@ skip_test() {
 mcp_admin_scope_available() {
   local token="${CORTEX_TOKEN:-${CORTEX_API_TOKEN:-}}"
   token="${token//[[:space:]]/}"
-  [[ -z "${token}" \
-    || "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
-    || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ]]
+  [[ -n "${token}" \
+    && ( "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
+      || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ) ]]
 }
 
 file_tail_smoke_available() {
@@ -518,8 +518,9 @@ suite_meta() {
   if mcp_admin_scope_available; then
     run_test "cortex file_tails: returns registry status" cortex file_tails '{"op":"status"}' "sources"
     local missing_op
-    missing_op="$(mcporter_call cortex file_tails '{}' 2>&1)" || missing_op=""
-    if [[ "${missing_op}" == *"op"* ]]; then
+    if missing_op="$(mcporter_call cortex file_tails '{}' 2>&1)"; then
+      fail_test "cortex file_tails: missing op rejected" "request unexpectedly succeeded: ${missing_op}"
+    elif [[ "${missing_op}" == *"op"* || "${missing_op}" == *"missing"* || "${missing_op}" == *"required"* ]]; then
       pass_test "cortex file_tails: missing op rejected"
     else
       fail_test "cortex file_tails: missing op rejected" "response did not mention op: ${missing_op}"
@@ -546,7 +547,7 @@ suite_meta() {
       count=0
       for attempt in {1..20}; do
         search_output="$(mcporter_call cortex search "$(jq -nc \
-          --arg q "${marker}" \
+          --arg q "\"${marker}\"" \
           --arg tag "${tag}" \
           '{"query":$q,"source_kind":"file-tail","app_name":$tag,"limit":5}')")" || search_output=""
         count="$(printf '%s' "${search_output}" | jq -r '.count // 0' 2>/dev/null)" || count=0

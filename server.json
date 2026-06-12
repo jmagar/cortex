@@ -7,11 +7,11 @@
     "url": "https://github.com/jmagar/cortex",
     "source": "github"
   },
-  "version": "1.20.0",
+  "version": "1.20.1",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/cortex:v1.20.0",
+      "identifier": "ghcr.io/jmagar/cortex:v1.20.1",
       "transport": {
         "type": "stdio"
       },

@@ -278,6 +278,8 @@ async fn tool_get_status_returns_runtime_observability() {
     let value = tool_get_status(&h.state, json!({})).await.unwrap();
     assert_eq!(value["status"], "ok");
     assert_eq!(value["db_ok"], true);
+    assert_eq!(value["file_tails"]["blocked_count"], 0);
+    assert!(value["file_tails"]["statuses"].as_array().is_some());
     assert!(value["runtime_observability"]["ingest_queue_depth"].is_number());
     assert!(value["otlp"]["logs_received"].is_number());
 }

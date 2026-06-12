@@ -15,6 +15,10 @@ pub(crate) use supervisor::FileTailSupervisor;
 mod models_tests;
 
 #[cfg(test)]
+#[path = "file_tail/path_policy_tests.rs"]
+mod path_policy_tests;
+
+#[cfg(test)]
 #[path = "file_tail/registry_tests.rs"]
 mod registry_tests;
 

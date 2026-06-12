@@ -421,6 +421,9 @@ fn file_tail_status_text_includes_healthy_statuses() {
             id: "swag-access".into(),
             running: true,
             last_line_at: None,
+            last_read_at: None,
+            last_checkpoint_at: None,
+            blocked_on_writer_since: None,
             last_error: None,
         }],
     };

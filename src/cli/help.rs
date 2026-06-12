@@ -329,7 +329,7 @@ const CATALOG: &[CommandDoc] = &[
         usage: &[
             "cortex file-tail list [--json]",
             "cortex file-tail status [--json]",
-            "cortex file-tail add --id ID --path PATH --tag TAG [--hostname HOST] [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
+            "cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
             "cortex file-tail remove --id ID [--json]",
             "cortex file-tail enable --id ID [--json]",
             "cortex file-tail disable --id ID [--json]",
@@ -715,7 +715,7 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         path: "file-tail add",
         summary: "Add or update a managed file-tail source",
         usage: &[
-            "cortex file-tail add --id ID --path PATH --tag TAG [--hostname HOST] [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
+            "cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
         ],
     },
     NestedCommandDoc {

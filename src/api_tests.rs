@@ -59,7 +59,7 @@ fn test_state_full(
         dir.path().join("file-tails.json"),
     ));
     let service = crate::app::CortexService::new(Arc::clone(&pool), storage)
-        .with_file_tail_registry(file_tail_registry);
+        .with_file_tail_control(file_tail_registry, Arc::new(|| Ok(())), Arc::new(Vec::new));
     // Every test gets a fresh per-state maintenance permit so parallel tests
     // never contend on the process-wide `SHARED_MAINTENANCE_PERMIT` — see
     // `ApiState::with_isolated_maintenance_permit` docs.
@@ -142,7 +142,7 @@ fn router_requires_token() {
 #[tokio::test]
 async fn stats_route_requires_bearer_token() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
-    let app = router(state).unwrap();
+    let app = test_router(state);
 
     let (status, _) = get_json(app.clone(), "/api/stats", None).await;
     assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
@@ -156,7 +156,7 @@ async fn stats_route_requires_bearer_token() {
 async fn file_tails_route_adds_and_lists_sources() {
     let (mut state, _pool, dir) = test_state(Some("secret".into()));
     state.config.admin_token = crate::config::Secret(Some("admin-secret".into()));
-    let app = router(state).unwrap();
+    let app = test_router(state);
     let log_path = dir.path().join("access.log");
     std::fs::write(&log_path, "seed\n").unwrap();
 
@@ -204,7 +204,7 @@ async fn file_tails_route_adds_and_lists_sources() {
 #[tokio::test]
 async fn file_tails_route_rejects_when_server_admin_token_unconfigured() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
-    let app = router(state).unwrap();
+    let app = test_router(state);
 
     let (status, value) = post_json_with_admin(
         app,
@@ -226,7 +226,7 @@ async fn file_tails_route_rejects_when_server_admin_token_unconfigured() {
 async fn file_tails_route_rejects_blank_server_admin_token() {
     let (mut state, _pool, _dir) = test_state(Some("secret".into()));
     state.config.admin_token = crate::config::Secret(Some("   ".into()));
-    let app = router(state).unwrap();
+    let app = test_router(state);
 
     let (status, value) = post_json_with_admin(
         app,
@@ -248,7 +248,7 @@ async fn file_tails_route_rejects_blank_server_admin_token() {
 async fn file_tails_route_rejects_wrong_admin_token() {
     let (mut state, _pool, _dir) = test_state(Some("secret".into()));
     state.config.admin_token = crate::config::Secret(Some("admin-secret".into()));
-    let app = router(state).unwrap();
+    let app = test_router(state);
 
     let (status, value) = post_json_with_admin(
         app,

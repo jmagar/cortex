@@ -409,10 +409,24 @@ pub(super) async fn tool_get_stats(state: &AppState, _args: Value) -> anyhow::Re
 pub(super) async fn tool_get_status(state: &AppState, _args: Value) -> anyhow::Result<Value> {
     let db_ok = state.service.health_check().await.is_ok();
     let db_maintenance = state.service.db_status().await.ok();
+    let file_tail_statuses = state.service.file_tail_statuses_snapshot();
+    let file_tail_blocked_count = file_tail_statuses
+        .iter()
+        .filter(|status| status.blocked_on_writer_since.is_some())
+        .count();
+    let degraded = db_ok && file_tail_blocked_count > 0;
     Ok(json!({
-        "status": if db_ok { "ok" } else { "error" },
+        "status": if db_ok {
+            if degraded { "degraded" } else { "ok" }
+        } else {
+            "error"
+        },
         "db_ok": db_ok,
         "db_maintenance": db_maintenance,
+        "file_tails": {
+            "blocked_count": file_tail_blocked_count,
+            "statuses": file_tail_statuses,
+        },
         "runtime_observability": state.observability.snapshot(),
         "otlp": {
             "logs_received": state.otlp_counters.logs_received.load(std::sync::atomic::Ordering::Relaxed),

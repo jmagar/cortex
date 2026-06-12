@@ -38,7 +38,7 @@ fn registry_persists_across_instances() {
                     id: "authelia".into(),
                     path: "/tmp/authelia.log".into(),
                     tag: "authelia".into(),
-                    hostname: None,
+                    hostname: Some("squirts".into()),
                     facility: Some("local5".into()),
                     severity: Some("info".into()),
                     start_at_end: Some(false),

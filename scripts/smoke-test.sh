@@ -98,9 +98,9 @@ mcp_call() {
 mcp_admin_scope_available() {
     local token="${CORTEX_TOKEN:-}"
     token="${token//[[:space:]]/}"
-    [[ -z "${token}" \
-        || "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
-        || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ]]
+    [[ -n "${token}" \
+        && ( "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
+          || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ) ]]
 }
 
 file_tail_smoke_available() {
@@ -372,10 +372,13 @@ if mcp_admin_scope_available; then
     [[ -n "$FILE_TAILS_STATUSES" ]] \
         && pass "file_tails: statuses present" \
         || fail "file_tails: statuses missing"
-    FILE_TAILS_OP_REQUIRED=$(mcp_call file_tails 2>&1 || true)
-    [[ "$FILE_TAILS_OP_REQUIRED" == *"op"* ]] \
-        && pass "file_tails: missing op is rejected" \
-        || fail "file_tails: missing op should be rejected"
+    if FILE_TAILS_OP_REQUIRED=$(mcp_call file_tails 2>&1); then
+        fail "file_tails: missing op should be rejected"
+    elif [[ "$FILE_TAILS_OP_REQUIRED" == *"op"* || "$FILE_TAILS_OP_REQUIRED" == *"missing"* || "$FILE_TAILS_OP_REQUIRED" == *"required"* ]]; then
+        pass "file_tails: missing op is rejected"
+    else
+        fail "file_tails: missing op rejection should mention op"
+    fi
     if file_tail_smoke_available; then
         FILE_TAIL_SMOKE_SERVER_PATH="${CORTEX_FILE_TAIL_SMOKE_PATH}"
         FILE_TAIL_SMOKE_WRITE_PATH="${CORTEX_FILE_TAIL_SMOKE_WRITE_PATH:-$FILE_TAIL_SMOKE_SERVER_PATH}"
@@ -397,7 +400,7 @@ if mcp_admin_scope_available; then
         FILE_TAIL_FOUND=0
         for _ in {1..20}; do
             FILE_TAIL_SEARCH=$(mcp_call search \
-                "query=${FILE_TAIL_SMOKE_MARKER}" \
+                "query=\"${FILE_TAIL_SMOKE_MARKER}\"" \
                 "source_kind=file-tail" \
                 "app_name=${FILE_TAIL_SMOKE_TAG}" \
                 "limit=5" 2>&1 || true)

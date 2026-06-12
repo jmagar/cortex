@@ -176,9 +176,9 @@ _skip() {
 mcp_admin_scope_available() {
   local token="${TOKEN:-}"
   token="${token//[[:space:]]/}"
-  [[ -z "${token}" \
-    || "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
-    || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ]]
+  [[ -n "${token}" \
+    && ( "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
+      || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ) ]]
 }
 
 file_tail_smoke_available() {
@@ -498,8 +498,9 @@ phase_tools() {
     assert_jq "cortex file_tails — sources array present"       "${file_tails_result}" '.sources | type == "array"'
     assert_jq "cortex file_tails — statuses array present"      "${file_tails_result}" '.statuses | type == "array"'
     local file_tails_missing_op
-    file_tails_missing_op="$(call_tool cortex '{"action":"file_tails"}' 2>&1)" || file_tails_missing_op=""
-    if [[ "${file_tails_missing_op}" == *"op"* ]]; then
+    if file_tails_missing_op="$(call_tool cortex '{"action":"file_tails"}' 2>&1)"; then
+      _fail "cortex file_tails — missing op rejected" "request unexpectedly succeeded: ${file_tails_missing_op}"
+    elif [[ "${file_tails_missing_op}" == *"op"* || "${file_tails_missing_op}" == *"missing"* || "${file_tails_missing_op}" == *"required"* ]]; then
       _pass "cortex file_tails — missing op rejected"
     else
       _fail "cortex file_tails — missing op rejected" "response did not mention op: ${file_tails_missing_op}"
@@ -522,7 +523,7 @@ phase_tools() {
       count=0
       for attempt in {1..20}; do
         search_result="$(call_tool cortex "$(jq -nc \
-          --arg q "${marker}" \
+          --arg q "\"${marker}\"" \
           --arg tag "${tag}" \
           '{"action":"search","query":$q,"source_kind":"file-tail","app_name":$tag,"limit":5}')")" || search_result=""
         count="$(printf '%s' "${search_result}" | jq -r '.count // 0' 2>/dev/null)" || count=0
@@ -807,6 +808,8 @@ run_docker_mode() {
   FILE_TAIL_SMOKE_DIR="$(mktemp -d /tmp/cortex-file-tail-smoke.XXXXXX)"
   FILE_TAIL_SMOKE_HOST_PATH="${FILE_TAIL_SMOKE_DIR}/smoke.log"
   : > "${FILE_TAIL_SMOKE_HOST_PATH}"
+  chmod 755 "${FILE_TAIL_SMOKE_DIR}"
+  chmod 644 "${FILE_TAIL_SMOKE_HOST_PATH}"
   docker_args+=("-v" "${FILE_TAIL_SMOKE_DIR}:/file-tail-root:ro")
   CORTEX_FILE_TAIL_SMOKE_PATH="${FILE_TAIL_SMOKE_SERVER_PATH}"
   CORTEX_FILE_TAIL_SMOKE_WRITE_PATH="${FILE_TAIL_SMOKE_HOST_PATH}"
@@ -873,6 +876,12 @@ run_docker_mode() {
     fi
     sleep 1
   done
+
+  if ! docker exec "${CONTAINER_NAME}" test -r "${FILE_TAIL_SMOKE_SERVER_PATH}"; then
+    log_error "file-tail smoke path is not readable in container: ${FILE_TAIL_SMOKE_SERVER_PATH}"
+    docker exec "${CONTAINER_NAME}" sh -c 'id; ls -ld /file-tail-root; ls -l /file-tail-root' 2>&1 || true
+    return 2
+  fi
 
   section "Docker — Seed AI transcript fixture"
   seed_ai_fixture_container "${project_dir}" || {

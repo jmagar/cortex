@@ -147,7 +147,6 @@ impl CortexService {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn with_file_tail_registry(mut self, registry: Arc<FileTailRegistry>) -> Self {
         self.file_tail_registry = Some(registry);
         self

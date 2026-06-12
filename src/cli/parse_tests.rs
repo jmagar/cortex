@@ -50,6 +50,23 @@ fn parses_file_tail_add() {
 }
 
 #[test]
+fn file_tail_add_requires_hostname() {
+    let err = parse_command(vec![
+        "file-tail".into(),
+        "add".into(),
+        "--id".into(),
+        "swag-access".into(),
+        "--path".into(),
+        "/mnt/appdata/swag/log/nginx/access.log".into(),
+        "--tag".into(),
+        "swag-access".into(),
+    ])
+    .unwrap_err();
+
+    assert!(err.to_string().contains("--hostname"));
+}
+
+#[test]
 fn parses_file_tail_list() {
     let command = parse_command(vec!["file-tail".into(), "list".into(), "--json".into()]).unwrap();
     assert_eq!(

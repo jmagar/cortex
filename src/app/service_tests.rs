@@ -1599,7 +1599,11 @@ async fn file_tails_add_list_disable_enable_remove_round_trip() {
     let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
         temp.path().join("file-tails.json"),
     ));
-    let service = CortexService::new(pool, storage).with_file_tail_registry(registry);
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        registry,
+        Arc::new(|| Ok(())),
+        Arc::new(Vec::new),
+    );
     let log_path = temp.path().join("access.log");
     std::fs::write(&log_path, "seed\n").unwrap();
 
@@ -1707,7 +1711,86 @@ async fn file_tails_list_and_status_do_not_reconcile() {
 }
 
 #[tokio::test]
-async fn file_tails_missing_source_maps_to_not_found() {
+async fn file_tails_duplicate_add_is_rejected_without_resetting_checkpoint() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        Arc::clone(&registry),
+        Arc::new(|| Ok(())),
+        Arc::new(Vec::new),
+    );
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    let request = crate::app::FileTailRequest::add(crate::app::FileTailAddRequest {
+        id: "swag-access".into(),
+        path: log_path.to_string_lossy().into_owned(),
+        tag: "swag-access".into(),
+        hostname: Some("squirts".into()),
+        facility: Some("local4".into()),
+        severity: Some("info".into()),
+        start_at_end: Some(true),
+    });
+    service.file_tails(request.clone()).await.unwrap();
+    registry
+        .update_checkpoint("swag-access", 11, 22, 33, "2026-06-11T20:01:00Z")
+        .unwrap();
+
+    let err = service.file_tails(request).await.unwrap_err();
+    assert!(
+        err.to_string().contains("already exists"),
+        "unexpected error: {err}"
+    );
+    let stored = registry.get("swag-access").unwrap().unwrap();
+    assert_eq!(stored.checkpoint_dev, Some(11));
+    assert_eq!(stored.checkpoint_ino, Some(22));
+    assert_eq!(stored.checkpoint_offset, Some(33));
+}
+
+#[tokio::test]
+async fn file_tails_reconcile_failure_reports_committed_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        Arc::clone(&registry),
+        Arc::new(|| Err(anyhow::anyhow!("boom"))),
+        Arc::new(Vec::new),
+    );
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    let err = service
+        .file_tails(crate::app::FileTailRequest::add(
+            crate::app::FileTailAddRequest {
+                id: "swag-access".into(),
+                path: log_path.to_string_lossy().into_owned(),
+                tag: "swag-access".into(),
+                hostname: Some("squirts".into()),
+                facility: Some("local4".into()),
+                severity: Some("info".into()),
+                start_at_end: Some(true),
+            },
+        ))
+        .await
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("mutation was committed"),
+        "unexpected error: {err}"
+    );
+    assert!(registry.get("swag-access").unwrap().is_some());
+}
+
+#[tokio::test]
+async fn file_tails_mutations_reject_registry_only_query_mode() {
     let temp = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
@@ -1715,6 +1798,43 @@ async fn file_tails_missing_source_maps_to_not_found() {
         temp.path().join("file-tails.json"),
     ));
     let service = CortexService::new(pool, storage).with_file_tail_registry(registry);
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    let err = service
+        .file_tails(crate::app::FileTailRequest::add(
+            crate::app::FileTailAddRequest {
+                id: "swag-access".into(),
+                path: log_path.to_string_lossy().into_owned(),
+                tag: "swag-access".into(),
+                hostname: Some("squirts".into()),
+                facility: Some("local4".into()),
+                severity: Some("info".into()),
+                start_at_end: Some(true),
+            },
+        ))
+        .await
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("query-only mode"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn file_tails_missing_source_maps_to_not_found() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        registry,
+        Arc::new(|| Ok(())),
+        Arc::new(Vec::new),
+    );
 
     let err = service
         .file_tails(crate::app::FileTailRequest::id_op(
@@ -1740,7 +1860,7 @@ fn add_file_tail_request(
         id: id.into(),
         path: path.into(),
         tag: id.into(),
-        hostname: None,
+        hostname: Some("squirts".into()),
         facility: facility.map(str::to_string),
         severity: severity.map(str::to_string),
         start_at_end: Some(true),
@@ -1755,7 +1875,11 @@ async fn file_tails_rejects_invalid_facility_severity_and_disallowed_paths() {
     let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
         temp.path().join("file-tails.json"),
     ));
-    let service = CortexService::new(pool, storage).with_file_tail_registry(registry);
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        registry,
+        Arc::new(|| Ok(())),
+        Arc::new(Vec::new),
+    );
     let log_path = temp.path().join("access.log");
     std::fs::write(&log_path, "seed\n").unwrap();
 

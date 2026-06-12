@@ -258,14 +258,18 @@ impl RuntimeCore {
             CancellationToken::new(),
             config.receiver.max_message_size,
         );
-        let reconcile_supervisor = file_tail_supervisor.clone();
-        let status_supervisor = file_tail_supervisor.clone();
-        let service = CortexService::new(Arc::clone(&pool), config.storage.clone())
-            .with_file_tail_control(
+        let mut service = CortexService::new(Arc::clone(&pool), config.storage.clone());
+        if is_stdio {
+            service = service.with_file_tail_registry(file_tail_registry);
+        } else {
+            let reconcile_supervisor = file_tail_supervisor.clone();
+            let status_supervisor = file_tail_supervisor.clone();
+            service = service.with_file_tail_control(
                 file_tail_registry,
                 Arc::new(move || reconcile_supervisor.reconcile()),
                 Arc::new(move || status_supervisor.statuses()),
             );
+        }
 
         let auth_policy = build_auth_policy(&config, is_stdio).await?;
 

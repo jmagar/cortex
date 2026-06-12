@@ -32,7 +32,7 @@ pub(crate) fn validate_file_tail_path(path: &str) -> Result<()> {
         bail!("file-tail path is under a sensitive cortex mount");
     }
 
-    let allowed_roots = allowed_file_tail_roots();
+    let allowed_roots = canonical_allowed_file_tail_roots();
     if allowed_roots.iter().any(|root| canonical.starts_with(root)) {
         return Ok(());
     }
@@ -58,6 +58,13 @@ pub(crate) fn validate_opened_file_tail_path(
         bail!("file-tail path changed while opening");
     }
     Ok(())
+}
+
+fn canonical_allowed_file_tail_roots() -> Vec<PathBuf> {
+    allowed_file_tail_roots()
+        .into_iter()
+        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .collect()
 }
 
 #[cfg(not(test))]

@@ -197,6 +197,52 @@ async fn supervisor_ingests_appended_line_and_updates_checkpoint() {
 }
 
 #[tokio::test]
+async fn reconcile_initializes_start_at_end_checkpoint_before_returning() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = std::sync::Arc::new(FileTailRegistry::new(temp.path().join("file-tails.json")));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<LogBatchEntry>(4);
+    let ingest = IngestTx::from_sender_for_test(tx);
+    let token = tokio_util::sync::CancellationToken::new();
+    let supervisor = FileTailSupervisor::new(
+        std::sync::Arc::clone(&registry),
+        ingest,
+        token.clone(),
+        8192,
+    );
+    let log_path = temp.path().join("loop.log");
+    tokio::fs::write(&log_path, b"already here\n")
+        .await
+        .unwrap();
+
+    registry
+        .upsert(source("loop", &log_path.to_string_lossy(), "loop"))
+        .unwrap();
+    supervisor.reconcile().unwrap();
+    let initial = registry.get("loop").unwrap().unwrap();
+    assert_eq!(
+        initial.checkpoint_offset,
+        Some("already here\n".len() as u64)
+    );
+
+    let mut writer = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(&log_path)
+        .await
+        .unwrap();
+    writer.write_all(b"after reconcile\n").await.unwrap();
+    writer.flush().await.unwrap();
+
+    let entry = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(entry.message, "after reconcile");
+
+    token.cancel();
+    supervisor.shutdown();
+}
+
+#[tokio::test]
 async fn supervisor_waits_for_durable_ack_before_checkpointing() {
     let temp = tempfile::tempdir().unwrap();
     let registry = std::sync::Arc::new(FileTailRegistry::new(temp.path().join("file-tails.json")));
@@ -230,13 +276,9 @@ async fn supervisor_waits_for_durable_ack_before_checkpointing() {
         .unwrap()
         .unwrap();
     assert_eq!(envelope.entry.message, "hello durable");
-    assert!(
-        registry
-            .get("loop")
-            .unwrap()
-            .unwrap()
-            .checkpoint_offset
-            .is_none()
+    assert_eq!(
+        registry.get("loop").unwrap().unwrap().checkpoint_offset,
+        Some(0)
     );
 
     envelope.ack_success();
@@ -247,7 +289,7 @@ async fn supervisor_waits_for_durable_ack_before_checkpointing() {
                 .unwrap()
                 .unwrap()
                 .checkpoint_offset
-                .is_some()
+                .is_some_and(|offset| offset > 0)
             {
                 break;
             }
@@ -321,6 +363,27 @@ async fn open_tail_file_resumes_matching_checkpoint_before_start_at_end() {
 }
 
 #[tokio::test]
+async fn open_tail_file_restarts_at_beginning_when_checkpoint_identity_mismatches() {
+    let temp = tempfile::tempdir().unwrap();
+    let file_path = temp.path().join("app.log");
+    tokio::fs::write(&file_path, b"replacement\n")
+        .await
+        .unwrap();
+    let mut src = source("app", &file_path.to_string_lossy(), "app");
+    src.start_at_end = true;
+    src.checkpoint_dev = Some(1);
+    src.checkpoint_ino = Some(2);
+    src.checkpoint_offset = Some(3);
+
+    let mut opened = open_tail_file(&src, true).await.unwrap();
+
+    assert_eq!(opened.position, 0);
+    let mut rest = String::new();
+    opened.file.read_to_string(&mut rest).await.unwrap();
+    assert_eq!(rest, "replacement\n");
+}
+
+#[tokio::test]
 async fn open_tail_file_rejects_symlink_paths() {
     let temp = tempfile::tempdir().unwrap();
     let target_path = temp.path().join("target.log");
@@ -347,10 +410,11 @@ async fn reopen_if_rotated_or_truncated_detects_rename_create_rotation() {
         .unwrap();
     tokio::fs::write(&file_path, b"new\n").await.unwrap();
 
-    let reopened = reopen_if_rotated_or_truncated(&src, old.identity, old.position)
-        .await
-        .unwrap()
-        .expect("rotation should reopen");
+    let reopened =
+        reopen_if_rotated_or_truncated(&src, old.identity, old.position, &old.fingerprint)
+            .await
+            .unwrap()
+            .expect("rotation should reopen");
     assert_eq!(reopened.position, 0);
     assert_ne!(reopened.identity, old.identity);
 }
@@ -367,10 +431,35 @@ async fn reopen_if_rotated_or_truncated_detects_copytruncate() {
     opened.position = 22;
     tokio::fs::write(&file_path, b"new\n").await.unwrap();
 
-    let reopened = reopen_if_rotated_or_truncated(&src, opened.identity, opened.position)
-        .await
-        .unwrap()
-        .expect("truncate should reopen");
+    let reopened =
+        reopen_if_rotated_or_truncated(&src, opened.identity, opened.position, &opened.fingerprint)
+            .await
+            .unwrap()
+            .expect("truncate should reopen");
+    assert_eq!(reopened.position, 0);
+}
+
+#[tokio::test]
+async fn reopen_if_rotated_or_truncated_detects_same_inode_copytruncate_regrow() {
+    let temp = tempfile::tempdir().unwrap();
+    let file_path = temp.path().join("app.log");
+    let old_contents = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n";
+    tokio::fs::write(&file_path, old_contents).await.unwrap();
+    let src = source("app", &file_path.to_string_lossy(), "app");
+    let mut opened = open_tail_file(&src, false).await.unwrap();
+    opened.position = 40;
+    tokio::fs::write(
+        &file_path,
+        b"cccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n",
+    )
+    .await
+    .unwrap();
+
+    let reopened =
+        reopen_if_rotated_or_truncated(&src, opened.identity, opened.position, &opened.fingerprint)
+            .await
+            .unwrap()
+            .expect("same-inode replacement should reopen");
     assert_eq!(reopened.position, 0);
 }
 
@@ -383,7 +472,7 @@ async fn reopen_if_rotated_or_truncated_errors_when_file_disappears() {
     let old = open_tail_file(&src, false).await.unwrap();
     tokio::fs::remove_file(&file_path).await.unwrap();
 
-    let err = reopen_if_rotated_or_truncated(&src, old.identity, old.position)
+    let err = reopen_if_rotated_or_truncated(&src, old.identity, old.position, &old.fingerprint)
         .await
         .unwrap_err();
 

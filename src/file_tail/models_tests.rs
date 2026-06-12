@@ -74,7 +74,29 @@ fn file_tail_request_rejects_missing_fields_for_add() {
 
     assert_eq!(
         req.into_add().unwrap_err(),
-        "file_tails op=add requires id, path, and tag"
+        "file_tails op=add requires id, path, tag, and hostname"
+    );
+}
+
+#[test]
+fn add_request_rejects_missing_hostname() {
+    let err = FileTailSource::from_add(
+        FileTailAddRequest {
+            id: "swag-access".into(),
+            path: "/mnt/appdata/swag/log/nginx/access.log".into(),
+            tag: "swag-access".into(),
+            hostname: None,
+            facility: None,
+            severity: None,
+            start_at_end: None,
+        },
+        "2026-06-11T20:00:00Z",
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        err,
+        "file_tails op=add requires id, path, tag, and hostname"
     );
 }
 

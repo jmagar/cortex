@@ -95,3 +95,34 @@ The final review pass hardened the feature around admin authorization, path poli
 - Wait for PR #73 CI and CodeRabbit to finish on the final branch head.
 - Merge PR #73 once checks are green.
 - Deploy with mounted log roots for any host that should manage file-tail sources through Cortex rather than rsyslog imfile.
+
+## 2026-06-12 Second Review Pass
+
+Dispatched the PR review toolkit again after PR #73 head `e54d033` and addressed the fresh findings from CodeRabbit plus the reviewer/test-analyzer agents.
+
+### Additional Fixes
+
+- Fixed the file-tail model compile break introduced while making `hostname` required.
+- Required `hostname` across CLI, REST, MCP schema, models, docs, and tests so file-tail rows are never silently attributed to the Cortex container/local host.
+- Rejected duplicate `file_tails op=add` requests before `upsert`, preserving existing checkpoints instead of resetting them.
+- Kept query-only/stdio runtimes registry-readable but mutation-disabled, preventing local CLI or stdio MCP sessions from spawning competing tailers outside the long-running server.
+- Changed the HTTP client file-tail admin POST path to avoid 503 retry replay and added a wiremock regression test.
+- Added explicit committed-mutation error messages for reconcile/refresh failures and a regression test proving registry state is preserved.
+- Added `last_read_at`, `last_checkpoint_at`, and `blocked_on_writer_since` to file-tail status and surfaced file-tail blocked count in the general `status` action.
+- Hardened resume/rotation behavior: stale checkpoint identity now starts replacement files at offset 0; same-inode copytruncate/regrow is detected by prefix fingerprint; rename-create rotation waits through a short EOF grace window before switching away from the old file descriptor.
+- Canonicalized configured allowed roots and added direct path-policy tests for env roots and symlinked roots.
+- Fixed the Docker live smoke harness by chmodding the host smoke dir/file and asserting container readability before the file-tail smoke.
+- Tightened admin-scope predicates in `scripts/smoke-test.sh`, `tests/test_live.sh`, and `tests/mcporter/test-tools.sh`.
+- Bumped version to `1.20.1` with changelog notes for the review-hardening patch.
+
+### Second-Pass Verification
+
+| command | result |
+|---|---|
+| `bash -n scripts/smoke-test.sh tests/test_live.sh tests/mcporter/test-tools.sh` | pass |
+| `cargo test file_tail --lib --quiet` | pass: 45 tests |
+| `cargo test file_tails --lib --quiet` | pass: 13 tests |
+| `cargo test http_client::tests::file_tails_post_does_not_retry_503 --quiet` | pass |
+| `cargo clippy --all-targets -- -D warnings` | pass |
+| `cargo test --locked` | pass: 1189 lib + 334 main + integration/doc tests clean, with 1 ignored network-dependent test |
+| `CORTEX_TOKEN=codex-live-smoke-token bash tests/test_live.sh --mode docker --token codex-live-smoke-token` | pass: 122 passed, 0 failed, 4 skipped |

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.1] - 2026-06-12
+
+### Changed
+
+- Require an explicit `hostname` when adding managed file-tail sources so rows are attributed to the intended host instead of falling back to the Cortex container identity.
+- Report file-tail durable-writer backpressure in the `status` action and mark overall status as `degraded` when tailers are blocked on writer ack.
+
+### Fixed
+
+- Prevent duplicate file-tail `add` calls from resetting checkpoints, avoid retrying stateful HTTP file-tail mutations after 503 responses, and make committed-but-reconcile-failed mutations explicit.
+- Harden file-tail resume and rotation handling: stale checkpoints now restart replacement files from the beginning, same-inode copytruncate/regrow is detected by prefix fingerprint, and rename-create rotation gets a short old-file drain window before switching.
+- Fix file-tail live smoke harness permissions so non-root containers can read the mounted smoke log, and tighten admin-scope predicates across smoke scripts.
+- Canonicalize configured file-tail allowed roots so symlinked operational roots validate against canonical file paths.
+
 ## [1.20.0] - 2026-06-11
 
 ### Added

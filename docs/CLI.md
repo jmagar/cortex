@@ -35,7 +35,7 @@ configured database in `file-tails.json` and reconciled by the running
 ```bash
 cortex file-tail list [--json]
 cortex file-tail status [--json]
-cortex file-tail add --id ID --path PATH --tag TAG [--hostname HOST] [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
+cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
 cortex file-tail remove --id ID [--json]
 cortex file-tail enable --id ID [--json]
 cortex file-tail disable --id ID [--json]

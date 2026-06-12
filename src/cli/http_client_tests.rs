@@ -426,6 +426,31 @@ async fn double_503_error_includes_both_bodies() {
     assert_eq!(counter.load(Ordering::SeqCst), 2);
 }
 
+#[tokio::test]
+async fn file_tails_post_does_not_retry_503() {
+    let server = MockServer::start().await;
+    let client = HttpClient::discover(Some(server.uri()), Some("test-value".into()))
+        .unwrap()
+        .with_api_admin_token_for_test("admin-value");
+    Mock::given(method("POST"))
+        .and(path("/api/file-tails"))
+        .and(header("x-cortex-admin-token", "admin-value"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("committed but unavailable"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = client
+        .file_tails(&cortex::app::FileTailRequest::status())
+        .await
+        .expect_err("stateful admin POST must not retry");
+
+    assert!(
+        err.to_string().contains("committed but unavailable"),
+        "expected first 503 body in error: {err}"
+    );
+}
+
 // ─── Malformed JSON: serde_path_to_error surfaces field path + preview ──────
 
 #[tokio::test]

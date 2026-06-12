@@ -335,6 +335,10 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "type": "string",
                     "description": "For action=file_tails op=add: app/tag stored as app_name for tailed lines."
                 },
+                "hostname": {
+                    "type": "string",
+                    "description": "For action=file_tails op=add: required source hostname assigned to tailed lines."
+                },
                 "start_at_end": {
                     "type": "boolean",
                     "description": "For action=file_tails op=add: true starts at EOF, false backfills existing file content."
@@ -546,7 +550,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                                     "required": ["op"]
                                 },
                                 "then": {
-                                    "required": ["id", "path", "tag"]
+                                    "required": ["id", "path", "tag", "hostname"]
                                 }
                             },
                             {

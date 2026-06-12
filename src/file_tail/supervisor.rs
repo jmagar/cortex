@@ -3,11 +3,11 @@ use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncSeekExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -19,6 +19,9 @@ use crate::ingest_metadata::bounded_metadata_json;
 use super::models::{FileTailSource, FileTailStatus};
 use super::path_policy::{validate_file_tail_path, validate_opened_file_tail_path};
 use super::registry::FileTailRegistry;
+
+const FILE_TAIL_FINGERPRINT_BYTES: usize = 256;
+const FILE_TAIL_ROTATION_GRACE: Duration = Duration::from_millis(1000);
 
 #[derive(Clone)]
 pub(crate) struct FileTailSupervisor {
@@ -79,37 +82,61 @@ impl FileTailSupervisor {
             .map(|source| (source.id.clone(), source.clone()))
             .collect();
 
-        let to_spawn = {
-            let mut tasks = self.tasks.lock();
-            tasks.retain(|id, task| {
-                let keep_running = enabled
-                    .get(id)
-                    .is_some_and(|source| source.same_definition(&task.source));
-                if !keep_running {
-                    task.status.lock().running = false;
-                    task.handle.abort();
-                }
-                keep_running
-            });
-            sources
-                .into_iter()
-                .filter(|source| source.enabled && !tasks.contains_key(&source.id))
-                .collect::<Vec<_>>()
-        };
-
-        for source in to_spawn {
-            self.spawn_source(source);
+        let mut tasks = self.tasks.lock();
+        tasks.retain(|id, task| {
+            let keep_running = enabled
+                .get(id)
+                .is_some_and(|source| source.same_definition(&task.source));
+            if !keep_running {
+                task.status.lock().running = false;
+                task.handle.abort();
+            }
+            keep_running
+        });
+        for source in sources {
+            if source.enabled && !tasks.contains_key(&source.id) {
+                self.ensure_initial_checkpoint(&source)?;
+                let (id, task) = self.build_task(source);
+                tasks.insert(id, task);
+            }
         }
         Ok(())
     }
 
-    fn spawn_source(&self, source: FileTailSource) {
+    fn ensure_initial_checkpoint(&self, source: &FileTailSource) -> Result<()> {
+        let has_checkpoint = source.checkpoint_dev.is_some()
+            || source.checkpoint_ino.is_some()
+            || source.checkpoint_offset.is_some();
+        if has_checkpoint {
+            return Ok(());
+        }
+
+        let file = open_validated_tail_file_sync(&source.path)?;
+        let metadata = file.metadata()?;
+        let offset = if source.start_at_end {
+            metadata.len()
+        } else {
+            0
+        };
+        self.registry.update_checkpoint(
+            &source.id,
+            metadata.dev(),
+            metadata.ino(),
+            offset,
+            &now_iso(),
+        )
+    }
+
+    fn build_task(&self, source: FileTailSource) -> (String, TailTask) {
         let id = source.id.clone();
         let task_source = source.clone();
         let status = Arc::new(Mutex::new(FileTailStatus {
             id: id.clone(),
             running: true,
             last_line_at: None,
+            last_read_at: None,
+            last_checkpoint_at: None,
+            blocked_on_writer_since: None,
             last_error: None,
         }));
         let task_status = Arc::clone(&status);
@@ -129,14 +156,14 @@ impl FileTailSupervisor {
             )
             .await;
         });
-        self.tasks.lock().insert(
+        (
             id,
             TailTask {
                 handle,
                 status,
                 source: task_source,
             },
-        );
+        )
     }
 
     #[cfg(test)]
@@ -229,14 +256,25 @@ async fn tail_file_until_cancelled(
     let mut reader = BufReader::new(opened.file);
     let mut position = opened.position;
     let mut identity = opened.identity;
+    let mut fingerprint = opened.fingerprint;
     let mut line = Vec::new();
+    let mut pending_rotation_since: Option<Instant> = None;
     loop {
         tokio::select! {
             _ = token.cancelled() => return Ok(()),
             read = read_bounded_line(&mut reader, &mut line, max_line_bytes) => {
                 let read = read?;
                 if read.bytes_read == 0 {
-                    if let Some(next) = reopen_if_rotated_or_truncated(source, identity, position).await? {
+                    if path_identity_changed(source, identity).await? {
+                        let since = pending_rotation_since.get_or_insert_with(Instant::now);
+                        if since.elapsed() < FILE_TAIL_ROTATION_GRACE {
+                            tokio::time::sleep(Duration::from_millis(200)).await;
+                            continue;
+                        }
+                    } else {
+                        pending_rotation_since = None;
+                    }
+                    if let Some(next) = reopen_if_rotated_or_truncated(source, identity, position, &fingerprint).await? {
                         if !line.is_empty() {
                             let now = now_iso();
                             let partial = PartialLineBeforeReopen {
@@ -254,6 +292,8 @@ async fn tail_file_until_cancelled(
                         reader = BufReader::new(next.file);
                         position = next.position;
                         identity = next.identity;
+                        fingerprint = next.fingerprint;
+                        pending_rotation_since = None;
                         line.clear();
                     } else {
                         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -261,6 +301,7 @@ async fn tail_file_until_cancelled(
                     continue;
                 }
                 position = position.saturating_add(read.bytes_read as u64);
+                pending_rotation_since = None;
                 if !read.complete {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     continue;
@@ -273,11 +314,18 @@ async fn tail_file_until_cancelled(
                 }
                 let now = now_iso();
                 let entry = file_tail_line_to_entry(source, msg, &now);
+                {
+                    let mut status = status.lock();
+                    status.last_read_at = Some(now.clone());
+                    status.blocked_on_writer_since = Some(now.clone());
+                }
                 ingest.send_durable(entry).await?;
                 registry.update_checkpoint(&source.id, identity.dev, identity.ino, position, &now)?;
                 line.clear();
                 let mut status = status.lock();
                 status.last_line_at = Some(now);
+                status.last_checkpoint_at = status.last_line_at.clone();
+                status.blocked_on_writer_since = None;
                 status.last_error = if read.truncated {
                     Some(format!(
                         "truncated oversized line from {} to {max_line_bytes} bytes",
@@ -339,6 +387,7 @@ pub(crate) struct OpenedTailFile {
     pub(crate) file: tokio::fs::File,
     pub(crate) identity: FileIdentity,
     pub(crate) position: u64,
+    pub(crate) fingerprint: Vec<u8>,
 }
 
 pub(crate) struct BoundedLine {
@@ -357,13 +406,19 @@ pub(crate) async fn open_tail_file(
         dev: metadata.dev(),
         ino: metadata.ino(),
     };
+    let fingerprint = file_prefix_fingerprint(&mut file).await?;
     let checkpoint_matches = source.checkpoint_dev == Some(identity.dev)
         && source.checkpoint_ino == Some(identity.ino)
         && source
             .checkpoint_offset
             .is_some_and(|offset| offset <= metadata.len());
+    let has_checkpoint = source.checkpoint_dev.is_some()
+        || source.checkpoint_ino.is_some()
+        || source.checkpoint_offset.is_some();
     let position = if checkpoint_matches {
         source.checkpoint_offset.unwrap_or(0)
+    } else if has_checkpoint {
+        0
     } else if first_open && source.start_at_end {
         metadata.len()
     } else {
@@ -374,6 +429,7 @@ pub(crate) async fn open_tail_file(
         file,
         identity,
         position,
+        fingerprint,
     })
 }
 
@@ -381,6 +437,7 @@ pub(crate) async fn reopen_if_rotated_or_truncated(
     source: &FileTailSource,
     identity: FileIdentity,
     position: u64,
+    fingerprint: &[u8],
 ) -> Result<Option<OpenedTailFile>> {
     let metadata = match tokio::fs::metadata(&source.path).await {
         Ok(metadata) => metadata,
@@ -394,19 +451,65 @@ pub(crate) async fn reopen_if_rotated_or_truncated(
         ino: metadata.ino(),
     };
     if current != identity || metadata.len() < position {
+        return reopen_from_start(source).await.map(Some);
+    }
+    if position > 0 {
         let mut file = open_validated_tail_file(&source.path).await?;
-        let metadata = file.metadata().await?;
-        file.seek(std::io::SeekFrom::Start(0)).await?;
-        return Ok(Some(OpenedTailFile {
-            file,
-            identity: FileIdentity {
-                dev: metadata.dev(),
-                ino: metadata.ino(),
-            },
-            position: 0,
-        }));
+        let current_fingerprint = file_prefix_fingerprint(&mut file).await?;
+        if current_fingerprint != fingerprint {
+            let metadata = file.metadata().await?;
+            file.seek(std::io::SeekFrom::Start(0)).await?;
+            return Ok(Some(OpenedTailFile {
+                file,
+                identity: FileIdentity {
+                    dev: metadata.dev(),
+                    ino: metadata.ino(),
+                },
+                position: 0,
+                fingerprint: current_fingerprint,
+            }));
+        }
     }
     Ok(None)
+}
+
+async fn path_identity_changed(source: &FileTailSource, identity: FileIdentity) -> Result<bool> {
+    let metadata = match tokio::fs::metadata(&source.path).await {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            anyhow::bail!("file-tail source disappeared: {}", source.path);
+        }
+        Err(err) => return Err(err.into()),
+    };
+    Ok(FileIdentity {
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+    } != identity)
+}
+
+async fn reopen_from_start(source: &FileTailSource) -> Result<OpenedTailFile> {
+    let mut file = open_validated_tail_file(&source.path).await?;
+    let metadata = file.metadata().await?;
+    let fingerprint = file_prefix_fingerprint(&mut file).await?;
+    file.seek(std::io::SeekFrom::Start(0)).await?;
+    Ok(OpenedTailFile {
+        file,
+        identity: FileIdentity {
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+        },
+        position: 0,
+        fingerprint,
+    })
+}
+
+async fn file_prefix_fingerprint(file: &mut tokio::fs::File) -> std::io::Result<Vec<u8>> {
+    let mut buf = vec![0; FILE_TAIL_FINGERPRINT_BYTES];
+    file.seek(std::io::SeekFrom::Start(0)).await?;
+    let n = file.read(&mut buf).await?;
+    buf.truncate(n);
+    file.seek(std::io::SeekFrom::Start(0)).await?;
+    Ok(buf)
 }
 
 async fn open_validated_tail_file(path: &str) -> Result<tokio::fs::File> {
@@ -425,6 +528,17 @@ async fn open_validated_tail_file(path: &str) -> Result<tokio::fs::File> {
     let metadata = std_file.metadata()?;
     validate_opened_file_tail_path(&path, &metadata)?;
     Ok(tokio::fs::File::from_std(std_file))
+}
+
+fn open_validated_tail_file_sync(path: &str) -> Result<std::fs::File> {
+    validate_file_tail_path(path)?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    validate_opened_file_tail_path(path, &metadata)?;
+    Ok(file)
 }
 
 pub(crate) async fn read_bounded_line<R: AsyncBufRead + Unpin>(

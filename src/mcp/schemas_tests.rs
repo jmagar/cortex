@@ -117,22 +117,11 @@ fn schema_includes_file_tails_action() {
     );
     let nested = file_tails_rule["then"]["allOf"].as_array().unwrap();
     assert!(nested.iter().any(|rule| {
+        let required = rule["then"]["required"].as_array().unwrap();
         rule["if"]["properties"]["op"]["const"] == "add"
-            && rule["then"]["required"]
-                .as_array()
-                .unwrap()
+            && ["id", "path", "tag", "hostname"]
                 .iter()
-                .any(|value| value == "id")
-            && rule["then"]["required"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|value| value == "path")
-            && rule["then"]["required"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|value| value == "tag")
+                .all(|name| required.iter().any(|value| value == name))
     }));
     assert!(nested.iter().any(|rule| {
         rule["if"]["properties"]["op"]["enum"]
