@@ -1,5 +1,32 @@
 use serde::{Deserialize, Serialize};
 
+const SYSLOG_FACILITIES: &[&str] = &[
+    "kern",
+    "user",
+    "mail",
+    "daemon",
+    "auth",
+    "syslog",
+    "lpr",
+    "news",
+    "uucp",
+    "cron",
+    "authpriv",
+    "ftp",
+    "ntp",
+    "security",
+    "console",
+    "solaris-cron",
+    "local0",
+    "local1",
+    "local2",
+    "local3",
+    "local4",
+    "local5",
+    "local6",
+    "local7",
+];
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FileTailSource {
@@ -11,6 +38,12 @@ pub struct FileTailSource {
     pub severity: String,
     pub start_at_end: bool,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_dev: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_ino: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_offset: Option<u64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -73,12 +106,27 @@ impl FileTailSource {
             tag: req.tag,
             hostname: req.hostname,
             facility: Some(req.facility.unwrap_or_else(|| "local7".to_string())),
-            severity: req.severity.unwrap_or_else(|| "info".to_string()),
+            severity: normalize_severity(req.severity.as_deref())
+                .unwrap_or_else(|| "info".to_string()),
             start_at_end: req.start_at_end.unwrap_or(true),
             enabled: true,
+            checkpoint_dev: None,
+            checkpoint_ino: None,
+            checkpoint_offset: None,
             created_at: now.to_string(),
             updated_at: now.to_string(),
         }
+    }
+
+    pub(crate) fn same_definition(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.path == other.path
+            && self.tag == other.tag
+            && self.hostname == other.hostname
+            && self.facility == other.facility
+            && self.severity == other.severity
+            && self.start_at_end == other.start_at_end
+            && self.enabled == other.enabled
     }
 }
 
@@ -95,6 +143,14 @@ impl FileTailRequest {
                     || self.tag.as_deref().is_none_or(str::is_empty)
                 {
                     return Err("file_tails op=add requires id, path, and tag".into());
+                }
+                if let Some(severity) = self.severity.as_deref() {
+                    normalize_severity(Some(severity)).ok_or_else(|| {
+                        "file_tails severity must be one of emerg, alert, crit, err, warning, notice, info, debug".to_string()
+                    })?;
+                }
+                if let Some(facility) = self.facility.as_deref() {
+                    validate_facility(facility)?;
                 }
                 Ok(())
             }
@@ -119,6 +175,28 @@ impl FileTailRequest {
             start_at_end: self.start_at_end,
         })
     }
+}
+
+fn normalize_severity(severity: Option<&str>) -> Option<String> {
+    let severity = severity?;
+    match severity.to_ascii_lowercase().as_str() {
+        "emerg" | "emergency" => Some("emerg".to_string()),
+        "alert" => Some("alert".to_string()),
+        "crit" | "critical" => Some("crit".to_string()),
+        "err" | "error" | "fatal" | "panic" => Some("err".to_string()),
+        "warning" | "warn" => Some("warning".to_string()),
+        "notice" => Some("notice".to_string()),
+        "info" | "informational" => Some("info".to_string()),
+        "debug" => Some("debug".to_string()),
+        _ => None,
+    }
+}
+
+fn validate_facility(facility: &str) -> Result<(), String> {
+    if SYSLOG_FACILITIES.contains(&facility) {
+        return Ok(());
+    }
+    Err("file_tails facility must be a canonical syslog facility".into())
 }
 
 fn validate_id(id: &str) -> Result<(), String> {

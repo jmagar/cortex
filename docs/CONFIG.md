@@ -127,17 +127,31 @@ Use this for logs that do not naturally reach journald or container stdout,
 such as SWAG nginx access/error logs, SWAG fail2ban logs, Authelia file logs,
 and AdGuard query logs.
 
+In Docker, mount a host log tree read-only at `/file-tail-root`:
+
+```bash
+CORTEX_FILE_TAIL_LOG_VOLUME=/mnt/user/appdata
+```
+
+Registered paths must be absolute, existing, non-symlink regular files under
+`CORTEX_FILE_TAIL_ALLOWED_ROOTS` (default:
+`/file-tail-root,/var/log,/host/var/log,/logs,/mnt,/tmp`). Sensitive Cortex
+mounts such as `/data`, `/cortex-home`, `/home/cortex/.ssh`, and
+`/home/cortex/workspace` are always rejected. REST management requires both the
+normal API bearer and `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`; MCP
+management requires `cortex:admin`.
+
 ```bash
 cortex file-tail add \
   --id swag-access \
-  --path /mnt/appdata/swag/log/nginx/access.log \
+  --path /file-tail-root/swag/log/nginx/access.log \
   --tag swag-access \
   --hostname squirts \
   --facility local4
 
 cortex file-tail add \
   --id swag-error \
-  --path /mnt/appdata/swag/log/nginx/error.log \
+  --path /file-tail-root/swag/log/nginx/error.log \
   --tag swag-error \
   --hostname squirts \
   --facility local4 \
@@ -145,30 +159,35 @@ cortex file-tail add \
 
 cortex file-tail add \
   --id fail2ban \
-  --path /mnt/appdata/swag/log/fail2ban/fail2ban.log \
+  --path /file-tail-root/swag/log/fail2ban/fail2ban.log \
   --tag fail2ban \
   --hostname squirts \
   --facility local5
 
 cortex file-tail add \
   --id authelia \
-  --path /mnt/appdata/authelia/logs/authelia.log \
+  --path /file-tail-root/authelia/logs/authelia.log \
   --tag authelia \
   --hostname squirts \
   --facility local5
 
 cortex file-tail add \
   --id adguard-query \
-  --path /mnt/appdata/adguard/var/data/querylog.json \
+  --path /file-tail-root/adguard/var/data/querylog.json \
   --tag adguard-query \
   --hostname squirts \
   --facility local6
 ```
 
-`--from-start` ingests existing file contents. The default starts at EOF so
-adding a source does not backfill a large historic log unexpectedly. The
-runtime reconciles enabled sources periodically and after CLI/REST/MCP
-mutations.
+`--from-start` ingests existing file contents on first open. The default starts
+at EOF so adding a source does not backfill a large historic log unexpectedly.
+After a source is running, Cortex checkpoints `dev`/`inode`/offset in
+`file-tails.json`, resumes from that cursor on restart, reopens on
+rename/create rotation, seeks back to 0 after truncation, and bounds each line
+by `CORTEX_MAX_MESSAGE_SIZE`. Per-row metadata stores `file_tail_id`, `tag`,
+and `path_basename`; full paths are visible only through the admin management
+surface. The runtime reconciles enabled sources periodically and after
+CLI/REST/MCP mutations.
 
 ### MCP server (`CORTEX_*`)
 
@@ -187,6 +206,7 @@ The plain JSON API is **always on**: it is mounted under `/api/*` on the same HT
 | Variable | Required | Default | Sensitive | Description |
 | --- | --- | --- | --- | --- |
 | `CORTEX_API_TOKEN` | yes | (none) | **yes** | Bearer token for `/api/*` routes — required at startup |
+| `CORTEX_API_ADMIN_TOKEN` | for REST file-tail management | (none) | **yes** | Extra token sent as `X-Cortex-Admin-Token` for `/api/file-tails` management. The normal API bearer is still required. |
 
 ### Headless Gemini assessment (`CORTEX_HEADLESS_*`, `CORTEX_LLM_*`)
 

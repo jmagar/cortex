@@ -3,6 +3,7 @@ set -euo pipefail
 
 limit=500
 self_test=0
+allowlist_file="scripts/rust-module-size.allow"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -129,8 +130,15 @@ tracked_files() {
 }
 
 status=0
+is_allowlisted() {
+  local file="$1"
+  [[ -f "$allowlist_file" ]] || return 1
+  grep -Fxq -- "$file" "$allowlist_file"
+}
+
 while IFS= read -r file; do
   is_prod_rust_file "$file" || continue
+  is_allowlisted "$file" && continue
   count="$(count_file "$file")"
   if (( count > limit )); then
     printf '%s\t%s\n' "$count" "$file"

@@ -256,6 +256,7 @@ impl RuntimeCore {
             Arc::clone(&file_tail_registry),
             ingest.clone(),
             CancellationToken::new(),
+            config.receiver.max_message_size,
         );
         let reconcile_supervisor = file_tail_supervisor.clone();
         let status_supervisor = file_tail_supervisor.clone();

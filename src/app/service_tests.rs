@@ -1192,6 +1192,42 @@ async fn filter_logs_rejects_queryless_json_only_source_kind() {
 }
 
 #[tokio::test]
+async fn filter_logs_file_tail_source_kind_uses_source_prefix() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry(
+                "2026-01-01T00:00:00Z",
+                "squirts",
+                "info",
+                "file-tail row",
+                "file-tail://squirts/swag-access",
+            ),
+            entry(
+                "2026-01-01T00:00:01Z",
+                "squirts",
+                "info",
+                "normal row",
+                "10.0.0.5:1514",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let response = service
+        .filter_logs(FilterLogsRequest {
+            source_kind: Some("file-tail".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.count, 1);
+    assert_eq!(response.logs[0].message, "file-tail row");
+}
+
+#[tokio::test]
 async fn filter_logs_rejects_conflicting_source_kind_tool_alias() {
     let (service, _pool, _dir) = test_service();
 
@@ -1564,12 +1600,14 @@ async fn file_tails_add_list_disable_enable_remove_round_trip() {
         temp.path().join("file-tails.json"),
     ));
     let service = CortexService::new(pool, storage).with_file_tail_registry(registry);
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
 
     let add = service
         .file_tails(crate::app::FileTailRequest {
             op: crate::app::FileTailOp::Add,
             id: Some("swag-access".into()),
-            path: Some("/tmp/access.log".into()),
+            path: Some(log_path.to_string_lossy().into_owned()),
             tag: Some("swag-access".into()),
             hostname: Some("squirts".into()),
             facility: Some("local4".into()),
@@ -1639,4 +1677,62 @@ async fn file_tails_add_list_disable_enable_remove_round_trip() {
         .await
         .unwrap();
     assert!(removed.sources.is_empty());
+}
+
+#[tokio::test]
+async fn file_tails_rejects_invalid_facility_severity_and_disallowed_paths() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_registry(registry);
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    let invalid_severity = service
+        .file_tails(crate::app::FileTailRequest {
+            op: crate::app::FileTailOp::Add,
+            id: Some("bad-sev".into()),
+            path: Some(log_path.to_string_lossy().into_owned()),
+            tag: Some("bad-sev".into()),
+            hostname: None,
+            facility: Some("local4".into()),
+            severity: Some("bogus".into()),
+            start_at_end: Some(true),
+        })
+        .await
+        .unwrap_err();
+    assert!(invalid_severity.to_string().contains("severity"));
+
+    let invalid_facility = service
+        .file_tails(crate::app::FileTailRequest {
+            op: crate::app::FileTailOp::Add,
+            id: Some("bad-facility".into()),
+            path: Some(log_path.to_string_lossy().into_owned()),
+            tag: Some("bad-facility".into()),
+            hostname: None,
+            facility: Some("notafacility".into()),
+            severity: Some("info".into()),
+            start_at_end: Some(true),
+        })
+        .await
+        .unwrap_err();
+    assert!(invalid_facility.to_string().contains("facility"));
+
+    let disallowed = service
+        .file_tails(crate::app::FileTailRequest {
+            op: crate::app::FileTailOp::Add,
+            id: Some("hosts".into()),
+            path: Some("/etc/hosts".into()),
+            tag: Some("hosts".into()),
+            hostname: None,
+            facility: Some("local4".into()),
+            severity: Some("info".into()),
+            start_at_end: Some(true),
+        })
+        .await
+        .unwrap_err();
+    assert!(disallowed.to_string().contains("allowed roots"));
 }

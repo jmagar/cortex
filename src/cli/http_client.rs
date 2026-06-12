@@ -53,7 +53,7 @@ use std::env;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Method, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -131,6 +131,7 @@ pub struct ServerVersion {
 pub struct HttpClient {
     base_url: Url,
     inner: reqwest::Client,
+    api_admin_token: Option<String>,
     /// **LAZY ON 404 ONLY. Do NOT pre-populate or refresh after success.** The
     /// whole point of `/api/version` is detecting upgrades after a deploy;
     /// caching beyond 404 enrichment defeats it (eng-review #A33). Populated
@@ -178,8 +179,17 @@ impl HttpClient {
         Ok(Self {
             base_url,
             inner,
+            api_admin_token: env::var("CORTEX_API_ADMIN_TOKEN")
+                .ok()
+                .filter(|token| !token.trim().is_empty()),
             server_version_cache: OnceCell::new(),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_api_admin_token_for_test(mut self, token: impl Into<String>) -> Self {
+        self.api_admin_token = Some(token.into());
+        self
     }
 
     // ─── HTTP plumbing ──────────────────────────────────────────────────────
@@ -243,6 +253,30 @@ impl HttpClient {
         let send = || async {
             self.inner
                 .request(Method::POST, url.clone())
+                .json(body)
+                .send()
+                .await
+        };
+        self.execute_with_retry(send, path).await
+    }
+
+    async fn post_json_with_admin<Req, Resp>(&self, path: &str, body: &Req) -> Result<Resp>
+    where
+        Req: Serialize + ?Sized,
+        Resp: DeserializeOwned,
+    {
+        let token = self.api_admin_token.as_deref().ok_or_else(|| {
+            anyhow!("CORTEX_API_ADMIN_TOKEN is required for this HTTP API mutation")
+        })?;
+        let mut admin_value =
+            HeaderValue::from_str(token).context("failed to construct admin token header")?;
+        admin_value.set_sensitive(true);
+        let admin_header = HeaderName::from_static("x-cortex-admin-token");
+        let url = self.url(path)?;
+        let send = || async {
+            self.inner
+                .request(Method::POST, url.clone())
+                .header(admin_header.clone(), admin_value.clone())
                 .json(body)
                 .send()
                 .await
@@ -516,7 +550,7 @@ impl HttpClient {
     }
 
     pub async fn file_tails(&self, req: &FileTailRequest) -> Result<FileTailResponse> {
-        self.post_json("/api/file-tails", req).await
+        self.post_json_with_admin("/api/file-tails", req).await
     }
 
     // ─── REST surface: bead 0p8r.4 (DB ops) ─────────────────────────────────

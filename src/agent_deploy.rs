@@ -1,4 +1,5 @@
-use std::io;
+use std::collections::BTreeSet;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
@@ -186,8 +187,8 @@ fn probe_one(host: &str) -> HostProbe {
 
 // ── interactive selection ────────────────────────────────────────────────────
 
-/// Show an `inquire::MultiSelect` over reachable hosts. Returns selected host
-/// names. Unreachable hosts are excluded from the list but noted beforehand.
+/// Show a simple stdin prompt over reachable hosts. Returns selected host names.
+/// Unreachable hosts are excluded from the list but noted beforehand.
 pub fn select_hosts_interactive(probes: &[HostProbe]) -> Result<Vec<String>> {
     let unreachable: Vec<&str> = probes
         .iter()
@@ -203,25 +204,51 @@ pub fn select_hosts_interactive(probes: &[HostProbe]) -> Result<Vec<String>> {
         anyhow::bail!("no reachable hosts found in ~/.ssh/config");
     }
 
-    let labels: Vec<String> = reachable.iter().map(|p| p.display_label()).collect();
+    eprintln!("Select hosts to deploy the cortex heartbeat agent:");
+    for (idx, probe) in reachable.iter().enumerate() {
+        eprintln!("  {:>2}. {}", idx + 1, probe.display_label());
+    }
+    eprint!("Enter numbers separated by commas/spaces, or 'all': ");
+    io::stderr().flush()?;
 
-    let selected = inquire::MultiSelect::new(
-        "Select hosts to deploy the cortex heartbeat agent:",
-        labels.clone(),
-    )
-    .with_help_message("↑↓ move  space toggle  enter confirm  type to filter")
-    .prompt()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let selected_indexes = parse_host_selection(&input, reachable.len())?;
 
-    Ok(selected
+    Ok(selected_indexes
         .into_iter()
-        .filter_map(|label| {
-            labels
-                .iter()
-                .position(|l| *l == label)
-                .and_then(|i| reachable.get(i))
-                .map(|p| p.host.clone())
-        })
+        .filter_map(|idx| reachable.get(idx))
+        .map(|probe| probe.host.clone())
         .collect())
+}
+
+fn parse_host_selection(input: &str, reachable_count: usize) -> Result<Vec<usize>> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("no hosts selected");
+    }
+    if trimmed.eq_ignore_ascii_case("all") {
+        return Ok((0..reachable_count).collect());
+    }
+
+    let mut selected = BTreeSet::new();
+    for token in trimmed.split(|c: char| c == ',' || c.is_ascii_whitespace()) {
+        if token.is_empty() {
+            continue;
+        }
+        let number: usize = token
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid host selection: {token}"))?;
+        if number == 0 || number > reachable_count {
+            anyhow::bail!("host selection {number} is out of range 1..={reachable_count}");
+        }
+        selected.insert(number - 1);
+    }
+
+    if selected.is_empty() {
+        anyhow::bail!("no hosts selected");
+    }
+    Ok(selected.into_iter().collect())
 }
 
 // ── deploy ───────────────────────────────────────────────────────────────────

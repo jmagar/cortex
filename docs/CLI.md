@@ -42,6 +42,9 @@ cortex file-tail disable --id ID [--json]
 ```
 
 The command maps to MCP action `file_tails` and REST `POST /api/file-tails`.
+When `--http` or `CORTEX_USE_HTTP=true` is used, set both `CORTEX_API_TOKEN`
+and `CORTEX_API_ADMIN_TOKEN`; the client sends the latter as
+`X-Cortex-Admin-Token`.
 By default `add` starts tailing at EOF; pass `--from-start` to ingest existing
 file contents.
 

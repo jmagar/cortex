@@ -63,7 +63,7 @@ to them by default.
 
 | Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| POST | `/api/file-tails` | **admin** | body: `{ "op": "list" \| "add" \| "remove" \| "enable" \| "disable" \| "status", "id"?: string, "path"?: string, "tag"?: string, "hostname"?: string, "facility"?: string, "severity"?: string, "start_at_end"?: bool }`. `add` requires `id`, `path`, and `tag`; remove/enable/disable require `id`. | `FileTailResponse { sources: [FileTailSource], statuses: [FileTailStatus] }` | 200, 400, 401, 500 | mixed | Manages Cortex-owned local file-tail ingest sources stored in `<data-dir>/file-tails.json`. CLI command: `cortex file-tail ...`; MCP action: `file_tails`. |
+| POST | `/api/file-tails` | **admin** | body: `{ "op": "list" \| "add" \| "remove" \| "enable" \| "disable" \| "status", "id"?: string, "path"?: string, "tag"?: string, "hostname"?: string, "facility"?: string, "severity"?: string, "start_at_end"?: bool }`. `add` requires `id`, `path`, and `tag`; remove/enable/disable require `id`. | `FileTailResponse { sources: [FileTailSource], statuses: [FileTailStatus] }` | 200, 400, 401, **403**, 500 | mixed | Requires normal `Authorization: Bearer $CORTEX_API_TOKEN` plus `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`. Manages Cortex-owned local file-tail ingest sources stored in `<data-dir>/file-tails.json`. `add` paths must be existing non-symlink regular files under `CORTEX_FILE_TAIL_ALLOWED_ROOTS` (default includes `/file-tail-root`). CLI command: `cortex file-tail ...`; MCP action: `file_tails` (`cortex:admin`). |
 
 ### DB ops (4) — bead `.4`
 
@@ -178,15 +178,12 @@ shell environment is unaffected.
   address while `CORTEX_PUBLIC_URL` does not begin with `https://`,
   so a misconfiguration is loud at first boot rather than silent
   in production.
-- **Single-token model.** `build_auth_layer` accepts exactly one token;
-  `AuthPolicy::Mounted` is enforced for `/api/*` regardless of bind
-  address (eng-review C1). The "scope" column in this matrix
-  (`read`/`admin`) is **documentation only** — there is no per-token
-  scope check today. A multi-token rollout (e.g. read-only viewer
-  token, separate admin token) would slot into `auth_state` without a
-  router rewrite; until then, every valid token can call every route.
-  This is reflected by a code-comment in `build_auth_layer` so future
-  contributors don't assume runtime scope enforcement.
+- **API auth model.** `build_auth_layer` accepts the normal
+  `CORTEX_API_TOKEN`; `AuthPolicy::Mounted` is enforced for `/api/*`
+  regardless of bind address (eng-review C1). Most legacy admin rows still use
+  that bearer as their only gate. `/api/file-tails` additionally requires
+  `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN` because it exposes configured
+  filesystem paths and can mutate runtime tail sources.
 
 ---
 

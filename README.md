@@ -771,31 +771,38 @@ Docker ingest is intentionally not part of the default smoke test because it nee
 
 #### Managed file-tail ingest
 
-Cortex can tail local files directly without rsyslog `imfile` drop-ins. Sources
-are stored next to the SQLite database in `file-tails.json`, managed through
-`cortex file-tail ...`, REST `POST /api/file-tails`, or MCP action
-`file_tails`, and emitted as `source_kind="file-tail"` rows.
+Cortex can tail local files directly without rsyslog `imfile` drop-ins. In
+Docker, mount the host log tree read-only at `/file-tail-root` with
+`CORTEX_FILE_TAIL_LOG_VOLUME` and register paths inside that mount. Sources are
+stored next to the SQLite database in `file-tails.json`, managed through
+`cortex file-tail ...`, REST `POST /api/file-tails` (requires
+`X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`), or MCP action `file_tails`,
+and emitted as `source_kind="file-tail"` rows. Row metadata includes
+`file_tail_id`, `tag`, and `path_basename`, not the full filesystem path.
 
 ```bash
 cortex file-tail add --id swag-access \
-  --path /mnt/appdata/swag/log/nginx/access.log \
+  --path /file-tail-root/swag/log/nginx/access.log \
   --tag swag-access --hostname squirts --facility local4
 cortex file-tail add --id swag-error \
-  --path /mnt/appdata/swag/log/nginx/error.log \
+  --path /file-tail-root/swag/log/nginx/error.log \
   --tag swag-error --hostname squirts --facility local4 --severity warning
 cortex file-tail add --id fail2ban \
-  --path /mnt/appdata/swag/log/fail2ban/fail2ban.log \
+  --path /file-tail-root/swag/log/fail2ban/fail2ban.log \
   --tag fail2ban --hostname squirts --facility local5
 cortex file-tail add --id authelia \
-  --path /mnt/appdata/authelia/logs/authelia.log \
+  --path /file-tail-root/authelia/logs/authelia.log \
   --tag authelia --hostname squirts --facility local5
 cortex file-tail add --id adguard-query \
-  --path /mnt/appdata/adguard/var/data/querylog.json \
+  --path /file-tail-root/adguard/var/data/querylog.json \
   --tag adguard-query --hostname squirts --facility local6
 ```
 
 The default starts at EOF. Add `--from-start` only when you intentionally want
-to backfill the current file contents.
+to backfill the current file contents. After startup, Cortex checkpoints
+`dev`/`inode`/offset in `file-tails.json`, resumes from that cursor, and
+reopens files on rename/create rotation or truncation. Lines are bounded by
+`CORTEX_MAX_MESSAGE_SIZE`; oversized records are truncated before enqueue.
 
 #### Storage
 

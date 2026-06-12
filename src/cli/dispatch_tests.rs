@@ -34,7 +34,7 @@ use crate::cli::{
 };
 use anyhow::{Result, bail};
 use std::time::Duration;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -381,9 +381,20 @@ async fn run_sessions_http_sends_exactly_one_request() {
 
 #[tokio::test]
 async fn run_file_tail_http_sends_exactly_one_request() {
-    let (server, mode) = http_mode().await;
+    let server = MockServer::start().await;
+    let client = HttpClient::discover(Some(server.uri()), Some("test-token".into()))
+        .expect("discover ok")
+        .with_api_admin_token_for_test("admin-token");
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(404))
+        .with_priority(255)
+        .expect(0)
+        .mount(&server)
+        .await;
+    let mode = CliMode::Http(client);
     Mock::given(method("POST"))
         .and(path("/api/file-tails"))
+        .and(header("x-cortex-admin-token", "admin-token"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "sources": [],
             "statuses": [],

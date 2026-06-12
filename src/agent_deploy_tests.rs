@@ -54,6 +54,20 @@ fn host_probe_label_formats_unreachable() {
 }
 
 #[test]
+fn parse_host_selection_accepts_all_and_dedupes_numbers() {
+    assert_eq!(parse_host_selection("all", 3).unwrap(), vec![0, 1, 2]);
+    assert_eq!(parse_host_selection("2, 1 2", 3).unwrap(), vec![0, 1]);
+}
+
+#[test]
+fn parse_host_selection_rejects_empty_invalid_and_out_of_range() {
+    assert!(parse_host_selection("", 3).is_err());
+    assert!(parse_host_selection("wat", 3).is_err());
+    assert!(parse_host_selection("0", 3).is_err());
+    assert!(parse_host_selection("4", 3).is_err());
+}
+
+#[test]
 fn unraid_constants_wire_socket_and_host_syslog() {
     assert_eq!(UNRAID_CONTAINER_SYSLOG, "/host/var/log/syslog");
     assert_eq!(

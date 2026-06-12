@@ -94,9 +94,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 comfy-table = "7"
 supports-hyperlinks = "3"
 
-# Interactive TUI prompts (agent deploy host selector)
-inquire = "0.7"
-
 # Utils
 anyhow = "1"
 lru = "0.16"

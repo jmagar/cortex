@@ -67,6 +67,7 @@ fn test_state_full(
         service,
         ApiConfig {
             api_token: crate::config::Secret(token),
+            admin_token: crate::config::Secret(None),
         },
         3100,
         true,
@@ -153,34 +154,44 @@ async fn stats_route_requires_bearer_token() {
 
 #[tokio::test]
 async fn file_tails_route_adds_and_lists_sources() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (mut state, _pool, dir) = test_state(Some("secret".into()));
+    state.config.admin_token = crate::config::Secret(Some("admin-secret".into()));
     let app = router(state).unwrap();
+    let log_path = dir.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
 
-    let (status, value) = post_json(
+    let body = serde_json::json!({
+        "op": "add",
+        "id": "swag-access",
+        "path": log_path,
+        "tag": "swag-access",
+        "hostname": "squirts",
+        "facility": "local4",
+        "severity": "info",
+        "start_at_end": true
+    });
+
+    let (status, _value) =
+        post_json(app.clone(), "/api/file-tails", body.clone(), Some("secret")).await;
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+
+    let (status, value) = post_json_with_admin(
         app.clone(),
         "/api/file-tails",
-        serde_json::json!({
-            "op": "add",
-            "id": "swag-access",
-            "path": "/tmp/access.log",
-            "tag": "swag-access",
-            "hostname": "squirts",
-            "facility": "local4",
-            "severity": "info",
-            "start_at_end": true
-        }),
+        body,
         Some("secret"),
+        Some("admin-secret"),
     )
     .await;
-
     assert_eq!(status, axum::http::StatusCode::OK, "response: {value}");
     assert_eq!(value["sources"][0]["id"], "swag-access");
 
-    let (status, value) = post_json(
+    let (status, value) = post_json_with_admin(
         app,
         "/api/file-tails",
         serde_json::json!({ "op": "list" }),
         Some("secret"),
+        Some("admin-secret"),
     )
     .await;
 
@@ -847,6 +858,7 @@ async fn cors_localhost_defaults_suppressed_on_external_bind() {
         service,
         ApiConfig {
             api_token: crate::config::Secret(Some("secret".into())),
+            admin_token: crate::config::Secret(None),
         },
         3100,
         // External bind — defaults must be dropped.
@@ -932,12 +944,25 @@ async fn post_json(
     body: serde_json::Value,
     token: Option<&str>,
 ) -> (axum::http::StatusCode, serde_json::Value) {
+    post_json_with_admin(app, uri, body, token, None).await
+}
+
+async fn post_json_with_admin(
+    app: axum::Router,
+    uri: &str,
+    body: serde_json::Value,
+    token: Option<&str>,
+    admin_token: Option<&str>,
+) -> (axum::http::StatusCode, serde_json::Value) {
     let mut builder = Request::builder()
         .method("POST")
         .uri(uri)
         .header("Content-Type", "application/json");
     if let Some(token) = token {
         builder = builder.header("Authorization", format!("Bearer {token}"));
+    }
+    if let Some(admin_token) = admin_token {
+        builder = builder.header("X-Cortex-Admin-Token", admin_token);
     }
     let response = app
         .oneshot(

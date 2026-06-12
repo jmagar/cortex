@@ -18,7 +18,7 @@ use std::sync::{Arc, OnceLock};
 use axum::{
     Router,
     extract::{ConnectInfo, Path, Query, State},
-    http::{HeaderValue, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
 };
@@ -323,9 +323,44 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
 
 async fn file_tails(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Json(req): Json<FileTailRequest>,
 ) -> impl IntoResponse {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+    tracing::warn!(action = ?req.op, "admin: file_tails invoked");
     respond(state.service.file_tails(req).await)
+}
+
+fn require_api_admin_token(
+    state: &ApiState,
+    headers: &HeaderMap,
+) -> Option<axum::response::Response> {
+    let Some(expected) = state.config.admin_token.as_deref() else {
+        return Some(
+            (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": "CORTEX_API_ADMIN_TOKEN required for file-tail management"})),
+            )
+                .into_response(),
+        );
+    };
+    let presented = headers
+        .get("x-cortex-admin-token")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim);
+    if presented == Some(expected) {
+        None
+    } else {
+        Some(
+            (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": "X-Cortex-Admin-Token required for file-tail management"})),
+            )
+                .into_response(),
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]

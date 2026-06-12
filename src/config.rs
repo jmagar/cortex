@@ -452,6 +452,11 @@ pub struct ApiConfig {
     /// Provisioned by `cortex setup repair`. The server fails to start without it.
     #[serde(default)]
     pub api_token: Secret,
+    /// Optional stronger bearer token for REST routes that mutate runtime state.
+    /// File-tail add/remove/enable/disable require this token when called over
+    /// `/api/*`; list/status remain available with `api_token`.
+    #[serde(default)]
+    pub admin_token: Secret,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -843,6 +848,7 @@ impl Config {
         )?;
 
         env_override_opt_str("CORTEX_API_TOKEN", &mut config.api.api_token.0);
+        env_override_opt_str("CORTEX_API_ADMIN_TOKEN", &mut config.api.admin_token.0);
 
         env_override_opt_str(
             "CORTEX_AUTHELIA_SOURCE_IP",
@@ -1139,6 +1145,9 @@ pub(crate) fn validate_auth_config(config: &Config, check_bind: bool) -> anyhow:
     }
     if token_is_set_but_blank(&config.api.api_token.0) {
         return Err(anyhow::anyhow!("api.api_token must not be empty"));
+    }
+    if token_is_set_but_blank(&config.api.admin_token.0) {
+        return Err(anyhow::anyhow!("api.admin_token must not be empty"));
     }
     // Note: CORTEX_API_TOKEN being entirely unset is enforced at
     // route-mount time by `api::router` (anyhow::bail) rather than here.

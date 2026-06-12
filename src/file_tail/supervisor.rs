@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::io::ErrorKind;
+use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
-use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -22,6 +24,7 @@ pub(crate) struct FileTailSupervisor {
     ingest: IngestTx,
     token: CancellationToken,
     tasks: Arc<Mutex<HashMap<String, TailTask>>>,
+    max_line_bytes: usize,
 }
 
 struct TailTask {
@@ -35,12 +38,14 @@ impl FileTailSupervisor {
         registry: Arc<FileTailRegistry>,
         ingest: IngestTx,
         token: CancellationToken,
+        max_line_bytes: usize,
     ) -> Self {
         Self {
             registry,
             ingest,
             token,
             tasks: Arc::new(Mutex::new(HashMap::new())),
+            max_line_bytes,
         }
     }
 
@@ -75,7 +80,9 @@ impl FileTailSupervisor {
         {
             let mut tasks = self.tasks.lock();
             tasks.retain(|id, task| {
-                let keep_running = enabled.get(id).is_some_and(|source| source == &task.source);
+                let keep_running = enabled
+                    .get(id)
+                    .is_some_and(|source| source.same_definition(&task.source));
                 if !keep_running {
                     task.status.lock().running = false;
                     task.handle.abort();
@@ -105,8 +112,10 @@ impl FileTailSupervisor {
         let task_status = Arc::clone(&status);
         let ingest = self.ingest.clone();
         let token = self.token.clone();
+        let registry = Arc::clone(&self.registry);
+        let max_line_bytes = self.max_line_bytes;
         let handle = tokio::spawn(async move {
-            tail_file_loop(source, ingest, token, task_status).await;
+            tail_file_loop(source, registry, ingest, token, task_status, max_line_bytes).await;
         });
         self.tasks.lock().insert(
             id,
@@ -126,17 +135,26 @@ impl FileTailSupervisor {
 
 async fn tail_file_loop(
     source: FileTailSource,
+    registry: Arc<FileTailRegistry>,
     ingest: IngestTx,
     token: CancellationToken,
     status: Arc<Mutex<FileTailStatus>>,
+    max_line_bytes: usize,
 ) {
     loop {
         if token.is_cancelled() {
             status.lock().running = false;
             return;
         }
-        match tail_file_until_cancelled(&source, ingest.clone(), token.clone(), Arc::clone(&status))
-            .await
+        match tail_file_until_cancelled(
+            &source,
+            Arc::clone(&registry),
+            ingest.clone(),
+            token.clone(),
+            Arc::clone(&status),
+            max_line_bytes,
+        )
+        .await
         {
             Ok(()) => {
                 status.lock().running = false;
@@ -158,39 +176,166 @@ async fn tail_file_loop(
 
 async fn tail_file_until_cancelled(
     source: &FileTailSource,
+    registry: Arc<FileTailRegistry>,
     ingest: IngestTx,
     token: CancellationToken,
     status: Arc<Mutex<FileTailStatus>>,
+    max_line_bytes: usize,
 ) -> Result<()> {
-    let mut file = tokio::fs::File::open(&source.path)
+    let opened = open_tail_file(source, true)
         .await
         .with_context(|| format!("open {}", source.path))?;
-    if source.start_at_end {
-        file.seek(std::io::SeekFrom::End(0)).await?;
-    }
-    let mut reader = BufReader::new(file);
-    let mut line = String::new();
+    let mut reader = BufReader::new(opened.file);
+    let mut position = opened.position;
+    let mut identity = opened.identity;
+    let mut line = Vec::new();
     loop {
         line.clear();
         tokio::select! {
             _ = token.cancelled() => return Ok(()),
-            read = reader.read_line(&mut line) => {
-                let bytes = read?;
-                if bytes == 0 {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
+            read = read_bounded_line(&mut reader, &mut line, max_line_bytes) => {
+                let read = read?;
+                if read.bytes_read == 0 {
+                    if let Some(next) = reopen_if_rotated_or_truncated(source, identity, position).await? {
+                        reader = BufReader::new(next.file);
+                        position = next.position;
+                        identity = next.identity;
+                    } else {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
                     continue;
                 }
-                let msg = line.trim_end_matches(['\r', '\n']);
+                position = position.saturating_add(read.bytes_read as u64);
+                let msg = String::from_utf8_lossy(&line);
+                let msg = msg.trim_end_matches(['\r', '\n']);
                 if msg.is_empty() {
                     continue;
                 }
                 let now = now_iso();
                 let entry = file_tail_line_to_entry(source, msg, &now);
                 ingest.send(entry).await?;
+                registry.update_checkpoint(&source.id, identity.dev, identity.ino, position, &now)?;
                 let mut status = status.lock();
                 status.last_line_at = Some(now);
-                status.last_error = None;
+                status.last_error = if read.truncated {
+                    Some(format!(
+                        "truncated oversized line from {} to {max_line_bytes} bytes",
+                        source.path
+                    ))
+                } else {
+                    None
+                };
             }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FileIdentity {
+    pub(crate) dev: u64,
+    pub(crate) ino: u64,
+}
+
+pub(crate) struct OpenedTailFile {
+    pub(crate) file: tokio::fs::File,
+    pub(crate) identity: FileIdentity,
+    pub(crate) position: u64,
+}
+
+pub(crate) struct BoundedLine {
+    pub(crate) bytes_read: usize,
+    pub(crate) truncated: bool,
+}
+
+pub(crate) async fn open_tail_file(
+    source: &FileTailSource,
+    first_open: bool,
+) -> Result<OpenedTailFile> {
+    let mut file = tokio::fs::File::open(&source.path).await?;
+    let metadata = file.metadata().await?;
+    let identity = FileIdentity {
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+    };
+    let checkpoint_matches = source.checkpoint_dev == Some(identity.dev)
+        && source.checkpoint_ino == Some(identity.ino)
+        && source
+            .checkpoint_offset
+            .is_some_and(|offset| offset <= metadata.len());
+    let position = if checkpoint_matches {
+        source.checkpoint_offset.unwrap_or(0)
+    } else if first_open && source.start_at_end {
+        metadata.len()
+    } else {
+        0
+    };
+    file.seek(std::io::SeekFrom::Start(position)).await?;
+    Ok(OpenedTailFile {
+        file,
+        identity,
+        position,
+    })
+}
+
+pub(crate) async fn reopen_if_rotated_or_truncated(
+    source: &FileTailSource,
+    identity: FileIdentity,
+    position: u64,
+) -> Result<Option<OpenedTailFile>> {
+    let metadata = match tokio::fs::metadata(&source.path).await {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    let current = FileIdentity {
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+    };
+    if current != identity || metadata.len() < position {
+        let mut file = tokio::fs::File::open(&source.path).await?;
+        file.seek(std::io::SeekFrom::Start(0)).await?;
+        return Ok(Some(OpenedTailFile {
+            file,
+            identity: current,
+            position: 0,
+        }));
+    }
+    Ok(None)
+}
+
+pub(crate) async fn read_bounded_line<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    out: &mut Vec<u8>,
+    max_line_bytes: usize,
+) -> std::io::Result<BoundedLine> {
+    let mut bytes_read = 0;
+    let mut truncated = false;
+
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return Ok(BoundedLine {
+                bytes_read,
+                truncated,
+            });
+        }
+
+        let newline_pos = available.iter().position(|byte| *byte == b'\n');
+        let consume_len = newline_pos.map_or(available.len(), |pos| pos + 1);
+        let remaining = max_line_bytes.saturating_sub(out.len());
+        let copy_len = remaining.min(consume_len);
+        out.extend_from_slice(&available[..copy_len]);
+        if copy_len < consume_len || (newline_pos.is_none() && copy_len < available.len()) {
+            truncated = true;
+        }
+        reader.consume(consume_len);
+        bytes_read += consume_len;
+
+        if newline_pos.is_some() {
+            return Ok(BoundedLine {
+                bytes_read,
+                truncated,
+            });
         }
     }
 }
@@ -201,12 +346,16 @@ pub(crate) fn file_tail_line_to_entry(
     now: &str,
 ) -> LogBatchEntry {
     let hostname = source.hostname.clone().unwrap_or_else(local_hostname);
+    let path_basename = std::path::Path::new(&source.path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown");
     let metadata_json = bounded_metadata_json(serde_json::json!({
         "source_type": "file_tail",
         "source_kind": SourceKind::FileTail.as_str(),
         "file_tail_id": source.id,
-        "path": source.path,
         "tag": source.tag,
+        "path_basename": path_basename,
     }));
     let mut entry = LogBatchEntry {
         timestamp: now.to_string(),

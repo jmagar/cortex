@@ -59,6 +59,27 @@ impl FileTailRegistry {
         self.write_locked(&sources)
     }
 
+    pub(crate) fn update_checkpoint(
+        &self,
+        id: &str,
+        dev: u64,
+        ino: u64,
+        offset: u64,
+        now: &str,
+    ) -> Result<()> {
+        let _guard = self.lock.lock();
+        let mut sources = self.read_locked()?;
+        let source = sources
+            .iter_mut()
+            .find(|source| source.id == id)
+            .with_context(|| format!("file tail source not found: {id}"))?;
+        source.checkpoint_dev = Some(dev);
+        source.checkpoint_ino = Some(ino);
+        source.checkpoint_offset = Some(offset);
+        source.updated_at = now.to_string();
+        self.write_locked(&sources)
+    }
+
     fn read_locked(&self) -> Result<Vec<FileTailSource>> {
         if !self.path.exists() {
             return Ok(Vec::new());

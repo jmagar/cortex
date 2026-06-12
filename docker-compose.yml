@@ -38,6 +38,10 @@ services:
       - ${CORTEX_SSH_VOLUME:-${HOME}/.cortex/ssh}:/home/cortex/.ssh:ro
       - ${CORTEX_WORKSPACE_VOLUME:-${HOME}/workspace}:/home/cortex/workspace:ro
       - ${CORTEX_DATA_VOLUME:-cortex-data}:/data
+      # Managed file-tail ingest can only read paths mounted under this root.
+      # Point CORTEX_FILE_TAIL_LOG_VOLUME at /var/log, /mnt/user/appdata, or a
+      # narrower log directory. Keep it read-only.
+      - ${CORTEX_FILE_TAIL_LOG_VOLUME:-/var/log}:/file-tail-root:ro
     networks:
       - cortex
     restart: unless-stopped
