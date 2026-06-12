@@ -34,10 +34,10 @@ test:
     env -u CORTEX_API_TOKEN -u NO_AUTH cargo nextest run
 
 coverage:
-    env -u CORTEX_API_TOKEN -u NO_AUTH cargo llvm-cov nextest --summary-only
+    env -u CORTEX_API_TOKEN -u NO_AUTH -u CORTEX_DB_PATH cargo llvm-cov nextest --summary-only
 
 coverage-html:
-    env -u CORTEX_API_TOKEN -u NO_AUTH cargo llvm-cov nextest --html
+    env -u CORTEX_API_TOKEN -u NO_AUTH -u CORTEX_DB_PATH cargo llvm-cov nextest --html
 
 # Verify Cargo wrapper binary sync behavior
 test-cargo-wrapper:
