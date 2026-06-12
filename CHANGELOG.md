@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.2] - 2026-06-12
+
+### Changed
+
+- Reframe Docker log ingest docs around the current host-local cortex agent path, with `CORTEX_DOCKER_*` documented as legacy central pull compatibility for explicit Docker HTTP endpoints.
+- Add repeatable coverage commands (`just coverage`, `just coverage-html`) and a CI coverage-summary job using `cargo-llvm-cov` with nextest.
+
+### Added
+
+- Add doc-drift tests for Docker ingest guidance, coverage tooling, and live-smoke admin REST coverage.
+- Add a mocked Docker Engine HTTP fixture for the legacy central pull client and its log-frame mapping.
+- Extend the live smoke harness with deterministic admin REST coverage for `/api/file-tails` status/list when `CORTEX_API_ADMIN_TOKEN` is configured.
+
 ## [1.20.1] - 2026-06-12
 
 ### Changed

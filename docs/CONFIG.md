@@ -83,9 +83,11 @@ such as `https://cortex.example.com`.
 
 TCP forwarders can keep a connection open and send multiple newline-delimited syslog frames. The size limit applies to each frame, not to the full TCP connection lifetime. An oversized newline-delimited frame is dropped and later bounded frames on the same connection can still be ingested. An oversized unterminated frame is dropped and the connection is closed because the listener cannot safely find the next frame boundary.
 
-### Docker socket-proxy ingest (`CORTEX_DOCKER_*`)
+### Docker log ingest (`CORTEX_DOCKER_*`)
 
-This optional mode pulls stdout/stderr logs from remote Docker hosts through `docker-socket-proxy` instead of changing Docker's daemon-level logging driver. Containers keep their existing local logging behavior, and remote host/container startup does not depend on cortex being online.
+Current deployments use the host-local cortex agent: each deployed agent reads Docker logs from `unix:///var/run/docker.sock` on its own host and forwards normalized rows into cortex. That is the recommended path because it does not expose a Docker API endpoint on the network.
+
+`CORTEX_DOCKER_*` is the legacy central pull compatibility mode. It lets the cortex server pull stdout/stderr logs from explicit remote Docker Engine HTTP endpoints. Older deployments commonly placed `docker-socket-proxy` in front of those endpoints, but that is no longer the default homelab path.
 
 Set `CORTEX_DOCKER_HOSTS` to a comma-separated list of hostnames. Each hostname becomes `http://<host>:2375` with insecure HTTP allowed — use only on trusted private networks.
 
@@ -97,12 +99,12 @@ CORTEX_DOCKER_HOSTS=squirts,tootie,dookie
 
 | Variable | Required | Default | Sensitive | Description |
 | --- | --- | --- | --- | --- |
-| `CORTEX_DOCKER_INGEST_ENABLED` | no | `false` | no | Enable pull-based Docker log ingestion |
+| `CORTEX_DOCKER_INGEST_ENABLED` | no | `false` | no | Enable legacy central pull Docker log ingestion |
 | `CORTEX_DOCKER_HOSTS` | yes, if Docker ingest is enabled | (none) | no | Comma-separated hostnames — each becomes `http://<host>:2375` |
 | `CORTEX_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | no | Initial reconnect delay after host stream failure |
 | `CORTEX_DOCKER_RECONNECT_MAX_MS` | no | `30000` | no | Maximum reconnect delay after repeated failures |
 
-Minimum recommended docker-socket-proxy permissions on each remote host:
+If the legacy central pull endpoint is a docker-socket-proxy, minimum recommended permissions are:
 
 ```env
 CONTAINERS=1
@@ -112,9 +114,9 @@ VERSION=1
 POST=0
 ```
 
-`CONTAINERS=1` exposes the broader read-only Docker container API to every client that can reach docker-socket-proxy. Bind the proxy on a trusted private network, firewall it so only cortex can connect, or put it behind authenticated TLS. Hosts using plain `http://` must set `allow_insecure_http = true` in the hosts file; otherwise config validation rejects them.
+`CONTAINERS=1` exposes the broader read-only Docker container API to every client that can reach that endpoint. Bind it on a trusted private network, firewall it so only cortex can connect, or put it behind authenticated TLS. Hosts using plain `http://` must set `allow_insecure_http = true` in the hosts file; otherwise config validation rejects them.
 
-Docker ingest is not included in the default smoke test because it requires a live docker-socket-proxy-compatible endpoint. For integration coverage, run a disposable docker-socket-proxy or mocked Docker HTTP fixture, set `CORTEX_DOCKER_INGEST_ENABLED=true`, emit a unique container stdout/stderr line, and verify it with `search` or `tail`. Container stream rows identify their source as `docker://<host>/<container>/<stream>`. Container lifecycle events such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, and `oom` identify their source as `docker-event://<host>/<container>/<action>` and use `facility=docker`.
+Docker log ingest is tested by path: host-local agent parity tests cover deployed-agent Docker streaming, while the legacy central pull path has a mocked Docker HTTP fixture. For a full legacy integration run, set `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable Docker-compatible HTTP fixture, emit a unique container stdout/stderr line, and verify it with `search` or `tail`. Container stream rows identify their source as `docker://<host>/<container>/<stream>`. Container lifecycle events such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, and `oom` identify their source as `docker-event://<host>/<container>/<action>` and use `facility=docker`.
 
 ## Managed File-Tail Sources
 

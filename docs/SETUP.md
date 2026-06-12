@@ -151,13 +151,15 @@ Per-host forwarder configuration (rsyslog, syslog-ng, WSL2, UniFi, routers/appli
 - **WSL hosts**: rsyslog with Tailscale IP
 - **UniFi**: Settings > System > Advanced > Remote Syslog
 - **Routers/appliances**: device syslog settings (Diagnostics > Syslog on ATT BGW-320)
-- **Docker hosts**: optional docker-socket-proxy pull mode for container stdout/stderr logs (below)
+- **Docker hosts**: host-local cortex agent streams container logs from each host's local Docker socket; the legacy pull mode below is optional compatibility coverage
 
 ### Optional Docker host log ingest
 
-If your hosts already run `docker-socket-proxy`, cortex can pull Docker container logs from those hosts without switching the Docker daemon to the syslog logging driver.
+The recommended deployment uses the host-local cortex agent, which reads Docker logs from `unix:///var/run/docker.sock` on each host and forwards them to cortex without changing Docker's daemon-level logging driver.
 
-On each remote Docker host, expose only the read endpoints cortex needs:
+The `CORTEX_DOCKER_*` settings are a legacy central pull compatibility mode for explicit remote Docker Engine HTTP endpoints. If your hosts still expose a Docker-compatible endpoint, cortex can pull container logs from those hosts directly.
+
+If the compatibility endpoint is docker-socket-proxy, expose only the read endpoints cortex needs:
 
 ```env
 CONTAINERS=1
@@ -178,9 +180,9 @@ Each hostname resolves to `http://<host>:2375`. Use only on trusted private netw
 
 The ingest loop follows existing containers, listens for container start events, records checkpoints in SQLite, and reconnects with backoff if a host is unavailable. Remote containers still start normally if cortex is down because this path does not use Docker's daemon-level syslog logging driver.
 
-Plain `http://` docker-socket-proxy URLs require `allow_insecure_http = true`. Use that only on trusted private networks, firewall the proxy so only cortex can connect, or put the proxy behind authenticated TLS. `CONTAINERS=1` exposes Docker's broader read-only container API to anything that can reach the proxy, not just the log endpoints cortex calls.
+Plain `http://` remote Docker endpoints require `allow_insecure_http = true`. Use that only on trusted private networks, firewall the endpoint so only cortex can connect, or put it behind authenticated TLS. `CONTAINERS=1` exposes Docker's broader read-only container API to anything that can reach a docker-socket-proxy, not just the log endpoints cortex calls.
 
-For Docker ingest integration testing, keep the default smoke test focused on UDP/TCP syslog and run Docker ingest as a separate fixture-backed check. Start cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP endpoint, emit a unique marker from a short-lived container, then verify it with `search` or `tail`. Container stdout/stderr rows should report `source_ip` as `docker://<host>/<container>/<stream>`. Container lifecycle events such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, and `oom` should report `source_ip` as `docker-event://<host>/<container>/<action>`.
+For Docker ingest integration testing, keep the default smoke test focused on UDP/TCP syslog, REST/CLI parity, and file-tail ingest. Host-local agent Docker streaming is covered by agent deployment tests. For the legacy central pull path, start cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable Docker-compatible HTTP fixture, emit a unique marker from a short-lived container, then verify it with `search` or `tail`. Container stdout/stderr rows should report `source_ip` as `docker://<host>/<container>/<stream>`. Container lifecycle events such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, and `oom` should report `source_ip` as `docker-event://<host>/<container>/<action>`.
 
 ## Troubleshooting
 

@@ -41,8 +41,10 @@ bash scripts/smoke-test-http.sh
 bash tests/mcporter/test-tools.sh
 ```
 
-Live Docker ingest validation requires configured docker-socket-proxy endpoints
-and `CORTEX_DOCKER_INGEST_ENABLED=true` with `CORTEX_DOCKER_HOSTS` set.
+Live Docker ingest validation now follows two paths: host-local cortex agent
+parity for deployed agents, and the legacy central pull fixture with
+`CORTEX_DOCKER_INGEST_ENABLED=true` plus `CORTEX_DOCKER_HOSTS` set to an
+explicit Docker-compatible HTTP endpoint.
 
 Live SSH inventory validation requires configured SSH aliases or
 `CORTEX_INVENTORY_SSH_HOSTS`, strict known-hosts coverage, and any intentional

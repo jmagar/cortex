@@ -33,6 +33,12 @@ fmt:
 test:
     env -u CORTEX_API_TOKEN -u NO_AUTH cargo nextest run
 
+coverage:
+    env -u CORTEX_API_TOKEN -u NO_AUTH cargo llvm-cov nextest --summary-only
+
+coverage-html:
+    env -u CORTEX_API_TOKEN -u NO_AUTH cargo llvm-cov nextest --html
+
 # Verify Cargo wrapper binary sync behavior
 test-cargo-wrapper:
     scripts/test-cargo-rustc-wrapper.sh

@@ -15,6 +15,7 @@
 #
 # Environment variables:
 #   CORTEX_TOKEN       Bearer token for auth (optional — server may run without it)
+#   CORTEX_API_ADMIN_TOKEN Admin token for /api/file-tails live REST smoke
 #   PORT                   Override server port (default: 3100)
 #
 # Action inventory reference (not every action is exercised by this live test):
@@ -824,8 +825,10 @@ run_docker_mode() {
   docker_args+=("-e" "CORTEX_HOST=0.0.0.0")
   docker_args+=("-e" "CORTEX_TOKEN=${TOKEN}")
   docker_args+=("-e" "CORTEX_API_TOKEN=${TOKEN}")
+  docker_args+=("-e" "CORTEX_API_ADMIN_TOKEN=${TOKEN}")
   docker_args+=("-e" "CORTEX_STATIC_TOKEN_ADMIN=true")
   CORTEX_STATIC_TOKEN_ADMIN=true
+  CORTEX_API_ADMIN_TOKEN="${TOKEN}"
 
   # Remove storage budget env vars that conflict with tmpfs size limits
   docker_args+=(
@@ -1044,10 +1047,11 @@ phase_surface_parity_rest() {
 
   build_auth_args
 
-  # POST mutation routes (/api/errors/ack, /api/errors/unack,
-  # /api/notifications/test) are intentionally excluded from smoke tests —
-  # they require seeded data or external service availability and are covered
-  # by unit tests in src/api_tests.rs and src/app/service.rs.
+  # Error-signature mutation and notification-test routes require seeded
+  # signatures or external service availability and stay covered by unit tests
+  # in src/api_tests.rs and src/app/service.rs. The file-tail route is a
+  # deterministic admin POST path, so smoke covers status/list when
+  # CORTEX_API_ADMIN_TOKEN is available.
   local routes=(
     "GET /api/source-ips?limit=3|source_ips"
     "GET /api/timeline?bucket=hour|points"
@@ -1088,6 +1092,25 @@ phase_surface_parity_rest() {
       assert_jq "${label} — response is array" "${response}" 'type' "array"
     fi
   done
+
+  if [[ -n "${CORTEX_API_ADMIN_TOKEN:-}" ]]; then
+    local admin_body admin_response
+    for admin_body in '{"op":"status"}' '{"op":"list"}'; do
+      admin_response="$(curl -sf --max-time 10 \
+        "${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}" \
+        -H "X-Cortex-Admin-Token: ${CORTEX_API_ADMIN_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "${admin_body}" \
+        "${BASE_URL}/api/file-tails" 2>&1)" || {
+          _fail "POST /api/file-tails ${admin_body}" "curl failed: ${admin_response:0:200}"
+          continue
+        }
+      assert_jq "POST /api/file-tails ${admin_body} — sources array present" "${admin_response}" '.sources | type' "array"
+      assert_jq "POST /api/file-tails ${admin_body} — statuses array present" "${admin_response}" '.statuses | type' "array"
+    done
+  else
+    _skip "POST /api/file-tails admin smoke" "requires CORTEX_API_ADMIN_TOKEN"
+  fi
 }
 
 # ---------------------------------------------------------------------------

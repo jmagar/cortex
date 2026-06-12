@@ -104,7 +104,11 @@ For every row in §4:
 
 CORS for this API is allowed at the MCP port (`config.mcp.port`); there is no separate `[api.cors]` block today.
 
-### `[docker_ingest]` — remote Docker socket-proxy ingestion
+### `[docker_ingest]` — legacy central Docker pull ingestion
+
+Current deployments use the host-local cortex agent for Docker logs. This block
+is retained as compatibility mode for explicit remote Docker Engine HTTP
+endpoints.
 
 | TOML key | Env var | Type | Default | Sens. | Reload | Validation | plugin.json | Notes |
 |---|---|---|---|---|---|---|---|---|

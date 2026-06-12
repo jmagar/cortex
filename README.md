@@ -540,7 +540,7 @@ for token flags, sensitive assignments, Authorization headers, URL userinfo,
 `curl -u`, and private-key blocks before storage. Scrubbing is best-effort, not
 a compliance boundary.
 
-**Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker ingest entries, `source_ip` identifies the configured Docker ingest host/container/stream and should be trusted only as far as the configured docker-socket-proxy endpoint and network path are trusted. `metadata_json` preserves source-specific context for debugging and correlation, but it is not an authorization boundary. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
+**Important:** `hostname` is taken from the syslog message body, which any LAN device can set to an arbitrary value over UDP. For syslog entries, `source_ip` is the only trustworthy network identifier. For Docker log entries from the current host-local cortex agent, trust follows the deployed agent host and its local Docker socket access. For legacy central pull entries, `source_ip` identifies the configured Docker host/container/stream and should be trusted only as far as the explicit remote Docker Engine endpoint and network path are trusted. `metadata_json` preserves source-specific context for debugging and correlation, but it is not an authorization boundary. Retention cutoffs use `received_at` (server clock) so that devices with misconfigured clocks cannot cause premature or indefinite log retention.
 
 ### Severity levels
 
@@ -623,7 +623,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 | `retention_days` | no | `90` | `0` = keep forever |
 | `batch_size` | no | `100` | Number of parsed messages per SQLite batch |
 | `write_channel_capacity` | no | `10000` | Internal parsed-message queue capacity before listener backpressure |
-| `docker_ingest_enabled` | no | `false` | Pull container logs from remote `docker-socket-proxy` endpoints |
+| `docker_ingest_enabled` | no | `false` | Legacy central pull compatibility mode for explicit remote Docker Engine endpoints; current deployments use the host-local agent |
 | `fleet_hosts` | no | — | SSH aliases of fleet hosts. Used for Docker ingest (when enabled, each becomes `http://<alias>:2375`) and the `cortex-deploy-dropins` skill |
 
 **SessionStart hook automation** (in server mode):
@@ -740,13 +740,15 @@ The plain JSON API is always mounted under `/api/*` on the same HTTP listener an
 | `CORTEX_FLUSH_INTERVAL` | no | `500` | Batch flush interval in milliseconds |
 | `CORTEX_WRITE_CHANNEL_CAPACITY` | no | `10000` | Internal parsed-message queue capacity |
 
-#### Docker socket-proxy ingest
+#### Docker log ingest
 
-Optional pull-based Docker log ingestion keeps each remote host on its normal Docker logging driver and has cortex read container stdout/stderr through read-only `docker-socket-proxy` endpoints. This avoids configuring Docker's daemon-level syslog driver and does not block container startup when cortex is down.
+The current deployment path is the host-local cortex agent. Each deployed agent reads Docker logs from that host's local Docker socket (`unix:///var/run/docker.sock`) and forwards the normalized rows into cortex. This keeps Docker's normal local logging behavior intact, avoids daemon-level syslog drivers, and does not require exposing a Docker API endpoint on the network.
+
+The `CORTEX_DOCKER_*` settings below remain as a legacy central pull compatibility mode for explicit remote Docker Engine HTTP endpoints. Use them for fixtures or transitional deployments where cortex itself should connect to a Docker-compatible API. Older deployments used `docker-socket-proxy` for this endpoint, but that is no longer the recommended homelab path.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CORTEX_DOCKER_INGEST_ENABLED` | no | `false` | Enable remote Docker log ingestion |
+| `CORTEX_DOCKER_INGEST_ENABLED` | no | `false` | Enable legacy central pull Docker log ingestion |
 | `CORTEX_DOCKER_HOSTS` | one of the two | — | Comma-separated hostnames; each becomes `http://<name>:2375` with `allow_insecure_http = true`. Takes priority over `CORTEX_DOCKER_HOSTS_FILE`. |
 | `CORTEX_DOCKER_HOSTS_FILE` | one of the two | — | Path to a TOML file with a `[[hosts]]` array (use when you need per-host `base_url` or TLS). If the file does not exist, a warning is logged and no hosts are loaded — the container will not crash. Mount the file into the container (e.g. under `/cortex-home` via `CORTEX_HOME_VOLUME`). |
 | `CORTEX_DOCKER_RECONNECT_INITIAL_MS` | no | `1000` | Initial reconnect delay after host stream failure |
@@ -766,9 +768,9 @@ base_url = "http://app-host-b:2375"
 allow_insecure_http = true
 ```
 
-The docker-socket-proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to cortex, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
+If this legacy pull path points at `docker-socket-proxy`, the proxy side only needs read access to containers, events, ping, and version endpoints: `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, `POST=0`. `CONTAINERS=1` exposes the broader read-only Docker container API to anything that can reach the proxy, so bind it only on a trusted private network, firewall it to cortex, or put it behind authenticated TLS. Plain `http://` endpoints require `allow_insecure_http = true` in the hosts file so that this trust decision is explicit.
 
-Docker ingest is intentionally not part of the default smoke test because it needs a live docker-socket-proxy-compatible endpoint and container log stream. For integration testing, run cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable docker-socket-proxy or mocked Docker HTTP fixture, emit a unique line from a short-lived container, then verify it with `cortex search` or `mcporter call ... action=search`. Container stdout/stderr rows use `source_ip=docker://<host>/<container>/<stream>`. Container lifecycle rows for actions such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, `oom`, and `health_status:*` use `source_ip=docker-event://<host>/<container>/<sanitized-action>`, `facility=docker`, and preserve the raw Docker event JSON.
+Docker log ingest has two test boundaries: agent parity tests verify that deployed agents preserve local Docker socket streaming, and the legacy central pull client has a mocked Docker HTTP fixture. The default smoke test stays focused on live UDP/TCP syslog, MCP/REST actions, CLI parity, and managed file-tail ingest. For a full legacy pull integration check, run cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` against a disposable Docker-compatible HTTP fixture, emit a unique line from a short-lived container, then verify it with `cortex search` or `mcporter call ... action=search`. Container stdout/stderr rows use `source_ip=docker://<host>/<container>/<stream>`. Container lifecycle rows for actions such as `create`, `start`, `restart`, `die`, `stop`, `destroy`, `rename`, `oom`, and `health_status:*` use `source_ip=docker-event://<host>/<container>/<sanitized-action>`, `facility=docker`, and preserve the raw Docker event JSON.
 
 #### Managed file-tail ingest
 
@@ -1357,7 +1359,7 @@ Run the live smoke test against a running server:
 bash scripts/smoke-test.sh
 ```
 
-The smoke test seeds UDP and TCP syslog messages and verifies MCP search/tail results. Docker ingest coverage is handled by the explicit integration path described in the Docker socket-proxy ingest section because it requires an external Docker-compatible log endpoint.
+The smoke test seeds UDP and TCP syslog messages and verifies MCP search/tail results. Docker log coverage is split by path: host-local agent parity is covered by agent deployment tests, the default live smoke covers file-tail/REST/CLI paths, and legacy central pull coverage uses the mocked Docker HTTP fixture or an explicit Docker-compatible endpoint.
 
 ---
 

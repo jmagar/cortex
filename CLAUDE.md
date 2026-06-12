@@ -49,7 +49,8 @@ Key modules in `src/` (most are directories with sidecar `*_tests.rs` files):
 | `syslog/` | UDP + TCP listeners, RFC 3164/5424 parsing, mpsc batch writer |
 | `mcp/` | RMCP Streamable HTTP server, single `cortex` tool with action dispatch |
 | `api.rs` | Always-on non-MCP REST API (`/api/*`); requires `CORTEX_API_TOKEN` at startup |
-| `docker_ingest/` | Docker container log ingestion via remote docker-socket-proxy endpoints |
+| `agent/`, `heartbeat_agent.rs` | Host-local cortex agent: heartbeat, syslog forwarding, and Docker log streaming from the local Docker socket |
+| `docker_ingest/` | Legacy central pull compatibility path for explicit remote Docker Engine HTTP endpoints |
 | `main.rs` | Entrypoint: `serve mcp` (full server with ingest) or `mcp` (stdio query-only) |
 
 Tests: unit tests live in sidecar files beside their source modules (e.g. `src/db/queries_tests.rs`). Source files keep only the `#[cfg(test)] #[path = "..._tests.rs"] mod tests;` hook, so sidecar tests compile as module-local unit tests with `use super::*` access to private items. Run with `cargo test`.
@@ -169,9 +170,12 @@ CORTEX_API_TOKEN=your-api-token         # REQUIRED at startup — /api/* is alwa
 # Stored in the parent directory of CORTEX_DB_PATH as file-tails.json.
 # Manage with: cortex file-tail list|status|add|remove|enable|disable
 
-# Docker container log ingestion (disabled by default)
-CORTEX_DOCKER_INGEST_ENABLED=false      # set true to ingest from docker-socket-proxy hosts
-CORTEX_DOCKER_HOSTS=host-a,host-b      # comma-separated hostnames → http://<host>:2375
+# Legacy central pull Docker ingestion compatibility mode (disabled by default)
+# Current deployments use the host-local cortex agent, which streams Docker logs
+# from unix:///var/run/docker.sock on each host. Keep CORTEX_DOCKER_* for
+# compatibility fixtures or explicit remote Docker Engine HTTP endpoints only.
+CORTEX_DOCKER_INGEST_ENABLED=false
+CORTEX_DOCKER_HOSTS=host-a,host-b      # comma-separated hosts → http://<host>:2375
 CORTEX_DOCKER_RECONNECT_INITIAL_MS=1000
 CORTEX_DOCKER_RECONNECT_MAX_MS=30000
 
