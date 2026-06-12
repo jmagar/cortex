@@ -118,11 +118,17 @@ impl FileTailSource {
             .transpose()?
             .unwrap_or_else(|| "info".to_string());
 
+        let hostname = req
+            .hostname
+            .as_deref()
+            .map(normalize_hostname)
+            .transpose()?;
+
         Ok(Self {
             id: req.id,
             path: req.path,
             tag: req.tag,
-            hostname: req.hostname,
+            hostname,
             facility: Some(req.facility.unwrap_or_else(|| "local7".to_string())),
             severity,
             start_at_end: req.start_at_end.unwrap_or(true),
@@ -300,4 +306,22 @@ fn validate_id(id: &str) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+fn normalize_hostname(hostname: &str) -> Result<String, String> {
+    let hostname = hostname.trim().to_ascii_lowercase();
+    if hostname.is_empty()
+        || hostname.len() > 255
+        || !hostname
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        || hostname.starts_with(['.', '-', '_'])
+        || hostname.ends_with(['.', '-', '_'])
+    {
+        return Err(
+            "file_tails hostname must be URI-safe ASCII letters, digits, dot, underscore, or dash"
+                .into(),
+        );
+    }
+    Ok(hostname)
 }

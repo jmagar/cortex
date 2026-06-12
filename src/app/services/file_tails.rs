@@ -12,6 +12,7 @@ impl CortexService {
         })?;
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
+        let mut should_reconcile = false;
         match req.op {
             FileTailOp::List | FileTailOp::Status => {}
             FileTailOp::Add => {
@@ -23,29 +24,33 @@ impl CortexService {
                 registry
                     .upsert(source)
                     .map_err(|err| ServiceError::Internal(anyhow::anyhow!(err)))?;
+                should_reconcile = true;
             }
             FileTailOp::Remove => {
                 let id = req.required_id().map_err(ServiceError::InvalidInput)?;
-                registry
-                    .remove(id)
-                    .map_err(|err| ServiceError::InvalidInput(err.to_string()))?;
+                registry.remove(id).map_err(map_registry_mutation_error)?;
+                should_reconcile = true;
             }
             FileTailOp::Enable => {
                 let id = req.required_id().map_err(ServiceError::InvalidInput)?;
                 registry
                     .set_enabled(id, true, &now)
-                    .map_err(|err| ServiceError::InvalidInput(err.to_string()))?;
+                    .map_err(map_registry_mutation_error)?;
+                should_reconcile = true;
             }
             FileTailOp::Disable => {
                 let id = req.required_id().map_err(ServiceError::InvalidInput)?;
                 registry
                     .set_enabled(id, false, &now)
-                    .map_err(|err| ServiceError::InvalidInput(err.to_string()))?;
+                    .map_err(map_registry_mutation_error)?;
+                should_reconcile = true;
             }
         }
 
-        if let Some(reconcile) = &self.file_tail_reconcile {
-            reconcile().map_err(|err| ServiceError::Internal(anyhow::anyhow!(err)))?;
+        if should_reconcile {
+            if let Some(reconcile) = &self.file_tail_reconcile {
+                reconcile().map_err(|err| ServiceError::Internal(anyhow::anyhow!(err)))?;
+            }
         }
 
         let sources = registry
@@ -57,5 +62,14 @@ impl CortexService {
             .map(|statuses| statuses())
             .unwrap_or_default();
         Ok(FileTailResponse { sources, statuses })
+    }
+}
+
+fn map_registry_mutation_error(err: anyhow::Error) -> ServiceError {
+    let message = err.to_string();
+    if message.contains("file tail source not found:") {
+        ServiceError::NotFound(message)
+    } else {
+        ServiceError::Internal(err)
     }
 }

@@ -324,7 +324,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "op": {
                     "type": "string",
-                    "description": "For action=file_tails: op=list|add|remove|enable|disable|status."
+                    "enum": ["list", "add", "remove", "enable", "disable", "status"],
+                    "description": "For action=file_tails: required operation, one of list, add, remove, enable, disable, or status."
                 },
                 "path": {
                     "type": "string",
@@ -519,7 +520,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "then": {
                         "properties": {
                             "id": { "type": "integer" }
-                        }
+                        },
+                        "required": ["id"]
                     }
                 },
                 {
@@ -531,8 +533,34 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     },
                     "then": {
                         "properties": {
-                            "id": { "type": "string" }
-                        }
+                            "id": { "type": "string" },
+                            "op": { "enum": ["list", "add", "remove", "enable", "disable", "status"] }
+                        },
+                        "required": ["op"],
+                        "allOf": [
+                            {
+                                "if": {
+                                    "properties": {
+                                        "op": { "const": "add" }
+                                    },
+                                    "required": ["op"]
+                                },
+                                "then": {
+                                    "required": ["id", "path", "tag"]
+                                }
+                            },
+                            {
+                                "if": {
+                                    "properties": {
+                                        "op": { "enum": ["remove", "enable", "disable"] }
+                                    },
+                                    "required": ["op"]
+                                },
+                                "then": {
+                                    "required": ["id"]
+                                }
+                            }
+                        ]
                     }
                 }
             ]

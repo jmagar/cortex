@@ -188,7 +188,8 @@ impl HttpClient {
 
     #[cfg(test)]
     pub(crate) fn with_api_admin_token_for_test(mut self, token: impl Into<String>) -> Self {
-        self.api_admin_token = Some(token.into());
+        let token = token.into();
+        self.api_admin_token = (!token.trim().is_empty()).then_some(token);
         self
     }
 

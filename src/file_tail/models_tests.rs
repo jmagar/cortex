@@ -27,6 +27,39 @@ fn add_request_builds_enabled_source_with_defaults() {
 }
 
 #[test]
+fn add_request_normalizes_and_validates_hostname() {
+    let source = FileTailSource::from_add(
+        FileTailAddRequest {
+            id: "swag-access".into(),
+            path: "/mnt/appdata/swag/log/nginx/access.log".into(),
+            tag: "swag-access".into(),
+            hostname: Some(" Squirts.LOCAL ".into()),
+            facility: None,
+            severity: None,
+            start_at_end: None,
+        },
+        "2026-06-11T20:00:00Z",
+    )
+    .unwrap();
+    assert_eq!(source.hostname.as_deref(), Some("squirts.local"));
+
+    let err = FileTailSource::from_add(
+        FileTailAddRequest {
+            id: "bad-host".into(),
+            path: "/mnt/appdata/swag/log/nginx/access.log".into(),
+            tag: "bad-host".into(),
+            hostname: Some("bad host/name".into()),
+            facility: None,
+            severity: None,
+            start_at_end: None,
+        },
+        "2026-06-11T20:00:00Z",
+    )
+    .unwrap_err();
+    assert!(err.contains("hostname must be URI-safe"));
+}
+
+#[test]
 fn file_tail_request_rejects_missing_fields_for_add() {
     let req = FileTailRequest {
         op: FileTailOp::Add,

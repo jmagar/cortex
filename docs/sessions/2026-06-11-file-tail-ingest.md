@@ -26,6 +26,8 @@ The final review pass hardened the feature around admin authorization, path poli
 4. Opened PR #73: `feat: add managed file-tail ingest`.
 5. Ran multiple review waves focused on data integrity, security, performance, API contracts, test simplification, and PR comments.
 6. Landed review hardening commit `4b17a3e` after local full-gate verification and pre-push verification.
+7. Dispatched two follow-up review agents over PR #73, split between runtime/data-integrity and API/CLI/MCP/docs concerns.
+8. Folded their fixes into the branch: durable DB-write acknowledgement before file-tail checkpoints, safe opened-file identity checks, read-only list/status behavior, partial-EOF ingestion before rotation, admin/CORS/schema hardening, smoke-test admin coverage, and narrower production path defaults.
 
 ## Key Changes
 | area | change |
@@ -39,42 +41,55 @@ The final review pass hardened the feature around admin authorization, path poli
 
 ## Review Findings Addressed
 - Checkpoint updates are registry-authoritative, so retries do not replay from stale in-memory source copies.
+- File-tail checkpoints now advance only after the batch writer successfully commits the row to SQLite; retryable write failures keep the durable ack pending.
+- The batch writer flushes durable file-tail entries immediately so checkpoint durability does not throttle ingestion to one line per flush interval.
 - Partial lines at EOF are held until newline instead of being prematurely ingested.
+- Unterminated partial lines are ingested before rotation/truncation and leave status context for operators.
 - Rotation and truncation reopen paths through the same path-policy checks used on initial open.
+- Opened file identity is validated after `O_NOFOLLOW` open so symlink swaps or path races are rejected.
+- Production defaults now allow only `/file-tail-root` unless `CORTEX_FILE_TAIL_ALLOWED_ROOTS` is set; tests retain tempdir roots.
 - Missing files during reopen now surface an error instead of silently marking the source healthy.
+- `list` and `status` are read-only and no longer reconcile/spawn supervisor tasks.
+- Disable/remove stop active tailing through supervisor reconciliation tests.
+- Configured file-tail hostnames are normalized/validated and source identity components are sanitized.
 - MCP schema now constrains `get.id` to integer and `file_tails.id` to string through action-specific JSON Schema conditionals.
+- MCP schema now also constrains `file_tails.op` to the supported operation enum and requires per-operation fields.
 - REST tests cover missing and wrong admin token cases.
+- Blank admin tokens are rejected and `X-Cortex-Admin-Token` is accepted by CORS preflight.
 - Smoke/live MCP scripts skip admin-only `file_tails` only when the token cannot have admin scope.
+- Optional admin-token smoke tests add, append, query, and remove a live file-tail source under `/file-tail-root`.
 - The stale `[Unreleased]` changelog compare target now starts from `v1.20.0`.
 
 ## Verification Evidence
 | command | result |
 |---|---|
-| `cargo test supervisor_ingests_appended_line_and_updates_checkpoint --lib` | pass |
+| `cargo test file_tail::supervisor_tests::supervisor_ingests_appended_line_and_updates_checkpoint --lib` | pass |
+| `cargo test otlp::tests::auth --lib` | pass |
 | `cargo test file_tail --all-targets` | pass |
 | `bash -n scripts/smoke-test.sh tests/test_live.sh tests/mcporter/test-tools.sh` | pass |
 | `cargo fmt --check` | pass |
 | `cargo clippy --all-targets -- -D warnings` | pass |
-| `cargo test` | pass: 331 main filtered unit tests plus integration/doc tests reported clean in final local run |
+| `cargo test` | pass: 1178 lib + 332 main + integration/doc tests clean, with 2 ignored network/perf tests |
 | `bash scripts/check-version-sync.sh` | pass |
 | `bash scripts/check-rust-module-size.sh --limit 500 src/cli.rs src/cli` | pass |
 | `cargo deny check` | pass, with existing wildcard git-source warning for `lab-auth` |
-| `git push` pre-push hook | pass: full `cargo test` reran before pushing `4b17a3e` |
+| `git push` pre-push hook | pending for the review-follow-up commit |
 
 ## PR State
 - PR: https://github.com/jmagar/cortex/pull/73
-- Head after implementation/review fixes: `4b17a3e`
+- Head after implementation/review fixes: current review-follow-up commit after `4b17a3e`
 - Local verification: green.
-- GitHub checks restarted after the final code push; at the time of this note, the new head had queued/in-progress CI jobs and GitGuardian had already passed.
+- GitHub checks need to restart after the review-follow-up push.
 
 ## Remaining Notes
-- CodeRabbit's latest visible summary still listed comments from the previous head when this note was written; the final hardening commit addresses the substantive items except the low-value sidecar-module naming suggestion, which conflicts with the current multi-sidecar file-tail test layout.
+- CodeRabbit/PR Review Toolkit comments from the previous head were used as the acceptance bar for the follow-up agent pass.
 - The `FileTailStatus.running` boolean was left as-is to avoid a broader API shape churn; `last_error` now carries retry detail for operators.
-- `CORTEX_FILE_TAIL_ALLOWED_ROOTS` should be set explicitly in production when operators want to constrain tails to a narrow mount set.
+- `CORTEX_FILE_TAIL_ALLOWED_ROOTS` can broaden or further constrain the default `/file-tail-root` mount set.
 
 ## Beads Activity
 - `syslog-mcp-6y96m` was claimed and implemented.
-- No unrelated beads were modified.
+- `syslog-mcp-6y96m` was reopened for the review follow-up.
+- Follow-up bead `syslog-mcp-7j9hn` was opened and closed by the API/CLI/docs agent during review remediation.
 
 ## Next Steps
 - Wait for PR #73 CI and CodeRabbit to finish on the final branch head.

@@ -177,13 +177,127 @@ async fn supervisor_ingests_appended_line_and_updates_checkpoint() {
         .unwrap();
     assert_eq!(entry.message, "hello from loop");
 
-    let stored = registry.get("loop").unwrap().unwrap();
-    assert!(stored.checkpoint_offset.unwrap_or_default() > 0);
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let stored = registry.get("loop").unwrap().unwrap();
+            if stored.checkpoint_offset.unwrap_or_default() > 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap();
     let statuses = supervisor.statuses();
     assert_eq!(statuses.len(), 1);
     assert!(statuses[0].last_line_at.is_some());
 
     token.cancel();
+    supervisor.shutdown();
+}
+
+#[tokio::test]
+async fn supervisor_waits_for_durable_ack_before_checkpointing() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = std::sync::Arc::new(FileTailRegistry::new(temp.path().join("file-tails.json")));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::ingest::IngestEnvelope>(4);
+    let ingest = IngestTx::from_envelope_sender_for_test(tx);
+    let token = tokio_util::sync::CancellationToken::new();
+    let supervisor = FileTailSupervisor::new(
+        std::sync::Arc::clone(&registry),
+        ingest,
+        token.clone(),
+        8192,
+    );
+    let log_path = temp.path().join("loop.log");
+    tokio::fs::write(&log_path, b"").await.unwrap();
+
+    let mut src = source("loop", &log_path.to_string_lossy(), "loop");
+    src.start_at_end = false;
+    registry.upsert(src).unwrap();
+    supervisor.reconcile().unwrap();
+
+    let mut writer = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(&log_path)
+        .await
+        .unwrap();
+    writer.write_all(b"hello durable\n").await.unwrap();
+    writer.flush().await.unwrap();
+
+    let envelope = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(envelope.entry.message, "hello durable");
+    assert!(
+        registry
+            .get("loop")
+            .unwrap()
+            .unwrap()
+            .checkpoint_offset
+            .is_none()
+    );
+
+    envelope.ack_success();
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if registry
+                .get("loop")
+                .unwrap()
+                .unwrap()
+                .checkpoint_offset
+                .is_some()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    token.cancel();
+    supervisor.shutdown();
+}
+
+#[tokio::test]
+async fn supervisor_reconcile_stops_disabled_and_removed_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = std::sync::Arc::new(FileTailRegistry::new(temp.path().join("file-tails.json")));
+    let (tx, _rx) = tokio::sync::mpsc::channel::<LogBatchEntry>(4);
+    let ingest = IngestTx::from_sender_for_test(tx);
+    let supervisor = FileTailSupervisor::new(
+        std::sync::Arc::clone(&registry),
+        ingest,
+        tokio_util::sync::CancellationToken::new(),
+        8192,
+    );
+    let first_path = temp.path().join("one.log");
+    let second_path = temp.path().join("two.log");
+    tokio::fs::write(&first_path, b"").await.unwrap();
+    tokio::fs::write(&second_path, b"").await.unwrap();
+
+    registry
+        .upsert(source("one", &first_path.to_string_lossy(), "one"))
+        .unwrap();
+    registry
+        .upsert(source("two", &second_path.to_string_lossy(), "two"))
+        .unwrap();
+    supervisor.reconcile().unwrap();
+    assert!(supervisor.running_source_for_test("one").is_some());
+    assert!(supervisor.running_source_for_test("two").is_some());
+
+    registry
+        .set_enabled("one", false, "2026-06-11T20:01:00Z")
+        .unwrap();
+    supervisor.reconcile().unwrap();
+    assert!(supervisor.running_source_for_test("one").is_none());
+    assert!(supervisor.running_source_for_test("two").is_some());
+
+    registry.remove("two").unwrap();
+    supervisor.reconcile().unwrap();
+    assert!(supervisor.running_source_for_test("two").is_none());
     supervisor.shutdown();
 }
 
@@ -274,6 +388,60 @@ async fn reopen_if_rotated_or_truncated_errors_when_file_disappears() {
         .unwrap_err();
 
     assert!(err.to_string().contains("disappeared"));
+}
+
+#[tokio::test]
+async fn supervisor_ingests_partial_eof_buffer_before_rotation() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = std::sync::Arc::new(FileTailRegistry::new(temp.path().join("file-tails.json")));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::ingest::IngestEnvelope>(4);
+    let ingest = IngestTx::from_envelope_sender_for_test(tx);
+    let token = tokio_util::sync::CancellationToken::new();
+    let supervisor = FileTailSupervisor::new(
+        std::sync::Arc::clone(&registry),
+        ingest,
+        token.clone(),
+        8192,
+    );
+    let log_path = temp.path().join("app.log");
+    tokio::fs::write(&log_path, b"partial").await.unwrap();
+    let mut src = source("app", &log_path.to_string_lossy(), "app");
+    src.start_at_end = false;
+    registry.upsert(src).unwrap();
+    supervisor.reconcile().unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tokio::fs::rename(&log_path, temp.path().join("app.log.1"))
+        .await
+        .unwrap();
+    tokio::fs::write(&log_path, b"next\n").await.unwrap();
+
+    let envelope = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(envelope.entry.message, "partial");
+    envelope.ack_success();
+
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let statuses = supervisor.statuses();
+            if statuses.iter().any(|status| {
+                status
+                    .last_error
+                    .as_deref()
+                    .is_some_and(|err| err.contains("unterminated partial line"))
+            }) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    token.cancel();
+    supervisor.shutdown();
 }
 
 #[tokio::test]

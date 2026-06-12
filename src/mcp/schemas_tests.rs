@@ -77,7 +77,11 @@ fn schema_includes_file_tails_action() {
     assert!(action_enum.iter().any(|value| value == "file_tails"));
     assert_eq!(
         properties["op"]["description"],
-        "For action=file_tails: op=list|add|remove|enable|disable|status."
+        "For action=file_tails: required operation, one of list, add, remove, enable, disable, or status."
+    );
+    assert_eq!(
+        properties["op"]["enum"],
+        serde_json::json!(["list", "add", "remove", "enable", "disable", "status"])
     );
     let source_kind_enum = properties["source_kind"]["enum"].as_array().unwrap();
     assert!(source_kind_enum.iter().any(|value| value == "file-tail"));
@@ -86,10 +90,59 @@ fn schema_includes_file_tails_action() {
     assert!(all_of.iter().any(|rule| {
         rule["if"]["properties"]["action"]["const"] == "get"
             && rule["then"]["properties"]["id"]["type"] == "integer"
+            && rule["then"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "id")
     }));
-    assert!(all_of.iter().any(|rule| {
-        rule["if"]["properties"]["action"]["const"] == "file_tails"
-            && rule["then"]["properties"]["id"]["type"] == "string"
+    let file_tails_rule = all_of
+        .iter()
+        .find(|rule| rule["if"]["properties"]["action"]["const"] == "file_tails")
+        .expect("file_tails conditional");
+    assert_eq!(
+        file_tails_rule["then"]["properties"]["id"]["type"],
+        "string"
+    );
+    assert_eq!(
+        file_tails_rule["then"]["properties"]["op"]["enum"],
+        serde_json::json!(["list", "add", "remove", "enable", "disable", "status"])
+    );
+    assert!(
+        file_tails_rule["then"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "op")
+    );
+    let nested = file_tails_rule["then"]["allOf"].as_array().unwrap();
+    assert!(nested.iter().any(|rule| {
+        rule["if"]["properties"]["op"]["const"] == "add"
+            && rule["then"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "id")
+            && rule["then"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "path")
+            && rule["then"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "tag")
+    }));
+    assert!(nested.iter().any(|rule| {
+        rule["if"]["properties"]["op"]["enum"]
+            .as_array()
+            .is_some_and(|values| values.iter().any(|value| value == "remove"))
+            && rule["then"]["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "id")
     }));
 }
 

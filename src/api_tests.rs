@@ -223,6 +223,28 @@ async fn file_tails_route_rejects_when_server_admin_token_unconfigured() {
 }
 
 #[tokio::test]
+async fn file_tails_route_rejects_blank_server_admin_token() {
+    let (mut state, _pool, _dir) = test_state(Some("secret".into()));
+    state.config.admin_token = crate::config::Secret(Some("   ".into()));
+    let app = router(state).unwrap();
+
+    let (status, value) = post_json_with_admin(
+        app,
+        "/api/file-tails",
+        serde_json::json!({ "op": "status" }),
+        Some("secret"),
+        Some(""),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(
+        value["error"],
+        "CORTEX_API_ADMIN_TOKEN required for file-tail management"
+    );
+}
+
+#[tokio::test]
 async fn file_tails_route_rejects_wrong_admin_token() {
     let (mut state, _pool, _dir) = test_state(Some("secret".into()));
     state.config.admin_token = crate::config::Secret(Some("admin-secret".into()));
@@ -292,7 +314,7 @@ async fn api_cors_preflight_allows_only_required_request_headers() {
         .header("Access-Control-Request-Method", "GET")
         .header(
             "Access-Control-Request-Headers",
-            "authorization,accept,x-unexpected-header",
+            "authorization,accept,x-cortex-admin-token,x-unexpected-header",
         )
         .body(axum::body::Body::empty())
         .unwrap();
@@ -308,6 +330,7 @@ async fn api_cors_preflight_allows_only_required_request_headers() {
         .to_ascii_lowercase();
     assert!(allowed.contains("authorization"));
     assert!(allowed.contains("accept"));
+    assert!(allowed.contains("x-cortex-admin-token"));
     assert!(
         !allowed.contains("x-unexpected-header"),
         "CORS allow-headers must not reflect arbitrary request headers: {allowed}"
@@ -1239,7 +1262,7 @@ async fn cors_preflight_for_post_includes_post_in_allow_methods() {
         .header("Access-Control-Request-Method", "POST")
         .header(
             "Access-Control-Request-Headers",
-            "authorization,content-type",
+            "authorization,content-type,x-cortex-admin-token",
         )
         .body(axum::body::Body::empty())
         .unwrap();
@@ -1281,6 +1304,10 @@ async fn cors_preflight_for_post_includes_post_in_allow_methods() {
     assert!(
         allow_headers.contains("content-type"),
         "Access-Control-Allow-Headers must include content-type, got: {allow_headers}"
+    );
+    assert!(
+        allow_headers.contains("x-cortex-admin-token"),
+        "Access-Control-Allow-Headers must include x-cortex-admin-token for /api/file-tails, got: {allow_headers}"
     );
     assert!(
         !allow_headers.contains('*'),

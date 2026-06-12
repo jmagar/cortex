@@ -134,9 +134,11 @@ CORTEX_FILE_TAIL_LOG_VOLUME=/mnt/user/appdata
 ```
 
 Registered paths must be absolute, existing, non-symlink regular files under
-`CORTEX_FILE_TAIL_ALLOWED_ROOTS` (default:
-`/file-tail-root,/var/log,/host/var/log,/logs,/mnt,/tmp`). Sensitive Cortex
-mounts such as `/data`, `/cortex-home`, `/home/cortex/.ssh`, and
+`CORTEX_FILE_TAIL_ALLOWED_ROOTS`. The documented safe default is the dedicated
+`/file-tail-root` mount. To opt into broader roots, mount those directories
+read-only and set an explicit comma-separated allowlist, for example
+`CORTEX_FILE_TAIL_ALLOWED_ROOTS=/file-tail-root,/var/log,/logs`. Sensitive
+Cortex mounts such as `/data`, `/cortex-home`, `/home/cortex/.ssh`, and
 `/home/cortex/workspace` are always rejected. REST management requires both the
 normal API bearer and `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`; MCP
 management requires `cortex:admin`.

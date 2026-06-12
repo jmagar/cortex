@@ -781,6 +781,9 @@ stored next to the SQLite database in `file-tails.json`, managed through
 `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`), or MCP action `file_tails`,
 and emitted as `source_kind="file-tail"` rows. Row metadata includes
 `file_tail_id`, `tag`, and `path_basename`, not the full filesystem path.
+The documented safe default is to keep managed tails inside `/file-tail-root`.
+Set `CORTEX_FILE_TAIL_ALLOWED_ROOTS` explicitly only when an operator has
+mounted and reviewed broader read-only roots such as `/var/log` or `/logs`.
 
 ```bash
 cortex file-tail add --id swag-access \

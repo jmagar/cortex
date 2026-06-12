@@ -50,6 +50,13 @@ fn make_entry_for_sender(hostname: &str, source_ip: &str, message: &str) -> db::
     }
 }
 
+fn envelope_batch(entries: Vec<db::LogBatchEntry>) -> Vec<crate::ingest::IngestEnvelope> {
+    entries
+        .into_iter()
+        .map(crate::ingest::IngestEnvelope::best_effort)
+        .collect()
+}
+
 #[tokio::test]
 async fn flush_batch_retains_entries_while_storage_is_write_blocked() {
     let (pool, mut storage, _dir) = test_pool();
@@ -65,7 +72,7 @@ async fn flush_batch_retains_entries_while_storage_is_write_blocked() {
         metrics: db::get_storage_metrics(&pool, &storage).unwrap(),
         write_blocked: true,
     });
-    let mut batch = vec![make_entry("blocked write")];
+    let mut batch = envelope_batch(vec![make_entry("blocked write")]);
     let mut storage_blocked = false;
     let mut summary = IngestSummary::default();
     let observability = Arc::new(crate::observability::RuntimeObservability::default());
@@ -92,7 +99,7 @@ async fn flush_batch_resumes_after_storage_recovers() {
         metrics: db::get_storage_metrics(&pool, &storage).unwrap(),
         write_blocked: false,
     })));
-    let mut batch = vec![make_entry("resumed write")];
+    let mut batch = envelope_batch(vec![make_entry("resumed write")]);
     let mut storage_blocked = true;
     let mut summary = IngestSummary::default();
     let observability = Arc::new(crate::observability::RuntimeObservability::default());
@@ -131,11 +138,11 @@ async fn flush_batch_isolates_bad_rows_and_writes_remaining_entries() {
         metrics: db::get_storage_metrics(&pool, &storage).unwrap(),
         write_blocked: false,
     })));
-    let mut batch = vec![
+    let mut batch = envelope_batch(vec![
         make_entry("good row one"),
         make_entry("bad row"),
         make_entry("good row two"),
-    ];
+    ]);
     let mut storage_blocked = false;
     let mut summary = IngestSummary::default();
     let observability = Arc::new(crate::observability::RuntimeObservability::default());
@@ -167,9 +174,11 @@ async fn flush_batch_retains_bounded_entries_for_large_retryable_failures() {
         metrics,
         write_blocked: false,
     })));
-    let mut batch = (0..(FAILED_BATCH_RETAIN_LIMIT + 5))
-        .map(|i| make_entry(&format!("locked row {i}")))
-        .collect::<Vec<_>>();
+    let mut batch = envelope_batch(
+        (0..(FAILED_BATCH_RETAIN_LIMIT + 5))
+            .map(|i| make_entry(&format!("locked row {i}")))
+            .collect::<Vec<_>>(),
+    );
     let mut storage_blocked = false;
     let mut summary = IngestSummary::default();
     let observability = Arc::new(crate::observability::RuntimeObservability::default());
@@ -193,7 +202,7 @@ async fn flush_batch_retains_bounded_entries_for_large_retryable_failures() {
 #[test]
 fn failed_batch_retains_disk_full_errors_instead_of_discarding_rows() {
     let (pool, _storage, _dir) = test_pool();
-    let batch = vec![make_entry("disk full retained")];
+    let batch = envelope_batch(vec![make_entry("disk full retained")]);
     let error = anyhow::anyhow!(rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_FULL),
         Some("database or disk is full".to_string()),

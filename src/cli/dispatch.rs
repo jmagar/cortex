@@ -20,8 +20,9 @@
 
 use anyhow::{Result, bail};
 use cortex::app::{
-    CorrelateEventsRequest, FileTailAddRequest, FileTailOp, FileTailRequest, FilterLogsRequest,
-    GetErrorsRequest, IncidentRequest, ListSessionsRequest, SearchLogsRequest, TailLogsRequest,
+    CorrelateEventsRequest, FileTailAddRequest, FileTailOp, FileTailRequest, FileTailResponse,
+    FilterLogsRequest, GetErrorsRequest, IncidentRequest, ListSessionsRequest, SearchLogsRequest,
+    TailLogsRequest,
 };
 use std::future::Future;
 
@@ -304,26 +305,34 @@ pub(crate) async fn run_file_tail(mode: &CliMode, command: FileTailCommand) -> R
     if json {
         println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
-        for source in response.sources {
-            println!(
-                "{}\t{}\t{}\t{}",
-                source.id,
-                if source.enabled {
-                    "enabled"
-                } else {
-                    "disabled"
-                },
-                source.tag,
-                source.path
-            );
-        }
-        for status in response.statuses {
-            if let Some(err) = status.last_error {
-                println!("{}\t{}\t{}", status.id, status.running, err);
-            }
-        }
+        print!("{}", format_file_tail_response(&response));
     }
     Ok(())
+}
+
+fn format_file_tail_response(response: &FileTailResponse) -> String {
+    let mut out = String::new();
+    for source in &response.sources {
+        out.push_str(&format!(
+            "{}\t{}\t{}\t{}\n",
+            source.id,
+            if source.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            source.tag,
+            source.path
+        ));
+    }
+    for status in &response.statuses {
+        let last_error = status.last_error.as_deref().unwrap_or("-");
+        out.push_str(&format!(
+            "{}\t{}\t{}\n",
+            status.id, status.running, last_error
+        ));
+    }
+    out
 }
 
 fn id_request(op: FileTailOp, args: FileTailIdArgs) -> (FileTailRequest, bool) {

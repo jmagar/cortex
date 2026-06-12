@@ -59,6 +59,9 @@ AI_SMOKE_PROJECT="/tmp/cortex-ai-smoke"
 AI_SMOKE_QUERY='"ai-smoke-authentication"'
 AI_SEEDED=false
 CLI_PARITY_CONTAINER=""
+FILE_TAIL_SMOKE_DIR=""
+FILE_TAIL_SMOKE_HOST_PATH=""
+FILE_TAIL_SMOKE_SERVER_PATH="/file-tail-root/smoke.log"
 
 # ---------------------------------------------------------------------------
 # Counters
@@ -171,9 +174,16 @@ _skip() {
 }
 
 mcp_admin_scope_available() {
-  [[ -z "${TOKEN:-}" \
+  local token="${TOKEN:-}"
+  token="${token//[[:space:]]/}"
+  [[ -z "${token}" \
     || "${CORTEX_STATIC_TOKEN_ADMIN:-false}" == "true" \
     || "${CORTEX_SMOKE_ADMIN:-false}" == "true" ]]
+}
+
+file_tail_smoke_available() {
+  [[ -n "${CORTEX_FILE_TAIL_SMOKE_PATH:-${FILE_TAIL_SMOKE_SERVER_PATH:-}}" \
+    && -n "${CORTEX_FILE_TAIL_SMOKE_WRITE_PATH:-${FILE_TAIL_SMOKE_HOST_PATH:-${CORTEX_FILE_TAIL_SMOKE_PATH:-}}}" ]]
 }
 
 section() {
@@ -487,6 +497,47 @@ phase_tools() {
     file_tails_result="$(call_tool cortex '{"action":"file_tails","op":"status"}')" || file_tails_result=""
     assert_jq "cortex file_tails — sources array present"       "${file_tails_result}" '.sources | type == "array"'
     assert_jq "cortex file_tails — statuses array present"      "${file_tails_result}" '.statuses | type == "array"'
+    local file_tails_missing_op
+    file_tails_missing_op="$(call_tool cortex '{"action":"file_tails"}' 2>&1)" || file_tails_missing_op=""
+    if [[ "${file_tails_missing_op}" == *"op"* ]]; then
+      _pass "cortex file_tails — missing op rejected"
+    else
+      _fail "cortex file_tails — missing op rejected" "response did not mention op: ${file_tails_missing_op}"
+    fi
+    if file_tail_smoke_available; then
+      local server_path write_path source_id tag marker add_result search_result count attempt
+      server_path="${CORTEX_FILE_TAIL_SMOKE_PATH:-${FILE_TAIL_SMOKE_SERVER_PATH}}"
+      write_path="${CORTEX_FILE_TAIL_SMOKE_WRITE_PATH:-${FILE_TAIL_SMOKE_HOST_PATH:-${server_path}}}"
+      source_id="smoke-${CONTAINER_NAME:-$$}"
+      tag="file-tail-smoke"
+      marker="file-tail-smoke-${CONTAINER_NAME:-$$}"
+      touch "${write_path}" || _fail "cortex file_tails — smoke file writable" "could not write ${write_path}"
+      add_result="$(call_tool cortex "$(jq -nc \
+        --arg id "${source_id}" \
+        --arg path "${server_path}" \
+        --arg tag "${tag}" \
+        '{"action":"file_tails","op":"add","id":$id,"path":$path,"tag":$tag,"hostname":"live-smoke","facility":"local7","severity":"info","start_at_end":true}')")" || add_result=""
+      assert_jq "cortex file_tails — add smoke source" "${add_result}" '.sources | type == "array"'
+      printf '%s\n' "${marker}" >> "${write_path}"
+      count=0
+      for attempt in {1..20}; do
+        search_result="$(call_tool cortex "$(jq -nc \
+          --arg q "${marker}" \
+          --arg tag "${tag}" \
+          '{"action":"search","query":$q,"source_kind":"file-tail","app_name":$tag,"limit":5}')")" || search_result=""
+        count="$(printf '%s' "${search_result}" | jq -r '.count // 0' 2>/dev/null)" || count=0
+        [[ "${count}" -ge 1 ]] && break
+        sleep 0.5
+      done
+      if [[ "${count}" -ge 1 ]]; then
+        _pass "cortex file_tails — add append query ingest"
+      else
+        _fail "cortex file_tails — add append query ingest" "marker was not queryable"
+      fi
+      call_tool cortex "$(jq -nc --arg id "${source_id}" '{"action":"file_tails","op":"remove","id":$id}')" >/dev/null 2>&1 || true
+    else
+      _skip "cortex file_tails — add append query ingest" "requires CORTEX_FILE_TAIL_SMOKE_PATH"
+    fi
   else
     _skip "cortex file_tails — registry status" "requires cortex:admin (set CORTEX_STATIC_TOKEN_ADMIN=true or CORTEX_SMOKE_ADMIN=true)"
   fi
@@ -716,6 +767,9 @@ docker_cleanup() {
     log_info "Removing test container ${CONTAINER_NAME}..."
     docker rm -f "${CONTAINER_NAME}" &>/dev/null || true
   fi
+  if [[ -n "${FILE_TAIL_SMOKE_DIR}" && -d "${FILE_TAIL_SMOKE_DIR}" ]]; then
+    rm -rf "${FILE_TAIL_SMOKE_DIR}"
+  fi
 }
 
 run_docker_mode() {
@@ -750,6 +804,12 @@ run_docker_mode() {
     # uid=1000,gid=1000 matches the 'syslog' user in the container image
     "--tmpfs" "/data:rw,noexec,nosuid,size=64m,uid=1000,gid=1000"
   )
+  FILE_TAIL_SMOKE_DIR="$(mktemp -d /tmp/cortex-file-tail-smoke.XXXXXX)"
+  FILE_TAIL_SMOKE_HOST_PATH="${FILE_TAIL_SMOKE_DIR}/smoke.log"
+  : > "${FILE_TAIL_SMOKE_HOST_PATH}"
+  docker_args+=("-v" "${FILE_TAIL_SMOKE_DIR}:/file-tail-root:ro")
+  CORTEX_FILE_TAIL_SMOKE_PATH="${FILE_TAIL_SMOKE_SERVER_PATH}"
+  CORTEX_FILE_TAIL_SMOKE_WRITE_PATH="${FILE_TAIL_SMOKE_HOST_PATH}"
 
   # /api/* is always mounted post-v0.26, so the container will refuse to
   # start without CORTEX_API_TOKEN. Fail fast here with a clear message

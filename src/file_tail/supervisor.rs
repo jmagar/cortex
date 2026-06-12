@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,7 +17,7 @@ use crate::ingest::IngestTx;
 use crate::ingest_metadata::bounded_metadata_json;
 
 use super::models::{FileTailSource, FileTailStatus};
-use super::path_policy::validate_file_tail_path;
+use super::path_policy::{validate_file_tail_path, validate_opened_file_tail_path};
 use super::registry::FileTailRegistry;
 
 #[derive(Clone)]
@@ -236,6 +237,20 @@ async fn tail_file_until_cancelled(
                 let read = read?;
                 if read.bytes_read == 0 {
                     if let Some(next) = reopen_if_rotated_or_truncated(source, identity, position).await? {
+                        if !line.is_empty() {
+                            let now = now_iso();
+                            let partial = PartialLineBeforeReopen {
+                                source,
+                                registry: &registry,
+                                ingest: &ingest,
+                                status: &status,
+                                line: &line,
+                                identity,
+                                position,
+                                now: &now,
+                            };
+                            ingest_partial_line_before_reopen(partial).await?;
+                        }
                         reader = BufReader::new(next.file);
                         position = next.position;
                         identity = next.identity;
@@ -258,7 +273,7 @@ async fn tail_file_until_cancelled(
                 }
                 let now = now_iso();
                 let entry = file_tail_line_to_entry(source, msg, &now);
-                ingest.send(entry).await?;
+                ingest.send_durable(entry).await?;
                 registry.update_checkpoint(&source.id, identity.dev, identity.ino, position, &now)?;
                 line.clear();
                 let mut status = status.lock();
@@ -274,6 +289,43 @@ async fn tail_file_until_cancelled(
             }
         }
     }
+}
+
+struct PartialLineBeforeReopen<'a> {
+    source: &'a FileTailSource,
+    registry: &'a FileTailRegistry,
+    ingest: &'a IngestTx,
+    status: &'a Mutex<FileTailStatus>,
+    line: &'a [u8],
+    identity: FileIdentity,
+    position: u64,
+    now: &'a str,
+}
+
+async fn ingest_partial_line_before_reopen(partial: PartialLineBeforeReopen<'_>) -> Result<()> {
+    let msg = String::from_utf8_lossy(partial.line);
+    let msg = msg.trim_end_matches(['\r', '\n']);
+    if msg.is_empty() {
+        return Ok(());
+    }
+    partial
+        .ingest
+        .send_durable(file_tail_line_to_entry(partial.source, msg, partial.now))
+        .await?;
+    partial.registry.update_checkpoint(
+        &partial.source.id,
+        partial.identity.dev,
+        partial.identity.ino,
+        partial.position,
+        partial.now,
+    )?;
+    let mut status = partial.status.lock();
+    status.last_line_at = Some(partial.now.to_string());
+    status.last_error = Some(format!(
+        "ingested unterminated partial line before rotation/truncation for {}",
+        partial.source.path
+    ));
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -299,8 +351,7 @@ pub(crate) async fn open_tail_file(
     source: &FileTailSource,
     first_open: bool,
 ) -> Result<OpenedTailFile> {
-    validate_file_tail_path(&source.path)?;
-    let mut file = tokio::fs::File::open(&source.path).await?;
+    let mut file = open_validated_tail_file(&source.path).await?;
     let metadata = file.metadata().await?;
     let identity = FileIdentity {
         dev: metadata.dev(),
@@ -343,16 +394,37 @@ pub(crate) async fn reopen_if_rotated_or_truncated(
         ino: metadata.ino(),
     };
     if current != identity || metadata.len() < position {
-        validate_file_tail_path(&source.path)?;
-        let mut file = tokio::fs::File::open(&source.path).await?;
+        let mut file = open_validated_tail_file(&source.path).await?;
+        let metadata = file.metadata().await?;
         file.seek(std::io::SeekFrom::Start(0)).await?;
         return Ok(Some(OpenedTailFile {
             file,
-            identity: current,
+            identity: FileIdentity {
+                dev: metadata.dev(),
+                ino: metadata.ino(),
+            },
             position: 0,
         }));
     }
     Ok(None)
+}
+
+async fn open_validated_tail_file(path: &str) -> Result<tokio::fs::File> {
+    validate_file_tail_path(path)?;
+    let path = path.to_string();
+    let std_file = tokio::task::spawn_blocking({
+        let path = path.clone();
+        move || {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&path)
+        }
+    })
+    .await??;
+    let metadata = std_file.metadata()?;
+    validate_opened_file_tail_path(&path, &metadata)?;
+    Ok(tokio::fs::File::from_std(std_file))
 }
 
 pub(crate) async fn read_bounded_line<R: AsyncBufRead + Unpin>(
@@ -400,6 +472,7 @@ pub(crate) fn file_tail_line_to_entry(
     now: &str,
 ) -> LogBatchEntry {
     let hostname = source.hostname.clone().unwrap_or_else(local_hostname);
+    let source_hostname = source_identity_component(&hostname);
     let path_basename = std::path::Path::new(&source.path)
         .file_name()
         .and_then(|name| name.to_str())
@@ -420,7 +493,7 @@ pub(crate) fn file_tail_line_to_entry(
         process_id: None,
         message: line.to_string(),
         raw: line.to_string(),
-        source_ip: format!("file-tail://{hostname}/{}", source.id),
+        source_ip: format!("file-tail://{source_hostname}/{}", source.id),
         docker_checkpoint: None,
         ai_tool: None,
         ai_project: None,
@@ -470,4 +543,29 @@ fn local_hostname() -> String {
         .ok()
         .filter(|host| !host.trim().is_empty())
         .unwrap_or_else(|| "localhost".to_string())
+}
+
+fn source_identity_component(hostname: &str) -> String {
+    let normalized = hostname
+        .trim()
+        .to_ascii_lowercase()
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_') {
+                byte as char
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches(['.', '-', '_'])
+        .to_string()
+        .chars()
+        .take(255)
+        .collect::<String>();
+    if normalized.is_empty() {
+        "localhost".to_string()
+    } else {
+        normalized
+    }
 }

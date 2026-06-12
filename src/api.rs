@@ -337,7 +337,13 @@ fn require_api_admin_token(
     state: &ApiState,
     headers: &HeaderMap,
 ) -> Option<axum::response::Response> {
-    let Some(expected) = state.config.admin_token.as_deref() else {
+    let Some(expected) = state
+        .config
+        .admin_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    else {
         return Some(
             (
                 StatusCode::FORBIDDEN,
@@ -1419,6 +1425,7 @@ fn cors_layer(port: u16, loopback_bind: bool, allowed_origins: &[String]) -> Cor
             axum::http::header::AUTHORIZATION,
             axum::http::header::CONTENT_TYPE,
             axum::http::header::ACCEPT,
+            axum::http::HeaderName::from_static("x-cortex-admin-token"),
         ])
 }
 

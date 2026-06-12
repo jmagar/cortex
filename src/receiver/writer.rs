@@ -11,6 +11,7 @@ use super::enrichment::{EnrichmentConfig, enrich_entry};
 use crate::config::StorageConfig;
 use crate::db::{self, DbPool};
 use crate::enrich::EnrichmentPipeline;
+use crate::ingest::IngestEnvelope;
 use crate::observability::RuntimeObservability;
 
 const INGEST_SUMMARY_INTERVAL_SECS: u64 = 60;
@@ -50,13 +51,13 @@ impl WriterContext {
 }
 
 pub(crate) async fn batch_writer(
-    mut rx: mpsc::Receiver<db::LogBatchEntry>,
+    mut rx: mpsc::Receiver<IngestEnvelope>,
     context: WriterContext,
     batch_size: usize,
     flush_interval: tokio::time::Duration,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let mut batch: Vec<db::LogBatchEntry> = Vec::with_capacity(batch_size);
+    let mut batch: Vec<IngestEnvelope> = Vec::with_capacity(batch_size);
     let mut storage_blocked = false;
     let mut summary = IngestSummary::default();
     let mut summary_deadline = tokio::time::Instant::now()
@@ -76,6 +77,7 @@ pub(crate) async fn batch_writer(
                 msg = rx.recv() => {
                     match msg {
                         Some(parsed) => {
+                            let requires_durable_ack = parsed.requires_durable_ack();
                             batch.push(parsed);
                             debug!(
                                 batch_len = batch.len(),
@@ -83,7 +85,7 @@ pub(crate) async fn batch_writer(
                                 queue_capacity = rx.max_capacity(),
                                 "Queued parsed syslog entry"
                             );
-                            if !batch.is_empty() && batch.len() % batch_size == 0 {
+                            if requires_durable_ack || (!batch.is_empty() && batch.len() % batch_size == 0) {
                                 break;
                             }
                         }
@@ -138,7 +140,7 @@ pub(crate) async fn batch_writer(
 }
 
 pub(super) async fn flush_batch(
-    batch: &mut Vec<db::LogBatchEntry>,
+    batch: &mut Vec<IngestEnvelope>,
     storage_blocked: &mut bool,
     summary: &mut IngestSummary,
     context: &WriterContext,
@@ -162,12 +164,12 @@ pub(super) async fn flush_batch(
     // framework (metadata_json parsed twice per entry) was fixed in the
     // new framework's dispatch() — it now parses once and passes a
     // reference to all helpers (Arch-H5 partial fix, 2026-05-22).
-    let batch_to_write: Vec<db::LogBatchEntry> = std::mem::take(batch)
+    let batch_to_write: Vec<IngestEnvelope> = std::mem::take(batch)
         .into_iter()
-        .map(|e| {
-            let mut e = enrich_entry(e, &context.enrichment);
-            context.pipeline.dispatch(&mut e);
-            e
+        .map(|mut envelope| {
+            envelope.entry = enrich_entry(envelope.entry, &context.enrichment);
+            context.pipeline.dispatch(&mut envelope.entry);
+            envelope
         })
         .collect();
     let count = batch_to_write.len();
@@ -201,19 +203,20 @@ pub(super) async fn flush_batch(
             return;
         }
     }
-    match tokio::task::spawn_blocking(
-        move || match db::insert_logs_batch(&pool, &batch_to_write) {
+    match tokio::task::spawn_blocking(move || {
+        match insert_envelopes_batch(&pool, &batch_to_write) {
             Ok(n) => Ok((n, batch_to_write)),
             Err(e) => {
                 let outcome = handle_failed_batch(&pool, batch_to_write, &e);
                 Err((e, outcome))
             }
-        },
-    )
+        }
+    })
     .await
     {
         Ok(Ok((n, inserted_batch))) => {
-            summary.record_batch(&inserted_batch[..n.min(inserted_batch.len())]);
+            let inserted_count = n.min(inserted_batch.len());
+            summary.record_envelopes(&inserted_batch[..inserted_count]);
             context.observability.record_writer_flushed(n);
             if *storage_blocked {
                 info!(
@@ -228,17 +231,24 @@ pub(super) async fn flush_batch(
                 elapsed_ms = started.elapsed().as_millis(),
                 "Flushed log batch"
             );
+            for envelope in inserted_batch.into_iter().take(inserted_count) {
+                envelope.ack_success();
+            }
         }
         Ok(Err((e, outcome))) => {
             if !outcome.inserted_entries.is_empty() {
                 let inserted_count = outcome.inserted_count.min(outcome.inserted_entries.len());
-                summary.record_batch(&outcome.inserted_entries[..inserted_count]);
+                summary.record_envelopes(&outcome.inserted_entries[..inserted_count]);
                 context.observability.record_writer_flushed(inserted_count);
                 debug!(
                     inserted_count,
                     elapsed_ms = started.elapsed().as_millis(),
                     "Flushed recovered log chunks after batch failure"
                 );
+            }
+
+            for envelope in outcome.inserted_entries {
+                envelope.ack_success();
             }
 
             if !outcome.retained_entries.is_empty() {
@@ -297,11 +307,19 @@ pub(super) async fn flush_batch(
     }
 }
 
+fn insert_envelopes_batch(pool: &DbPool, envelopes: &[IngestEnvelope]) -> anyhow::Result<usize> {
+    let entries = envelopes
+        .iter()
+        .map(|envelope| envelope.entry.clone())
+        .collect::<Vec<_>>();
+    db::insert_logs_batch(pool, &entries)
+}
+
 #[derive(Default)]
 struct FailedBatchOutcome {
     inserted_count: usize,
-    inserted_entries: Vec<db::LogBatchEntry>,
-    retained_entries: Vec<db::LogBatchEntry>,
+    inserted_entries: Vec<IngestEnvelope>,
+    retained_entries: Vec<IngestEnvelope>,
     retained_chunks: usize,
     discarded_count: usize,
     discarded_chunks: usize,
@@ -309,7 +327,7 @@ struct FailedBatchOutcome {
 
 fn handle_failed_batch(
     pool: &DbPool,
-    failed_batch: Vec<db::LogBatchEntry>,
+    failed_batch: Vec<IngestEnvelope>,
     error: &anyhow::Error,
 ) -> FailedBatchOutcome {
     let mut outcome = FailedBatchOutcome::default();
@@ -318,18 +336,21 @@ fn handle_failed_batch(
         return outcome;
     }
 
-    for chunk in failed_batch.chunks(FAILED_BATCH_RETRY_CHUNK_SIZE) {
-        retry_failed_chunk(pool, chunk.to_vec(), &mut outcome);
+    let mut remaining = failed_batch;
+    while !remaining.is_empty() {
+        let next = if remaining.len() > FAILED_BATCH_RETRY_CHUNK_SIZE {
+            remaining.split_off(FAILED_BATCH_RETRY_CHUNK_SIZE)
+        } else {
+            Vec::new()
+        };
+        retry_failed_chunk(pool, remaining, &mut outcome);
+        remaining = next;
     }
     outcome
 }
 
-fn retry_failed_chunk(
-    pool: &DbPool,
-    chunk: Vec<db::LogBatchEntry>,
-    outcome: &mut FailedBatchOutcome,
-) {
-    match db::insert_logs_batch(pool, &chunk) {
+fn retry_failed_chunk(pool: &DbPool, chunk: Vec<IngestEnvelope>, outcome: &mut FailedBatchOutcome) {
+    match insert_envelopes_batch(pool, &chunk) {
         Ok(inserted) => {
             outcome.inserted_count += inserted;
             outcome.inserted_entries.extend(chunk);
@@ -347,22 +368,27 @@ fn retry_failed_chunk(
         Err(_) => {
             outcome.discarded_count += chunk.len();
             outcome.discarded_chunks += 1;
+            for envelope in chunk {
+                envelope.ack_failure("unrecoverable database insert failure");
+            }
         }
     }
 }
 
-fn retain_or_discard_entries(outcome: &mut FailedBatchOutcome, entries: Vec<db::LogBatchEntry>) {
+fn retain_or_discard_entries(outcome: &mut FailedBatchOutcome, entries: Vec<IngestEnvelope>) {
     let retain_remaining = FAILED_BATCH_RETAIN_LIMIT.saturating_sub(outcome.retained_entries.len());
     if retain_remaining == 0 {
-        for entry in &entries {
+        let discarded = entries.len();
+        for envelope in entries {
             tracing::warn!(
-                hostname = %entry.hostname,
-                severity = %entry.severity,
-                timestamp = %entry.timestamp,
+                hostname = %envelope.entry.hostname,
+                severity = %envelope.entry.severity,
+                timestamp = %envelope.entry.timestamp,
                 "Discarding log entry: retain limit reached"
             );
+            envelope.ack_failure("ingest writer retain limit reached");
         }
-        outcome.discarded_count += entries.len();
+        outcome.discarded_count += discarded;
         outcome.discarded_chunks += 1;
         return;
     }
@@ -379,13 +405,14 @@ fn retain_or_discard_entries(outcome: &mut FailedBatchOutcome, entries: Vec<db::
         .retained_entries
         .extend(iter.by_ref().take(retain_remaining));
     outcome.retained_chunks += 1;
-    for entry in iter {
+    for envelope in iter {
         tracing::warn!(
-            hostname = %entry.hostname,
-            severity = %entry.severity,
-            timestamp = %entry.timestamp,
+            hostname = %envelope.entry.hostname,
+            severity = %envelope.entry.severity,
+            timestamp = %envelope.entry.timestamp,
             "Discarding log entry: retain limit reached"
         );
+        envelope.ack_failure("ingest writer retain limit reached");
     }
     outcome.discarded_count += discarded;
     outcome.discarded_chunks += 1;
@@ -426,17 +453,29 @@ pub(super) struct IngestSummary {
 }
 
 impl IngestSummary {
+    fn record_envelopes(&mut self, envelopes: &[IngestEnvelope]) {
+        self.total_logs += envelopes.len();
+        for envelope in envelopes {
+            self.record_entry(&envelope.entry);
+        }
+    }
+
+    #[cfg(test)]
     fn record_batch(&mut self, entries: &[db::LogBatchEntry]) {
         self.total_logs += entries.len();
         for entry in entries {
-            self.host_overflow_count +=
-                record_bounded_count(&mut self.host_counts, entry.hostname.clone());
-            let source_ip = source_addr_ip(&entry.source_ip);
-            self.source_ip_overflow_count +=
-                record_bounded_count(&mut self.source_ip_counts, source_ip.clone());
-            self.sender_overflow_count +=
-                record_bounded_count(&mut self.sender_counts, (entry.hostname.clone(), source_ip));
+            self.record_entry(entry);
         }
+    }
+
+    fn record_entry(&mut self, entry: &db::LogBatchEntry) {
+        self.host_overflow_count +=
+            record_bounded_count(&mut self.host_counts, entry.hostname.clone());
+        let source_ip = source_addr_ip(&entry.source_ip);
+        self.source_ip_overflow_count +=
+            record_bounded_count(&mut self.source_ip_counts, source_ip.clone());
+        self.sender_overflow_count +=
+            record_bounded_count(&mut self.sender_counts, (entry.hostname.clone(), source_ip));
     }
 
     fn reset(&mut self) {

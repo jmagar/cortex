@@ -1656,6 +1656,80 @@ async fn file_tails_add_list_disable_enable_remove_round_trip() {
     assert!(removed.sources.is_empty());
 }
 
+#[tokio::test]
+async fn file_tails_list_and_status_do_not_reconcile() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let reconcile_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let service = CortexService::new(pool, storage).with_file_tail_control(
+        Arc::clone(&registry),
+        {
+            let reconcile_count = Arc::clone(&reconcile_count);
+            Arc::new(move || {
+                reconcile_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            })
+        },
+        Arc::new(Vec::new),
+    );
+    let log_path = temp.path().join("access.log");
+    std::fs::write(&log_path, "seed\n").unwrap();
+
+    service
+        .file_tails(crate::app::FileTailRequest::add(
+            crate::app::FileTailAddRequest {
+                id: "swag-access".into(),
+                path: log_path.to_string_lossy().into_owned(),
+                tag: "swag-access".into(),
+                hostname: Some("squirts".into()),
+                facility: Some("local4".into()),
+                severity: Some("info".into()),
+                start_at_end: Some(true),
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(reconcile_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    service
+        .file_tails(crate::app::FileTailRequest::list())
+        .await
+        .unwrap();
+    service
+        .file_tails(crate::app::FileTailRequest::status())
+        .await
+        .unwrap();
+    assert_eq!(reconcile_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn file_tails_missing_source_maps_to_not_found() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
+    let pool = Arc::new(init_pool(&storage).unwrap());
+    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+        temp.path().join("file-tails.json"),
+    ));
+    let service = CortexService::new(pool, storage).with_file_tail_registry(registry);
+
+    let err = service
+        .file_tails(crate::app::FileTailRequest::id_op(
+            crate::app::FileTailOp::Disable,
+            "missing-source".into(),
+        ))
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, ServiceError::NotFound(_)),
+        "missing source should be NotFound, got {err:?}"
+    );
+}
+
 fn add_file_tail_request(
     id: &str,
     path: impl Into<String>,
