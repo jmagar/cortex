@@ -4,14 +4,14 @@ use crate::db::LogBatchEntry;
 use crate::ingest::IngestTx;
 
 use super::models::FileTailSource;
-use super::supervisor::{file_tail_line_to_entry, tail_file_once_for_test};
+use super::registry::FileTailRegistry;
+use super::supervisor::{FileTailSupervisor, file_tail_line_to_entry, tail_file_once_for_test};
 
-#[test]
-fn file_tail_line_to_entry_sets_expected_envelope() {
-    let source = FileTailSource {
-        id: "swag-access".into(),
-        path: "/tmp/access.log".into(),
-        tag: "swag-access".into(),
+fn source(id: &str, path: &str, tag: &str) -> FileTailSource {
+    FileTailSource {
+        id: id.into(),
+        path: path.into(),
+        tag: tag.into(),
         hostname: Some("squirts".into()),
         facility: Some("local4".into()),
         severity: "info".into(),
@@ -19,7 +19,12 @@ fn file_tail_line_to_entry_sets_expected_envelope() {
         enabled: true,
         created_at: "2026-06-11T20:00:00Z".into(),
         updated_at: "2026-06-11T20:00:00Z".into(),
-    };
+    }
+}
+
+#[test]
+fn file_tail_line_to_entry_sets_expected_envelope() {
+    let source = source("swag-access", "/tmp/access.log", "swag-access");
 
     let entry = file_tail_line_to_entry(&source, "GET / HTTP/1.1\" 401", "2026-06-11T20:01:00Z");
 
@@ -45,6 +50,44 @@ fn file_tail_line_to_entry_sets_expected_envelope() {
             .unwrap()
             .contains("\"path\":\"/tmp/access.log\"")
     );
+}
+
+#[tokio::test]
+async fn reconcile_restarts_task_when_source_definition_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = std::sync::Arc::new(FileTailRegistry::new(temp.path().join("file-tails.json")));
+    let (tx, _rx) = tokio::sync::mpsc::channel::<LogBatchEntry>(4);
+    let ingest = IngestTx::from_sender_for_test(tx);
+    let supervisor = FileTailSupervisor::new(
+        std::sync::Arc::clone(&registry),
+        ingest,
+        tokio_util::sync::CancellationToken::new(),
+    );
+
+    registry
+        .upsert(source("swag-access", "/tmp/one.log", "swag-access"))
+        .unwrap();
+    supervisor.reconcile().unwrap();
+    assert_eq!(
+        supervisor
+            .running_source_for_test("swag-access")
+            .unwrap()
+            .path,
+        "/tmp/one.log"
+    );
+
+    registry
+        .upsert(source("swag-access", "/tmp/two.log", "swag-access"))
+        .unwrap();
+    supervisor.reconcile().unwrap();
+    assert_eq!(
+        supervisor
+            .running_source_for_test("swag-access")
+            .unwrap()
+            .path,
+        "/tmp/two.log"
+    );
+    supervisor.shutdown();
 }
 
 #[tokio::test]

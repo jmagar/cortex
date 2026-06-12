@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,6 +27,7 @@ pub(crate) struct FileTailSupervisor {
 struct TailTask {
     handle: JoinHandle<()>,
     status: Arc<Mutex<FileTailStatus>>,
+    source: FileTailSource,
 }
 
 impl FileTailSupervisor {
@@ -65,22 +66,21 @@ impl FileTailSupervisor {
 
     pub(crate) fn reconcile(&self) -> Result<()> {
         let sources = self.registry.list()?;
-        let enabled: HashSet<String> = sources
+        let enabled: HashMap<String, FileTailSource> = sources
             .iter()
             .filter(|source| source.enabled)
-            .map(|source| source.id.clone())
+            .map(|source| (source.id.clone(), source.clone()))
             .collect();
 
         {
             let mut tasks = self.tasks.lock();
             tasks.retain(|id, task| {
-                if enabled.contains(id) {
-                    true
-                } else {
+                let keep_running = enabled.get(id).is_some_and(|source| source == &task.source);
+                if !keep_running {
                     task.status.lock().running = false;
                     task.handle.abort();
-                    false
                 }
+                keep_running
             });
         }
 
@@ -95,6 +95,7 @@ impl FileTailSupervisor {
 
     fn spawn_source(&self, source: FileTailSource) {
         let id = source.id.clone();
+        let task_source = source.clone();
         let status = Arc::new(Mutex::new(FileTailStatus {
             id: id.clone(),
             running: true,
@@ -107,7 +108,19 @@ impl FileTailSupervisor {
         let handle = tokio::spawn(async move {
             tail_file_loop(source, ingest, token, task_status).await;
         });
-        self.tasks.lock().insert(id, TailTask { handle, status });
+        self.tasks.lock().insert(
+            id,
+            TailTask {
+                handle,
+                status,
+                source: task_source,
+            },
+        );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn running_source_for_test(&self, id: &str) -> Option<FileTailSource> {
+        self.tasks.lock().get(id).map(|task| task.source.clone())
     }
 }
 
