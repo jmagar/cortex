@@ -85,6 +85,25 @@ fn should_refresh_for_relevant_config_events_only() {
 }
 
 #[test]
+fn path_matches_target_accepts_directory_targets_but_not_siblings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target_dir = tmp.path().join("stack");
+    std::fs::create_dir(&target_dir).unwrap();
+    let sibling_dir = tmp.path().join("stack-old");
+    std::fs::create_dir(&sibling_dir).unwrap();
+
+    assert!(path_matches_target(
+        &target_dir.join("docker-compose.yml"),
+        &target_dir
+    ));
+    assert!(path_matches_target(&target_dir, &target_dir));
+    assert!(!path_matches_target(
+        &sibling_dir.join("docker-compose.yml"),
+        &target_dir
+    ));
+}
+
+#[test]
 fn remote_docker_events_ssh_args_include_safe_options_and_remote_command() {
     let context = crate::inventory::ssh::SshContext::new(
         crate::inventory::ssh::SshOptions::for_config(Some(std::path::Path::new(
@@ -115,6 +134,37 @@ fn remote_docker_events_output_sample_is_bounded() {
     sample.push_line(&"x".repeat(5000));
 
     let rendered = sample.as_str();
+    assert!(rendered.ends_with("...<truncated>"));
+    assert!(rendered.len() <= 4110);
+}
+
+#[test]
+fn output_sample_preserves_line_boundaries_and_empty_state() {
+    let mut sample = OutputSample::default();
+    assert_eq!(sample.as_str(), "");
+
+    sample.push_line("first");
+    sample.push_line("second");
+
+    assert_eq!(sample.as_str(), "first\nsecond");
+}
+
+#[test]
+fn output_sample_truncates_on_utf8_boundary() {
+    let mut sample = OutputSample::default();
+    sample.push_line(&"é".repeat(3000));
+
+    let rendered = sample.as_str();
+    assert!(rendered.ends_with("...<truncated>"));
+    let sample_body = rendered.trim_end_matches("...<truncated>");
+    assert!(sample_body.is_char_boundary(sample_body.len()));
+}
+
+#[tokio::test]
+async fn read_stream_sample_truncates_large_stderr_payloads() {
+    let payload = vec![b'x'; 5000];
+    let rendered = read_stream_sample(std::io::Cursor::new(payload)).await;
+
     assert!(rendered.ends_with("...<truncated>"));
     assert!(rendered.len() <= 4110);
 }

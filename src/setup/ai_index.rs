@@ -170,3 +170,64 @@ pub(crate) fn ai_index_timer_unit() -> &'static str {
 
 // write_executable_file lives in the parent module (setup.rs) to avoid duplication.
 use super::write_executable_file;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_ai_index_timer_files_writes_script_service_and_timer() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("bin/cortex-ai-index");
+        let systemd_dir = dir.path().join("systemd");
+        let service_path = systemd_dir.join("cortex-ai-index.service");
+        let timer_path = systemd_dir.join("cortex-ai-index.timer");
+
+        let phase =
+            install_ai_index_timer_files(&bin_path, &systemd_dir, &service_path, &timer_path)
+                .unwrap();
+
+        assert_eq!(phase.status, SetupStatus::Ok);
+        let script = std::fs::read_to_string(&bin_path).unwrap();
+        assert!(script.contains("cortex ai index --json"));
+        assert!(script.contains("CORTEX_DOCKER_INGEST_ENABLED"));
+        let service = std::fs::read_to_string(&service_path).unwrap();
+        assert!(service.contains(&format!("ExecStart={}", bin_path.display())));
+        let timer = std::fs::read_to_string(&timer_path).unwrap();
+        assert!(timer.contains("OnUnitActiveSec=30min"));
+    }
+
+    #[test]
+    fn remove_ai_index_timer_files_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("bin/cortex-ai-index");
+        let service_path = dir.path().join("systemd/cortex-ai-index.service");
+        let timer_path = dir.path().join("systemd/cortex-ai-index.timer");
+        std::fs::create_dir_all(bin_path.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(service_path.parent().unwrap()).unwrap();
+        std::fs::write(&bin_path, "script").unwrap();
+        std::fs::write(&service_path, "service").unwrap();
+        std::fs::write(&timer_path, "timer").unwrap();
+
+        let first = remove_ai_index_timer_files(&bin_path, &service_path, &timer_path).unwrap();
+        let second = remove_ai_index_timer_files(&bin_path, &service_path, &timer_path).unwrap();
+
+        assert_eq!(first.status, SetupStatus::Ok);
+        assert_eq!(second.status, SetupStatus::Ok);
+        assert!(!bin_path.exists());
+        assert!(!service_path.exists());
+        assert!(!timer_path.exists());
+    }
+
+    #[test]
+    fn service_and_timer_units_keep_host_user_timer_contract() {
+        let service = ai_index_service_unit(Path::new("/home/me/.local/bin/cortex-ai-index"));
+        let timer = ai_index_timer_unit();
+
+        assert!(service.contains("Type=oneshot"));
+        assert!(service.contains("ExecStart=/home/me/.local/bin/cortex-ai-index"));
+        assert!(timer.contains("OnBootSec=5min"));
+        assert!(timer.contains("Persistent=true"));
+        assert!(timer.contains("WantedBy=timers.target"));
+    }
+}

@@ -81,3 +81,82 @@ fn agent_command_env_phase_accepts_claude_settings_json() {
 
     assert_eq!(phase.status, SetupStatus::Ok);
 }
+
+#[test]
+fn agent_command_wrapper_script_execs_cortex_with_spool_and_passthrough_args() {
+    let script = agent_command_wrapper_script(
+        Path::new("/home/me/.local/bin/cortex"),
+        Path::new("/home/me/.local/state/cortex/agent-command.jsonl"),
+    );
+
+    assert!(script.starts_with("#!/usr/bin/env sh\n"));
+    assert!(script.contains("exec /home/me/.local/bin/cortex agent-command wrap"));
+    assert!(script.contains("--spool /home/me/.local/state/cortex/agent-command.jsonl -- \"$@\""));
+}
+
+#[test]
+fn agent_command_content_phase_accepts_matching_wrapper_and_rejects_stale_wrapper() {
+    let dir = tempfile::tempdir().unwrap();
+    let wrapper = dir.path().join("wrapper");
+    let spool = dir.path().join("agent-command.jsonl");
+    let cortex_bin = Path::new("/usr/local/bin/cortex");
+    std::fs::write(&wrapper, agent_command_wrapper_script(cortex_bin, &spool)).unwrap();
+
+    let matching = agent_command_content_phase(&wrapper, &spool, cortex_bin);
+    assert_eq!(matching.status, SetupStatus::Ok);
+
+    std::fs::write(&wrapper, "#!/bin/sh\nexec old\n").unwrap();
+    let stale = agent_command_content_phase(&wrapper, &spool, cortex_bin);
+    assert_eq!(stale.status, SetupStatus::Error);
+    assert!(
+        stale
+            .detail
+            .contains("does not match generated agent command wrapper")
+    );
+}
+
+#[test]
+fn agent_command_state_phase_reports_missing_state_and_ready_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let state_dir = dir.path().join("state");
+    let spool = state_dir.join("agent-command.jsonl");
+
+    let missing = agent_command_state_phase(&state_dir, &spool);
+    assert_eq!(missing.status, SetupStatus::Warn);
+    assert!(missing.detail.contains("missing"));
+
+    std::fs::create_dir(&state_dir).unwrap();
+    std::fs::write(&spool, "").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&state_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&spool, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    let ready = agent_command_state_phase(&state_dir, &spool);
+    assert_eq!(ready.status, SetupStatus::Ok);
+    assert!(ready.detail.contains("state ready"));
+}
+
+#[test]
+fn agent_command_env_phase_warns_on_mismatched_or_malformed_settings() {
+    let home = tempfile::tempdir().unwrap();
+    let claude_dir = home.path().join(".claude");
+    std::fs::create_dir(&claude_dir).unwrap();
+    let wrapper = home.path().join(".local/bin/cortex-agent-command-wrapper");
+    std::fs::write(
+        claude_dir.join("settings.json"),
+        r#"{"env":{"CLAUDE_CODE_SHELL_PREFIX":"/tmp/old-wrapper"}}"#,
+    )
+    .unwrap();
+
+    let mismatched = agent_command_env_phase(&wrapper, home.path());
+    assert_eq!(mismatched.status, SetupStatus::Warn);
+    assert!(mismatched.detail.contains("expected"));
+
+    std::fs::write(claude_dir.join("settings.json"), "{not-json").unwrap();
+    let malformed = agent_command_env_phase(&wrapper, home.path());
+    assert_eq!(malformed.status, SetupStatus::Warn);
+    assert!(malformed.detail.contains("parse"));
+}

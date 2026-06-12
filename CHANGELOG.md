@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.4] - 2026-06-12
+
+### Added
+
+- Add focused unit coverage for notification queue wrappers, Aurora logging helpers, remote config parsing, inventory refresh helpers, and setup helper modules.
+
 ## [1.20.3] - 2026-06-12
 
 ### Added
