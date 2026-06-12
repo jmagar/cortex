@@ -125,3 +125,65 @@ fn runtime_current_phase(repo_path: &Path) -> SetupPhase {
         Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::setup::{PhaseTimer, SetupIssueKind};
+
+    #[test]
+    fn downgrade_dev_phase_converts_errors_to_warnings_without_issue_kind() {
+        let phase = PhaseTimer::start("debug-wrapper-content").finish_with_issue(
+            SetupStatus::Error,
+            Some(SetupIssueKind::BlockingError),
+            "stale wrapper",
+        );
+
+        let downgraded = downgrade_dev_phase(phase, "production binary installed");
+
+        assert!(matches!(downgraded.status, SetupStatus::Warn));
+        assert_eq!(downgraded.issue_kind, None);
+        assert_eq!(downgraded.detail, "production binary installed");
+        assert_eq!(downgraded.name, "debug-wrapper-content");
+    }
+
+    #[test]
+    fn downgrade_dev_phase_preserves_non_error_statuses() {
+        let phase = PhaseTimer::start("debug-compose-content").finish(SetupStatus::Ok, "matches");
+
+        let unchanged = downgrade_dev_phase(phase, "should not replace detail");
+
+        assert!(matches!(unchanged.status, SetupStatus::Ok));
+        assert_eq!(unchanged.detail, "matches");
+    }
+
+    #[test]
+    fn runtime_current_phase_reports_missing_script_as_error() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let phase = runtime_current_phase(dir.path());
+
+        assert!(matches!(phase.status, SetupStatus::Error));
+        assert!(phase.detail.contains("scripts/check-runtime-current.sh"));
+        assert!(phase.detail.contains("missing"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_current_phase_uses_last_stdout_line_on_success() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("scripts/check-runtime-current.sh");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, "#!/bin/sh\nprintf 'first\\ncurrent ok\\n'\n").unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        let phase = runtime_current_phase(dir.path());
+
+        assert!(matches!(phase.status, SetupStatus::Ok));
+        assert_eq!(phase.detail, "current ok");
+    }
+}

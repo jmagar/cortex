@@ -349,4 +349,65 @@ mod tests {
         assert!(unit.contains("EnvironmentFile=/home/me/.cortex/heartbeat-agent.env"));
         assert!(unit.contains("ReadWritePaths=/home/me/.cortex"));
     }
+
+    #[test]
+    fn compose_runs_host_binary_with_host_network_and_private_id_path() {
+        let compose = heartbeat_agent_compose(
+            Path::new("/home/me/.local/bin/cortex"),
+            Path::new("/home/me/.cortex/heartbeat-agent.env"),
+            Path::new("/home/me/.cortex/heartbeat-host-id"),
+        )
+        .unwrap();
+
+        assert!(compose.contains("network_mode: host"));
+        assert!(compose.contains("env_file: /home/me/.cortex/heartbeat-agent.env"));
+        assert!(compose.contains("- /home/me/.local/bin/cortex:/usr/local/bin/cortex:ro"));
+        assert!(compose.contains("- /home/me/.cortex:/home/me/.cortex"));
+        assert!(compose.contains("- --host-id-path\n      - /home/me/.cortex/heartbeat-host-id"));
+    }
+
+    #[test]
+    fn shell_safe_value_rejects_control_characters() {
+        assert_eq!(shell_safe_value("plain-token").unwrap(), "plain-token");
+        assert!(shell_safe_value("bad\nvalue").is_err());
+        assert!(shell_safe_value("bad\rvalue").is_err());
+    }
+
+    #[test]
+    fn remove_file_phase_treats_missing_file_as_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.service");
+
+        let phase = remove_file_phase("heartbeat-agent-unit", &missing).unwrap();
+
+        assert!(matches!(phase.status, SetupStatus::Ok));
+        assert!(phase.detail.contains("already absent"));
+    }
+
+    #[test]
+    fn content_phase_detects_matching_and_stale_units() {
+        let dir = tempfile::tempdir().unwrap();
+        let unit_path = dir.path().join("cortex-heartbeat-agent.service");
+        let cortex_bin = Path::new("/usr/local/bin/cortex");
+        let env_path = Path::new("/home/me/.cortex/heartbeat-agent.env");
+        let host_id_path = Path::new("/home/me/.cortex/heartbeat-host-id");
+        std::fs::write(
+            &unit_path,
+            heartbeat_agent_unit(cortex_bin, env_path, host_id_path).unwrap(),
+        )
+        .unwrap();
+
+        let matching =
+            check_heartbeat_agent_content(&unit_path, cortex_bin, env_path, host_id_path);
+        assert!(matches!(matching.status, SetupStatus::Ok));
+
+        std::fs::write(&unit_path, "stale unit").unwrap();
+        let stale = check_heartbeat_agent_content(&unit_path, cortex_bin, env_path, host_id_path);
+        assert!(matches!(stale.status, SetupStatus::Error));
+        assert!(
+            stale
+                .detail
+                .contains("does not match generated heartbeat agent unit")
+        );
+    }
 }

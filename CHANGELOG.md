@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.3] - 2026-06-12
+
+### Added
+
+- Add focused unit coverage for notification evaluator SQL helpers and setup doctor, heartbeat-agent, and systemd setup helpers.
+
 ## [1.20.2] - 2026-06-12
 
 ### Changed
