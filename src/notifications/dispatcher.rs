@@ -536,6 +536,38 @@ mod tests {
     }
 
     #[test]
+    fn signature_ack_check_distinguishes_missing_pending_and_acknowledged() {
+        let conn = open_test_db();
+        let version = crate::app::error_detection::NORMALIZER_VERSION;
+
+        assert!(!is_signature_acked(&conn, "missing", version).unwrap());
+
+        conn.execute(
+            "INSERT INTO error_signatures (
+                 signature_hash, normalizer_version, template, sample_message,
+                 sample_hostname, severity, first_seen_at, last_seen_at, acknowledged_at
+             ) VALUES (?1, ?2, 'template', 'sample', 'host1', 'err',
+                       '2026-06-13T00:00:00.000Z', '2026-06-13T00:00:00.000Z', NULL)",
+            rusqlite::params!["pending", version],
+        )
+        .unwrap();
+        assert!(!is_signature_acked(&conn, "pending", version).unwrap());
+
+        conn.execute(
+            "INSERT INTO error_signatures (
+                 signature_hash, normalizer_version, template, sample_message,
+                 sample_hostname, severity, first_seen_at, last_seen_at, acknowledged_at
+             ) VALUES (?1, ?2, 'template', 'sample', 'host1', 'err',
+                       '2026-06-13T00:00:00.000Z', '2026-06-13T00:00:00.000Z',
+                       '2026-06-13T00:01:00.000Z')",
+            rusqlite::params!["acked", version],
+        )
+        .unwrap();
+        assert!(is_signature_acked(&conn, "acked", version).unwrap());
+        assert!(!is_signature_acked(&conn, "acked", version + 1).unwrap());
+    }
+
+    #[test]
     fn outbox_row_dedup_suppressed() {
         let conn = open_test_db();
         // Insert a firing first (simulating a previous delivery)
