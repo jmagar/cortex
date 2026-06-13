@@ -256,4 +256,19 @@ mod tests {
         );
         assert_eq!(container_app_name("cortex-1", &HashMap::new()), "cortex-1");
     }
+
+    #[test]
+    fn connect_constructs_http_client_without_eager_network_io() {
+        connect("http://127.0.0.1:2375").unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn connect_constructs_unix_socket_client_without_eager_network_io() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("docker.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+
+        connect(&format!("unix://{}", socket.display())).unwrap();
+    }
 }

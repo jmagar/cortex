@@ -2,6 +2,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use parking_lot::Mutex;
+
 use super::*;
 
 /// A panicking listener attempt must not kill supervision: the supervisor
@@ -177,4 +179,49 @@ fn not_started_listeners_are_not_down() {
     assert_eq!(obs.udp_listener_state(), ListenerState::NotStarted);
     assert_eq!(obs.tcp_listener_state(), ListenerState::NotStarted);
     assert!(!obs.any_listener_down());
+}
+
+#[tokio::test]
+async fn start_listeners_wires_udp_and_tcp_supervisors_on_ephemeral_loopback_port() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(dir.path().join("receiver.db"));
+    let pool = Arc::new(db::init_pool(&storage).unwrap());
+    let storage_state = Arc::new(Mutex::new(None));
+    let observability = Arc::new(RuntimeObservability::default());
+    let config = ReceiverConfig {
+        host: "127.0.0.1".to_string(),
+        port: 0,
+        max_message_size: 1024,
+        max_tcp_connections: 4,
+        tcp_idle_timeout_secs: 1,
+        batch_size: 10,
+        flush_interval: 10,
+        write_channel_capacity: 16,
+        allowed_source_cidrs: Vec::new(),
+    };
+    let ingest = ingest::start_writer_from_receiver_config(
+        &config,
+        storage,
+        pool,
+        storage_state,
+        crate::receiver::enrichment::EnrichmentConfig::default(),
+        Arc::clone(&observability),
+    );
+
+    let handles = start_listeners(config, ingest.clone(), Arc::clone(&observability))
+        .await
+        .expect("listeners start");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while observability.udp_listener_state() != ListenerState::Alive
+            || observability.tcp_listener_state() != ListenerState::Alive
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("listener supervisors report alive");
+
+    handles.udp.abort();
+    handles.tcp.abort();
+    ingest.shutdown(Duration::from_secs(1)).await;
 }

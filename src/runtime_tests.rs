@@ -217,6 +217,25 @@ async fn query_only_forces_loopback_dev_for_nonloopback_oauth_config() {
 }
 
 #[tokio::test]
+async fn runtime_accessors_build_shared_state_and_ingest_routers() {
+    let tmp = tempfile::tempdir().unwrap();
+    let runtime = RuntimeCore::for_server(test_config(tmp.path(), loopback_mcp()))
+        .await
+        .expect("runtime");
+
+    let _service = runtime.service();
+    let _pool = runtime.pool();
+    let _otlp = runtime.otlp_router();
+    let _heartbeat = runtime.heartbeat_router();
+    let state = runtime.mcp_state();
+
+    assert_eq!(state.config.server_name, "cortex");
+    assert!(matches!(runtime.auth_policy(), AuthPolicy::LoopbackDev));
+
+    runtime.shutdown(std::time::Duration::from_secs(1)).await;
+}
+
+#[tokio::test]
 async fn spawn_maintenance_tasks_constructs_expected_handles_and_shutdowns_cleanly() {
     let tmp = tempfile::tempdir().unwrap();
     let runtime = RuntimeCore::for_server(test_config(tmp.path(), loopback_mcp()))

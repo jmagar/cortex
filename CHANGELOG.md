@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.11] - 2026-06-13
+
+### Added
+
+- Add focused coverage for agent Docker connection seams, deploy-agent command probes, Gemini assessment missing-incident validation, Docker ingest supervisor task pruning, doctor render/error paths, receiver listener wiring, and runtime router accessors.
+
 ## [1.20.10] - 2026-06-13
 
 ### Added

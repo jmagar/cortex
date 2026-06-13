@@ -100,6 +100,60 @@ fn section_counts_errors_warnings_and_passes() {
 }
 
 #[test]
+#[serial]
+fn section_render_text_returns_error_count_and_skips_ok_details() {
+    let _color = EnvGuard::set("NO_COLOR", "1");
+    let section = DoctorSection::new(
+        "Render",
+        vec![
+            DoctorPhase::new(SetupStatus::Ok, "ok", "ok detail"),
+            DoctorPhase::new(SetupStatus::Skipped, "skip", "skip detail"),
+            DoctorPhase::new(SetupStatus::Warn, "warn", "\nwarn detail\nextra"),
+            DoctorPhase::new(SetupStatus::Error, "error", "error detail"),
+        ],
+    );
+
+    assert_eq!(section.render_text(), 1);
+}
+
+#[test]
+#[serial]
+fn text_doctor_report_render_succeeds_without_errors_and_fails_with_errors() {
+    let _color = EnvGuard::set("NO_COLOR", "1");
+    let ok = TextDoctorReport {
+        sections: vec![DoctorSection::new(
+            "Ok",
+            vec![DoctorPhase::new(SetupStatus::Ok, "ok", "ok detail")],
+        )],
+    };
+    assert!(ok.render().is_ok());
+
+    let err = TextDoctorReport {
+        sections: vec![DoctorSection::new(
+            "Bad",
+            vec![DoctorPhase::new(SetupStatus::Error, "bad", "bad detail")],
+        )],
+    }
+    .render()
+    .unwrap_err();
+    assert!(err.to_string().contains("1 error(s) found"));
+}
+
+#[test]
+fn binary_doctor_report_render_text_handles_absent_optional_fields() {
+    let report = BinaryDoctorReport {
+        current_exe: "cortex".into(),
+        path_cortex: None,
+        repo_version: "1.2.3".into(),
+        container_version: None,
+        runtime_current: None,
+        runtime_current_error: Some("runtime unknown".into()),
+    };
+
+    report.render_text();
+}
+
+#[test]
 fn diag_status_maps_compose_diagnostic_severity_to_setup_status() {
     assert!(matches!(
         diag_status(&DiagnosticSeverity::Info),

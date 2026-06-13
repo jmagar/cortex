@@ -1,14 +1,17 @@
 use std::time::Duration;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::config::{DockerHostConfig, DockerIngestConfig};
 use crate::db::{DockerCheckpoint, LogBatchEntry};
 use crate::docker_ingest::models::ContainerMeta;
+use crate::observability::RuntimeObservability;
 
 use super::{
-    DockerEventTaskPolicy, MIN_STREAM_DURATION_FOR_BACKOFF_RESET, StreamEnd, docker_log_since_unix,
+    ActiveDockerContainerStream, ActiveDockerHostStream, DockerEventTaskPolicy,
+    MIN_STREAM_DURATION_FOR_BACKOFF_RESET, StreamEnd, docker_log_since_unix,
     entry_is_at_or_before_checkpoint, event_task_policy, is_expected_disconnect,
-    jittered_reconnect_delay_ms, next_reconnect_backoff_ms, should_ingest_container,
-    should_reset_reconnect_backoff,
+    jittered_reconnect_delay_ms, next_reconnect_backoff_ms, prune_finished_tasks,
+    should_ingest_container, should_reset_reconnect_backoff,
 };
 
 fn docker_entry(timestamp: &str) -> LogBatchEntry {
@@ -223,4 +226,54 @@ fn reconnect_delay_jitter_is_deterministic_and_bounded() {
     assert_ne!(first, other);
     assert!((8_000..=12_000).contains(&first));
     assert!((8_000..=12_000).contains(&other));
+}
+
+#[test]
+fn active_stream_guards_increment_and_decrement_observability_counters() {
+    let observability = Arc::new(RuntimeObservability::default());
+
+    {
+        let _host = ActiveDockerHostStream::new(Arc::clone(&observability));
+        let _container = ActiveDockerContainerStream::new(Arc::clone(&observability));
+        let snapshot = observability.snapshot();
+        assert_eq!(snapshot.docker_ingest_host_streams_active, 1);
+        assert_eq!(snapshot.docker_ingest_container_streams_active, 1);
+    }
+
+    let snapshot = observability.snapshot();
+    assert_eq!(snapshot.docker_ingest_host_streams_active, 0);
+    assert_eq!(snapshot.docker_ingest_container_streams_active, 0);
+}
+
+#[tokio::test]
+async fn prune_finished_tasks_removes_completed_tasks_and_keeps_running_tasks() {
+    let mut tasks = HashMap::from([
+        ("done".to_string(), tokio::spawn(async {})),
+        (
+            "running".to_string(),
+            tokio::spawn(async {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }),
+        ),
+    ]);
+
+    tokio::task::yield_now().await;
+    prune_finished_tasks(&mut tasks);
+
+    assert!(!tasks.contains_key("done"));
+    let running = tasks.remove("running").expect("running task kept");
+    running.abort();
+}
+
+#[tokio::test]
+async fn prune_finished_tasks_removes_panicked_tasks_without_panicking() {
+    let mut tasks = HashMap::from([(
+        "panic".to_string(),
+        tokio::spawn(async { panic!("simulated docker log task panic") }),
+    )]);
+
+    tokio::task::yield_now().await;
+    prune_finished_tasks(&mut tasks);
+
+    assert!(tasks.is_empty());
 }
