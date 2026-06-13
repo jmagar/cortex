@@ -336,6 +336,212 @@ mod tests {
         (pool, dir)
     }
 
+    fn insert_sig(conn: &rusqlite::Connection, hash: &str, version: i64, last_seen_at: &str) {
+        upsert_signature(
+            conn,
+            UpsertSignatureParams {
+                hash,
+                normalizer_version: version,
+                template: &format!("template {hash}"),
+                sample_message: &format!("sample {hash}"),
+                sample_hostname: "host1",
+                sample_app_name: Some("sshd"),
+                severity: "err",
+                first_seen_at: "2026-06-13T00:00:00.000Z",
+                last_seen_at,
+                delta: 1,
+            },
+        )
+        .unwrap();
+    }
+
+    fn recent_timestamp(minutes_ago: i64) -> String {
+        chrono::Utc::now()
+            .checked_sub_signed(chrono::TimeDelta::minutes(minutes_ago))
+            .unwrap()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string()
+    }
+
+    #[test]
+    fn cursor_get_and_advance_round_trip() {
+        let (pool, _dir) = test_pool();
+        assert_eq!(cursor_get(&pool).unwrap(), 0);
+
+        {
+            let conn = pool.get().unwrap();
+            cursor_advance(&conn, 42).unwrap();
+        }
+
+        assert_eq!(cursor_get(&pool).unwrap(), 42);
+        let conn = pool.get().unwrap();
+        let completed_at: Option<String> = conn
+            .query_row(
+                "SELECT last_scan_completed_at FROM error_scan_cursor WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(completed_at.is_some());
+    }
+
+    #[test]
+    fn insert_window_merges_conflicting_counts_and_keeps_dimensions_separate() {
+        let (pool, _dir) = test_pool();
+        let conn = pool.get().unwrap();
+
+        insert_window(
+            &conn,
+            "deadbeef",
+            1,
+            "2026-06-13T00:00:00.000Z",
+            "2026-06-13T01:00:00.000Z",
+            2,
+        )
+        .unwrap();
+        insert_window(
+            &conn,
+            "deadbeef",
+            1,
+            "2026-06-13T00:00:00.000Z",
+            "2026-06-13T01:00:00.000Z",
+            3,
+        )
+        .unwrap();
+        insert_window(
+            &conn,
+            "deadbeef",
+            2,
+            "2026-06-13T00:00:00.000Z",
+            "2026-06-13T01:00:00.000Z",
+            11,
+        )
+        .unwrap();
+
+        let count_v1: i64 = conn
+            .query_row(
+                "SELECT count_in_window FROM error_signature_windows
+                 WHERE signature_hash = 'deadbeef' AND normalizer_version = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let count_v2: i64 = conn
+            .query_row(
+                "SELECT count_in_window FROM error_signature_windows
+                 WHERE signature_hash = 'deadbeef' AND normalizer_version = 2",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(count_v1, 5);
+        assert_eq!(count_v2, 11);
+    }
+
+    #[test]
+    fn read_unaddressed_filters_acknowledged_and_sums_recent_windows() {
+        let (pool, _dir) = test_pool();
+        let newer = recent_timestamp(5);
+        let older = recent_timestamp(10);
+        let stale = recent_timestamp(120);
+
+        {
+            let conn = pool.get().unwrap();
+            insert_sig(&conn, "unacked", 1, &newer);
+            insert_window(&conn, "unacked", 1, &older, &newer, 4).unwrap();
+            insert_window(&conn, "unacked", 1, &stale, &stale, 99).unwrap();
+
+            insert_sig(&conn, "acked", 1, &older);
+            insert_window(&conn, "acked", 1, &older, &newer, 7).unwrap();
+            update_ack_projection(
+                &conn,
+                "acked",
+                1,
+                Some("2026-06-13T00:30:00.000Z"),
+                Some("admin"),
+            )
+            .unwrap();
+        }
+
+        let unaddressed = read_unaddressed(&pool, 10, false).unwrap();
+        assert_eq!(unaddressed.len(), 1);
+        assert_eq!(unaddressed[0].signature_hash, "unacked");
+        assert_eq!(unaddressed[0].count_last_1h, 4);
+        assert!(unaddressed[0].acknowledged_at.is_none());
+
+        let with_acknowledged = read_unaddressed(&pool, 10, true).unwrap();
+        assert_eq!(
+            with_acknowledged
+                .iter()
+                .map(|row| row.signature_hash.as_str())
+                .collect::<Vec<_>>(),
+            vec!["unacked", "acked"]
+        );
+        let acked = with_acknowledged
+            .iter()
+            .find(|row| row.signature_hash == "acked")
+            .unwrap();
+        assert_eq!(acked.count_last_1h, 7);
+        assert!(acked.acknowledged_at.is_some());
+    }
+
+    #[test]
+    fn read_signature_by_hash_returns_none_for_missing_or_wrong_version() {
+        let (pool, _dir) = test_pool();
+        let recent = recent_timestamp(5);
+        {
+            let conn = pool.get().unwrap();
+            insert_sig(&conn, "look-me-up", 3, &recent);
+            insert_window(&conn, "look-me-up", 3, &recent, &recent, 6).unwrap();
+        }
+
+        assert!(
+            read_signature_by_hash(&pool, "look-me-up", 2)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            read_signature_by_hash(&pool, "missing", 3)
+                .unwrap()
+                .is_none()
+        );
+
+        let row = read_signature_by_hash(&pool, "look-me-up", 3)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.signature_hash, "look-me-up");
+        assert_eq!(row.normalizer_version, 3);
+        assert_eq!(row.count_last_1h, 6);
+    }
+
+    #[test]
+    fn update_ack_projection_unknown_hash_touches_no_rows() {
+        let (pool, _dir) = test_pool();
+        {
+            let conn = pool.get().unwrap();
+            insert_sig(&conn, "real", 1, "2026-06-13T00:00:00.000Z");
+
+            update_ack_projection(
+                &conn,
+                "forged",
+                1,
+                Some("2026-06-13T00:30:00.000Z"),
+                Some("attacker"),
+            )
+            .unwrap();
+
+            assert_eq!(conn.changes(), 0);
+        }
+        assert!(
+            read_signature_by_hash(&pool, "forged", 1)
+                .unwrap()
+                .is_none()
+        );
+        let real = read_signature_by_hash(&pool, "real", 1).unwrap().unwrap();
+        assert!(real.acknowledged_at.is_none());
+    }
+
     #[test]
     fn upsert_idempotency() {
         let (pool, _dir) = test_pool();

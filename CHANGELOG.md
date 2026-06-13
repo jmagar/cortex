@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.7] - 2026-06-13
+
+### Added
+
+- Add focused DB-layer coverage for error-signature scan cursors, window-count merging, unaddressed filtering, hash lookup misses, and forged-hash ack projection no-ops.
+
 ## [1.20.6] - 2026-06-12
 
 ### Added
