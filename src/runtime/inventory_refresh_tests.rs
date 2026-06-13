@@ -30,6 +30,61 @@ fn remote_docker_events_default_to_disabled() {
 }
 
 #[test]
+fn inventory_watch_env_accepts_common_false_values() {
+    let _guard = env_lock().lock().unwrap();
+    for value in ["0", "false", "FALSE", "no", " No "] {
+        unsafe {
+            std::env::set_var("CORTEX_INVENTORY_WATCH_ENABLED", value);
+        }
+        assert!(!inventory_watch_enabled(), "{value:?} should disable watch");
+    }
+    unsafe {
+        std::env::set_var("CORTEX_INVENTORY_WATCH_ENABLED", "yes");
+    }
+    assert!(inventory_watch_enabled());
+    unsafe {
+        std::env::remove_var("CORTEX_INVENTORY_WATCH_ENABLED");
+    }
+}
+
+#[test]
+fn inventory_refresh_interval_env_falls_back_on_invalid_values() {
+    let _guard = env_lock().lock().unwrap();
+    unsafe {
+        std::env::set_var("CORTEX_INVENTORY_REFRESH_INTERVAL_SECS", "not-a-number");
+    }
+    assert_eq!(
+        inventory_refresh_interval_secs(),
+        INVENTORY_REFRESH_INTERVAL_SECS
+    );
+    unsafe {
+        std::env::set_var("CORTEX_INVENTORY_REFRESH_INTERVAL_SECS", "42");
+    }
+    assert_eq!(inventory_refresh_interval_secs(), 42);
+    unsafe {
+        std::env::remove_var("CORTEX_INVENTORY_REFRESH_INTERVAL_SECS");
+    }
+}
+
+#[test]
+fn start_config_watcher_returns_none_when_watch_disabled() {
+    let _guard = env_lock().lock().unwrap();
+    unsafe {
+        std::env::set_var("CORTEX_INVENTORY_WATCH_ENABLED", "false");
+    }
+    let mut config = crate::inventory::InventoryConfig::from_env();
+    config.compose_paths = vec!["/tmp/cortex-compose.yml".into()];
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+    let watcher = start_config_watcher(&config, tx);
+
+    assert!(watcher.is_none());
+    unsafe {
+        std::env::remove_var("CORTEX_INVENTORY_WATCH_ENABLED");
+    }
+}
+
+#[test]
 fn watched_config_targets_include_compose_and_proxy_paths_once() {
     let mut config = crate::inventory::InventoryConfig::from_env();
     config.compose_paths = vec![

@@ -6,8 +6,9 @@ use crate::docker_ingest::models::ContainerMeta;
 
 use super::{
     DockerEventTaskPolicy, MIN_STREAM_DURATION_FOR_BACKOFF_RESET, StreamEnd, docker_log_since_unix,
-    entry_is_at_or_before_checkpoint, event_task_policy, jittered_reconnect_delay_ms,
-    next_reconnect_backoff_ms, should_ingest_container, should_reset_reconnect_backoff,
+    entry_is_at_or_before_checkpoint, event_task_policy, is_expected_disconnect,
+    jittered_reconnect_delay_ms, next_reconnect_backoff_ms, should_ingest_container,
+    should_reset_reconnect_backoff,
 };
 
 fn docker_entry(timestamp: &str) -> LogBatchEntry {
@@ -56,6 +57,20 @@ fn checkpoint_filter_skips_only_entries_at_or_before_precise_checkpoint() {
         &docker_entry("2026-05-05T01:02:03.500000001Z"),
         &checkpoint
     ));
+}
+
+#[test]
+fn checkpoint_filter_keeps_entries_without_parseable_docker_checkpoint() {
+    let checkpoint =
+        chrono::DateTime::parse_from_rfc3339("2026-05-05T01:02:03.500000000Z").unwrap();
+    let mut entry = docker_entry("2026-05-05T01:02:03.123456789Z");
+    entry.docker_checkpoint = None;
+
+    assert!(!entry_is_at_or_before_checkpoint(&entry, &checkpoint));
+
+    let mut invalid = docker_entry("not-a-timestamp");
+    invalid.docker_checkpoint.as_mut().unwrap().timestamp = "not-a-timestamp".to_string();
+    assert!(!entry_is_at_or_before_checkpoint(&invalid, &checkpoint));
 }
 
 #[test]
@@ -144,6 +159,21 @@ fn docker_event_policy_maps_lifecycle_actions_to_task_work() {
         event_task_policy("exec_start"),
         DockerEventTaskPolicy::Ignore
     );
+}
+
+#[test]
+fn expected_disconnect_detection_matches_known_transport_errors_only() {
+    for message in [
+        "error reading a body from connection",
+        "connection reset by peer",
+        "broken pipe",
+    ] {
+        let error = anyhow::anyhow!(message);
+        assert!(is_expected_disconnect(&error), "{message}");
+    }
+
+    let error = anyhow::anyhow!("permission denied opening docker socket");
+    assert!(!is_expected_disconnect(&error));
 }
 
 #[test]

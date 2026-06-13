@@ -340,6 +340,25 @@ fn mode_parse_accepts_deploy_namespace() {
         .unwrap(),
         Mode::Deploy(_)
     ));
+    assert!(matches!(
+        Mode::parse(vec![
+            "deploy".into(),
+            "agent".into(),
+            "--hosts".into(),
+            "tootie,dookie".into(),
+            "--target".into(),
+            "https://cortex.example.test".into(),
+            "--heartbeat-token".into(),
+            "secret".into(),
+            "--binary".into(),
+            "/tmp/cortex".into(),
+            "--docker".into(),
+            "--journald".into(),
+            "--json".into(),
+        ])
+        .unwrap(),
+        Mode::Deploy(_)
+    ));
 }
 
 #[test]
@@ -367,6 +386,108 @@ fn mode_parse_rejects_remote_deploy_with_multiple_hosts() {
         err.to_string()
             .contains("deploy remote accepts exactly one host")
     );
+}
+
+#[test]
+fn parse_deploy_agent_trims_and_drops_empty_hosts() {
+    let command = super::parse_deploy_command(&[
+        "agent".into(),
+        "--hosts".into(),
+        " tootie, ,dookie, ".into(),
+    ])
+    .unwrap();
+
+    let super::DeployCommandKind::Agent { hosts, .. } = command.kind else {
+        panic!("expected deploy agent");
+    };
+    assert_eq!(hosts, vec!["tootie".to_string(), "dookie".to_string()]);
+}
+
+#[test]
+fn parse_deploy_agent_preserves_all_options() {
+    let command = super::parse_deploy_command(&[
+        "agent".into(),
+        "--hosts".into(),
+        "tootie,dookie".into(),
+        "--target".into(),
+        "https://cortex.example.test".into(),
+        "--heartbeat-token".into(),
+        "secret".into(),
+        "--binary".into(),
+        "/tmp/cortex".into(),
+        "--docker".into(),
+        "--journald".into(),
+        "--json".into(),
+    ])
+    .unwrap();
+
+    assert!(command.json);
+    let super::DeployCommandKind::Agent {
+        hosts,
+        target,
+        token,
+        docker,
+        journald,
+        binary,
+    } = command.kind
+    else {
+        panic!("expected deploy agent");
+    };
+    assert_eq!(hosts, vec!["tootie".to_string(), "dookie".to_string()]);
+    assert_eq!(target.as_deref(), Some("https://cortex.example.test"));
+    assert_eq!(token.as_deref(), Some("secret"));
+    assert!(docker);
+    assert!(journald);
+    assert_eq!(binary.as_deref(), Some("/tmp/cortex"));
+}
+
+#[test]
+fn parse_deploy_agent_reports_missing_option_values() {
+    for flag in ["--hosts", "--target", "--heartbeat-token", "--binary"] {
+        let err = super::parse_deploy_command(&["agent".into(), flag.into()]).unwrap_err();
+        assert!(
+            err.to_string().contains("requires a value"),
+            "expected missing-value error for {flag}, got: {err}"
+        );
+    }
+}
+
+#[test]
+fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
+    let cases = [
+        (
+            vec!["setup", "ai-index-timer", "--json"],
+            "ai-index-timer check",
+        ),
+        (
+            vec!["setup", "ai-watch-service", "remove", "--json"],
+            "ai-watch-service remove",
+        ),
+        (
+            vec!["setup", "agent-command", "remove", "--json"],
+            "agent-command remove",
+        ),
+        (
+            vec!["setup", "heartbeat-agent", "remove", "--json"],
+            "heartbeat-agent remove",
+        ),
+        (
+            vec!["setup", "debug-wrapper", "remove", "--json"],
+            "debug-wrapper remove",
+        ),
+        (
+            vec!["setup", "debug-compose", "remove", "--json"],
+            "debug-compose remove",
+        ),
+    ];
+
+    for (args, label) in cases {
+        let mode = Mode::parse(args.into_iter().map(str::to_string).collect()).unwrap();
+        let Mode::Setup(command) = mode else {
+            panic!("{label}: expected setup mode");
+        };
+        assert!(command.json, "{label}: --json should be preserved");
+    }
 }
 
 #[test]

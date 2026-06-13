@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.9] - 2026-06-13
+
+### Added
+
+- Add focused coverage for deploy-agent parsing, notification evaluator cycles, inventory refresh gates, remote config/project collectors, and Docker ingest supervisor helpers.
+
+### Fixed
+
+- Drop empty host entries from `cortex deploy agent --hosts` comma lists and make the evaluator future-row age test assert against `received_at`.
+
 ## [1.20.8] - 2026-06-13
 
 ### Added
