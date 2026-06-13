@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.10] - 2026-06-13
+
+### Added
+
+- Expand coverage for doctor runtime diagnostics, setup first-run/systemd/AI-watch command phases, runtime auth and inventory-refresh helpers, heartbeat-agent collection and retry paths, CLI local-only routing, and inventory device/project collectors.
+
 ## [1.20.9] - 2026-06-13
 
 ### Added

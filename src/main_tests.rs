@@ -673,6 +673,90 @@ fn mode_parse_accepts_new_surface_parity_subcommands() {
     }
 }
 
+fn cli_invocation(args: &[&str]) -> super::CliInvocation {
+    let mode = Mode::parse(args.iter().map(|arg| (*arg).to_string()).collect()).unwrap();
+    let Mode::Cli(invocation) = mode else {
+        panic!("expected CLI mode");
+    };
+    *invocation
+}
+
+#[tokio::test]
+async fn run_cli_rejects_http_flags_for_local_only_compose_setup_and_inventory() {
+    for (args, expected) in [
+        (
+            &["--http", "compose", "status"][..],
+            "`compose` (local-only command)",
+        ),
+        (
+            &["--server", "http://127.0.0.1:3100", "setup", "check"][..],
+            "`setup` (local-only command)",
+        ),
+        (
+            &["inventory", "--token", "secret", "refresh"][..],
+            "`inventory` (local-only command)",
+        ),
+    ] {
+        let err = super::run_cli(cli_invocation(args)).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains(expected),
+            "expected {expected:?} in {msg:?} for args {args:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn run_cli_rejects_http_flags_for_agent_local_surfaces() {
+    for (args, expected) in [
+        (
+            &["--http", "heartbeat", "agent"][..],
+            "--http has no effect on `heartbeat agent`",
+        ),
+        (
+            &[
+                "agent-command",
+                "wrap",
+                "--server",
+                "http://127.0.0.1:3100",
+                "--spool",
+                "/tmp/spool.jsonl",
+                "--",
+                "true",
+            ][..],
+            "`agent-command wrap` (wrapper command)",
+        ),
+        (
+            &[
+                "shell",
+                "index",
+                "--path",
+                "/tmp/history",
+                "--token",
+                "secret",
+            ][..],
+            "local agent commands",
+        ),
+    ] {
+        let err = super::run_cli(cli_invocation(args)).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains(expected),
+            "expected {expected:?} in {msg:?} for args {args:?}"
+        );
+    }
+}
+
+#[test]
+fn colorize_setup_status_renders_all_status_variants() {
+    use cortex::setup::SetupStatus;
+
+    assert!(super::colorize_setup_status(&SetupStatus::Ok).contains("Ok"));
+    assert!(super::colorize_setup_status(&SetupStatus::Warn).contains("Warn"));
+    assert!(super::colorize_setup_status(&SetupStatus::Error).contains("Error"));
+    assert!(super::colorize_setup_status(&SetupStatus::Skipped).contains("Skipped"));
+}
+
 // Top-level help banner content + per-command drift coverage now live in
 // `src/cli/help_tests.rs` (the `CATALOG` is the source of truth, not a flat
 // USAGE const).

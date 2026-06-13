@@ -25,7 +25,7 @@ pub(super) fn systemctl_user_phase(args: &[&str]) -> SetupPhase {
     systemctl_user_named_phase("systemctl-user", args)
 }
 
-pub(super) fn systemctl_user_named_phase(name: &'static str, args: &[&str]) -> SetupPhase {
+pub(crate) fn systemctl_user_named_phase(name: &'static str, args: &[&str]) -> SetupPhase {
     let timer = super::PhaseTimer::start(name);
     match run_systemctl_user(args) {
         Ok(output) if output.status.success() => timer.finish(
@@ -48,7 +48,7 @@ pub(super) fn systemctl_user_required_phase(args: &[&str]) -> SetupPhase {
     systemctl_user_required_named_phase("systemctl-user", args)
 }
 
-pub(super) fn systemctl_user_required_named_phase(name: &'static str, args: &[&str]) -> SetupPhase {
+pub(crate) fn systemctl_user_required_named_phase(name: &'static str, args: &[&str]) -> SetupPhase {
     let timer = super::PhaseTimer::start(name);
     match run_systemctl_user(args) {
         Ok(output) if output.status.success() => timer.finish(
@@ -64,7 +64,7 @@ pub(super) fn systemctl_user_required_named_phase(name: &'static str, args: &[&s
     }
 }
 
-pub(super) fn systemctl_user_state(command: &str, unit: &str) -> Option<String> {
+pub(crate) fn systemctl_user_state(command: &str, unit: &str) -> Option<String> {
     let output = run_systemctl_user(&[command, unit]).ok()?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     (!stdout.is_empty()).then_some(stdout)

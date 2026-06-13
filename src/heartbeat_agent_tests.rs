@@ -3,6 +3,46 @@ use super::*;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use serial_test::serial;
+use wiremock::matchers::{header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+struct EnvGuard {
+    name: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvGuard {
+    fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let previous = std::env::var(name).ok();
+        unsafe {
+            std::env::set_var(name, value);
+        }
+        Self { name, previous }
+    }
+
+    fn unset(name: &'static str) -> Self {
+        let previous = std::env::var(name).ok();
+        unsafe {
+            std::env::remove_var(name);
+        }
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => unsafe {
+                std::env::set_var(self.name, value);
+            },
+            None => unsafe {
+                std::env::remove_var(self.name);
+            },
+        }
+    }
+}
+
 #[tokio::test]
 async fn fake_collector_emits_valid_v1_payload_defaults() {
     let collector = HeartbeatCollector::fake();
@@ -29,6 +69,97 @@ async fn fake_collector_emits_valid_v1_payload_defaults() {
     let json = serde_json::to_value(&payload).unwrap();
     assert!(json.get("networks").is_some());
     assert!(json.get("network").is_none());
+}
+
+#[test]
+#[serial]
+fn config_from_env_honors_agent_stream_flags_and_fallbacks() {
+    let _target = EnvGuard::set("CORTEX_HEARTBEAT_TARGET", "https://cortex.example.test");
+    let _token = EnvGuard::set("CORTEX_HEARTBEAT_TOKEN", "heartbeat-token");
+    let _docker = EnvGuard::set("CORTEX_AGENT_DOCKER", "1");
+    let _docker_url = EnvGuard::set("CORTEX_AGENT_DOCKER_URL", "unix:///tmp/docker.sock");
+    let _journald = EnvGuard::set("CORTEX_AGENT_JOURNALD", "true");
+    let _syslog_file = EnvGuard::set("CORTEX_AGENT_SYSLOG_FILE", "/var/log/syslog");
+    let _syslog_target = EnvGuard::set("CORTEX_SYSLOG_TARGET", "127.0.0.1:1514");
+
+    let config = HeartbeatAgentConfig::from_env(PathBuf::from("/tmp/host-id"));
+
+    assert_eq!(
+        config.target.as_deref(),
+        Some("https://cortex.example.test")
+    );
+    assert_eq!(config.token.as_deref(), Some("heartbeat-token"));
+    assert!(config.docker);
+    assert_eq!(config.docker_url, "unix:///tmp/docker.sock");
+    assert!(config.journald);
+    assert_eq!(
+        config.syslog_file.as_deref(),
+        Some(Path::new("/var/log/syslog"))
+    );
+    assert_eq!(config.syslog_target.as_deref(), Some("127.0.0.1:1514"));
+}
+
+#[test]
+#[serial]
+fn config_from_env_uses_cortex_url_and_token_fallbacks_and_ignores_blank_syslog_file() {
+    let _heartbeat_target = EnvGuard::unset("CORTEX_HEARTBEAT_TARGET");
+    let _heartbeat_token = EnvGuard::unset("CORTEX_HEARTBEAT_TOKEN");
+    let _target = EnvGuard::set("CORTEX_URL", "http://fallback.example.test");
+    let _token = EnvGuard::set("CORTEX_TOKEN", "fallback-token");
+    let _docker = EnvGuard::set("CORTEX_AGENT_DOCKER", "false");
+    let _journald = EnvGuard::set("CORTEX_AGENT_JOURNALD", "0");
+    let _syslog_file = EnvGuard::set("CORTEX_AGENT_SYSLOG_FILE", "   ");
+
+    let config = HeartbeatAgentConfig::from_env(PathBuf::from("/tmp/host-id"));
+
+    assert_eq!(
+        config.target.as_deref(),
+        Some("http://fallback.example.test")
+    );
+    assert_eq!(config.token.as_deref(), Some("fallback-token"));
+    assert!(!config.docker);
+    assert!(!config.journald);
+    assert!(config.syslog_file.is_none());
+    assert_eq!(config.docker_url, DEFAULT_DOCKER_URL);
+}
+
+#[tokio::test]
+async fn collector_caps_disk_and_network_outputs_and_marks_partial() {
+    let mut probes: Vec<Box<dyn HeartbeatProbe>> = Vec::new();
+    for _ in 0..17 {
+        probes.push(Box::new(FakeProbe::disk()));
+    }
+    for _ in 0..17 {
+        probes.push(Box::new(FakeProbe::network()));
+    }
+    let collector = HeartbeatCollector::with_probes(probes);
+
+    let payload = collector
+        .collect(
+            "syslog_testhostid1234".to_string(),
+            1,
+            Duration::from_secs(30),
+            0,
+            Duration::from_millis(100),
+            Duration::from_millis(1_000),
+        )
+        .await;
+
+    assert_eq!(payload.disks.len(), 16);
+    assert_eq!(payload.networks.len(), 16);
+    assert!(payload.sample.partial);
+    assert!(
+        payload
+            .sample
+            .skipped_probes
+            .contains(&"disk_limit".to_string())
+    );
+    assert!(
+        payload
+            .sample
+            .skipped_probes
+            .contains(&"network_limit".to_string())
+    );
 }
 
 #[tokio::test]
@@ -154,6 +285,25 @@ fn linux_proc_parsers_extract_cpu_network_disk_and_process_state() {
 }
 
 #[test]
+fn linux_parser_helpers_cover_pseudo_fs_mount_escaping_and_device_names() {
+    assert!(is_pseudo_fs("proc"));
+    assert!(!is_pseudo_fs("ext4"));
+    assert_eq!(
+        unescape_mount_path("/mnt/My\\040Disk/with\\011tab/line\\012slash\\134"),
+        "/mnt/My Disk/with\ttab/line\nslash\\"
+    );
+    assert!(!is_disk_device_name("loop0"));
+    assert!(!is_disk_device_name("sda1"));
+    assert!(is_disk_device_name("sda"));
+    assert!(is_disk_device_name("nvme0n1"));
+    assert!(!is_disk_device_name("nvme0n1p1"));
+    assert!(is_disk_device_name("mmcblk0"));
+    assert!(!is_disk_device_name("mmcblk0p1"));
+    assert!(is_disk_device_name("dm-0"));
+    assert_eq!(clamp_u128_to_i64(i64::MAX as u128 + 500), i64::MAX);
+}
+
+#[test]
 fn linux_rate_helpers_return_none_on_first_sample_and_rates_afterwards() {
     let previous = Mutex::new(None);
     let now = Instant::now();
@@ -242,6 +392,69 @@ fn heartbeat_url_rejects_non_http_scheme() {
     assert!(heartbeat_url("ftp://host:3100").is_err());
 }
 
+#[tokio::test]
+async fn send_payload_posts_json_with_bearer_and_records_latency_on_accepted_response() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/heartbeats"))
+        .and(header("authorization", "Bearer secret-token"))
+        .respond_with(ResponseTemplate::new(202))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = reqwest::Client::new();
+    let mut payload = test_payload(1);
+
+    send_payload(&client, &server.uri(), Some("secret-token"), &mut payload)
+        .await
+        .unwrap();
+
+    assert!(payload.agent.push_latency_ms.is_some());
+}
+
+#[tokio::test]
+async fn send_payload_reports_non_accepted_status_and_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/heartbeats"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("try later"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = reqwest::Client::new();
+    let mut payload = test_payload(1);
+
+    let err = send_payload(&client, &server.uri(), None, &mut payload)
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(msg.contains("503"));
+    assert!(msg.contains("try later"));
+    assert!(payload.agent.push_latency_ms.is_some());
+}
+
+#[tokio::test]
+async fn flush_retry_buffer_stops_on_first_failed_retry_and_requeues_payload() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/heartbeats"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("still down"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = reqwest::Client::new();
+    let mut retry = RetryBuffer::new(4);
+    retry.push(test_payload(1));
+    retry.push(test_payload(2));
+
+    flush_retry_buffer(&client, &mut retry, &server.uri(), None).await;
+
+    assert_eq!(retry.len(), 2);
+    assert_eq!(retry.pop_front().unwrap().sample.sequence, 2);
+    assert_eq!(retry.pop_front().unwrap().sample.sequence, 1);
+}
+
 #[test]
 fn retry_buffer_zero_limit_discards_all_pushes() {
     let mut buffer = RetryBuffer::new(0);
@@ -263,6 +476,14 @@ fn parse_meminfo_errors_on_missing_mem_available() {
     let result = parse_meminfo("MemTotal: 1000 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n");
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("MemAvailable"));
+}
+
+#[test]
+fn host_id_validation_rejects_short_or_unsafe_values_and_accepts_generated_shape() {
+    assert!(validate_host_id("syslog_valid-host_id123").is_ok());
+    assert!(validate_host_id("short").is_err());
+    assert!(validate_host_id("syslog bad spaces").is_err());
+    assert_eq!(hex_bytes(&[0x00, 0x1f, 0xa5, 0xff]), "001fa5ff");
 }
 
 #[test]

@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use super::{RuntimeCore, background_interval, build_auth_policy};
+use super::{
+    RuntimeCore, background_interval, build_auth_policy, mcp_static_token_active,
+    reject_unsafe_otlp_oauth_only_exposure, resolve_auth_path,
+};
 use crate::config::{AuthConfig, AuthMode, Config, McpConfig, StorageConfig};
 use crate::mcp::AuthPolicy;
 
@@ -110,6 +113,84 @@ fn oauth_mcp(tmp: &std::path::Path) -> McpConfig {
     mcp
 }
 
+#[test]
+fn resolve_auth_path_keeps_absolute_and_roots_relative_paths_in_storage_dir() {
+    let base = std::path::Path::new("/var/lib/cortex");
+
+    assert_eq!(
+        resolve_auth_path(base, std::path::Path::new("auth.db")),
+        std::path::PathBuf::from("/var/lib/cortex/auth.db")
+    );
+    assert_eq!(
+        resolve_auth_path(base, std::path::Path::new("/run/cortex/auth.db")),
+        std::path::PathBuf::from("/run/cortex/auth.db")
+    );
+}
+
+#[test]
+fn mcp_static_token_active_requires_nonblank_token() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut mcp = loopback_mcp();
+    let mut config = test_config(tmp.path(), mcp.clone());
+    assert!(!mcp_static_token_active(&config));
+
+    mcp.api_token = Some("   ".into()).into();
+    config = test_config(tmp.path(), mcp.clone());
+    assert!(!mcp_static_token_active(&config));
+
+    mcp.api_token = Some("secret".into()).into();
+    config = test_config(tmp.path(), mcp);
+    assert!(mcp_static_token_active(&config));
+}
+
+#[test]
+fn unsafe_otlp_oauth_exposure_guard_allows_stdio_loopback_token_and_trusted_gateway() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let mut stdio_mcp = oauth_mcp(tmp.path());
+    stdio_mcp.host = "0.0.0.0".into();
+    stdio_mcp.api_token = None.into();
+    let stdio_config = test_config(tmp.path(), stdio_mcp);
+    assert!(reject_unsafe_otlp_oauth_only_exposure(&stdio_config, true).is_ok());
+
+    let loopback_config = test_config(tmp.path(), oauth_mcp(tmp.path()));
+    assert!(reject_unsafe_otlp_oauth_only_exposure(&loopback_config, false).is_ok());
+
+    let mut token_mcp = oauth_mcp(tmp.path());
+    token_mcp.host = "0.0.0.0".into();
+    token_mcp.api_token = Some("token".into()).into();
+    let token_config = test_config(tmp.path(), token_mcp);
+    assert!(reject_unsafe_otlp_oauth_only_exposure(&token_config, false).is_ok());
+
+    let mut gateway_mcp = oauth_mcp(tmp.path());
+    gateway_mcp.host = "0.0.0.0".into();
+    gateway_mcp.no_auth = true;
+    gateway_mcp.trusted_gateway_no_auth = true;
+    gateway_mcp.api_token = None.into();
+    let gateway_config = test_config(tmp.path(), gateway_mcp);
+    assert!(reject_unsafe_otlp_oauth_only_exposure(&gateway_config, false).is_ok());
+}
+
+#[test]
+fn unsafe_otlp_oauth_exposure_guard_rejects_nonloopback_without_static_token_or_gateway() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let mut oauth_only = oauth_mcp(tmp.path());
+    oauth_only.host = "0.0.0.0".into();
+    oauth_only.api_token = None.into();
+    let oauth_only_config = test_config(tmp.path(), oauth_only);
+    let err = reject_unsafe_otlp_oauth_only_exposure(&oauth_only_config, false).unwrap_err();
+    assert!(err.to_string().contains("OTLP /v1/logs"));
+
+    let mut no_auth = oauth_mcp(tmp.path());
+    no_auth.host = "0.0.0.0".into();
+    no_auth.no_auth = true;
+    no_auth.trusted_gateway_no_auth = false;
+    let no_auth_config = test_config(tmp.path(), no_auth);
+    let err = reject_unsafe_otlp_oauth_only_exposure(&no_auth_config, false).unwrap_err();
+    assert!(err.to_string().contains("CORTEX_TRUSTED_GATEWAY_NO_AUTH"));
+}
+
 #[tokio::test]
 async fn build_auth_policy_returns_loopback_dev_when_no_auth_and_loopback_bind() {
     let tmp = tempfile::tempdir().unwrap();
@@ -118,6 +199,45 @@ async fn build_auth_policy_returns_loopback_dev_when_no_auth_and_loopback_bind()
         .await
         .expect("build policy");
     assert!(matches!(policy, AuthPolicy::LoopbackDev));
+}
+
+#[tokio::test]
+async fn query_only_forces_loopback_dev_for_nonloopback_oauth_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut mcp = oauth_mcp(tmp.path());
+    mcp.host = "0.0.0.0".into();
+    mcp.api_token = None.into();
+    let config = test_config(tmp.path(), mcp);
+
+    let runtime = RuntimeCore::query_only(config)
+        .await
+        .expect("stdio runtime should ignore HTTP OAuth exposure constraints");
+
+    assert!(matches!(runtime.auth_policy, AuthPolicy::LoopbackDev));
+}
+
+#[tokio::test]
+async fn spawn_maintenance_tasks_constructs_expected_handles_and_shutdowns_cleanly() {
+    let tmp = tempfile::tempdir().unwrap();
+    let runtime = RuntimeCore::for_server(test_config(tmp.path(), loopback_mcp()))
+        .await
+        .expect("runtime");
+
+    let handles = runtime.spawn_maintenance_tasks();
+
+    assert!(handles.purge.is_some());
+    assert!(handles.storage.is_some());
+    assert!(handles.file_tail.is_some());
+    assert!(handles.inventory_refresh.is_some());
+    assert!(handles.inventory_backfill.is_some());
+    assert!(handles.session_rollup.is_some());
+    assert!(handles.timeline_rollup.is_some());
+    assert!(handles.optimize.is_some());
+    assert!(handles.syslog_monitor.is_none());
+    assert!(handles.docker_ingest.is_empty());
+
+    handles.shutdown(std::time::Duration::from_secs(1)).await;
+    runtime.shutdown(std::time::Duration::from_secs(1)).await;
 }
 
 #[tokio::test]

@@ -340,7 +340,7 @@ fn transcript_root_permission_error(root: &Path) -> Option<String> {
     None
 }
 
-fn run_ai_watch_initial_index_phase(cortex_bin: &Path, env_path: &Path) -> SetupPhase {
+pub(crate) fn run_ai_watch_initial_index_phase(cortex_bin: &Path, env_path: &Path) -> SetupPhase {
     let timer = PhaseTimer::start("ai-watch-initial-index");
     let env = match std::fs::read_to_string(env_path) {
         Ok(raw) => parse_env(&raw),

@@ -35,8 +35,8 @@ pub(crate) use ai_index::{ai_index_script, ai_index_service_unit, ai_index_timer
 #[cfg(test)]
 pub(crate) use ai_watch::{
     ai_index_output_status, ai_watch_env_file, ai_watch_service_unit,
-    check_ai_watch_service_content_phase, summarize_ai_index_output,
-    transcript_root_permissions_phase,
+    check_ai_watch_service_content_phase, run_ai_watch_initial_index_phase,
+    summarize_ai_index_output, transcript_root_permissions_phase,
 };
 #[cfg(test)]
 pub(crate) use debug_wrapper::{
@@ -45,10 +45,14 @@ pub(crate) use debug_wrapper::{
 };
 #[cfg(test)]
 pub(crate) use firstrun::{
-    ensure_env_file, filesystem_phase, parse_env, write_compose_assets, write_env,
+    cleanup_legacy_systemd, command_phase, ensure_env_file, ensure_network_phase, filesystem_phase,
+    health_phase, parse_env, run_compose_phase, write_compose_assets, write_env,
 };
 #[cfg(test)]
-pub(crate) use systemd::inferred_user_bus_env;
+pub(crate) use systemd::{
+    inferred_user_bus_env, systemctl_user_named_phase, systemctl_user_required_named_phase,
+    systemctl_user_state,
+};
 
 #[cfg(test)]
 #[path = "setup_tests.rs"]
