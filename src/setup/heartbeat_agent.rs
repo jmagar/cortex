@@ -385,6 +385,107 @@ mod tests {
     }
 
     #[test]
+    fn write_heartbeat_agent_env_writes_private_agent_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let env_path = dir.path().join("nested/heartbeat-agent.env");
+
+        let phase = write_heartbeat_agent_env(&env_path).unwrap();
+        let raw = std::fs::read_to_string(&env_path).unwrap();
+
+        assert!(matches!(phase.status, SetupStatus::Ok));
+        assert!(raw.contains(&format!(
+            "CORTEX_HEARTBEAT_TARGET={}\n",
+            heartbeat_agent::DEFAULT_TARGET
+        )));
+        assert!(raw.contains("CORTEX_AGENT_DOCKER=false\n"));
+        assert!(raw.contains(&format!(
+            "CORTEX_AGENT_DOCKER_URL={}\n",
+            heartbeat_agent::DEFAULT_DOCKER_URL
+        )));
+        assert!(raw.contains("CORTEX_AGENT_JOURNALD=false\n"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&env_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[test]
+    fn write_heartbeat_agent_unit_creates_parent_and_expected_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let unit_path = dir
+            .path()
+            .join(".config/systemd/user/cortex-heartbeat-agent.service");
+        let cortex_bin = Path::new("/usr/local/bin/cortex");
+        let env_path = Path::new("/home/me/.cortex/heartbeat-agent.env");
+        let host_id_path = Path::new("/home/me/.cortex/heartbeat-host-id");
+
+        let phase =
+            write_heartbeat_agent_unit(&unit_path, cortex_bin, env_path, host_id_path).unwrap();
+        let raw = std::fs::read_to_string(&unit_path).unwrap();
+
+        assert!(matches!(phase.status, SetupStatus::Ok));
+        assert!(raw.contains("[Service]\nType=simple"));
+        assert!(raw.contains(
+            "ExecStart=/usr/local/bin/cortex heartbeat agent --host-id-path /home/me/.cortex/heartbeat-host-id"
+        ));
+    }
+
+    #[test]
+    fn write_heartbeat_agent_compose_creates_compose_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let compose_dir = dir.path().join("compose");
+        std::fs::create_dir_all(&compose_dir).unwrap();
+
+        let phase = write_heartbeat_agent_compose(
+            &compose_dir,
+            Path::new("/home/me/.local/bin/cortex"),
+            Path::new("/home/me/.cortex/heartbeat-agent.env"),
+            Path::new("/home/me/.cortex/heartbeat-host-id"),
+        )
+        .unwrap();
+        let raw = std::fs::read_to_string(compose_dir.join("docker-compose.yml")).unwrap();
+
+        assert!(matches!(phase.status, SetupStatus::Ok));
+        assert!(raw.contains("cortex-heartbeat-agent:"));
+        assert!(raw.contains("restart: unless-stopped"));
+        assert!(raw.contains("network_mode: host"));
+    }
+
+    #[test]
+    fn heartbeat_agent_assets_reject_unit_breaking_paths() {
+        assert!(
+            heartbeat_agent_unit(
+                Path::new("/usr/local/bin/cortex"),
+                Path::new("/home/me/bad path/heartbeat-agent.env"),
+                Path::new("/home/me/.cortex/heartbeat-host-id"),
+            )
+            .is_err()
+        );
+        assert!(
+            heartbeat_agent_compose(
+                Path::new("/home/me/.local/bin/cortex"),
+                Path::new("/home/me/.cortex/heartbeat-agent.env"),
+                Path::new("/home/me/bad path/heartbeat-host-id"),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn docker_compose_up_phase_reports_warn_when_workdir_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing-compose-dir");
+
+        let phase = docker_compose_up_phase(&missing);
+
+        assert!(matches!(phase.status, SetupStatus::Warn));
+        assert_eq!(phase.name, "heartbeat-agent-docker-up");
+        assert!(!phase.detail.trim().is_empty());
+    }
+
+    #[test]
     fn content_phase_detects_matching_and_stale_units() {
         let dir = tempfile::tempdir().unwrap();
         let unit_path = dir.path().join("cortex-heartbeat-agent.service");

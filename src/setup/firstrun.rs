@@ -91,7 +91,7 @@ pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {
     ))
 }
 
-pub(super) fn filesystem_phase(
+pub(crate) fn filesystem_phase(
     mode: SetupMode,
     home: &Path,
     data_dir: &Path,
@@ -346,7 +346,7 @@ pub(crate) fn render_env(env: &BTreeMap<String, String>) -> String {
     out
 }
 
-fn write_compose_assets(compose_dir: &Path) -> io::Result<SetupPhase> {
+pub(crate) fn write_compose_assets(compose_dir: &Path) -> io::Result<SetupPhase> {
     let timer = PhaseTimer::start("compose-assets");
     std::fs::create_dir_all(compose_dir.join("config"))?;
     std::fs::write(

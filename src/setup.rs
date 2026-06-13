@@ -44,7 +44,9 @@ pub(crate) use debug_wrapper::{
     debug_wrapper_script,
 };
 #[cfg(test)]
-pub(crate) use firstrun::{ensure_env_file, parse_env, write_env};
+pub(crate) use firstrun::{
+    ensure_env_file, filesystem_phase, parse_env, write_compose_assets, write_env,
+};
 #[cfg(test)]
 pub(crate) use systemd::inferred_user_bus_env;
 

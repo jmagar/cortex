@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.8] - 2026-06-13
+
+### Added
+
+- Add focused coverage for migration idempotency drift, setup first-run env and compose asset generation, heartbeat-agent setup artifacts, and notification dispatcher no-URL drops.
+
 ## [1.20.7] - 2026-06-13
 
 ### Added

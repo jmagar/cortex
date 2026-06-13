@@ -239,6 +239,103 @@ fn parse_env_ignores_comments_and_blank_lines() {
 }
 
 #[test]
+fn parse_env_preserves_equals_inside_values_and_trims_outer_whitespace() {
+    let parsed = parse_env(" URL = https://example.test/path?a=1&b=2 \nBROKEN\nEMPTY=\n");
+
+    assert_eq!(
+        parsed.get("URL").map(String::as_str),
+        Some("https://example.test/path?a=1&b=2")
+    );
+    assert_eq!(parsed.get("EMPTY").map(String::as_str), Some(""));
+    assert!(
+        !parsed.contains_key("BROKEN"),
+        "lines without '=' are ignored"
+    );
+}
+
+#[test]
+fn default_env_for_data_dir_uses_agent_docker_defaults_and_required_tokens() {
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().join("data");
+
+    let env = default_env_for_data_dir(&data_dir).unwrap();
+
+    assert_eq!(
+        env.get("CORTEX_DOCKER_INGEST_ENABLED").map(String::as_str),
+        Some("false"),
+        "fresh setup must keep legacy central Docker ingest disabled"
+    );
+    assert!(
+        !env.contains_key("CORTEX_DOCKER_HOSTS"),
+        "remote Docker Engine hosts are opt-in compatibility config only"
+    );
+    assert_eq!(
+        env.get("CORTEX_DATA_VOLUME").map(String::as_str),
+        Some(data_dir.to_string_lossy().as_ref())
+    );
+    for key in ["CORTEX_TOKEN", "CORTEX_API_TOKEN"] {
+        let token = env.get(key).expect("token default must be generated");
+        assert_eq!(token.len(), 64, "{key} must be 64 hex chars");
+        assert!(
+            token.chars().all(|c| c.is_ascii_hexdigit()),
+            "{key} must be hex"
+        );
+    }
+}
+
+#[test]
+fn filesystem_phase_check_warns_when_setup_dirs_are_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".cortex");
+    let data_dir = home.join("data");
+    let compose_dir = home.join("compose");
+
+    let phase = filesystem_phase(SetupMode::Check, &home, &data_dir, &compose_dir).unwrap();
+
+    assert_eq!(phase.name, "filesystem");
+    assert_eq!(phase.status, SetupStatus::Warn);
+    assert!(phase.detail.contains("missing setup dirs"));
+}
+
+#[test]
+fn filesystem_phase_repair_creates_private_runtime_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".cortex");
+    let data_dir = home.join("data");
+    let compose_dir = home.join("compose");
+
+    let phase = filesystem_phase(SetupMode::Repair, &home, &data_dir, &compose_dir).unwrap();
+
+    assert_eq!(phase.status, SetupStatus::Ok);
+    assert!(home.is_dir());
+    assert!(data_dir.is_dir());
+    assert!(compose_dir.is_dir());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let home_mode = std::fs::metadata(&home).unwrap().permissions().mode() & 0o777;
+        let data_mode = std::fs::metadata(&data_dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(home_mode, 0o700);
+        assert_eq!(data_mode, 0o700);
+    }
+}
+
+#[test]
+fn write_compose_assets_writes_installed_compose_and_dockerfile() {
+    let dir = tempfile::tempdir().unwrap();
+    let compose_dir = dir.path().join("compose");
+
+    let phase = write_compose_assets(&compose_dir).unwrap();
+
+    assert_eq!(phase.status, SetupStatus::Ok);
+    let compose = std::fs::read_to_string(compose_dir.join("docker-compose.yml")).unwrap();
+    let dockerfile = std::fs::read_to_string(compose_dir.join("config/Dockerfile")).unwrap();
+    assert_eq!(compose, installed_compose_asset());
+    assert_eq!(dockerfile, dockerfile_asset());
+    assert!(compose.contains("      - path: ../.env\n"));
+}
+
+#[test]
 fn installed_compose_asset_uses_published_image_only() {
     // COMPOSE_ASSET is now docker-compose.prod.yml — the publishable template.
     assert!(COMPOSE_ASSET.contains("image: ghcr.io/jmagar/cortex:"));
