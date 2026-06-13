@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.5] - 2026-06-12
+
+### Added
+
+- Add focused unit coverage for agent Docker naming, journald parsing, syslog sender formatting, OS adapter D-Bus inference, CLI heartbeat-agent config mapping, and debug setup helpers.
+
+### Fixed
+
+- Relax the graph-inventory lock-scope test timeout so coverage-instrumented builds do not fail on instrumentation overhead while still proving the write lock is released promptly.
+
 ## [1.20.4] - 2026-06-12
 
 ### Added

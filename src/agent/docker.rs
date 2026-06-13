@@ -139,23 +139,30 @@ async fn list_containers(docker: &Docker) -> Result<Vec<ContainerInfo>> {
         .into_iter()
         .filter_map(|s| {
             let id = s.id?;
-            let name = s
-                .names
-                .and_then(|ns| ns.into_iter().next())
-                .map(|n| n.trim_start_matches('/').to_string())
-                .unwrap_or_else(|| id.chars().take(12).collect());
+            let name = container_display_name(&id, s.names);
             let labels: HashMap<String, String> = s.labels.unwrap_or_default();
-            let app_name = match (
-                labels.get("com.docker.compose.project"),
-                labels.get("com.docker.compose.service"),
-            ) {
-                (Some(proj), Some(svc)) => format!("{proj}/{svc}/{name}"),
-                (_, Some(svc)) => format!("{svc}/{name}"),
-                _ => name.clone(),
-            };
+            let app_name = container_app_name(&name, &labels);
             Some(ContainerInfo { id, name, app_name })
         })
         .collect())
+}
+
+fn container_display_name(id: &str, names: Option<Vec<String>>) -> String {
+    names
+        .and_then(|ns| ns.into_iter().next())
+        .map(|n| n.trim_start_matches('/').to_string())
+        .unwrap_or_else(|| id.chars().take(12).collect())
+}
+
+fn container_app_name(name: &str, labels: &HashMap<String, String>) -> String {
+    match (
+        labels.get("com.docker.compose.project"),
+        labels.get("com.docker.compose.service"),
+    ) {
+        (Some(proj), Some(svc)) => format!("{proj}/{svc}/{name}"),
+        (_, Some(svc)) => format!("{svc}/{name}"),
+        _ => name.to_string(),
+    }
 }
 
 fn connect(docker_url: &str) -> Result<Docker> {
@@ -191,4 +198,62 @@ fn connect(docker_url: &str) -> Result<Docker> {
         bollard::API_DEFAULT_VERSION,
     )
     .context("bollard http connect")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn container_display_name_prefers_first_docker_name_without_leading_slash() {
+        assert_eq!(
+            container_display_name(
+                "abcdef1234567890",
+                Some(vec!["/cortex".to_string(), "/alias".to_string()])
+            ),
+            "cortex"
+        );
+    }
+
+    #[test]
+    fn container_display_name_falls_back_to_short_id_when_names_missing() {
+        assert_eq!(
+            container_display_name("abcdef1234567890", Some(Vec::new())),
+            "abcdef123456"
+        );
+        assert_eq!(container_display_name("short", None), "short");
+    }
+
+    #[test]
+    fn container_app_name_includes_compose_project_service_and_container_name() {
+        let labels = HashMap::from([
+            (
+                "com.docker.compose.project".to_string(),
+                "cortex".to_string(),
+            ),
+            (
+                "com.docker.compose.service".to_string(),
+                "server".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            container_app_name("cortex-1", &labels),
+            "cortex/server/cortex-1"
+        );
+    }
+
+    #[test]
+    fn container_app_name_falls_back_to_service_or_container_name() {
+        let service_only = HashMap::from([(
+            "com.docker.compose.service".to_string(),
+            "server".to_string(),
+        )]);
+
+        assert_eq!(
+            container_app_name("cortex-1", &service_only),
+            "server/cortex-1"
+        );
+        assert_eq!(container_app_name("cortex-1", &HashMap::new()), "cortex-1");
+    }
 }

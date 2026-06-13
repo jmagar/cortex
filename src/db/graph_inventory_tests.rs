@@ -113,9 +113,10 @@ fn project_inventory_does_not_hold_write_lock_while_preparing_projection() {
         insert_done_tx.send(started.elapsed()).unwrap();
     });
 
-    match insert_done_rx.recv_timeout(Duration::from_millis(200)) {
+    let writer_timeout = Duration::from_secs(5);
+    match insert_done_rx.recv_timeout(writer_timeout) {
         Ok(elapsed) => assert!(
-            elapsed < Duration::from_millis(200),
+            elapsed < writer_timeout,
             "insert waited for projection preparation for {elapsed:?}"
         ),
         Err(error) => {

@@ -208,3 +208,87 @@ pub(crate) fn check_debug_compose_content_phase(
 
 // write_executable_file and write_private_file live in parent module (setup.rs).
 use super::{write_executable_file, write_private_file};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_wrapper_script_builds_current_repo_debug_binary_with_safe_defaults() {
+        let script = debug_wrapper_script(Path::new("/home/jmagar/workspace/cortex"));
+
+        assert!(script.starts_with("#!/usr/bin/env bash\nset -euo pipefail\n"));
+        assert!(script.contains(r#"repo="${CORTEX_REPO:-/home/jmagar/workspace/cortex}""#));
+        assert!(script.contains(r#"export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.cache/cargo}""#));
+        assert!(script.contains(
+            r#"export CORTEX_DOCKER_INGEST_ENABLED="${CORTEX_DOCKER_INGEST_ENABLED:-false}""#
+        ));
+        assert!(script.contains(r#"export CORTEX_AUTH_MODE="${CORTEX_AUTH_MODE:-bearer}""#));
+        assert!(script.contains(r#"exec "${CARGO_TARGET_DIR}/debug/cortex" "$@""#));
+    }
+
+    #[test]
+    fn debug_wrapper_script_keeps_serve_and_setup_env_unmodified() {
+        let script = debug_wrapper_script(Path::new("/home/jmagar/workspace/cortex"));
+
+        assert!(script.contains("case \"${1:-}\" in\n  serve|setup)\n    ;;\n  *)"));
+    }
+
+    #[test]
+    fn debug_compose_override_builds_debug_image_from_repo_context() {
+        let override_yaml = debug_compose_override(Path::new("/home/jmagar/workspace/cortex"));
+
+        assert_eq!(
+            override_yaml,
+            "services:\n  cortex:\n    image: cortex:local-debug\n    build:\n      context: /home/jmagar/workspace/cortex\n      dockerfile: config/Dockerfile\n      args:\n        CORTEX_BUILD_PROFILE: debug\n"
+        );
+    }
+
+    #[test]
+    fn debug_wrapper_content_phase_reports_match_mismatch_and_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wrapper_path = tmp.path().join("cortex");
+        let repo_path = tmp.path().join("repo");
+        std::fs::create_dir(&repo_path).unwrap();
+        std::fs::write(&wrapper_path, debug_wrapper_script(&repo_path)).unwrap();
+
+        let ok = check_debug_wrapper_content_phase(&wrapper_path, &repo_path);
+        assert_eq!(ok.status, SetupStatus::Ok);
+        assert!(ok.detail.contains("matches generated content"));
+
+        std::fs::write(&wrapper_path, "#!/usr/bin/env bash\nexit 0\n").unwrap();
+        let stale = check_debug_wrapper_content_phase(&wrapper_path, &repo_path);
+        assert_eq!(stale.status, SetupStatus::Error);
+        assert!(
+            stale
+                .detail
+                .contains("does not match generated debug wrapper")
+        );
+
+        let missing = check_debug_wrapper_content_phase(&tmp.path().join("missing"), &repo_path);
+        assert_eq!(missing.status, SetupStatus::Error);
+        assert!(missing.detail.contains("No such file") || missing.detail.contains("not found"));
+    }
+
+    #[test]
+    fn debug_compose_content_phase_reports_match_and_stale_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let override_path = tmp.path().join("docker-compose.override.yml");
+        let repo_path = tmp.path().join("repo");
+        std::fs::create_dir(&repo_path).unwrap();
+        std::fs::write(&override_path, debug_compose_override(&repo_path)).unwrap();
+
+        let ok = check_debug_compose_content_phase(&override_path, &repo_path);
+        assert_eq!(ok.status, SetupStatus::Ok);
+        assert!(ok.detail.contains("matches generated content"));
+
+        std::fs::write(&override_path, "services: {}\n").unwrap();
+        let stale = check_debug_compose_content_phase(&override_path, &repo_path);
+        assert_eq!(stale.status, SetupStatus::Error);
+        assert!(
+            stale
+                .detail
+                .contains("does not match generated debug Compose override")
+        );
+    }
+}

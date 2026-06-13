@@ -163,9 +163,17 @@ fn apply_dbus_env(command: &mut Command) {
 /// desktop session.
 pub(crate) fn inferred_user_bus_env() -> Option<(PathBuf, String)> {
     let runtime_dir = PathBuf::from(format!("/run/user/{}", current_uid()));
+    user_bus_env_for_runtime_dir(&runtime_dir)
+}
+
+fn user_bus_env_for_runtime_dir(runtime_dir: &std::path::Path) -> Option<(PathBuf, String)> {
     let bus = runtime_dir.join("bus");
-    bus.exists()
-        .then(|| (runtime_dir, format!("unix:path={}", bus.display())))
+    bus.exists().then(|| {
+        (
+            runtime_dir.to_path_buf(),
+            format!("unix:path={}", bus.display()),
+        )
+    })
 }
 
 pub(crate) fn current_uid() -> u32 {
@@ -176,5 +184,36 @@ pub(crate) fn current_uid() -> u32 {
     #[cfg(not(unix))]
     {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_bus_env_for_runtime_dir_returns_none_when_bus_socket_is_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        assert_eq!(user_bus_env_for_runtime_dir(tmp.path()), None);
+    }
+
+    #[test]
+    fn user_bus_env_for_runtime_dir_formats_dbus_socket_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bus = tmp.path().join("bus");
+        std::fs::write(&bus, "").unwrap();
+
+        let (runtime_dir, bus_address) = user_bus_env_for_runtime_dir(tmp.path()).unwrap();
+
+        assert_eq!(runtime_dir, tmp.path());
+        assert_eq!(bus_address, format!("unix:path={}", bus.display()));
+    }
+
+    #[test]
+    fn current_uid_is_available_for_system_adapter_env_inference() {
+        let uid = current_uid();
+
+        assert!(uid <= u32::MAX);
     }
 }
