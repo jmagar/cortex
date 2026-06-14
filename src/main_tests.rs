@@ -514,6 +514,148 @@ fn mode_parse_accepts_binary_doctor() {
     ));
 }
 
+#[test]
+fn mode_default_log_filter_matches_operational_noise_profile() {
+    assert_eq!(Mode::ServeMcp.default_log_filter(), "info");
+    assert_eq!(Mode::StdioMcp.default_log_filter(), "warn");
+    assert_eq!(Mode::Help.default_log_filter(), "info");
+    assert_eq!(Mode::Version.default_log_filter(), "info");
+    assert_eq!(
+        Mode::Setup(super::SetupCommand {
+            kind: super::SetupCommandKind::Main(cortex::setup::SetupMode::Check),
+            json: false,
+        })
+        .default_log_filter(),
+        "warn"
+    );
+    assert_eq!(
+        Mode::Deploy(super::DeployCommand {
+            kind: super::DeployCommandKind::Preflight,
+            json: false,
+        })
+        .default_log_filter(),
+        "warn"
+    );
+    assert_eq!(
+        Mode::DoctorBinary(super::DoctorBinaryCommand { json: false }).default_log_filter(),
+        "warn"
+    );
+    assert_eq!(
+        Mode::DoctorFull(super::DoctorFullCommand { json: false }).default_log_filter(),
+        "warn"
+    );
+    assert_eq!(
+        Mode::parse(vec!["search".into(), "foo".into()])
+            .unwrap()
+            .default_log_filter(),
+        "error"
+    );
+}
+
+#[test]
+fn parse_doctor_commands_accept_json_and_reject_bad_shapes() {
+    assert!(
+        super::parse_doctor_full_command(&["--json".into()])
+            .unwrap()
+            .json
+    );
+    assert!(
+        super::parse_doctor_command(&["binary".into(), "--json".into()])
+            .unwrap()
+            .json
+    );
+
+    let err = super::parse_doctor_command(&["--json".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("doctor requires `binary`"));
+
+    let err = super::parse_doctor_full_command(&["bogus".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown doctor argument"));
+}
+
+#[test]
+fn parse_setup_command_accepts_main_modes_and_rejects_bad_args() {
+    let check = super::parse_setup_command(&["check".into(), "--json".into()]).unwrap();
+    assert!(matches!(
+        check.kind,
+        super::SetupCommandKind::Main(cortex::setup::SetupMode::Check)
+    ));
+    assert!(check.json);
+
+    let repair = super::parse_setup_command(&["repair".into()]).unwrap();
+    assert!(matches!(
+        repair.kind,
+        super::SetupCommandKind::Main(cortex::setup::SetupMode::Repair)
+    ));
+
+    let default = super::parse_setup_command(&[]).unwrap();
+    assert!(matches!(
+        default.kind,
+        super::SetupCommandKind::Main(cortex::setup::SetupMode::FirstRun)
+    ));
+
+    let err = super::parse_setup_command(&["bogus".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown setup argument"));
+
+    let err =
+        super::parse_setup_command(&["debug-wrapper".into(), "install".into(), "remove".into()])
+            .unwrap_err()
+            .to_string();
+    assert!(err.contains("debug-wrapper action specified more than once"));
+
+    let err = super::parse_setup_command(&["debug-compose".into(), "--bad".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown debug-compose argument"));
+}
+
+#[test]
+fn parse_deploy_command_covers_modes_and_rejects_contextual_flags() {
+    let preflight = super::parse_deploy_command(&["preflight".into(), "--json".into()]).unwrap();
+    assert!(matches!(
+        preflight.kind,
+        super::DeployCommandKind::Preflight
+    ));
+    assert!(preflight.json);
+
+    let local = super::parse_deploy_command(&["local".into()]).unwrap();
+    assert!(matches!(
+        local.kind,
+        super::DeployCommandKind::Local { dry_run: false }
+    ));
+
+    let remote =
+        super::parse_deploy_command(&["remote".into(), "tootie".into(), "--dry-run".into()])
+            .unwrap();
+    assert!(matches!(
+        remote.kind,
+        super::DeployCommandKind::Remote {
+            ref host,
+            dry_run: true
+        } if host == "tootie"
+    ));
+
+    for (args, expected) in [
+        (
+            vec!["local", "--hosts", "tootie"],
+            "unknown deploy local argument",
+        ),
+        (vec!["remote", "--docker"], "unknown deploy remote argument"),
+        (vec!["agent", "--dry-run"], "unknown deploy agent argument"),
+    ] {
+        let err =
+            super::parse_deploy_command(&args.into_iter().map(str::to_string).collect::<Vec<_>>())
+                .unwrap_err()
+                .to_string();
+        assert!(err.contains(expected), "expected {expected:?}, got {err:?}");
+    }
+}
+
 // ─── Bead 0p8r.6: global HTTP flag plumbing ─────────────────────────────────
 
 use serial_test::serial;

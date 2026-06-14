@@ -174,6 +174,53 @@ use super::write_executable_file;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    struct EnvGuard {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var_os(name);
+            unsafe {
+                std::env::set_var(name, value);
+            }
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => unsafe {
+                    std::env::set_var(self.name, value);
+                },
+                None => unsafe {
+                    std::env::remove_var(self.name);
+                },
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_executable(path: &std::path::Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::write(path, body).unwrap();
+        let mut perms = std::fs::metadata(path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms).unwrap();
+    }
+
+    fn path_with_prepended(dir: &std::path::Path) -> std::ffi::OsString {
+        let mut paths = vec![dir.to_path_buf()];
+        if let Some(existing) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&existing));
+        }
+        std::env::join_paths(paths).unwrap()
+    }
 
     #[test]
     fn install_ai_index_timer_files_writes_script_service_and_timer() {
@@ -229,5 +276,71 @@ mod tests {
         assert!(timer.contains("OnBootSec=5min"));
         assert!(timer.contains("Persistent=true"));
         assert!(timer.contains("WantedBy=timers.target"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[serial]
+    async fn run_ai_index_timer_setup_install_check_and_remove_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let cortex_home = home.join(".cortex");
+        let bin_dir = dir.path().join("bin");
+        std::fs::create_dir_all(&cortex_home).unwrap();
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        write_executable(
+            &bin_dir.join("systemctl"),
+            "#!/bin/sh\ncase \"$*\" in\n  *is-enabled*) printf 'enabled\\n' ;;\n  *) printf 'ok\\n' ;;\nesac\nexit 0\n",
+        );
+
+        let _home = EnvGuard::set("HOME", &home);
+        let _cortex_home = EnvGuard::set("CORTEX_HOME", &cortex_home);
+        let _path = EnvGuard::set("PATH", path_with_prepended(&bin_dir));
+
+        let install = run_ai_index_timer_setup(AiIndexTimerAction::Install)
+            .await
+            .unwrap();
+        assert_eq!(install.mode, "ai-index-timer-install");
+        assert!(
+            install.phases.iter().any(
+                |phase| phase.name == "ai-index-timer-files" && phase.status == SetupStatus::Ok
+            )
+        );
+        assert!(home.join(".local/bin/cortex-ai-index").is_file());
+        assert!(
+            home.join(".config/systemd/user/cortex-ai-index.service")
+                .is_file()
+        );
+        assert!(
+            home.join(".config/systemd/user/cortex-ai-index.timer")
+                .is_file()
+        );
+
+        let check = run_ai_index_timer_setup(AiIndexTimerAction::Check)
+            .await
+            .unwrap();
+        assert_eq!(check.mode, "ai-index-timer-check");
+        assert!(
+            check
+                .phases
+                .iter()
+                .any(|phase| phase.name == "systemctl-user" && phase.status == SetupStatus::Ok)
+        );
+
+        let remove = run_ai_index_timer_setup(AiIndexTimerAction::Remove)
+            .await
+            .unwrap();
+        assert_eq!(remove.mode, "ai-index-timer-remove");
+        assert!(!home.join(".local/bin/cortex-ai-index").exists());
+        assert!(
+            !home
+                .join(".config/systemd/user/cortex-ai-index.service")
+                .exists()
+        );
+        assert!(
+            !home
+                .join(".config/systemd/user/cortex-ai-index.timer")
+                .exists()
+        );
     }
 }

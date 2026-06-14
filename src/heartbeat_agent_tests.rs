@@ -71,6 +71,61 @@ async fn fake_collector_emits_valid_v1_payload_defaults() {
     assert!(json.get("network").is_none());
 }
 
+#[tokio::test]
+async fn linux_collector_constructs_probe_set_and_collects_core_proc_metrics() {
+    let collector = HeartbeatCollector::linux();
+    let payload = collector
+        .collect(
+            "syslog_testhostid1234".to_string(),
+            11,
+            Duration::from_secs(DEFAULT_INTERVAL_SECS),
+            0,
+            Duration::from_millis(DEFAULT_PROBE_DEADLINE_MS),
+            Duration::from_millis(DEFAULT_COLLECTION_DEADLINE_MS),
+        )
+        .await;
+
+    assert_eq!(payload.sample.sequence, 11);
+    assert!(payload.cpu.is_some());
+    assert!(payload.memory.is_some());
+    assert!(payload.processes.is_some());
+    assert!(
+        payload.containers.is_some(),
+        "container probe should report reachable=false when docker is absent"
+    );
+}
+
+#[tokio::test]
+async fn linux_probe_collectors_read_proc_and_statvfs_successfully() {
+    let cpu = LinuxCpuProbe.collect().await.unwrap();
+    assert!(matches!(cpu, ProbeOutput::Cpu(_)));
+
+    let memory = LinuxMemoryProbe.collect().await.unwrap();
+    assert!(matches!(memory, ProbeOutput::Memory(_)));
+
+    let disk = LinuxDiskCapacityProbe {
+        mount: MountProbeTarget {
+            path: PathBuf::from("/"),
+            fs_type: Some("rootfs".to_string()),
+        },
+    }
+    .collect()
+    .await
+    .unwrap();
+    let ProbeOutput::Disk(disk) = disk else {
+        panic!("expected disk output");
+    };
+    assert_eq!(disk.kind, "mount");
+    assert_eq!(disk.name, "/");
+    assert!(disk.bytes_total.unwrap_or_default() > 0);
+
+    let processes = LinuxProcessProbe.collect().await.unwrap();
+    let ProbeOutput::Processes(processes) = processes else {
+        panic!("expected process output");
+    };
+    assert!(processes.total > 0);
+}
+
 #[test]
 #[serial]
 fn config_from_env_honors_agent_stream_flags_and_fallbacks() {
@@ -453,6 +508,25 @@ async fn flush_retry_buffer_stops_on_first_failed_retry_and_requeues_payload() {
     assert_eq!(retry.len(), 2);
     assert_eq!(retry.pop_front().unwrap().sample.sequence, 2);
     assert_eq!(retry.pop_front().unwrap().sample.sequence, 1);
+}
+
+#[tokio::test]
+async fn flush_retry_buffer_drains_successful_retries_in_order() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/heartbeats"))
+        .respond_with(ResponseTemplate::new(202))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let client = reqwest::Client::new();
+    let mut retry = RetryBuffer::new(4);
+    retry.push(test_payload(1));
+    retry.push(test_payload(2));
+
+    flush_retry_buffer(&client, &mut retry, &server.uri(), None).await;
+
+    assert!(retry.is_empty());
 }
 
 #[test]

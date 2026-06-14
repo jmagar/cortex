@@ -214,6 +214,9 @@ mod tests {
     fn current_uid_is_available_for_system_adapter_env_inference() {
         let uid = current_uid();
 
-        assert!(uid <= u32::MAX);
+        #[cfg(unix)]
+        assert_eq!(uid, unsafe { libc::geteuid() });
+        #[cfg(not(unix))]
+        assert_eq!(uid, 0);
     }
 }

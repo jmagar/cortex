@@ -212,6 +212,29 @@ use super::{write_executable_file, write_private_file};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    struct EnvGuard {
+        name: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var(name).ok();
+            unsafe { std::env::set_var(name, value) };
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => unsafe { std::env::set_var(self.name, value) },
+                None => unsafe { std::env::remove_var(self.name) },
+            }
+        }
+    }
 
     #[test]
     fn debug_wrapper_script_builds_current_repo_debug_binary_with_safe_defaults() {
@@ -290,5 +313,91 @@ mod tests {
                 .detail
                 .contains("does not match generated debug Compose override")
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn debug_wrapper_setup_install_check_and_remove_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let cortex_home = tmp.path().join("cortex-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&cortex_home).unwrap();
+        let _home = EnvGuard::set("HOME", &home);
+        let _cortex_home = EnvGuard::set("CORTEX_HOME", &cortex_home);
+
+        let install = run_debug_wrapper_setup(DebugWrapperAction::Install)
+            .await
+            .unwrap();
+        assert!(!install.has_errors);
+        assert_eq!(install.mode, "debug-wrapper-install");
+        assert!(home.join(".local/bin/cortex").is_file());
+
+        let check = run_debug_wrapper_setup(DebugWrapperAction::Check)
+            .await
+            .unwrap();
+        assert!(!check.has_errors);
+        assert!(
+            check
+                .phases
+                .iter()
+                .any(|phase| phase.name == "debug-wrapper-content"
+                    && phase.status == SetupStatus::Ok)
+        );
+
+        let remove = run_debug_wrapper_setup(DebugWrapperAction::Remove)
+            .await
+            .unwrap();
+        assert!(!remove.has_errors);
+        assert!(!home.join(".local/bin/cortex").exists());
+
+        let remove_again = run_debug_wrapper_setup(DebugWrapperAction::Remove)
+            .await
+            .unwrap();
+        assert!(!remove_again.has_errors);
+        assert!(
+            remove_again
+                .phases
+                .iter()
+                .any(|phase| phase.detail.contains("already absent"))
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn debug_compose_setup_install_check_and_remove_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let cortex_home = tmp.path().join("cortex-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&cortex_home).unwrap();
+        let _home = EnvGuard::set("HOME", &home);
+        let _cortex_home = EnvGuard::set("CORTEX_HOME", &cortex_home);
+
+        let install = run_debug_compose_setup(DebugComposeAction::Install)
+            .await
+            .unwrap();
+        assert!(!install.has_errors);
+        assert_eq!(install.mode, "debug-compose-install");
+        let override_path = cortex_home.join("compose/docker-compose.override.yml");
+        assert!(override_path.is_file());
+
+        let check = run_debug_compose_setup(DebugComposeAction::Check)
+            .await
+            .unwrap();
+        assert!(!check.has_errors);
+        assert!(
+            check
+                .phases
+                .iter()
+                .any(|phase| phase.name == "debug-compose-content"
+                    && phase.status == SetupStatus::Ok)
+        );
+
+        let remove = run_debug_compose_setup(DebugComposeAction::Remove)
+            .await
+            .unwrap();
+        assert!(!remove.has_errors);
+        assert!(!override_path.exists());
     }
 }

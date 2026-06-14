@@ -211,3 +211,135 @@ fn find_local_binary_prefers_installed_cortex_from_path() {
 
     assert_eq!(find_local_binary(), Some(cortex_path));
 }
+
+#[test]
+#[serial]
+fn deploy_agent_to_linux_host_runs_install_sequence_with_env_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("commands.log");
+    let local_binary = dir.path().join("cortex");
+    std::fs::write(&local_binary, "binary").unwrap();
+    write_executable(
+        &dir.path().join("ssh"),
+        r#"#!/bin/sh
+printf 'ssh %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
+case "$*" in
+  *"/etc/unraid-version"*) printf 'no\n'; exit 0 ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+    write_executable(
+        &dir.path().join("scp"),
+        r#"#!/bin/sh
+printf 'scp %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
+exit 0
+"#,
+    );
+    let _path = prepend_path(dir.path());
+    let _log = EnvGuard::set("CORTEX_TEST_AGENT_DEPLOY_LOG", &log);
+    let _syslog = EnvGuard::remove("CORTEX_SYSLOG_TARGET");
+
+    let result = deploy_agent_to_host(
+        "linux-host",
+        &local_binary,
+        &AgentDeployConfig {
+            target: Some("https://cortex.example.test:3100".to_string()),
+            token: Some("heartbeat token".to_string()),
+            docker: true,
+            journald: true,
+        },
+    );
+
+    assert!(result.ok, "{result:?}");
+    assert_eq!(result.host, "linux-host");
+    let log = std::fs::read_to_string(log).unwrap();
+    assert!(log.contains("mkdir -p ~/.local/bin"));
+    assert!(log.contains("linux-host:.local/bin/cortex.new"));
+    assert!(log.contains("mv -f ~/.local/bin/cortex.new ~/.local/bin/cortex"));
+    assert!(log.contains("CORTEX_HEARTBEAT_TARGET='https://cortex.example.test:3100'"));
+    assert!(log.contains("CORTEX_HEARTBEAT_TOKEN='heartbeat token'"));
+    assert!(log.contains("CORTEX_AGENT_DOCKER=true"));
+    assert!(log.contains("CORTEX_AGENT_JOURNALD=true"));
+    assert!(log.contains("CORTEX_SYSLOG_TARGET='cortex.example.test:1514'"));
+    assert!(log.contains("~/.local/bin/cortex setup heartbeat-agent install"));
+}
+
+#[test]
+#[serial]
+fn deploy_agent_reports_first_remote_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let local_binary = dir.path().join("cortex");
+    std::fs::write(&local_binary, "binary").unwrap();
+    write_executable(
+        &dir.path().join("ssh"),
+        r#"#!/bin/sh
+case "$*" in
+  *"/etc/unraid-version"*) printf 'no\n'; exit 0 ;;
+  *"mkdir -p"*) exit 42 ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+    write_executable(&dir.path().join("scp"), "#!/bin/sh\nexit 0\n");
+    let _path = prepend_path(dir.path());
+
+    let result = deploy_agent_to_host("linux-host", &local_binary, &AgentDeployConfig::default());
+
+    assert!(!result.ok);
+    assert!(result.detail.contains("mkdir -p ~/.local/bin"));
+    assert!(result.detail.contains("exited non-zero"));
+}
+
+#[test]
+#[serial]
+fn deploy_agent_to_unraid_writes_persistent_env_and_docker_container() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("commands.log");
+    let local_binary = dir.path().join("cortex");
+    std::fs::write(&local_binary, "binary").unwrap();
+    write_executable(
+        &dir.path().join("ssh"),
+        r#"#!/bin/sh
+printf 'ssh %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
+case "$*" in
+  *"/etc/unraid-version"*) printf 'yes\n'; exit 0 ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+    write_executable(
+        &dir.path().join("scp"),
+        r#"#!/bin/sh
+printf 'scp %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
+exit 0
+"#,
+    );
+    let _path = prepend_path(dir.path());
+    let _log = EnvGuard::set("CORTEX_TEST_AGENT_DEPLOY_LOG", &log);
+
+    let result = deploy_agent_to_host(
+        "unraid-host",
+        &local_binary,
+        &AgentDeployConfig {
+            target: Some("https://cortex.example.test".to_string()),
+            token: Some("secret".to_string()),
+            docker: false,
+            journald: true,
+        },
+    );
+
+    assert!(result.ok, "{result:?}");
+    let log = std::fs::read_to_string(log).unwrap();
+    assert!(log.contains("mkdir -p /mnt/user/appdata/cortex/bin"));
+    assert!(log.contains("unraid-host:/mnt/user/appdata/cortex/bin/cortex.new"));
+    assert!(log.contains("heartbeat-agent.env"));
+    assert!(log.contains("CORTEX_HEARTBEAT_TARGET='https://cortex.example.test'"));
+    assert!(log.contains("CORTEX_HEARTBEAT_TOKEN='secret'"));
+    assert!(log.contains("CORTEX_AGENT_DOCKER='false'"));
+    assert!(log.contains("CORTEX_AGENT_JOURNALD='false'"));
+    assert!(log.contains("docker rm -f cortex-heartbeat-agent"));
+    assert!(log.contains("--restart unless-stopped"));
+    assert!(log.contains("-v /var/run/docker.sock:/var/run/docker.sock"));
+    assert!(log.contains("--host-id-path /mnt/user/appdata/cortex/heartbeat-host-id"));
+}

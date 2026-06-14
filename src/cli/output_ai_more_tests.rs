@@ -123,3 +123,112 @@ fn compact_ai_investigate_json_includes_transcript_when_requested() {
         "nearby error message"
     );
 }
+
+#[test]
+fn human_ai_more_outputs_accept_representative_payloads() {
+    let searched = cortex::app::SearchedSessionEntry {
+        session_key: "key".to_string(),
+        project: "/home/jmagar/workspace/cortex".to_string(),
+        tool: "codex".to_string(),
+        session_id: "sess-1".to_string(),
+        hostname: "dookie".to_string(),
+        first_seen: "2026-06-13T12:00:00Z".to_string(),
+        last_seen: "2026-06-13T12:01:00Z".to_string(),
+        event_count: 4,
+        match_count: 2,
+        best_snippet: Some("panic near docker stream".to_string()),
+    };
+
+    print_similar_incidents_response(
+        &cortex::app::SimilarIncidentsResponse {
+            query: "panic".to_string(),
+            total_clusters: 1,
+            truncated: true,
+            clusters: vec![cortex::app::IncidentCluster {
+                hostname: "dookie".to_string(),
+                app_name: Some("cortex".to_string()),
+                window_start: "2026-06-13T12:00:00Z".to_string(),
+                window_end: "2026-06-13T12:30:00Z".to_string(),
+                log_count: 3,
+                severity_peak: "err".to_string(),
+                representative_messages: vec!["panic".to_string()],
+                correlated_sessions: vec![cortex::app::CorrelatedSession {
+                    session_id: "sess-1".to_string(),
+                    project: "/home/jmagar/workspace/cortex".to_string(),
+                    tool: "codex".to_string(),
+                    match_count: 2,
+                    best_snippet: Some("panic".to_string()),
+                }],
+            }],
+        },
+        false,
+    )
+    .unwrap();
+
+    print_ask_history_response(
+        &cortex::app::AskHistoryResponse {
+            query: "panic".to_string(),
+            total_candidates: 2,
+            truncated: true,
+            sessions: vec![searched.clone()],
+            context_logs: vec![log_entry(20, "context log")],
+        },
+        false,
+    )
+    .unwrap();
+
+    print_incident_context_response(
+        &cortex::app::IncidentContextResponse {
+            window_from: "2026-06-13T12:00:00Z".to_string(),
+            window_to: "2026-06-13T12:30:00Z".to_string(),
+            total_logs: 4,
+            by_severity: vec![cortex::app::SeverityCount {
+                severity: "err".to_string(),
+                count: 2,
+            }],
+            by_app: vec![cortex::app::AppLogCount {
+                app_name: Some("cortex".to_string()),
+                count: 2,
+            }],
+            error_logs: vec![log_entry(21, "error")],
+            error_logs_truncated: true,
+            ai_sessions: vec![cortex::app::AiSessionEntry {
+                session_key: "key".to_string(),
+                project: "/home/jmagar/workspace/cortex".to_string(),
+                tool: "codex".to_string(),
+                session_id: "sess-1".to_string(),
+                transcript_path: None,
+                hostname: "dookie".to_string(),
+                first_seen: "2026-06-13T12:00:00Z".to_string(),
+                last_seen: "2026-06-13T12:01:00Z".to_string(),
+                event_count: 4,
+            }],
+        },
+        false,
+    )
+    .unwrap();
+
+    print_ai_incidents_response(
+        &cortex::app::AiIncidentResponse {
+            incidents: vec![abuse_incident()],
+            total_incidents: 2,
+            candidate_rows: 100,
+            candidate_cap: 50,
+            candidate_window_truncated: true,
+            truncated: true,
+        },
+        false,
+    )
+    .unwrap();
+
+    print_ai_investigate_response_with_options(
+        &investigate_response(),
+        false,
+        AiInvestigatePrintOptions {
+            detail: AiOutputDetail::Full,
+            include_transcript: true,
+            max_bytes: 80,
+        },
+    )
+    .unwrap();
+}

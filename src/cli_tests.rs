@@ -4,6 +4,34 @@ fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| value.to_string()).collect()
 }
 
+struct EnvGuard {
+    name: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let previous = std::env::var_os(name);
+        unsafe {
+            std::env::set_var(name, value);
+        }
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => unsafe {
+                std::env::set_var(self.name, value);
+            },
+            None => unsafe {
+                std::env::remove_var(self.name);
+            },
+        }
+    }
+}
+
 #[test]
 fn parse_search_collects_query_and_filters() {
     let parsed = CliCommand::parse(strings(&[
@@ -164,6 +192,40 @@ fn parse_unknown_option_errors() {
     let err = CliCommand::parse(strings(&["stats", "--bad"])).unwrap_err();
 
     assert!(err.to_string().contains("unknown stats option"));
+}
+
+#[test]
+fn run_compose_rejects_non_compose_commands_before_live_probes() {
+    let error = run_compose(CliCommand::Stats(OutputArgs::default()))
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("non-compose command"));
+}
+
+#[tokio::test]
+async fn run_service_no_db_rejects_non_service_commands_before_db_access() {
+    let error = run_service_no_db(CliCommand::Stats(OutputArgs::default()))
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("non-service command"));
+}
+
+#[tokio::test]
+async fn run_inventory_status_uses_cache_only_and_accepts_json_or_text_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let inventory_dir = dir.path().join("inventory");
+    let _home = EnvGuard::set("HOME", dir.path());
+    let _inventory = EnvGuard::set("CORTEX_INVENTORY_DIR", &inventory_dir);
+
+    run_inventory(InventoryCommand::Status(InventoryArgs { json: true }))
+        .await
+        .unwrap();
+    run_inventory(InventoryCommand::Status(InventoryArgs { json: false }))
+        .await
+        .unwrap();
 }
 
 #[test]

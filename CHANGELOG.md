@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.12] - 2026-06-13
+
+### Added
+
+- Expand focused coverage across setup doctor/agent helpers, heartbeat-agent setup, AI index/watch service setup, CLI global-flag routing, command dispatch guardrails, and test-only OS adapter assertions to lift total line coverage to 80%.
+
 ## [1.20.11] - 2026-06-13
 
 ### Added
