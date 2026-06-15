@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.1] - 2026-06-15
+
+### Added
+
+- Document the MCP Apps query widget as progressive enhancement (README + `docs/SETUP.md`): canonical URI `ui://cortex/query-widget`, `text/html;profile=mcp-app` MIME, host-agnostic JSON-RPC verification snippets, and an explicit note that non-UI hosts keep receiving normal text/JSON tool results.
+- Add host-agnostic widget wire-contract smoke coverage to `scripts/smoke-test.sh`: `resources/list` exposure, `resources/read` MIME + anchors, `tools/list` `_meta.ui.resourceUri`, and `tools/call action=search` returning both `structuredContent` and text. No browser, Node, or named UI host required.
+
 ## [1.21.0] - 2026-06-15
 
 ### Added

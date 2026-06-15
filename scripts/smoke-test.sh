@@ -306,6 +306,71 @@ except Exception as e:
 ")
 assert_eq "prompt output schema resource is available" "$PROMPT_SCHEMA_VALID" "ok"
 
+# MCP Apps query widget wire contract — host-agnostic. No browser, Node, or named
+# UI host required; this verifies only the MCP JSON-RPC surface that any capable
+# host (e.g. one honoring _meta.ui.resourceUri) would consume. Non-UI clients
+# keep using normal text/JSON tool results and are unaffected by these fields.
+RES_LIST=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":110,"method":"resources/list","params":{}}' || true)
+RES_LIST_VALID=$(printf '%s\n' "$RES_LIST" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    uris = {r['uri'] for r in d['result']['resources']}
+    assert 'ui://cortex/query-widget' in uris, uris
+    assert 'cortex://schema/mcp-tool' in uris, uris
+    print('ok')
+except Exception as e:
+    print(f'error: {e}')
+")
+assert_eq "resources/list exposes the query widget resource" "$RES_LIST_VALID" "ok"
+
+WIDGET_READ=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":111,"method":"resources/read","params":{"uri":"ui://cortex/query-widget"}}' || true)
+WIDGET_READ_VALID=$(printf '%s\n' "$WIDGET_READ" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    c = d['result']['contents'][0]
+    assert c['uri'] == 'ui://cortex/query-widget', c.get('uri')
+    assert c['mimeType'] == 'text/html;profile=mcp-app', c.get('mimeType')
+    html = c['text']
+    for anchor in ['data-syslog-query-widget', 'value=\"search\"', 'name=\"query\"',
+                   'ui-message-response', 'event.source', 'Host bridge unavailable']:
+        assert anchor in html, anchor
+    print('ok')
+except Exception as e:
+    print(f'error: {e}')
+")
+assert_eq "resources/read returns query widget HTML with MCP Apps MIME + anchors" "$WIDGET_READ_VALID" "ok"
+
+TOOLS_META=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":112,"method":"tools/list","params":{}}' || true)
+TOOLS_META_VALID=$(printf '%s\n' "$TOOLS_META" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    tool = next(t for t in d['result']['tools'] if t['name'] == 'cortex')
+    ui = tool['_meta']['ui']
+    assert ui['resourceUri'] == 'ui://cortex/query-widget', ui.get('resourceUri')
+    print('ok')
+except Exception as e:
+    print(f'error: {e}')
+")
+assert_eq "tools/list cortex tool advertises _meta.ui.resourceUri" "$TOOLS_META_VALID" "ok"
+
+WIDGET_SEARCH=$(mcp_jsonrpc '{"jsonrpc":"2.0","id":113,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"search","query":"smoke","limit":1}}}' || true)
+WIDGET_SEARCH_VALID=$(printf '%s\n' "$WIDGET_SEARCH" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    r = d['result']
+    # UI hosts render structuredContent; non-UI hosts read content[0].text.
+    assert 'logs' in r['structuredContent'], 'no structuredContent.logs'
+    assert r['content'][0]['text'], 'no text content'
+    print('ok')
+except Exception as e:
+    print(f'error: {e}')
+")
+assert_eq "tools/call action=search returns structuredContent and text" "$WIDGET_SEARCH_VALID" "ok"
+
 # ─── Phase 2: Seed test data ─────────────────────────────────────────────────
 echo ""
 echo -e "${COLOR_BOLD}[2/4] Seeding test data${COLOR_RESET}"
