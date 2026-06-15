@@ -1459,12 +1459,30 @@ async fn mounted_policy_with_auth_context_permits_query_widget_resource() {
         response["result"]["contents"][0]["mimeType"],
         super::MCP_APP_HTML_MIME_TYPE
     );
+    let widget_html = response["result"]["contents"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
     assert!(
-        response["result"]["contents"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("data-syslog-query-widget")),
+        widget_html.contains("data-syslog-query-widget"),
         "resources/read should return query widget HTML; response: {response}"
     );
+    // Stable anchors the widget UI depends on. These guard the wire format
+    // (per yi66 risk note: verify format, do not assume a host renderer).
+    for anchor in [
+        "value=\"search\"",        // hidden action input -> action=search
+        "name=\"query\"",          // FTS5 query field
+        "name=\"hostname\"",       // hostname filter
+        "name=\"severity\"",       // severity filter
+        "name=\"limit\"",          // limit control
+        "data-rows",               // results table body
+        "Host bridge unavailable", // graceful bridge-unavailable state
+        "ui-message-response",     // mcp-ui postMessage bridge protocol
+    ] {
+        assert!(
+            widget_html.contains(anchor),
+            "query widget HTML missing stable anchor {anchor:?}; response: {response}"
+        );
+    }
 }
 
 /// Scope check fires BEFORE execute_tool — a read denied by scope must not

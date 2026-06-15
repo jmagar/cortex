@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-06-15
+
+### Added
+
+- Build out the MCP Apps query widget (`ui://cortex/query-widget`) into a self-contained, dependency-free interactive UI. It exposes an FTS5 query input plus hostname/severity/limit filters, calls the `cortex` tool with `action=search` over an MCP Apps host bridge (`window.openai.callTool` when present, otherwise an mcp-ui `postMessage` adapter), and renders results in a compact Aurora-dark table with idle/loading/empty/error/bridge-unavailable states. Replaces the previous placeholder form.
+
+### Security
+
+- Render all log fields in the query widget via `textContent`, preventing HTML/script injection from untrusted log message contents.
+
 ## [1.20.1] - 2026-06-12
 
 ### Changed

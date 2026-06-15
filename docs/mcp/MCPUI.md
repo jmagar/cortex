@@ -4,7 +4,14 @@ Protocol-level UI hints for MCP servers to improve client-side rendering of tool
 
 ## Current state
 
-cortex does not currently include MCP UI annotations in its tool schemas. Tool inputs use standard JSON Schema properties without `x-ui-*` extensions.
+cortex ships one MCP Apps surface: an interactive query widget.
+
+- **Resource:** `ui://cortex/query-widget`, served through `resources/list` and `resources/read` with MIME `text/html;profile=mcp-app` (see `src/mcp/rmcp_server.rs`).
+- **Tool link:** the `cortex` tool carries `_meta.ui.resourceUri` pointing at that resource with `visibility: ["model", "app"]`.
+- **Structured results:** `tools/call` returns both readable JSON text content and `structuredContent` so UI hosts can render rows without re-parsing text.
+- **Widget UI:** `src/mcp/ui/query_widget.html` is a self-contained, dependency-free page (FTS5 query + hostname/severity/limit filters) that calls the `cortex` tool with `action=search` over an MCP Apps host bridge — `window.openai.callTool` when the host injects it, otherwise an mcp-ui `postMessage` adapter (`type:"tool"` → `ui-message-response`). It degrades to a visible "bridge unavailable" state when no host bridge responds, and renders all log fields via `textContent` to avoid HTML injection.
+
+Tool inputs otherwise use standard JSON Schema properties without `x-ui-*` extensions.
 
 ## Schema annotations available
 
