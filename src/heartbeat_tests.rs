@@ -352,3 +352,105 @@ async fn zero_memory_total_stores_null_used_percent() {
         "used_percent should be NULL when mem_total_bytes is 0"
     );
 }
+
+// --- Agent auto-update (server side) ---
+
+async fn get_request(app: Router, uri: &str, token: Option<&str>) -> StatusCode {
+    let mut builder = Request::builder().method("GET").uri(uri);
+    if let Some(token) = token {
+        builder = builder.header("authorization", format!("Bearer {token}"));
+    }
+    app.oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+        .status()
+}
+
+#[test]
+fn platform_self_servable_only_linux_x86_64() {
+    assert!(platform_self_servable("linux", "x86_64"));
+    assert!(platform_self_servable("linux", "amd64"));
+    assert!(platform_self_servable("Linux", "x86_64"));
+    assert!(!platform_self_servable("windows", "x86_64"));
+    assert!(!platform_self_servable("linux", "aarch64"));
+}
+
+#[test]
+fn directive_for_decisions() {
+    let release = AgentReleaseInfo {
+        version: SERVER_VERSION,
+        sha256: Some("abc123".to_string()),
+        exe_path: None,
+    };
+    // Stale linux agent → directive toward the server version.
+    let d = release
+        .directive_for("linux", "x86_64", "0.0.0")
+        .expect("stale linux agent gets a directive");
+    assert_eq!(d.version, SERVER_VERSION);
+    assert_eq!(d.sha256, "abc123");
+    assert!(d.path.contains("os=linux"));
+    assert!(d.path.contains("arch=x86_64"));
+    // Matching version → no directive.
+    assert!(
+        release
+            .directive_for("linux", "x86_64", SERVER_VERSION)
+            .is_none()
+    );
+    // Unsupported platform → no directive.
+    assert!(
+        release
+            .directive_for("windows", "x86_64", "0.0.0")
+            .is_none()
+    );
+
+    // No sha (binary unreadable) → never advertise.
+    let no_sha = AgentReleaseInfo {
+        version: SERVER_VERSION,
+        sha256: None,
+        exe_path: None,
+    };
+    assert!(no_sha.directive_for("linux", "x86_64", "0.0.0").is_none());
+}
+
+#[tokio::test]
+async fn heartbeat_ack_advertises_update_for_stale_linux_agent() {
+    let (app, _pool, _dir) = test_app(Some("secret"));
+    let (status, body) =
+        post_json(app, "/v1/heartbeats", Some("secret"), heartbeat_payload()).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(body["server_version"], json!(SERVER_VERSION));
+    let update = &body["agent_update"];
+    assert_eq!(update["version"], json!(SERVER_VERSION));
+    assert!(update["path"].as_str().unwrap().contains("os=linux"));
+    assert!(!update["sha256"].as_str().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn heartbeat_ack_omits_update_for_matching_version() {
+    let (app, _pool, _dir) = test_app(Some("secret"));
+    let mut payload = heartbeat_payload();
+    payload["agent"]["version"] = json!(SERVER_VERSION);
+    let (status, body) = post_json(app, "/v1/heartbeats", Some("secret"), payload).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(body["server_version"], json!(SERVER_VERSION));
+    assert!(body.get("agent_update").is_none() || body["agent_update"].is_null());
+}
+
+#[tokio::test]
+async fn agent_binary_endpoint_requires_auth() {
+    let (app, _pool, _dir) = test_app(Some("secret"));
+    let status = get_request(app, "/v1/agent/binary?os=linux&arch=x86_64", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn agent_binary_endpoint_rejects_unsupported_platform() {
+    let (app, _pool, _dir) = test_app(Some("secret"));
+    let status = get_request(
+        app,
+        "/v1/agent/binary?os=windows&arch=x86_64",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

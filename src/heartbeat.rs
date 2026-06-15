@@ -10,27 +10,35 @@
 //! static `CORTEX_TOKEN` bearer when configured, with non-loopback
 //! unauthenticated exposure rejected at startup by config validation.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{
     Router,
-    extract::{ConnectInfo, State},
-    http::{HeaderMap, StatusCode},
+    body::Body,
+    extract::{ConnectInfo, Query, State},
+    http::{HeaderMap, StatusCode, header},
     middleware::{Next, from_fn},
-    response::{IntoResponse, Json},
-    routing::post,
+    response::{IntoResponse, Json, Response},
+    routing::{get, post},
 };
 use bytes::Bytes;
 use lab_auth::middleware::{parse_bearer_token, tokens_equal};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::db::DbPool;
 use crate::mcp::AuthPolicy;
+
+/// Server version compiled into this binary; advertised to agents so they can
+/// converge to it via [`AgentReleaseInfo`].
+const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub const HEARTBEAT_BODY_LIMIT_BYTES: usize = 256 * 1024;
 
@@ -39,6 +47,7 @@ pub struct HeartbeatState {
     pool: Arc<DbPool>,
     api_token: Option<String>,
     auth_policy: AuthPolicy,
+    release: Arc<AgentReleaseInfo>,
 }
 
 impl HeartbeatState {
@@ -47,8 +56,85 @@ impl HeartbeatState {
             pool,
             api_token,
             auth_policy,
+            release: Arc::new(AgentReleaseInfo::from_current_exe()),
         }
     }
+}
+
+/// Identity of the agent binary this server can hand out (its own running
+/// binary). Computed once at construction; the SHA-256 lets agents verify the
+/// download over the authenticated heartbeat channel.
+struct AgentReleaseInfo {
+    version: &'static str,
+    /// Lowercase hex SHA-256 of the server binary, or `None` if it could not be
+    /// read (e.g. in unit tests) — in which case no update is ever advertised.
+    sha256: Option<String>,
+    exe_path: Option<PathBuf>,
+}
+
+impl AgentReleaseInfo {
+    fn from_current_exe() -> Self {
+        let (sha256, exe_path) = match std::env::current_exe()
+            .ok()
+            .and_then(|path| std::fs::read(&path).ok().map(|bytes| (path, bytes)))
+        {
+            Some((path, bytes)) => {
+                let mut hasher = Sha256::new();
+                hasher.update(&bytes);
+                let hexed: String = hasher
+                    .finalize()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                (Some(hexed), Some(path))
+            }
+            None => (None, None),
+        };
+        Self {
+            version: SERVER_VERSION,
+            sha256,
+            exe_path,
+        }
+    }
+
+    /// Build an update directive when the reporting agent is on a different
+    /// version and we can serve a matching binary. Phase 1 serves only
+    /// `linux/x86_64` (the binary the server itself runs); other platforms get
+    /// no directive (handled out-of-band until the phase-2 fallback lands).
+    fn directive_for(
+        &self,
+        os: &str,
+        arch: &str,
+        agent_version: &str,
+    ) -> Option<AgentUpdateDirective> {
+        let sha256 = self.sha256.as_ref()?;
+        if agent_version == self.version {
+            return None;
+        }
+        if !platform_self_servable(os, arch) {
+            return None;
+        }
+        Some(AgentUpdateDirective {
+            version: self.version.to_string(),
+            path: format!("/v1/agent/binary?os={os}&arch={arch}"),
+            sha256: sha256.clone(),
+        })
+    }
+}
+
+/// True for the platform whose binary the server can hand out from its own
+/// running image (linux on a 64-bit x86 host).
+fn platform_self_servable(os: &str, arch: &str) -> bool {
+    os.eq_ignore_ascii_case("linux") && matches!(arch, "x86_64" | "amd64")
+}
+
+/// Auto-update directive serialized into the heartbeat `202` ack. The agent
+/// resolves `path` against its own heartbeat target base URL.
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentUpdateDirective {
+    pub version: String,
+    pub path: String,
+    pub sha256: String,
 }
 
 pub fn router(state: HeartbeatState) -> Router {
@@ -56,7 +142,58 @@ pub fn router(state: HeartbeatState) -> Router {
         .route("/v1/heartbeats", post(heartbeat_handler))
         .layer(RequestBodyLimitLayer::new(HEARTBEAT_BODY_LIMIT_BYTES))
         .layer(from_fn(json_payload_too_large))
+        .route("/v1/agent/binary", get(agent_binary_handler))
         .with_state(state)
+}
+
+/// `GET /v1/agent/binary?os=&arch=` — streams the server's own binary so agents
+/// can self-update to match. Shares the heartbeat auth model (bearer token, or
+/// loopback under `LoopbackDev`). Only serves the platform the server runs on.
+async fn agent_binary_handler(
+    State(state): State<HeartbeatState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    if !is_authorized(&state, &peer, &headers) {
+        return unauthorized();
+    }
+    let os = params.get("os").map(String::as_str).unwrap_or("");
+    let arch = params.get("arch").map(String::as_str).unwrap_or("");
+    if !platform_self_servable(os, arch) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "unsupported_platform", "os": os, "arch": arch})),
+        )
+            .into_response();
+    }
+    let Some(exe_path) = state.release.exe_path.clone() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "binary_unavailable"})),
+        )
+            .into_response();
+    };
+    let sha256 = state.release.sha256.clone().unwrap_or_default();
+    match tokio::fs::read(&exe_path).await {
+        Ok(bytes) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .header("x-cortex-version", state.release.version)
+            .header("x-cortex-sha256", sha256)
+            .body(Body::from(bytes))
+            .unwrap_or_else(|_| {
+                (StatusCode::INTERNAL_SERVER_ERROR, "response build failed").into_response()
+            }),
+        Err(error) => {
+            tracing::error!(error = %error, "failed to read agent binary for download");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "binary_read_failed"})),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn json_payload_too_large(
@@ -95,6 +232,12 @@ async fn heartbeat_handler(
         }
     };
 
+    // Capture identity for the auto-update directive before `request` is moved
+    // into the blocking insert task.
+    let agent_os = request.host.os.clone();
+    let agent_arch = request.host.architecture.clone();
+    let agent_version = request.agent.version.clone();
+
     let pool = Arc::clone(&state.pool);
     let source_ip = peer.to_string();
     let exec_start = Instant::now();
@@ -118,7 +261,14 @@ async fn heartbeat_handler(
     }
 
     match result {
-        Ok(response) => (StatusCode::ACCEPTED, Json(response)).into_response(),
+        Ok(mut response) => {
+            response.server_version = Some(state.release.version.to_string());
+            response.agent_update =
+                state
+                    .release
+                    .directive_for(&agent_os, &agent_arch, &agent_version);
+            (StatusCode::ACCEPTED, Json(response)).into_response()
+        }
         Err(error) => {
             tracing::error!(error = %error, "heartbeat ingest failed");
             (
@@ -209,6 +359,8 @@ fn insert_heartbeat(
             accepted: 0,
             heartbeat_id: id,
             received_at,
+            server_version: None,
+            agent_update: None,
         });
     } else {
         tx.last_insert_rowid()
@@ -255,6 +407,8 @@ fn insert_heartbeat(
         accepted: 1,
         heartbeat_id,
         received_at,
+        server_version: None,
+        agent_update: None,
     })
 }
 
@@ -413,6 +567,12 @@ struct HeartbeatIngestResponse {
     accepted: u32,
     heartbeat_id: i64,
     received_at: String,
+    /// Server version, so agents can detect drift even without a directive.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server_version: Option<String>,
+    /// Present only when the agent should self-update to match the server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_update: Option<AgentUpdateDirective>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
