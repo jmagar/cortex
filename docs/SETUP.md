@@ -134,6 +134,20 @@ curl -s -X POST http://localhost:3100/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"tail","n":5}}}' | jq .
 ```
 
+Optionally confirm the MCP Apps query widget resource is served (host-agnostic —
+no UI client required):
+
+```bash
+curl -s -X POST http://localhost:3100/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"ui://cortex/query-widget"}}' | jq -r '.result.contents[0].mimeType'
+# Expected: text/html;profile=mcp-app
+```
+
+See the [MCP Apps query widget](../README.md#mcp-apps-query-widget) section for
+what the widget does and how non-UI hosts are unaffected.
+
 ## 8. Install as Claude Code plugin
 
 ```bash

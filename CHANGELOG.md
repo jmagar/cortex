@@ -7,86 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.20.12] - 2026-06-13
+## [1.21.4] - 2026-06-15
 
 ### Added
 
-- Expand focused coverage across setup doctor/agent helpers, heartbeat-agent setup, AI index/watch service setup, CLI global-flag routing, command dispatch guardrails, and test-only OS adapter assertions to lift total line coverage to 80%.
-
-## [1.20.11] - 2026-06-13
-
-### Added
-
-- Add focused coverage for agent Docker connection seams, deploy-agent command probes, Gemini assessment missing-incident validation, Docker ingest supervisor task pruning, doctor render/error paths, receiver listener wiring, and runtime router accessors.
-
-## [1.20.10] - 2026-06-13
-
-### Added
-
-- Expand coverage for doctor runtime diagnostics, setup first-run/systemd/AI-watch command phases, runtime auth and inventory-refresh helpers, heartbeat-agent collection and retry paths, CLI local-only routing, and inventory device/project collectors.
-
-## [1.20.9] - 2026-06-13
-
-### Added
-
-- Add focused coverage for deploy-agent parsing, notification evaluator cycles, inventory refresh gates, remote config/project collectors, and Docker ingest supervisor helpers.
-
-### Fixed
-
-- Drop empty host entries from `cortex deploy agent --hosts` comma lists and make the evaluator future-row age test assert against `received_at`.
-
-## [1.20.8] - 2026-06-13
-
-### Added
-
-- Add focused coverage for migration idempotency drift, setup first-run env and compose asset generation, heartbeat-agent setup artifacts, and notification dispatcher no-URL drops.
-
-## [1.20.7] - 2026-06-13
-
-### Added
-
-- Add focused DB-layer coverage for error-signature scan cursors, window-count merging, unaddressed filtering, hash lookup misses, and forged-hash ack projection no-ops.
-
-## [1.20.6] - 2026-06-12
-
-### Added
-
-- Add focused unit coverage for CLI AI output success gates, command-log local-only dispatch, service import wrappers, and notification digest/dispatcher SQL helpers.
-
-## [1.20.5] - 2026-06-12
-
-### Added
-
-- Add focused unit coverage for agent Docker naming, journald parsing, syslog sender formatting, OS adapter D-Bus inference, CLI heartbeat-agent config mapping, and debug setup helpers.
-
-### Fixed
-
-- Relax the graph-inventory lock-scope test timeout so coverage-instrumented builds do not fail on instrumentation overhead while still proving the write lock is released promptly.
-
-## [1.20.4] - 2026-06-12
-
-### Added
-
-- Add focused unit coverage for notification queue wrappers, Aurora logging helpers, remote config parsing, inventory refresh helpers, and setup helper modules.
-
-## [1.20.3] - 2026-06-12
-
-### Added
-
-- Add focused unit coverage for notification evaluator SQL helpers and setup doctor, heartbeat-agent, and systemd setup helpers.
-
-## [1.20.2] - 2026-06-12
+- Expand focused unit coverage across the setup, runtime, inventory, notification, and ingest layers to lift total line coverage to ~80%. New sidecar suites cover setup doctor/agent/first-run/systemd/AI-index/AI-watch/heartbeat-agent helpers, CLI global-flag and local-only routing, command-dispatch guardrails, runtime auth and inventory-refresh seams, inventory device/project/remote-config collectors, notification evaluator/dispatcher/queue/digest SQL helpers, Aurora logging helpers, receiver listener wiring, journald/syslog formatting, and error-signature DB contracts.
+- Add a mocked Docker Engine HTTP fixture for the legacy central pull client plus log-frame mapping, doc-drift tests for Docker ingest guidance and coverage tooling, and deterministic admin REST coverage for `/api/file-tails` in the live smoke harness when `CORTEX_API_ADMIN_TOKEN` is set.
 
 ### Changed
 
-- Reframe Docker log ingest docs around the current host-local cortex agent path, with `CORTEX_DOCKER_*` documented as legacy central pull compatibility for explicit Docker HTTP endpoints.
+- Reframe Docker log ingest docs around the host-local cortex agent path, documenting `CORTEX_DOCKER_*` as legacy central-pull compatibility for explicit Docker HTTP endpoints.
 - Add repeatable coverage commands (`just coverage`, `just coverage-html`) and a CI coverage-summary job using `cargo-llvm-cov` with nextest.
+
+### Fixed
+
+- Drop empty host entries from `cortex deploy agent --hosts` comma lists and assert the evaluator future-row age test against `received_at`.
+- Relax the graph-inventory lock-scope test timeout so coverage-instrumented builds do not fail on instrumentation overhead while still proving the write lock is released promptly.
+
+## [1.21.3] - 2026-06-15
+
+### Security
+
+- Add a defense-in-depth Content-Security-Policy to the query widget (`img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`) capping egress/injection vectors it never uses. `script-src`/`connect-src` are intentionally left open so an MCP Apps host can inject its bridge; document the widget's origin-bound message handling and the `ui://` `targetOrigin: "*"` constraint in `docs/mcp/MCPUI.md`.
+- Stop interpolating server-controlled values into `python3 -c` programs in `scripts/smoke-test.sh`: `assert_gte` now reads the compared value via stdin, and `json_get` documents its literal-accessor-only contract.
+
+### Changed
+
+- Factor the repeated PUBLIC_URL `McpConfig` literals in the rmcp server tests into a `public_url_config()` helper, and fix a stray tab in `scripts/smoke-test.sh`.
+
+## [1.21.2] - 2026-06-15
+
+### Changed
+
+- Consolidate duplicated rmcp server test helpers: `test_state`/`mounted_state` now delegate to a single `make_state(auth_policy)` builder, and the byte-identical `rmcp_router_no_auth_middleware` is folded into `rmcp_router`. Test-only; no behavior change.
+
+## [1.21.1] - 2026-06-15
 
 ### Added
 
-- Add doc-drift tests for Docker ingest guidance, coverage tooling, and live-smoke admin REST coverage.
-- Add a mocked Docker Engine HTTP fixture for the legacy central pull client and its log-frame mapping.
-- Extend the live smoke harness with deterministic admin REST coverage for `/api/file-tails` status/list when `CORTEX_API_ADMIN_TOKEN` is configured.
+- Document the MCP Apps query widget as progressive enhancement (README + `docs/SETUP.md`): canonical URI `ui://cortex/query-widget`, `text/html;profile=mcp-app` MIME, host-agnostic JSON-RPC verification snippets, and an explicit note that non-UI hosts keep receiving normal text/JSON tool results.
+- Add host-agnostic widget wire-contract smoke coverage to `scripts/smoke-test.sh`: `resources/list` exposure, `resources/read` MIME + anchors, `tools/list` `_meta.ui.resourceUri`, and `tools/call action=search` returning both `structuredContent` and text. No browser, Node, or named UI host required.
+
+## [1.21.0] - 2026-06-15
+
+### Added
+
+- Build out the MCP Apps query widget (`ui://cortex/query-widget`) into a self-contained, dependency-free interactive UI. It exposes an FTS5 query input plus hostname/severity/limit filters, calls the `cortex` tool with `action=search` over an MCP Apps host bridge (`window.openai.callTool` when present, otherwise an mcp-ui `postMessage` adapter), and renders results in a compact Aurora-dark table with idle/loading/empty/error/bridge-unavailable states. Replaces the previous placeholder form.
+
+### Security
+
+- Render all log fields in the query widget via `textContent`, preventing HTML/script injection from untrusted log message contents.
 
 ## [1.20.1] - 2026-06-12
 

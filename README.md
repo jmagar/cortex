@@ -138,6 +138,48 @@ workflows: `infra.incident-triage`, `infra.host-health`,
 For the prompt catalog and argument reference, see
 [`docs/mcp/PROMPTS.md`](docs/mcp/PROMPTS.md).
 
+## MCP Apps query widget
+
+cortex ships one interactive UI surface as **progressive enhancement**: a simple
+log-search widget for MCP hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview)
+/ MCP-UI (`_meta.ui.resourceUri`). It is a single self-contained HTML resource —
+no browser build step, no external dependencies, no new server routes.
+
+- **Resource URI:** `ui://cortex/query-widget`
+- **MIME type:** `text/html;profile=mcp-app`
+- The `cortex` tool advertises it via `_meta.ui.resourceUri`; the widget calls the
+  same `cortex` tool with `action=search` over the host bridge and renders the
+  rows in a compact table.
+- It is a **simple search UI, not a dashboard** — query (FTS5) plus hostname,
+  severity, and limit filters.
+
+**Non-UI hosts are unaffected.** Plain MCP clients keep reading the normal
+text/JSON tool results; only hosts that detect `_meta.ui.resourceUri` fetch and
+render the `ui://` resource.
+
+Confirm the wire contract with raw JSON-RPC (no UI host required):
+
+```bash
+# Widget resource is listed
+curl -s -X POST http://localhost:3100/mcp \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{}}'
+
+# Widget HTML is served with the MCP Apps MIME type
+curl -s -X POST http://localhost:3100/mcp \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"ui://cortex/query-widget"}}'
+
+# Search returns both structuredContent (for UI rows) and text (for plain clients)
+curl -s -X POST http://localhost:3100/mcp \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"search","query":"error","limit":5}}}'
+```
+
+If `CORTEX_TOKEN` is set, add `-H "Authorization: Bearer $CORTEX_TOKEN"`.
+`scripts/smoke-test.sh` runs these same checks automatically. For the wire-format
+details see [`docs/mcp/MCPUI.md`](docs/mcp/MCPUI.md).
+
 ### `cortex search`
 
 Full-text search across all syslog messages with optional filters. Uses SQLite FTS5 with porter stemming.
