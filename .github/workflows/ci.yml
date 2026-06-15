@@ -74,10 +74,22 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
+      - name: Install nextest
+        run: cargo install cargo-nextest --locked
+
       - name: Run tests
-        # --locked: CI must never silently re-resolve Cargo.lock (full-review
-        # BM8 — an unlocked run is how rmcp drifted to 1.7 unnoticed).
-        run: cargo test --locked
+        # nextest gives each test its own process, which is the only safe way
+        # to run the env-mutating setup/heartbeat/plugin tests — libtest's
+        # shared-process model lets them race. This matches `just test` and the
+        # coverage job below. --locked: CI must never silently re-resolve
+        # Cargo.lock (full-review BM8 — an unlocked run is how rmcp drifted to
+        # 1.7 unnoticed). env -u mirrors the Justfile's canonical invocation.
+        run: env -u CORTEX_API_TOKEN -u NO_AUTH cargo nextest run --locked
+
+      - name: Run doctests
+        # nextest does not execute doctests; run them explicitly so coverage
+        # matches the previous `cargo test` invocation.
+        run: cargo test --doc --locked
 
   coverage:
     name: Coverage

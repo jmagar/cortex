@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reframe Docker log ingest docs around the host-local cortex agent path, documenting `CORTEX_DOCKER_*` as legacy central-pull compatibility for explicit Docker HTTP endpoints.
 - Add repeatable coverage commands (`just coverage`, `just coverage-html`) and a CI coverage-summary job using `cargo-llvm-cov` with nextest.
 - Extract the `dispatch_surface_gap` argument-mapper tests into a sidecar `dispatch_surface_gap_tests.rs`, honouring the repo's sidecar-test convention and keeping the production module under the 500-line size limit.
+- Run CI tests via `cargo nextest run --locked` (with an explicit `cargo test --doc` step) in the `ci`, `docker-publish`, and `publish-crates` workflows, matching `just test` and the coverage job. The expanded env-mutating setup/heartbeat/plugin tests require per-process isolation, which libtest's shared-process model cannot provide.
 
 ### Fixed
 
