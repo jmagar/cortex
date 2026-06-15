@@ -1470,6 +1470,98 @@ fn init_pool_is_idempotent_when_run_twice() {
     assert_eq!(m22_applied, 1);
 }
 
+#[test]
+fn migration_18_re_stamps_when_restarting_column_already_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("partial-m18.db");
+    let config = test_storage_config(db_path.clone());
+
+    let pool = init_pool(&config).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        assert!(
+            column_exists(&conn, "heartbeat_containers", "restarting").unwrap(),
+            "fixture must have heartbeat_containers.restarting"
+        );
+        conn.execute("DELETE FROM schema_migrations WHERE version = 18", [])
+            .unwrap();
+    }
+    drop(pool);
+
+    let pool = init_pool(&config).expect("migration 18 must converge with existing column");
+    let conn = pool.get().unwrap();
+    assert!(
+        column_exists(&conn, "heartbeat_containers", "restarting").unwrap(),
+        "restarting column must remain present"
+    );
+    let version_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 18",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version_count, 1, "migration 18 marker must be restored");
+}
+
+#[test]
+fn migration_28_repairs_missing_runtime_metric_column_without_duplicate_marker() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("partial-m28.db");
+    let config = test_storage_config(db_path.clone());
+
+    let pool = init_pool(&config).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE graph_projection_meta
+                SET last_runtime_ms = 4242,
+                    last_chunk_count = 7
+              WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM schema_migrations WHERE version = 28", [])
+            .unwrap();
+        conn.execute(
+            "ALTER TABLE graph_projection_meta DROP COLUMN last_chunk_count",
+            [],
+        )
+        .unwrap();
+    }
+    drop(pool);
+
+    let pool = init_pool(&config).expect("migration 28 must repair a missing runtime column");
+    let conn = pool.get().unwrap();
+    assert!(
+        column_exists(&conn, "graph_projection_meta", "last_runtime_ms").unwrap(),
+        "existing metric column must remain present"
+    );
+    assert!(
+        column_exists(&conn, "graph_projection_meta", "last_chunk_count").unwrap(),
+        "missing metric column must be restored"
+    );
+    let version_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 28",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        version_count, 1,
+        "migration 28 marker must be restored exactly once"
+    );
+    let runtime_ms: i64 = conn
+        .query_row(
+            "SELECT last_runtime_ms FROM graph_projection_meta WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(runtime_ms, 4242, "existing metric data must survive repair");
+}
+
 /// Golden old-schema fixture: the exact v0.2.6 schema (pre-migration-framework
 /// — no schema_migrations table, no ai_* columns, no metadata_json). Frozen
 /// from `git show v0.2.6:src/db.rs`; do not "modernize" it — its purpose is to

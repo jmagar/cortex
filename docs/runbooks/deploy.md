@@ -126,9 +126,9 @@ Rollback while a migration is running is a restore operation, not a partial sche
 
 ## Docker Ingest Integration Check
 
-The default `scripts/smoke-test.sh` covers live UDP and TCP ingest plus MCP actions. Docker ingest is heavier because it requires a docker-socket-proxy-compatible endpoint and a container log stream, so run it explicitly during Docker ingest changes:
+The default `scripts/smoke-test.sh` covers live UDP and TCP ingest plus MCP actions. Current Docker log coverage is split: host-local cortex agent parity is covered by agent deployment tests, and the legacy central pull path is covered by a mocked Docker HTTP fixture. Run an explicit fixture-backed integration check only when changing the legacy pull path:
 
-1. Start a disposable docker-socket-proxy or mocked Docker HTTP fixture with `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, and `POST=0`.
+1. Start a disposable Docker-compatible HTTP fixture. If it is docker-socket-proxy, use `CONTAINERS=1`, `EVENTS=1`, `PING=1`, `VERSION=1`, and `POST=0`.
 2. Start cortex with `CORTEX_DOCKER_INGEST_ENABLED=true` and `CORTEX_DOCKER_HOSTS=<fixture-host>`.
 3. Run a short-lived container that writes a unique marker to stdout and stderr.
 4. Verify `search` or `tail` returns the marker and that stream rows use `source_ip=docker://<host>/<container>/<stream>`.

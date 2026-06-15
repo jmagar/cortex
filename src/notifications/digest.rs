@@ -337,6 +337,38 @@ mod tests {
     }
 
     #[test]
+    fn fetch_host_stats_orders_by_volume_and_attaches_top_app() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE logs (
+                 hostname TEXT NOT NULL,
+                 severity TEXT NOT NULL,
+                 app_name TEXT,
+                 received_at TEXT NOT NULL
+             );
+             INSERT INTO logs (hostname, severity, app_name, received_at) VALUES
+                 ('host-a', 'info', 'nginx', strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                 ('host-a', 'warning', 'nginx', strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                 ('host-a', 'err', 'postgres', strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                 ('host-b', 'crit', 'worker', strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                 ('old-host', 'err', 'stale', strftime('%Y-%m-%dT%H:%M:%fZ','now','-48 hours'));",
+        )
+        .unwrap();
+
+        let entries = fetch_host_stats(&conn, 24).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].hostname, "host-a");
+        assert_eq!(entries[0].total_logs, 3);
+        assert_eq!(entries[0].error_count, 1);
+        assert_eq!(entries[0].warning_count, 1);
+        assert_eq!(entries[0].top_app.as_deref(), Some("nginx"));
+        assert_eq!(entries[1].hostname, "host-b");
+        assert_eq!(entries[1].error_count, 1);
+        assert_eq!(entries[1].top_app.as_deref(), Some("worker"));
+    }
+
+    #[test]
     fn parse_cron_hour_minute_standard() {
         assert_eq!(parse_cron_hour_minute("0 8 * * *"), (8, 0));
         assert_eq!(parse_cron_hour_minute("30 7 * * *"), (7, 30));

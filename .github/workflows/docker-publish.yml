@@ -38,8 +38,15 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
+      - name: Install nextest
+        run: cargo install cargo-nextest --locked
+
       - name: Run tests
-        run: cargo test --locked
+        # nextest isolates env-mutating tests per-process (matches `just test`).
+        run: env -u CORTEX_API_TOKEN -u NO_AUTH cargo nextest run --locked
+
+      - name: Run doctests
+        run: cargo test --doc --locked
 
   build-and-push:
     runs-on: ubuntu-latest

@@ -4,7 +4,8 @@ cortex is one binary, but operationally it is three sub-products sharing a
 SQLite database and a service layer:
 
 1. **Log intelligence core** — syslog UDP/TCP ingest, OTLP `/v1/logs`,
-   Docker socket-proxy ingest, AI transcript indexing, FTS5 search, and the
+   host-local agent Docker log ingest, legacy central pull Docker compatibility,
+   AI transcript indexing, FTS5 search, and the
    45-action `cortex` MCP tool plus the `/api/*` REST mirror. Source: `src/syslog/`,
    `src/otlp.rs`, `src/docker_ingest/`, `src/db/`, `src/mcp/`, `src/api.rs`,
    `src/app/`.
@@ -28,7 +29,8 @@ SQLite database and a service layer:
 | `syslog/` (`receiver/`, parser) | core | UDP + TCP listeners (supervised with restart + backoff), RFC 3164/5424 + CEF parsing |
 | `ingest.rs` | core | mpsc channel + batch writer (one pool connection reserved for this writer) |
 | `otlp.rs` | core | OTLP/HTTP `POST /v1/logs` (protobuf, 4 MiB cap) |
-| `docker_ingest/` | core | Remote container stdout/stderr + lifecycle events via docker-socket-proxy |
+| `agent/`, `heartbeat_agent.rs` | inventory | Host-local cortex agent, including Docker log streaming from the local socket |
+| `docker_ingest/` | core | Legacy central pull container stdout/stderr + lifecycle events via explicit remote Docker Engine HTTP endpoints |
 | `mcp/` | core | RMCP Streamable HTTP server, `ACTION_SPECS` registry, scope gates, `/health` + `/health/full` |
 | `api.rs` | core | Always-on `/api/*` REST surface (56 routes), bearer-token gated |
 | `scanner/`, `ai_watch.rs` | core | AI transcript scanning/scrubbing and the host-side watch daemon |
@@ -56,7 +58,8 @@ supervised listeners:
 | AI session rollup refresh | every 300s (eager first run) | fixed (`SESSION_ROLLUP_REFRESH_SECS`) |
 | Timeline hourly rollup (incremental) | every 60s | fixed (`TIMELINE_ROLLUP_REFRESH_SECS`) |
 | `PRAGMA optimize` (planner stats) | every 6h | fixed (`OPTIMIZE_INTERVAL_SECS`) |
-| Docker ingest streams | continuous, reconnect with backoff | `CORTEX_DOCKER_INGEST_ENABLED`, `CORTEX_DOCKER_RECONNECT_INITIAL_MS` / `_MAX_MS` |
+| Host-local agent Docker streams | continuous on deployed agents | agent deployment config + local Docker socket |
+| Legacy central pull Docker streams | continuous, reconnect with backoff | `CORTEX_DOCKER_INGEST_ENABLED`, `CORTEX_DOCKER_RECONNECT_INITIAL_MS` / `_MAX_MS` |
 | Syslog UDP/TCP listeners | continuous, supervised restart + backoff | `CORTEX_RECEIVER_HOST` / `_PORT` |
 
 A dead syslog listener fails `/health` with 503; per-listener liveness

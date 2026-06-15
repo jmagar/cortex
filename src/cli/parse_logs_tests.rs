@@ -101,6 +101,144 @@ fn parse_filter_collects_structured_filters_and_rejects_query_terms() {
 }
 
 #[test]
+fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
+    let search = parse_search(&strings(&[
+        "--hostname=host1",
+        "--source-ip=10.0.0.1",
+        "--severity=err",
+        "--app-name=cortex",
+        "--facility=daemon",
+        "--exclude-facility=kern",
+        "--from=t0",
+        "--to=t1",
+        "--received-from=r0",
+        "--received-to=r1",
+        "--limit=30",
+        "--json",
+        "disk",
+        "full",
+    ]))
+    .unwrap();
+    match search {
+        crate::cli::CliCommand::Search(args) => {
+            assert_eq!(args.query.as_deref(), Some("disk full"));
+            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.received_to.as_deref(), Some("r1"));
+            assert_eq!(args.limit, Some(30));
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    let tail = parse_tail(&strings(&[
+        "--hostname=host1",
+        "--source-ip=10.0.0.1",
+        "-n",
+        "12",
+    ]))
+    .unwrap();
+    match tail {
+        crate::cli::CliCommand::Tail(args) => {
+            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.n, Some(12));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    let sessions = parse_sessions(&strings(&[
+        "--project=/repo",
+        "--tool=Bash",
+        "--hostname=host1",
+        "--from=t0",
+        "--to=t1",
+        "--limit=4",
+    ]))
+    .unwrap();
+    match sessions {
+        crate::cli::CliCommand::Sessions(args) => {
+            assert_eq!(args.project.as_deref(), Some("/repo"));
+            assert_eq!(args.tool.as_deref(), Some("Bash"));
+            assert_eq!(args.limit, Some(4));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    let incident = parse_incident(&strings(&[
+        "--around=t0",
+        "--minutes=10",
+        "--host=host1",
+        "--limit=50",
+    ]))
+    .unwrap();
+    match incident {
+        crate::cli::CliCommand::Incident(args) => {
+            assert_eq!(args.around, "t0");
+            assert_eq!(args.minutes, Some(10));
+            assert_eq!(args.hostname.as_deref(), Some("host1"));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    let correlate = parse_correlate(&strings(&[
+        "--reference-time=t0",
+        "--window-minutes=5",
+        "--severity-min=warn",
+        "--hostname=host1",
+        "--source-ip=10.0.0.1",
+        "--query=panic",
+        "--limit=99",
+    ]))
+    .unwrap();
+    match correlate {
+        crate::cli::CliCommand::Correlate(args) => {
+            assert_eq!(args.reference_time, "t0");
+            assert_eq!(args.window_minutes, Some(5));
+            assert_eq!(args.query.as_deref(), Some("panic"));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_log_commands_report_help_and_unknown_argument_errors() {
+    for (parser, args, expected) in [
+        (
+            parse_search as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
+            vec!["--help"],
+            "use `cortex --help`",
+        ),
+        (parse_filter, vec!["--bogus"], "unknown filter option"),
+        (parse_tail, vec!["--bogus"], "unknown tail option"),
+        (
+            parse_sessions,
+            vec!["extra"],
+            "unexpected sessions argument",
+        ),
+        (parse_incident, vec!["--service=x"], "requires --around"),
+        (
+            parse_correlate,
+            vec!["--query=x"],
+            "requires --reference-time",
+        ),
+        (
+            parse_source_ips,
+            vec!["--bogus"],
+            "unknown source-ips option",
+        ),
+        (parse_timeline, vec!["--bogus"], "unknown timeline option"),
+        (parse_patterns, vec!["--bogus"], "unknown patterns option"),
+        (
+            parse_ingest_rate,
+            vec!["--host"],
+            "unknown ingest-rate option",
+        ),
+    ] {
+        let err = parser(&strings(&args)).unwrap_err().to_string();
+        assert!(err.contains(expected), "expected {expected:?}, got {err:?}");
+    }
+}
+
+#[test]
 fn parse_patterns_accepts_limit_alias_for_top_n() {
     let args = strings(&["--limit=7"]);
 

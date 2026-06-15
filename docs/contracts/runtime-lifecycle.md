@@ -142,7 +142,8 @@ Body is JSON. **Field additions are always allowed** (additive minor change); re
 Field groupings (Prometheus / Grafana consumers may rely on these prefixes):
 
 - `syslog_udp_*`, `syslog_tcp_*` — listener counters.
-- `docker_ingest_*` — remote Docker socket-proxy ingestion.
+- `docker_ingest_*` — legacy central pull Docker ingestion. Current deployed
+  agents stream Docker logs from each host's local Docker socket.
 - `ingest_*` — channel/queue state between listeners and writer.
 - `writer_*` — batch writer + storage-budget interaction.
 - `otlp_*` — OTLP `/v1/logs` receiver counters (top-level, not under `ingest`).

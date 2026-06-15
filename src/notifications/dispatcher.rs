@@ -451,6 +451,8 @@ pub(crate) fn spawn_dispatcher(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::StorageConfig;
+    use crate::db::init_pool;
     use crate::db::notifications::outbox_insert;
 
     fn open_test_db() -> rusqlite::Connection {
@@ -533,6 +535,38 @@ mod tests {
         assert_eq!(severity_to_notify_type("err"), NotifyType::Warning);
         assert_eq!(severity_to_notify_type("notice"), NotifyType::Info);
         assert_eq!(severity_to_notify_type("info"), NotifyType::Info);
+    }
+
+    #[test]
+    fn signature_ack_check_distinguishes_missing_pending_and_acknowledged() {
+        let conn = open_test_db();
+        let version = crate::app::error_detection::NORMALIZER_VERSION;
+
+        assert!(!is_signature_acked(&conn, "missing", version).unwrap());
+
+        conn.execute(
+            "INSERT INTO error_signatures (
+                 signature_hash, normalizer_version, template, sample_message,
+                 sample_hostname, severity, first_seen_at, last_seen_at, acknowledged_at
+             ) VALUES (?1, ?2, 'template', 'sample', 'host1', 'err',
+                       '2026-06-13T00:00:00.000Z', '2026-06-13T00:00:00.000Z', NULL)",
+            rusqlite::params!["pending", version],
+        )
+        .unwrap();
+        assert!(!is_signature_acked(&conn, "pending", version).unwrap());
+
+        conn.execute(
+            "INSERT INTO error_signatures (
+                 signature_hash, normalizer_version, template, sample_message,
+                 sample_hostname, severity, first_seen_at, last_seen_at, acknowledged_at
+             ) VALUES (?1, ?2, 'template', 'sample', 'host1', 'err',
+                       '2026-06-13T00:00:00.000Z', '2026-06-13T00:00:00.000Z',
+                       '2026-06-13T00:01:00.000Z')",
+            rusqlite::params!["acked", version],
+        )
+        .unwrap();
+        assert!(is_signature_acked(&conn, "acked", version).unwrap());
+        assert!(!is_signature_acked(&conn, "acked", version + 1).unwrap());
     }
 
     #[test]
@@ -629,5 +663,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "dead");
+    }
+
+    #[tokio::test]
+    async fn dispatch_cycle_drops_pending_row_when_no_apprise_urls_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = Arc::new(
+            init_pool(&StorageConfig::for_test(
+                dir.path().join("notifications.db"),
+            ))
+            .unwrap(),
+        );
+        let conn = pool.get().unwrap();
+        outbox_insert(
+            &conn,
+            &crate::db::notifications::OutboxInsertParams {
+                dedup_key: "no-url:test".to_string(),
+                rule_id: "oom_kill".to_string(),
+                severity: "critical".to_string(),
+                hostname: "host1".to_string(),
+                title: "Title".to_string(),
+                body: "Body".to_string(),
+                apprise_urls_json: "[]".to_string(),
+                next_attempt_at: "2000-01-01T00:00:00.000Z".to_string(),
+            },
+        )
+        .unwrap();
+        drop(conn);
+
+        let dispatched = run_dispatch_cycle(
+            Arc::clone(&pool),
+            Arc::new(Semaphore::new(1)),
+            &AppriseClient::new("http://127.0.0.1:1"),
+            &NotificationsConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(dispatched, 0);
+        let conn = pool.get().unwrap();
+        let (status, error): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, last_error FROM notifications_outbox WHERE dedup_key = 'no-url:test'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "dropped");
+        assert_eq!(error.as_deref(), Some("no_apprise_urls"));
+        let firing_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM notification_firings", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(firing_count, 0, "drops must not create firing history");
     }
 }

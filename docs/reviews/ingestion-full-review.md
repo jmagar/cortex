@@ -20,8 +20,8 @@ Tracker epic: `cortex-vzg8`
    - Bead: `cortex-vzg8.10`
 
 2. Docker ingest did not have a practical smoke-test boundary.
-   - Evidence: Docker ingest requires a docker-socket-proxy-compatible endpoint and a real or mocked container log stream.
-   - Remediation: default smoke remains practical; Docker ingest is documented as a separate integration path using a disposable proxy or mocked Docker HTTP fixture.
+   - Evidence: Docker ingest requires either a deployed host-local agent with Docker socket access or a real/mocked legacy Docker HTTP endpoint.
+   - Remediation: default smoke remains practical; host-local agent parity is covered separately and legacy central pull ingest is documented/tested through a mocked Docker HTTP fixture.
    - Bead: `cortex-vzg8.10`
 
 3. TCP message-size documentation could overstate protection.

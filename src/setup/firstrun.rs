@@ -91,7 +91,7 @@ pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {
     ))
 }
 
-pub(super) fn filesystem_phase(
+pub(crate) fn filesystem_phase(
     mode: SetupMode,
     home: &Path,
     data_dir: &Path,
@@ -346,7 +346,7 @@ pub(crate) fn render_env(env: &BTreeMap<String, String>) -> String {
     out
 }
 
-fn write_compose_assets(compose_dir: &Path) -> io::Result<SetupPhase> {
+pub(crate) fn write_compose_assets(compose_dir: &Path) -> io::Result<SetupPhase> {
     let timer = PhaseTimer::start("compose-assets");
     std::fs::create_dir_all(compose_dir.join("config"))?;
     std::fs::write(
@@ -381,7 +381,7 @@ pub(crate) fn dockerfile_asset() -> &'static str {
     super::DOCKERFILE_ASSET
 }
 
-fn command_phase<const N: usize>(name: &'static str, args: [&str; N]) -> SetupPhase {
+pub(crate) fn command_phase<const N: usize>(name: &'static str, args: [&str; N]) -> SetupPhase {
     let timer = PhaseTimer::start(name);
     let program = if name == "docker compose" {
         "docker"
@@ -412,7 +412,7 @@ fn command_phase<const N: usize>(name: &'static str, args: [&str; N]) -> SetupPh
     }
 }
 
-fn cleanup_legacy_systemd() -> SetupPhase {
+pub(crate) fn cleanup_legacy_systemd() -> SetupPhase {
     let timer = PhaseTimer::start("legacy-systemd");
     let home = match std::env::var("HOME") {
         Ok(home) => PathBuf::from(home),
@@ -470,7 +470,10 @@ fn cleanup_legacy_systemd() -> SetupPhase {
     )
 }
 
-fn ensure_network_phase(phases: &mut Vec<SetupPhase>, env: Option<&BTreeMap<String, String>>) {
+pub(crate) fn ensure_network_phase(
+    phases: &mut Vec<SetupPhase>,
+    env: Option<&BTreeMap<String, String>>,
+) {
     let timer = PhaseTimer::start("docker-network");
     let network = env
         .and_then(|env| env.get("DOCKER_NETWORK"))
@@ -503,7 +506,7 @@ fn ensure_network_phase(phases: &mut Vec<SetupPhase>, env: Option<&BTreeMap<Stri
     }
 }
 
-fn run_compose_phase(compose_dir: &Path, env_path: &Path, args: &[&str]) -> SetupPhase {
+pub(crate) fn run_compose_phase(compose_dir: &Path, env_path: &Path, args: &[&str]) -> SetupPhase {
     let timer = PhaseTimer::start(if args.first() == Some(&"pull") {
         "compose-pull"
     } else {
@@ -542,7 +545,7 @@ fn run_compose_phase(compose_dir: &Path, env_path: &Path, args: &[&str]) -> Setu
     }
 }
 
-fn health_phase(env: &Option<BTreeMap<String, String>>) -> SetupPhase {
+pub(crate) fn health_phase(env: &Option<BTreeMap<String, String>>) -> SetupPhase {
     let timer = PhaseTimer::start("health");
     let port = env
         .as_ref()

@@ -1333,6 +1333,37 @@ async fn ai_service_methods_return_seeded_data() {
     assert_eq!(tools.tools[0].tool, "claude");
 }
 
+#[tokio::test]
+async fn run_gemini_assess_rejects_missing_incident_before_gemini() {
+    let (service, _pool, _dir) = test_service();
+
+    let err = service
+        .run_gemini_assess_with_delta(
+            AiAssessRequest {
+                incident_id: "missing-incident".into(),
+                model: Some("gemini-test-model".into()),
+                project: None,
+                tool: None,
+                from: None,
+                to: None,
+                window_minutes: Some(30),
+                correlation_window_minutes: Some(10),
+                terms: vec!["panic".into()],
+                limit: Some(1),
+            },
+            |_| panic!("gemini should not be invoked when the incident is absent"),
+        )
+        .await
+        .unwrap_err();
+
+    match err {
+        ServiceError::InvalidInput(message) => {
+            assert!(message.contains("no incident found with id 'missing-incident'"));
+        }
+        other => panic!("expected invalid input, got {other:?}"),
+    }
+}
+
 // `tracing_test::traced_test` captures TRACE-level events by default, so the
 // `tracing::debug!` calls emitted by `run_db` are visible to `logs_contain`.
 // We verify both the message tag and the structured timing fields are present.

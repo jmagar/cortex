@@ -33,6 +33,10 @@ pub(crate) mod docker_ingest;
 pub(crate) mod ingest;
 pub(crate) mod ingest_metadata;
 
+#[cfg(test)]
+#[path = "docs_tests.rs"]
+mod docs_tests;
+
 /// Test support: factory helpers for building [`mcp::AppState`] variants.
 ///
 /// Gated by `cfg(any(test, feature = "test-support"))` so the helpers are

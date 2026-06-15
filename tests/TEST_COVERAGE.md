@@ -4,13 +4,22 @@
 
 `tests/test_live.sh` is the canonical integration test suite for the **cortex** MCP server. It exercises the server end-to-end over HTTP using real JSON-RPC requests, not unit stubs or mocks.
 
+Run the hermetic Rust suite with `just test`. Run line coverage with
+`just coverage`, which invokes `cargo llvm-cov nextest --summary-only`; use
+`just coverage-html` for an HTML report. The live smoke harness covers UDP and
+TCP ingest, MCP tool calls, CLI parity, REST surface parity, and file-tail
+admin/status paths. Docker log ingest is split by operational path: the current
+host-local agent path is covered by agent deployment parity tests, while the
+legacy central pull path has a mocked Docker HTTP fixture in
+`src/docker_ingest/client_tests.rs`.
+
 **Service under test:** cortex — a read-only MCP server that exposes syslog data from a SQLite backing store via the Model Context Protocol (MCP) over HTTP.
 
 **MCP server exercised:** The HTTP transport endpoint at `POST /mcp`, plus the unauthenticated health check at `GET /health`. All MCP calls use JSON-RPC 2.0.
 
 **What it does NOT test:**
-- Syslog ingestion (UDP/TCP listeners)
-- Write operations of any kind (there are none in the tool surface, but the principle applies)
+- Full production Docker log ingest with real containers on every host
+- Destructive/admin operations that require seeded error signatures or external notification services
 - Stdio transport (see section 9)
 - Long-running streaming / SSE events beyond accept header negotiation
 
@@ -236,24 +245,24 @@ All subsequent assertions operate on this inner JSON payload, not the raw JSON-R
 
 ---
 
-#### Tool: `syslog help`
+#### Tool: `cortex help`
 
 **Arguments:** `{"action":"status"}`. The action has no additional
 action-specific parameters.
 
-**Purpose:** Confirm the help tool returns a non-empty help string containing the word "syslog".
+**Purpose:** Confirm the help tool returns a non-empty help string containing the word "cortex".
 
 | Test label | jq expression | PASS condition |
 |---|---|---|
-| `syslog help — help field present` | `.help` | Non-null, non-empty, non-false |
-| `syslog help — help text is non-empty` | `.help \| length > 0` | Evaluates to `true` |
-| `syslog help — help text contains 'syslog'` | `.help \| ascii_downcase \| contains("syslog")` | Evaluates to `true` |
+| `cortex help — help field present` | `.help` | Non-null, non-empty, non-false |
+| `cortex help — help text is non-empty` | `.help \| length > 0` | Evaluates to `true` |
+| `cortex help — help text contains 'cortex'` | `.help \| ascii_downcase \| contains("cortex")` | Evaluates to `true` |
 
-The third assertion is case-insensitive via `ascii_downcase` — the word "syslog" or "Syslog" or "SYSLOG" all pass.
+The third assertion is case-insensitive via `ascii_downcase` — the word "cortex" or "Cortex" or "CORTEX" all pass.
 
 ---
 
-#### Tool: `syslog status`
+#### Tool: `cortex status`
 
 **Arguments:** `{}` (no arguments)
 
@@ -261,14 +270,14 @@ The third assertion is case-insensitive via `ascii_downcase` — the word "syslo
 
 | Test label | jq expression | PASS condition |
 |---|---|---|
-| `syslog status — status is ok` | `.status` | Equals `"ok"` |
-| `syslog status — db_ok field present` | `.db_ok != null` | Evaluates to `true` |
-| `syslog status — runtime_observability present` | `.runtime_observability` | Non-null object |
-| `syslog status — otlp counters present` | `.otlp` | Non-null object |
+| `cortex status — status is ok` | `.status` | Equals `"ok"` |
+| `cortex status — db_ok field present` | `.db_ok != null` | Evaluates to `true` |
+| `cortex status — runtime_observability present` | `.runtime_observability` | Non-null object |
+| `cortex status — otlp counters present` | `.otlp` | Non-null object |
 
 ---
 
-#### Tool: `syslog stats`
+#### Tool: `cortex stats`
 
 **Arguments:** `{}` (no arguments)
 
@@ -276,13 +285,13 @@ The third assertion is case-insensitive via `ascii_downcase` — the word "syslo
 
 | Test label | jq expression | PASS condition |
 |---|---|---|
-| `syslog stats — total_logs field present` | `.total_logs != null` | Evaluates to `true` |
-| `syslog stats — total_hosts field present` | `.total_hosts != null` | Evaluates to `true` |
-| `syslog stats — logical_db_size_mb present` | `.logical_db_size_mb` | Non-null, non-empty |
-| `syslog stats — physical_db_size_mb present` | `.physical_db_size_mb` | Non-null, non-empty |
-| `syslog stats — write_blocked field present` | `.write_blocked != null` | Evaluates to `true` |
-| `syslog stats — total_logs is a number >= 0` | `.total_logs >= 0` | Evaluates to `true` |
-| `syslog stats — total_hosts is a number >= 0` | `.total_hosts >= 0` | Evaluates to `true` |
+| `cortex stats — total_logs field present` | `.total_logs != null` | Evaluates to `true` |
+| `cortex stats — total_hosts field present` | `.total_hosts != null` | Evaluates to `true` |
+| `cortex stats — logical_db_size_mb present` | `.logical_db_size_mb` | Non-null, non-empty |
+| `cortex stats — physical_db_size_mb present` | `.physical_db_size_mb` | Non-null, non-empty |
+| `cortex stats — write_blocked field present` | `.write_blocked != null` | Evaluates to `true` |
+| `cortex stats — total_logs is a number >= 0` | `.total_logs >= 0` | Evaluates to `true` |
+| `cortex stats — total_hosts is a number >= 0` | `.total_hosts >= 0` | Evaluates to `true` |
 
 The `!= null` form is used for `total_logs`, `total_hosts`, and `write_blocked` so that a value of `0` or `false` still passes — these are valid production values. The `>= 0` checks additionally assert numeric type.
 
@@ -455,14 +464,14 @@ No write operations exist in the cortex tool surface (it is a read-only server),
 
 | Action | Tested? |
 |---|---|
-| `syslog search` | Yes — two invocations |
-| `syslog tail` | Yes |
-| `syslog errors` | Yes |
-| `syslog hosts` | Yes |
-| `syslog correlate` | Yes |
-| `syslog stats` | Yes |
-| `syslog status` | Yes |
-| `syslog help` | Yes |
+| `cortex search` | Yes — two invocations |
+| `cortex tail` | Yes |
+| `cortex errors` | Yes |
+| `cortex hosts` | Yes |
+| `cortex correlate` | Yes |
+| `cortex stats` | Yes |
+| `cortex status` | Yes |
+| `cortex help` | Yes |
 
 ---
 
@@ -470,12 +479,12 @@ No write operations exist in the cortex tool surface (it is a read-only server),
 
 | Action | What correctness means beyond "responded" |
 |---|---|
-| `syslog help` | `.help` is a non-empty string that mentions "syslog" — proves the help content is not empty or boilerplate |
-| `syslog status` | `.status`, `.db_ok`, `.runtime_observability`, and `.otlp` are present — proves the lightweight runtime health path works through MCP |
-| `syslog stats` | All numeric fields are present AND `>= 0` — proves the DB query ran and returned sensible (not negative) values; `write_blocked` is proven non-null (may be `false`) |
-| `syslog hosts` | `.hosts` is a JSON array (not an object or string); if populated, each entry has `hostname`, `log_count`, `first_seen`, `last_seen` — proves the host aggregation query produced correctly shaped rows |
-| `syslog search` | `.count` is numeric `>= 0` and `.logs` is an array; if populated, entries have all four log fields — proves the full-text search plumbing returns correctly shaped log rows |
-| `syslog errors` | `.summary` is an array; if populated, entries have `hostname`, `severity`, and `count` — proves the severity-filtered aggregation returns the correct schema |
+| `cortex help` | `.help` is a non-empty string that mentions "cortex" — proves the help content is not empty or boilerplate |
+| `cortex status` | `.status`, `.db_ok`, `.runtime_observability`, and `.otlp` are present — proves the lightweight runtime health path works through MCP |
+| `cortex stats` | All numeric fields are present AND `>= 0` — proves the DB query ran and returned sensible (not negative) values; `write_blocked` is proven non-null (may be `false`) |
+| `cortex hosts` | `.hosts` is a JSON array (not an object or string); if populated, each entry has `hostname`, `log_count`, `first_seen`, `last_seen` — proves the host aggregation query produced correctly shaped rows |
+| `cortex search` | `.count` is numeric `>= 0` and `.logs` is an array; if populated, entries have all four log fields — proves the full-text search plumbing returns correctly shaped log rows |
+| `cortex errors` | `.summary` is an array; if populated, entries have `hostname`, `severity`, and `count` — proves the severity-filtered aggregation returns the correct schema |
 | `syslog tail` | `.count >= 0` and `.logs` is an array; if populated, entries have all four log fields — proves the recency ordering query returns correct log rows |
 | `syslog correlate` | All seven fields (`reference_time`, `window_minutes`, `window_from`, `window_to`, `hosts`, `total_events`, `truncated`) are present — proves the temporal windowing logic computed bounds and populated all metadata even on an empty window |
 | `syslog ai_correlate` | `.anchors` is an array and `.total_related_events` plus `.related_limit_per_anchor` are present — proves AI transcript anchors can be joined to nearby non-AI log context without requiring matches |

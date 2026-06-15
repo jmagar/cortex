@@ -853,7 +853,12 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
                 let val = rest
                     .get(i)
                     .ok_or_else(|| anyhow::anyhow!("--hosts requires a value"))?;
-                agent_hosts = val.split(',').map(str::trim).map(str::to_string).collect();
+                agent_hosts = val
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|host| !host.is_empty())
+                    .map(str::to_string)
+                    .collect();
             }
             "--target" if subcommand == "agent" => {
                 i += 1;

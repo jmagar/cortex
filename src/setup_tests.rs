@@ -1,4 +1,43 @@
 use super::*;
+use serial_test::serial;
+
+struct EnvGuard {
+    name: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvGuard {
+    fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let previous = std::env::var(name).ok();
+        unsafe {
+            std::env::set_var(name, value);
+        }
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => unsafe {
+                std::env::set_var(self.name, value);
+            },
+            None => unsafe {
+                std::env::remove_var(self.name);
+            },
+        }
+    }
+}
+
+#[cfg(unix)]
+fn executable_file(path: &std::path::Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::write(path, body).unwrap();
+    let mut perms = std::fs::metadata(path).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(path, perms).unwrap();
+}
 
 #[test]
 fn ensure_env_file_preserves_existing_token_and_adds_compose_defaults() {
@@ -236,6 +275,103 @@ fn parse_env_ignores_comments_and_blank_lines() {
     let parsed = parse_env("\n# comment\nA=1\nB = two\n");
     assert_eq!(parsed.get("A").map(String::as_str), Some("1"));
     assert_eq!(parsed.get("B").map(String::as_str), Some("two"));
+}
+
+#[test]
+fn parse_env_preserves_equals_inside_values_and_trims_outer_whitespace() {
+    let parsed = parse_env(" URL = https://example.test/path?a=1&b=2 \nBROKEN\nEMPTY=\n");
+
+    assert_eq!(
+        parsed.get("URL").map(String::as_str),
+        Some("https://example.test/path?a=1&b=2")
+    );
+    assert_eq!(parsed.get("EMPTY").map(String::as_str), Some(""));
+    assert!(
+        !parsed.contains_key("BROKEN"),
+        "lines without '=' are ignored"
+    );
+}
+
+#[test]
+fn default_env_for_data_dir_uses_agent_docker_defaults_and_required_tokens() {
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().join("data");
+
+    let env = default_env_for_data_dir(&data_dir).unwrap();
+
+    assert_eq!(
+        env.get("CORTEX_DOCKER_INGEST_ENABLED").map(String::as_str),
+        Some("false"),
+        "fresh setup must keep legacy central Docker ingest disabled"
+    );
+    assert!(
+        !env.contains_key("CORTEX_DOCKER_HOSTS"),
+        "remote Docker Engine hosts are opt-in compatibility config only"
+    );
+    assert_eq!(
+        env.get("CORTEX_DATA_VOLUME").map(String::as_str),
+        Some(data_dir.to_string_lossy().as_ref())
+    );
+    for key in ["CORTEX_TOKEN", "CORTEX_API_TOKEN"] {
+        let token = env.get(key).expect("token default must be generated");
+        assert_eq!(token.len(), 64, "{key} must be 64 hex chars");
+        assert!(
+            token.chars().all(|c| c.is_ascii_hexdigit()),
+            "{key} must be hex"
+        );
+    }
+}
+
+#[test]
+fn filesystem_phase_check_warns_when_setup_dirs_are_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".cortex");
+    let data_dir = home.join("data");
+    let compose_dir = home.join("compose");
+
+    let phase = filesystem_phase(SetupMode::Check, &home, &data_dir, &compose_dir).unwrap();
+
+    assert_eq!(phase.name, "filesystem");
+    assert_eq!(phase.status, SetupStatus::Warn);
+    assert!(phase.detail.contains("missing setup dirs"));
+}
+
+#[test]
+fn filesystem_phase_repair_creates_private_runtime_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".cortex");
+    let data_dir = home.join("data");
+    let compose_dir = home.join("compose");
+
+    let phase = filesystem_phase(SetupMode::Repair, &home, &data_dir, &compose_dir).unwrap();
+
+    assert_eq!(phase.status, SetupStatus::Ok);
+    assert!(home.is_dir());
+    assert!(data_dir.is_dir());
+    assert!(compose_dir.is_dir());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let home_mode = std::fs::metadata(&home).unwrap().permissions().mode() & 0o777;
+        let data_mode = std::fs::metadata(&data_dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(home_mode, 0o700);
+        assert_eq!(data_mode, 0o700);
+    }
+}
+
+#[test]
+fn write_compose_assets_writes_installed_compose_and_dockerfile() {
+    let dir = tempfile::tempdir().unwrap();
+    let compose_dir = dir.path().join("compose");
+
+    let phase = write_compose_assets(&compose_dir).unwrap();
+
+    assert_eq!(phase.status, SetupStatus::Ok);
+    let compose = std::fs::read_to_string(compose_dir.join("docker-compose.yml")).unwrap();
+    let dockerfile = std::fs::read_to_string(compose_dir.join("config/Dockerfile")).unwrap();
+    assert_eq!(compose, installed_compose_asset());
+    assert_eq!(dockerfile, dockerfile_asset());
+    assert!(compose.contains("      - path: ../.env\n"));
 }
 
 #[test]
@@ -517,6 +653,40 @@ fn ai_watch_service_content_phase_detects_stale_unit() {
 }
 
 #[test]
+fn ai_watch_service_content_phase_accepts_generated_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join("ai-watch.env");
+    let service_path = dir.path().join("cortex-ai-watch.service");
+    let state_dir = dir.path().join("state");
+    let db_path = dir.path().join("data/cortex.db");
+    let user_home = dir.path().join("home");
+    let bin = dir.path().join("bin/cortex");
+    std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+    std::fs::write(&env_path, ai_watch_env_file(&db_path)).unwrap();
+    std::fs::write(
+        &service_path,
+        ai_watch_service_unit(&bin, &env_path, &db_path, &state_dir, &user_home),
+    )
+    .unwrap();
+
+    let phase = check_ai_watch_service_content_phase(
+        &env_path,
+        &service_path,
+        &state_dir,
+        &bin,
+        &db_path,
+        &user_home,
+    );
+
+    assert_eq!(phase.status, SetupStatus::Ok);
+    assert_eq!(
+        phase.detail,
+        "AI watch service files match generated content"
+    );
+}
+
+#[test]
 fn debug_wrapper_script_builds_current_repo_debug_binary() {
     let script = debug_wrapper_script(std::path::Path::new("/home/me/workspace/cortex"));
 
@@ -583,6 +753,21 @@ fn transcript_root_permissions_phase_reports_missing_roots() {
 }
 
 #[test]
+fn transcript_root_permissions_phase_accepts_owned_writable_roots() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".claude/projects")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codex/sessions")).unwrap();
+
+    let phase = transcript_root_permissions_phase(dir.path());
+
+    assert_eq!(phase.status, SetupStatus::Ok);
+    assert_eq!(
+        phase.detail,
+        "AI transcript roots are owned/readable/writable"
+    );
+}
+
+#[test]
 fn summarize_ai_index_output_reports_key_counts() {
     let summary = summarize_ai_index_output(
         r#"{
@@ -598,6 +783,14 @@ fn summarize_ai_index_output_reports_key_counts() {
     assert_eq!(
         summary,
         "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 dropped_metadata_fields=0 file_errors=1; inspect with `cortex ai errors --limit 20`, `cortex ai checkpoints --errors`, then rerun `cortex ai index --json` after fixes"
+    );
+}
+
+#[test]
+fn summarize_ai_index_output_reports_invalid_json() {
+    assert_eq!(
+        summarize_ai_index_output("not json"),
+        "invalid ai index JSON output"
     );
 }
 
@@ -695,4 +888,293 @@ fn inferred_user_bus_env_uses_runtime_bus_when_present() {
     assert!(runtime_dir.is_absolute());
     assert!(bus_address.starts_with("unix:path="));
     assert!(bus_address.ends_with("/bus"));
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn systemctl_user_phases_use_mocked_systemctl_status_and_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    executable_file(
+        &bin_dir.join("systemctl"),
+        r#"#!/bin/sh
+case "$*" in
+  "--user ok") printf 'done\n'; exit 0 ;;
+  "--user fail") printf 'inactive\n'; printf 'ignored stderr\n' >&2; exit 4 ;;
+  "--user is-active cortex.service") printf 'active\n'; exit 3 ;;
+  *) printf 'unexpected args: %s\n' "$*" >&2; exit 9 ;;
+esac
+"#,
+    );
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let _path_guard = EnvGuard::set("PATH", path);
+
+    let ok = systemctl_user_named_phase("mock-systemctl", &["ok"]);
+    let optional = systemctl_user_named_phase("mock-systemctl", &["fail"]);
+    let required = systemctl_user_required_named_phase("mock-systemctl", &["fail"]);
+    let state = systemctl_user_state("is-active", "cortex.service");
+
+    assert_eq!(ok.status, SetupStatus::Ok);
+    assert_eq!(ok.detail, "done");
+    assert_eq!(optional.status, SetupStatus::Warn);
+    assert_eq!(optional.detail, "inactive");
+    assert_eq!(required.status, SetupStatus::Error);
+    assert_eq!(required.detail, "inactive");
+    assert_eq!(state.as_deref(), Some("active"));
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn command_phase_reports_success_failure_and_missing_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    executable_file(
+        &bin_dir.join("docker"),
+        r#"#!/bin/sh
+case "$*" in
+  "--version") printf 'Docker version 99\n'; exit 0 ;;
+  "compose version") printf 'Docker Compose version 88\n'; exit 0 ;;
+  "bad") printf 'docker failed\n' >&2; exit 7 ;;
+  *) printf 'unexpected args: %s\n' "$*" >&2; exit 9 ;;
+esac
+"#,
+    );
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let _path_guard = EnvGuard::set("PATH", path);
+
+    let docker = command_phase("docker", ["--version"]);
+    let compose = command_phase("docker compose", ["compose", "version"]);
+    let failed = command_phase("docker", ["bad"]);
+    let missing = command_phase("missing-cortex-test-bin", ["--version"]);
+
+    assert_eq!(docker.status, SetupStatus::Ok);
+    assert_eq!(docker.detail, "Docker version 99");
+    assert_eq!(compose.status, SetupStatus::Ok);
+    assert_eq!(compose.detail, "Docker Compose version 88");
+    assert_eq!(failed.status, SetupStatus::Error);
+    assert_eq!(failed.detail, "docker failed");
+    assert_eq!(missing.status, SetupStatus::Error);
+    assert_eq!(missing.detail, "not found on PATH");
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn cleanup_legacy_systemd_removes_stale_units_and_dropins() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    let home = dir.path().join("home");
+    let systemd_dir = home.join(".config/systemd/user");
+    let dropin_dir = systemd_dir.join("cortex.service.d");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    std::fs::create_dir_all(&dropin_dir).unwrap();
+    std::fs::write(systemd_dir.join("cortex.service"), "stale\n").unwrap();
+    std::fs::write(dropin_dir.join("override.conf"), "stale\n").unwrap();
+    executable_file(
+        &bin_dir.join("systemctl"),
+        r#"#!/bin/sh
+case "$*" in
+  "--user disable --now cortex.service") exit 0 ;;
+  "--user disable --now mnemo-index.service") exit 0 ;;
+  "--user disable --now mnemo-index.timer") exit 0 ;;
+  "--user daemon-reload") exit 0 ;;
+  *) printf 'unexpected args: %s\n' "$*" >&2; exit 9 ;;
+esac
+"#,
+    );
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let _path_guard = EnvGuard::set("PATH", path);
+    let _home_guard = EnvGuard::set("HOME", &home);
+
+    let phase = cleanup_legacy_systemd();
+
+    assert_eq!(phase.status, SetupStatus::Ok);
+    assert!(!systemd_dir.join("cortex.service").exists());
+    assert!(!dropin_dir.exists());
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn ensure_network_phase_inspects_before_creating_network() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    let log = dir.path().join("docker.log");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    executable_file(
+        &bin_dir.join("docker"),
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$CORTEX_TEST_DOCKER_LOG"
+case "$*" in
+  "network inspect exists") exit 0 ;;
+  "network inspect needs-create") exit 1 ;;
+  "network create needs-create") printf 'made\n'; exit 0 ;;
+  *) printf 'unexpected args: %s\n' "$*" >&2; exit 9 ;;
+esac
+"#,
+    );
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let _path_guard = EnvGuard::set("PATH", path);
+    let _log_guard = EnvGuard::set("CORTEX_TEST_DOCKER_LOG", &log);
+
+    let mut phases = Vec::new();
+    let mut env = std::collections::BTreeMap::new();
+    env.insert("DOCKER_NETWORK".to_string(), "exists".to_string());
+    ensure_network_phase(&mut phases, Some(&env));
+    env.insert("DOCKER_NETWORK".to_string(), "needs-create".to_string());
+    ensure_network_phase(&mut phases, Some(&env));
+
+    assert_eq!(phases[0].status, SetupStatus::Ok);
+    assert_eq!(phases[0].detail, "exists exists");
+    assert_eq!(phases[1].status, SetupStatus::Ok);
+    assert_eq!(phases[1].detail, "created needs-create");
+    assert_eq!(
+        std::fs::read_to_string(log).unwrap(),
+        "network inspect exists\nnetwork inspect needs-create\nnetwork create needs-create\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn run_compose_phase_includes_env_compose_and_override_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    let compose_dir = dir.path().join("compose");
+    let env_path = dir.path().join(".env");
+    let log = dir.path().join("docker.log");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    std::fs::create_dir_all(&compose_dir).unwrap();
+    std::fs::write(compose_dir.join("docker-compose.yml"), "services: {}\n").unwrap();
+    std::fs::write(
+        compose_dir.join("docker-compose.override.yml"),
+        "services: {}\n",
+    )
+    .unwrap();
+    std::fs::write(&env_path, "CORTEX_PORT=3100\n").unwrap();
+    executable_file(
+        &bin_dir.join("docker"),
+        r#"#!/bin/sh
+printf 'cwd=%s args=%s\n' "$PWD" "$*" >> "$CORTEX_TEST_DOCKER_LOG"
+printf 'compose ok\n'
+exit 0
+"#,
+    );
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let _path_guard = EnvGuard::set("PATH", path);
+    let _log_guard = EnvGuard::set("CORTEX_TEST_DOCKER_LOG", &log);
+
+    let phase = run_compose_phase(&compose_dir, &env_path, &["up", "-d", "--build"]);
+
+    assert_eq!(phase.status, SetupStatus::Ok);
+    assert_eq!(phase.name, "compose-up");
+    assert_eq!(phase.detail, "compose ok");
+    let logged = std::fs::read_to_string(log).unwrap();
+    assert!(logged.contains(&format!("cwd={}", compose_dir.display())));
+    assert!(logged.contains(&format!("--env-file {}", env_path.display())));
+    assert!(logged.contains(&format!(
+        "-f {}",
+        compose_dir.join("docker-compose.yml").display()
+    )));
+    assert!(logged.contains(&format!(
+        "-f {}",
+        compose_dir.join("docker-compose.override.yml").display()
+    )));
+    assert!(logged.contains("up -d --build"));
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn health_phase_uses_configured_port_and_reports_curl_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    executable_file(
+        &bin_dir.join("curl"),
+        r#"#!/bin/sh
+case "$*" in
+  *"http://127.0.0.1:3999/health"*) printf 'ok\n'; exit 0 ;;
+  *) printf 'connection refused\n' >&2; exit 7 ;;
+esac
+"#,
+    );
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let _path_guard = EnvGuard::set("PATH", path);
+    let mut env = std::collections::BTreeMap::new();
+    env.insert("CORTEX_PORT".to_string(), "3999".to_string());
+
+    let ok = health_phase(&Some(env));
+    let failed = health_phase(&None);
+
+    assert_eq!(ok.status, SetupStatus::Ok);
+    assert_eq!(ok.detail, "http://127.0.0.1:3999/health ready");
+    assert_eq!(failed.status, SetupStatus::Error);
+    assert_eq!(failed.detail, "connection refused");
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn ai_watch_initial_index_phase_maps_success_warning_and_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let cortex = dir.path().join("cortex");
+    let env_path = dir.path().join("ai-watch.env");
+    std::fs::write(
+        &env_path,
+        "CORTEX_DB_PATH=/tmp/cortex.db\nCORTEX_TEST_MODE=warn\n",
+    )
+    .unwrap();
+    executable_file(
+        &cortex,
+        r#"#!/bin/sh
+case "$CORTEX_TEST_MODE" in
+  warn) printf '{"discovered_files":1,"ingested":0,"skipped_dupes":0,"parse_errors":1,"storage_blocked_chunks":0,"file_errors":[]}\n'; exit 0 ;;
+  fail) printf 'boom\n' >&2; exit 2 ;;
+  *) printf '{"discovered_files":1,"ingested":1,"skipped_dupes":0,"parse_errors":0,"storage_blocked_chunks":0,"file_errors":[]}\n'; exit 0 ;;
+esac
+"#,
+    );
+
+    let warn = run_ai_watch_initial_index_phase(&cortex, &env_path);
+    std::fs::write(&env_path, "CORTEX_TEST_MODE=fail\n").unwrap();
+    let failed = run_ai_watch_initial_index_phase(&cortex, &env_path);
+    let missing_env = run_ai_watch_initial_index_phase(&cortex, &dir.path().join("missing.env"));
+
+    assert_eq!(warn.status, SetupStatus::Warn);
+    assert_eq!(warn.issue_kind, Some(SetupIssueKind::DataQualityWarning));
+    assert!(warn.detail.contains("parse_errors=1"));
+    assert_eq!(failed.status, SetupStatus::Error);
+    assert_eq!(failed.issue_kind, Some(SetupIssueKind::BlockingError));
+    assert_eq!(failed.detail, "boom");
+    assert_eq!(missing_env.status, SetupStatus::Error);
+    assert!(missing_env.detail.contains("missing.env"));
 }

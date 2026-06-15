@@ -336,6 +336,61 @@ fn shell_safe_value(value: &str) -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    struct EnvGuard {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var_os(name);
+            unsafe {
+                std::env::set_var(name, value);
+            }
+            Self { name, previous }
+        }
+
+        fn remove(name: &'static str) -> Self {
+            let previous = std::env::var_os(name);
+            unsafe {
+                std::env::remove_var(name);
+            }
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => unsafe {
+                    std::env::set_var(self.name, value);
+                },
+                None => unsafe {
+                    std::env::remove_var(self.name);
+                },
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_executable(path: &std::path::Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::write(path, body).unwrap();
+        let mut perms = std::fs::metadata(path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms).unwrap();
+    }
+
+    fn path_with_prepended(dir: &std::path::Path) -> std::ffi::OsString {
+        let mut paths = vec![dir.to_path_buf()];
+        if let Some(existing) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&existing));
+        }
+        std::env::join_paths(paths).unwrap()
+    }
 
     #[test]
     fn unit_runs_heartbeat_agent_with_private_host_id_path() {
@@ -348,5 +403,256 @@ mod tests {
         assert!(unit.contains("ExecStart=/usr/local/bin/cortex heartbeat agent --host-id-path /home/me/.cortex/heartbeat-host-id"));
         assert!(unit.contains("EnvironmentFile=/home/me/.cortex/heartbeat-agent.env"));
         assert!(unit.contains("ReadWritePaths=/home/me/.cortex"));
+    }
+
+    #[test]
+    fn compose_runs_host_binary_with_host_network_and_private_id_path() {
+        let compose = heartbeat_agent_compose(
+            Path::new("/home/me/.local/bin/cortex"),
+            Path::new("/home/me/.cortex/heartbeat-agent.env"),
+            Path::new("/home/me/.cortex/heartbeat-host-id"),
+        )
+        .unwrap();
+
+        assert!(compose.contains("network_mode: host"));
+        assert!(compose.contains("env_file: /home/me/.cortex/heartbeat-agent.env"));
+        assert!(compose.contains("- /home/me/.local/bin/cortex:/usr/local/bin/cortex:ro"));
+        assert!(compose.contains("- /home/me/.cortex:/home/me/.cortex"));
+        assert!(compose.contains("- --host-id-path\n      - /home/me/.cortex/heartbeat-host-id"));
+    }
+
+    #[test]
+    fn shell_safe_value_rejects_control_characters() {
+        assert_eq!(shell_safe_value("plain-token").unwrap(), "plain-token");
+        assert!(shell_safe_value("bad\nvalue").is_err());
+        assert!(shell_safe_value("bad\rvalue").is_err());
+    }
+
+    #[test]
+    fn remove_file_phase_treats_missing_file_as_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.service");
+
+        let phase = remove_file_phase("heartbeat-agent-unit", &missing).unwrap();
+
+        assert!(matches!(phase.status, SetupStatus::Ok));
+        assert!(phase.detail.contains("already absent"));
+    }
+
+    #[test]
+    fn write_heartbeat_agent_env_writes_private_agent_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let env_path = dir.path().join("nested/heartbeat-agent.env");
+
+        let phase = write_heartbeat_agent_env(&env_path).unwrap();
+        let raw = std::fs::read_to_string(&env_path).unwrap();
+
+        assert!(matches!(phase.status, SetupStatus::Ok));
+        assert!(raw.contains(&format!(
+            "CORTEX_HEARTBEAT_TARGET={}\n",
+            heartbeat_agent::DEFAULT_TARGET
+        )));
+        assert!(raw.contains("CORTEX_AGENT_DOCKER=false\n"));
+        assert!(raw.contains(&format!(
+            "CORTEX_AGENT_DOCKER_URL={}\n",
+            heartbeat_agent::DEFAULT_DOCKER_URL
+        )));
+        assert!(raw.contains("CORTEX_AGENT_JOURNALD=false\n"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&env_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[test]
+    fn write_heartbeat_agent_unit_creates_parent_and_expected_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let unit_path = dir
+            .path()
+            .join(".config/systemd/user/cortex-heartbeat-agent.service");
+        let cortex_bin = Path::new("/usr/local/bin/cortex");
+        let env_path = Path::new("/home/me/.cortex/heartbeat-agent.env");
+        let host_id_path = Path::new("/home/me/.cortex/heartbeat-host-id");
+
+        let phase =
+            write_heartbeat_agent_unit(&unit_path, cortex_bin, env_path, host_id_path).unwrap();
+        let raw = std::fs::read_to_string(&unit_path).unwrap();
+
+        assert!(matches!(phase.status, SetupStatus::Ok));
+        assert!(raw.contains("[Service]\nType=simple"));
+        assert!(raw.contains(
+            "ExecStart=/usr/local/bin/cortex heartbeat agent --host-id-path /home/me/.cortex/heartbeat-host-id"
+        ));
+    }
+
+    #[test]
+    fn write_heartbeat_agent_compose_creates_compose_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let compose_dir = dir.path().join("compose");
+        std::fs::create_dir_all(&compose_dir).unwrap();
+
+        let phase = write_heartbeat_agent_compose(
+            &compose_dir,
+            Path::new("/home/me/.local/bin/cortex"),
+            Path::new("/home/me/.cortex/heartbeat-agent.env"),
+            Path::new("/home/me/.cortex/heartbeat-host-id"),
+        )
+        .unwrap();
+        let raw = std::fs::read_to_string(compose_dir.join("docker-compose.yml")).unwrap();
+
+        assert!(matches!(phase.status, SetupStatus::Ok));
+        assert!(raw.contains("cortex-heartbeat-agent:"));
+        assert!(raw.contains("restart: unless-stopped"));
+        assert!(raw.contains("network_mode: host"));
+    }
+
+    #[test]
+    fn heartbeat_agent_assets_reject_unit_breaking_paths() {
+        assert!(
+            heartbeat_agent_unit(
+                Path::new("/usr/local/bin/cortex"),
+                Path::new("/home/me/bad path/heartbeat-agent.env"),
+                Path::new("/home/me/.cortex/heartbeat-host-id"),
+            )
+            .is_err()
+        );
+        assert!(
+            heartbeat_agent_compose(
+                Path::new("/home/me/.local/bin/cortex"),
+                Path::new("/home/me/.cortex/heartbeat-agent.env"),
+                Path::new("/home/me/bad path/heartbeat-host-id"),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn docker_compose_up_phase_reports_warn_when_workdir_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing-compose-dir");
+
+        let phase = docker_compose_up_phase(&missing);
+
+        assert!(matches!(phase.status, SetupStatus::Warn));
+        assert_eq!(phase.name, "heartbeat-agent-docker-up");
+        assert!(!phase.detail.trim().is_empty());
+    }
+
+    #[test]
+    fn content_phase_detects_matching_and_stale_units() {
+        let dir = tempfile::tempdir().unwrap();
+        let unit_path = dir.path().join("cortex-heartbeat-agent.service");
+        let cortex_bin = Path::new("/usr/local/bin/cortex");
+        let env_path = Path::new("/home/me/.cortex/heartbeat-agent.env");
+        let host_id_path = Path::new("/home/me/.cortex/heartbeat-host-id");
+        std::fs::write(
+            &unit_path,
+            heartbeat_agent_unit(cortex_bin, env_path, host_id_path).unwrap(),
+        )
+        .unwrap();
+
+        let matching =
+            check_heartbeat_agent_content(&unit_path, cortex_bin, env_path, host_id_path);
+        assert!(matches!(matching.status, SetupStatus::Ok));
+
+        std::fs::write(&unit_path, "stale unit").unwrap();
+        let stale = check_heartbeat_agent_content(&unit_path, cortex_bin, env_path, host_id_path);
+        assert!(matches!(stale.status, SetupStatus::Error));
+        assert!(
+            stale
+                .detail
+                .contains("does not match generated heartbeat agent unit")
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[serial]
+    async fn run_heartbeat_agent_setup_install_check_and_remove_with_systemd() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let cortex_home = home.join(".cortex");
+        let bin_dir = dir.path().join("bin");
+        std::fs::create_dir_all(&cortex_home).unwrap();
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        write_executable(&bin_dir.join("cortex"), "#!/bin/sh\nexit 0\n");
+        write_executable(
+            &bin_dir.join("systemctl"),
+            "#!/bin/sh\ncase \"$*\" in\n  *is-enabled*) printf 'enabled\\n' ;;\n  *is-active*) printf 'active\\n' ;;\n  *) printf 'ok\\n' ;;\nesac\nexit 0\n",
+        );
+
+        let _home = EnvGuard::set("HOME", &home);
+        let _cortex_home = EnvGuard::set("CORTEX_HOME", &cortex_home);
+        let _path = EnvGuard::set("PATH", path_with_prepended(&bin_dir));
+        let _target = EnvGuard::set("CORTEX_HEARTBEAT_TARGET", "http://cortex.local/heartbeat");
+        let _token = EnvGuard::set("CORTEX_HEARTBEAT_TOKEN", "secret");
+        let _docker = EnvGuard::set("CORTEX_AGENT_DOCKER", "true");
+        let _journald = EnvGuard::set("CORTEX_AGENT_JOURNALD", "true");
+        let _docker_url = EnvGuard::set("CORTEX_AGENT_DOCKER_URL", "unix:///tmp/docker.sock");
+
+        let install = run_heartbeat_agent_setup(HeartbeatAgentAction::Install)
+            .await
+            .unwrap();
+        assert_eq!(install.mode, "heartbeat-agent-install");
+        assert!(install.phases.iter().any(|phase| {
+            phase.name == "heartbeat-agent-unit" && phase.status == SetupStatus::Ok
+        }));
+        let env_raw = std::fs::read_to_string(cortex_home.join("heartbeat-agent.env")).unwrap();
+        assert!(env_raw.contains("CORTEX_HEARTBEAT_TARGET=http://cortex.local/heartbeat\n"));
+        assert!(env_raw.contains("CORTEX_HEARTBEAT_TOKEN=secret\n"));
+        assert!(env_raw.contains("CORTEX_AGENT_DOCKER=true\n"));
+
+        let check = run_heartbeat_agent_setup(HeartbeatAgentAction::Check)
+            .await
+            .unwrap();
+        assert_eq!(check.mode, "heartbeat-agent-check");
+        assert!(
+            check
+                .phases
+                .iter()
+                .any(|phase| phase.name == "heartbeat-agent-active" && phase.detail == "active")
+        );
+
+        let remove = run_heartbeat_agent_setup(HeartbeatAgentAction::Remove)
+            .await
+            .unwrap();
+        assert_eq!(remove.mode, "heartbeat-agent-remove");
+        assert!(
+            !home
+                .join(".config/systemd/user/cortex-heartbeat-agent.service")
+                .exists()
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn write_heartbeat_agent_env_reads_setup_env_fallbacks_and_optional_syslog() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let cortex_home = home.join(".cortex");
+        std::fs::create_dir_all(&cortex_home).unwrap();
+        std::fs::write(
+            cortex_home.join(".env"),
+            "CORTEX_TOKEN=from-setup-env\nCORTEX_HEARTBEAT_TARGET=http://from-env-file/heartbeat\n",
+        )
+        .unwrap();
+        let env_path = dir.path().join("heartbeat-agent.env");
+
+        let _home = EnvGuard::set("HOME", &home);
+        let _cortex_home = EnvGuard::set("CORTEX_HOME", &cortex_home);
+        let _target = EnvGuard::remove("CORTEX_HEARTBEAT_TARGET");
+        let _token = EnvGuard::remove("CORTEX_HEARTBEAT_TOKEN");
+        let _syslog_file = EnvGuard::set("CORTEX_AGENT_SYSLOG_FILE", "/var/log/syslog");
+        let _syslog_target = EnvGuard::set("CORTEX_SYSLOG_TARGET", "127.0.0.1:1514");
+
+        write_heartbeat_agent_env(&env_path).unwrap();
+        let raw = std::fs::read_to_string(&env_path).unwrap();
+
+        assert!(raw.contains("CORTEX_HEARTBEAT_TARGET=http://from-env-file/heartbeat\n"));
+        assert!(raw.contains("CORTEX_HEARTBEAT_TOKEN=from-setup-env\n"));
+        assert!(raw.contains("CORTEX_AGENT_SYSLOG_FILE=/var/log/syslog\n"));
+        assert!(raw.contains("CORTEX_SYSLOG_TARGET=127.0.0.1:1514\n"));
     }
 }

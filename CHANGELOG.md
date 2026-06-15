@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.4] - 2026-06-15
+
+### Added
+
+- Expand focused unit coverage across the setup, runtime, inventory, notification, and ingest layers to lift total line coverage to ~80%. New sidecar suites cover setup doctor/agent/first-run/systemd/AI-index/AI-watch/heartbeat-agent helpers, CLI global-flag and local-only routing, command-dispatch guardrails, runtime auth and inventory-refresh seams, inventory device/project/remote-config collectors, notification evaluator/dispatcher/queue/digest SQL helpers, Aurora logging helpers, receiver listener wiring, journald/syslog formatting, and error-signature DB contracts.
+- Add a mocked Docker Engine HTTP fixture for the legacy central pull client plus log-frame mapping, doc-drift tests for Docker ingest guidance and coverage tooling, and deterministic admin REST coverage for `/api/file-tails` in the live smoke harness when `CORTEX_API_ADMIN_TOKEN` is set.
+
+### Changed
+
+- Reframe Docker log ingest docs around the host-local cortex agent path, documenting `CORTEX_DOCKER_*` as legacy central-pull compatibility for explicit Docker HTTP endpoints.
+- Add repeatable coverage commands (`just coverage`, `just coverage-html`) and a CI coverage-summary job using `cargo-llvm-cov` with nextest.
+- Extract the `dispatch_surface_gap` argument-mapper tests into a sidecar `dispatch_surface_gap_tests.rs`, honouring the repo's sidecar-test convention and keeping the production module under the 500-line size limit.
+- Run CI tests via `cargo nextest run --locked` (with an explicit `cargo test --doc` step) in the `ci`, `docker-publish`, and `publish-crates` workflows, matching `just test` and the coverage job. The expanded env-mutating setup/heartbeat/plugin tests require per-process isolation, which libtest's shared-process model cannot provide.
+
+### Fixed
+
+- Drop empty host entries from `cortex deploy agent --hosts` comma lists and assert the evaluator future-row age test against `received_at`.
+- Relax the graph-inventory lock-scope test timeout so coverage-instrumented builds do not fail on instrumentation overhead while still proving the write lock is released promptly.
+
 ## [1.21.3] - 2026-06-15
 
 ### Security

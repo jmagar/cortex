@@ -466,3 +466,7 @@ pub(crate) async fn run_graph_rebuild(mode: &CliMode, args: GraphRebuildArgs) ->
     };
     print_graph_rebuild_response(&response, args.json)
 }
+
+#[cfg(test)]
+#[path = "dispatch_surface_gap_tests.rs"]
+mod tests;

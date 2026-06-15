@@ -1,5 +1,53 @@
 use super::*;
 
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+
+use serial_test::serial;
+
+struct EnvGuard {
+    name: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let previous = std::env::var_os(name);
+        unsafe { std::env::set_var(name, value) };
+        Self { name, previous }
+    }
+
+    fn remove(name: &'static str) -> Self {
+        let previous = std::env::var_os(name);
+        unsafe { std::env::remove_var(name) };
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => unsafe { std::env::set_var(self.name, value) },
+            None => unsafe { std::env::remove_var(self.name) },
+        }
+    }
+}
+
+fn write_executable(path: &Path, body: &str) {
+    std::fs::write(path, body).unwrap();
+    let mut perms = std::fs::metadata(path).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(path, perms).unwrap();
+}
+
+fn prepend_path(dir: &Path) -> EnvGuard {
+    let previous = std::env::var_os("PATH").unwrap_or_default();
+    let mut new_path = std::ffi::OsString::from(dir.as_os_str());
+    new_path.push(":");
+    new_path.push(previous);
+    EnvGuard::set("PATH", new_path)
+}
+
 #[test]
 fn parse_ssh_config_skips_wildcards_and_github() {
     let config = "Host *\n  ServerAliveInterval 60\n\nHost dookie\n  HostName 100.88.16.79\n\nHost github.com\n  User git\n\nHost tootie squirts\n  User jmagar\n";
@@ -82,4 +130,216 @@ fn deploy_syslog_target_derives_from_heartbeat_url() {
         deploy_syslog_target(Some("https://cortex.example.test:3100")),
         Some("cortex.example.test:1514".to_string())
     );
+}
+
+#[test]
+#[serial]
+fn deploy_syslog_target_prefers_nonblank_env_override() {
+    let _guard = EnvGuard::set("CORTEX_SYSLOG_TARGET", "syslog.example.test:1514");
+
+    assert_eq!(
+        deploy_syslog_target(Some("https://cortex.example.test:3100")),
+        Some("syslog.example.test:1514".to_string())
+    );
+}
+
+#[test]
+#[serial]
+fn deploy_syslog_target_ignores_blank_env_and_falls_back_to_heartbeat() {
+    let _guard = EnvGuard::set("CORTEX_SYSLOG_TARGET", "  ");
+
+    assert_eq!(
+        deploy_syslog_target(Some("https://cortex.example.test:3100/path")),
+        Some("cortex.example.test:1514".to_string())
+    );
+}
+
+#[test]
+#[serial]
+fn is_unraid_uses_ssh_probe_output() {
+    let dir = tempfile::tempdir().unwrap();
+    write_executable(
+        &dir.path().join("ssh"),
+        "#!/bin/sh\ncase \"$*\" in\n  *unraid-host*) printf 'yes\\n'; exit 0 ;;\n  *linux-host*) printf 'no\\n'; exit 0 ;;\n  *) exit 1 ;;\nesac\n",
+    );
+    let _path = prepend_path(dir.path());
+
+    assert!(is_unraid("unraid-host"));
+    assert!(!is_unraid("linux-host"));
+    assert!(!is_unraid("unknown-host"));
+}
+
+#[test]
+#[serial]
+fn which_cortex_returns_nonempty_success_and_ignores_blank_or_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let cortex_path = PathBuf::from("/tmp/cortex-from-test");
+    write_executable(
+        &dir.path().join("which"),
+        "#!/bin/sh\ncase \"$CORTEX_TEST_WHICH_MODE\" in\n  ok) printf '%s\\n' \"$CORTEX_TEST_CORTEX_PATH\"; exit 0 ;;\n  blank) printf '\\n'; exit 0 ;;\n  fail) exit 1 ;;\n  *) exit 2 ;;\nesac\n",
+    );
+    let _path = prepend_path(dir.path());
+    let _cortex_path = EnvGuard::set("CORTEX_TEST_CORTEX_PATH", &cortex_path);
+
+    {
+        let _mode = EnvGuard::set("CORTEX_TEST_WHICH_MODE", "ok");
+        assert_eq!(which_cortex(), Some(cortex_path.clone()));
+    }
+    {
+        let _mode = EnvGuard::set("CORTEX_TEST_WHICH_MODE", "blank");
+        assert_eq!(which_cortex(), None);
+    }
+    {
+        let _mode = EnvGuard::set("CORTEX_TEST_WHICH_MODE", "fail");
+        assert_eq!(which_cortex(), None);
+    }
+}
+
+#[test]
+#[serial]
+fn find_local_binary_prefers_installed_cortex_from_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let cortex_path = dir.path().join("cortex");
+    write_executable(&cortex_path, "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &dir.path().join("which"),
+        "#!/bin/sh\n[ \"$1\" = cortex ] || exit 1\nprintf '%s\\n' \"$CORTEX_TEST_CORTEX_PATH\"\n",
+    );
+    let _path = prepend_path(dir.path());
+    let _cortex_path = EnvGuard::set("CORTEX_TEST_CORTEX_PATH", &cortex_path);
+    let _mode = EnvGuard::remove("CORTEX_TEST_WHICH_MODE");
+
+    assert_eq!(find_local_binary(), Some(cortex_path));
+}
+
+#[test]
+#[serial]
+fn deploy_agent_to_linux_host_runs_install_sequence_with_env_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("commands.log");
+    let local_binary = dir.path().join("cortex");
+    std::fs::write(&local_binary, "binary").unwrap();
+    write_executable(
+        &dir.path().join("ssh"),
+        r#"#!/bin/sh
+printf 'ssh %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
+case "$*" in
+  *"/etc/unraid-version"*) printf 'no\n'; exit 0 ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+    write_executable(
+        &dir.path().join("scp"),
+        r#"#!/bin/sh
+printf 'scp %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
+exit 0
+"#,
+    );
+    let _path = prepend_path(dir.path());
+    let _log = EnvGuard::set("CORTEX_TEST_AGENT_DEPLOY_LOG", &log);
+    let _syslog = EnvGuard::remove("CORTEX_SYSLOG_TARGET");
+
+    let result = deploy_agent_to_host(
+        "linux-host",
+        &local_binary,
+        &AgentDeployConfig {
+            target: Some("https://cortex.example.test:3100".to_string()),
+            token: Some("heartbeat token".to_string()),
+            docker: true,
+            journald: true,
+        },
+    );
+
+    assert!(result.ok, "{result:?}");
+    assert_eq!(result.host, "linux-host");
+    let log = std::fs::read_to_string(log).unwrap();
+    assert!(log.contains("mkdir -p ~/.local/bin"));
+    assert!(log.contains("linux-host:.local/bin/cortex.new"));
+    assert!(log.contains("mv -f ~/.local/bin/cortex.new ~/.local/bin/cortex"));
+    assert!(log.contains("CORTEX_HEARTBEAT_TARGET='https://cortex.example.test:3100'"));
+    assert!(log.contains("CORTEX_HEARTBEAT_TOKEN='heartbeat token'"));
+    assert!(log.contains("CORTEX_AGENT_DOCKER=true"));
+    assert!(log.contains("CORTEX_AGENT_JOURNALD=true"));
+    assert!(log.contains("CORTEX_SYSLOG_TARGET='cortex.example.test:1514'"));
+    assert!(log.contains("~/.local/bin/cortex setup heartbeat-agent install"));
+}
+
+#[test]
+#[serial]
+fn deploy_agent_reports_first_remote_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let local_binary = dir.path().join("cortex");
+    std::fs::write(&local_binary, "binary").unwrap();
+    write_executable(
+        &dir.path().join("ssh"),
+        r#"#!/bin/sh
+case "$*" in
+  *"/etc/unraid-version"*) printf 'no\n'; exit 0 ;;
+  *"mkdir -p"*) exit 42 ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+    write_executable(&dir.path().join("scp"), "#!/bin/sh\nexit 0\n");
+    let _path = prepend_path(dir.path());
+
+    let result = deploy_agent_to_host("linux-host", &local_binary, &AgentDeployConfig::default());
+
+    assert!(!result.ok);
+    assert!(result.detail.contains("mkdir -p ~/.local/bin"));
+    assert!(result.detail.contains("exited non-zero"));
+}
+
+#[test]
+#[serial]
+fn deploy_agent_to_unraid_writes_persistent_env_and_docker_container() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("commands.log");
+    let local_binary = dir.path().join("cortex");
+    std::fs::write(&local_binary, "binary").unwrap();
+    write_executable(
+        &dir.path().join("ssh"),
+        r#"#!/bin/sh
+printf 'ssh %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
+case "$*" in
+  *"/etc/unraid-version"*) printf 'yes\n'; exit 0 ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+    write_executable(
+        &dir.path().join("scp"),
+        r#"#!/bin/sh
+printf 'scp %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
+exit 0
+"#,
+    );
+    let _path = prepend_path(dir.path());
+    let _log = EnvGuard::set("CORTEX_TEST_AGENT_DEPLOY_LOG", &log);
+
+    let result = deploy_agent_to_host(
+        "unraid-host",
+        &local_binary,
+        &AgentDeployConfig {
+            target: Some("https://cortex.example.test".to_string()),
+            token: Some("secret".to_string()),
+            docker: false,
+            journald: true,
+        },
+    );
+
+    assert!(result.ok, "{result:?}");
+    let log = std::fs::read_to_string(log).unwrap();
+    assert!(log.contains("mkdir -p /mnt/user/appdata/cortex/bin"));
+    assert!(log.contains("unraid-host:/mnt/user/appdata/cortex/bin/cortex.new"));
+    assert!(log.contains("heartbeat-agent.env"));
+    assert!(log.contains("CORTEX_HEARTBEAT_TARGET='https://cortex.example.test'"));
+    assert!(log.contains("CORTEX_HEARTBEAT_TOKEN='secret'"));
+    assert!(log.contains("CORTEX_AGENT_DOCKER='false'"));
+    assert!(log.contains("CORTEX_AGENT_JOURNALD='false'"));
+    assert!(log.contains("docker rm -f cortex-heartbeat-agent"));
+    assert!(log.contains("--restart unless-stopped"));
+    assert!(log.contains("-v /var/run/docker.sock:/var/run/docker.sock"));
+    assert!(log.contains("--host-id-path /mnt/user/appdata/cortex/heartbeat-host-id"));
 }

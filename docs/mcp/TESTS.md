@@ -8,6 +8,19 @@ cargo test
 
 Shortcut: `just test`
 
+Coverage summary:
+
+```bash
+just coverage       # cargo llvm-cov nextest --summary-only
+just coverage-html  # cargo llvm-cov nextest --html
+```
+
+Install `cargo-llvm-cov` first if the command is missing:
+
+```bash
+cargo install cargo-llvm-cov --locked
+```
+
 Tests are colocated with source code in `#[cfg(test)]` modules:
 
 | Module | Tests cover |
@@ -40,6 +53,13 @@ just test-live
 ```
 
 The smoke test (`scripts/smoke-test.sh`) exercises all `cortex` actions via mcporter.
+`tests/test_live.sh` additionally covers live UDP and TCP syslog ingest, MCP
+tool calls, CLI parity between local SQLite and `--http`, REST surface parity,
+and a deterministic admin `POST /api/file-tails` status/list path when
+`CORTEX_API_ADMIN_TOKEN` is set. Docker log ingest is split by operational
+path: host-local agent Docker streaming is covered by agent deployment parity
+tests, while the legacy central pull path uses the mocked Docker HTTP fixture
+in `src/docker_ingest/client_tests.rs`.
 Compose diagnostics are non-mutating and are validated only for redacted shape,
 so the smoke test can pass on either Docker-backed or non-Docker deployments.
 When seeding is enabled, the smoke scripts import

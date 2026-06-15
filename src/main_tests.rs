@@ -340,6 +340,25 @@ fn mode_parse_accepts_deploy_namespace() {
         .unwrap(),
         Mode::Deploy(_)
     ));
+    assert!(matches!(
+        Mode::parse(vec![
+            "deploy".into(),
+            "agent".into(),
+            "--hosts".into(),
+            "tootie,dookie".into(),
+            "--target".into(),
+            "https://cortex.example.test".into(),
+            "--heartbeat-token".into(),
+            "secret".into(),
+            "--binary".into(),
+            "/tmp/cortex".into(),
+            "--docker".into(),
+            "--journald".into(),
+            "--json".into(),
+        ])
+        .unwrap(),
+        Mode::Deploy(_)
+    ));
 }
 
 #[test]
@@ -370,6 +389,108 @@ fn mode_parse_rejects_remote_deploy_with_multiple_hosts() {
 }
 
 #[test]
+fn parse_deploy_agent_trims_and_drops_empty_hosts() {
+    let command = super::parse_deploy_command(&[
+        "agent".into(),
+        "--hosts".into(),
+        " tootie, ,dookie, ".into(),
+    ])
+    .unwrap();
+
+    let super::DeployCommandKind::Agent { hosts, .. } = command.kind else {
+        panic!("expected deploy agent");
+    };
+    assert_eq!(hosts, vec!["tootie".to_string(), "dookie".to_string()]);
+}
+
+#[test]
+fn parse_deploy_agent_preserves_all_options() {
+    let command = super::parse_deploy_command(&[
+        "agent".into(),
+        "--hosts".into(),
+        "tootie,dookie".into(),
+        "--target".into(),
+        "https://cortex.example.test".into(),
+        "--heartbeat-token".into(),
+        "secret".into(),
+        "--binary".into(),
+        "/tmp/cortex".into(),
+        "--docker".into(),
+        "--journald".into(),
+        "--json".into(),
+    ])
+    .unwrap();
+
+    assert!(command.json);
+    let super::DeployCommandKind::Agent {
+        hosts,
+        target,
+        token,
+        docker,
+        journald,
+        binary,
+    } = command.kind
+    else {
+        panic!("expected deploy agent");
+    };
+    assert_eq!(hosts, vec!["tootie".to_string(), "dookie".to_string()]);
+    assert_eq!(target.as_deref(), Some("https://cortex.example.test"));
+    assert_eq!(token.as_deref(), Some("secret"));
+    assert!(docker);
+    assert!(journald);
+    assert_eq!(binary.as_deref(), Some("/tmp/cortex"));
+}
+
+#[test]
+fn parse_deploy_agent_reports_missing_option_values() {
+    for flag in ["--hosts", "--target", "--heartbeat-token", "--binary"] {
+        let err = super::parse_deploy_command(&["agent".into(), flag.into()]).unwrap_err();
+        assert!(
+            err.to_string().contains("requires a value"),
+            "expected missing-value error for {flag}, got: {err}"
+        );
+    }
+}
+
+#[test]
+fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
+    let cases = [
+        (
+            vec!["setup", "ai-index-timer", "--json"],
+            "ai-index-timer check",
+        ),
+        (
+            vec!["setup", "ai-watch-service", "remove", "--json"],
+            "ai-watch-service remove",
+        ),
+        (
+            vec!["setup", "agent-command", "remove", "--json"],
+            "agent-command remove",
+        ),
+        (
+            vec!["setup", "heartbeat-agent", "remove", "--json"],
+            "heartbeat-agent remove",
+        ),
+        (
+            vec!["setup", "debug-wrapper", "remove", "--json"],
+            "debug-wrapper remove",
+        ),
+        (
+            vec!["setup", "debug-compose", "remove", "--json"],
+            "debug-compose remove",
+        ),
+    ];
+
+    for (args, label) in cases {
+        let mode = Mode::parse(args.into_iter().map(str::to_string).collect()).unwrap();
+        let Mode::Setup(command) = mode else {
+            panic!("{label}: expected setup mode");
+        };
+        assert!(command.json, "{label}: --json should be preserved");
+    }
+}
+
+#[test]
 fn mode_parse_rejects_duplicate_ai_watch_service_actions() {
     let err = Mode::parse(vec![
         "setup".into(),
@@ -391,6 +512,148 @@ fn mode_parse_accepts_binary_doctor() {
         Mode::parse(vec!["doctor".into(), "binary".into(), "--json".into()]).unwrap(),
         Mode::DoctorBinary(_)
     ));
+}
+
+#[test]
+fn mode_default_log_filter_matches_operational_noise_profile() {
+    assert_eq!(Mode::ServeMcp.default_log_filter(), "info");
+    assert_eq!(Mode::StdioMcp.default_log_filter(), "warn");
+    assert_eq!(Mode::Help.default_log_filter(), "info");
+    assert_eq!(Mode::Version.default_log_filter(), "info");
+    assert_eq!(
+        Mode::Setup(super::SetupCommand {
+            kind: super::SetupCommandKind::Main(cortex::setup::SetupMode::Check),
+            json: false,
+        })
+        .default_log_filter(),
+        "warn"
+    );
+    assert_eq!(
+        Mode::Deploy(super::DeployCommand {
+            kind: super::DeployCommandKind::Preflight,
+            json: false,
+        })
+        .default_log_filter(),
+        "warn"
+    );
+    assert_eq!(
+        Mode::DoctorBinary(super::DoctorBinaryCommand { json: false }).default_log_filter(),
+        "warn"
+    );
+    assert_eq!(
+        Mode::DoctorFull(super::DoctorFullCommand { json: false }).default_log_filter(),
+        "warn"
+    );
+    assert_eq!(
+        Mode::parse(vec!["search".into(), "foo".into()])
+            .unwrap()
+            .default_log_filter(),
+        "error"
+    );
+}
+
+#[test]
+fn parse_doctor_commands_accept_json_and_reject_bad_shapes() {
+    assert!(
+        super::parse_doctor_full_command(&["--json".into()])
+            .unwrap()
+            .json
+    );
+    assert!(
+        super::parse_doctor_command(&["binary".into(), "--json".into()])
+            .unwrap()
+            .json
+    );
+
+    let err = super::parse_doctor_command(&["--json".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("doctor requires `binary`"));
+
+    let err = super::parse_doctor_full_command(&["bogus".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown doctor argument"));
+}
+
+#[test]
+fn parse_setup_command_accepts_main_modes_and_rejects_bad_args() {
+    let check = super::parse_setup_command(&["check".into(), "--json".into()]).unwrap();
+    assert!(matches!(
+        check.kind,
+        super::SetupCommandKind::Main(cortex::setup::SetupMode::Check)
+    ));
+    assert!(check.json);
+
+    let repair = super::parse_setup_command(&["repair".into()]).unwrap();
+    assert!(matches!(
+        repair.kind,
+        super::SetupCommandKind::Main(cortex::setup::SetupMode::Repair)
+    ));
+
+    let default = super::parse_setup_command(&[]).unwrap();
+    assert!(matches!(
+        default.kind,
+        super::SetupCommandKind::Main(cortex::setup::SetupMode::FirstRun)
+    ));
+
+    let err = super::parse_setup_command(&["bogus".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown setup argument"));
+
+    let err =
+        super::parse_setup_command(&["debug-wrapper".into(), "install".into(), "remove".into()])
+            .unwrap_err()
+            .to_string();
+    assert!(err.contains("debug-wrapper action specified more than once"));
+
+    let err = super::parse_setup_command(&["debug-compose".into(), "--bad".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown debug-compose argument"));
+}
+
+#[test]
+fn parse_deploy_command_covers_modes_and_rejects_contextual_flags() {
+    let preflight = super::parse_deploy_command(&["preflight".into(), "--json".into()]).unwrap();
+    assert!(matches!(
+        preflight.kind,
+        super::DeployCommandKind::Preflight
+    ));
+    assert!(preflight.json);
+
+    let local = super::parse_deploy_command(&["local".into()]).unwrap();
+    assert!(matches!(
+        local.kind,
+        super::DeployCommandKind::Local { dry_run: false }
+    ));
+
+    let remote =
+        super::parse_deploy_command(&["remote".into(), "tootie".into(), "--dry-run".into()])
+            .unwrap();
+    assert!(matches!(
+        remote.kind,
+        super::DeployCommandKind::Remote {
+            ref host,
+            dry_run: true
+        } if host == "tootie"
+    ));
+
+    for (args, expected) in [
+        (
+            vec!["local", "--hosts", "tootie"],
+            "unknown deploy local argument",
+        ),
+        (vec!["remote", "--docker"], "unknown deploy remote argument"),
+        (vec!["agent", "--dry-run"], "unknown deploy agent argument"),
+    ] {
+        let err =
+            super::parse_deploy_command(&args.into_iter().map(str::to_string).collect::<Vec<_>>())
+                .unwrap_err()
+                .to_string();
+        assert!(err.contains(expected), "expected {expected:?}, got {err:?}");
+    }
 }
 
 // ─── Bead 0p8r.6: global HTTP flag plumbing ─────────────────────────────────
@@ -550,6 +813,90 @@ fn mode_parse_accepts_new_surface_parity_subcommands() {
         let result = Mode::parse(vec![(*cmd).to_string()]);
         assert!(result.is_ok(), "Mode::parse rejected '{cmd}': {result:?}");
     }
+}
+
+fn cli_invocation(args: &[&str]) -> super::CliInvocation {
+    let mode = Mode::parse(args.iter().map(|arg| (*arg).to_string()).collect()).unwrap();
+    let Mode::Cli(invocation) = mode else {
+        panic!("expected CLI mode");
+    };
+    *invocation
+}
+
+#[tokio::test]
+async fn run_cli_rejects_http_flags_for_local_only_compose_setup_and_inventory() {
+    for (args, expected) in [
+        (
+            &["--http", "compose", "status"][..],
+            "`compose` (local-only command)",
+        ),
+        (
+            &["--server", "http://127.0.0.1:3100", "setup", "check"][..],
+            "`setup` (local-only command)",
+        ),
+        (
+            &["inventory", "--token", "secret", "refresh"][..],
+            "`inventory` (local-only command)",
+        ),
+    ] {
+        let err = super::run_cli(cli_invocation(args)).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains(expected),
+            "expected {expected:?} in {msg:?} for args {args:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn run_cli_rejects_http_flags_for_agent_local_surfaces() {
+    for (args, expected) in [
+        (
+            &["--http", "heartbeat", "agent"][..],
+            "--http has no effect on `heartbeat agent`",
+        ),
+        (
+            &[
+                "agent-command",
+                "wrap",
+                "--server",
+                "http://127.0.0.1:3100",
+                "--spool",
+                "/tmp/spool.jsonl",
+                "--",
+                "true",
+            ][..],
+            "`agent-command wrap` (wrapper command)",
+        ),
+        (
+            &[
+                "shell",
+                "index",
+                "--path",
+                "/tmp/history",
+                "--token",
+                "secret",
+            ][..],
+            "local agent commands",
+        ),
+    ] {
+        let err = super::run_cli(cli_invocation(args)).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains(expected),
+            "expected {expected:?} in {msg:?} for args {args:?}"
+        );
+    }
+}
+
+#[test]
+fn colorize_setup_status_renders_all_status_variants() {
+    use cortex::setup::SetupStatus;
+
+    assert!(super::colorize_setup_status(&SetupStatus::Ok).contains("Ok"));
+    assert!(super::colorize_setup_status(&SetupStatus::Warn).contains("Warn"));
+    assert!(super::colorize_setup_status(&SetupStatus::Error).contains("Error"));
+    assert!(super::colorize_setup_status(&SetupStatus::Skipped).contains("Skipped"));
 }
 
 // Top-level help banner content + per-command drift coverage now live in

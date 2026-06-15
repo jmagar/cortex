@@ -87,3 +87,7 @@ impl DockerHostClient {
         self.docker.clone()
     }
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;
