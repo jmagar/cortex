@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.6] - 2026-06-15
+
+### Fixed
+
+- Fix the Windows release build, which had been failing since the `file_tail` ingest module landed and was blocking the `publish` job (it `needs` both the Linux and Windows builds). `src/file_tail/path_policy.rs` and `src/file_tail/supervisor.rs` called Unix-only APIs unconditionally — `MetadataExt::dev`/`ino`, `OpenOptionsExt::custom_flags`, and `libc::O_NOFOLLOW` — but `libc`/`rustix` are `[target.'cfg(unix)'.dependencies]`, so the Windows target failed to compile (E0599/E0433). Introduced `src/file_tail/platform.rs`, a small `#[cfg(unix)]`/`#[cfg(windows)]` shim for file identity and no-follow open. Linux behavior is byte-identical (`(st_dev, st_ino)` + `O_NOFOLLOW`); on Windows the no-follow open maps to `FILE_FLAG_OPEN_REPARSE_POINT` and identity-based rotation detection falls back to the content fingerprint + length.
+
 ## [1.21.5] - 2026-06-15
 
 ### Fixed
