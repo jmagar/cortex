@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Heartbeat-coordinated agent auto-update** — the server now keeps fleet agent binaries in lockstep with itself, preventing the version drift that silently broke Docker/syslog forwarding (an agent binary predating unified forwarding). The heartbeat `202` ack carries `server_version` plus an optional `agent_update` directive (`{version, path, sha256}`), and a new authenticated `GET /v1/agent/binary?os=&arch=` streams the server's own running binary (phase 1: `linux/x86_64`). When an agent reports a different version, it downloads the binary over the bearer-authenticated channel, verifies the SHA-256, validates that the staged binary runs and self-reports the expected version, keeps a `.bak`, atomically swaps, and re-execs. Bounded auto-rollback restores the `.bak` if the new binary fails to confirm a healthy heartbeat within 3 restarts. Gated by `CORTEX_AGENT_AUTO_UPDATE` (default on); when disabled, version drift is logged only. Phase 2 (a GitHub-release fallback for windows/non-x86_64 agents) is tracked separately.
 
+## [1.21.6] - 2026-06-15
+
+### Fixed
+
+- Fix the Windows release build, which had been failing since the `file_tail` ingest module landed and was blocking the `publish` job (it `needs` both the Linux and Windows builds). `src/file_tail/path_policy.rs` and `src/file_tail/supervisor.rs` called Unix-only APIs unconditionally — `MetadataExt::dev`/`ino`, `OpenOptionsExt::custom_flags`, and `libc::O_NOFOLLOW` — but `libc`/`rustix` are `[target.'cfg(unix)'.dependencies]`, so the Windows target failed to compile (E0599/E0433). Introduced `src/file_tail/platform.rs`, a small `#[cfg(unix)]`/`#[cfg(windows)]` shim for file identity and no-follow open. Linux behavior is byte-identical (`(st_dev, st_ino)` + `O_NOFOLLOW`); on Windows the no-follow open maps to `FILE_FLAG_OPEN_REPARSE_POINT` and identity-based rotation detection falls back to the content fingerprint + length.
+
 ## [1.21.5] - 2026-06-15
 
 ### Fixed
