@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.5] - 2026-06-15
+
+### Fixed
+
+- Add a `.gitleaks.toml` so the weekly scheduled full-history Secret Scan stays green. The scan flagged eight placeholder tokens committed in docs and test scripts (the `secret-token-opaque-base64url-32bytes` base64 example in `docs/contracts/*.md`, plus `YOUR_TOKEN`, `bad-token`, and `intentionally-wrong-token-for-testing` in `README.md` and `tests/`). All built-in gitleaks rules remain active; only these exact placeholder strings are allowlisted by secret content, so a real credential on any of those lines would still be caught.
+
 ## [1.21.4] - 2026-06-15
 
 ### Added
