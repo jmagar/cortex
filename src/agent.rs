@@ -1,5 +1,6 @@
 pub mod docker;
 pub mod journald;
+pub mod self_update;
 pub mod syslog_file;
 pub mod syslog_sender;
 

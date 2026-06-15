@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-06-15
+
+### Added
+
+- **Heartbeat-coordinated agent auto-update** — the server now keeps fleet agent binaries in lockstep with itself, preventing the version drift that silently broke Docker/syslog forwarding (an agent binary predating unified forwarding). The heartbeat `202` ack carries `server_version` plus an optional `agent_update` directive (`{version, path, sha256}`), and a new authenticated `GET /v1/agent/binary?os=&arch=` streams the server's own running binary (phase 1: `linux/x86_64`). When an agent reports a different version, it downloads the binary over the bearer-authenticated channel, verifies the SHA-256, validates that the staged binary runs and self-reports the expected version, keeps a `.bak`, atomically swaps, and re-execs. Bounded auto-rollback restores the `.bak` if the new binary fails to confirm a healthy heartbeat within 3 restarts. Gated by `CORTEX_AGENT_AUTO_UPDATE` (default on); when disabled, version drift is logged only. Phase 2 (a GitHub-release fallback for windows/non-x86_64 agents) is tracked separately.
+
 ## [1.21.6] - 2026-06-15
 
 ### Fixed

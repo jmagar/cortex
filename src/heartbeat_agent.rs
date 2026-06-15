@@ -1183,6 +1183,19 @@ pub fn backoff_duration(attempt: u32) -> Duration {
 pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
     let host_id = load_or_create_host_id(&config.host_id_path)?;
 
+    // If we are running immediately after a self-update, confirm it settled or
+    // roll back to the previous binary. May re-exec and not return.
+    if let Err(error) = crate::agent::self_update::confirm_or_rollback() {
+        tracing::error!(error = %error, "agent update rollback check failed");
+    }
+
+    // Server-coordinated auto-update keeps the agent binary in lockstep with the
+    // cortex server it reports to. Opt out with CORTEX_AGENT_AUTO_UPDATE=false.
+    let auto_update = std::env::var("CORTEX_AGENT_AUTO_UPDATE")
+        .map(|v| !(v.eq_ignore_ascii_case("false") || v == "0"))
+        .unwrap_or(true);
+    let mut update_confirmed = false;
+
     // Spawn Docker / journald forwarding streams as a background task.
     if config.docker || config.journald || config.syslog_file.is_some() {
         let syslog_target = config
@@ -1236,7 +1249,36 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
         flush_retry_buffer(&client, &mut retry, target, config.token.as_deref()).await;
         payload.agent.retry_backlog = retry.len() as i64;
         match send_payload(&client, target, config.token.as_deref(), &mut payload).await {
-            Ok(()) => attempt = 0,
+            Ok(directive) => {
+                attempt = 0;
+                // First successful heartbeat after a swap finalizes the update.
+                if !update_confirmed {
+                    crate::agent::self_update::confirm_update_success();
+                    update_confirmed = true;
+                }
+                if let Some(directive) = directive {
+                    if auto_update {
+                        if let Err(error) = crate::agent::self_update::maybe_update(
+                            &client,
+                            target,
+                            config.token.as_deref(),
+                            &directive,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                error = %error,
+                                "agent self-update failed; staying on current binary"
+                            );
+                        }
+                    } else if crate::agent::self_update::update_needed(&directive) {
+                        tracing::info!(
+                            target_version = %directive.version,
+                            "agent update available (CORTEX_AGENT_AUTO_UPDATE disabled)"
+                        );
+                    }
+                }
+            }
             Err(error) => {
                 tracing::warn!(error = %error, "heartbeat push failed; queued for retry");
                 retry.push(payload);
@@ -1277,12 +1319,22 @@ async fn flush_retry_buffer(
     }
 }
 
+/// Minimal view of the heartbeat `202` ack body. Only the optional auto-update
+/// directive is consumed; all other fields are ignored.
+#[derive(Debug, Deserialize)]
+struct HeartbeatAck {
+    #[serde(default)]
+    agent_update: Option<crate::agent::self_update::AgentUpdateDirective>,
+}
+
+/// Returns the server's auto-update directive when one is advertised in the
+/// heartbeat ack, otherwise `None`.
 async fn send_payload(
     client: &reqwest::Client,
     target: &str,
     token: Option<&str>,
     payload: &mut HeartbeatPayload,
-) -> Result<()> {
+) -> Result<Option<crate::agent::self_update::AgentUpdateDirective>> {
     let url = heartbeat_url(target)?;
     let started = Instant::now();
     let mut request = client.post(url).json(payload);
@@ -1292,7 +1344,11 @@ async fn send_payload(
     let response = request.send().await.context("heartbeat POST failed")?;
     payload.agent.push_latency_ms = Some(started.elapsed().as_millis() as i64);
     if response.status().as_u16() == 202 {
-        return Ok(());
+        let body = response.text().await.unwrap_or_default();
+        let directive = serde_json::from_str::<HeartbeatAck>(&body)
+            .ok()
+            .and_then(|ack| ack.agent_update);
+        return Ok(directive);
     }
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
