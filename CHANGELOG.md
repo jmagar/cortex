@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.3] - 2026-06-15
+
+### Security
+
+- Add a defense-in-depth Content-Security-Policy to the query widget (`img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`) capping egress/injection vectors it never uses. `script-src`/`connect-src` are intentionally left open so an MCP Apps host can inject its bridge; document the widget's origin-bound message handling and the `ui://` `targetOrigin: "*"` constraint in `docs/mcp/MCPUI.md`.
+- Stop interpolating server-controlled values into `python3 -c` programs in `scripts/smoke-test.sh`: `assert_gte` now reads the compared value via stdin, and `json_get` documents its literal-accessor-only contract.
+
+### Changed
+
+- Factor the repeated PUBLIC_URL `McpConfig` literals in the rmcp server tests into a `public_url_config()` helper, and fix a stray tab in `scripts/smoke-test.sh`.
+
+## [1.21.2] - 2026-06-15
+
+### Changed
+
+- Consolidate duplicated rmcp server test helpers: `test_state`/`mounted_state` now delegate to a single `make_state(auth_policy)` builder, and the byte-identical `rmcp_router_no_auth_middleware` is folded into `rmcp_router`. Test-only; no behavior change.
+
+## [1.21.1] - 2026-06-15
+
+### Added
+
+- Document the MCP Apps query widget as progressive enhancement (README + `docs/SETUP.md`): canonical URI `ui://cortex/query-widget`, `text/html;profile=mcp-app` MIME, host-agnostic JSON-RPC verification snippets, and an explicit note that non-UI hosts keep receiving normal text/JSON tool results.
+- Add host-agnostic widget wire-contract smoke coverage to `scripts/smoke-test.sh`: `resources/list` exposure, `resources/read` MIME + anchors, `tools/list` `_meta.ui.resourceUri`, and `tools/call action=search` returning both `structuredContent` and text. No browser, Node, or named UI host required.
+
+## [1.21.0] - 2026-06-15
+
+### Added
+
+- Build out the MCP Apps query widget (`ui://cortex/query-widget`) into a self-contained, dependency-free interactive UI. It exposes an FTS5 query input plus hostname/severity/limit filters, calls the `cortex` tool with `action=search` over an MCP Apps host bridge (`window.openai.callTool` when present, otherwise an mcp-ui `postMessage` adapter), and renders results in a compact Aurora-dark table with idle/loading/empty/error/bridge-unavailable states. Replaces the previous placeholder form.
+
+### Security
+
+- Render all log fields in the query widget via `textContent`, preventing HTML/script injection from untrusted log message contents.
+
 ## [1.20.1] - 2026-06-12
 
 ### Changed

@@ -23,9 +23,12 @@ use super::{
     required_scope_for,
 };
 
-fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
+/// Build an AppState with the given auth policy. The two production-relevant
+/// policies in these tests (`LoopbackDev`, `Mounted`) share an otherwise
+/// identical config, so they differ only in the policy passed here.
+fn make_state(auth_policy: AuthPolicy) -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let storage = StorageConfig::for_test(dir.path().join("rmcp-server-test.db"));
+    let storage = StorageConfig::for_test(dir.path().join("rmcp-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
     let state = AppState {
         service: CortexService::new(Arc::clone(&pool), storage.clone()),
@@ -43,37 +46,19 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
         },
         notifications_config: crate::config::NotificationsConfig::default(),
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
-        auth_policy: crate::mcp::AuthPolicy::LoopbackDev,
+        auth_policy,
         observability: Arc::new(crate::observability::RuntimeObservability::default()),
     };
     (state, pool, dir)
 }
 
+fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
+    make_state(AuthPolicy::LoopbackDev)
+}
+
 /// Build a Mounted-policy AppState (no OAuth; static-bearer only path).
 fn mounted_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let storage = StorageConfig::for_test(dir.path().join("rmcp-mounted-test.db"));
-    let pool = Arc::new(db::init_pool(&storage).unwrap());
-    let state = AppState {
-        service: CortexService::new(Arc::clone(&pool), storage.clone()),
-        config: McpConfig {
-            host: "127.0.0.1".into(),
-            port: 3100,
-            server_name: "cortex".into(),
-            no_auth: false,
-            trusted_gateway_no_auth: false,
-            api_token: crate::config::Secret(None),
-            allowed_hosts: Vec::new(),
-            allowed_origins: Vec::new(),
-            auth: Default::default(),
-            static_token_is_admin: false,
-        },
-        notifications_config: crate::config::NotificationsConfig::default(),
-        otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
-        auth_policy: AuthPolicy::Mounted { auth_state: None },
-        observability: Arc::new(crate::observability::RuntimeObservability::default()),
-    };
-    (state, pool, dir)
+    make_state(AuthPolicy::Mounted { auth_state: None })
 }
 
 /// Build a test router with an axum middleware that injects `auth_ctx` into
@@ -92,13 +77,6 @@ fn rmcp_router_with_auth(state: AppState, auth_ctx: AuthContext) -> Router {
                 }
             },
         ))
-}
-
-/// Build a test router WITHOUT any auth middleware (simulates broken
-/// middleware ordering — AuthContext never inserted).
-fn rmcp_router_no_auth_middleware(state: AppState) -> Router {
-    let config = streamable_http_config(&state.config);
-    Router::new().nest_service("/mcp", streamable_http_service(state, config))
 }
 
 fn auth_ctx(subject: &str, scopes: Vec<&str>, email: Option<&str>) -> AuthContext {
@@ -680,10 +658,11 @@ async fn rmcp_correlate_events_preserves_truncation_and_host_grouping() {
 
 // ── PUBLIC_URL host/origin allowlist extension ───────────────────────────────
 
-/// `CORTEX_PUBLIC_URL` bare host is added to `allowed_hosts`.
-#[test]
-fn public_url_host_added_to_allowed_hosts() {
-    let config = McpConfig {
+/// Build a default `McpConfig` (host `0.0.0.0`) whose only non-default field is
+/// `auth.public_url`. Shared by the PUBLIC_URL allowlist tests below, which
+/// differ only in the URL they assert against.
+fn public_url_config(public_url: &str) -> McpConfig {
+    McpConfig {
         host: "0.0.0.0".into(),
         port: 3100,
         server_name: "cortex".into(),
@@ -693,11 +672,17 @@ fn public_url_host_added_to_allowed_hosts() {
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
         auth: crate::config::AuthConfig {
-            public_url: Some("https://syslog.example.com".into()),
+            public_url: Some(public_url.into()),
             ..Default::default()
         },
         static_token_is_admin: false,
-    };
+    }
+}
+
+/// `CORTEX_PUBLIC_URL` bare host is added to `allowed_hosts`.
+#[test]
+fn public_url_host_added_to_allowed_hosts() {
+    let config = public_url_config("https://syslog.example.com");
 
     let hosts = allowed_hosts(&config);
     assert!(
@@ -710,21 +695,7 @@ fn public_url_host_added_to_allowed_hosts() {
 /// without the port (browsers omit default ports from the Origin header).
 #[test]
 fn public_url_origin_added_to_allowed_origins() {
-    let config = McpConfig {
-        host: "0.0.0.0".into(),
-        port: 3100,
-        server_name: "cortex".into(),
-        no_auth: false,
-        trusted_gateway_no_auth: false,
-        api_token: crate::config::Secret(None),
-        allowed_hosts: Vec::new(),
-        allowed_origins: Vec::new(),
-        auth: crate::config::AuthConfig {
-            public_url: Some("https://syslog.example.com".into()),
-            ..Default::default()
-        },
-        static_token_is_admin: false,
-    };
+    let config = public_url_config("https://syslog.example.com");
 
     let origins = allowed_origins(&config);
     // https on port 443 (default) — browser omits port from Origin header.
@@ -737,21 +708,7 @@ fn public_url_origin_added_to_allowed_origins() {
 /// Non-standard port: host and origin variants both include the explicit port.
 #[test]
 fn public_url_non_standard_port_included_in_host_and_origin() {
-    let config = McpConfig {
-        host: "0.0.0.0".into(),
-        port: 3100,
-        server_name: "cortex".into(),
-        no_auth: false,
-        trusted_gateway_no_auth: false,
-        api_token: crate::config::Secret(None),
-        allowed_hosts: Vec::new(),
-        allowed_origins: Vec::new(),
-        auth: crate::config::AuthConfig {
-            public_url: Some("https://syslog.example.com:8443".into()),
-            ..Default::default()
-        },
-        static_token_is_admin: false,
-    };
+    let config = public_url_config("https://syslog.example.com:8443");
 
     let hosts = allowed_hosts(&config);
     // Non-standard port: both bare host and host:port must be present.
@@ -778,21 +735,7 @@ fn public_url_non_standard_port_included_in_host_and_origin() {
 /// host:443 is also added so rmcp's port-aware comparison passes.
 #[test]
 fn public_url_standard_https_port_host_variants() {
-    let config = McpConfig {
-        host: "0.0.0.0".into(),
-        port: 3100,
-        server_name: "cortex".into(),
-        no_auth: false,
-        trusted_gateway_no_auth: false,
-        api_token: crate::config::Secret(None),
-        allowed_hosts: Vec::new(),
-        allowed_origins: Vec::new(),
-        auth: crate::config::AuthConfig {
-            public_url: Some("https://syslog.example.com".into()),
-            ..Default::default()
-        },
-        static_token_is_admin: false,
-    };
+    let config = public_url_config("https://syslog.example.com");
 
     let hosts = allowed_hosts(&config);
     // Bare host: what browsers send when using the default port.
@@ -819,7 +762,7 @@ fn public_url_standard_https_port_host_variants() {
 async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
     let (state, _pool, _dir) = test_state();
     // No auth middleware — AuthContext is NOT in extensions.
-    let router = rmcp_router_no_auth_middleware(state);
+    let router = rmcp_router(state);
 
     // tools/list should succeed without AuthContext under LoopbackDev.
     let (status, response) = post_rmcp(
@@ -1181,7 +1124,7 @@ async fn mounted_policy_with_empty_scopes_permits_help_action() {
 async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools_list() {
     let (state, _pool, _dir) = mounted_state();
     // No auth middleware — AuthContext absent from extensions.
-    let router = rmcp_router_no_auth_middleware(state);
+    let router = rmcp_router(state);
 
     // tools/list must be denied when AuthContext absent under Mounted policy.
     let (status, response) = post_rmcp(
@@ -1459,12 +1402,31 @@ async fn mounted_policy_with_auth_context_permits_query_widget_resource() {
         response["result"]["contents"][0]["mimeType"],
         super::MCP_APP_HTML_MIME_TYPE
     );
+    let widget_html = response["result"]["contents"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
     assert!(
-        response["result"]["contents"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("data-syslog-query-widget")),
+        widget_html.contains("data-syslog-query-widget"),
         "resources/read should return query widget HTML; response: {response}"
     );
+    // Stable anchors the widget UI depends on. These guard the wire format
+    // (per yi66 risk note: verify format, do not assume a host renderer).
+    for anchor in [
+        "value=\"search\"",        // hidden action input -> action=search
+        "name=\"query\"",          // FTS5 query field
+        "name=\"hostname\"",       // hostname filter
+        "name=\"severity\"",       // severity filter
+        "name=\"limit\"",          // limit control
+        "data-rows",               // results table body
+        "Host bridge unavailable", // graceful bridge-unavailable state
+        "ui-message-response",     // mcp-ui postMessage bridge protocol
+        "event.source",            // origin-bound message guard (anti-spoof)
+    ] {
+        assert!(
+            widget_html.contains(anchor),
+            "query widget HTML missing stable anchor {anchor:?}; response: {response}"
+        );
+    }
 }
 
 /// Scope check fires BEFORE execute_tool — a read denied by scope must not
