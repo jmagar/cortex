@@ -23,9 +23,12 @@ use super::{
     required_scope_for,
 };
 
-fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
+/// Build an AppState with the given auth policy. The two production-relevant
+/// policies in these tests (`LoopbackDev`, `Mounted`) share an otherwise
+/// identical config, so they differ only in the policy passed here.
+fn make_state(auth_policy: AuthPolicy) -> (AppState, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let storage = StorageConfig::for_test(dir.path().join("rmcp-server-test.db"));
+    let storage = StorageConfig::for_test(dir.path().join("rmcp-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
     let state = AppState {
         service: CortexService::new(Arc::clone(&pool), storage.clone()),
@@ -43,37 +46,19 @@ fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
         },
         notifications_config: crate::config::NotificationsConfig::default(),
         otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
-        auth_policy: crate::mcp::AuthPolicy::LoopbackDev,
+        auth_policy,
         observability: Arc::new(crate::observability::RuntimeObservability::default()),
     };
     (state, pool, dir)
 }
 
+fn test_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
+    make_state(AuthPolicy::LoopbackDev)
+}
+
 /// Build a Mounted-policy AppState (no OAuth; static-bearer only path).
 fn mounted_state() -> (AppState, Arc<DbPool>, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let storage = StorageConfig::for_test(dir.path().join("rmcp-mounted-test.db"));
-    let pool = Arc::new(db::init_pool(&storage).unwrap());
-    let state = AppState {
-        service: CortexService::new(Arc::clone(&pool), storage.clone()),
-        config: McpConfig {
-            host: "127.0.0.1".into(),
-            port: 3100,
-            server_name: "cortex".into(),
-            no_auth: false,
-            trusted_gateway_no_auth: false,
-            api_token: crate::config::Secret(None),
-            allowed_hosts: Vec::new(),
-            allowed_origins: Vec::new(),
-            auth: Default::default(),
-            static_token_is_admin: false,
-        },
-        notifications_config: crate::config::NotificationsConfig::default(),
-        otlp_counters: Arc::new(crate::otlp::OtlpCounters::default()),
-        auth_policy: AuthPolicy::Mounted { auth_state: None },
-        observability: Arc::new(crate::observability::RuntimeObservability::default()),
-    };
-    (state, pool, dir)
+    make_state(AuthPolicy::Mounted { auth_state: None })
 }
 
 /// Build a test router with an axum middleware that injects `auth_ctx` into
@@ -92,13 +77,6 @@ fn rmcp_router_with_auth(state: AppState, auth_ctx: AuthContext) -> Router {
                 }
             },
         ))
-}
-
-/// Build a test router WITHOUT any auth middleware (simulates broken
-/// middleware ordering — AuthContext never inserted).
-fn rmcp_router_no_auth_middleware(state: AppState) -> Router {
-    let config = streamable_http_config(&state.config);
-    Router::new().nest_service("/mcp", streamable_http_service(state, config))
 }
 
 fn auth_ctx(subject: &str, scopes: Vec<&str>, email: Option<&str>) -> AuthContext {
@@ -819,7 +797,7 @@ fn public_url_standard_https_port_host_variants() {
 async fn loopback_dev_policy_permits_all_actions_without_auth_context() {
     let (state, _pool, _dir) = test_state();
     // No auth middleware — AuthContext is NOT in extensions.
-    let router = rmcp_router_no_auth_middleware(state);
+    let router = rmcp_router(state);
 
     // tools/list should succeed without AuthContext under LoopbackDev.
     let (status, response) = post_rmcp(
@@ -1181,7 +1159,7 @@ async fn mounted_policy_with_empty_scopes_permits_help_action() {
 async fn mounted_policy_missing_auth_context_denies_all_including_help_and_tools_list() {
     let (state, _pool, _dir) = mounted_state();
     // No auth middleware — AuthContext absent from extensions.
-    let router = rmcp_router_no_auth_middleware(state);
+    let router = rmcp_router(state);
 
     // tools/list must be denied when AuthContext absent under Mounted policy.
     let (status, response) = post_rmcp(

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.2] - 2026-06-15
+
+### Changed
+
+- Consolidate duplicated rmcp server test helpers: `test_state`/`mounted_state` now delegate to a single `make_state(auth_policy)` builder, and the byte-identical `rmcp_router_no_auth_middleware` is folded into `rmcp_router`. Test-only; no behavior change.
+
 ## [1.21.1] - 2026-06-15
 
 ### Added
