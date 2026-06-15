@@ -181,7 +181,8 @@
     "use strict";
 
     var TOOL_NAME = "cortex";
-    var BRIDGE_TIMEOUT_MS = 15000;
+    var BRIDGE_TIMEOUT_MS = 12000;
+    var MAX_ERR_LEN = 200;
 
     var form = document.querySelector("[data-query-form]");
     var statusEl = document.querySelector("[data-status]");
@@ -280,6 +281,24 @@
       return params;
     }
 
+    // Reject a hung promise after `ms` so both bridge paths share one liveness
+    // contract — otherwise a host that never settles wedges the form forever.
+    function withTimeout(promise, ms, onTimeout) {
+      return new Promise(function (resolve, reject) {
+        var settled = false;
+        var timer = setTimeout(function () {
+          if (settled) return;
+          settled = true;
+          if (onTimeout) onTimeout();
+          reject(new Error("no-bridge"));
+        }, ms);
+        Promise.resolve(promise).then(
+          function (v) { if (settled) return; settled = true; clearTimeout(timer); resolve(v); },
+          function (e) { if (settled) return; settled = true; clearTimeout(timer); reject(e); }
+        );
+      });
+    }
+
     // ---- Host bridge ---------------------------------------------------------
     // Primary: OpenAI/MCP Apps injected helper, if the host provides one.
     // Fallback: mcp-ui async postMessage protocol (type:"tool" ->
@@ -288,13 +307,20 @@
     function callTool(params) {
       var host = window.openai;
       if (host && typeof host.callTool === "function") {
+        var call;
         try {
-          return Promise.resolve(host.callTool(TOOL_NAME, params));
+          call = Promise.resolve(host.callTool(TOOL_NAME, params));
         } catch (e) {
           return Promise.reject(e);
         }
+        // The injected helper gives no timeout of its own; bound it ourselves.
+        return withTimeout(call, BRIDGE_TIMEOUT_MS, notifyStalling);
       }
       return postMessageCall(params);
+    }
+
+    function notifyStalling() {
+      setStatus("Host bridge not responding…", "loading");
     }
 
     var msgSeq = 0;
@@ -303,32 +329,59 @@
         return Promise.reject(new Error("no-bridge"));
       }
       return new Promise(function (resolve, reject) {
-        var messageId = "cortex-" + (++msgSeq) + "-" + (Date.now ? Date.now() : "");
-        var timer = setTimeout(function () {
+        var messageId = "cortex-" + (++msgSeq) + "-" + Date.now();
+        var done = false;
+        function cleanup() {
+          clearTimeout(timer);
           window.removeEventListener("message", onMessage);
+        }
+        var timer = setTimeout(function () {
+          if (done) return;
+          done = true;
+          notifyStalling();
+          cleanup();
           reject(new Error("no-bridge"));
         }, BRIDGE_TIMEOUT_MS);
 
         function onMessage(event) {
+          // Only accept responses from our direct parent frame. Without this a
+          // sibling/cross-origin frame could spoof a response (messageId is
+          // predictable), so origin-binding is the real correlation guard.
+          if (event.source !== window.parent) return;
           var data = event.data;
           if (!data || typeof data !== "object") return;
-          if (data.messageId && data.messageId !== messageId) return;
+          // Require a positive messageId match. A host that cannot echo the id
+          // cannot be safely multiplexed — fail closed (timeout) rather than
+          // risk applying a stale response to a later query.
+          if (data.messageId !== messageId) return;
           if (data.type !== "ui-message-response" && data.type !== "tool-response") return;
-          clearTimeout(timer);
-          window.removeEventListener("message", onMessage);
+          if (done) return;
+          done = true;
+          cleanup();
           var payload = data.payload || {};
           if (payload.error) {
-            reject(new Error(typeof payload.error === "string" ? payload.error : "tool call failed"));
+            var msg = typeof payload.error === "string"
+              ? payload.error.slice(0, MAX_ERR_LEN)
+              : "tool call failed";
+            reject(new Error(msg));
           } else {
             resolve(payload.response != null ? payload.response : payload);
           }
         }
 
         window.addEventListener("message", onMessage);
-        window.parent.postMessage(
-          { type: "tool", messageId: messageId, payload: { toolName: TOOL_NAME, params: params } },
-          "*"
-        );
+        try {
+          window.parent.postMessage(
+            { type: "tool", messageId: messageId, payload: { toolName: TOOL_NAME, params: params } },
+            "*"
+          );
+        } catch (e) {
+          if (!done) {
+            done = true;
+            cleanup();
+            reject(e);
+          }
+        }
       });
     }
 
@@ -349,7 +402,8 @@
         if (err && err.message === "no-bridge") {
           setStatus("Host bridge unavailable — open this widget in an MCP Apps host to run searches.", "unavailable");
         } else {
-          setStatus("Search failed: " + (err && err.message ? err.message : "unknown error"), "error");
+          var reason = err && err.message ? String(err.message).slice(0, MAX_ERR_LEN) : "unknown error";
+          setStatus("Search failed: " + reason, "error");
         }
       }).then(function () {
         submitEl.disabled = false;

@@ -1477,6 +1477,7 @@ async fn mounted_policy_with_auth_context_permits_query_widget_resource() {
         "data-rows",               // results table body
         "Host bridge unavailable", // graceful bridge-unavailable state
         "ui-message-response",     // mcp-ui postMessage bridge protocol
+        "event.source",            // origin-bound message guard (anti-spoof)
     ] {
         assert!(
             widget_html.contains(anchor),
