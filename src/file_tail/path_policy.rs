@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
-use std::os::unix::fs::MetadataExt;
+
+use super::platform::metadata_identity;
 
 pub(crate) fn validate_file_tail_path(path: &str) -> Result<()> {
     let raw = Path::new(path);
@@ -53,8 +54,7 @@ pub(crate) fn validate_opened_file_tail_path(
     validate_file_tail_path(path)?;
     let path_metadata = std::fs::symlink_metadata(path)
         .map_err(|err| anyhow::anyhow!("file-tail path is not readable: {path}: {err}"))?;
-    if opened_metadata.dev() != path_metadata.dev() || opened_metadata.ino() != path_metadata.ino()
-    {
+    if metadata_identity(opened_metadata) != metadata_identity(&path_metadata) {
         bail!("file-tail path changed while opening");
     }
     Ok(())

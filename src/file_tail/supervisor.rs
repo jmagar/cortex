@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
-use std::os::unix::fs::MetadataExt;
-use std::os::unix::fs::OpenOptionsExt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,6 +16,7 @@ use crate::ingest_metadata::bounded_metadata_json;
 
 use super::models::{FileTailSource, FileTailStatus};
 use super::path_policy::{validate_file_tail_path, validate_opened_file_tail_path};
+use super::platform::{metadata_identity, open_read_no_follow};
 use super::registry::FileTailRegistry;
 
 const FILE_TAIL_FINGERPRINT_BYTES: usize = 256;
@@ -118,13 +117,9 @@ impl FileTailSupervisor {
         } else {
             0
         };
-        self.registry.update_checkpoint(
-            &source.id,
-            metadata.dev(),
-            metadata.ino(),
-            offset,
-            &now_iso(),
-        )
+        let (dev, ino) = metadata_identity(&metadata);
+        self.registry
+            .update_checkpoint(&source.id, dev, ino, offset, &now_iso())
     }
 
     fn build_task(&self, source: FileTailSource) -> (String, TailTask) {
@@ -382,6 +377,13 @@ pub(crate) struct FileIdentity {
     pub(crate) ino: u64,
 }
 
+impl FileIdentity {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        let (dev, ino) = metadata_identity(metadata);
+        Self { dev, ino }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct OpenedTailFile {
     pub(crate) file: tokio::fs::File,
@@ -402,10 +404,7 @@ pub(crate) async fn open_tail_file(
 ) -> Result<OpenedTailFile> {
     let mut file = open_validated_tail_file(&source.path).await?;
     let metadata = file.metadata().await?;
-    let identity = FileIdentity {
-        dev: metadata.dev(),
-        ino: metadata.ino(),
-    };
+    let identity = FileIdentity::from_metadata(&metadata);
     let fingerprint = file_prefix_fingerprint(&mut file).await?;
     let checkpoint_matches = source.checkpoint_dev == Some(identity.dev)
         && source.checkpoint_ino == Some(identity.ino)
@@ -446,10 +445,7 @@ pub(crate) async fn reopen_if_rotated_or_truncated(
         }
         Err(err) => return Err(err.into()),
     };
-    let current = FileIdentity {
-        dev: metadata.dev(),
-        ino: metadata.ino(),
-    };
+    let current = FileIdentity::from_metadata(&metadata);
     if current != identity || metadata.len() < position {
         return reopen_from_start(source).await.map(Some);
     }
@@ -461,10 +457,7 @@ pub(crate) async fn reopen_if_rotated_or_truncated(
             file.seek(std::io::SeekFrom::Start(0)).await?;
             return Ok(Some(OpenedTailFile {
                 file,
-                identity: FileIdentity {
-                    dev: metadata.dev(),
-                    ino: metadata.ino(),
-                },
+                identity: FileIdentity::from_metadata(&metadata),
                 position: 0,
                 fingerprint: current_fingerprint,
             }));
@@ -481,10 +474,7 @@ async fn path_identity_changed(source: &FileTailSource, identity: FileIdentity) 
         }
         Err(err) => return Err(err.into()),
     };
-    Ok(FileIdentity {
-        dev: metadata.dev(),
-        ino: metadata.ino(),
-    } != identity)
+    Ok(FileIdentity::from_metadata(&metadata) != identity)
 }
 
 async fn reopen_from_start(source: &FileTailSource) -> Result<OpenedTailFile> {
@@ -494,10 +484,7 @@ async fn reopen_from_start(source: &FileTailSource) -> Result<OpenedTailFile> {
     file.seek(std::io::SeekFrom::Start(0)).await?;
     Ok(OpenedTailFile {
         file,
-        identity: FileIdentity {
-            dev: metadata.dev(),
-            ino: metadata.ino(),
-        },
+        identity: FileIdentity::from_metadata(&metadata),
         position: 0,
         fingerprint,
     })
@@ -517,12 +504,7 @@ async fn open_validated_tail_file(path: &str) -> Result<tokio::fs::File> {
     let path = path.to_string();
     let std_file = tokio::task::spawn_blocking({
         let path = path.clone();
-        move || {
-            std::fs::OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NOFOLLOW)
-                .open(&path)
-        }
+        move || open_read_no_follow(std::path::Path::new(&path))
     })
     .await??;
     let metadata = std_file.metadata()?;
@@ -532,10 +514,7 @@ async fn open_validated_tail_file(path: &str) -> Result<tokio::fs::File> {
 
 fn open_validated_tail_file_sync(path: &str) -> Result<std::fs::File> {
     validate_file_tail_path(path)?;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
+    let file = open_read_no_follow(std::path::Path::new(path))?;
     let metadata = file.metadata()?;
     validate_opened_file_tail_path(path, &metadata)?;
     Ok(file)

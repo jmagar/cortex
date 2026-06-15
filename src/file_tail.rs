@@ -1,5 +1,6 @@
 pub(crate) mod models;
 pub(crate) mod path_policy;
+pub(crate) mod platform;
 pub(crate) mod registry;
 pub(crate) mod supervisor;
 
