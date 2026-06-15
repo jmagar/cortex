@@ -121,6 +121,9 @@ mcp_jsonrpc() {
 }
 
 json_get() {
+    # NOTE: $field is interpolated into the Python program, so callers MUST pass
+    # only a literal accessor (e.g. ['status']) — never a server-controlled value.
+    # The JSON payload itself is safe: it is piped via stdin, not interpolated.
     local json="$1" field="$2"
     printf '%s\n' "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d$field)" 2>/dev/null
 }
@@ -136,7 +139,16 @@ assert_eq() {
 
 assert_gte() {
     local label="$1" actual="$2" min="$3"
-    if python3 -c "exit(0 if int('$actual') >= $min else 1)" 2>/dev/null; then
+    # Read $actual via stdin rather than interpolating it into the -c program —
+    # it can originate from server JSON, and int() of an interpolated string is a
+    # footgun. ($min is always an integer literal from in-script callers.)
+    if printf '%s' "$actual" | python3 -c "
+import sys
+try:
+    sys.exit(0 if int(sys.stdin.read().strip()) >= $min else 1)
+except ValueError:
+    sys.exit(1)
+" 2>/dev/null; then
         pass "$label"
     else
         fail "$label (expected >= $min, got '$actual')"
@@ -1066,7 +1078,7 @@ if [[ -n "${CORTEX_SMOKE_GRAPH_EVIDENCE_ID:-}" ]]; then
     GRAPH_PROOF_END=$(python3 -c "import time; print(int(time.time() * 1000))")
     assert_no_error "graph evidence: no error" "$GRAPH_EVIDENCE"
     GRAPH_EVIDENCE_BYTES=$(printf '%s' "$GRAPH_EVIDENCE" | wc -c | tr -d ' ')
-	    GRAPH_EVIDENCE_LATENCY_MS=$((GRAPH_PROOF_END - GRAPH_PROOF_START))
+    GRAPH_EVIDENCE_LATENCY_MS=$((GRAPH_PROOF_END - GRAPH_PROOF_START))
     GRAPH_EVIDENCE_VALID=$(printf '%s\n' "$GRAPH_EVIDENCE" | python3 -c "
 import json, re, sys
 d = json.load(sys.stdin)

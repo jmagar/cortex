@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.3] - 2026-06-15
+
+### Security
+
+- Add a defense-in-depth Content-Security-Policy to the query widget (`img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`) capping egress/injection vectors it never uses. `script-src`/`connect-src` are intentionally left open so an MCP Apps host can inject its bridge; document the widget's origin-bound message handling and the `ui://` `targetOrigin: "*"` constraint in `docs/mcp/MCPUI.md`.
+- Stop interpolating server-controlled values into `python3 -c` programs in `scripts/smoke-test.sh`: `assert_gte` now reads the compared value via stdin, and `json_get` documents its literal-accessor-only contract.
+
+### Changed
+
+- Factor the repeated PUBLIC_URL `McpConfig` literals in the rmcp server tests into a `public_url_config()` helper, and fix a stray tab in `scripts/smoke-test.sh`.
+
 ## [1.21.2] - 2026-06-15
 
 ### Changed

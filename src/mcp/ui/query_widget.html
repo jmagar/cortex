@@ -3,6 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!--
+    Defense-in-depth CSP. The widget renders attacker-influenceable log text (a
+    spoofed CEF hostname is a known trust-boundary gotcha) and only ever writes
+    via textContent, so this caps the blast radius of any future regression by
+    blocking egress/injection vectors the widget never uses: no images (beacon
+    exfil), objects, <base>, or form posts. script-src/connect-src are left
+    unrestricted on purpose — an MCP Apps host may inject its bridge (e.g.
+    window.openai) via an external script or fetch, and locking those down
+    without live-host verification could break the bridge. Tightening them is
+    tracked separately and must be verified against the real host.
+  -->
+  <meta http-equiv="Content-Security-Policy"
+        content="img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Cortex Syslog Query</title>
   <style>
     /* Aurora dark-first tokens (inlined — widget must be dependency-free). */

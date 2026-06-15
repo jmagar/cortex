@@ -658,10 +658,11 @@ async fn rmcp_correlate_events_preserves_truncation_and_host_grouping() {
 
 // ── PUBLIC_URL host/origin allowlist extension ───────────────────────────────
 
-/// `CORTEX_PUBLIC_URL` bare host is added to `allowed_hosts`.
-#[test]
-fn public_url_host_added_to_allowed_hosts() {
-    let config = McpConfig {
+/// Build a default `McpConfig` (host `0.0.0.0`) whose only non-default field is
+/// `auth.public_url`. Shared by the PUBLIC_URL allowlist tests below, which
+/// differ only in the URL they assert against.
+fn public_url_config(public_url: &str) -> McpConfig {
+    McpConfig {
         host: "0.0.0.0".into(),
         port: 3100,
         server_name: "cortex".into(),
@@ -671,11 +672,17 @@ fn public_url_host_added_to_allowed_hosts() {
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
         auth: crate::config::AuthConfig {
-            public_url: Some("https://syslog.example.com".into()),
+            public_url: Some(public_url.into()),
             ..Default::default()
         },
         static_token_is_admin: false,
-    };
+    }
+}
+
+/// `CORTEX_PUBLIC_URL` bare host is added to `allowed_hosts`.
+#[test]
+fn public_url_host_added_to_allowed_hosts() {
+    let config = public_url_config("https://syslog.example.com");
 
     let hosts = allowed_hosts(&config);
     assert!(
@@ -688,21 +695,7 @@ fn public_url_host_added_to_allowed_hosts() {
 /// without the port (browsers omit default ports from the Origin header).
 #[test]
 fn public_url_origin_added_to_allowed_origins() {
-    let config = McpConfig {
-        host: "0.0.0.0".into(),
-        port: 3100,
-        server_name: "cortex".into(),
-        no_auth: false,
-        trusted_gateway_no_auth: false,
-        api_token: crate::config::Secret(None),
-        allowed_hosts: Vec::new(),
-        allowed_origins: Vec::new(),
-        auth: crate::config::AuthConfig {
-            public_url: Some("https://syslog.example.com".into()),
-            ..Default::default()
-        },
-        static_token_is_admin: false,
-    };
+    let config = public_url_config("https://syslog.example.com");
 
     let origins = allowed_origins(&config);
     // https on port 443 (default) — browser omits port from Origin header.
@@ -715,21 +708,7 @@ fn public_url_origin_added_to_allowed_origins() {
 /// Non-standard port: host and origin variants both include the explicit port.
 #[test]
 fn public_url_non_standard_port_included_in_host_and_origin() {
-    let config = McpConfig {
-        host: "0.0.0.0".into(),
-        port: 3100,
-        server_name: "cortex".into(),
-        no_auth: false,
-        trusted_gateway_no_auth: false,
-        api_token: crate::config::Secret(None),
-        allowed_hosts: Vec::new(),
-        allowed_origins: Vec::new(),
-        auth: crate::config::AuthConfig {
-            public_url: Some("https://syslog.example.com:8443".into()),
-            ..Default::default()
-        },
-        static_token_is_admin: false,
-    };
+    let config = public_url_config("https://syslog.example.com:8443");
 
     let hosts = allowed_hosts(&config);
     // Non-standard port: both bare host and host:port must be present.
@@ -756,21 +735,7 @@ fn public_url_non_standard_port_included_in_host_and_origin() {
 /// host:443 is also added so rmcp's port-aware comparison passes.
 #[test]
 fn public_url_standard_https_port_host_variants() {
-    let config = McpConfig {
-        host: "0.0.0.0".into(),
-        port: 3100,
-        server_name: "cortex".into(),
-        no_auth: false,
-        trusted_gateway_no_auth: false,
-        api_token: crate::config::Secret(None),
-        allowed_hosts: Vec::new(),
-        allowed_origins: Vec::new(),
-        auth: crate::config::AuthConfig {
-            public_url: Some("https://syslog.example.com".into()),
-            ..Default::default()
-        },
-        static_token_is_admin: false,
-    };
+    let config = public_url_config("https://syslog.example.com");
 
     let hosts = allowed_hosts(&config);
     // Bare host: what browsers send when using the default port.
