@@ -1396,7 +1396,7 @@ async fn build_auth_policy(config: &Config, is_stdio: bool) -> Result<AuthPolicy
             vec!["cortex:read".into()]
         })
         .disable_static_token_with_oauth(auth.disable_static_token_with_oauth)
-        .enable_dynamic_registration(false)
+        .enable_dynamic_registration(true)
         .build_from_sources(vars)
         .context("failed to build lab-auth AuthConfig from cortex config")?;
 
