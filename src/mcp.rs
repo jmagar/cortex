@@ -15,6 +15,8 @@ mod routes;
 mod schemas;
 mod tools;
 
+pub use action_flags::{FlagSpec, ValueKind};
+pub use actions::{description_for, examples_for, flags_for};
 pub use rmcp_server::{
     CortexRmcpServer, rmcp_server, streamable_http_config, streamable_http_service,
 };

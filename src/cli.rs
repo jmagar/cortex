@@ -36,6 +36,8 @@ pub(crate) use run::{CliMode, GlobalFlags, run};
 
 mod ai_watch;
 pub(crate) mod color;
+mod complete;
+mod completions;
 mod config_cmd;
 mod config_toml;
 mod coordination;
@@ -75,6 +77,47 @@ impl CliCommand {
     pub(crate) fn parse(args: Vec<String>) -> Result<Self> {
         parse::parse_command(args)
     }
+}
+
+// ── Registry facade: CLI command names (hyphenated) ↔ ACTION_SPECS metadata
+// (MCP action names are underscored). Used by completion + discoverability help.
+
+/// All CLI command names paired with their one-line description (empty when the
+/// command has no `ACTION_SPECS` entry, e.g. grouping commands like `ai`).
+pub(crate) fn registry_actions() -> Vec<(&'static str, &'static str)> {
+    parse::TOP_LEVEL_COMMANDS
+        .iter()
+        .map(|&cmd| {
+            let desc = cortex::mcp::description_for(&cmd.replace('-', "_")).unwrap_or("");
+            (cmd, desc)
+        })
+        .collect()
+}
+
+/// Canonical flag metadata for a CLI command (empty slice when none).
+pub(crate) fn registry_flags(cli_command: &str) -> &'static [cortex::mcp::FlagSpec] {
+    cortex::mcp::flags_for(&cli_command.replace('-', "_")).unwrap_or(&[])
+}
+
+/// Copy-paste examples for a CLI command (empty slice when none).
+// Consumed by the discoverability help (Plan 2 Task 7); allow removed then.
+#[allow(dead_code)]
+pub(crate) fn registry_examples(cli_command: &str) -> &'static [&'static str] {
+    cortex::mcp::examples_for(&cli_command.replace('-', "_")).unwrap_or(&[])
+}
+
+/// `cortex __complete <ctx> ...` — print shell-completion candidates to stdout.
+pub(crate) fn run_complete(args: &[String]) -> Result<()> {
+    for line in complete::complete(args)? {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// `cortex completions <shell>` — print a completion script to stdout.
+pub(crate) fn run_completions(args: &[String]) -> Result<()> {
+    let shell = args.first().map(|s| s.as_str()).unwrap_or("zsh");
+    completions::print_completions(shell)
 }
 
 pub(crate) fn run_compose(command: CliCommand) -> Result<()> {

@@ -1,11 +1,8 @@
 //! Canonical CLI flag metadata, shared by the parser, completion, and help.
 
 /// One CLI flag for an action. `value_kind` drives dynamic completion.
-// Fields are read by the CLI completion engine + help (Plan 2 Tasks 4-7); the
-// `allow` is removed once those readers land.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
-pub(super) struct FlagSpec {
+pub struct FlagSpec {
     /// Canonical long flag, including leading dashes, e.g. "--host".
     pub flag: &'static str,
     /// Optional short alias, e.g. "-n". Empty string = none.
@@ -18,7 +15,7 @@ pub(super) struct FlagSpec {
 
 /// What completes after a flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ValueKind {
+pub enum ValueKind {
     /// No value (boolean flag).
     None,
     /// Free text (no candidates).

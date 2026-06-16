@@ -513,10 +513,7 @@ pub(super) fn handler_for(action: &str) -> Option<ActionHandler> {
 }
 
 /// CLI flag metadata for an action (canonical names), or `None` if unknown.
-// Consumed by the CLI completion engine + help (Plan 2 Tasks 4/7); the
-// `allow` is removed once those call sites land.
-#[allow(dead_code)]
-pub(super) fn flags_for(action: &str) -> Option<&'static [FlagSpec]> {
+pub fn flags_for(action: &str) -> Option<&'static [FlagSpec]> {
     ACTION_SPECS
         .iter()
         .find(|s| s.name == action)
@@ -524,12 +521,19 @@ pub(super) fn flags_for(action: &str) -> Option<&'static [FlagSpec]> {
 }
 
 /// Copy-paste example invocations for an action, or `None` if unknown.
-#[allow(dead_code)]
-pub(super) fn examples_for(action: &str) -> Option<&'static [&'static str]> {
+pub fn examples_for(action: &str) -> Option<&'static [&'static str]> {
     ACTION_SPECS
         .iter()
         .find(|s| s.name == action)
         .map(|s| s.examples)
+}
+
+/// One-line description for an action, or `None` if unknown.
+pub fn description_for(action: &str) -> Option<&'static str> {
+    ACTION_SPECS
+        .iter()
+        .find(|s| s.name == action)
+        .map(|s| s.description)
 }
 
 /// Map an action name to its required MCP scope string.

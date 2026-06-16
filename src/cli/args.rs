@@ -53,6 +53,10 @@ pub(crate) enum CliCommand {
     Entity(EntityArgs),
     Graph(GraphCommand),
     FileTail(FileTailCommand),
+    /// Hidden: emit shell-completion candidates (`cortex __complete <ctx> ...`).
+    Complete(Vec<String>),
+    /// Emit a shell completion script (`cortex completions <shell>`).
+    Completions(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

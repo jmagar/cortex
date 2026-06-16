@@ -9,7 +9,7 @@ use super::parse_logs::{
 };
 use super::{CliCommand, commands, parse_config, suggest};
 
-const TOP_LEVEL_COMMANDS: &[&str] = &[
+pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
     "search",
     "filter",
     "tail",
@@ -89,6 +89,8 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "fleet-state" => commands::fleet_state::parse_fleet_state(rest),
         "correlate-state" => commands::correlate_state::parse_correlate_state(rest),
         "file-tail" => commands::file_tails::parse_file_tail(rest),
+        "__complete" => Ok(CliCommand::Complete(rest.to_vec())),
+        "completions" => Ok(CliCommand::Completions(rest.to_vec())),
         _ => bail!(
             "{}",
             suggest::unknown_command("CLI command", command, TOP_LEVEL_COMMANDS)

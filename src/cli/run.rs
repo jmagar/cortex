@@ -168,6 +168,11 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
                 "internal: inventory commands must be dispatched by main::run_cli before reaching cli::run()"
             )
         }
+        CliCommand::Complete(_) | CliCommand::Completions(_) => {
+            bail!(
+                "internal: completion commands must be dispatched by main::run_cli before reaching cli::run()"
+            )
+        }
     }
 }
 
