@@ -1,0 +1,92 @@
+//! Canonical CLI flag metadata, shared by the parser, completion, and help.
+
+/// One CLI flag for an action. `value_kind` drives dynamic completion.
+// Fields are read by the CLI completion engine + help (Plan 2 Tasks 4-7); the
+// `allow` is removed once those readers land.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FlagSpec {
+    /// Canonical long flag, including leading dashes, e.g. "--host".
+    pub flag: &'static str,
+    /// Optional short alias, e.g. "-n". Empty string = none.
+    pub short: &'static str,
+    /// One-line help.
+    pub help: &'static str,
+    /// Completion source for the flag's value.
+    pub value_kind: ValueKind,
+}
+
+/// What completes after a flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ValueKind {
+    /// No value (boolean flag).
+    None,
+    /// Free text (no candidates).
+    Text,
+    /// Live hostnames from the DB.
+    Host,
+    /// Live app names from the DB.
+    App,
+    /// Live source identifiers from the DB.
+    Source,
+    /// Fixed enum candidates.
+    Enum(&'static [&'static str]),
+    /// A time value (offers relative hints).
+    Time,
+}
+
+pub(super) const SEVERITIES: &[&str] = &[
+    "emerg", "alert", "crit", "err", "warning", "notice", "info", "debug",
+];
+
+/// Flags shared by the log-query actions (search/filter/tail/errors/...).
+pub(super) const COMMON_LOG_FLAGS: &[FlagSpec] = &[
+    FlagSpec {
+        flag: "--host",
+        short: "",
+        help: "Filter by hostname",
+        value_kind: ValueKind::Host,
+    },
+    FlagSpec {
+        flag: "--app",
+        short: "",
+        help: "Filter by app/program name",
+        value_kind: ValueKind::App,
+    },
+    FlagSpec {
+        flag: "--source",
+        short: "",
+        help: "Filter by source id (IP:port or docker://...)",
+        value_kind: ValueKind::Source,
+    },
+    FlagSpec {
+        flag: "--severity",
+        short: "-s",
+        help: "Minimum severity",
+        value_kind: ValueKind::Enum(SEVERITIES),
+    },
+    FlagSpec {
+        flag: "--since",
+        short: "",
+        help: "Start of window (1h, 2d, yesterday, RFC3339)",
+        value_kind: ValueKind::Time,
+    },
+    FlagSpec {
+        flag: "--until",
+        short: "",
+        help: "End of window",
+        value_kind: ValueKind::Time,
+    },
+    FlagSpec {
+        flag: "--limit",
+        short: "-n",
+        help: "Max results",
+        value_kind: ValueKind::Text,
+    },
+    FlagSpec {
+        flag: "--json",
+        short: "",
+        help: "JSON output",
+        value_kind: ValueKind::None,
+    },
+];

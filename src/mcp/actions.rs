@@ -9,6 +9,8 @@
 //! Now there is one metadata table: [`ACTION_SPECS`]. The schema, scope gates,
 //! help text, and action metadata are computed from it.
 
+use super::action_flags::{COMMON_LOG_FLAGS, FlagSpec};
+
 /// The scope required to invoke a given action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Scope {
@@ -111,17 +113,32 @@ pub(super) struct ActionSpec {
     pub cost: Cost,
     /// Registry-owned executable handler for this action.
     pub handler: ActionHandler,
+    /// CLI flags for this action (canonical names). Drives completion + help.
+    pub flags: &'static [FlagSpec],
+    /// Copy-paste example invocations.
+    pub examples: &'static [&'static str],
 }
 
 macro_rules! action_spec {
-    ($name:literal, $scope:ident, $description:literal, $cost:ident, $handler:ident) => {
+    // Full form: with flag + example metadata.
+    ($name:literal, $scope:ident, $description:literal, $cost:ident, $handler:ident,
+     flags: $flags:expr, examples: $examples:expr) => {
         ActionSpec {
             name: $name,
             scope: Scope::$scope,
             description: $description,
             cost: Cost::$cost,
             handler: ActionHandler::$handler,
+            flags: $flags,
+            examples: $examples,
         }
+    };
+    // Short form: no flag/example metadata yet (defaults to empty).
+    ($name:literal, $scope:ident, $description:literal, $cost:ident, $handler:ident) => {
+        action_spec!(
+            $name, $scope, $description, $cost, $handler,
+            flags: &[], examples: &[]
+        )
     };
 }
 
@@ -138,35 +155,48 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Read,
         "Full-text search over syslog messages",
         Cheap,
-        SearchLogs
+        SearchLogs,
+        flags: COMMON_LOG_FLAGS,
+        examples: &[
+            "cortex search \"oom killer\" --host dookie --since 1h",
+            "cortex search --grep \"smoke-test\" --limit 20",
+        ]
     ),
     action_spec!(
         "filter",
         Read,
         "Filter logs by indexed fields without a full-text query",
         Cheap,
-        FilterLogs
+        FilterLogs,
+        flags: COMMON_LOG_FLAGS,
+        examples: &["cortex filter --host tootie --severity err --since 6h"]
     ),
     action_spec!(
         "tail",
         Read,
         "Stream the most recent log entries",
         Cheap,
-        TailLogs
+        TailLogs,
+        flags: COMMON_LOG_FLAGS,
+        examples: &["cortex tail --host dookie -n 100"]
     ),
     action_spec!(
         "errors",
         Read,
         "List recent error-level log entries",
         Cheap,
-        GetErrors
+        GetErrors,
+        flags: COMMON_LOG_FLAGS,
+        examples: &["cortex errors --since 1h"]
     ),
     action_spec!(
         "hosts",
         Read,
         "Enumerate all known source hostnames",
         Cheap,
-        ListHosts
+        ListHosts,
+        flags: &[],
+        examples: &["cortex hosts"]
     ),
     action_spec!(
         "map",
@@ -194,7 +224,9 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Read,
         "Correlate events across hosts/services",
         Moderate,
-        CorrelateEvents
+        CorrelateEvents,
+        flags: &[],
+        examples: &["cortex correlate --reference-time 2026-06-16T04:00:00Z --window-minutes 15"]
     ),
     action_spec!(
         "correlate_state",
@@ -208,21 +240,27 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Read,
         "Aggregate log statistics",
         Expensive,
-        GetStats
+        GetStats,
+        flags: &[],
+        examples: &["cortex stats"]
     ),
     action_spec!(
         "status",
         Read,
         "Server health and ingestion status",
         Cheap,
-        GetStatus
+        GetStatus,
+        flags: &[],
+        examples: &["cortex status"]
     ),
     action_spec!(
         "apps",
         Read,
         "Enumerate all known application names",
         Cheap,
-        ListApps
+        ListApps,
+        flags: &[],
+        examples: &["cortex apps"]
     ),
     action_spec!(
         "sessions",
@@ -299,21 +337,27 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Read,
         "Enumerate unique source IP addresses",
         Cheap,
-        ListSourceIps
+        ListSourceIps,
+        flags: &[],
+        examples: &["cortex source-ips"]
     ),
     action_spec!(
         "timeline",
         Read,
         "Log volume over time (bucketed)",
         Cheap,
-        Timeline
+        Timeline,
+        flags: &[],
+        examples: &["cortex timeline --bucket hour --host dookie"]
     ),
     action_spec!(
         "patterns",
         Read,
         "Recurring message patterns",
         Expensive,
-        Patterns
+        Patterns,
+        flags: &[],
+        examples: &["cortex patterns --limit 20"]
     ),
     action_spec!(
         "context",
@@ -468,6 +512,26 @@ pub(super) fn handler_for(action: &str) -> Option<ActionHandler> {
         .map(|s| s.handler)
 }
 
+/// CLI flag metadata for an action (canonical names), or `None` if unknown.
+// Consumed by the CLI completion engine + help (Plan 2 Tasks 4/7); the
+// `allow` is removed once those call sites land.
+#[allow(dead_code)]
+pub(super) fn flags_for(action: &str) -> Option<&'static [FlagSpec]> {
+    ACTION_SPECS
+        .iter()
+        .find(|s| s.name == action)
+        .map(|s| s.flags)
+}
+
+/// Copy-paste example invocations for an action, or `None` if unknown.
+#[allow(dead_code)]
+pub(super) fn examples_for(action: &str) -> Option<&'static [&'static str]> {
+    ACTION_SPECS
+        .iter()
+        .find(|s| s.name == action)
+        .map(|s| s.examples)
+}
+
 /// Map an action name to its required MCP scope string.
 ///
 /// - `None` for `InfoOnly` actions (auth context required when Mounted, but no
@@ -486,3 +550,7 @@ pub(super) fn required_scope_for(action: &str) -> Option<&'static str> {
         None => Some("cortex:__deny__"),
     }
 }
+
+#[cfg(test)]
+#[path = "actions_tests.rs"]
+mod tests;

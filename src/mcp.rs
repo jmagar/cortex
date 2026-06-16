@@ -7,6 +7,7 @@ use crate::config::{McpConfig, NotificationsConfig};
 use crate::observability::RuntimeObservability;
 use crate::otlp::OtlpCounters;
 
+mod action_flags;
 mod actions;
 mod prompts;
 mod rmcp_server;
