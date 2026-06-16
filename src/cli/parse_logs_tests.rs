@@ -47,7 +47,7 @@ fn parse_errors_accepts_limit_for_bounded_agent_output() {
 
     match command {
         crate::cli::CliCommand::Errors(args) => {
-            assert_eq!(args.from.as_deref(), Some("2026-01-01T00:00:00Z"));
+            assert_eq!(args.from.as_deref(), Some("2026-01-01T00:00:00+00:00"));
             assert_eq!(args.limit, Some(10));
             assert!(args.json);
         }
@@ -109,10 +109,10 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         "--app-name=cortex",
         "--facility=daemon",
         "--exclude-facility=kern",
-        "--from=t0",
-        "--to=t1",
-        "--received-from=r0",
-        "--received-to=r1",
+        "--from=2026-01-01T00:00:00Z",
+        "--to=2026-01-02T00:00:00Z",
+        "--received-from=2026-01-03T00:00:00Z",
+        "--received-to=2026-01-04T00:00:00Z",
         "--limit=30",
         "--json",
         "disk",
@@ -123,7 +123,10 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         crate::cli::CliCommand::Search(args) => {
             assert_eq!(args.query.as_deref(), Some("disk full"));
             assert_eq!(args.hostname.as_deref(), Some("host1"));
-            assert_eq!(args.received_to.as_deref(), Some("r1"));
+            assert_eq!(
+                args.received_to.as_deref(),
+                Some("2026-01-04T00:00:00+00:00")
+            );
             assert_eq!(args.limit, Some(30));
             assert!(args.json);
         }
@@ -149,8 +152,8 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         "--project=/repo",
         "--tool=Bash",
         "--hostname=host1",
-        "--from=t0",
-        "--to=t1",
+        "--from=2026-01-01T00:00:00Z",
+        "--to=2026-01-02T00:00:00Z",
         "--limit=4",
     ]))
     .unwrap();
@@ -254,4 +257,18 @@ fn parse_patterns_accepts_limit_alias_for_top_n() {
 
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
+}
+
+#[test]
+fn search_normalizes_relative_from() {
+    let cmd = parse_search(&strings(&["error", "--from", "1h"])).unwrap();
+    let crate::cli::CliCommand::Search(args) = cmd else {
+        panic!("expected Search");
+    };
+    let from = args.from.expect("from set");
+    // Relative input is normalized to an absolute RFC3339 timestamp at parse time.
+    assert!(
+        from.contains('T') && from.ends_with("+00:00"),
+        "expected normalized RFC3339, got {from}"
+    );
 }
