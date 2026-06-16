@@ -38,17 +38,17 @@ fn basic_surface_args_map_to_requests() {
     assert_eq!(anomalies.baseline_minutes, Some(120));
 
     let apps = AppsArgs {
-        hostname: Some("host-a".to_string()),
-        from: Some("from".to_string()),
-        to: Some("to".to_string()),
+        host: Some("host-a".to_string()),
+        since: Some("from".to_string()),
+        until: Some("to".to_string()),
         limit: Some(50),
         offset: Some(10),
         json: true,
     }
     .into_request();
-    assert_eq!(apps.hostname.as_deref(), Some("host-a"));
-    assert_eq!(apps.from.as_deref(), Some("from"));
-    assert_eq!(apps.to.as_deref(), Some("to"));
+    assert_eq!(apps.host.as_deref(), Some("host-a"));
+    assert_eq!(apps.since.as_deref(), Some("from"));
+    assert_eq!(apps.until.as_deref(), Some("to"));
     assert_eq!(apps.limit, Some(50));
     assert_eq!(apps.offset, Some(10));
 }
@@ -90,14 +90,14 @@ fn compare_and_correlate_state_require_reference_fields() {
 fn heartbeat_state_args_map_to_requests() {
     let host = HostStateArgs {
         host_id: Some("host-id".to_string()),
-        hostname: Some("host-a".to_string()),
+        host: Some("host-a".to_string()),
         since: Some("2026-06-13T00:00:00Z".to_string()),
         limit: Some(20),
         json: true,
     }
     .into_request();
     assert_eq!(host.host_id.as_deref(), Some("host-id"));
-    assert_eq!(host.hostname.as_deref(), Some("host-a"));
+    assert_eq!(host.host.as_deref(), Some("host-a"));
     assert_eq!(host.since.as_deref(), Some("2026-06-13T00:00:00Z"));
     assert_eq!(host.limit, Some(20));
 

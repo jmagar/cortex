@@ -707,8 +707,8 @@ fn usage_blocks_group_into_five_hour_windows() {
     let result = get_ai_usage_blocks(
         &pool,
         &AiUsageBlocksParams {
-            from: Some("2026-01-01T00:00:00Z".into()),
-            to: Some("2026-01-01T06:00:00Z".into()),
+            since: Some("2026-01-01T00:00:00Z".into()),
+            until: Some("2026-01-01T06:00:00Z".into()),
             ..Default::default()
         },
     )
@@ -738,8 +738,8 @@ fn usage_blocks_total_blocks_equals_len_when_truncated() {
     let result = get_ai_usage_blocks(
         &pool,
         &AiUsageBlocksParams {
-            from: Some("2026-01-01T00:00:00Z".into()),
-            to: Some("2026-07-31T00:00:00Z".into()),
+            since: Some("2026-01-01T00:00:00Z".into()),
+            until: Some("2026-07-31T00:00:00Z".into()),
             ..Default::default()
         },
     )

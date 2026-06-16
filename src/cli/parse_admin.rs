@@ -39,14 +39,14 @@ pub(crate) fn parse_service_logs(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--since" => parsed.from = Some(flags.value("--since")?),
-            "--until" => parsed.to = Some(flags.value("--until")?),
+            "--since" => parsed.since = Some(flags.value("--since")?),
+            "--until" => parsed.until = Some(flags.value("--until")?),
             "--tail" | "-n" => parsed.tail = Some(parse_u32_flag(&arg, flags.value(&arg)?)?),
             _ if arg.starts_with("--since=") => {
-                parsed.from = Some(value_after_equals(arg, "--since")?)
+                parsed.since = Some(value_after_equals(arg, "--since")?)
             }
             _ if arg.starts_with("--until=") => {
-                parsed.to = Some(value_after_equals(arg, "--until")?)
+                parsed.until = Some(value_after_equals(arg, "--until")?)
             }
             _ if arg.starts_with("--tail=") => {
                 parsed.tail = Some(parse_u32_flag(

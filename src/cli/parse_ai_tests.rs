@@ -121,7 +121,7 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
             assert_eq!(args.session_id.as_deref(), Some("s1"));
             assert_eq!(args.window_minutes, Some(15));
             assert_eq!(args.events_per_anchor, Some(4));
-            assert_eq!(args.source_ip.as_deref(), Some("10.0.0.8"));
+            assert_eq!(args.source.as_deref(), Some("10.0.0.8"));
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -160,7 +160,7 @@ fn parse_ai_inventory_and_indexing_commands_accept_flags() {
     match projects {
         crate::cli::CliCommand::Ai(crate::cli::AiCommand::Projects(args)) => {
             assert_eq!(args.tool.as_deref(), Some("Write"));
-            assert_eq!(args.to.as_deref(), Some("b"));
+            assert_eq!(args.until.as_deref(), Some("b"));
         }
         other => panic!("unexpected command: {other:?}"),
     }

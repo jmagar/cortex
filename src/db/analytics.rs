@@ -373,15 +373,15 @@ pub fn get_ai_usage_blocks(
         bindings.push(rusqlite::types::Value::Text(tool.clone()));
         idx += 1;
     }
-    if let Some(from) = &params.from {
+    if let Some(from) = &params.since {
         sql.push_str(&format!(" AND timestamp >= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         idx += 1;
     }
-    if let Some(to) = &params.to {
+    if let Some(to) = &params.until {
         sql.push_str(&format!(" AND timestamp <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
-    } else if params.from.is_none() {
+    } else if params.since.is_none() {
         sql.push_str(&format!(
             " AND timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-{DEFAULT_LOOKBACK_DAYS} days')"
         ));

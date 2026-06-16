@@ -2,14 +2,14 @@ use super::*;
 
 impl CortexService {
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let result = self
             .run_db("list_apps", move |pool| {
                 db::list_apps(
                     pool,
                     &db::ListAppsParams {
-                        hostname: req.hostname.as_deref(),
+                        hostname: req.host.as_deref(),
                         from: from.as_deref(),
                         to: to.as_deref(),
                         limit: req.limit.unwrap_or(500) as usize,
@@ -67,14 +67,14 @@ impl CortexService {
         // or we'd create an impossible range. All transport call sites (api.rs,
         // mcp/tools.rs, cli/dispatch_surface.rs) now pass `from`/`to` through
         // verbatim, so this is the single source of truth.
-        let from_raw = match (req.from, req.to.is_some()) {
+        let from_raw = match (req.since, req.until.is_some()) {
             (None, false) => chrono::Utc::now()
                 .checked_sub_signed(chrono::Duration::days(bucket.default_lookback_days()))
                 .map(|dt| dt.to_rfc3339()),
             (other, _) => other,
         };
         let from = parse_optional_timestamp(from_raw.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let severity_in = match req.severity_min.as_deref() {
             Some(min) => Some(severity_at_or_above(min)?),
             None => None,
@@ -91,8 +91,8 @@ impl CortexService {
                     group_by,
                     from.as_deref(),
                     to.as_deref(),
-                    req.hostname.as_deref(),
-                    req.app_name.as_deref(),
+                    req.host.as_deref(),
+                    req.app.as_deref(),
                     severity_in.as_deref(),
                 )?;
                 let as_of = if served_by_rollup {
@@ -112,8 +112,8 @@ impl CortexService {
     }
 
     pub async fn patterns(&self, req: PatternsRequest) -> ServiceResult<PatternsResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let severity_in = match req.severity_min.as_deref() {
             Some(min) => Some(severity_at_or_above(min)?),
             None => None,
@@ -126,8 +126,8 @@ impl CortexService {
                     pool,
                     from.as_deref(),
                     to.as_deref(),
-                    req.hostname.as_deref(),
-                    req.app_name.as_deref(),
+                    req.host.as_deref(),
+                    req.app.as_deref(),
                     severity_in.as_deref(),
                     scan_limit,
                 )?;
@@ -186,7 +186,7 @@ impl CortexService {
                         (entry, row.hostname, row.timestamp, Some(row.id))
                     } else {
                         let hostname = req
-                            .hostname
+                            .host
                             .clone()
                             .ok_or_else(|| anyhow::anyhow!("context_missing_pivot"))?;
                         let timestamp = synthetic_timestamp

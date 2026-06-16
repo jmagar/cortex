@@ -88,17 +88,13 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "type": "string",
                     "description": "For action=graph: alias value to resolve. Ambiguous aliases return candidates instead of guessing."
                 },
-                "hostname": {
-                    "type": "string",
-                    "description": "For action=search, filter, tail, correlate, ai_correlate, apps, sessions, timeline, patterns, context, similar_incidents, ask_history, or incident_context: exact hostname filter. For action=host_state: resolve a host by unique hostname when host_id is omitted. Use action=hosts to enumerate."
-                },
                 "host_id": {
                     "type": "string",
-                    "description": "For action=host_state: exact heartbeat host_id. Takes precedence over hostname and is authoritative over hostname metadata."
+                    "description": "For action=host_state: exact heartbeat host_id. Takes precedence over host and is authoritative over host metadata."
                 },
                 "host": {
                     "type": "string",
-                    "description": "For action=correlate_state: optional host filter accepting a host_id or a unique hostname. When omitted, a bounded cross-host plan is used over all hosts with heartbeats in the window. For action=map mode=host_services or service_dependencies: target host."
+                    "description": "For action=search, filter, tail, correlate, ai_correlate, apps, sessions, timeline, patterns, context, similar_incidents, ask_history, or incident_context: exact hostname filter (use action=hosts to enumerate). For action=host_state: resolve a host by unique hostname when host_id is omitted. For action=correlate_state: optional host filter accepting a host_id or a unique hostname; when omitted, a bounded cross-host plan is used over all hosts with heartbeats in the window. For action=map mode=host_services or service_dependencies: target host. For action=file_tails op=add: required source host assigned to tailed lines."
                 },
                 "domain": {
                     "type": "string",
@@ -126,7 +122,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "enum": ["claude", "codex", "gemini"],
                     "description": "For action=filter, sessions, search_sessions, abuse, ai_correlate, usage_blocks, project_context, or list_ai_projects: AI tool filter."
                 },
-                "source_ip": {
+                "source": {
                     "type": "string",
                     "description": "For action=search, filter, tail, correlate, or ai_correlate: exact source identifier. Syslog uses IP:port; OTLP uses peer IP; Docker stream rows use docker://host/container/stream; Docker lifecycle rows use docker-event://host/container/action."
                 },
@@ -145,7 +141,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "enum": SEVERITY_LEVELS,
                     "description": "For action=tail, correlate, correlate_state, ai_correlate, timeline, patterns, similar_incidents, or incident_context: minimum severity to include. Defaults to 'warning' for incident_context and 'info' for correlate_state."
                 },
-                "app_name": {
+                "app": {
                     "type": "string",
                     "description": "For action=search, filter, tail, ai_correlate, timeline, patterns, similar_incidents, ask_history, or incident_context: application name filter, e.g. sshd, dockerd, kernel."
                 },
@@ -198,13 +194,9 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "type": "string",
                     "description": "For action=filter: Docker lifecycle/enrichment event action filter."
                 },
-                "from": {
+                "until": {
                     "type": "string",
-                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or ask_history: start of time range as ISO 8601/RFC3339. Required for incident_context. For action=timeline: when both from and to are omitted, a bucket-sized default lookback window applies (≈7 days for hour, 30 for day, longer for week/month) — no full-history scan. Strongly recommended for patterns — omitting from/to causes a full-history scan."
-                },
-                "to": {
-                    "type": "string",
-                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or ask_history: end of time range as ISO 8601/RFC3339. Required for incident_context. For action=timeline: a bucket-sized default lookback bounds the query when from/to are omitted (no full-history scan). Strongly recommended for patterns — omitting from/to causes a full-history scan."
+                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or ask_history: end of time range as ISO 8601/RFC3339. Required for incident_context. For action=timeline: a bucket-sized default lookback bounds the query when since/until are omitted (no full-history scan). Strongly recommended for patterns — omitting since/until causes a full-history scan."
                 },
                 "limit": {
                     "type": "integer",
@@ -335,10 +327,6 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "type": "string",
                     "description": "For action=file_tails op=add: app/tag stored as app_name for tailed lines."
                 },
-                "hostname": {
-                    "type": "string",
-                    "description": "For action=file_tails op=add: required source hostname assigned to tailed lines."
-                },
                 "start_at_end": {
                     "type": "boolean",
                     "description": "For action=file_tails op=add: true starts at EOF, false backfills existing file content."
@@ -353,7 +341,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "since": {
                     "type": "string",
-                    "description": "For action=clock_skew: sample entries with received_at >= since. Use `limit` to cap returned host rows. For action=host_state: only include heartbeat samples with sampled_at >= this ISO 8601/RFC3339 timestamp."
+                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or ask_history: start of time range as ISO 8601/RFC3339. Required for incident_context. For action=timeline: when both since and until are omitted, a bucket-sized default lookback window applies (≈7 days for hour, 30 for day, longer for week/month) — no full-history scan. Strongly recommended for patterns — omitting since/until causes a full-history scan. For action=clock_skew: sample entries with received_at >= since; use `limit` to cap returned host rows. For action=host_state: only include heartbeat samples with sampled_at >= this timestamp. For action=notifications_recent: lower time bound."
                 },
                 "recent_minutes": {
                     "type": "integer",
@@ -550,7 +538,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                                     "required": ["op"]
                                 },
                                 "then": {
-                                    "required": ["id", "path", "tag", "hostname"]
+                                    "required": ["id", "path", "tag", "host"]
                                 }
                             },
                             {

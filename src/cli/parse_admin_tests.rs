@@ -31,7 +31,7 @@ fn parse_service_and_db_commands_dispatch_expected_subcommands() {
     match service {
         crate::cli::CliCommand::Service(crate::cli::ServiceCommand::Logs(args)) => {
             assert_eq!(args.service, "cortex");
-            assert_eq!(args.from.as_deref(), Some("t0"));
+            assert_eq!(args.since.as_deref(), Some("t0"));
             assert_eq!(args.tail, Some(20));
             assert!(args.json);
         }

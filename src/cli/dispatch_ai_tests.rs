@@ -4,8 +4,8 @@ fn ai_search_args_into_request_keeps_filters() {
         query: "error".to_string(),
         project: Some("/repo".to_string()),
         tool: Some("codex".to_string()),
-        from: Some("2026-01-01T00:00:00Z".to_string()),
-        to: None,
+        since: Some("2026-01-01T00:00:00Z".to_string()),
+        until: None,
         limit: Some(25),
         json: true,
     }

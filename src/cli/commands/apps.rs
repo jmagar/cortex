@@ -15,11 +15,11 @@ pub(crate) fn parse_apps(args: &[String]) -> Result<CliCommand> {
         if arg == "--json" {
             parsed.json = true;
         } else if let Some(v) = flags.match_value(&arg, "--host")? {
-            parsed.hostname = Some(v);
+            parsed.host = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--since")? {
-            parsed.from = Some(v);
+            parsed.since = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--until")? {
-            parsed.to = Some(v);
+            parsed.until = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--limit")? {
             parsed.limit = Some(parse_u32_flag("--limit", v)?);
         } else if let Some(v) = flags.match_value(&arg, "--offset")? {

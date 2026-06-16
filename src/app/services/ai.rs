@@ -5,8 +5,8 @@ impl CortexService {
         &self,
         req: ListSessionsRequest,
     ) -> ServiceResult<ListSessionsResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         // The unbounded (no time-window) path reads from the periodically
         // refreshed rollup; expose its staleness so callers know the `as_of`.
         // Time-windowed queries run live, so no staleness applies.
@@ -14,9 +14,9 @@ impl CortexService {
         let params = db::ListAiSessionsParams {
             ai_project: req.project,
             ai_tool: req.tool,
-            hostname: req.hostname,
-            from,
-            to,
+            host: req.host,
+            since: from,
+            until: to,
             limit: req.limit,
         };
         let (rows, rollup_as_of) = self
@@ -62,16 +62,16 @@ impl CortexService {
         if let Some(policy) = limit_clamped_to {
             req.limit = Some(policy.limit_cap);
         }
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let params = db::SearchAiSessionsParams {
             query: req.query,
             ai_project: req.project,
             ai_tool: req.tool,
-            hostname: None,
-            app_name: None,
-            from,
-            to,
+            host: None,
+            app: None,
+            since: from,
+            until: to,
             limit: req.limit,
         };
         let result = self
@@ -107,13 +107,13 @@ impl CortexService {
         if let Some(policy) = limit_clamped_to {
             req.limit = Some(policy.limit_cap);
         }
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let params = db::AiAbuseParams {
             ai_project: req.project,
             ai_tool: req.tool,
-            from,
-            to,
+            since: from,
+            until: to,
             limit: req.limit,
             before: req.before,
             after: req.after,
@@ -136,8 +136,8 @@ impl CortexService {
         &self,
         req: AiIncidentRequest,
     ) -> ServiceResult<AiIncidentResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let result = self
             .run_db("list_ai_incidents", move |pool| {
                 db::search_ai_incidents(
@@ -145,8 +145,8 @@ impl CortexService {
                     &db::AiIncidentParams {
                         ai_project: req.project,
                         ai_tool: req.tool,
-                        from,
-                        to,
+                        since: from,
+                        until: to,
                         limit: req.limit,
                         window_minutes: req.window_minutes,
                         terms: req.terms,
@@ -168,8 +168,8 @@ impl CortexService {
         &self,
         req: AiInvestigateRequest,
     ) -> ServiceResult<AiInvestigateResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let result = self
             .run_db("investigate_ai_incidents", move |pool| {
                 db::investigate_ai_incidents(
@@ -178,8 +178,8 @@ impl CortexService {
                         incident_id: req.incident_id,
                         ai_project: req.project,
                         ai_tool: req.tool,
-                        from,
-                        to,
+                        since: from,
+                        until: to,
                         limit: req.limit,
                         window_minutes: req.window_minutes,
                         correlation_window_minutes: req.correlation_window_minutes,
@@ -209,8 +209,8 @@ impl CortexService {
         policy: AiCorrelateLimitPolicy,
     ) -> ServiceResult<AiCorrelateResponse> {
         let (req, events_per_anchor_clamped_to) = req.normalize_limits(policy);
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let window = req.window_minutes.unwrap_or(5).clamp(1, 120);
         let related_limit = req
             .events_per_anchor
@@ -229,14 +229,14 @@ impl CortexService {
             ai_tool: req.tool,
             ai_session_id: req.session_id,
             ai_query: req.ai_query,
-            from,
-            to,
+            since: from,
+            until: to,
             limit: Some(anchor_limit),
         };
         let log_query = req.log_query;
-        let hostname = req.hostname;
-        let source_ip = req.source_ip;
-        let app_name = req.app_name;
+        let hostname = req.host;
+        let source_ip = req.source;
+        let app_name = req.app;
 
         type CorrelateDbResult = (
             bool,
@@ -273,10 +273,10 @@ impl CortexService {
                     let related_params = db::AiRelatedLogsParams {
                         windows,
                         query: log_query,
-                        hostname,
-                        source_ip,
+                        host: hostname,
+                        source: source_ip,
                         severity_in: severity_levels,
-                        app_name,
+                        app: app_name,
                         limit_per_anchor: related_limit,
                     };
                     let related_by_anchor = db::search_ai_related_logs(pool, &related_params)?;
@@ -328,13 +328,13 @@ impl CortexService {
         &self,
         req: UsageBlocksRequest,
     ) -> ServiceResult<UsageBlocksResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let params = db::AiUsageBlocksParams {
             ai_project: req.project,
             ai_tool: req.tool,
-            from,
-            to,
+            since: from,
+            until: to,
         };
         let result = self
             .run_db("usage_blocks", move |pool| {
@@ -365,12 +365,12 @@ impl CortexService {
         &self,
         req: ListAiToolsRequest,
     ) -> ServiceResult<ListAiToolsResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let params = db::ListAiToolsParams {
             ai_project: req.project,
-            from,
-            to,
+            since: from,
+            until: to,
         };
         let result = self
             .run_db("list_ai_tools", move |pool| {
@@ -384,12 +384,12 @@ impl CortexService {
         &self,
         req: ListAiProjectsRequest,
     ) -> ServiceResult<ListAiProjectsResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let params = db::ListAiProjectsParams {
             ai_tool: req.tool,
-            from,
-            to,
+            since: from,
+            until: to,
         };
         let result = self
             .run_db("list_ai_projects", move |pool| {
@@ -414,17 +414,17 @@ impl CortexService {
         let limit = req.limit.unwrap_or(500).min(999);
         let params = SearchParams {
             query: req.query,
-            hostname: req.hostname,
-            source_ip: req.source_ip,
+            host: req.host,
+            source: req.source,
             source_ip_prefix: None,
             severity: None,
             severity_in: Some(severity_levels),
-            app_name: None,
+            app: None,
             facility: None,
             exclude_facility: None,
             process_id: None,
-            from: Some(from.clone()),
-            to: Some(to.clone()),
+            since: Some(from.clone()),
+            until: Some(to.clone()),
             received_since: None,
             received_until: None,
             limit: Some(limit + 1),

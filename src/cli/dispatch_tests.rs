@@ -88,14 +88,14 @@ fn search_args_into_request_snapshot() {
     let args = SearchArgs {
         query: Some("foo".into()),
         grep: None,
-        hostname: Some("h1".into()),
-        source_ip: Some("10.0.0.1".into()),
+        host: Some("h1".into()),
+        source: Some("10.0.0.1".into()),
         severity: Some("error".into()),
-        app_name: Some("nginx".into()),
+        app: Some("nginx".into()),
         facility: Some("auth".into()),
         exclude_facility: Some("transcript".into()),
-        from: Some("2026-01-01T00:00:00Z".into()),
-        to: Some("2026-01-02T00:00:00Z".into()),
+        since: Some("2026-01-01T00:00:00Z".into()),
+        until: Some("2026-01-02T00:00:00Z".into()),
         received_since: Some("2026-01-01T00:00:30Z".into()),
         received_until: Some("2026-01-02T00:00:30Z".into()),
         limit: Some(50),
@@ -104,7 +104,7 @@ fn search_args_into_request_snapshot() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "SearchLogsRequest { query: Some(\"foo\"), hostname: Some(\"h1\"), source_ip: Some(\"10.0.0.1\"), severity: Some(\"error\"), app_name: Some(\"nginx\"), facility: Some(\"auth\"), exclude_facility: Some(\"transcript\"), process_id: None, from: Some(\"2026-01-01T00:00:00Z\"), to: Some(\"2026-01-02T00:00:00Z\"), received_since: Some(\"2026-01-01T00:00:30Z\"), received_until: Some(\"2026-01-02T00:00:30Z\"), limit: Some(50), source_kind: None, tool: None, project: None, session_id: None, container: None, docker_host: None, stream: None, event_action: None }"
+        "SearchLogsRequest { query: Some(\"foo\"), host: Some(\"h1\"), source: Some(\"10.0.0.1\"), severity: Some(\"error\"), app: Some(\"nginx\"), facility: Some(\"auth\"), exclude_facility: Some(\"transcript\"), process_id: None, since: Some(\"2026-01-01T00:00:00Z\"), until: Some(\"2026-01-02T00:00:00Z\"), received_since: Some(\"2026-01-01T00:00:30Z\"), received_until: Some(\"2026-01-02T00:00:30Z\"), limit: Some(50), source_kind: None, tool: None, project: None, session_id: None, container: None, docker_host: None, stream: None, event_action: None }"
     );
 }
 
@@ -126,23 +126,23 @@ fn filter_args_into_request_snapshot() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "FilterLogsRequest { hostname: None, source_ip: None, severity: None, app_name: None, facility: None, exclude_facility: None, process_id: None, from: None, to: None, received_since: None, received_until: None, limit: Some(25), source_kind: Some(\"docker-stream\"), tool: Some(\"claude\"), project: Some(\"/tmp/project\"), session_id: Some(\"abc123\"), container: Some(\"cortex\"), docker_host: Some(\"dookie\"), stream: Some(\"stdout\"), event_action: Some(\"die\") }"
+        "FilterLogsRequest { host: None, source: None, severity: None, app: None, facility: None, exclude_facility: None, process_id: None, since: None, until: None, received_since: None, received_until: None, limit: Some(25), source_kind: Some(\"docker-stream\"), tool: Some(\"claude\"), project: Some(\"/tmp/project\"), session_id: Some(\"abc123\"), container: Some(\"cortex\"), docker_host: Some(\"dookie\"), stream: Some(\"stdout\"), event_action: Some(\"die\") }"
     );
 }
 
 #[test]
 fn tail_args_into_request_snapshot() {
     let args = TailArgs {
-        hostname: Some("h1".into()),
-        source_ip: None,
-        app_name: Some("docker".into()),
+        host: Some("h1".into()),
+        source: None,
+        app: Some("docker".into()),
         n: Some(100),
         json: false,
     };
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "TailLogsRequest { hostname: Some(\"h1\"), source_ip: None, app_name: Some(\"docker\"), severity_min: None, n: Some(100) }"
+        "TailLogsRequest { host: Some(\"h1\"), source: None, app: Some(\"docker\"), severity_min: None, n: Some(100) }"
     );
 }
 
@@ -220,15 +220,15 @@ fn graph_evidence_args_into_request_snapshot() {
 #[test]
 fn errors_args_into_request_snapshot() {
     let args = TimeRangeArgs {
-        from: Some("2026-01-01T00:00:00Z".into()),
-        to: None,
+        since: Some("2026-01-01T00:00:00Z".into()),
+        until: None,
         limit: Some(10),
         json: false,
     };
     let req = args.into_errors_request();
     assert_eq!(
         format!("{req:?}"),
-        "GetErrorsRequest { from: Some(\"2026-01-01T00:00:00Z\"), to: None, group_by: None, limit: Some(10) }"
+        "GetErrorsRequest { since: Some(\"2026-01-01T00:00:00Z\"), until: None, group_by: None, limit: Some(10) }"
     );
 }
 
@@ -237,16 +237,16 @@ fn sessions_args_into_request_snapshot() {
     let args = SessionsArgs {
         project: Some("/home/me/proj".into()),
         tool: Some("claude".into()),
-        hostname: None,
-        from: None,
-        to: None,
+        host: None,
+        since: None,
+        until: None,
         limit: Some(20),
         json: false,
     };
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "ListSessionsRequest { project: Some(\"/home/me/proj\"), tool: Some(\"claude\"), hostname: None, from: None, to: None, limit: Some(20) }"
+        "ListSessionsRequest { project: Some(\"/home/me/proj\"), tool: Some(\"claude\"), host: None, since: None, until: None, limit: Some(20) }"
     );
 }
 
@@ -256,8 +256,8 @@ fn correlate_args_into_request_snapshot() {
         reference_time: "2026-01-01T12:00:00Z".into(),
         window_minutes: Some(15),
         severity_min: Some("warning".into()),
-        hostname: Some("h1".into()),
-        source_ip: None,
+        host: Some("h1".into()),
+        source: None,
         query: Some("oom".into()),
         limit: Some(50),
         json: false,
@@ -265,7 +265,7 @@ fn correlate_args_into_request_snapshot() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "CorrelateEventsRequest { reference_time: \"2026-01-01T12:00:00Z\", window_minutes: Some(15), severity_min: Some(\"warning\"), hostname: Some(\"h1\"), source_ip: None, query: Some(\"oom\"), limit: Some(50) }"
+        "CorrelateEventsRequest { reference_time: \"2026-01-01T12:00:00Z\", window_minutes: Some(15), severity_min: Some(\"warning\"), host: Some(\"h1\"), source: None, query: Some(\"oom\"), limit: Some(50) }"
     );
 }
 
@@ -481,7 +481,7 @@ async fn run_search_http_sends_expected_query_params() {
         .await;
     let args = SearchArgs {
         query: Some("foo".into()),
-        hostname: Some("h1".into()),
+        host: Some("h1".into()),
         severity: Some("error".into()),
         limit: Some(50),
         json: true,
@@ -497,7 +497,7 @@ async fn run_search_http_sends_expected_query_params() {
         .expect("search request");
     let qs = req.url.query().unwrap_or("");
     assert!(qs.contains("query=foo"), "missing query=foo in {qs}");
-    assert!(qs.contains("hostname=h1"), "missing hostname=h1 in {qs}");
+    assert!(qs.contains("host=h1"), "missing host=h1 in {qs}");
     assert!(
         qs.contains("severity=error"),
         "missing severity=error in {qs}"
@@ -595,15 +595,15 @@ fn ai_search_args_into_request_snapshot() {
         query: "needle".into(),
         project: Some("/p".into()),
         tool: Some("claude".into()),
-        from: Some("2026-01-01T00:00:00Z".into()),
-        to: Some("2026-01-02T00:00:00Z".into()),
+        since: Some("2026-01-01T00:00:00Z".into()),
+        until: Some("2026-01-02T00:00:00Z".into()),
         limit: Some(25),
         json: true,
     };
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "SearchSessionsRequest { query: \"needle\", project: Some(\"/p\"), tool: Some(\"claude\"), from: Some(\"2026-01-01T00:00:00Z\"), to: Some(\"2026-01-02T00:00:00Z\"), limit: Some(25) }"
+        "SearchSessionsRequest { query: \"needle\", project: Some(\"/p\"), tool: Some(\"claude\"), since: Some(\"2026-01-01T00:00:00Z\"), until: Some(\"2026-01-02T00:00:00Z\"), limit: Some(25) }"
     );
 }
 
@@ -612,8 +612,8 @@ fn ai_abuse_args_into_request_snapshot() {
     let args = AiAbuseArgs {
         project: Some("/p".into()),
         tool: Some("claude".into()),
-        from: None,
-        to: None,
+        since: None,
+        until: None,
         limit: Some(10),
         before: Some(3),
         after: Some(2),
@@ -623,7 +623,7 @@ fn ai_abuse_args_into_request_snapshot() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "AbuseSearchRequest { project: Some(\"/p\"), tool: Some(\"claude\"), from: None, to: None, limit: Some(10), before: Some(3), after: Some(2), terms: [\"bad\", \"worse\"] }"
+        "AbuseSearchRequest { project: Some(\"/p\"), tool: Some(\"claude\"), since: None, until: None, limit: Some(10), before: Some(3), after: Some(2), terms: [\"bad\", \"worse\"] }"
     );
 }
 
@@ -635,11 +635,11 @@ fn ai_correlate_args_into_request_snapshot() {
         session_id: Some("s1".into()),
         ai_query: Some("ai".into()),
         log_query: Some("log".into()),
-        hostname: Some("h1".into()),
-        source_ip: Some("10.0.0.1".into()),
-        app_name: Some("nginx".into()),
-        from: Some("2026-01-01T00:00:00Z".into()),
-        to: Some("2026-01-02T00:00:00Z".into()),
+        host: Some("h1".into()),
+        source: Some("10.0.0.1".into()),
+        app: Some("nginx".into()),
+        since: Some("2026-01-01T00:00:00Z".into()),
+        until: Some("2026-01-02T00:00:00Z".into()),
         window_minutes: Some(15),
         severity_min: Some("warning".into()),
         limit: Some(50),
@@ -649,7 +649,7 @@ fn ai_correlate_args_into_request_snapshot() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "AiCorrelateRequest { project: Some(\"/p\"), tool: Some(\"claude\"), session_id: Some(\"s1\"), ai_query: Some(\"ai\"), log_query: Some(\"log\"), hostname: Some(\"h1\"), source_ip: Some(\"10.0.0.1\"), app_name: Some(\"nginx\"), from: Some(\"2026-01-01T00:00:00Z\"), to: Some(\"2026-01-02T00:00:00Z\"), window_minutes: Some(15), severity_min: Some(\"warning\"), limit: Some(50), events_per_anchor: Some(20) }"
+        "AiCorrelateRequest { project: Some(\"/p\"), tool: Some(\"claude\"), session_id: Some(\"s1\"), ai_query: Some(\"ai\"), log_query: Some(\"log\"), host: Some(\"h1\"), source: Some(\"10.0.0.1\"), app: Some(\"nginx\"), since: Some(\"2026-01-01T00:00:00Z\"), until: Some(\"2026-01-02T00:00:00Z\"), window_minutes: Some(15), severity_min: Some(\"warning\"), limit: Some(50), events_per_anchor: Some(20) }"
     );
 }
 
@@ -658,15 +658,15 @@ fn ai_blocks_args_into_request_snapshot() {
     let args = AiBlocksArgs {
         project: Some("/p".into()),
         tool: None,
-        from: None,
-        to: None,
+        since: None,
+        until: None,
         json: false,
         ..Default::default()
     };
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "UsageBlocksRequest { project: Some(\"/p\"), tool: None, from: None, to: None }"
+        "UsageBlocksRequest { project: Some(\"/p\"), tool: None, since: None, until: None }"
     );
 }
 
@@ -690,14 +690,14 @@ fn ai_tools_args_into_request_snapshot() {
     let args = AiListArgs {
         project: Some("/p".into()),
         tool: None,
-        from: Some("2026-01-01T00:00:00Z".into()),
-        to: None,
+        since: Some("2026-01-01T00:00:00Z".into()),
+        until: None,
         json: false,
     };
     let req = args.into_tools_request();
     assert_eq!(
         format!("{req:?}"),
-        "ListAiToolsRequest { project: Some(\"/p\"), from: Some(\"2026-01-01T00:00:00Z\"), to: None }"
+        "ListAiToolsRequest { project: Some(\"/p\"), since: Some(\"2026-01-01T00:00:00Z\"), until: None }"
     );
 }
 
@@ -706,14 +706,14 @@ fn ai_projects_args_into_request_snapshot() {
     let args = AiListArgs {
         project: None,
         tool: Some("claude".into()),
-        from: None,
-        to: Some("2026-01-02T00:00:00Z".into()),
+        since: None,
+        until: Some("2026-01-02T00:00:00Z".into()),
         json: false,
     };
     let req = args.into_projects_request();
     assert_eq!(
         format!("{req:?}"),
-        "ListAiProjectsRequest { tool: Some(\"claude\"), from: None, to: Some(\"2026-01-02T00:00:00Z\") }"
+        "ListAiProjectsRequest { tool: Some(\"claude\"), since: None, until: Some(\"2026-01-02T00:00:00Z\") }"
     );
 }
 
@@ -1488,21 +1488,21 @@ fn timeline_args_into_request_passes_time_range_through() {
     let args = TimelineArgs {
         bucket: Some("hour".to_string()),
         group_by: None,
-        from: None,
-        to: None,
-        hostname: None,
-        app_name: None,
+        since: None,
+        until: None,
+        host: None,
+        app: None,
         severity_min: None,
         json: false,
     };
     let req = args.into_request();
     assert_eq!(req.bucket.as_deref(), Some("hour"));
     assert!(
-        req.from.is_none(),
+        req.since.is_none(),
         "into_request must not inject a default `from`; the service applies it"
     );
     assert!(
-        req.to.is_none(),
+        req.until.is_none(),
         "into_request must not inject a default `to`"
     );
 }
@@ -1513,16 +1513,16 @@ fn timeline_args_into_request_explicit_from_preserved() {
     let args = TimelineArgs {
         bucket: None,
         group_by: None,
-        from: Some("2025-01-01T00:00:00Z".to_string()),
-        to: None,
-        hostname: None,
-        app_name: None,
+        since: Some("2025-01-01T00:00:00Z".to_string()),
+        until: None,
+        host: None,
+        app: None,
         severity_min: None,
         json: false,
     };
     let req = args.into_request();
     assert_eq!(
-        req.from.as_deref(),
+        req.since.as_deref(),
         Some("2025-01-01T00:00:00Z"),
         "explicit from must not be overridden by the default"
     );
@@ -1534,7 +1534,7 @@ fn patterns_args_into_request_default() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "PatternsRequest { from: None, to: None, hostname: None, app_name: None, severity_min: None, scan_limit: None, top_n: None }"
+        "PatternsRequest { since: None, until: None, host: None, app: None, severity_min: None, scan_limit: None, top_n: None }"
     );
 }
 

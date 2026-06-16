@@ -29,9 +29,9 @@ pub(crate) struct CompareArgs {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AppsArgs {
-    pub hostname: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub host: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
     pub json: bool,
@@ -42,7 +42,7 @@ pub(crate) struct AppsArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct HostStateArgs {
     pub host_id: Option<String>,
-    pub hostname: Option<String>,
+    pub host: Option<String>,
     pub since: Option<String>,
     pub limit: Option<u32>,
     pub json: bool,

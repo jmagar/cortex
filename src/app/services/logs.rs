@@ -29,7 +29,7 @@ impl CortexService {
         &self,
         req: models::HostStateRequest,
     ) -> ServiceResult<models::HostStateResponse> {
-        let lookup = match (req.host_id, req.hostname) {
+        let lookup = match (req.host_id, req.host) {
             (Some(host_id), _) if !host_id.trim().is_empty() => {
                 db::HeartbeatHostLookup::HostId(host_id)
             }
@@ -235,9 +235,9 @@ impl CortexService {
                     db::search_logs(
                         pool,
                         &db::SearchParams {
-                            hostname: Some(hostname_filter.clone()),
-                            from: Some(from3),
-                            to: Some(to3),
+                            host: Some(hostname_filter.clone()),
+                            since: Some(from3),
+                            until: Some(to3),
                             severity_in: Some(sev_levels),
                             limit: Some(fetch_limit as u32),
                             // correlate_state correlates non-AI logs with heartbeat
@@ -298,9 +298,9 @@ impl CortexService {
             .run_db("tail_logs", move |pool| {
                 db::tail_logs(
                     pool,
-                    req.hostname.as_deref(),
-                    req.source_ip.as_deref(),
-                    req.app_name.as_deref(),
+                    req.host.as_deref(),
+                    req.source.as_deref(),
+                    req.app.as_deref(),
                     severity_in.as_deref(),
                     req.n.unwrap_or(50),
                 )
@@ -314,8 +314,8 @@ impl CortexService {
     }
 
     pub async fn get_errors(&self, req: GetErrorsRequest) -> ServiceResult<GetErrorsResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
         let group_by_app = match req.group_by.as_deref() {
             None => false,
             Some("app_name") | Some("app") => true,

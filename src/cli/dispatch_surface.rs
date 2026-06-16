@@ -34,10 +34,10 @@ impl TimelineArgs {
         TimelineRequest {
             bucket: self.bucket,
             group_by: self.group_by,
-            from: self.from,
-            to: self.to,
-            hostname: self.hostname,
-            app_name: self.app_name,
+            since: self.since,
+            until: self.until,
+            host: self.host,
+            app: self.app,
             severity_min: self.severity_min,
         }
     }
@@ -46,10 +46,10 @@ impl TimelineArgs {
 impl PatternsArgs {
     pub(crate) fn into_request(self) -> PatternsRequest {
         PatternsRequest {
-            from: self.from,
-            to: self.to,
-            hostname: self.hostname,
-            app_name: self.app_name,
+            since: self.since,
+            until: self.until,
+            host: self.host,
+            app: self.app,
             severity_min: self.severity_min,
             scan_limit: self.scan_limit,
             top_n: self.top_n,

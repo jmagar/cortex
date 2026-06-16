@@ -191,8 +191,8 @@ pub struct DbBackupResult {
 #[serde(deny_unknown_fields)]
 pub struct ServiceLogsRequest {
     pub service: String,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub tail: Option<u32>,
 }
 
@@ -258,7 +258,7 @@ pub struct IncidentRequest {
     pub around: String,
     pub minutes: Option<u32>,
     pub service: Option<String>,
-    pub hostname: Option<String>,
+    pub host: Option<String>,
     pub limit: Option<u32>,
 }
 
@@ -330,7 +330,7 @@ impl From<db::LogEntry> for LogEntry {
 #[serde(deny_unknown_fields)]
 pub struct HostStateRequest {
     pub host_id: Option<String>,
-    pub hostname: Option<String>,
+    pub host: Option<String>,
     pub since: Option<String>,
     pub limit: Option<u32>,
 }

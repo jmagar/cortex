@@ -40,7 +40,7 @@ fn parses_file_tail_add() {
             id: "swag-access".into(),
             path: "/mnt/appdata/swag/log/nginx/access.log".into(),
             tag: "swag-access".into(),
-            hostname: Some("squirts".into()),
+            host: Some("squirts".into()),
             facility: Some("local4".into()),
             severity: Some("info".into()),
             start_at_end: false,

@@ -304,7 +304,7 @@ async fn tool_compose_doctor(args: Value) -> anyhow::Result<Value> {
 
 async fn tool_timeline(state: &AppState, args: Value) -> anyhow::Result<Value> {
     // Default lookback is centralized in `CortexService::timeline` (bead dyqw):
-    // it applies a bucket-sized window only when neither `from` nor `to` is set,
+    // it applies a bucket-sized window only when neither `since` nor `until` is set,
     // preventing full table scans without recreating the logic per transport.
     let req: TimelineRequest = action_payload(args, "timeline")?;
     let response = state.service.timeline(req).await?;
@@ -647,15 +647,15 @@ phrase matching with quotes, prefix matching with *.
 
 **Parameters:**
 - `query` (string) — FTS5 search query, e.g. `'kernel panic'`, `'OOM AND killer'`, `'"connection refused"'`, `'error*'`
-- `hostname` (string, optional) — filter by hostname (exact match); use `cortex hosts` to enumerate
-- `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
+- `host` (string, optional) — filter by hostname (exact match); use `cortex hosts` to enumerate
+- `source` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
 - `severity` (string, optional) — one of: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`
-- `app_name` (string, optional) — filter by application name, e.g. `sshd`, `dockerd`, `kernel`
+- `app` (string, optional) — filter by application name, e.g. `sshd`, `dockerd`, `kernel`
 - `facility` (string, optional) — filter by syslog facility name (e.g. `kern`, `auth`, `daemon`)
 - `exclude_facility` (string, optional) — exclude a syslog facility name (e.g. `kern` to suppress kernel noise)
 - `process_id` (string, optional) — filter by process_id (exact match)
-- `from` (string, optional) — start of time range (ISO 8601 / RFC3339, e.g. `2025-01-15T00:00:00Z`)
-- `to` (string, optional) — end of time range (ISO 8601)
+- `since` (string, optional) — start of time range (ISO 8601 / RFC3339, e.g. `2025-01-15T00:00:00Z`)
+- `until` (string, optional) — end of time range (ISO 8601)
 - `received_since` (string, optional) — restrict to entries received after this time (server-side ingestion clock, ISO 8601)
 - `received_until` (string, optional) — restrict to entries received before this time (server-side ingestion clock, ISO 8601)
 - `limit` (integer, optional) — max results (default 100, max 1000)
@@ -667,13 +667,13 @@ Filter log rows by structured fields only. This action never accepts `query`;
 use `search` for message-body FTS5 queries.
 
 **Parameters:**
-- `hostname` (string, optional) — filter by hostname (exact match)
-- `source_ip` (string, optional) — filter by exact source identifier
+- `host` (string, optional) — filter by hostname (exact match)
+- `source` (string, optional) — filter by exact source identifier
 - `severity` (string, optional) — one of: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`
-- `app_name` (string, optional) — filter by application/container name
+- `app` (string, optional) — filter by application/container name
 - `facility` / `exclude_facility` (string, optional) — include or exclude syslog facility
 - `process_id` (string, optional) — filter by process_id
-- `from` / `to` (string, optional) — event timestamp window
+- `since` / `until` (string, optional) — event timestamp window
 - `received_since` / `received_until` (string, optional) — ingest timestamp window
 - `source_kind` (string, optional) — `docker-stream`, `docker-event`, `agent-command`, `shell-history`, `transcript`, `claude`, `codex`, or `gemini`
 - `tool`, `project`, `session_id` (string, optional) — AI transcript filters
@@ -687,9 +687,9 @@ Get the N most recent log entries, optionally filtered by host, application, and
 Equivalent to `tail -f` across all hosts.
 
 **Parameters:**
-- `hostname` (string, optional) — filter to a specific host
-- `source_ip` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
-- `app_name` (string, optional) — filter to a specific application
+- `host` (string, optional) — filter to a specific host
+- `source` (string, optional) — filter by exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
+- `app` (string, optional) — filter to a specific application
 - `severity_min` (string, optional) — only return entries at or above this severity (e.g. `warning` returns warning + worse)
 - `n` (integer, optional) — number of recent entries (default 50, max 500)
 
@@ -700,8 +700,8 @@ Get a summary of errors and warnings across all hosts in a time window.
 Groups by hostname and severity level (and optionally app_name), showing counts.
 
 **Parameters:**
-- `from` (string, optional) — start of time range (ISO 8601); defaults to all time
-- `to` (string, optional) — end of time range (ISO 8601); defaults to now
+- `since` (string, optional) — start of time range (ISO 8601); defaults to all time
+- `until` (string, optional) — end of time range (ISO 8601); defaults to now
 - `group_by` (string, optional) — secondary grouping key. Currently `app_name` is supported; default groups only by hostname+severity.
 - `limit` (integer, optional) — cap summary rows returned (max 100)
 
@@ -748,7 +748,7 @@ Return the latest bounded heartbeat state for one host.
 
 **Parameters:**
 - `host_id` (string, optional) — authoritative heartbeat host identity
-- `hostname` (string, optional) — self-reported hostname fallback; must resolve to exactly one host_id
+- `host` (string, optional) — self-reported hostname fallback; must resolve to exactly one host_id
 - `since` (string, optional) — minimum sampled_at timestamp (ISO 8601)
 - `limit` (integer, optional) — number of samples to return (default 1, max 100)
 
@@ -780,10 +780,10 @@ Response includes the resolved `window`, per-host `heartbeat_summary` plus match
 
 ## cortex apps
 List distinct application names with log counts, host counts, and first/last seen timestamps.
-Mirror of `cortex hosts` for the `app_name` dimension.
+Mirror of `cortex hosts` for the `app` dimension.
 
 **Parameters:**
-- `hostname` (string, optional) — restrict to apps seen on this host
+- `host` (string, optional) — restrict to apps seen on this host
 
 ---
 
@@ -793,8 +793,8 @@ Lists AI transcript sessions grouped by project/tool/session/host.
 **Parameters:**
 - `project` (string, optional) — exact project path, e.g. `/home/jmagar/workspace/cortex`
 - `tool` (string, optional) — AI tool filter: `claude`, `codex`, or `gemini`
-- `hostname` (string, optional) — restrict to one host
-- `from`, `to` (string, optional) — time range (ISO 8601)
+- `host` (string, optional) — restrict to one host
+- `since`, `until` (string, optional) — time range (ISO 8601)
 - `limit` (integer, optional) — max sessions (default 100, max 1000)
 
 ---
@@ -806,7 +806,7 @@ Session-ranked full-text search across AI transcript rows. Returns grouped sessi
 - `query` (string, **required**) — FTS5 search query
 - `project` (string, optional) — exact project path filter
 - `tool` (string, optional) — AI tool filter: `claude`, `codex`, or `gemini`
-- `from`, `to` (string, optional) — time range (ISO 8601)
+- `since`, `until` (string, optional) — time range (ISO 8601)
 - `limit` (integer, optional) — max grouped sessions (default 20, max 100)
 
 ---
@@ -817,7 +817,7 @@ Detects abuse in AI transcript rows and returns each hit with surrounding rows f
 **Parameters:**
 - `project` (string, optional) — exact project path filter
 - `tool` (string, optional) — AI tool filter
-- `from`, `to` (string, optional) — time range (ISO 8601)
+- `since`, `until` (string, optional) — time range (ISO 8601)
 - `limit` (integer, optional) — max matches (default 20, max 100)
 - `before`, `after` (integer, optional) — same-session context rows around each hit (default 2, max 20)
 - `terms` (array of strings, optional) — custom detector terms; replaces the built-in list
@@ -830,7 +830,7 @@ Groups AI transcript abuse hits into scored incident candidates. Returns inciden
 **Parameters:**
 - `project` (string, optional) — exact project path filter
 - `tool` (string, optional) — AI tool filter
-- `from`, `to` (string, optional) — time range (ISO 8601)
+- `since`, `until` (string, optional) — time range (ISO 8601)
 - `limit` (integer, optional) — max incidents (default 20, max 100)
 - `window_minutes` (integer, optional) — grouping window (default 10, max 120)
 - `terms` (array of strings, optional) — custom detector terms
@@ -843,7 +843,7 @@ Expands top abuse incidents into deterministic evidence bundles. Each bundle inc
 **Parameters:**
 - `project` (string, optional) — exact project path filter
 - `tool` (string, optional) — AI tool filter
-- `from`, `to` (string, optional) — time range (ISO 8601)
+- `since`, `until` (string, optional) — time range (ISO 8601)
 - `limit` (integer, optional) — max incidents to expand (default 3, max 10)
 - `window_minutes` (integer, optional) — grouping window (default 10, max 120)
 - `correlation_window_minutes` (integer, optional) — minutes before/after incident for nearby log correlation (default 5, max 120)
@@ -861,8 +861,8 @@ Related rows explicitly exclude AI transcript rows, so the result surfaces host,
 - `session_id` (string, optional) — exact AI session id filter
 - `ai_query` (string, optional) — FTS5 query over AI transcript anchor rows
 - `log_query` (string, optional) — FTS5 query over related non-AI logs
-- `hostname`, `source_ip`, `app_name` (string, optional) — related log filters
-- `from`, `to` (string, optional) — AI anchor time range (ISO 8601)
+- `host`, `source`, `app` (string, optional) — related log filters
+- `since`, `until` (string, optional) — AI anchor time range (ISO 8601)
 - `window_minutes` (integer, optional) — minutes before and after each AI anchor (default 5, max 120)
 - `severity_min` (string, optional) — minimum related log severity (default `warning`)
 - `limit` (integer, optional) — max AI anchors (default 10, max 50)
@@ -876,7 +876,7 @@ AI activity bucketed into deterministic 5-hour UTC windows.
 **Parameters:**
 - `project` (string, optional) — exact project path filter
 - `tool` (string, optional) — AI tool filter
-- `from`, `to` (string, optional) — time range (ISO 8601)
+- `since`, `until` (string, optional) — time range (ISO 8601)
 
 ---
 
@@ -895,7 +895,7 @@ Distinct AI tools with counts and first/last seen timestamps.
 
 **Parameters:**
 - `project` (string, optional) — exact project path filter
-- `from`, `to` (string, optional) — time range (ISO 8601)
+- `since`, `until` (string, optional) — time range (ISO 8601)
 
 ---
 
@@ -904,7 +904,7 @@ Distinct AI projects with counts, tools used, and first/last seen timestamps.
 
 **Parameters:**
 - `tool` (string, optional) — AI tool filter
-- `from`, `to` (string, optional) — time range (ISO 8601)
+- `since`, `until` (string, optional) — time range (ISO 8601)
 
 ---
 
@@ -914,7 +914,7 @@ peer IP for OTLP input,
 `docker://host/container/stream` for Docker stream ingest, or
 `docker-event://host/container/action` for Docker lifecycle ingest) with log counts, the number
 of distinct hostnames each sender claims, and up to 10 top hostnames per sender.
-`source_ip` is the only network-verified identity — useful for spoof detection
+`source` is the only network-verified identity — useful for spoof detection
 on hostname-spoofable formats (e.g. UniFi CEF).
 
 **Parameters:** none
@@ -930,8 +930,8 @@ of a reference timestamp. Results are grouped by host and ordered by time.
 - `reference_time` (string, **required**) — center timestamp (ISO 8601, e.g. `2025-01-15T14:30:00Z`)
 - `window_minutes` (integer, optional) — minutes before and after reference_time to search (default 5, max 60)
 - `severity_min` (string, optional) — minimum severity to include (default `warning`); `debug` returns everything
-- `hostname` (string, optional) — limit correlation to a specific host
-- `source_ip` (string, optional) — limit correlation to an exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
+- `host` (string, optional) — limit correlation to a specific host
+- `source` (string, optional) — limit correlation to an exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
 - `query` (string, optional) — optional FTS query to narrow results
 - `limit` (integer, optional) — max total events to return (default 500, max 999)
 
@@ -944,10 +944,10 @@ or "is the incident still active". Each point reports `{bucket, group?, count}`.
 **Parameters:**
 - `bucket` (string, optional) — `minute`, `hour` (default), `day`, `week`, or `month`
 - `group_by` (string, optional) — split each bucket by `hostname`, `severity`, or `app_name`
-- `from` (string, optional) — start of time range (ISO 8601)
-- `to` (string, optional) — end of time range (ISO 8601)
-- `hostname` (string, optional) — restrict to one host
-- `app_name` (string, optional) — restrict to one app
+- `since` (string, optional) — start of time range (ISO 8601)
+- `until` (string, optional) — end of time range (ISO 8601)
+- `host` (string, optional) — restrict to one host
+- `app` (string, optional) — restrict to one app
 - `severity_min` (string, optional) — only count entries at or above this severity
 
 ---
@@ -959,8 +959,8 @@ messages aggregate. Returns top templates with counts, sample message, and
 host distribution.
 
 **Parameters:**
-- `from` / `to` (string, optional) — time range (ISO 8601)
-- `hostname`, `app_name` (string, optional) — narrow the population
+- `since` / `until` (string, optional) — time range (ISO 8601)
+- `host`, `app` (string, optional) — narrow the population
 - `severity_min` (string, optional) — only cluster entries at or above this severity
 - `scan_limit` (integer, optional) — max messages to read (default 10000, max 10000)
 - `top_n` (integer, optional) — max templates to return (default 20, max 200)
@@ -971,11 +971,11 @@ host distribution.
 ## cortex context
 Surrounding logs around a single point of interest, on the same host. Pass
 either `log_id` (preferred — uses (timestamp, id) for stable ordering) or both
-`hostname` + `timestamp` to anchor on a synthetic reference.
+`host` + `timestamp` to anchor on a synthetic reference.
 
 **Parameters:**
 - `log_id` (integer, optional) — id of an existing log entry (e.g. from `search`)
-- `hostname` (string, optional) — required when `log_id` is not given
+- `host` (string, optional) — required when `log_id` is not given
 - `timestamp` (string, optional) — required when `log_id` is not given (ISO 8601)
 - `before` (integer, optional) — entries before the reference (default 10, max 500)
 - `after` (integer, optional) — entries after the reference (default 10, max 500)
@@ -1108,14 +1108,14 @@ log hits first) with representative message snippets and correlated AI sessions
 whose transcript timestamps overlap the cluster window.
 
 **Required:** `query` (FTS5 syntax, e.g. `nginx upstream error` or `OOM killed`)
-**Optional:** `hostname`, `app_name`, `severity_min`, `from`, `to`,
+**Optional:** `host`, `app`, `severity_min`, `since`, `until`,
              `window_minutes` (cluster window, default 30, clamp 5..=120),
              `limit` (default 10, max 50)
 
 Example: `{"action":"similar_incidents","query":"upstream connect error","app_name":"nginx"}`
 
 Response fields: `query`, `total_clusters`, `truncated`, `clusters` where each
-cluster has: `hostname`, `app_name`, `window_start`, `window_end`, `log_count`,
+cluster has: `host`, `app`, `window_start`, `window_end`, `log_count`,
 `severity_peak`, `representative_messages` (up to 3), `correlated_sessions` (up to 5).
 
 ---
@@ -1127,7 +1127,7 @@ ranked by match count with system log context from the top session's time window
 Use this to answer "what did an AI agent work on related to X?".
 
 **Required:** `query` (FTS5 syntax, e.g. `nginx ssl certificate` or `OOM postgres`)
-**Optional:** `hostname`, `app_name`, `from`, `to`, `limit` (default 10, max 50)
+**Optional:** `host`, `app`, `since`, `until`, `limit` (default 10, max 50)
 
 Example: `{"action":"ask_history","query":"nginx ssl certificate"}`
 
@@ -1143,13 +1143,13 @@ Return full context for a known time window: log counts by severity and app,
 error-level log rows, and AI sessions active in that window. Useful for
 post-incident review of a time range you already know was problematic.
 
-**Required:** `from`, `to` (ISO 8601/RFC3339)
-**Optional:** `hostname`, `app_name`, `severity_min` (default warning),
+**Required:** `since`, `until` (ISO 8601/RFC3339)
+**Optional:** `host`, `app`, `severity_min` (default warning),
              `limit` (max error log rows, default 50, max 200)
 **Note:** `query` is accepted but reserved for v2 FTS5 filtering; it is
           currently ignored — omit it for incident_context.
 
-Example: `{"action":"incident_context","from":"2024-01-15T10:00:00Z","to":"2024-01-15T11:00:00Z"}`
+Example: `{"action":"incident_context","since":"2024-01-15T10:00:00Z","until":"2024-01-15T11:00:00Z"}`
 
 Response fields: `window_from`, `window_to`, `total_logs`, `by_severity` (array),
 `by_app` (array, top 20), `error_logs` (array), `error_logs_truncated`, `ai_sessions`.

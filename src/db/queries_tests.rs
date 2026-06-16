@@ -251,7 +251,7 @@ fn search_fts_hostname_filter_returns_only_that_host() {
 
     let params = SearchParams {
         query: Some("panic".to_string()),
-        hostname: Some("host-a".to_string()),
+        host: Some("host-a".to_string()),
         limit: Some(1000),
         ..Default::default()
     };
@@ -281,7 +281,7 @@ fn search_fts_plan_selection_branches_on_indexed_filter() {
     // bounded match-set subquery (full-review PH1: the non-correlated IN
     // subquery is materialized in full, so it must carry a cap).
     let filtered = SearchParams {
-        hostname: Some("host-a".to_string()),
+        host: Some("host-a".to_string()),
         ..plain.clone()
     };
     assert!(filtered.has_indexed_equality_filter());
@@ -336,7 +336,7 @@ fn search_fts_severity_only_filter_uses_capped_candidate_plan() {
     let combined = SearchParams {
         query: Some("disk".to_string()),
         severity: Some("info".to_string()),
-        hostname: Some("host-a".to_string()),
+        host: Some("host-a".to_string()),
         ..Default::default()
     };
     assert!(combined.has_indexed_equality_filter());
@@ -496,7 +496,7 @@ fn test_search_timestamp_range_filtering() {
 
     // from only
     let params = SearchParams {
-        from: Some("2026-06-01T00:00:00Z".into()),
+        since: Some("2026-06-01T00:00:00Z".into()),
         ..Default::default()
     };
     let results = search_logs(&pool, &params).unwrap();
@@ -504,7 +504,7 @@ fn test_search_timestamp_range_filtering() {
 
     // to only
     let params = SearchParams {
-        to: Some("2026-06-30T00:00:00Z".into()),
+        until: Some("2026-06-30T00:00:00Z".into()),
         ..Default::default()
     };
     let results = search_logs(&pool, &params).unwrap();
@@ -512,8 +512,8 @@ fn test_search_timestamp_range_filtering() {
 
     // from + to (narrow window)
     let params = SearchParams {
-        from: Some("2026-06-01T00:00:00Z".into()),
-        to: Some("2026-06-30T00:00:00Z".into()),
+        since: Some("2026-06-01T00:00:00Z".into()),
+        until: Some("2026-06-30T00:00:00Z".into()),
         ..Default::default()
     };
     let results = search_logs(&pool, &params).unwrap();
@@ -1429,9 +1429,9 @@ fn ai_session_queries_respect_filters() {
         &ListAiSessionsParams {
             ai_project: Some("/tmp/a".into()),
             ai_tool: Some("claude".into()),
-            hostname: Some("host-a".into()),
-            from: Some("2026-01-01T00:00:00Z".into()),
-            to: Some("2026-01-01T23:59:59Z".into()),
+            host: Some("host-a".into()),
+            since: Some("2026-01-01T00:00:00Z".into()),
+            until: Some("2026-01-01T23:59:59Z".into()),
             limit: Some(10),
         },
     )
@@ -1445,10 +1445,10 @@ fn ai_session_queries_respect_filters() {
             query: "needle".into(),
             ai_project: Some("/tmp/b".into()),
             ai_tool: Some("codex".into()),
-            hostname: None,
-            app_name: None,
-            from: Some("2026-01-01T00:30:00Z".into()),
-            to: Some("2026-01-01T01:30:00Z".into()),
+            host: None,
+            app: None,
+            since: Some("2026-01-01T00:30:00Z".into()),
+            until: Some("2026-01-01T01:30:00Z".into()),
             limit: Some(10),
         },
     )
@@ -1649,9 +1649,9 @@ fn default_session_params() -> ListAiSessionsParams {
     ListAiSessionsParams {
         ai_project: None,
         ai_tool: None,
-        hostname: None,
-        from: None,
-        to: None,
+        host: None,
+        since: None,
+        until: None,
         limit: Some(100),
     }
 }
@@ -2046,8 +2046,8 @@ fn time_windowed_sessions_always_use_live_path() {
     .unwrap();
 
     let windowed = ListAiSessionsParams {
-        from: Some("2026-06-01T00:00:00Z".into()),
-        to: Some("2026-06-02T00:00:00Z".into()),
+        since: Some("2026-06-01T00:00:00Z".into()),
+        until: Some("2026-06-02T00:00:00Z".into()),
         ..default_session_params()
     };
     let rows = list_ai_sessions(&pool, &windowed).unwrap();
@@ -2301,11 +2301,11 @@ fn similar_incidents_clusters_returns_clusters_for_matching_logs() {
 
     let params = SimilarIncidentsParams {
         query: "upstream".into(),
-        hostname: None,
-        app_name: None,
+        host: None,
+        app: None,
         severity_min: None,
-        from: None,
-        to: None,
+        since: None,
+        until: None,
         window_minutes: Some(30),
         limit: Some(10),
     };
@@ -2343,7 +2343,7 @@ fn similar_incidents_clusters_filters_by_hostname() {
 
     let params = SimilarIncidentsParams {
         query: "upstream".into(),
-        hostname: Some("web-01".into()),
+        host: Some("web-01".into()),
         ..Default::default()
     };
     let result = similar_incidents_clusters(&pool, &params).unwrap();
@@ -2373,10 +2373,10 @@ fn incident_context_summary_returns_window_stats() {
     insert_logs_batch(&pool, &logs).unwrap();
 
     let params = IncidentContextParams {
-        from: "2024-02-01T07:00:00Z".into(),
-        to: "2024-02-01T09:00:00Z".into(),
-        hostname: None,
-        app_name: None,
+        since: "2024-02-01T07:00:00Z".into(),
+        until: "2024-02-01T09:00:00Z".into(),
+        host: None,
+        app: None,
         severity_min: Some("err".into()),
         limit: Some(10),
     };
@@ -2393,8 +2393,8 @@ fn incident_context_summary_empty_window_returns_zero() {
     let (pool, _dir) = test_pool();
 
     let params = IncidentContextParams {
-        from: "2020-01-01T00:00:00Z".into(),
-        to: "2020-01-02T00:00:00Z".into(),
+        since: "2020-01-01T00:00:00Z".into(),
+        until: "2020-01-02T00:00:00Z".into(),
         ..Default::default()
     };
     let result = incident_context_summary(&pool, &params).unwrap();
@@ -2438,10 +2438,10 @@ fn ask_history_sessions_returns_session_hits() {
 
     let params = AskHistoryParams {
         query: "certificate".into(),
-        hostname: None,
-        app_name: None,
-        from: None,
-        to: None,
+        host: None,
+        app: None,
+        since: None,
+        until: None,
         limit: Some(5),
     };
     let result = ask_history_sessions(&pool, &params).unwrap();
@@ -2620,9 +2620,9 @@ fn bench_stats_and_sessions() {
     let params = ListAiSessionsParams {
         ai_project: None,
         ai_tool: None,
-        hostname: None,
-        from: None,
-        to: None,
+        host: None,
+        since: None,
+        until: None,
         limit: Some(100),
     };
     let mut live_rows = 0usize;

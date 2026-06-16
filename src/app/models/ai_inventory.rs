@@ -5,8 +5,8 @@ use super::*;
 pub struct UsageBlocksRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,8 +90,8 @@ impl From<db::AiProjectContext> for ProjectContextResponse {
 #[serde(deny_unknown_fields)]
 pub struct ListAiToolsRequest {
     pub project: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,8 +136,8 @@ impl From<db::ListAiToolsResult> for ListAiToolsResponse {
 #[serde(deny_unknown_fields)]
 pub struct ListAiProjectsRequest {
     pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

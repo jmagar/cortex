@@ -17,7 +17,7 @@ pub(crate) fn parse_host_state(args: &[String]) -> Result<CliCommand> {
         } else if let Some(v) = flags.match_value(&arg, "--host-id")? {
             parsed.host_id = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--host")? {
-            parsed.hostname = Some(v);
+            parsed.host = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--since")? {
             parsed.since = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--limit")? {
@@ -33,7 +33,7 @@ pub(crate) fn parse_host_state(args: &[String]) -> Result<CliCommand> {
             );
         }
     }
-    if parsed.host_id.is_none() && parsed.hostname.is_none() {
+    if parsed.host_id.is_none() && parsed.host.is_none() {
         bail!(
             "host-state requires --host-id ID or --host HOST\n\nUsage: cortex host-state [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]"
         );

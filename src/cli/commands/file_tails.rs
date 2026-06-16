@@ -81,7 +81,7 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
         id: String::new(),
         path: String::new(),
         tag: String::new(),
-        hostname: None,
+        host: None,
         facility: None,
         severity: None,
         start_at_end: true,
@@ -104,7 +104,7 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
             }
             "--host" => {
                 i += 1;
-                out.hostname = Some(required(args, i, "--host")?);
+                out.host = Some(required(args, i, "--host")?);
             }
             "--facility" => {
                 i += 1;
@@ -137,7 +137,7 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
         }
         i += 1;
     }
-    if out.id.is_empty() || out.path.is_empty() || out.tag.is_empty() || out.hostname.is_none() {
+    if out.id.is_empty() || out.path.is_empty() || out.tag.is_empty() || out.host.is_none() {
         bail!("file-tail add requires --id, --path, --tag, and --hostname");
     }
     Ok(out)

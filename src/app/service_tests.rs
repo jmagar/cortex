@@ -792,7 +792,7 @@ async fn incident_returns_ordered_db_events_for_window() {
             around: "2026-01-01T00:05:00Z".into(),
             minutes: Some(5),
             service: None,
-            hostname: Some("host-a".into()),
+            host: Some("host-a".into()),
             limit: Some(10),
         })
         .await
@@ -841,8 +841,8 @@ async fn correlate_events_normalizes_window_groups_and_truncates() {
             reference_time: "2026-01-01T01:00:00+01:00".into(),
             window_minutes: Some(2),
             severity_min: Some("warning".into()),
-            hostname: None,
-            source_ip: None,
+            host: None,
+            source: None,
             query: None,
             limit: Some(1),
         })
@@ -1117,7 +1117,7 @@ async fn source_ip_filter_uses_network_sender_identity() {
 
     let response = service
         .search_logs(SearchLogsRequest {
-            source_ip: Some("10.0.0.2:514".into()),
+            source: Some("10.0.0.2:514".into()),
             ..Default::default()
         })
         .await
@@ -1344,8 +1344,8 @@ async fn run_gemini_assess_rejects_missing_incident_before_gemini() {
                 model: Some("gemini-test-model".into()),
                 project: None,
                 tool: None,
-                from: None,
-                to: None,
+                since: None,
+                until: None,
                 window_minutes: Some(30),
                 correlation_window_minutes: Some(10),
                 terms: vec!["panic".into()],
@@ -1468,10 +1468,10 @@ async fn timeline_applies_default_lookback_only_when_from_and_to_both_absent() {
         .timeline(TimelineRequest {
             bucket: Some("day".into()),
             group_by: None,
-            from: None,
-            to: None,
-            hostname: None,
-            app_name: None,
+            since: None,
+            until: None,
+            host: None,
+            app: None,
             severity_min: None,
         })
         .await
@@ -1492,10 +1492,10 @@ async fn timeline_applies_default_lookback_only_when_from_and_to_both_absent() {
         .timeline(TimelineRequest {
             bucket: Some("day".into()),
             group_by: None,
-            from: None,
-            to: Some(to),
-            hostname: None,
-            app_name: None,
+            since: None,
+            until: Some(to),
+            host: None,
+            app: None,
             severity_min: None,
         })
         .await
@@ -1644,7 +1644,7 @@ async fn file_tails_add_list_disable_enable_remove_round_trip() {
                 id: "swag-access".into(),
                 path: log_path.to_string_lossy().into_owned(),
                 tag: "swag-access".into(),
-                hostname: Some("squirts".into()),
+                host: Some("squirts".into()),
                 facility: Some("local4".into()),
                 severity: Some("info".into()),
                 start_at_end: Some(true),
@@ -1720,7 +1720,7 @@ async fn file_tails_list_and_status_do_not_reconcile() {
                 id: "swag-access".into(),
                 path: log_path.to_string_lossy().into_owned(),
                 tag: "swag-access".into(),
-                hostname: Some("squirts".into()),
+                host: Some("squirts".into()),
                 facility: Some("local4".into()),
                 severity: Some("info".into()),
                 start_at_end: Some(true),
@@ -1761,7 +1761,7 @@ async fn file_tails_duplicate_add_is_rejected_without_resetting_checkpoint() {
         id: "swag-access".into(),
         path: log_path.to_string_lossy().into_owned(),
         tag: "swag-access".into(),
-        hostname: Some("squirts".into()),
+        host: Some("squirts".into()),
         facility: Some("local4".into()),
         severity: Some("info".into()),
         start_at_end: Some(true),
@@ -1804,7 +1804,7 @@ async fn file_tails_reconcile_failure_reports_committed_mutation() {
                 id: "swag-access".into(),
                 path: log_path.to_string_lossy().into_owned(),
                 tag: "swag-access".into(),
-                hostname: Some("squirts".into()),
+                host: Some("squirts".into()),
                 facility: Some("local4".into()),
                 severity: Some("info".into()),
                 start_at_end: Some(true),
@@ -1838,7 +1838,7 @@ async fn file_tails_mutations_reject_registry_only_query_mode() {
                 id: "swag-access".into(),
                 path: log_path.to_string_lossy().into_owned(),
                 tag: "swag-access".into(),
-                hostname: Some("squirts".into()),
+                host: Some("squirts".into()),
                 facility: Some("local4".into()),
                 severity: Some("info".into()),
                 start_at_end: Some(true),
@@ -1891,7 +1891,7 @@ fn add_file_tail_request(
         id: id.into(),
         path: path.into(),
         tag: id.into(),
-        hostname: Some("squirts".into()),
+        host: Some("squirts".into()),
         facility: facility.map(str::to_string),
         severity: severity.map(str::to_string),
         start_at_end: Some(true),

@@ -119,7 +119,7 @@ fn schema_includes_file_tails_action() {
     assert!(nested.iter().any(|rule| {
         let required = rule["then"]["required"].as_array().unwrap();
         rule["if"]["properties"]["op"]["const"] == "add"
-            && ["id", "path", "tag", "hostname"]
+            && ["id", "path", "tag", "host"]
                 .iter()
                 .all(|name| required.iter().any(|value| value == name))
     }));
@@ -139,8 +139,8 @@ fn schema_includes_file_tails_action() {
 fn schema_apps_exposes_pagination_and_total() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];
-    let from_desc = props["from"]["description"].as_str().unwrap();
-    let to_desc = props["to"]["description"].as_str().unwrap();
+    let from_desc = props["since"]["description"].as_str().unwrap();
+    let to_desc = props["until"]["description"].as_str().unwrap();
     let limit_desc = props["limit"]["description"].as_str().unwrap();
     let offset_desc = props["offset"]["description"].as_str().unwrap();
     assert!(
@@ -289,7 +289,7 @@ fn schema_map_findings_exposes_findings_arguments() {
 fn schema_timeline_and_patterns_warn_on_full_history_scan() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];
-    let from_desc = props["from"]["description"].as_str().unwrap();
+    let from_desc = props["since"]["description"].as_str().unwrap();
     assert_eq!(
         props["scan_limit"]["maximum"],
         crate::db::PATTERN_SCAN_LIMIT_MAX

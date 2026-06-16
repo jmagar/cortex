@@ -9,7 +9,7 @@ fn parse_ai_similar_collects_query_and_filters() {
     match command {
         crate::cli::CliCommand::Ai(crate::cli::AiCommand::SimilarIncidents(args)) => {
             assert_eq!(args.query, "disk full");
-            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.host.as_deref(), Some("host1"));
             assert_eq!(args.limit, Some(7));
             assert!(args.json);
         }
@@ -32,7 +32,7 @@ fn parse_ai_similar_and_ask_history_accept_all_filters() {
     .unwrap();
     match similar {
         crate::cli::CliCommand::Ai(crate::cli::AiCommand::SimilarIncidents(args)) => {
-            assert_eq!(args.app_name.as_deref(), Some("cortex"));
+            assert_eq!(args.app.as_deref(), Some("cortex"));
             assert_eq!(args.severity_min.as_deref(), Some("err"));
             assert_eq!(args.window_minutes, Some(45));
             assert_eq!(args.query, "disk");
@@ -54,7 +54,7 @@ fn parse_ai_similar_and_ask_history_accept_all_filters() {
     match ask {
         crate::cli::CliCommand::Ai(crate::cli::AiCommand::AskHistory(args)) => {
             assert_eq!(args.query, "why failed");
-            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.host.as_deref(), Some("host1"));
             assert_eq!(args.limit, Some(5));
             assert!(args.json);
         }
@@ -87,8 +87,8 @@ fn parse_ai_incident_context_accepts_full_filter_set() {
 
     match command {
         crate::cli::CliCommand::Ai(crate::cli::AiCommand::IncidentContext(args)) => {
-            assert_eq!(args.from, "2026-01-01T00:00:00Z");
-            assert_eq!(args.to, "2026-01-01T00:10:00Z");
+            assert_eq!(args.since, "2026-01-01T00:00:00Z");
+            assert_eq!(args.until, "2026-01-01T00:10:00Z");
             assert_eq!(args.query.as_deref(), Some("panic"));
             assert_eq!(args.limit, Some(12));
             assert!(args.json);

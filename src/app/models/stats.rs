@@ -43,9 +43,9 @@ impl From<db::DbStats> for DbStats {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListAppsRequest {
-    pub hostname: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub host: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     /// Page size. Default 500, max 5000.
     pub limit: Option<u32>,
     /// Page offset. Default 0.
@@ -139,10 +139,10 @@ impl From<db::SourceIpEntry> for SourceIpEntry {
 pub struct TimelineRequest {
     pub bucket: Option<String>,
     pub group_by: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub host: Option<String>,
+    pub app: Option<String>,
     pub severity_min: Option<String>,
 }
 
@@ -179,10 +179,10 @@ impl From<db::TimelinePoint> for TimelinePoint {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatternsRequest {
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub host: Option<String>,
+    pub app: Option<String>,
     pub severity_min: Option<String>,
     pub scan_limit: Option<u32>,
     #[serde(alias = "limit")]

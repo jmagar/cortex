@@ -178,8 +178,8 @@ pub(crate) async fn run_service_no_db(command: CliCommand) -> Result<()> {
             let report = cortex::app::run_service_logs(
                 ServiceLogsRequest {
                     service: args.service,
-                    from: args.from,
-                    to: args.to,
+                    since: args.since,
+                    until: args.until,
                     tail: args.tail,
                 },
                 &cortex::app::SystemOsAdapter,

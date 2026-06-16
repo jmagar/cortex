@@ -17,7 +17,7 @@ fn parse_timeline_collects_bucket_group_and_filters() {
         crate::cli::CliCommand::Timeline(args) => {
             assert_eq!(args.bucket.as_deref(), Some("hour"));
             assert_eq!(args.group_by.as_deref(), Some("hostname"));
-            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.host.as_deref(), Some("host1"));
             assert!(args.json);
         }
         other => panic!("unexpected command: {other:?}"),
@@ -47,7 +47,7 @@ fn parse_errors_accepts_limit_for_bounded_agent_output() {
 
     match command {
         crate::cli::CliCommand::Errors(args) => {
-            assert_eq!(args.from.as_deref(), Some("2026-01-01T00:00:00+00:00"));
+            assert_eq!(args.since.as_deref(), Some("2026-01-01T00:00:00+00:00"));
             assert_eq!(args.limit, Some(10));
             assert!(args.json);
         }
@@ -122,7 +122,7 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     match search {
         crate::cli::CliCommand::Search(args) => {
             assert_eq!(args.query.as_deref(), Some("disk full"));
-            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.host.as_deref(), Some("host1"));
             assert_eq!(
                 args.received_until.as_deref(),
                 Some("2026-01-04T00:00:00+00:00")
@@ -136,7 +136,7 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     let tail = parse_tail(&strings(&["--host=host1", "--source=10.0.0.1", "-n", "12"])).unwrap();
     match tail {
         crate::cli::CliCommand::Tail(args) => {
-            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.host.as_deref(), Some("host1"));
             assert_eq!(args.n, Some(12));
         }
         other => panic!("unexpected command: {other:?}"),
@@ -171,7 +171,7 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         crate::cli::CliCommand::Incident(args) => {
             assert_eq!(args.around, "t0");
             assert_eq!(args.minutes, Some(10));
-            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.host.as_deref(), Some("host1"));
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -259,7 +259,7 @@ fn search_normalizes_relative_from() {
     let crate::cli::CliCommand::Search(args) = cmd else {
         panic!("expected Search");
     };
-    let from = args.from.expect("from set");
+    let from = args.since.expect("from set");
     // Relative input is normalized to an absolute RFC3339 timestamp at parse time.
     assert!(
         from.contains('T') && from.ends_with("+00:00"),
@@ -300,9 +300,9 @@ fn filter_and_sessions_normalize_relative_from() {
         panic!("expected Filter");
     };
     assert!(
-        args.from.as_deref().unwrap().ends_with("+00:00"),
+        args.since.as_deref().unwrap().ends_with("+00:00"),
         "filter --from should normalize: {:?}",
-        args.from
+        args.since
     );
 
     // Equals form is normalized too.
@@ -311,8 +311,8 @@ fn filter_and_sessions_normalize_relative_from() {
         panic!("expected Sessions");
     };
     assert!(
-        args.from.as_deref().unwrap().ends_with("+00:00"),
+        args.since.as_deref().unwrap().ends_with("+00:00"),
         "sessions --since= should normalize: {:?}",
-        args.from
+        args.since
     );
 }

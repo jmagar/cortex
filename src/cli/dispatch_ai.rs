@@ -40,8 +40,8 @@ impl AiSearchArgs {
             query: self.query,
             project: self.project,
             tool: self.tool,
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
             limit: self.limit,
         }
     }
@@ -52,8 +52,8 @@ impl AiAbuseArgs {
         AbuseSearchRequest {
             project: self.project,
             tool: self.tool,
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
             limit: self.limit,
             before: self.before,
             after: self.after,
@@ -70,11 +70,11 @@ impl AiCorrelateArgs {
             session_id: self.session_id,
             ai_query: self.ai_query,
             log_query: self.log_query,
-            hostname: self.hostname,
-            source_ip: self.source_ip,
-            app_name: self.app_name,
-            from: self.from,
-            to: self.to,
+            host: self.host,
+            source: self.source,
+            app: self.app,
+            since: self.since,
+            until: self.until,
             window_minutes: self.window_minutes,
             severity_min: self.severity_min,
             limit: self.limit,
@@ -88,8 +88,8 @@ impl AiBlocksArgs {
         UsageBlocksRequest {
             project: self.project,
             tool: self.tool,
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
         }
     }
 }
@@ -108,16 +108,16 @@ impl AiListArgs {
     pub(crate) fn into_tools_request(self) -> ListAiToolsRequest {
         ListAiToolsRequest {
             project: self.project,
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
         }
     }
 
     pub(crate) fn into_projects_request(self) -> ListAiProjectsRequest {
         ListAiProjectsRequest {
             tool: self.tool,
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
         }
     }
 }
@@ -152,11 +152,11 @@ impl AiSimilarArgs {
     pub(crate) fn into_request(self) -> SimilarIncidentsRequest {
         SimilarIncidentsRequest {
             query: self.query,
-            hostname: self.hostname,
-            app_name: self.app_name,
+            host: self.host,
+            app: self.app,
             severity_min: self.severity_min,
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
             window_minutes: self.window_minutes,
             limit: self.limit,
         }
@@ -167,10 +167,10 @@ impl AiAskHistoryArgs {
     pub(crate) fn into_request(self) -> AskHistoryRequest {
         AskHistoryRequest {
             query: self.query,
-            hostname: self.hostname,
-            app_name: self.app_name,
-            from: self.from,
-            to: self.to,
+            host: self.host,
+            app: self.app,
+            since: self.since,
+            until: self.until,
             limit: self.limit,
         }
     }
@@ -179,10 +179,10 @@ impl AiAskHistoryArgs {
 impl AiIncidentContextArgs {
     pub(crate) fn into_request(self) -> IncidentContextRequest {
         IncidentContextRequest {
-            from: self.from,
-            to: self.to,
-            hostname: self.hostname,
-            app_name: self.app_name,
+            since: self.since,
+            until: self.until,
+            host: self.host,
+            app: self.app,
             query: self.query,
             severity_min: self.severity_min,
             limit: self.limit,
@@ -431,8 +431,8 @@ impl AiIncidentsArgs {
         AiIncidentRequest {
             project: self.project,
             tool: self.tool,
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
             limit: self.limit,
             window_minutes: self.window_minutes,
             terms: self.terms,
@@ -446,8 +446,8 @@ impl AiInvestigateArgs {
             incident_id: None,
             project: self.project,
             tool: self.tool,
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
             limit: self.limit,
             window_minutes: self.window_minutes,
             correlation_window_minutes: self.correlation_window_minutes,
@@ -493,8 +493,8 @@ pub(crate) async fn run_ai_assess(mode: &CliMode, args: AiAssessArgs) -> Result<
         model: args.model,
         project: args.project,
         tool: args.tool,
-        from: args.from,
-        to: args.to,
+        since: args.since,
+        until: args.until,
         window_minutes: args.window_minutes,
         correlation_window_minutes: args.correlation_window_minutes,
         terms: args.terms,

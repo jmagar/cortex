@@ -59,15 +59,15 @@ impl SearchArgs {
         };
         SearchLogsRequest {
             query,
-            hostname: self.hostname,
-            source_ip: self.source_ip,
+            host: self.host,
+            source: self.source,
             severity: self.severity,
-            app_name: self.app_name,
+            app: self.app,
             facility: self.facility,
             exclude_facility: self.exclude_facility,
             process_id: None,
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
             received_since: self.received_since,
             received_until: self.received_until,
             limit: self.limit,
@@ -86,15 +86,15 @@ impl SearchArgs {
 impl FilterArgs {
     pub(crate) fn into_request(self) -> FilterLogsRequest {
         FilterLogsRequest {
-            hostname: self.hostname,
-            source_ip: self.source_ip,
+            host: self.host,
+            source: self.source,
             severity: self.severity,
-            app_name: self.app_name,
+            app: self.app,
             facility: self.facility,
             exclude_facility: self.exclude_facility,
             process_id: self.process_id,
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
             received_since: self.received_since,
             received_until: self.received_until,
             limit: self.limit,
@@ -116,7 +116,7 @@ impl IncidentArgs {
             around: self.around,
             minutes: self.minutes,
             service: self.service,
-            hostname: self.hostname,
+            host: self.host,
             limit: self.limit,
         }
     }
@@ -125,9 +125,9 @@ impl IncidentArgs {
 impl TailArgs {
     pub(crate) fn into_request(self) -> TailLogsRequest {
         TailLogsRequest {
-            hostname: self.hostname,
-            source_ip: self.source_ip,
-            app_name: self.app_name,
+            host: self.host,
+            source: self.source,
+            app: self.app,
             severity_min: None,
             n: self.n,
         }
@@ -137,8 +137,8 @@ impl TailArgs {
 impl TimeRangeArgs {
     pub(crate) fn into_errors_request(self) -> GetErrorsRequest {
         GetErrorsRequest {
-            from: self.from,
-            to: self.to,
+            since: self.since,
+            until: self.until,
             group_by: None,
             limit: self.limit,
         }
@@ -150,9 +150,9 @@ impl SessionsArgs {
         ListSessionsRequest {
             project: self.project,
             tool: self.tool,
-            hostname: self.hostname,
-            from: self.from,
-            to: self.to,
+            host: self.host,
+            since: self.since,
+            until: self.until,
             limit: self.limit,
         }
     }
@@ -164,8 +164,8 @@ impl CorrelateArgs {
             reference_time: self.reference_time,
             window_minutes: self.window_minutes,
             severity_min: self.severity_min,
-            hostname: self.hostname,
-            source_ip: self.source_ip,
+            host: self.host,
+            source: self.source,
             query: self.query,
             limit: self.limit,
         }
@@ -299,7 +299,7 @@ pub(crate) async fn run_file_tail(mode: &CliMode, command: FileTailCommand) -> R
                 id: args.id,
                 path: args.path,
                 tag: args.tag,
-                hostname: args.hostname,
+                host: args.host,
                 facility: args.facility,
                 severity: args.severity,
                 start_at_end: Some(args.start_at_end),

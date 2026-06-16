@@ -40,8 +40,8 @@ pub(crate) async fn ai_smoke_watch(service: &CortexService) -> Result<AiSmokeWat
                 query: session_id.clone(),
                 project: Some(target.project.clone()),
                 tool: Some(target.tool.into()),
-                from: None,
-                to: None,
+                since: None,
+                until: None,
                 limit: Some(5),
             })
             .await?;

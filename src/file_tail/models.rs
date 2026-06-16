@@ -66,7 +66,7 @@ pub struct FileTailRequest {
     pub id: Option<String>,
     pub path: Option<String>,
     pub tag: Option<String>,
-    pub hostname: Option<String>,
+    pub host: Option<String>,
     pub facility: Option<String>,
     pub severity: Option<String>,
     pub start_at_end: Option<bool>,
@@ -78,7 +78,7 @@ pub struct FileTailAddRequest {
     pub id: String,
     pub path: String,
     pub tag: String,
-    pub hostname: Option<String>,
+    pub host: Option<String>,
     pub facility: Option<String>,
     pub severity: Option<String>,
     pub start_at_end: Option<bool>,
@@ -104,8 +104,8 @@ pub struct FileTailResponse {
 impl FileTailSource {
     pub(crate) fn from_add(req: FileTailAddRequest, now: &str) -> Result<Self, String> {
         validate_id(&req.id)?;
-        if req.path.is_empty() || req.tag.is_empty() || req.hostname.is_none() {
-            return Err("file_tails op=add requires id, path, tag, and hostname".into());
+        if req.path.is_empty() || req.tag.is_empty() || req.host.is_none() {
+            return Err("file_tails op=add requires id, path, tag, and host".into());
         }
         if let Some(facility) = req.facility.as_deref() {
             validate_facility(facility)?;
@@ -122,9 +122,9 @@ impl FileTailSource {
             .unwrap_or_else(|| "info".to_string());
 
         let hostname = req
-            .hostname
+            .host
             .as_deref()
-            .ok_or_else(|| "file_tails op=add requires id, path, tag, and hostname".to_string())
+            .ok_or_else(|| "file_tails op=add requires id, path, tag, and host".to_string())
             .and_then(normalize_hostname)?;
 
         Ok(Self {
@@ -163,7 +163,7 @@ impl FileTailRequest {
             id: None,
             path: None,
             tag: None,
-            hostname: None,
+            host: None,
             facility: None,
             severity: None,
             start_at_end: None,
@@ -183,7 +183,7 @@ impl FileTailRequest {
             id: Some(id),
             path: None,
             tag: None,
-            hostname: None,
+            host: None,
             facility: None,
             severity: None,
             start_at_end: None,
@@ -196,7 +196,7 @@ impl FileTailRequest {
             id: Some(add.id),
             path: Some(add.path),
             tag: Some(add.tag),
-            hostname: add.hostname,
+            host: add.host,
             facility: add.facility,
             severity: add.severity,
             start_at_end: add.start_at_end,
@@ -218,7 +218,7 @@ impl FileTailRequest {
                 if self.id.is_some()
                     || self.path.is_some()
                     || self.tag.is_some()
-                    || self.hostname.is_some()
+                    || self.host.is_some()
                     || self.facility.is_some()
                     || self.severity.is_some()
                     || self.start_at_end.is_some()
@@ -235,7 +235,7 @@ impl FileTailRequest {
             FileTailOp::Remove | FileTailOp::Enable | FileTailOp::Disable => {
                 if self.path.is_some()
                     || self.tag.is_some()
-                    || self.hostname.is_some()
+                    || self.host.is_some()
                     || self.facility.is_some()
                     || self.severity.is_some()
                     || self.start_at_end.is_some()
@@ -252,25 +252,25 @@ impl FileTailRequest {
     pub(crate) fn into_add(self) -> Result<FileTailAddRequest, String> {
         let id = self
             .id
-            .ok_or_else(|| "file_tails op=add requires id, path, tag, and hostname".to_string())?;
+            .ok_or_else(|| "file_tails op=add requires id, path, tag, and host".to_string())?;
         validate_id(&id)?;
         let path = self
             .path
-            .ok_or_else(|| "file_tails op=add requires id, path, tag, and hostname".to_string())?;
+            .ok_or_else(|| "file_tails op=add requires id, path, tag, and host".to_string())?;
         let tag = self
             .tag
-            .ok_or_else(|| "file_tails op=add requires id, path, tag, and hostname".to_string())?;
+            .ok_or_else(|| "file_tails op=add requires id, path, tag, and host".to_string())?;
         let hostname = self
-            .hostname
-            .ok_or_else(|| "file_tails op=add requires id, path, tag, and hostname".to_string())?;
+            .host
+            .ok_or_else(|| "file_tails op=add requires id, path, tag, and host".to_string())?;
         if path.is_empty() || tag.is_empty() || hostname.trim().is_empty() {
-            return Err("file_tails op=add requires id, path, tag, and hostname".into());
+            return Err("file_tails op=add requires id, path, tag, and host".into());
         }
         Ok(FileTailAddRequest {
             id,
             path,
             tag,
-            hostname: Some(hostname),
+            host: Some(hostname),
             facility: self.facility,
             severity: self.severity,
             start_at_end: self.start_at_end,

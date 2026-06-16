@@ -43,15 +43,15 @@ pub mod topology_findings {
 #[serde(deny_unknown_fields)]
 pub struct SearchLogsRequest {
     pub query: Option<String>,
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
+    pub host: Option<String>,
+    pub source: Option<String>,
     pub severity: Option<String>,
-    pub app_name: Option<String>,
+    pub app: Option<String>,
     pub facility: Option<String>,
     pub exclude_facility: Option<String>,
     pub process_id: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub received_since: Option<String>,
     pub received_until: Option<String>,
     pub limit: Option<u32>,
@@ -68,15 +68,15 @@ pub struct SearchLogsRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FilterLogsRequest {
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
+    pub host: Option<String>,
+    pub source: Option<String>,
     pub severity: Option<String>,
-    pub app_name: Option<String>,
+    pub app: Option<String>,
     pub facility: Option<String>,
     pub exclude_facility: Option<String>,
     pub process_id: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub received_since: Option<String>,
     pub received_until: Option<String>,
     pub limit: Option<u32>,
@@ -99,9 +99,9 @@ pub struct SearchLogsResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TailLogsRequest {
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
-    pub app_name: Option<String>,
+    pub host: Option<String>,
+    pub source: Option<String>,
+    pub app: Option<String>,
     /// Minimum severity to return (e.g. `warning` returns warning + worse).
     pub severity_min: Option<String>,
     pub n: Option<u32>,
@@ -131,8 +131,8 @@ impl From<db::ErrorSummaryEntry> for ErrorSummaryEntry {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GetErrorsRequest {
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     /// Secondary grouping key. Currently supports `app_name`.
     pub group_by: Option<String>,
     /// Max summary rows to return. Defaults to all rows; clamped by service.
@@ -396,8 +396,8 @@ pub struct CorrelateEventsRequest {
     pub reference_time: String,
     pub window_minutes: Option<u32>,
     pub severity_min: Option<String>,
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
+    pub host: Option<String>,
+    pub source: Option<String>,
     pub query: Option<String>,
     pub limit: Option<u32>,
 }

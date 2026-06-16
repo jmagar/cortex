@@ -374,15 +374,15 @@ fn require_api_admin_token(
 #[serde(deny_unknown_fields)]
 struct SearchQuery {
     query: Option<String>,
-    hostname: Option<String>,
-    source_ip: Option<String>,
+    host: Option<String>,
+    source: Option<String>,
     severity: Option<String>,
-    app_name: Option<String>,
+    app: Option<String>,
     facility: Option<String>,
     exclude_facility: Option<String>,
     process_id: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
     received_since: Option<String>,
     received_until: Option<String>,
     limit: Option<u32>,
@@ -405,15 +405,15 @@ async fn search(
             .service
             .search_logs(SearchLogsRequest {
                 query: query.query,
-                hostname: query.hostname,
-                source_ip: query.source_ip,
+                host: query.host,
+                source: query.source,
                 severity: query.severity,
-                app_name: query.app_name,
+                app: query.app,
                 facility: query.facility,
                 exclude_facility: query.exclude_facility,
                 process_id: query.process_id,
-                from: query.from,
-                to: query.to,
+                since: query.since,
+                until: query.until,
                 received_since: query.received_since,
                 received_until: query.received_until,
                 limit: query.limit,
@@ -440,9 +440,9 @@ async fn filter(
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TailQuery {
-    hostname: Option<String>,
-    source_ip: Option<String>,
-    app_name: Option<String>,
+    host: Option<String>,
+    source: Option<String>,
+    app: Option<String>,
     severity_min: Option<String>,
     n: Option<u32>,
 }
@@ -452,9 +452,9 @@ async fn tail(State(state): State<ApiState>, Query(query): Query<TailQuery>) -> 
         state
             .service
             .tail_logs(TailLogsRequest {
-                hostname: query.hostname,
-                source_ip: query.source_ip,
-                app_name: query.app_name,
+                host: query.host,
+                source: query.source,
+                app: query.app,
                 severity_min: query.severity_min,
                 n: query.n,
             })
@@ -465,8 +465,8 @@ async fn tail(State(state): State<ApiState>, Query(query): Query<TailQuery>) -> 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ErrorQuery {
-    from: Option<String>,
-    to: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
     group_by: Option<String>,
     limit: Option<u32>,
 }
@@ -479,8 +479,8 @@ async fn errors(
         state
             .service
             .get_errors(GetErrorsRequest {
-                from: query.from,
-                to: query.to,
+                since: query.since,
+                until: query.until,
                 group_by: query.group_by,
                 limit: query.limit,
             })
@@ -498,8 +498,8 @@ struct CorrelateQuery {
     reference_time: String,
     window_minutes: Option<u32>,
     severity_min: Option<String>,
-    hostname: Option<String>,
-    source_ip: Option<String>,
+    host: Option<String>,
+    source: Option<String>,
     query: Option<String>,
     limit: Option<u32>,
 }
@@ -515,8 +515,8 @@ async fn correlate(
                 reference_time: query.reference_time,
                 window_minutes: query.window_minutes,
                 severity_min: query.severity_min,
-                hostname: query.hostname,
-                source_ip: query.source_ip,
+                host: query.host,
+                source: query.source,
                 query: query.query,
                 limit: query.limit,
             })
@@ -561,10 +561,10 @@ async fn source_ips(
 struct TimelineQuery {
     bucket: Option<String>,
     group_by: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
-    hostname: Option<String>,
-    app_name: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    host: Option<String>,
+    app: Option<String>,
     severity_min: Option<String>,
 }
 
@@ -581,10 +581,10 @@ async fn timeline(
             .timeline(TimelineRequest {
                 bucket: query.bucket,
                 group_by: query.group_by,
-                from: query.from,
-                to: query.to,
-                hostname: query.hostname,
-                app_name: query.app_name,
+                since: query.since,
+                until: query.until,
+                host: query.host,
+                app: query.app,
                 severity_min: query.severity_min,
             })
             .await,
@@ -593,10 +593,10 @@ async fn timeline(
 
 #[derive(Debug, Deserialize)]
 struct PatternsQuery {
-    from: Option<String>,
-    to: Option<String>,
-    hostname: Option<String>,
-    app_name: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    host: Option<String>,
+    app: Option<String>,
     severity_min: Option<String>,
     scan_limit: Option<u32>,
     top_n: Option<u32>,
@@ -610,10 +610,10 @@ async fn patterns(
         state
             .service
             .patterns(PatternsRequest {
-                from: query.from,
-                to: query.to,
-                hostname: query.hostname,
-                app_name: query.app_name,
+                since: query.since,
+                until: query.until,
+                host: query.host,
+                app: query.app,
                 severity_min: query.severity_min,
                 scan_limit: query.scan_limit,
                 top_n: query.top_n,
@@ -860,9 +860,9 @@ async fn compare(
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AppsQuery {
-    hostname: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
+    host: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
     limit: Option<u32>,
     offset: Option<u32>,
 }
@@ -872,9 +872,9 @@ async fn apps(State(state): State<ApiState>, Query(query): Query<AppsQuery>) -> 
         state
             .service
             .list_apps(ListAppsRequest {
-                hostname: query.hostname,
-                from: query.from,
-                to: query.to,
+                host: query.host,
+                since: query.since,
+                until: query.until,
                 limit: query.limit,
                 offset: query.offset,
             })
@@ -886,11 +886,11 @@ async fn apps(State(state): State<ApiState>, Query(query): Query<AppsQuery>) -> 
 #[serde(deny_unknown_fields)]
 struct SimilarIncidentsQuery {
     query: String,
-    hostname: Option<String>,
-    app_name: Option<String>,
+    host: Option<String>,
+    app: Option<String>,
     severity_min: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
     window_minutes: Option<u32>,
     limit: Option<u32>,
 }
@@ -904,11 +904,11 @@ async fn similar_incidents(
             .service
             .similar_incidents(SimilarIncidentsRequest {
                 query: q.query,
-                hostname: q.hostname,
-                app_name: q.app_name,
+                host: q.host,
+                app: q.app,
                 severity_min: q.severity_min,
-                from: q.from,
-                to: q.to,
+                since: q.since,
+                until: q.until,
                 window_minutes: q.window_minutes,
                 limit: q.limit,
             })
@@ -919,10 +919,10 @@ async fn similar_incidents(
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct IncidentContextQuery {
-    from: String,
-    to: String,
-    hostname: Option<String>,
-    app_name: Option<String>,
+    since: String,
+    until: String,
+    host: Option<String>,
+    app: Option<String>,
     query: Option<String>,
     severity_min: Option<String>,
     limit: Option<u32>,
@@ -936,10 +936,10 @@ async fn incident_context(
         state
             .service
             .incident_context(IncidentContextRequest {
-                from: q.from,
-                to: q.to,
-                hostname: q.hostname,
-                app_name: q.app_name,
+                since: q.since,
+                until: q.until,
+                host: q.host,
+                app: q.app,
                 query: q.query,
                 severity_min: q.severity_min,
                 limit: q.limit,
@@ -980,10 +980,10 @@ async fn graph_evidence(
 #[serde(deny_unknown_fields)]
 struct AskHistoryQuery {
     query: String,
-    hostname: Option<String>,
-    app_name: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
+    host: Option<String>,
+    app: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
     limit: Option<u32>,
 }
 
@@ -996,10 +996,10 @@ async fn ai_ask_history(
             .service
             .ask_history(AskHistoryRequest {
                 query: q.query,
-                hostname: q.hostname,
-                app_name: q.app_name,
-                from: q.from,
-                to: q.to,
+                host: q.host,
+                app: q.app,
+                since: q.since,
+                until: q.until,
                 limit: q.limit,
             })
             .await,
@@ -1014,8 +1014,8 @@ async fn ai_ask_history(
 struct AiIncidentsQuery {
     project: Option<String>,
     tool: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
     limit: Option<u32>,
     window_minutes: Option<u32>,
     #[serde(default)]
@@ -1032,8 +1032,8 @@ async fn ai_incidents(
             .list_ai_incidents(AiIncidentRequest {
                 project: q.project,
                 tool: q.tool,
-                from: q.from,
-                to: q.to,
+                since: q.since,
+                until: q.until,
                 limit: q.limit,
                 window_minutes: q.window_minutes,
                 terms: q.terms,
@@ -1047,8 +1047,8 @@ async fn ai_incidents(
 struct AiInvestigateQuery {
     project: Option<String>,
     tool: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
     limit: Option<u32>,
     window_minutes: Option<u32>,
     correlation_window_minutes: Option<u32>,
@@ -1067,8 +1067,8 @@ async fn ai_investigate(
                 incident_id: None,
                 project: q.project,
                 tool: q.tool,
-                from: q.from,
-                to: q.to,
+                since: q.since,
+                until: q.until,
                 limit: q.limit,
                 window_minutes: q.window_minutes,
                 correlation_window_minutes: q.correlation_window_minutes,
