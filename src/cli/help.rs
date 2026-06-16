@@ -97,7 +97,7 @@ const CATALOG: &[CommandDoc] = &[
         name: "search",
         summary: "Full-text search across all logs",
         usage: &[
-            "cortex search [query] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]",
+            "cortex search [query] [--grep TEXT] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]    (TIME accepts 1h, 2d, yesterday, or RFC3339)",
         ],
     },
     CommandDoc {
@@ -778,7 +778,8 @@ const ENVIRONMENT: &[(&str, &str)] = &[
 ];
 
 const QUICK_START: &[&str] = &[
-    "cortex search \"oom killer\" --hostname web-01",
+    "cortex search \"oom killer\" --hostname web-01 --from 1h",
+    "cortex search --grep \"smoke-test\"   # literal text, no FTS5 syntax",
     "cortex tail -n 50 --severity err",
     "cortex ai investigate --window-minutes 30",
 ];
