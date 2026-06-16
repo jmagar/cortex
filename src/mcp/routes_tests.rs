@@ -707,6 +707,7 @@ async fn test_state_with_oauth() -> (AppState, tempfile::TempDir) {
         .scopes_supported(vec!["cortex:read".into(), "cortex:admin".into()])
         .default_scope("cortex:read")
         .resource_path("/mcp")
+        .enable_dynamic_registration(true)
         .build_from_sources(vars)
         .expect("test auth config should build");
 
@@ -829,19 +830,18 @@ async fn oauth_router_not_mounted_when_loopback_dev() {
     );
 }
 
-/// POST /register is 404 in ALL modes — not in bearer_only_router.
-/// Locked Decision: /register is excluded from the headless router subset.
+/// POST /register is 404 in LoopbackDev and bearer-only (no OAuth router), but
+/// mounted in OAuth mode so MCP clients can self-register (RFC-7591).
 #[tokio::test]
-async fn register_returns_404_in_all_modes() {
-    // Test all three modes.
+async fn register_mounted_only_in_oauth_mode() {
     let (loopback_state, _dir1) = test_state_no_auth();
     let (bearer_state, _dir2) = test_state_with_token("tok".into());
     let (oauth_state, _dir3) = test_state_with_oauth().await;
 
-    for (label, state) in [
-        ("LoopbackDev", loopback_state),
-        ("bearer-only", bearer_state),
-        ("OAuth", oauth_state),
+    for (label, state, mounted) in [
+        ("LoopbackDev", loopback_state, false),
+        ("bearer-only", bearer_state, false),
+        ("OAuth", oauth_state, true),
     ] {
         let app = router(state);
         let request = Request::builder()
@@ -850,27 +850,35 @@ async fn register_returns_404_in_all_modes() {
             .header(header::CONTENT_TYPE, "application/json")
             .body(axum::body::Body::from(r#"{"redirect_uris":[]}"#))
             .unwrap();
-        let response = app.oneshot(request).await.unwrap();
-        assert_eq!(
-            response.status(),
-            StatusCode::NOT_FOUND,
-            "POST /register must not be mounted in {label} mode (Locked Decision)"
-        );
+        let status = app.oneshot(request).await.unwrap().status();
+        if mounted {
+            assert_ne!(
+                status,
+                StatusCode::NOT_FOUND,
+                "POST /register must be mounted in {label} mode"
+            );
+        } else {
+            assert_eq!(
+                status,
+                StatusCode::NOT_FOUND,
+                "POST /register must not be mounted in {label} mode"
+            );
+        }
     }
 }
 
-/// GET /auth/login is 404 in all modes. OAuth mode uses lab-auth's headless
-/// bearer_only_router subset, not the full browser router.
+/// GET /auth/login is 404 in LoopbackDev and bearer-only (no OAuth router), but
+/// mounted in OAuth mode (full browser router → 302 redirect).
 #[tokio::test]
-async fn auth_login_not_mounted_in_any_mode() {
+async fn auth_login_mounted_only_in_oauth_mode() {
     let (loopback_state, _dir1) = test_state_no_auth();
     let (bearer_state, _dir2) = test_state_with_token("tok".into());
     let (oauth_state, _dir3) = test_state_with_oauth().await;
 
-    for (label, state) in [
-        ("LoopbackDev", loopback_state),
-        ("bearer-only", bearer_state),
-        ("OAuth", oauth_state),
+    for (label, state, mounted) in [
+        ("LoopbackDev", loopback_state, false),
+        ("bearer-only", bearer_state, false),
+        ("OAuth", oauth_state, true),
     ] {
         let app = router(state);
         let request = Request::builder()
@@ -878,12 +886,20 @@ async fn auth_login_not_mounted_in_any_mode() {
             .uri("/auth/login")
             .body(axum::body::Body::empty())
             .unwrap();
-        let response = app.oneshot(request).await.unwrap();
-        assert_eq!(
-            response.status(),
-            StatusCode::NOT_FOUND,
-            "GET /auth/login must not be mounted in {label} mode"
-        );
+        let status = app.oneshot(request).await.unwrap().status();
+        if mounted {
+            assert_ne!(
+                status,
+                StatusCode::NOT_FOUND,
+                "GET /auth/login must be mounted in {label} mode"
+            );
+        } else {
+            assert_eq!(
+                status,
+                StatusCode::NOT_FOUND,
+                "GET /auth/login must not be mounted in {label} mode"
+            );
+        }
     }
 }
 
