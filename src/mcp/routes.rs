@@ -59,9 +59,11 @@ pub fn router(state: AppState) -> Router {
     // Locked Decision: OAuth router only when auth_state: Some(_).
     // bearer-only (auth_state: None) and LoopbackDev have no OAuth routes.
     //
-    // Locked Decision: use lab-auth's headless subset. /register and
-    // /auth/login are NOT in bearer_only_router (confirmed by lab-auth's
-    // BEARER_ONLY_ROUTER_FORBIDDEN_PATHS snapshot test).
+    // Use lab-auth's full router so MCP clients (e.g. the Labby gateway) can
+    // self-register via RFC-7591 dynamic client registration. This mounts the
+    // interactive OAuth surface — /register, /authorize, /token,
+    // /auth/google/callback — in addition to the discovery + token-validation
+    // endpoints. (Previously bearer_only_router, which excludes /register.)
     let oauth_router: Option<Router> = if let AuthPolicy::Mounted {
         auth_state: Some(ref state_arc),
     } = state.auth_policy
@@ -69,7 +71,7 @@ pub fn router(state: AppState) -> Router {
         tracing::info!(
             "OAuth router mounted: /.well-known/oauth-authorization-server, \
                  /.well-known/oauth-protected-resource, /mcp/.well-known/*, \
-                 /jwks, /authorize, /auth/google/callback, /token"
+                 /jwks, /register, /authorize, /auth/google/callback, /token"
         );
         let auth_state = state_arc.as_ref().clone();
         let path_based_discovery = Router::new()
@@ -87,7 +89,7 @@ pub fn router(state: AppState) -> Router {
             )
             .with_state(auth_state.clone());
 
-        Some(lab_auth::routes::bearer_only_router(auth_state).merge(path_based_discovery))
+        Some(lab_auth::routes::router(auth_state).merge(path_based_discovery))
     } else {
         None
     };

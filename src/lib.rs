@@ -205,6 +205,7 @@ pub mod testing {
             .scopes_supported(vec!["cortex:read".into(), "cortex:admin".into()])
             .default_scope("cortex:read")
             .resource_path("/mcp")
+            .enable_dynamic_registration(true)
             .build_from_sources(vars)
             .expect("test auth config should build");
 

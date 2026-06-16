@@ -140,10 +140,10 @@ async fn jwks_returns_404_when_loopback_dev() {
 
 // ── /register and /auth/login are excluded in ALL modes ──────────────────────
 
-/// `POST /register` → 404 in ALL three modes.
-/// Locked Decision: `/register` is excluded from `bearer_only_router`.
+/// `POST /register` → 404 in LoopbackDev and bearer-only (no OAuth router),
+/// but mounted in OAuth mode so MCP clients can self-register (RFC-7591).
 #[tokio::test]
-async fn register_returns_404_in_all_modes() {
+async fn register_mounted_only_in_oauth_mode() {
     let d1 = TempDir::new().unwrap();
     let d2 = TempDir::new().unwrap();
     let d3 = TempDir::new().unwrap();
@@ -151,10 +151,10 @@ async fn register_returns_404_in_all_modes() {
     let bearer = testing::bearer_state(d2.path(), "tok");
     let oauth = testing::oauth_state(d3.path()).await;
 
-    for (label, state) in [
-        ("LoopbackDev", loopback),
-        ("bearer-only", bearer),
-        ("OAuth", oauth),
+    for (label, state, mounted) in [
+        ("LoopbackDev", loopback, false),
+        ("bearer-only", bearer, false),
+        ("OAuth", oauth, true),
     ] {
         let req = Request::builder()
             .method("POST")
@@ -163,18 +163,26 @@ async fn register_returns_404_in_all_modes() {
             .body(axum::body::Body::from(r#"{"redirect_uris":[]}"#))
             .unwrap();
         let status = router(state).oneshot(req).await.unwrap().status();
-        assert_eq!(
-            status,
-            StatusCode::NOT_FOUND,
-            "POST /register must not be mounted in {label} mode (Locked Decision)"
-        );
+        if mounted {
+            assert_ne!(
+                status,
+                StatusCode::NOT_FOUND,
+                "POST /register must be mounted in {label} mode"
+            );
+        } else {
+            assert_eq!(
+                status,
+                StatusCode::NOT_FOUND,
+                "POST /register must not be mounted in {label} mode"
+            );
+        }
     }
 }
 
-/// `GET /auth/login` → 404 in all modes. OAuth mode uses lab-auth's headless
-/// bearer_only_router subset, not the full browser router.
+/// `GET /auth/login` → 404 in LoopbackDev and bearer-only (no OAuth router),
+/// but mounted in OAuth mode (full browser router → 302 redirect).
 #[tokio::test]
-async fn auth_login_returns_404_in_all_modes() {
+async fn auth_login_mounted_only_in_oauth_mode() {
     let d1 = TempDir::new().unwrap();
     let d2 = TempDir::new().unwrap();
     let d3 = TempDir::new().unwrap();
@@ -182,17 +190,25 @@ async fn auth_login_returns_404_in_all_modes() {
     let bearer = testing::bearer_state(d2.path(), "tok");
     let oauth = testing::oauth_state(d3.path()).await;
 
-    for (label, state) in [
-        ("LoopbackDev", loopback),
-        ("bearer-only", bearer),
-        ("OAuth", oauth),
+    for (label, state, mounted) in [
+        ("LoopbackDev", loopback, false),
+        ("bearer-only", bearer, false),
+        ("OAuth", oauth, true),
     ] {
         let status = get_status(router(state), "/auth/login").await;
-        assert_eq!(
-            status,
-            StatusCode::NOT_FOUND,
-            "GET /auth/login must not be mounted in {label} mode"
-        );
+        if mounted {
+            assert_ne!(
+                status,
+                StatusCode::NOT_FOUND,
+                "GET /auth/login must be mounted in {label} mode"
+            );
+        } else {
+            assert_eq!(
+                status,
+                StatusCode::NOT_FOUND,
+                "GET /auth/login must not be mounted in {label} mode"
+            );
+        }
     }
 }
 
