@@ -38,20 +38,20 @@ fn parse_search_collects_query_and_filters() {
         "search",
         "disk",
         "full",
-        "--hostname",
+        "--host",
         "nas",
-        "--source-ip=10.0.0.5:514",
+        "--source=10.0.0.5:514",
         "--severity",
         "err",
-        "--app-name=kernel",
+        "--app=kernel",
         "--facility=auth",
         "--exclude-facility",
         "transcript",
-        "--from",
+        "--since",
         "2026-01-01T00:00:00Z",
-        "--to=2026-01-02T00:00:00Z",
-        "--received-from=2026-01-01T00:00:30Z",
-        "--received-to",
+        "--until=2026-01-02T00:00:00Z",
+        "--received-since=2026-01-01T00:00:30Z",
+        "--received-until",
         "2026-01-02T00:00:30Z",
         "--limit",
         "25",
@@ -82,7 +82,7 @@ fn parse_search_collects_query_and_filters() {
 
 #[test]
 fn parse_tail_accepts_positional_count() {
-    let parsed = CliCommand::parse(strings(&["tail", "10", "--hostname", "router"])).unwrap();
+    let parsed = CliCommand::parse(strings(&["tail", "10", "--host", "router"])).unwrap();
 
     assert_eq!(
         parsed,

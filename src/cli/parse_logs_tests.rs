@@ -7,7 +7,7 @@ fn parse_timeline_collects_bucket_group_and_filters() {
         "hour",
         "--group-by",
         "hostname",
-        "--hostname=host1",
+        "--host=host1",
         "--json",
     ]);
 
@@ -41,7 +41,7 @@ fn parse_source_ips_accepts_limit_and_offset() {
 
 #[test]
 fn parse_errors_accepts_limit_for_bounded_agent_output() {
-    let args = strings(&["--from=2026-01-01T00:00:00Z", "--limit", "10", "--json"]);
+    let args = strings(&["--since=2026-01-01T00:00:00Z", "--limit", "10", "--json"]);
 
     let command = parse_errors(&args).unwrap();
 
@@ -103,16 +103,16 @@ fn parse_filter_collects_structured_filters_and_rejects_query_terms() {
 #[test]
 fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     let search = parse_search(&strings(&[
-        "--hostname=host1",
-        "--source-ip=10.0.0.1",
+        "--host=host1",
+        "--source=10.0.0.1",
         "--severity=err",
-        "--app-name=cortex",
+        "--app=cortex",
         "--facility=daemon",
         "--exclude-facility=kern",
-        "--from=2026-01-01T00:00:00Z",
-        "--to=2026-01-02T00:00:00Z",
-        "--received-from=2026-01-03T00:00:00Z",
-        "--received-to=2026-01-04T00:00:00Z",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-02T00:00:00Z",
+        "--received-since=2026-01-03T00:00:00Z",
+        "--received-until=2026-01-04T00:00:00Z",
         "--limit=30",
         "--json",
         "disk",
@@ -133,13 +133,7 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let tail = parse_tail(&strings(&[
-        "--hostname=host1",
-        "--source-ip=10.0.0.1",
-        "-n",
-        "12",
-    ]))
-    .unwrap();
+    let tail = parse_tail(&strings(&["--host=host1", "--source=10.0.0.1", "-n", "12"])).unwrap();
     match tail {
         crate::cli::CliCommand::Tail(args) => {
             assert_eq!(args.hostname.as_deref(), Some("host1"));
@@ -151,9 +145,9 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     let sessions = parse_sessions(&strings(&[
         "--project=/repo",
         "--tool=Bash",
-        "--hostname=host1",
-        "--from=2026-01-01T00:00:00Z",
-        "--to=2026-01-02T00:00:00Z",
+        "--host=host1",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-02T00:00:00Z",
         "--limit=4",
     ]))
     .unwrap();
@@ -186,8 +180,8 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         "--reference-time=t0",
         "--window-minutes=5",
         "--severity-min=warn",
-        "--hostname=host1",
-        "--source-ip=10.0.0.1",
+        "--host=host1",
+        "--source=10.0.0.1",
         "--query=panic",
         "--limit=99",
     ]))
@@ -261,7 +255,7 @@ fn strings(values: &[&str]) -> Vec<String> {
 
 #[test]
 fn search_normalizes_relative_from() {
-    let cmd = parse_search(&strings(&["error", "--from", "1h"])).unwrap();
+    let cmd = parse_search(&strings(&["error", "--since", "1h"])).unwrap();
     let crate::cli::CliCommand::Search(args) = cmd else {
         panic!("expected Search");
     };
@@ -301,7 +295,7 @@ fn search_grep_equals_form_and_rejects_empty() {
 
 #[test]
 fn filter_and_sessions_normalize_relative_from() {
-    let filter = parse_filter(&strings(&["--from", "2d"])).unwrap();
+    let filter = parse_filter(&strings(&["--since", "2d"])).unwrap();
     let crate::cli::CliCommand::Filter(args) = filter else {
         panic!("expected Filter");
     };
@@ -312,13 +306,13 @@ fn filter_and_sessions_normalize_relative_from() {
     );
 
     // Equals form is normalized too.
-    let sessions = parse_sessions(&strings(&["--from=1h"])).unwrap();
+    let sessions = parse_sessions(&strings(&["--since=1h"])).unwrap();
     let crate::cli::CliCommand::Sessions(args) = sessions else {
         panic!("expected Sessions");
     };
     assert!(
         args.from.as_deref().unwrap().ends_with("+00:00"),
-        "sessions --from= should normalize: {:?}",
+        "sessions --since= should normalize: {:?}",
         args.from
     );
 }
