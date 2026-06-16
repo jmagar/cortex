@@ -293,7 +293,7 @@ plumbing, no new behaviour. All require the standard bearer token.
 | Method | Path | Body / Query | Service method |
 |---|---|---|---|
 | GET | `/api/source-ips` | `?limit=N&offset=N` | `list_source_ips` |
-| GET | `/api/timeline` | `?bucket=...&group_by=...&from=...&to=...&hostname=...&app_name=...&severity_min=...` | `timeline` |
+| GET | `/api/timeline` | `?bucket=...&group_by=...&since=...&until=...&host=...&app=...&severity_min=...` | `timeline` |
 | GET | `/api/patterns` | filter + `&scan_limit=N&top_n=N` | `patterns` |
 | GET | `/api/ingest-rate` | `?by_host=true` | `ingest_rate` |
 | GET | `/api/get` | `?id=N` | `get_log` |

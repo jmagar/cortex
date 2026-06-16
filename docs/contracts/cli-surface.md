@@ -40,7 +40,7 @@ This is the most important table for operators — it disambiguates where each c
 | `cortex agent issue` | server | local SQLite (insert pending row) | Prints one-time token to stdout. |
 | `cortex agent revoke` | server | local SQLite + active WS connections | Kicks live conn if attached. |
 | `cortex agent rotate` | server | local SQLite | Returns new token; old hash in grace for 300s. |
-| `cortex agent tail` | server | local SQLite (`logs` view filtered to host) | Convenience wrapper over `cortex search hostname=...`. |
+| `cortex agent tail` | server | local SQLite (`logs` view filtered to host) | Convenience wrapper over `cortex search host=...`. |
 | `cortex agent status` (server form) | server | local SQLite + live WS state | Same data as MCP `agent_status` action; omit `--host` for fleet. |
 | `cortex agent run` | client (per-host) | `wss://syslog.tootie.tv/ws/agent` | Long-lived daemon. |
 | `cortex agent enroll` | client | server WS endpoint | Performs one-time-token handshake. |
@@ -113,7 +113,7 @@ Exit codes: `0`, `3` (unknown host_id).
 cortex agent tail <host_id_or_hostname> [--follow] [--severity-min <sev>] [--lines <n>]
 ```
 
-Server-side `tail -f` of recent log rows from that host. Convenience wrapper over `cortex search hostname=<h>` with `--follow` mapping to a 2-second polling loop. Honors the same flags as the existing `cortex tail` command.
+Server-side `tail -f` of recent log rows from that host. Convenience wrapper over `cortex search host=<h>` with `--follow` mapping to a 2-second polling loop. Honors the same flags as the existing `cortex tail` command.
 
 - `--lines <n>` default 50.
 
