@@ -71,11 +71,18 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
                     value_after_equals(arg, "--limit")?,
                 )?)
             }
+            "--grep" => parsed.grep = Some(flags.value("--grep")?),
+            _ if arg.starts_with("--grep=") => {
+                parsed.grep = Some(value_after_equals(arg, "--grep")?)
+            }
             _ if arg.starts_with('-') => bail!("unknown search option: {arg}"),
             _ => query.push(arg),
         }
     }
     parsed.query = (!query.is_empty()).then(|| query.join(" "));
+    if parsed.grep.is_some() && parsed.query.is_some() {
+        bail!("--grep and a positional query are mutually exclusive; use one or the other");
+    }
     Ok(CliCommand::Search(parsed))
 }
 

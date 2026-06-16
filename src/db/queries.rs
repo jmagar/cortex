@@ -62,7 +62,36 @@ fn push_bound_limit(
 /// - Max 16 whitespace-separated terms (prevents 28+ wildcard term DoS)
 ///
 /// Returns a user-friendly error; the caller logs the details server-side.
+/// Detect common FTS5 foot-guns and return a fix-it error. Runs before the
+/// generic length/term-count checks in [`validate_fts_query`].
+///
+/// - An unquoted term with an *infix* hyphen (e.g. `smoke-test`) is parsed by
+///   FTS5 as `smoke NOT test`, which surprises users searching a hyphenated
+///   word. A leading-hyphen term (`-nginx`) is left alone — that's an
+///   intentional NOT.
+/// - An odd number of double-quotes is an unterminated phrase.
+fn lint_fts_query(query: &str) -> Result<()> {
+    let has_unquoted_infix_hyphen = !query.contains('"')
+        && query
+            .split_whitespace()
+            .any(|t| t.len() > 1 && t.contains('-') && !t.starts_with('-'));
+    if has_unquoted_infix_hyphen {
+        return Err(anyhow::Error::new(crate::app::ServiceError::InvalidInput(
+            "hyphen is the FTS5 NOT operator; quote hyphenated terms as a phrase \
+             (e.g. \"smoke-test\") or use --grep for literal text"
+                .to_string(),
+        )));
+    }
+    if query.matches('"').count() % 2 != 0 {
+        return Err(anyhow::Error::new(crate::app::ServiceError::InvalidInput(
+            "unbalanced quote in search query; wrap phrases in matching double quotes".to_string(),
+        )));
+    }
+    Ok(())
+}
+
 pub fn validate_fts_query(query: &str) -> Result<()> {
+    lint_fts_query(query)?;
     if query.len() > 512 {
         return Err(anyhow::Error::new(crate::app::ServiceError::InvalidInput(
             format!(

@@ -358,6 +358,8 @@ pub(crate) struct SessionsArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SearchArgs {
     pub query: Option<String>,
+    /// Literal substring text (FTS5-safe); mutually exclusive with `query`.
+    pub grep: Option<String>,
     pub hostname: Option<String>,
     pub source_ip: Option<String>,
     pub severity: Option<String>,

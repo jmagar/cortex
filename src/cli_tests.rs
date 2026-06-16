@@ -63,6 +63,7 @@ fn parse_search_collects_query_and_filters() {
         parsed,
         CliCommand::Search(SearchArgs {
             query: Some("disk full".into()),
+            grep: None,
             hostname: Some("nas".into()),
             source_ip: Some("10.0.0.5:514".into()),
             severity: Some("err".into()),

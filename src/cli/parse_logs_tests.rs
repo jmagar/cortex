@@ -272,3 +272,18 @@ fn search_normalizes_relative_from() {
         "expected normalized RFC3339, got {from}"
     );
 }
+
+#[test]
+fn search_grep_sets_literal_and_rejects_with_query() {
+    let cmd = parse_search(&strings(&["--grep", "smoke-test"])).unwrap();
+    let crate::cli::CliCommand::Search(args) = cmd else {
+        panic!("expected Search");
+    };
+    assert_eq!(args.grep.as_deref(), Some("smoke-test"));
+
+    // --grep together with a positional query is an error.
+    let err = parse_search(&strings(&["error", "--grep", "x"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("--grep"), "should explain the conflict: {err}");
+}

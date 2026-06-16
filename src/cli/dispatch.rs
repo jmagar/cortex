@@ -43,10 +43,22 @@ use super::{
 // would be premature. The free `into_request()` methods are simpler and
 // individually inlinable.
 
+/// Wrap literal user text (`--grep`) as a single FTS5 phrase so operators and
+/// hyphens match literally. Embedded double-quotes are doubled per FTS5 syntax.
+fn fts_phrase_literal(text: &str) -> String {
+    format!("\"{}\"", text.replace('"', "\"\""))
+}
+
 impl SearchArgs {
     pub(crate) fn into_request(self) -> SearchLogsRequest {
+        // `--grep` wins over a raw query: literal text is wrapped as a safe FTS5
+        // phrase so hyphens/operators match literally.
+        let query = match self.grep {
+            Some(ref text) => Some(fts_phrase_literal(text)),
+            None => self.query,
+        };
         SearchLogsRequest {
-            query: self.query,
+            query,
             hostname: self.hostname,
             source_ip: self.source_ip,
             severity: self.severity,
