@@ -2792,3 +2792,13 @@ fn lint_flags_unbalanced_quote() {
     let err = validate_fts_query("\"oops").unwrap_err().to_string();
     assert!(err.contains("unbalanced quote"), "{err}");
 }
+
+#[test]
+fn lint_flags_unquoted_hyphen_term_alongside_a_quoted_phrase() {
+    // The hyphen check is per-term: a quoted phrase elsewhere must not mask an
+    // unquoted hyphenated term (regression for a query-wide quote gate).
+    let err = validate_fts_query("\"disk full\" smoke-test")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("NOT operator"), "{err}");
+}

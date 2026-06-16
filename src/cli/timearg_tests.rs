@@ -72,3 +72,20 @@ fn parses_absolute_timestamps() {
         "2026-06-01T08:30:00+00:00"
     );
 }
+
+#[test]
+fn rejects_multibyte_trailing_char_without_panicking() {
+    let now = fixed_now();
+    // A multibyte final char must error cleanly, not panic in split_at.
+    assert!(parse_time_arg("5€", now).is_err());
+    assert!(parse_time_arg("2д", now).is_err());
+    assert!(parse_time_arg("30м", now).is_err());
+}
+
+#[test]
+fn rejects_negative_relative_duration() {
+    let now = fixed_now();
+    // `-5m` would otherwise compute a *future* time; reject it instead.
+    assert!(parse_time_arg("-5m", now).is_err());
+    assert!(parse_time_arg("-1h", now).is_err());
+}

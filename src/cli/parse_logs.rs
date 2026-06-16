@@ -83,6 +83,9 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
     if parsed.grep.is_some() && parsed.query.is_some() {
         bail!("--grep and a positional query are mutually exclusive; use one or the other");
     }
+    if parsed.grep.as_deref().is_some_and(|g| g.trim().is_empty()) {
+        bail!("--grep requires non-empty text");
+    }
     Ok(CliCommand::Search(parsed))
 }
 

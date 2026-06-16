@@ -287,3 +287,38 @@ fn search_grep_sets_literal_and_rejects_with_query() {
         .to_string();
     assert!(err.contains("--grep"), "should explain the conflict: {err}");
 }
+
+#[test]
+fn search_grep_equals_form_and_rejects_empty() {
+    let cmd = parse_search(&strings(&["--grep=smoke-test"])).unwrap();
+    let crate::cli::CliCommand::Search(args) = cmd else {
+        panic!("expected Search");
+    };
+    assert_eq!(args.grep.as_deref(), Some("smoke-test"));
+    // Whitespace-only --grep is rejected rather than matching nothing silently.
+    assert!(parse_search(&strings(&["--grep", "   "])).is_err());
+}
+
+#[test]
+fn filter_and_sessions_normalize_relative_from() {
+    let filter = parse_filter(&strings(&["--from", "2d"])).unwrap();
+    let crate::cli::CliCommand::Filter(args) = filter else {
+        panic!("expected Filter");
+    };
+    assert!(
+        args.from.as_deref().unwrap().ends_with("+00:00"),
+        "filter --from should normalize: {:?}",
+        args.from
+    );
+
+    // Equals form is normalized too.
+    let sessions = parse_sessions(&strings(&["--from=1h"])).unwrap();
+    let crate::cli::CliCommand::Sessions(args) = sessions else {
+        panic!("expected Sessions");
+    };
+    assert!(
+        args.from.as_deref().unwrap().ends_with("+00:00"),
+        "sessions --from= should normalize: {:?}",
+        args.from
+    );
+}

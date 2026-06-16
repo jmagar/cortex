@@ -40,18 +40,24 @@ pub(crate) fn parse_time_arg(input: &str, now: DateTime<Utc>) -> Result<String> 
 }
 
 /// Parse a relative duration (`<int><unit>`). Returns `Ok(None)` when `s` is not
-/// a relative form so the caller can try absolute parsing; errors only when the
-/// numeric prefix parses but the unit is unknown.
+/// a relative form so the caller can try absolute parsing; errors when the
+/// numeric prefix parses but the unit is unknown or the value is negative.
 fn parse_relative(s: &str, now: DateTime<Utc>) -> Result<Option<DateTime<Utc>>> {
-    let (value, unit) = s.split_at(s.len() - 1);
-    let unit_char = s.chars().last().unwrap();
+    // `s` is non-empty (the caller guards empty input). Split on the final
+    // *character* boundary, not the final byte, so a multibyte trailing char
+    // (e.g. `5€`, `2д`) is rejected cleanly instead of panicking in `split_at`.
+    let unit_char = s.chars().last().expect("caller guarantees non-empty input");
+    let value = &s[..s.len() - unit_char.len_utf8()];
     if let Ok(n) = value.parse::<i64>() {
+        if n < 0 {
+            bail!("time value must not be negative; relative offsets are in the past (e.g. 2d)");
+        }
         let dur = match unit_char {
             's' => Duration::seconds(n),
             'm' => Duration::minutes(n),
             'h' => Duration::hours(n),
             'd' => Duration::days(n),
-            _ => bail!("unknown time unit '{unit}'; use s, m, h, or d (e.g. 90s, 2d)"),
+            _ => bail!("unknown time unit '{unit_char}'; use s, m, h, or d (e.g. 90s, 2d)"),
         };
         return Ok(Some(now - dur));
     }
