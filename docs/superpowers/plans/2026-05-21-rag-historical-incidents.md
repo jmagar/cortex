@@ -1470,29 +1470,29 @@ Add:
 ```rust
 "similar" => AiCommand::SimilarIncidents(AiSimilarArgs {
     query: require_arg(&args, "<query>", "syslog ai similar <query>")?,
-    hostname: flag_val(&args, "--hostname"),
-    app_name: flag_val(&args, "--app-name"),
+    hostname: flag_val(&args, "--host"),
+    app_name: flag_val(&args, "--app"),
     severity_min: flag_val(&args, "--severity-min"),
-    from: flag_val(&args, "--from"),
-    to: flag_val(&args, "--to"),
+    from: flag_val(&args, "--since"),
+    to: flag_val(&args, "--until"),
     window_minutes: flag_u32(&args, "--window-minutes")?,
     limit: flag_u32(&args, "--limit")?,
     output: output_format(&args),
 }),
 "ask-history" => AiCommand::AskHistory(AiAskHistoryArgs {
     query: require_arg(&args, "<query>", "syslog ai ask-history <query>")?,
-    hostname: flag_val(&args, "--hostname"),
-    app_name: flag_val(&args, "--app-name"),
-    from: flag_val(&args, "--from"),
-    to: flag_val(&args, "--to"),
+    hostname: flag_val(&args, "--host"),
+    app_name: flag_val(&args, "--app"),
+    from: flag_val(&args, "--since"),
+    to: flag_val(&args, "--until"),
     limit: flag_u32(&args, "--limit")?,
     output: output_format(&args),
 }),
 "incident-context" => AiCommand::IncidentContext(AiIncidentContextArgs {
-    from: flag_val(&args, "--from").ok_or_else(|| anyhow::anyhow!("--from is required"))?,
-    to: flag_val(&args, "--to").ok_or_else(|| anyhow::anyhow!("--to is required"))?,
-    hostname: flag_val(&args, "--hostname"),
-    app_name: flag_val(&args, "--app-name"),
+    from: flag_val(&args, "--since").ok_or_else(|| anyhow::anyhow!("--since is required"))?,
+    to: flag_val(&args, "--until").ok_or_else(|| anyhow::anyhow!("--until is required"))?,
+    hostname: flag_val(&args, "--host"),
+    app_name: flag_val(&args, "--app"),
     query: flag_val(&args, "--query"),
     severity_min: flag_val(&args, "--severity-min"),
     limit: flag_u32(&args, "--limit")?,
@@ -1558,16 +1558,16 @@ Note: Check how existing commands import service types — it may be via `use sy
 Find the `help` or `usage` string for `syslog ai` subcommands (search for `"syslog ai search"` or similar). Add:
 
 ```
-  syslog ai similar <query> [--hostname H] [--app-name A] [--from T] [--to T]
+  syslog ai similar <query> [--host H] [--app A] [--since T] [--until T]
                             [--severity-min S] [--window-minutes N] [--limit N]
       Find historical incidents similar to a query. Returns FTS5-matched log clusters
       grouped by host+app within a time window, with correlated AI sessions.
 
-  syslog ai ask-history <query> [--hostname H] [--app-name A] [--from T] [--to T] [--limit N]
+  syslog ai ask-history <query> [--host H] [--app A] [--since T] [--until T] [--limit N]
       Search AI session transcripts for past work related to a topic. Returns sessions
       ranked by match count with system log context from the top session's window.
 
-  syslog ai incident-context --from T --to T [--hostname H] [--app-name A]
+  syslog ai incident-context --since T --until T [--host H] [--app A]
                               [--query Q] [--severity-min S] [--limit N]
       Full context for a time window: log summary by severity/app, error logs,
       correlated AI sessions. Useful for known incident windows.

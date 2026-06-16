@@ -316,7 +316,7 @@ The unauthenticated socket window is bounded by `handshake_timeout = 5s` and an 
 
 ### 6.2 Token lifecycle
 
-- **Issuance:** `cortex admin agent issue --hostname dookie` on the server prints a one-time token (32 bytes, base64url). Server stores only its hash (BLAKE3 of the raw token) in `agents.token_hash`. A pending row is inserted with `connection_state = NeverConnected`.
+- **Issuance:** `cortex admin agent issue --host dookie` on the server prints a one-time token (32 bytes, base64url). Server stores only its hash (BLAKE3 of the raw token) in `agents.token_hash`. A pending row is inserted with `connection_state = NeverConnected`.
 - **Bootstrap on agent:** an operator pastes the token into `/etc/syslog-agent/token` (mode 0600), or feeds it via `syslog-agent register --token <…>` which writes the same file.
 - **Storage on agent:** plain file on disk, perms 0600, owned by the dedicated `syslog-agent` user. Not encrypted at rest — tailnet trust + filesystem perms are the boundary, matching every other agent in this class (Promtail, Filebeat).
 - **Rotation:** `cortex admin agent rotate --host-id <uuid>` issues a new token; server keeps both old and new `token_hash` for `rotation_grace_secs` (default 300). After grace, old hash is dropped.
@@ -691,7 +691,7 @@ If duplicates do appear, downstream search queries can filter on `source_ip LIKE
 6. **Bootstrap UX.** One-time tokens via copy-paste vs. printing a `wireguard-style` invite URL the agent can read. Lean toward QR/URL for the next epic.
 7. ~~**`cortex agent` CLI subcommand surface.**~~ **RESOLVED — IN SCOPE.** Server-side CLI subcommands (run on `tootie`, operate on the central DB):
    - `cortex agent list` — table of agents: host_id, hostname, connection_state, last_handshake, agent_version
-   - `cortex agent issue --hostname=<h>` — generate and print a one-time enrollment token; record `token_hash` row in `agents` with `connection_state=NeverConnected`
+   - `cortex agent issue --host=<h>` — generate and print a one-time enrollment token; record `token_hash` row in `agents` with `connection_state=NeverConnected`
    - `cortex agent revoke <host_id>` — set `connection_state=Revoked`, server-side kicks any active connection
    - `cortex agent rotate <host_id>` — issue a new token, mark old `token_hash_prev` for grace window, agent picks up on next reconnect
    - `cortex agent tail <host_id>` — server-side `tail -f` of recent log rows from that host (convenience wrapper over `search` with `hostname=...`)

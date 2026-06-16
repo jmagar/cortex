@@ -146,7 +146,7 @@ Three sequential goals: (1) "execute each of our CLI commands and record how lon
 | area | before | after |
 |---|---|---|
 | `syslog timeline` (no date args) | full scan, 72–99s | per-bucket default window (e.g. 30d for day), seconds |
-| `syslog timeline --to <past>` only | (new code) would return 0 rows | returns historical data; default skipped when `to` set |
+| `syslog timeline --until <past>` only | (new code) would return 0 rows | returns historical data; default skipped when `to` set |
 | `syslog timeline --bucket week/month` | HTTP 400 | returns bucketed counts |
 | `syslog --http db backup` | failed: "database is locked" | server-side backup via rusqlite, cooperates with WAL |
 | `db integrity --quick` over HTTP | silent 600s timeout | 120s timeout with actionable container instructions |

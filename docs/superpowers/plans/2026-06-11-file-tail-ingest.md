@@ -1366,7 +1366,7 @@ fn parses_file_tail_add() {
         "/mnt/appdata/swag/log/nginx/access.log".into(),
         "--tag".into(),
         "swag-access".into(),
-        "--hostname".into(),
+        "--host".into(),
         "squirts".into(),
         "--facility".into(),
         "local4".into(),
@@ -1538,9 +1538,9 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
                 i += 1;
                 out.tag = required(args, i, "--tag")?;
             }
-            "--hostname" => {
+            "--host" => {
                 i += 1;
-                out.hostname = Some(required(args, i, "--hostname")?);
+                out.hostname = Some(required(args, i, "--host")?);
             }
             "--facility" => {
                 i += 1;
@@ -1553,7 +1553,7 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
             "--from-start" => out.start_at_end = false,
             "--json" => out.json = true,
             other => bail!("{}", suggest::unknown_option("file-tail add", other, &[
-                "--id", "--path", "--tag", "--hostname", "--facility", "--severity", "--from-start", "--json",
+                "--id", "--path", "--tag", "--host", "--facility", "--severity", "--from-start", "--json",
             ])),
         }
         i += 1;
@@ -1575,7 +1575,7 @@ fn required(args: &[String], index: usize, flag: &str) -> Result<String> {
 }
 
 fn usage() -> &'static str {
-    "Usage: cortex file-tail list [--json]\n       cortex file-tail add --id ID --path PATH --tag TAG [--hostname HOST] [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]\n       cortex file-tail remove --id ID [--json]\n       cortex file-tail enable --id ID [--json]\n       cortex file-tail disable --id ID [--json]"
+    "Usage: cortex file-tail list [--json]\n       cortex file-tail add --id ID --path PATH --tag TAG [--host HOST] [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]\n       cortex file-tail remove --id ID [--json]\n       cortex file-tail enable --id ID [--json]\n       cortex file-tail disable --id ID [--json]"
 }
 ```
 
@@ -1794,14 +1794,14 @@ cortex file-tail add \
   --id swag-access \
   --path /mnt/appdata/swag/log/nginx/access.log \
   --tag swag-access \
-  --hostname squirts \
+  --host squirts \
   --facility local4
 
 cortex file-tail add \
   --id swag-error \
   --path /mnt/appdata/swag/log/nginx/error.log \
   --tag swag-error \
-  --hostname squirts \
+  --host squirts \
   --facility local4 \
   --severity warning
 
@@ -1809,21 +1809,21 @@ cortex file-tail add \
   --id fail2ban \
   --path /mnt/appdata/swag/log/fail2ban/fail2ban.log \
   --tag fail2ban \
-  --hostname squirts \
+  --host squirts \
   --facility local5
 
 cortex file-tail add \
   --id authelia \
   --path /mnt/appdata/authelia/logs/authelia.log \
   --tag authelia \
-  --hostname squirts \
+  --host squirts \
   --facility local5
 
 cortex file-tail add \
   --id adguard-query \
   --path /mnt/appdata/adguard/var/data/querylog.json \
   --tag adguard-query \
-  --hostname squirts \
+  --host squirts \
   --facility local6
 ```
 
@@ -1841,7 +1841,7 @@ Manage Cortex-owned file-tail ingest sources.
 ```bash
 cortex file-tail list [--json]
 cortex file-tail status [--json]
-cortex file-tail add --id ID --path PATH --tag TAG [--hostname HOST] [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
+cortex file-tail add --id ID --path PATH --tag TAG [--host HOST] [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
 cortex file-tail remove --id ID [--json]
 cortex file-tail enable --id ID [--json]
 cortex file-tail disable --id ID [--json]
@@ -1943,7 +1943,7 @@ export CORTEX_API_TOKEN="test-token"
 target/debug/cortex serve mcp --no-auth >"$tmpdir/cortex.log" 2>&1 &
 pid=$!
 sleep 2
-target/debug/cortex file-tail add --id smoke-file --path "$tmpdir/app.log" --tag smoke-app --hostname smoke-host --from-start --json
+target/debug/cortex file-tail add --id smoke-file --path "$tmpdir/app.log" --tag smoke-app --host smoke-host --from-start --json
 printf 'hello from managed file tail\n' >> "$tmpdir/app.log"
 sleep 2
 target/debug/cortex search '"hello from managed file tail"' --json

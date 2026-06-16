@@ -148,7 +148,7 @@ operators can opt out of HTTP transport for the duration of the script:
 ```bash
 ( unset CORTEX_USE_HTTP; \
   for h in $(cortex hosts --json | jq -r '.hosts[].hostname'); do \
-    cortex tail --hostname "$h" --n 50; \
+    cortex tail --host "$h" --n 50; \
   done )
 ```
 

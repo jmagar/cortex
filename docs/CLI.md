@@ -35,7 +35,7 @@ configured database in `file-tails.json` and reconciled by the running
 ```bash
 cortex file-tail list [--json]
 cortex file-tail status [--json]
-cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
+cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
 cortex file-tail remove --id ID [--json]
 cortex file-tail enable --id ID [--json]
 cortex file-tail disable --id ID [--json]
@@ -67,8 +67,8 @@ cortex search 'error AND nginx' --limit 5 --json
 Search logs with optional FTS5 query and filters.
 
 ```bash
-cortex search 'error AND nginx' --hostname proxy --limit 10
-cortex search '"disk full"' --source-ip 10.0.0.5:514 --from 2026-01-01T00:00:00Z
+cortex search 'error AND nginx' --host proxy --limit 10
+cortex search '"disk full"' --source 10.0.0.5:514 --since 2026-01-01T00:00:00Z
 ```
 
 Flags:
@@ -76,12 +76,12 @@ Flags:
 | Flag | Description |
 | --- | --- |
 | positional query | Optional SQLite FTS5 query. Multiple words are joined with spaces. |
-| `--hostname HOST` | Exact claimed hostname filter |
-| `--source-ip SOURCE` | Exact source identifier filter |
+| `--host HOST` | Exact claimed hostname filter |
+| `--source SOURCE` | Exact source identifier filter |
 | `--severity LEVEL` | Syslog severity filter: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug` |
-| `--app-name APP` | Application/process name filter |
-| `--from TIME` | RFC3339 start timestamp |
-| `--to TIME` | RFC3339 end timestamp |
+| `--app APP` | Application/process name filter |
+| `--since TIME` | RFC3339 start timestamp |
+| `--until TIME` | RFC3339 end timestamp |
 | `--limit N` | Maximum returned rows |
 | `--json` | Print JSON response |
 
@@ -91,7 +91,7 @@ Return recent log entries, optionally filtered by host, source, or app.
 
 ```bash
 cortex tail -n 20
-cortex tail 50 --hostname nas --app-name kernel
+cortex tail 50 --host nas --app kernel
 ```
 
 Flags:
@@ -100,9 +100,9 @@ Flags:
 | --- | --- |
 | positional `N` | Number of rows to return |
 | `-n N`, `--n N` | Number of rows to return |
-| `--hostname HOST` | Exact claimed hostname filter |
-| `--source-ip SOURCE` | Exact source identifier filter |
-| `--app-name APP` | Application/process name filter |
+| `--host HOST` | Exact claimed hostname filter |
+| `--source SOURCE` | Exact source identifier filter |
+| `--app APP` | Application/process name filter |
 | `--json` | Print JSON response |
 
 ### `cortex errors`
@@ -111,15 +111,15 @@ Summarize error and warning counts by host and severity.
 
 ```bash
 cortex errors
-cortex errors --from 2026-01-01T00:00:00Z --to 2026-01-02T00:00:00Z --json
+cortex errors --since 2026-01-01T00:00:00Z --until 2026-01-02T00:00:00Z --json
 ```
 
 Flags:
 
 | Flag | Description |
 | --- | --- |
-| `--from TIME` | RFC3339 start timestamp |
-| `--to TIME` | RFC3339 end timestamp |
+| `--since TIME` | RFC3339 start timestamp |
+| `--until TIME` | RFC3339 end timestamp |
 | `--json` | Print JSON response |
 
 ### `cortex hosts`
@@ -166,9 +166,9 @@ Flags:
 | --- | --- |
 | `--project PATH` | Exact project path filter |
 | `--tool TOOL` | AI tool filter: `claude`, `codex`, or `gemini` |
-| `--hostname HOST` | Filter by host |
-| `--from TIME` | RFC3339 start timestamp |
-| `--to TIME` | RFC3339 end timestamp |
+| `--host HOST` | Filter by host |
+| `--since TIME` | RFC3339 start timestamp |
+| `--until TIME` | RFC3339 end timestamp |
 | `--limit N` | Maximum returned rows |
 | `--json` | Print JSON response |
 
@@ -675,8 +675,8 @@ Flags:
 | `--reference-time TIME` | RFC3339 center timestamp |
 | `--window-minutes N` | Minutes before and after the reference time |
 | `--severity-min LEVEL` | Minimum severity to include |
-| `--hostname HOST` | Exact claimed hostname filter |
-| `--source-ip SOURCE` | Exact source identifier filter |
+| `--host HOST` | Exact claimed hostname filter |
+| `--source SOURCE` | Exact source identifier filter |
 | `--query FTS` | Optional FTS5 query |
 | `--limit N` | Maximum total events |
 | `--json` | Print JSON response |
@@ -686,7 +686,7 @@ Flags:
 Return the latest bounded heartbeat state for one host.
 
 ```bash
-cortex host-state --hostname tootie
+cortex host-state --host tootie
 cortex host-state --host-id host-a --limit 5 --json
 ```
 
@@ -695,7 +695,7 @@ Flags:
 | Flag | Description |
 | --- | --- |
 | `--host-id ID` | Authoritative heartbeat host identity |
-| `--hostname HOST` | Self-reported hostname fallback (must resolve to one host) |
+| `--host HOST` | Self-reported hostname fallback (must resolve to one host) |
 | `--since TIME` | Minimum `sampled_at` timestamp (ISO 8601) |
 | `--limit N` | Number of samples (default 1, max 100) |
 | `--json` | Print JSON response |

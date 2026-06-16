@@ -653,8 +653,8 @@ pub(crate) struct IngestRateArgs {
 Add CLI parsing in the `parse_args` function (follow the pattern for `SearchArgs`). Add help strings to `print_usage()`:
 ```
   syslog source-ips [--limit N] [--offset N] [--json]
-  syslog timeline [--bucket 1m|5m|1h|1d] [--group-by hostname|severity|app] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]
-  syslog patterns [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--scan-limit N] [--top-n N] [--json]
+  syslog timeline [--bucket 1m|5m|1h|1d] [--group-by hostname|severity|app] [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--json]
+  syslog patterns [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--scan-limit N] [--top-n N] [--json]
   syslog ingest-rate [--by-host] [--json]
 ```
 

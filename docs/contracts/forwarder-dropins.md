@@ -225,7 +225,7 @@ long-lived token (BLAKE3-hashed server-side). See
 
 ```bash
 # Single host
-cortex agent issue --hostname=dookie
+cortex agent issue --host=dookie
 
 # Output (token is shown ONCE; re-run if lost):
 #   host_id:       2b9a0b3a-7e3c-4d2a-9c0e-9bbf5d3a1f01
@@ -335,7 +335,7 @@ logger -t deploy-test "hello from $(hostname)"
 
 ```bash
 # replace <target-host> with the actual hostname
-cortex tail --hostname=<target-host> --limit=5
+cortex tail --host=<target-host> --limit=5
 # OR via MCP:
 mcporter call --config config/mcporter.json cortex.search query=deploy-test limit=5
 ```
@@ -344,7 +344,7 @@ For agent-mode hosts, also check:
 
 ```bash
 cortex agent list                      # Active state, recent last_seen
-cortex tail --hostname=<host> --limit=5  # logs.push entries landing
+cortex tail --host=<host> --limit=5  # logs.push entries landing
 ```
 
 For OTLP hosts:

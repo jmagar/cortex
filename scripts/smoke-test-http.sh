@@ -123,7 +123,7 @@ assert_json "http: search (limit 1)"     http search --json --limit 1
 assert_json "http: tail (limit 1)"       http tail --json --limit 1
 assert_json "http: errors"               http errors --json
 assert_json "http: hosts"                http hosts --json
-assert_json "http: correlate (1m, h=_)"  http correlate --json --reference-time "$CORTEX_SMOKE_REFTIME" --hostname _smoke_ --window-minutes 1
+assert_json "http: correlate (1m, h=_)"  http correlate --json --reference-time "$CORTEX_SMOKE_REFTIME" --host _smoke_ --window-minutes 1
 assert_json "http: stats"                http stats --json
 assert_json "http: sessions (limit 1)"   http sessions --json --limit 1
 

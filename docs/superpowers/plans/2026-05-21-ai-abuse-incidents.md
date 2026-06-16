@@ -132,8 +132,8 @@ fn parse_ai_incidents(args: &[String]) -> Result<CliCommand> {
             "--json" => parsed.json = true,
             "--project" => parsed.project = Some(flags.value("--project")?),
             "--tool" => parsed.tool = Some(flags.value("--tool")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--since" => parsed.from = Some(flags.value("--since")?),
+            "--until" => parsed.to = Some(flags.value("--until")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "--window-minutes" => {
                 parsed.window_minutes = Some(parse_u32_flag(
@@ -148,10 +148,10 @@ fn parse_ai_incidents(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--tool=") => {
                 parsed.tool = Some(value_after_equals(arg, "--tool")?)
             }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+            _ if arg.starts_with("--since=") => {
+                parsed.from = Some(value_after_equals(arg, "--since")?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--until=") => parsed.to = Some(value_after_equals(arg, "--until")?),
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
                     "--limit",
@@ -301,8 +301,8 @@ fn parse_ai_investigate(args: &[String]) -> Result<CliCommand> {
             "--json" => parsed.json = true,
             "--project" => parsed.project = Some(flags.value("--project")?),
             "--tool" => parsed.tool = Some(flags.value("--tool")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--since" => parsed.from = Some(flags.value("--since")?),
+            "--until" => parsed.to = Some(flags.value("--until")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "--window-minutes" => {
                 parsed.window_minutes = Some(parse_u32_flag(
@@ -323,10 +323,10 @@ fn parse_ai_investigate(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--tool=") => {
                 parsed.tool = Some(value_after_equals(arg, "--tool")?)
             }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+            _ if arg.starts_with("--since=") => {
+                parsed.from = Some(value_after_equals(arg, "--since")?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--until=") => parsed.to = Some(value_after_equals(arg, "--until")?),
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
                     "--limit",
@@ -431,7 +431,7 @@ pub(super) fn print_ai_incidents_response(
         if response.truncated { " (truncated)" } else { "" },
         if response.candidate_window_truncated {
             format!(
-                "\nwarning: candidate scan capped at {} rows; narrow with --project/--tool/--from/--to",
+                "\nwarning: candidate scan capped at {} rows; narrow with --project/--tool/--from/--until",
                 response.candidate_cap
             )
         } else {

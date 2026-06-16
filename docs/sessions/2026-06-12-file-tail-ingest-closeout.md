@@ -105,7 +105,7 @@ The final repository state before this note was clean on `main` at merge commit 
 | modified | `src/cli/http_client.rs` | - | Add file-tail API client and non-retry admin POST | `git diff --name-status 5632f78..8f092ac` |
 | modified | `src/cli/http_client_tests.rs` | - | Test 503 non-retry and redaction behavior | `git diff --name-status 5632f78..8f092ac` |
 | modified | `src/cli/parse.rs` | - | Route file-tail parse branch | `git diff --name-status 5632f78..8f092ac` |
-| modified | `src/cli/parse_tests.rs` | - | Test required `--hostname` and command parsing | `git diff --name-status 5632f78..8f092ac` |
+| modified | `src/cli/parse_tests.rs` | - | Test required `--host` and command parsing | `git diff --name-status 5632f78..8f092ac` |
 | modified | `src/cli/run.rs` | - | Run file-tail command arm | `git diff --name-status 5632f78..8f092ac` |
 | modified | `src/config.rs` | - | Add file-tail and agent parity config fields | `git diff --name-status 5632f78..8f092ac` |
 | modified | `src/config_tests.rs` | - | Cover config additions | `git diff --name-status 5632f78..8f092ac` |
@@ -275,6 +275,6 @@ No new bead was created by this `save-to-md` pass. `bd list --all --sort updated
 
 - Deploy the new `main` image/config if production has not already picked up PR #73.
 - Configure `CORTEX_FILE_TAIL_LOG_VOLUME` per host for the app log root that should appear as `/file-tail-root` inside Cortex.
-- Add file-tail sources for SWAG, Authelia, AdGuard, fail2ban, or other explicit log files using `cortex file-tail add --id ... --path /file-tail-root/... --tag ... --hostname ...`.
+- Add file-tail sources for SWAG, Authelia, AdGuard, fail2ban, or other explicit log files using `cortex file-tail add --id ... --path /file-tail-root/... --tag ... --host ...`.
 - Use `cortex file-tail status --json` and `cortex action=status`/MCP `status` to watch tail health and blocked writer state.
 - Review the three ambiguous historical `docs/plans/` files in a separate cleanup pass before moving them to `docs/plans/complete/`.

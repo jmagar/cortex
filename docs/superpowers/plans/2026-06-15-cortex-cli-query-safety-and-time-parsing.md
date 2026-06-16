@@ -17,7 +17,7 @@
 - **Create** `src/cli/timearg.rs` — pure time-argument normalizer (`parse_time_arg`). One responsibility: turn a user string into an RFC3339 string, given an injected `now`.
 - **Create** `src/cli/timearg_tests.rs` — sidecar unit tests for the parser.
 - **Modify** `src/cli.rs` — register `pub(crate) mod timearg;`.
-- **Modify** `src/cli/parse_logs.rs` — route the existing `--from/--to/--received-from/--received-to` values through `parse_time_arg` so relative input is accepted. (Flag *names* are unchanged here; the rename to `--since/--until` is Plan 2.)
+- **Modify** `src/cli/parse_logs.rs` — route the existing `--from/--to/--received-since/--received-until` values through `parse_time_arg` so relative input is accepted. (Flag *names* are unchanged here; the rename to `--since/--until` is Plan 2.)
 - **Modify** `src/db/queries.rs` — add `lint_fts_query` (fix-it detection) and call it from `validate_fts_query`; add `fts_phrase_literal` to wrap `--grep` input as a safe FTS5 phrase.
 - **Modify** `src/db/queries_tests.rs` — sidecar tests for the lint + phrase helpers.
 - **Modify** the search args struct + `parse_search` (in `src/cli/args*.rs` and `src/cli/parse_logs.rs`) — add a `grep: Option<String>` field, parse `--grep`, and make it mutually exclusive with `--query`.
@@ -275,7 +275,7 @@ git commit -m "feat(cli): time parser accepts RFC3339, date, and date-time forms
 - Modify: `src/cli/parse_logs.rs` (the `parse_search` and `parse_filter` time-flag arms)
 - Modify: `src/cli/parse_logs_tests.rs`
 
-> The flags keep their current names (`--from`, `--to`, `--received-from`, `--received-to`) in this plan; renaming to `--since/--until` is Plan 2. Here we only normalize their *values* through `parse_time_arg`.
+> The flags keep their current names (`--from`, `--to`, `--received-since`, `--received-until`) in this plan; renaming to `--since/--until` is Plan 2. Here we only normalize their *values* through `parse_time_arg`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -284,7 +284,7 @@ Add to `src/cli/parse_logs_tests.rs`:
 ```rust
 #[test]
 fn search_normalizes_relative_from() {
-    let cmd = parse_search(&["error".into(), "--from".into(), "1h".into()]).unwrap();
+    let cmd = parse_search(&["error".into(), "--since".into(), "1h".into()]).unwrap();
     let CliCommand::Search(args) = cmd else { panic!("expected Search") };
     let from = args.from.expect("from set");
     // Relative input is normalized to an absolute RFC3339 timestamp.
@@ -313,16 +313,16 @@ fn norm_time(raw: String) -> anyhow::Result<String> {
 Then change each time-flag assignment in `parse_search` (and the equals-form arms) from:
 
 ```rust
-"--from" => parsed.from = Some(flags.value("--from")?),
+"--since" => parsed.from = Some(flags.value("--since")?),
 ```
 
 to:
 
 ```rust
-"--from" => parsed.from = Some(norm_time(flags.value("--from")?)?),
+"--since" => parsed.from = Some(norm_time(flags.value("--since")?)?),
 ```
 
-Apply the same wrap to `--to`, `--received-from`, `--received-to` in both the
+Apply the same wrap to `--to`, `--received-since`, `--received-until` in both the
 space-separated and `--flag=value` arms.
 
 - [ ] **Step 4: Run the test**

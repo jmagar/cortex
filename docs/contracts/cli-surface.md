@@ -73,12 +73,12 @@ Exit codes: `0` success.
 ### syslog agent issue
 
 ```
-cortex agent issue --hostname <host> [--ttl <duration>] [--json]
+cortex agent issue --host <host> [--ttl <duration>] [--json]
 ```
 
 Generate a one-time enrollment token. Inserts a pending row in `agents` with `connection_state=NeverConnected` and the token's BLAKE3 hash. Prints the raw token **once** on stdout — operator must copy it now; the server does not retain it in plaintext.
 
-- `--hostname <host>` (required): the canonical hostname this token will be bound to. Server checks that the hostname is not already `Active` with a different `host_id` (error code 3 if conflict).
+- `--host <host>` (required): the canonical hostname this token will be bound to. Server checks that the hostname is not already `Active` with a different `host_id` (error code 3 if conflict).
 - `--ttl <duration>` (optional, default `15m`): how long the one-time token is valid before its hash is purged from `agents` (a never-claimed token shouldn't sit on disk forever). Parsed by `humantime`.
 - `--json`: emit `{"token": "...", "host_id": "...", "expires_at": "..."}`.
 

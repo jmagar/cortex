@@ -782,7 +782,7 @@ print('ok')
 assert_eq "tail: results in non-increasing timestamp order" "$TAIL_ORDER" "ok"
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
-    # hostname= filter must only return logs for that host
+    # host= filter must only return logs for that host
     TAIL_FILTERED=$(mcp_call tail "host=${SEED_HOST}" "n=50" 2>&1)
     assert_no_error "tail(hostname filter): no error" "$TAIL_FILTERED"
     TAIL_FILTER_VALID=$(printf '%s\n' "$TAIL_FILTERED" | python3 -c "
@@ -838,7 +838,7 @@ print('ok')
 assert_eq "search(phrase): results contain exact phrase" "$PHRASE_MATCH" "ok"
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
-    # hostname= filter: should return only that host's logs
+    # host= filter: should return only that host's logs
     SEARCH_HOST=$(mcp_call search "host=${SEED_HOST}" "limit=50" 2>&1)
     assert_no_error "search(hostname filter): no error" "$SEARCH_HOST"
     SEARCH_HOST_VALID=$(printf '%s\n' "$SEARCH_HOST" | python3 -c "
