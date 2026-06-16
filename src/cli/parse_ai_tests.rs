@@ -58,8 +58,8 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
     let search = parse_ai_search(&strings(&[
         "--project=/repo",
         "--tool=Edit",
-        "--from=2026-01-01T00:00:00Z",
-        "--to=2026-01-02T00:00:00Z",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-02T00:00:00Z",
         "--limit=9",
         "--json",
         "disk",
@@ -80,8 +80,8 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
     let abuse = parse_ai_abuse(&strings(&[
         "--project=/repo",
         "--tool=Bash",
-        "--from=old",
-        "--to=new",
+        "--since=old",
+        "--until=new",
         "--limit=10",
         "--before=2",
         "--after=3",
@@ -105,11 +105,11 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
         "--session-id=s1",
         "--ai-query=build",
         "--log-query=error",
-        "--hostname=host1",
-        "--source-ip=10.0.0.8",
-        "--app-name=cortex",
-        "--from=t0",
-        "--to=t1",
+        "--host=host1",
+        "--source=10.0.0.8",
+        "--app=cortex",
+        "--since=t0",
+        "--until=t1",
         "--window-minutes=15",
         "--severity-min=warn",
         "--limit=20",
@@ -142,8 +142,8 @@ fn parse_ai_inventory_and_indexing_commands_accept_flags() {
 
     let tools = parse_ai_tools(&strings(&[
         "--project=/repo",
-        "--from=a",
-        "--to=b",
+        "--since=a",
+        "--until=b",
         "--json",
     ]))
     .unwrap();
@@ -155,7 +155,8 @@ fn parse_ai_inventory_and_indexing_commands_accept_flags() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let projects = parse_ai_projects(&strings(&["--tool=Write", "--from=a", "--to=b"])).unwrap();
+    let projects =
+        parse_ai_projects(&strings(&["--tool=Write", "--since=a", "--until=b"])).unwrap();
     match projects {
         crate::cli::CliCommand::Ai(crate::cli::AiCommand::Projects(args)) => {
             assert_eq!(args.tool.as_deref(), Some("Write"));

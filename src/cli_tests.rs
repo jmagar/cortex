@@ -100,9 +100,9 @@ fn parse_service_logs_accepts_time_range_and_json() {
         "service",
         "logs",
         "cortex-ai-watch",
-        "--from",
+        "--since",
         "2026-05-19 19:55:00",
-        "--to=2026-05-19 20:05:00",
+        "--until=2026-05-19 20:05:00",
         "--tail",
         "50",
         "--json",
@@ -302,9 +302,9 @@ fn parse_ai_correlate_collects_cross_reference_filters() {
         "--ai-query",
         "deploy",
         "--log-query=error",
-        "--hostname",
+        "--host",
         "host-a",
-        "--app-name",
+        "--app",
         "dockerd",
         "--window-minutes",
         "15",
@@ -1519,7 +1519,7 @@ fn parse_compare_with_ranges() {
 
 #[test]
 fn parse_apps_with_hostname_limit() {
-    let cmd = CliCommand::parse(strings(&["apps", "--hostname", "dookie", "--limit", "50"]))
+    let cmd = CliCommand::parse(strings(&["apps", "--host", "dookie", "--limit", "50"]))
         .expect("parse apps");
     match cmd {
         CliCommand::Apps(args) => {

@@ -102,9 +102,9 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
                 i += 1;
                 out.tag = required(args, i, "--tag")?;
             }
-            "--hostname" => {
+            "--host" => {
                 i += 1;
-                out.hostname = Some(required(args, i, "--hostname")?);
+                out.hostname = Some(required(args, i, "--host")?);
             }
             "--facility" => {
                 i += 1;
@@ -126,7 +126,7 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
                         "--id",
                         "--path",
                         "--tag",
-                        "--hostname",
+                        "--host",
                         "--facility",
                         "--severity",
                         "--from-start",

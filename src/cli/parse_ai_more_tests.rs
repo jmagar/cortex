@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn parse_ai_similar_collects_query_and_filters() {
-    let args = strings(&["disk", "full", "--hostname", "host1", "--limit=7", "--json"]);
+    let args = strings(&["disk", "full", "--host", "host1", "--limit=7", "--json"]);
 
     let command = parse_ai_similar(&args).unwrap();
 
@@ -20,11 +20,11 @@ fn parse_ai_similar_collects_query_and_filters() {
 #[test]
 fn parse_ai_similar_and_ask_history_accept_all_filters() {
     let similar = parse_ai_similar(&strings(&[
-        "--hostname=host1",
-        "--app-name=cortex",
+        "--host=host1",
+        "--app=cortex",
         "--severity-min=err",
-        "--from=t0",
-        "--to=t1",
+        "--since=t0",
+        "--until=t1",
         "--window-minutes=45",
         "--limit=8",
         "disk",
@@ -41,10 +41,10 @@ fn parse_ai_similar_and_ask_history_accept_all_filters() {
     }
 
     let ask = parse_ai_ask_history(&strings(&[
-        "--hostname=host1",
-        "--app-name=cortex",
-        "--from=t0",
-        "--to=t1",
+        "--host=host1",
+        "--app=cortex",
+        "--since=t0",
+        "--until=t1",
         "--limit=5",
         "--json",
         "why",
@@ -64,7 +64,7 @@ fn parse_ai_similar_and_ask_history_accept_all_filters() {
 
 #[test]
 fn parse_ai_incident_context_requires_from_and_to() {
-    let args = strings(&["--from", "2026-01-01T00:00:00Z"]);
+    let args = strings(&["--since", "2026-01-01T00:00:00Z"]);
 
     let err = parse_ai_incident_context(&args).unwrap_err().to_string();
 
@@ -74,10 +74,10 @@ fn parse_ai_incident_context_requires_from_and_to() {
 #[test]
 fn parse_ai_incident_context_accepts_full_filter_set() {
     let command = parse_ai_incident_context(&strings(&[
-        "--from=2026-01-01T00:00:00Z",
-        "--to=2026-01-01T00:10:00Z",
-        "--hostname=host1",
-        "--app-name=cortex",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-01T00:10:00Z",
+        "--host=host1",
+        "--app=cortex",
         "--query=panic",
         "--severity-min=warn",
         "--limit=12",
@@ -102,8 +102,8 @@ fn parse_ai_incidents_accepts_terms_and_window_filters() {
     let command = parse_ai_incidents(&strings(&[
         "--project=/repo",
         "--tool=Bash",
-        "--from=t0",
-        "--to=t1",
+        "--since=t0",
+        "--until=t1",
         "--limit=13",
         "--window-minutes=60",
         "--term=panic",
@@ -153,8 +153,8 @@ fn parse_ai_investigate_accepts_incident_filters_and_limits() {
     let command = parse_ai_investigate(&strings(&[
         "--project=/repo",
         "--tool=Edit",
-        "--from=t0",
-        "--to=t1",
+        "--since=t0",
+        "--until=t1",
         "--limit=21",
         "--window-minutes=30",
         "--correlation-window-minutes=7",
@@ -185,8 +185,8 @@ fn parse_ai_assess_accepts_incident_and_investigation_filters() {
         "--model=gemini-test",
         "--project=/repo",
         "--tool=Bash",
-        "--from=t0",
-        "--to=t1",
+        "--since=t0",
+        "--until=t1",
         "--limit=34",
         "--window-minutes=44",
         "--correlation-window-minutes=9",
@@ -221,7 +221,7 @@ fn parse_ai_more_reports_required_query_and_unexpected_argument_errors() {
         (parse_ai_ask_history, vec!["--limit=1"], "requires a query"),
         (
             parse_ai_incident_context,
-            vec!["--from=t0", "--to=t1", "extra"],
+            vec!["--since=t0", "--until=t1", "extra"],
             "unexpected positional argument",
         ),
         (

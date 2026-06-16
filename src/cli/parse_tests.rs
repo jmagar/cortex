@@ -23,7 +23,7 @@ fn parses_file_tail_add() {
         "/mnt/appdata/swag/log/nginx/access.log".into(),
         "--tag".into(),
         "swag-access".into(),
-        "--hostname".into(),
+        "--host".into(),
         "squirts".into(),
         "--facility".into(),
         "local4".into(),
@@ -63,7 +63,7 @@ fn file_tail_add_requires_hostname() {
     ])
     .unwrap_err();
 
-    assert!(err.to_string().contains("--hostname"));
+    assert!(err.to_string().contains("--host"));
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn parse_routes_host_state() {
     assert!(matches!(
         parse_command(vec![
             "host-state".to_string(),
-            "--hostname".to_string(),
+            "--host".to_string(),
             "tootie".to_string(),
             "--json".to_string(),
         ])
@@ -269,7 +269,7 @@ fn parse_host_state_requires_host_selector_with_usage() {
         .to_string();
 
     assert!(
-        err.contains("requires --host-id ID or --hostname HOST"),
+        err.contains("requires --host-id ID or --host HOST"),
         "got: {err}"
     );
     assert!(err.contains("Usage: cortex host-state"), "got: {err}");

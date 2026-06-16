@@ -22,8 +22,8 @@ fn parse_service_and_db_commands_dispatch_expected_subcommands() {
     let service = parse_service(&strings(&[
         "logs",
         "cortex",
-        "--from=t0",
-        "--to=t1",
+        "--since=t0",
+        "--until=t1",
         "--tail=20",
         "--json",
     ]))

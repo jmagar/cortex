@@ -97,27 +97,25 @@ const CATALOG: &[CommandDoc] = &[
         name: "search",
         summary: "Full-text search across all logs",
         usage: &[
-            "cortex search [query] [--grep TEXT] [--hostname HOST] [--source-ip SOURCE] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]    (TIME accepts 1h, 2d, yesterday, or RFC3339)",
+            "cortex search [query] [--grep TEXT] [--host HOST] [--source SOURCE] [--severity LEVEL] [--app APP] [--facility FACILITY] [--exclude-facility FACILITY] [--since TIME] [--until TIME] [--received-since TIME] [--received-until TIME] [--limit N] [--json]    (TIME accepts 1h, 2d, yesterday, or RFC3339)",
         ],
     },
     CommandDoc {
         name: "filter",
         summary: "Filter logs by structured fields (host, container, severity…)",
         usage: &[
-            "cortex filter [--hostname HOST] [--source-ip SOURCE] [--source-kind KIND] [--tool TOOL] [--project PATH] [--session-id ID] [--container NAME] [--docker-host HOST] [--stream stdout|stderr] [--event-action ACTION] [--severity LEVEL] [--app-name APP] [--facility FACILITY] [--exclude-facility FACILITY] [--from TIME] [--to TIME] [--received-from TIME] [--received-to TIME] [--limit N] [--json]",
+            "cortex filter [--host HOST] [--source SOURCE] [--source-kind KIND] [--tool TOOL] [--project PATH] [--session-id ID] [--container NAME] [--docker-host HOST] [--stream stdout|stderr] [--event-action ACTION] [--severity LEVEL] [--app APP] [--facility FACILITY] [--exclude-facility FACILITY] [--since TIME] [--until TIME] [--received-since TIME] [--received-until TIME] [--limit N] [--json]",
         ],
     },
     CommandDoc {
         name: "tail",
         summary: "Show the most recent log lines",
-        usage: &[
-            "cortex tail [-n N] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--json]",
-        ],
+        usage: &["cortex tail [-n N] [--host HOST] [--source SOURCE] [--app APP] [--json]"],
     },
     CommandDoc {
         name: "errors",
         summary: "Recent error-level log entries",
-        usage: &["cortex errors [--from TIME] [--to TIME] [--limit N] [--json]"],
+        usage: &["cortex errors [--since TIME] [--until TIME] [--limit N] [--json]"],
     },
     CommandDoc {
         name: "hosts",
@@ -128,7 +126,7 @@ const CATALOG: &[CommandDoc] = &[
         name: "sessions",
         summary: "List indexed AI sessions",
         usage: &[
-            "cortex sessions [--project PATH] [--tool TOOL] [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--json]",
+            "cortex sessions [--project PATH] [--tool TOOL] [--host HOST] [--since TIME] [--until TIME] [--limit N] [--json]",
         ],
     },
     CommandDoc {
@@ -177,14 +175,14 @@ const CATALOG: &[CommandDoc] = &[
         name: "timeline",
         summary: "Log volume over time, bucketed",
         usage: &[
-            "cortex timeline [--bucket minute|hour|day] [--group-by FIELD] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]",
+            "cortex timeline [--bucket minute|hour|day] [--group-by FIELD] [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--json]",
         ],
     },
     CommandDoc {
         name: "patterns",
         summary: "Recurring message patterns",
         usage: &[
-            "cortex patterns [--top-n N] [--scan-limit N] [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--json]",
+            "cortex patterns [--top-n N] [--scan-limit N] [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--json]",
         ],
     },
     CommandDoc {
@@ -196,21 +194,21 @@ const CATALOG: &[CommandDoc] = &[
         name: "apps",
         summary: "Top application/program names by volume",
         usage: &[
-            "cortex apps [--hostname HOST] [--from TIME] [--to TIME] [--limit N] [--offset N] [--json]",
+            "cortex apps [--host HOST] [--since TIME] [--until TIME] [--limit N] [--offset N] [--json]",
         ],
     },
     CommandDoc {
         name: "correlate",
         summary: "Correlate events around a reference time",
         usage: &[
-            "cortex correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--hostname HOST] [--source-ip SOURCE] [--query FTS] [--limit N] [--json]",
+            "cortex correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--host HOST] [--source SOURCE] [--query FTS] [--limit N] [--json]",
         ],
     },
     CommandDoc {
         name: "host-state",
         summary: "Per-host health/pressure snapshot",
         usage: &[
-            "cortex host-state [--host-id ID] [--hostname HOST] [--since TIME] [--limit N] [--json]",
+            "cortex host-state [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]",
         ],
     },
     CommandDoc {
@@ -252,16 +250,16 @@ const CATALOG: &[CommandDoc] = &[
         name: "ai",
         summary: "AI transcript search, correlation, and indexing",
         usage: &[
-            "cortex ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]",
-            "cortex ai abuse [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
-            "cortex ai incidents [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
-            "cortex ai investigate [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
-            "cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
-            "cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--from TIME] [--to TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
-            "cortex ai blocks [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--detail compact|full] [--json]",
+            "cortex ai search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
+            "cortex ai abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
+            "cortex ai incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
+            "cortex ai investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
+            "cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
+            "cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
+            "cortex ai blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
             "cortex ai context --project PATH [--tool TOOL] [--limit N] [--json]",
-            "cortex ai tools [--project PATH] [--from TIME] [--to TIME] [--json]",
-            "cortex ai projects [--tool TOOL] [--from TIME] [--to TIME] [--json]",
+            "cortex ai tools [--project PATH] [--since TIME] [--until TIME] [--json]",
+            "cortex ai projects [--tool TOOL] [--since TIME] [--until TIME] [--json]",
             "cortex ai index [--path PATH] [--since TIME] [--force] [--json]",
             "cortex ai add --file FILE [--force] [--json]",
             "cortex ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
@@ -329,7 +327,7 @@ const CATALOG: &[CommandDoc] = &[
         usage: &[
             "cortex file-tail list [--json]",
             "cortex file-tail status [--json]",
-            "cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
+            "cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
             "cortex file-tail remove --id ID [--json]",
             "cortex file-tail enable --id ID [--json]",
             "cortex file-tail disable --id ID [--json]",
@@ -376,7 +374,7 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "service",
         summary: "Inspect container service logs",
-        usage: &["cortex service logs SERVICE [--from TIME] [--to TIME] [--tail N] [--json]"],
+        usage: &["cortex service logs SERVICE [--since TIME] [--until TIME] [--tail N] [--json]"],
     },
     CommandDoc {
         name: "setup",
@@ -430,28 +428,28 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         path: "ai search",
         summary: "Full-text search over indexed AI transcript sessions",
         usage: &[
-            "cortex ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]",
+            "cortex ai search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai abuse",
         summary: "Find risky or failure-related transcript messages",
         usage: &[
-            "cortex ai abuse [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
+            "cortex ai abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai incidents",
         summary: "Cluster AI transcript abuse matches into incidents",
         usage: &[
-            "cortex ai incidents [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
+            "cortex ai incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai investigate",
         summary: "Expand AI incidents into evidence bundles",
         usage: &[
-            "cortex ai investigate [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
+            "cortex ai investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
             "Default output is compact; use --detail full for complete evidence.",
         ],
     },
@@ -459,21 +457,21 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         path: "ai assess",
         summary: "Assess one AI incident with optional model context",
         usage: &[
-            "cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
+            "cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai correlate",
         summary: "Correlate AI transcript anchors with non-AI logs",
         usage: &[
-            "cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--hostname HOST] [--source-ip SOURCE] [--app-name APP] [--from TIME] [--to TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
+            "cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai blocks",
         summary: "AI transcript activity grouped into 5-hour UTC blocks",
         usage: &[
-            "cortex ai blocks [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--detail compact|full] [--json]",
+            "cortex ai blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
             "Default output is capped for interactive use; use --detail full for every block.",
         ],
     },
@@ -485,12 +483,12 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
     NestedCommandDoc {
         path: "ai tools",
         summary: "List AI tools present in transcript metadata",
-        usage: &["cortex ai tools [--project PATH] [--from TIME] [--to TIME] [--json]"],
+        usage: &["cortex ai tools [--project PATH] [--since TIME] [--until TIME] [--json]"],
     },
     NestedCommandDoc {
         path: "ai projects",
         summary: "List AI projects present in transcript metadata",
-        usage: &["cortex ai projects [--tool TOOL] [--from TIME] [--to TIME] [--json]"],
+        usage: &["cortex ai projects [--tool TOOL] [--since TIME] [--until TIME] [--json]"],
     },
     NestedCommandDoc {
         path: "ai index",
@@ -543,21 +541,21 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         path: "ai similar",
         summary: "Find incidents similar to a free-text query",
         usage: &[
-            "cortex ai similar QUERY [--hostname HOST] [--app-name APP] [--severity-min LEVEL] [--from TIME] [--to TIME] [--window-minutes N] [--limit N] [--json]",
+            "cortex ai similar QUERY [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--window-minutes N] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai ask-history",
         summary: "Search historical AI sessions and nearby system logs",
         usage: &[
-            "cortex ai ask-history QUERY [--hostname HOST] [--app-name APP] [--from TIME] [--to TIME] [--limit N] [--json]",
+            "cortex ai ask-history QUERY [--host HOST] [--app APP] [--since TIME] [--until TIME] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai incident-context",
         summary: "Build incident context from an explicit time window",
         usage: &[
-            "cortex ai incident-context --from TIME --to TIME [--hostname HOST] [--app-name APP] [--query FTS] [--severity-min LEVEL] [--limit N] [--json]",
+            "cortex ai incident-context --since TIME --until TIME [--host HOST] [--app APP] [--query FTS] [--severity-min LEVEL] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
@@ -715,7 +713,7 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         path: "file-tail add",
         summary: "Add or update a managed file-tail source",
         usage: &[
-            "cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
+            "cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
         ],
     },
     NestedCommandDoc {
@@ -778,7 +776,7 @@ const ENVIRONMENT: &[(&str, &str)] = &[
 ];
 
 const QUICK_START: &[&str] = &[
-    "cortex search \"oom killer\" --hostname web-01 --from 1h",
+    "cortex search \"oom killer\" --host web-01 --since 1h",
     "cortex search --grep \"smoke-test\"   # literal text, no FTS5 syntax",
     "cortex tail -n 50 --severity err",
     "cortex ai investigate --window-minutes 30",

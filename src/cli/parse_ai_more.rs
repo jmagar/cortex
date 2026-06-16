@@ -12,11 +12,11 @@ pub(crate) fn parse_ai_similar(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--host" => parsed.hostname = Some(flags.value("--host")?),
+            "--app" => parsed.app_name = Some(flags.value("--app")?),
             "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--since" => parsed.from = Some(flags.value("--since")?),
+            "--until" => parsed.to = Some(flags.value("--until")?),
             "--window-minutes" => {
                 parsed.window_minutes = Some(parse_u32_flag(
                     "--window-minutes",
@@ -24,19 +24,21 @@ pub(crate) fn parse_ai_similar(args: &[String]) -> Result<CliCommand> {
                 )?)
             }
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            _ if arg.starts_with("--host=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--host")?)
             }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            _ if arg.starts_with("--app=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app")?)
             }
             _ if arg.starts_with("--severity-min=") => {
                 parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
             }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+            _ if arg.starts_with("--since=") => {
+                parsed.from = Some(value_after_equals(arg, "--since")?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--until=") => {
+                parsed.to = Some(value_after_equals(arg, "--until")?)
+            }
             _ if arg.starts_with("--window-minutes=") => {
                 parsed.window_minutes = Some(parse_u32_flag(
                     "--window-minutes",
@@ -67,21 +69,23 @@ pub(crate) fn parse_ai_ask_history(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--host" => parsed.hostname = Some(flags.value("--host")?),
+            "--app" => parsed.app_name = Some(flags.value("--app")?),
+            "--since" => parsed.from = Some(flags.value("--since")?),
+            "--until" => parsed.to = Some(flags.value("--until")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            _ if arg.starts_with("--host=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--host")?)
             }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            _ if arg.starts_with("--app=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app")?)
             }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+            _ if arg.starts_with("--since=") => {
+                parsed.from = Some(value_after_equals(arg, "--since")?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--until=") => {
+                parsed.to = Some(value_after_equals(arg, "--until")?)
+            }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
                     "--limit",
@@ -105,20 +109,20 @@ pub(crate) fn parse_ai_incident_context(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--from" => parsed.from = flags.value("--from")?,
-            "--to" => parsed.to = flags.value("--to")?,
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--since" => parsed.from = flags.value("--since")?,
+            "--until" => parsed.to = flags.value("--until")?,
+            "--host" => parsed.hostname = Some(flags.value("--host")?),
+            "--app" => parsed.app_name = Some(flags.value("--app")?),
             "--query" => parsed.query = Some(flags.value("--query")?),
             "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--from=") => parsed.from = value_after_equals(arg, "--from")?,
-            _ if arg.starts_with("--to=") => parsed.to = value_after_equals(arg, "--to")?,
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            _ if arg.starts_with("--since=") => parsed.from = value_after_equals(arg, "--since")?,
+            _ if arg.starts_with("--until=") => parsed.to = value_after_equals(arg, "--until")?,
+            _ if arg.starts_with("--host=") => {
+                parsed.hostname = Some(value_after_equals(arg, "--host")?)
             }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
+            _ if arg.starts_with("--app=") => {
+                parsed.app_name = Some(value_after_equals(arg, "--app")?)
             }
             _ if arg.starts_with("--query=") => {
                 parsed.query = Some(value_after_equals(arg, "--query")?)
@@ -153,8 +157,8 @@ pub(crate) fn parse_ai_incidents(args: &[String]) -> Result<CliCommand> {
             "--json" => parsed.json = true,
             "--project" => parsed.project = Some(flags.value("--project")?),
             "--tool" => parsed.tool = Some(flags.value("--tool")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--since" => parsed.from = Some(flags.value("--since")?),
+            "--until" => parsed.to = Some(flags.value("--until")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "--window-minutes" => {
                 parsed.window_minutes = Some(parse_u32_flag(
@@ -169,10 +173,12 @@ pub(crate) fn parse_ai_incidents(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--tool=") => {
                 parsed.tool = Some(value_after_equals(arg, "--tool")?)
             }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+            _ if arg.starts_with("--since=") => {
+                parsed.from = Some(value_after_equals(arg, "--since")?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--until=") => {
+                parsed.to = Some(value_after_equals(arg, "--until")?)
+            }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
                     "--limit",
@@ -203,8 +209,8 @@ pub(crate) fn parse_ai_investigate(args: &[String]) -> Result<CliCommand> {
             "--json" => parsed.json = true,
             "--project" => parsed.project = Some(flags.value("--project")?),
             "--tool" => parsed.tool = Some(flags.value("--tool")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--since" => parsed.from = Some(flags.value("--since")?),
+            "--until" => parsed.to = Some(flags.value("--until")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "--window-minutes" => {
                 parsed.window_minutes = Some(parse_u32_flag(
@@ -233,10 +239,12 @@ pub(crate) fn parse_ai_investigate(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--tool=") => {
                 parsed.tool = Some(value_after_equals(arg, "--tool")?)
             }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+            _ if arg.starts_with("--since=") => {
+                parsed.from = Some(value_after_equals(arg, "--since")?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--until=") => {
+                parsed.to = Some(value_after_equals(arg, "--until")?)
+            }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
                     "--limit",
@@ -277,8 +285,8 @@ pub(crate) fn parse_ai_investigate(args: &[String]) -> Result<CliCommand> {
                         "--json",
                         "--project",
                         "--tool",
-                        "--from",
-                        "--to",
+                        "--since",
+                        "--until",
                         "--limit",
                         "--window-minutes",
                         "--correlation-window-minutes",
@@ -314,8 +322,8 @@ pub(crate) fn parse_ai_assess(args: &[String]) -> Result<CliCommand> {
             "--model" => model = Some(flags.value("--model")?),
             "--project" => project = Some(flags.value("--project")?),
             "--tool" => tool = Some(flags.value("--tool")?),
-            "--from" => from = Some(flags.value("--from")?),
-            "--to" => to = Some(flags.value("--to")?),
+            "--since" => from = Some(flags.value("--since")?),
+            "--until" => to = Some(flags.value("--until")?),
             "--limit" => limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "--window-minutes" => {
                 window_minutes = Some(parse_u32_flag(
@@ -335,8 +343,8 @@ pub(crate) fn parse_ai_assess(args: &[String]) -> Result<CliCommand> {
                 project = Some(value_after_equals(arg, "--project")?)
             }
             _ if arg.starts_with("--tool=") => tool = Some(value_after_equals(arg, "--tool")?),
-            _ if arg.starts_with("--from=") => from = Some(value_after_equals(arg, "--from")?),
-            _ if arg.starts_with("--to=") => to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--since=") => from = Some(value_after_equals(arg, "--since")?),
+            _ if arg.starts_with("--until=") => to = Some(value_after_equals(arg, "--until")?),
             _ if arg.starts_with("--limit=") => {
                 limit = Some(parse_u32_flag(
                     "--limit",
