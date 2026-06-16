@@ -925,6 +925,16 @@ pub(crate) fn render_command(name: &str, color: bool) -> Option<String> {
     for line in doc.usage {
         out.push_str(&format!("  {}\n", paint(color, CYAN_ANSI, line)));
     }
+    // Copy-paste examples, sourced from the single ACTION_SPECS registry so they
+    // stay in lockstep with the canonical flags.
+    let examples = crate::cli::registry_examples(name);
+    if !examples.is_empty() {
+        out.push('\n');
+        out.push_str(&format!("  {}\n", heading(color, "Examples")));
+        for ex in examples {
+            out.push_str(&format!("  {}\n", paint(color, MUTED_ANSI, ex)));
+        }
+    }
     Some(out)
 }
 

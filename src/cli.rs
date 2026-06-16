@@ -100,8 +100,6 @@ pub(crate) fn registry_flags(cli_command: &str) -> &'static [cortex::mcp::FlagSp
 }
 
 /// Copy-paste examples for a CLI command (empty slice when none).
-// Consumed by the discoverability help (Plan 2 Task 7); allow removed then.
-#[allow(dead_code)]
 pub(crate) fn registry_examples(cli_command: &str) -> &'static [&'static str] {
     cortex::mcp::examples_for(&cli_command.replace('-', "_")).unwrap_or(&[])
 }
