@@ -400,9 +400,9 @@ pub struct SearchParams {
     /// End of time range (ISO 8601)
     pub to: Option<String>,
     /// Start of receive-time range (ISO 8601)
-    pub received_from: Option<String>,
+    pub received_since: Option<String>,
     /// End of receive-time range (ISO 8601)
-    pub received_to: Option<String>,
+    pub received_until: Option<String>,
     /// Max results to return
     pub limit: Option<u32>,
     pub ai_tool: Option<String>,

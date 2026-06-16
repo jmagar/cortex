@@ -124,7 +124,7 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
             assert_eq!(args.query.as_deref(), Some("disk full"));
             assert_eq!(args.hostname.as_deref(), Some("host1"));
             assert_eq!(
-                args.received_to.as_deref(),
+                args.received_until.as_deref(),
                 Some("2026-01-04T00:00:00+00:00")
             );
             assert_eq!(args.limit, Some(30));

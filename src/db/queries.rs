@@ -1306,8 +1306,8 @@ pub fn search_ai_related_logs(
         process_id: None,
         from: None,
         to: None,
-        received_from: None,
-        received_to: None,
+        received_since: None,
+        received_until: None,
         limit: None,
         ai_tool: None,
         ai_project: None,
@@ -2385,12 +2385,12 @@ fn append_filters(
         bindings.push(rusqlite::types::Value::Text(to.clone()));
         *idx += 1;
     }
-    if let Some(ref from) = params.received_from {
+    if let Some(ref from) = params.received_since {
         sql.push_str(&format!(" AND l.received_at >= ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         *idx += 1;
     }
-    if let Some(ref to) = params.received_to {
+    if let Some(ref to) = params.received_until {
         sql.push_str(&format!(" AND l.received_at <= ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
         *idx += 1;

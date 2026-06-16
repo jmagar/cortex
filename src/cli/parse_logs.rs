@@ -30,10 +30,10 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
             "--since" => parsed.from = Some(norm_time(flags.value("--since")?)?),
             "--until" => parsed.to = Some(norm_time(flags.value("--until")?)?),
             "--received-since" => {
-                parsed.received_from = Some(norm_time(flags.value("--received-since")?)?)
+                parsed.received_since = Some(norm_time(flags.value("--received-since")?)?)
             }
             "--received-until" => {
-                parsed.received_to = Some(norm_time(flags.value("--received-until")?)?)
+                parsed.received_until = Some(norm_time(flags.value("--received-until")?)?)
             }
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "-h" | "--help" => bail!("use `cortex --help` for usage"),
@@ -62,11 +62,12 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
                 parsed.to = Some(norm_time(value_after_equals(arg, "--until")?)?)
             }
             _ if arg.starts_with("--received-since=") => {
-                parsed.received_from =
+                parsed.received_since =
                     Some(norm_time(value_after_equals(arg, "--received-since")?)?)
             }
             _ if arg.starts_with("--received-until=") => {
-                parsed.received_to = Some(norm_time(value_after_equals(arg, "--received-until")?)?)
+                parsed.received_until =
+                    Some(norm_time(value_after_equals(arg, "--received-until")?)?)
             }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
@@ -110,10 +111,10 @@ pub(crate) fn parse_filter(args: &[String]) -> Result<CliCommand> {
             "--since" => parsed.from = Some(norm_time(flags.value("--since")?)?),
             "--until" => parsed.to = Some(norm_time(flags.value("--until")?)?),
             "--received-since" => {
-                parsed.received_from = Some(norm_time(flags.value("--received-since")?)?)
+                parsed.received_since = Some(norm_time(flags.value("--received-since")?)?)
             }
             "--received-until" => {
-                parsed.received_to = Some(norm_time(flags.value("--received-until")?)?)
+                parsed.received_until = Some(norm_time(flags.value("--received-until")?)?)
             }
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "--source-kind" => parsed.source_kind = Some(flags.value("--source-kind")?),
@@ -153,11 +154,12 @@ pub(crate) fn parse_filter(args: &[String]) -> Result<CliCommand> {
                 parsed.to = Some(norm_time(value_after_equals(arg, "--until")?)?)
             }
             _ if arg.starts_with("--received-since=") => {
-                parsed.received_from =
+                parsed.received_since =
                     Some(norm_time(value_after_equals(arg, "--received-since")?)?)
             }
             _ if arg.starts_with("--received-until=") => {
-                parsed.received_to = Some(norm_time(value_after_equals(arg, "--received-until")?)?)
+                parsed.received_until =
+                    Some(norm_time(value_after_equals(arg, "--received-until")?)?)
             }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(

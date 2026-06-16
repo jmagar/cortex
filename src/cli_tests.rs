@@ -72,8 +72,8 @@ fn parse_search_collects_query_and_filters() {
             exclude_facility: Some("transcript".into()),
             from: Some("2026-01-01T00:00:00+00:00".into()),
             to: Some("2026-01-02T00:00:00+00:00".into()),
-            received_from: Some("2026-01-01T00:00:30+00:00".into()),
-            received_to: Some("2026-01-02T00:00:30+00:00".into()),
+            received_since: Some("2026-01-01T00:00:30+00:00".into()),
+            received_until: Some("2026-01-02T00:00:30+00:00".into()),
             limit: Some(25),
             json: true,
         })

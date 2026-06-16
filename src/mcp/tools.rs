@@ -656,8 +656,8 @@ phrase matching with quotes, prefix matching with *.
 - `process_id` (string, optional) — filter by process_id (exact match)
 - `from` (string, optional) — start of time range (ISO 8601 / RFC3339, e.g. `2025-01-15T00:00:00Z`)
 - `to` (string, optional) — end of time range (ISO 8601)
-- `received_from` (string, optional) — restrict to entries received after this time (server-side ingestion clock, ISO 8601)
-- `received_to` (string, optional) — restrict to entries received before this time (server-side ingestion clock, ISO 8601)
+- `received_since` (string, optional) — restrict to entries received after this time (server-side ingestion clock, ISO 8601)
+- `received_until` (string, optional) — restrict to entries received before this time (server-side ingestion clock, ISO 8601)
 - `limit` (integer, optional) — max results (default 100, max 1000)
 
 ---
@@ -674,7 +674,7 @@ use `search` for message-body FTS5 queries.
 - `facility` / `exclude_facility` (string, optional) — include or exclude syslog facility
 - `process_id` (string, optional) — filter by process_id
 - `from` / `to` (string, optional) — event timestamp window
-- `received_from` / `received_to` (string, optional) — ingest timestamp window
+- `received_since` / `received_until` (string, optional) — ingest timestamp window
 - `source_kind` (string, optional) — `docker-stream`, `docker-event`, `agent-command`, `shell-history`, `transcript`, `claude`, `codex`, or `gemini`
 - `tool`, `project`, `session_id` (string, optional) — AI transcript filters
 - `docker_host`, `container`, `stream`, `event_action` (string, optional) — Docker refiners

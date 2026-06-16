@@ -555,8 +555,8 @@ fn test_search_received_at_range_filtering() {
     let results = search_logs(
         &pool,
         &SearchParams {
-            received_from: Some("2026-01-01T00:15:00Z".into()),
-            received_to: Some("2026-01-01T00:45:00Z".into()),
+            received_since: Some("2026-01-01T00:15:00Z".into()),
+            received_until: Some("2026-01-01T00:45:00Z".into()),
             ..Default::default()
         },
     )

@@ -468,7 +468,7 @@ if mcp_admin_scope_available; then
             "id=${FILE_TAIL_SMOKE_ID}" \
             "path=${FILE_TAIL_SMOKE_SERVER_PATH}" \
             "tag=${FILE_TAIL_SMOKE_TAG}" \
-            "hostname=${SEED_HOST}" \
+            "host=${SEED_HOST}" \
             "facility=local7" \
             "severity=info" \
             "start_at_end=true" 2>&1)
@@ -479,7 +479,7 @@ if mcp_admin_scope_available; then
             FILE_TAIL_SEARCH=$(mcp_call search \
                 "query=\"${FILE_TAIL_SMOKE_MARKER}\"" \
                 "source_kind=file-tail" \
-                "app_name=${FILE_TAIL_SMOKE_TAG}" \
+                "app=${FILE_TAIL_SMOKE_TAG}" \
                 "limit=5" 2>&1 || true)
             FILE_TAIL_COUNT=$(json_get "$FILE_TAIL_SEARCH" "['count']" || true)
             if [[ "${FILE_TAIL_COUNT:-0}" -ge 1 ]]; then
@@ -596,7 +596,7 @@ echo ""
 echo "Action: sessions"
 # Use a time-windowed query so smoke data seeded directly into SQLite is read
 # live instead of through a periodically refreshed session rollup.
-SESSIONS=$(mcp_call sessions "limit=10" "from=1970-01-01T00:00:00Z" 2>&1)
+SESSIONS=$(mcp_call sessions "limit=10" "since=1970-01-01T00:00:00Z" 2>&1)
 assert_no_error "sessions: no error" "$SESSIONS"
 
 SESSIONS_VALID=$(printf '%s\n' "$SESSIONS" | python3 -c "
@@ -783,7 +783,7 @@ assert_eq "tail: results in non-increasing timestamp order" "$TAIL_ORDER" "ok"
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     # hostname= filter must only return logs for that host
-    TAIL_FILTERED=$(mcp_call tail "hostname=${SEED_HOST}" "n=50" 2>&1)
+    TAIL_FILTERED=$(mcp_call tail "host=${SEED_HOST}" "n=50" 2>&1)
     assert_no_error "tail(hostname filter): no error" "$TAIL_FILTERED"
     TAIL_FILTER_VALID=$(printf '%s\n' "$TAIL_FILTERED" | python3 -c "
 import sys, json
@@ -839,7 +839,7 @@ assert_eq "search(phrase): results contain exact phrase" "$PHRASE_MATCH" "ok"
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     # hostname= filter: should return only that host's logs
-    SEARCH_HOST=$(mcp_call search "hostname=${SEED_HOST}" "limit=50" 2>&1)
+    SEARCH_HOST=$(mcp_call search "host=${SEED_HOST}" "limit=50" 2>&1)
     assert_no_error "search(hostname filter): no error" "$SEARCH_HOST"
     SEARCH_HOST_VALID=$(printf '%s\n' "$SEARCH_HOST" | python3 -c "
 import sys, json
@@ -852,7 +852,7 @@ print('ok')
     assert_eq "search(hostname filter): only returns logs for '$SEED_HOST'" "$SEARCH_HOST_VALID" "ok"
 
     # severity= filter: warning should only return warning-level logs
-    SEARCH_SEV=$(mcp_call search "hostname=${SEED_HOST}" "severity=warning" "limit=50" 2>&1)
+    SEARCH_SEV=$(mcp_call search "host=${SEED_HOST}" "severity=warning" "limit=50" 2>&1)
     assert_no_error "search(severity filter): no error" "$SEARCH_SEV"
     SEARCH_SEV_VALID=$(printf '%s\n' "$SEARCH_SEV" | python3 -c "
 import sys, json
@@ -864,7 +864,7 @@ print('ok')
 " 2>/dev/null || echo "error")
     assert_eq "search(severity filter): only returns warning-level logs" "$SEARCH_SEV_VALID" "ok"
 
-    SEARCH_TCP=$(mcp_call search "query=${TCP_MARKER}" "hostname=${SEED_HOST}" "limit=10" 2>&1)
+    SEARCH_TCP=$(mcp_call search "query=${TCP_MARKER}" "host=${SEED_HOST}" "limit=10" 2>&1)
     assert_no_error "search(TCP seed marker): no error" "$SEARCH_TCP"
     SEARCH_TCP_VALID=$(printf '%s\n' "$SEARCH_TCP" | python3 -c "
 import sys, json
@@ -879,7 +879,7 @@ print('ok')
 fi
 
 # Nonexistent hostname must return 0 results (filter is not ignored)
-SEARCH_GHOST=$(mcp_call search "hostname=${GHOST_HOST}" "limit=10" 2>&1)
+SEARCH_GHOST=$(mcp_call search "host=${GHOST_HOST}" "limit=10" 2>&1)
 assert_no_error "search(nonexistent hostname): no error" "$SEARCH_GHOST"
 GHOST_COUNT=$(printf '%s\n' "$SEARCH_GHOST" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "-1")
 assert_eq "search(nonexistent hostname): returns 0 results" "$GHOST_COUNT" "0"
@@ -893,7 +893,7 @@ assert_eq "search(limit=0): returns 0 results" "$ZERO_COUNT" "0"
 # ── filter ───────────────────────────────────────────────────────────────────
 echo ""
 echo "Action: filter"
-FILTER_HOST=$(mcp_call filter "hostname=${SEED_HOST}" "limit=50" 2>&1)
+FILTER_HOST=$(mcp_call filter "host=${SEED_HOST}" "limit=50" 2>&1)
 assert_no_error "filter(hostname): no error" "$FILTER_HOST"
 FILTER_HOST_VALID=$(printf '%s\n' "$FILTER_HOST" | python3 -c "
 import sys, json

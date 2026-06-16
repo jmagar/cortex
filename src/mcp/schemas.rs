@@ -173,11 +173,11 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "type": "string",
                     "description": "For action=search or filter: exact process_id filter."
                 },
-                "received_from": {
+                "received_since": {
                     "type": "string",
                     "description": "For action=search or filter: filter rows with received_at >= this timestamp."
                 },
-                "received_to": {
+                "received_until": {
                     "type": "string",
                     "description": "For action=search or filter: filter rows with received_at <= this timestamp."
                 },
