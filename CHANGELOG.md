@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-06-16
+
+### Added
+
+- **Relative & natural time arguments** — `--from`/`--to`/`--received-from`/`--received-to` on `search`/`filter`/`sessions`/`errors` now accept relative durations (`1h`, `30m`, `2d`, `90s`), keywords (`now`, `today`, `yesterday`), and `YYYY-MM-DD`/`YYYY-MM-DD HH:MM` forms in addition to RFC3339. Values are normalized to RFC3339 at parse time (e.g. a trailing `Z` becomes `+00:00`).
+- **`--grep` literal search** — `cortex search --grep "smoke-test"` matches literal text (including hyphenated terms) by wrapping it as a safe FTS5 phrase, bypassing FTS5 operator syntax. Mutually exclusive with a positional query.
+
+### Changed
+
+- **FTS5 query fix-it errors** — searches with an unquoted infix-hyphen term (the `smoke-test` → `smoke NOT test` trap) or an unbalanced quote now return an actionable message suggesting a phrase quote or `--grep`, instead of a raw database error.
+
+### Docs
+
+- Added the CLI ergonomics design spec and three implementation plans under `docs/superpowers/` (this change implements Plan 1; Plans 2–3 cover dynamic completion, the canonical flag rename, and smart defaults/positionals).
+
 ## [1.22.0] - 2026-06-15
 
 ### Added
