@@ -163,7 +163,7 @@ fn defaults_are_applied_without_env_vars() {
     assert_eq!(cfg.mcp.bind_addr(), "127.0.0.1:3100");
     assert!(cfg.mcp.allowed_hosts.is_empty());
     assert!(cfg.mcp.allowed_origins.is_empty());
-    assert_eq!(cfg.storage.pool_size, 4);
+    assert_eq!(cfg.storage.pool_size, 8);
     assert_eq!(cfg.storage.retention_days, 90);
     assert!(cfg.storage.wal_mode);
     assert_eq!(cfg.storage.max_db_size_mb, 1024);
@@ -1225,4 +1225,87 @@ fn err_floor_window_with_zero_cap_is_rejected() {
         err.to_string().contains("err_floor_per_source_cap"),
         "wrong error: {err}"
     );
+}
+
+#[test]
+fn notifications_disabled_skips_apprise_checks() {
+    let cfg = NotificationsConfig {
+        enabled: false,
+        ..NotificationsConfig::default()
+    };
+    assert!(validate_notifications_config(&cfg).is_ok());
+}
+
+#[test]
+fn notifications_enabled_requires_apprise_url() {
+    // Only target URLs set, no API base URL → reject.
+    let cfg = NotificationsConfig {
+        enabled: true,
+        apprise_url: String::new(),
+        apprise_urls: vec!["gotify://host/token".to_string()],
+        ..NotificationsConfig::default()
+    };
+    let err = validate_notifications_config(&cfg).expect_err("missing apprise_url must fail");
+    assert!(
+        err.to_string().contains("apprise_url"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
+fn notifications_enabled_requires_apprise_urls() {
+    // API base URL set but no delivery targets → reject (the dispatcher would
+    // otherwise log "no apprise URLs configured" and silently drop firings).
+    let cfg = NotificationsConfig {
+        enabled: true,
+        apprise_url: "http://apprise:8000".to_string(),
+        apprise_urls: vec![],
+        ..NotificationsConfig::default()
+    };
+    let err = validate_notifications_config(&cfg).expect_err("empty apprise_urls must fail");
+    assert!(
+        err.to_string().contains("apprise_urls"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
+fn notifications_enabled_with_both_passes() {
+    let cfg = NotificationsConfig {
+        enabled: true,
+        apprise_url: "http://apprise:8000".to_string(),
+        apprise_urls: vec!["gotify://host/token".to_string()],
+        ..NotificationsConfig::default()
+    };
+    assert!(validate_notifications_config(&cfg).is_ok());
+}
+
+#[test]
+fn notifications_whitespace_only_apprise_urls_rejected() {
+    let cfg = NotificationsConfig {
+        enabled: true,
+        apprise_url: "http://apprise:8000".to_string(),
+        apprise_urls: vec!["   ".to_string()],
+        ..NotificationsConfig::default()
+    };
+    let err = validate_notifications_config(&cfg).expect_err("whitespace-only target must fail");
+    assert!(
+        err.to_string().contains("apprise_urls"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
+#[serial]
+fn env_override_populates_apprise_urls_list() {
+    unsafe {
+        std::env::set_var(
+            "CORTEX_NOTIFICATIONS_APPRISE_URLS",
+            "gotify://host/a, ntfy://ntfy.sh/b ",
+        );
+    }
+    let mut urls: Vec<String> = Vec::new();
+    env_override_list("CORTEX_NOTIFICATIONS_APPRISE_URLS", &mut urls);
+    unsafe { std::env::remove_var("CORTEX_NOTIFICATIONS_APPRISE_URLS") };
+    assert_eq!(urls, vec!["gotify://host/a", "ntfy://ntfy.sh/b"]);
 }

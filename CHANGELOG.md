@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-06-17
+
+### Added
+
+- **Self-maintaining investigation graph** — the server now keeps the derived graph projection current in-process instead of relying on the local-only `cortex graph rebuild` CLI (which drifted stale on long-running servers and risked dual-writer contention when run as a second process). A new `graph_refresh` background task does a one-time full build on first run, then **incremental delta passes** on an interval (`CORTEX_GRAPH_REFRESH_INTERVAL_SECS`, default 300; `0` disables). Incremental passes project only logs newer than the recorded watermark plus the bounded heartbeat/error-signature snapshots, merging the delta into the live tables by natural key — so steady-state refreshes complete in seconds rather than rescanning all history. The long log scan builds into per-connection TEMP staging without the write lock; only the final merge transaction briefly blocks ingestion, so refreshes are safe while serving (no offline window).
+
+### Changed
+
+- **Versioning system replaced with a declarative `cargo xtask` port of axon's.** Retired the shell scripts (`bump-version.sh`, `check-version-sync.sh`, `check-plugin-manifest-versions.sh`) in favor of a workspace `xtask` crate driven by `release/components.toml` — the single source of truth listing every version-bearing file and how each is read/rewritten. New commands: `cargo xtask bump-version <patch|minor|major>`, `cargo xtask check-version-sync`, and `cargo xtask check-release-versions` (the release gate). The manifest adds a `regex_version` kind covering the `cortex:vX.Y.Z` image tag in `server.json` and the `${CORTEX_VERSION:-X.Y.Z}` default in `docker-compose.prod.yml`, and a `json_no_version` kind enforcing the unversioned-plugin-manifest policy.
+- **Default `CORTEX_POOL_SIZE` raised 4 → 8.** The graph projection scheduler can hold one pooled connection for the duration of a full rebuild, so the larger pool preserves read/writer headroom; incremental passes are short.
+
+### Fixed
+
+- **Notification config now fails loud instead of silently dropping.** `validate_notifications_config` rejects `enabled = true` unless BOTH the Apprise API base URL (`apprise_url`) and at least one delivery target (`apprise_urls`) are set — previously a base URL with no targets passed validation and the dispatcher logged "no apprise URLs configured" and dropped every firing. Added `CORTEX_NOTIFICATIONS_APPRISE_URLS` env override; the dev `config.toml` template now ships with notifications disabled.
+
 ## [1.27.1] - 2026-06-16
 
 ### Fixed

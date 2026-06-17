@@ -1,40 +1,34 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "tv.tootie/cortex",
-  "title": "Cortex",
   "description": "Syslog receiver and MCP server for homelab log intelligence.",
-  "repository": {
-    "url": "https://github.com/jmagar/cortex",
-    "source": "github"
-  },
-  "version": "1.27.1",
+  "name": "tv.tootie/cortex",
   "packages": [
     {
-      "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/cortex:v1.27.1",
-      "transport": {
-        "type": "stdio"
-      },
       "environmentVariables": [
         {
-          "name": "CORTEX_RECEIVER_HOST",
           "description": "Hostname or IP of the syslog listener.",
           "isRequired": true,
-          "isSecret": false
+          "isSecret": false,
+          "name": "CORTEX_RECEIVER_HOST"
         },
         {
-          "name": "CORTEX_TOKEN",
           "description": "Bearer token for MCP endpoint authentication.",
           "isRequired": false,
-          "isSecret": true
+          "isSecret": true,
+          "name": "CORTEX_TOKEN"
         },
         {
-          "name": "CORTEX_RECEIVER_PORT",
           "description": "Syslog listener port (UDP + TCP). Default: 1514.",
           "isRequired": false,
-          "isSecret": false
+          "isSecret": false,
+          "name": "CORTEX_RECEIVER_PORT"
         }
-      ]
+      ],
+      "identifier": "ghcr.io/jmagar/cortex:v1.28.0",
+      "registryType": "oci",
+      "transport": {
+        "type": "stdio"
+      }
     }
   ],
   "remotes": [
@@ -42,5 +36,11 @@
       "type": "streamable-http",
       "url": "https://cortex.tootie.tv/mcp"
     }
-  ]
+  ],
+  "repository": {
+    "source": "github",
+    "url": "https://github.com/jmagar/cortex"
+  },
+  "title": "Cortex",
+  "version": "1.28.0"
 }

@@ -16,16 +16,22 @@ Semantic versioning (MAJOR.MINOR.PATCH). Bump type from commit prefix:
 
 All version-bearing files must match. Update together:
 
+The version-bearing files are declared in `release/components.toml` and bumped
+together by `cargo xtask bump-version patch|minor|major`:
+
 | File | Field |
 | --- | --- |
-| `Cargo.toml` | `version = "X.Y.Z"` in `[package]` |
-| `server.json` | `"version": "X.Y.Z"` |
+| `Cargo.toml` | `version = "X.Y.Z"` in `[package]` (canonical source) |
+| `Cargo.lock` | the `cortex` package entry |
+| `server.json` | `"version": "X.Y.Z"` plus the `cortex:vX.Y.Z` image tag |
 | `mcpb/manifest.json` | `"version": "X.Y.Z"` |
-| `CHANGELOG.md` | New entry under `## X.Y.Z` |
+| `docker-compose.prod.yml` | `${CORTEX_VERSION:-X.Y.Z}` default image tag |
+| `CHANGELOG.md` | New entry under `## [X.Y.Z]` |
 
 Plugin manifests such as `.claude-plugin/plugin.json` are intentionally
-unversioned. `scripts/check-plugin-manifest-versions.sh` is the guardrail that
-prevents top-level plugin manifest `version` keys from coming back.
+unversioned. `cargo xtask check-version-sync` (via the manifest's
+`json_no_version` row) is the guardrail that prevents top-level plugin manifest
+`version` keys from coming back.
 
 ## Publish workflow
 
@@ -37,13 +43,13 @@ Steps executed:
 
 1. Verify on `main` branch with clean working tree
 2. Pull latest from origin
-3. Read current version from `Cargo.toml`
-4. Compute new version based on bump type
-5. Update `Cargo.toml`, `server.json`, `mcpb/manifest.json`, and `CHANGELOG.md`
-6. Run `cargo check` to update `Cargo.lock`
-7. Commit: `release: vX.Y.Z`
-8. Tag: `vX.Y.Z`
-9. Push to origin with tags (triggers CI/CD publish workflows)
+3. `cargo xtask bump-version <level>` — reads the current version from
+   `Cargo.toml`, computes the next, and rewrites every file in
+   `release/components.toml` (including `Cargo.lock` and a `CHANGELOG.md` entry)
+4. `cargo xtask check-release-versions` — confirm sync + changelog
+5. Commit: `release: vX.Y.Z`
+6. Tag: `vX.Y.Z`
+7. Push to origin with tags (triggers CI/CD publish workflows)
 
 ## Package registries
 

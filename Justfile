@@ -297,9 +297,9 @@ publish bump="patch":
       major|minor|patch) ;;
       *) echo "Usage: just publish [major|minor|patch]"; exit 1 ;;
     esac
-    scripts/bump-version.sh "{{bump}}"
+    cargo xtask bump-version "{{bump}}"
     NEW=$(grep -m1 "^version" Cargo.toml | sed "s/.*\"\(.*\)\".*/\1/")
-    scripts/check-version-sync.sh --require-changelog
+    cargo xtask check-release-versions
     # Reuse the canonical gates (bead ok8c) so the release gate can't drift from
     # them: `test` strips the auth vars `set dotenv-load` injects and runs
     # nextest, `test-doc` covers doc tests (nextest skips those), `lint` is

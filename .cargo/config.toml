@@ -10,6 +10,13 @@
 # canonical family reference.
 # =============================================================================
 
+[alias]
+# Release-version maintenance, driven by release/components.toml.
+#   cargo xtask check-version-sync       — every version file agrees
+#   cargo xtask check-release-versions   — sync + CHANGELOG entry (release gate)
+#   cargo xtask bump-version <level>     — bump patch|minor|major everywhere
+xtask = "run --quiet --package xtask --"
+
 [build]
 # This wrapper preserves local sccache delegation and, after RELEASE builds of
 # the cortex bin only, atomically refreshes ~/.local/bin/cortex. Debug/test
