@@ -52,8 +52,8 @@ impl CortexService {
     pub async fn incident(&self, req: IncidentRequest) -> ServiceResult<IncidentResponse> {
         if req.host.is_some() && req.service.is_some() {
             return Err(ServiceError::InvalidInput(
-                "hostname and service cannot be combined: journal entries are always local \
-                 and cannot be filtered by remote hostname"
+                "host and service cannot be combined: journal entries are always local \
+                 and cannot be filtered by remote host"
                     .into(),
             ));
         }

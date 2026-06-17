@@ -28,9 +28,9 @@ impl SourceIpsArgs {
 impl TimelineArgs {
     pub(crate) fn into_request(self) -> TimelineRequest {
         // Default lookback is centralized in `CortexService::timeline` (bead dyqw):
-        // it applies a bucket-sized window only when neither `from` nor `to` is set.
+        // it applies a bucket-sized window only when neither `since` nor `until` is set.
         // Both CLI modes reach that service (local directly, HTTP via the server),
-        // so we pass `from`/`to` through verbatim — no per-binary duplication.
+        // so we pass `since`/`until` through verbatim — no per-binary duplication.
         TimelineRequest {
             bucket: self.bucket,
             group_by: self.group_by,

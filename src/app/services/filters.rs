@@ -86,8 +86,8 @@ fn request_parts_to_params(req: FilterRequestParts) -> ServiceResult<SearchParam
         facility: req.facility.clone(),
         exclude_facility: req.exclude_facility.clone(),
         process_id: req.process_id.clone(),
-        since: parse_optional_timestamp(req.from.as_deref(), "from")?,
-        until: parse_optional_timestamp(req.to.as_deref(), "to")?,
+        since: parse_optional_timestamp(req.from.as_deref(), "since")?,
+        until: parse_optional_timestamp(req.to.as_deref(), "until")?,
         received_since: parse_optional_timestamp(req.received_since.as_deref(), "received_since")?,
         received_until: parse_optional_timestamp(req.received_until.as_deref(), "received_until")?,
         limit: req.limit,
@@ -158,7 +158,7 @@ fn apply_log_filter_aliases(
         }
         Some("syslog-udp") | Some("syslog-tcp") | Some("otlp") => {
             return Err(ServiceError::InvalidInput(format!(
-                "source_kind={} is not indexed separately in v1; filter by hostname, source_ip, app_name, facility, and time range instead",
+                "source_kind={} is not indexed separately in v1; filter by host, source, app, facility, and time range instead",
                 source_kind.unwrap()
             )));
         }

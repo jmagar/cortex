@@ -2394,7 +2394,10 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.20.0...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.26.1...HEAD
+[1.26.1]: https://github.com/jmagar/cortex/compare/v1.26.0...v1.26.1
+[1.26.0]: https://github.com/jmagar/cortex/compare/v1.25.1...v1.26.0
+[1.25.1]: https://github.com/jmagar/cortex/compare/v1.20.0...v1.25.1
 [1.20.0]: https://github.com/jmagar/cortex/compare/v1.19.0...v1.20.0
 [1.14.0]: https://github.com/jmagar/cortex/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/jmagar/cortex/compare/v1.13.2...v1.13.3
