@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.27.1] - 2026-06-16
+
+### Fixed
+
+- **Silent wrong results from relative time on `apps`/`clock-skew`/`compare`/`correlate-state`/`host-state`/`notify recent`/`ai *`** — these commands captured their time-window flags (`--since`/`--until`, `--reference-time`, compare's `--a-from`/`--a-to`/`--b-from`/`--b-to`, notify's `--since`) as raw strings and bound them straight into SQL timestamp comparisons. A relative value like `1h` was compared *lexically* against RFC3339 timestamps (`timestamp >= '1h'`), silently returning wrong rows with no error. All such flags now route through a shared `norm_time` helper, so relative/keyword forms normalize to RFC3339 and non-time input is rejected. (`timeline`/`patterns`/`incident`/`correlate` in `parse_logs.rs` are addressed by the Plan 1 review fix.) `service logs` is unaffected — its `--since`/`--until` are forwarded to `docker compose logs`, not bound into cortex SQL.
+
 ## [1.27.0] - 2026-06-16
 
 ### Added
