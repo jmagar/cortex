@@ -177,7 +177,8 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         SearchLogs,
         flags: COMMON_LOG_FLAGS,
         examples: &[
-            "cortex search \"oom killer\" --host dookie --since 1h",
+            "cortex search \"oom killer\"",
+            "cortex search \"oom\" --host dookie --since 1h",
             "cortex search --grep \"smoke-test\" --limit 20",
         ],
         positional: Some("--query"),
@@ -199,7 +200,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Cheap,
         TailLogs,
         flags: COMMON_LOG_FLAGS,
-        examples: &["cortex tail --host dookie -n 100"],
+        examples: &["cortex tail dookie", "cortex tail --host dookie -n 100"],
         positional: Some("--host"),
         defaults: Defaults { limit: Some(50), since: None }
     ),
@@ -210,7 +211,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Cheap,
         GetErrors,
         flags: COMMON_LOG_FLAGS,
-        examples: &["cortex errors --since 1h"],
+        examples: &["cortex errors", "cortex errors --since 6h --limit 50"],
         positional: None,
         defaults: Defaults { limit: None, since: Some("1h") }
     ),
@@ -237,7 +238,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Moderate,
         HostState,
         flags: &[],
-        examples: &["cortex host-state dookie"],
+        examples: &["cortex host-state dookie", "cortex host-state dookie --since 30m"],
         positional: Some("--host"),
         defaults: Defaults::new()
     ),
